@@ -1,12 +1,15 @@
 import { Search } from "lucide-react";
-import { auth, signOut } from "@/auth";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { initials } from "@/lib/utils";
 
+const DEMO_MODE = process.env.DEMO_MODE === "1";
+
 export async function Topbar() {
-  const session = await auth();
+  const session = DEMO_MODE
+    ? { user: { name: "Ada Lovelace", email: "ada@sinnlos.local", image: null } }
+    : await (await import("@/auth")).auth();
   const name = session?.user?.name ?? "Signed out";
   const email = session?.user?.email ?? "";
 
@@ -31,18 +34,31 @@ export async function Topbar() {
             {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
             <AvatarFallback>{initials(name)}</AvatarFallback>
           </Avatar>
-          <form
-            action={async () => {
-              "use server";
-              await signOut({ redirectTo: "/sign-in" });
-            }}
-          >
-            <Button variant="ghost" size="sm" type="submit">
-              Sign out
+          {DEMO_MODE ? (
+            <Button variant="ghost" size="sm" disabled>
+              Demo mode
             </Button>
-          </form>
+          ) : (
+            <SignOutButton />
+          )}
         </div>
       ) : null}
     </header>
+  );
+}
+
+async function SignOutButton() {
+  const { signOut } = await import("@/auth");
+  return (
+    <form
+      action={async () => {
+        "use server";
+        await signOut({ redirectTo: "/sign-in" });
+      }}
+    >
+      <Button variant="ghost" size="sm" type="submit">
+        Sign out
+      </Button>
+    </form>
   );
 }
