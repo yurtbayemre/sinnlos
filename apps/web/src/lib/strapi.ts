@@ -4,8 +4,10 @@
  * stored in the Auth.js session) is injected automatically.
  */
 import { auth } from "@/auth";
+import { demo } from "@/lib/demo";
 
 const STRAPI_URL = process.env.STRAPI_URL || "http://localhost:1337";
+const DEMO_MODE = process.env.DEMO_MODE === "1";
 
 export type StrapiListResponse<T> = {
   data: T[];
@@ -23,6 +25,9 @@ export interface FetchOptions extends RequestInit {
 }
 
 export async function strapi<T>(path: string, opts: FetchOptions = {}): Promise<T> {
+  if (DEMO_MODE) {
+    return demo(path) as T;
+  }
   const session = await auth();
   const token = opts.tokenOverride ?? (session as any)?.strapiJwt ?? null;
 
