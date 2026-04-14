@@ -1,0 +1,44 @@
+{
+  "kind": "collectionType",
+  "collectionName": "wiki_spaces",
+  "info": {
+    "singularName": "wiki-space",
+    "pluralName": "wiki-spaces",
+    "displayName": "Wiki Space",
+    "description": "A namespace for wiki pages (e.g. Handbook, Engineering, HR)"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "name": { "type": "string", "required": true, "unique": true },
+    "slug": { "type": "uid", "targetField": "name", "required": true },
+    "icon": { "type": "string", "default": "book" },
+    "description": { "type": "text" },
+    "visibility": {
+      "type": "enumeration",
+      "enum": ["public", "role", "department", "team"],
+      "default": "public",
+      "required": true
+    },
+    "allowedRoles": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "plugin::users-permissions.role"
+    },
+    "department": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "team": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::team.team"
+    },
+    "pages": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::wiki-page.wiki-page",
+      "mappedBy": "space"
+    }
+  }
+}

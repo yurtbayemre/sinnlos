@@ -1,0 +1,15 @@
+{
+  "extends": "@strapi/strapi/tsconfigs/server",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": ".",
+    "baseUrl": "."
+  },
+  "include": [
+    "./src/**/*.ts",
+    "./src/**/*.js",
+    "./config/**/*.ts",
+    "./database/migrations/**/*"
+  ],
+  "exclude": ["node_modules", "build", "dist", ".cache", ".tmp"]
+}
