@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "announcements",
+  "info": {
+    "singularName": "announcement",
+    "pluralName": "announcements",
+    "displayName": "Announcement",
+    "description": "Company-wide or scoped news items for the dashboard"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "title": { "type": "string", "required": true },
+    "body": { "type": "richtext" },
+    "pinned": { "type": "boolean", "default": false },
+    "expiresAt": { "type": "datetime" },
+    "author": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "audienceRoles": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "plugin::users-permissions.role"
+    },
+    "department": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "team": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::team.team"
+    }
+  }
+}
