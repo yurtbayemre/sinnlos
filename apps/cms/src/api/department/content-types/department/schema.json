@@ -1,0 +1,43 @@
+{
+  "kind": "collectionType",
+  "collectionName": "departments",
+  "info": {
+    "singularName": "department",
+    "pluralName": "departments",
+    "displayName": "Department",
+    "description": "Top-level organisational unit"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "name": { "type": "string", "required": true, "unique": true },
+    "slug": { "type": "uid", "targetField": "name", "required": true },
+    "description": { "type": "richtext" },
+    "color": { "type": "string", "default": "#6366f1" },
+    "headerImage": { "type": "media", "allowedTypes": ["images"], "multiple": false },
+    "head": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "members": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "plugin::users-permissions.user",
+      "mappedBy": "department"
+    },
+    "teams": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::team.team",
+      "mappedBy": "department"
+    },
+    "pages": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::wiki-page.wiki-page",
+      "mappedBy": "department"
+    }
+  }
+}

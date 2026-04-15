@@ -1,0 +1,20 @@
+{
+  "name": "sinnlos-intranet",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Self-hosted intranet platform: Strapi v5 + Next.js 15 + Microsoft Entra ID login",
+  "packageManager": "pnpm@9.12.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel dev",
+    "build": "pnpm -r build",
+    "start": "pnpm -r --parallel start",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "cms:dev": "pnpm --filter @sinnlos/cms dev",
+    "web:dev": "pnpm --filter @sinnlos/web dev"
+  },
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9"
+  }
+}

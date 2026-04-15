@@ -1,0 +1,51 @@
+{
+  "name": "@sinnlos/web",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Next.js 15 frontend for the Sinnlos intranet",
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.0.3",
+    "next-auth": "5.0.0-beta.25",
+    "next-themes": "0.4.3",
+    "react": "19.0.0-rc-66855b96-20241106",
+    "react-dom": "19.0.0-rc-66855b96-20241106",
+    "tailwindcss": "3.4.14",
+    "tailwindcss-animate": "1.0.7",
+    "@tailwindcss/typography": "0.5.15",
+    "class-variance-authority": "0.7.0",
+    "clsx": "2.1.1",
+    "tailwind-merge": "2.5.4",
+    "lucide-react": "0.454.0",
+    "@radix-ui/react-avatar": "1.1.1",
+    "@radix-ui/react-dialog": "1.1.2",
+    "@radix-ui/react-dropdown-menu": "2.1.2",
+    "@radix-ui/react-navigation-menu": "1.2.1",
+    "@radix-ui/react-separator": "1.1.0",
+    "@radix-ui/react-slot": "1.1.0",
+    "@radix-ui/react-tabs": "1.1.1",
+    "@radix-ui/react-tooltip": "1.1.4",
+    "cmdk": "1.0.4",
+    "react-markdown": "9.0.1",
+    "remark-gfm": "4.0.0",
+    "rehype-slug": "6.0.0",
+    "rehype-autolink-headings": "7.1.0",
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.0",
+    "@types/react": "18.3.12",
+    "@types/react-dom": "18.3.1",
+    "autoprefixer": "10.4.20",
+    "postcss": "8.4.47",
+    "typescript": "5.6.3",
+    "eslint": "9.13.0",
+    "eslint-config-next": "15.0.3"
+  }
+}

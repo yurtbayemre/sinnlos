@@ -1,0 +1,26 @@
+{
+  "kind": "collectionType",
+  "collectionName": "wiki_revisions",
+  "info": {
+    "singularName": "wiki-revision",
+    "pluralName": "wiki-revisions",
+    "displayName": "Wiki Revision",
+    "description": "Snapshot of a wiki page at a point in time"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "page": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::wiki-page.wiki-page",
+      "inversedBy": "revisions"
+    },
+    "body": { "type": "richtext" },
+    "summary": { "type": "text" },
+    "editor": {
+      "type": "relation",
+      "relation": "oneToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}
