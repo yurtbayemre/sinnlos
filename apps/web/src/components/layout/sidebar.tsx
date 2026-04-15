@@ -15,17 +15,17 @@ export function Sidebar({ className }: { className?: string }) {
   return (
     <aside
       className={cn(
-        "hidden w-64 shrink-0 flex-col border-r bg-card/40 backdrop-blur md:flex",
+        "sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r bg-card/40 backdrop-blur md:flex",
         className,
       )}
     >
-      <div className="flex h-16 items-center gap-2 border-b px-6">
+      <div className="flex h-16 shrink-0 items-center gap-2 border-b px-6">
         <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold">
           S
         </div>
         <span className="font-semibold tracking-tight">Sinnlos</span>
       </div>
-      <nav className="flex-1 space-y-1 p-4">
+      <nav className="flex-1 space-y-1 overflow-y-auto p-4">
         {nav.map((item) => (
           <Link
             key={item.href}
@@ -37,7 +37,7 @@ export function Sidebar({ className }: { className?: string }) {
           </Link>
         ))}
       </nav>
-      <div className="border-t p-4 text-xs text-muted-foreground">
+      <div className="shrink-0 border-t p-4 text-xs text-muted-foreground">
         Self-hosted intranet · v0.1
       </div>
     </aside>
