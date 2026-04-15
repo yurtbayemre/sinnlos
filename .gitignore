@@ -19,6 +19,7 @@ apps/cms/public/uploads/*
 apps/cms/exports
 apps/cms/.strapi
 apps/cms/.strapi-updater.json
+apps/cms/types/generated
 
 # Env
 .env
