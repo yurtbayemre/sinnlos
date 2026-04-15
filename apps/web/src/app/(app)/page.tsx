@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Building2, Megaphone, Users2, BookOpen } from "lucide-react";
 import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
+import { LatestNews } from "@/components/dashboard/latest-news";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -33,28 +34,7 @@ export default async function DashboardPage() {
         <StatCard icon={<Megaphone className="h-5 w-5" />} label="News" value={announcements?.data.length ?? 0} href="/announcements" />
       </section>
 
-      <section>
-        <h2 className="mb-4 text-lg font-semibold">Latest announcements</h2>
-        {announcements && announcements.data.length > 0 ? (
-          <div className="grid gap-4 md:grid-cols-2">
-            {announcements.data.slice(0, 4).map((a: any) => (
-              <Card key={a.id}>
-                <CardHeader>
-                  <CardTitle className="text-base">{a.title ?? a.attributes?.title}</CardTitle>
-                  <CardDescription>
-                    {new Date(a.createdAt ?? a.attributes?.createdAt).toLocaleDateString()}
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            title="No announcements yet"
-            hint="Editors can post company news from the Strapi admin panel."
-          />
-        )}
-      </section>
+      <LatestNews items={(announcements?.data ?? []) as any[]} />
     </div>
   );
 }
@@ -84,17 +64,6 @@ function StatCard({
         </CardContent>
       </Card>
     </Link>
-  );
-}
-
-function EmptyState({ title, hint }: { title: string; hint: string }) {
-  return (
-    <Card>
-      <CardContent className="py-12 text-center">
-        <p className="font-medium">{title}</p>
-        <p className="mt-1 text-sm text-muted-foreground">{hint}</p>
-      </CardContent>
-    </Card>
   );
 }
 
