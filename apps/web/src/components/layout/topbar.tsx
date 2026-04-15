@@ -2,6 +2,7 @@ import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
@@ -52,15 +53,9 @@ export async function Topbar() {
   );
 }
 
-async function SignOutButton() {
-  const { signOut } = await import("@/auth");
+function SignOutButton() {
   return (
-    <form
-      action={async () => {
-        "use server";
-        await signOut({ redirectTo: "/sign-in" });
-      }}
-    >
+    <form action={signOutAction}>
       <Button variant="ghost" size="sm" type="submit">
         Sign out
       </Button>
