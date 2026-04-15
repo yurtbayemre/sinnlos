@@ -9,8 +9,7 @@ a **wiki**, **team pages**, and **department pages**, all gated by **user roles*
   users-permissions Microsoft provider → Strapi JWT
 - **Deployment** — Docker Compose + Caddy (automatic TLS) in `infra/`
 
-The plan that produced this codebase lives at
-[`/root/.claude/plans/swift-honking-sunbeam.md`](./.claude-plan.md).
+**→ [Full deployment guide](./docs/DEPLOYMENT.md)** — bare-metal, Docker, VPS, Azure VM, Azure Container Apps.
 
 ## Repository layout
 
@@ -29,7 +28,7 @@ The plan that produced this codebase lives at
 
 ## Prerequisites
 
-- Node.js ≥ 20.11
+- Node.js 20 LTS, 22 LTS, or 24 LTS (≥ 20.11)
 - pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant with permission to register an app

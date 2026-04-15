@@ -11,24 +11,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@strapi/strapi": "5.5.0",
-    "@strapi/plugin-users-permissions": "5.5.0",
-    "@strapi/plugin-cloud": "5.5.0",
-    "better-sqlite3": "11.3.0",
+    "@strapi/strapi": "5.42.1",
+    "@strapi/plugin-users-permissions": "5.42.1",
+    "@strapi/plugin-cloud": "5.42.1",
+    "better-sqlite3": "12.9.0",
     "pg": "8.13.1",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "6.28.0",
+    "react-router-dom": "6.30.3",
     "styled-components": "6.1.13"
   },
   "devDependencies": {
-    "@types/node": "20.17.0",
+    "@strapi/typescript-utils": "5.42.1",
+    "@types/node": "22.10.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "typescript": "5.6.3"
   },
   "engines": {
-    "node": ">=20.11.0",
+    "node": ">=20.11.0 <=24.x.x",
     "npm": ">=6.0.0"
   },
   "strapi": {
