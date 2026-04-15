@@ -9,8 +9,7 @@ a **wiki**, **team pages**, and **department pages**, all gated by **user roles*
   users-permissions Microsoft provider → Strapi JWT
 - **Deployment** — Docker Compose + Caddy (automatic TLS) in `infra/`
 
-The plan that produced this codebase lives at
-[`/root/.claude/plans/swift-honking-sunbeam.md`](./.claude-plan.md).
+**→ [Full deployment guide](./docs/DEPLOYMENT.md)** — bare-metal, Docker, VPS, Azure VM, Azure Container Apps.
 
 ## Repository layout
 
