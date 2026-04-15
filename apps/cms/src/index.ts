@@ -131,6 +131,24 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": READ_ACTIONS,
   },
+  /**
+   * `authenticated` is the users-permissions built-in default role.
+   * A newly-registered OAuth user is assigned it before our Microsoft
+   * callback extension has a chance to re-map them to one of the six
+   * intranet roles above. If that reassignment fails (missing access
+   * token, Graph hiccup, race on first login, ...), the user would
+   * otherwise be stuck with zero permissions and hit 403 on every
+   * `/api/*` call. Grant baseline reads on the intranet content types
+   * so the dashboard works even in that fallback case.
+   */
+  authenticated: {
+    "api::announcement.announcement": READ_ACTIONS,
+    "api::department.department": READ_ACTIONS,
+    "api::team.team": READ_ACTIONS,
+    "api::wiki-space.wiki-space": READ_ACTIONS,
+    "api::wiki-page.wiki-page": READ_ACTIONS,
+    "api::wiki-revision.wiki-revision": READ_ACTIONS,
+  },
 };
 
 async function ensurePermission(
