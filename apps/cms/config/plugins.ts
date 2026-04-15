@@ -9,7 +9,13 @@
  *   - Redirect URI: ${PUBLIC_URL}/api/connect/microsoft/callback
  *   - API permissions: openid, profile, email, User.Read, GroupMember.Read.All
  */
-export default ({ env }: { env: (key: string, def?: unknown) => any }) => ({
+type Env = ((key: string, def?: unknown) => any) & {
+  int: (key: string, def?: number) => number;
+  bool: (key: string, def?: boolean) => boolean;
+  array: (key: string, def?: string[]) => string[];
+};
+
+export default ({ env }: { env: Env }) => ({
   "users-permissions": {
     config: {
       jwt: {
