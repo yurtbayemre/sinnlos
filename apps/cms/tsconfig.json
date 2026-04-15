@@ -6,10 +6,16 @@
     "baseUrl": "."
   },
   "include": [
-    "./src/**/*.ts",
-    "./src/**/*.js",
-    "./config/**/*.ts",
-    "./database/migrations/**/*"
+    "./",
+    "src/**/*.json"
   ],
-  "exclude": ["node_modules", "build", "dist", ".cache", ".tmp"]
+  "exclude": [
+    "node_modules/",
+    "build/",
+    "dist/",
+    ".cache/",
+    ".tmp/",
+    "src/admin/",
+    "**/*.test.*"
+  ]
 }
