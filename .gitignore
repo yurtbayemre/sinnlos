@@ -8,6 +8,7 @@ build
 .next
 .turbo
 out
+*.tsbuildinfo
 
 # Strapi
 apps/cms/.cache
