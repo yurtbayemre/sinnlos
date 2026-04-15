@@ -80,10 +80,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      session.strapiJwt = token.strapiJwt as string | undefined;
-      session.user.id = token.strapiUserId as number | undefined;
-      session.user.role = token.strapiRole as string | undefined;
-      session.user.department = (token.strapiDepartment as any) ?? null;
+      const s = session as any;
+      s.strapiJwt = token.strapiJwt as string | undefined;
+      s.user.id = token.strapiUserId as number | undefined;
+      s.user.role = token.strapiRole as string | undefined;
+      s.user.department = (token.strapiDepartment as any) ?? null;
       return session;
     },
   },
