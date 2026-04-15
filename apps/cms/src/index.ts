@@ -173,6 +173,62 @@ async function syncRolePermissions(strapi: any) {
   }
 }
 
+/**
+ * Seed a first Strapi admin user from environment variables if the
+ * admin_users table is empty. This lets a fresh clone of the repo
+ * boot straight into a usable admin panel without the interactive
+ * registration form.
+ *
+ * Env vars (all required together):
+ *   STRAPI_ADMIN_EMAIL     — login email for the Super Admin
+ *   STRAPI_ADMIN_PASSWORD  — plaintext password, hashed by Strapi on insert
+ *   STRAPI_ADMIN_FIRSTNAME — optional, defaults to "Admin"
+ *   STRAPI_ADMIN_LASTNAME  — optional, defaults to "User"
+ *
+ * Safety: runs ONLY when the admin_users table is empty. On every
+ * subsequent boot this is a no-op, so rotating the env password does
+ * NOT overwrite the existing admin — that has to be done from the
+ * admin panel itself.
+ *
+ * Strapi Community Edition has no admin-panel SSO, so this is the
+ * friction-free alternative to clicking through the registration
+ * form every time you wipe the SQLite database.
+ */
+async function seedAdminUser(strapi: any) {
+  const email = process.env.STRAPI_ADMIN_EMAIL;
+  const password = process.env.STRAPI_ADMIN_PASSWORD;
+  if (!email || !password) return;
+
+  const existingCount = await strapi.db.query("admin::user").count({});
+  if (existingCount > 0) return;
+
+  const superAdminRole = await strapi.db
+    .query("admin::role")
+    .findOne({ where: { code: "strapi-super-admin" } });
+  if (!superAdminRole) {
+    strapi.log.warn("[bootstrap] strapi-super-admin role not found; skipping admin seed");
+    return;
+  }
+
+  try {
+    await strapi.service("admin::user").create({
+      firstname: process.env.STRAPI_ADMIN_FIRSTNAME || "Admin",
+      lastname: process.env.STRAPI_ADMIN_LASTNAME || "User",
+      email,
+      password,
+      isActive: true,
+      blocked: false,
+      registrationToken: null,
+      roles: [superAdminRole.id],
+    });
+    strapi.log.info(`[bootstrap] created initial Super Admin ${email}`);
+  } catch (err) {
+    strapi.log.error(
+      `[bootstrap] failed to create initial admin user: ${(err as Error).message}`,
+    );
+  }
+}
+
 export default {
   register(/* { strapi } */) {},
 
@@ -190,5 +246,6 @@ export default {
     }
 
     await syncRolePermissions(strapi);
+    await seedAdminUser(strapi);
   },
 };

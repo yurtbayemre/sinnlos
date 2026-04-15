@@ -79,8 +79,18 @@ pnpm --filter @sinnlos/cms dev
 pnpm --filter @sinnlos/web dev
 ```
 
-- Strapi admin: http://localhost:1337/admin (create the first admin account)
+- Strapi admin: http://localhost:1337/admin (see admin bootstrap note below)
 - Web: http://localhost:3000 — redirects to `/sign-in`, click **Sign in with Microsoft**
+
+> **Strapi admin account:** the first time Strapi boots with an empty
+> `admin_users` table, `src/index.ts → bootstrap()` will auto-create a
+> **Super Admin** from `STRAPI_ADMIN_EMAIL` / `STRAPI_ADMIN_PASSWORD`
+> in `apps/cms/.env`. Set those before the first boot and you can log
+> straight into `/admin` with no registration form. Leave them blank to
+> keep the classic interactive flow. Strapi CE does **not** support SSO
+> for the admin panel — Entra ID SSO only applies to the Next.js
+> frontend (i.e. `users-permissions` users, not `admin_users`). Admin
+> SSO is a Strapi Enterprise Edition feature.
 
 > **Database:** the default `apps/cms/.env.example` uses **SQLite** (file
 > at `apps/cms/.tmp/data.db`) so local dev needs no database server. If
