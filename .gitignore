@@ -1,0 +1,47 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+dist
+build
+.next
+.turbo
+out
+*.tsbuildinfo
+
+# Strapi
+apps/cms/.cache
+apps/cms/.tmp
+apps/cms/build
+apps/cms/public/uploads/*
+!apps/cms/public/uploads/.gitkeep
+apps/cms/exports
+apps/cms/.strapi
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE
+.vscode
+.idea
+*.swp
+.DS_Store
+
+# Test
+coverage
+
+# Docker
+infra/caddy_data
+infra/caddy_config
+infra/pgdata
