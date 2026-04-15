@@ -15,7 +15,9 @@ export async function Topbar() {
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/80 px-6 backdrop-blur">
-      <div className="relative flex-1 max-w-xl">
+      <div className="flex-1" />
+
+      <div className="relative w-full max-w-xl flex-1">
         <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="search"
@@ -23,26 +25,29 @@ export async function Topbar() {
           className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
         />
       </div>
-      <ThemeToggle />
-      {session?.user ? (
-        <div className="flex items-center gap-3">
-          <div className="hidden text-right md:block">
-            <div className="text-sm font-medium leading-none">{name}</div>
-            <div className="text-xs text-muted-foreground">{email}</div>
-          </div>
-          <Avatar>
-            {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
-            <AvatarFallback>{initials(name)}</AvatarFallback>
-          </Avatar>
-          {DEMO_MODE ? (
-            <Button variant="ghost" size="sm" disabled>
-              Demo mode
-            </Button>
-          ) : (
-            <SignOutButton />
-          )}
-        </div>
-      ) : null}
+
+      <div className="flex flex-1 items-center justify-end gap-3">
+        <ThemeToggle />
+        {session?.user ? (
+          <>
+            <div className="hidden text-right md:block">
+              <div className="text-sm font-medium leading-none">{name}</div>
+              <div className="text-xs text-muted-foreground">{email}</div>
+            </div>
+            <Avatar>
+              {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
+              <AvatarFallback>{initials(name)}</AvatarFallback>
+            </Avatar>
+            {DEMO_MODE ? (
+              <Button variant="ghost" size="sm" disabled>
+                Demo mode
+              </Button>
+            ) : (
+              <SignOutButton />
+            )}
+          </>
+        ) : null}
+      </div>
     </header>
   );
 }
