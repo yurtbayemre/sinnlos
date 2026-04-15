@@ -48,11 +48,17 @@ In the Azure portal:
    - `http://localhost:3000/api/auth/callback/microsoft-entra-id` (Next.js / Auth.js)
    - `http://localhost:1337/api/connect/microsoft/callback` (Strapi)
    - Add the production equivalents once you have a domain.
-3. **API permissions (delegated)**:
+3. **Front-channel logout URL** (on the same *Authentication* blade,
+   further down the page): `http://localhost:3000/sign-in`. This is
+   required for federated sign-out — without it, clicking "Sign out"
+   still ends the local session but leaves the Microsoft tenant cookie
+   intact, and the next login skips the password prompt. Add the
+   production equivalent alongside it.
+4. **API permissions (delegated)**:
    - `openid`, `profile`, `email`, `User.Read`
    - `GroupMember.Read.All` (needed to map Entra groups → intranet roles)
    - Grant admin consent.
-4. **Certificates & secrets** → new client secret, copy the value.
+5. **Certificates & secrets** → new client secret, copy the value.
 
 ## 3. Environment files
 
