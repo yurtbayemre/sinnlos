@@ -10,6 +10,9 @@ This guide walks through every supported deployment method for **Sinnlos Intrane
 | [Azure (VM)](#4-azure-vm-deployment) | Production on Azure using the same Docker Compose approach |
 | [Azure (Container Apps)](#5-azure-container-apps-advanced) | Cloud-native, autoscaling, no VM management |
 
+After deploying, run the [post-deployment verification](#post-deployment-verification)
+and set up [backup & restore](#backup--restore) for any production environment.
+
 All methods share the same [prerequisites](#prerequisites) and
 [Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first.
 
@@ -24,7 +27,9 @@ Install these on any machine you are deploying **from**:
 | Node.js | 20.11 LTS | [nodejs.org](https://nodejs.org) |
 | pnpm | 9.x | `corepack enable && corepack prepare pnpm@9.12.0 --activate` |
 | Git | any recent | system package manager |
-| Docker + Docker Compose | Docker 24 / Compose v2 | [docs.docker.com](https://docs.docker.com/get-docker/) |
+| openssl | any recent | preinstalled on macOS/Linux; on Windows use Git Bash or WSL |
+| curl | any recent | preinstalled on macOS/Linux |
+| Docker + Docker Compose | Docker 24 / Compose v2 | [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Mac/Win) or [Docker Engine](https://docs.docker.com/engine/install/) (Linux) |
 | Azure CLI *(Azure only)* | 2.60 | [learn.microsoft.com/cli/azure/install](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) |
 
 Check versions:
@@ -34,7 +39,12 @@ node -v          # v20.x.x
 pnpm -v          # 9.x.x
 docker -v        # Docker version 24.x.x
 docker compose version  # Docker Compose version v2.x.x
+openssl version  # OpenSSL 3.x.x
 ```
+
+> **Windows users:** Use **WSL2** with Ubuntu 24.04 for the smoothest experience.
+> Everything in this guide assumes a bash-like shell. PowerShell works for bare-metal
+> dev but the heredoc and `openssl rand` snippets won't run as-is.
 
 ---
 
@@ -48,6 +58,8 @@ app registration and you'll reference it in every deployment method.
 1. Open [portal.azure.com](https://portal.azure.com) → search **App registrations** → **New registration**.
 2. **Name**: `Sinnlos Intranet` (or any name you prefer).
 3. **Supported account types**: *Accounts in this organizational directory only* (single-tenant).
+   - Choose **single-tenant** for a company intranet so only your org's users can sign in.
+   - Choose **multi-tenant** only if you want any Microsoft work/school account to sign in.
 4. Leave Redirect URI blank for now → **Register**.
 
 ### Step 2 — Copy the IDs
@@ -56,6 +68,11 @@ On the app overview page, copy:
 
 - **Application (client) ID** → this is `MS_CLIENT_ID`
 - **Directory (tenant) ID** → this is `MS_TENANT_ID`
+
+> **MS_TENANT_ID tip:** Use the actual tenant GUID (not `common` or `organizations`)
+> for a single-tenant company intranet. Using `common` would let any MS account
+> in the world attempt to sign in — Strapi would still reject unauthorized users,
+> but it's cleaner to scope the token issuer to your tenant at the OIDC layer.
 
 ### Step 3 — Create a client secret
 
@@ -110,10 +127,12 @@ cp apps/cms/.env.example   apps/cms/.env
 cp apps/web/.env.example   apps/web/.env.local
 ```
 
-**`apps/cms/.env`** — fill in:
+**`apps/cms/.env`** — fill in. The `.env.example` defaults to Postgres; override
+with **SQLite** for the simplest local setup (no external database needed):
 
 ```dotenv
-DATABASE_CLIENT=sqlite        # easiest for local dev (no Postgres needed)
+# Use SQLite locally — zero-config, file-based
+DATABASE_CLIENT=sqlite
 DATABASE_FILENAME=.tmp/data.db
 
 APP_KEYS=key1,key2            # two random strings, comma-separated
@@ -129,6 +148,16 @@ MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 MS_TENANT_ID=<your-tenant-id>
 ```
+
+> **Prefer Postgres locally?** Run one with Docker in a single command and keep
+> the default `DATABASE_CLIENT=postgres`:
+> ```bash
+> docker run -d --name sinnlos-pg \
+>   -e POSTGRES_DB=sinnlos -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=sinnlos \
+>   -p 5432:5432 -v sinnlos-pgdata:/var/lib/postgresql/data \
+>   postgres:16-alpine
+> ```
+> Then set `DATABASE_HOST=localhost` in `apps/cms/.env`.
 
 Generate secrets quickly:
 
@@ -405,6 +434,8 @@ docker compose up -d --build
 ```
 
 This performs a rolling restart — Postgres and existing volumes are untouched.
+For **production**, follow the safer [update procedure](#74-update-procedure-production-safe)
+that backs up the database first.
 
 ---
 
@@ -445,6 +476,22 @@ az vm create \
 `Standard_B2s` = 2 vCPU / 4 GB RAM (~€30/month in West Europe).
 Note the `publicIpAddress` in the output.
 
+> **Memory warning:** Building Next.js and Strapi on the VM can peak near
+> 3.5 GB. On `Standard_B2s` (4 GB) you should either:
+>
+> 1. **Add swap** to avoid OOM during build (recommended for 4 GB VMs):
+>    ```bash
+>    # On the VM after SSHing in
+>    sudo fallocate -l 4G /swapfile
+>    sudo chmod 600 /swapfile
+>    sudo mkswap /swapfile
+>    sudo swapon /swapfile
+>    echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+>    ```
+> 2. **Or pick `Standard_B2ms`** (2 vCPU / 8 GB RAM, ~€55/month).
+> 3. **Or build images on your laptop**, push to ACR, and run `docker compose pull`
+>    on the VM — zero build work on the server.
+
 ### 4.4 Open ports
 
 ```bash
@@ -473,11 +520,19 @@ newgrp docker
 
 ### 4.6 Assign a static public IP (optional but recommended)
 
+`az vm create` auto-generates a public IP named `<vm-name>PublicIP`. First,
+discover the exact name, then make it static so it survives VM restarts:
+
 ```bash
-# Make the dynamic IP static so it survives VM restarts
+# Find the public IP resource
+az network public-ip list \
+  --resource-group rg-sinnlos \
+  --query "[].name" -o tsv
+
+# Make it static (replace with the name you just saw)
 az network public-ip update \
   --resource-group rg-sinnlos \
-  --name vm-sinnlosPPublicIP \
+  --name vm-sinnlosPublicIP \
   --allocation-method Static
 ```
 
@@ -602,12 +657,86 @@ az postgres flexible-server create \
   --sku-name Standard_B1ms \
   --tier Burstable \
   --version 16 \
-  --public-access 0.0.0.0
+  --public-access None
 ```
 
 Note the hostname: `db-sinnlos.postgres.database.azure.com`.
 
-### 5.5 Deploy the CMS container
+> ⚠ **Do not use `--public-access 0.0.0.0`** — that opens your database to the
+> entire internet. Either:
+>
+> - **Preferred:** Create the Container Apps environment in a VNet and peer
+>   the Postgres flexible server into the same VNet (private access). See
+>   [Azure docs](https://learn.microsoft.com/en-us/azure/container-apps/networking).
+> - **Simpler alternative:** After deploying the containers (steps 5.5–5.6),
+>   read the outbound IPs from your Container Apps environment and whitelist
+>   only those:
+>   ```bash
+>   # Get the Container Apps environment's outbound IPs
+>   az containerapp env show \
+>     --name env-sinnlos --resource-group rg-sinnlos \
+>     --query "properties.staticIp" -o tsv
+>
+>   # Whitelist that single IP on Postgres
+>   az postgres flexible-server firewall-rule create \
+>     --resource-group rg-sinnlos \
+>     --name db-sinnlos \
+>     --rule-name allow-container-apps \
+>     --start-ip-address <static-ip> \
+>     --end-ip-address <static-ip>
+>   ```
+
+**Create the database** (Strapi needs it to exist):
+
+```bash
+az postgres flexible-server db create \
+  --resource-group rg-sinnlos \
+  --server-name db-sinnlos \
+  --database-name sinnlos
+```
+
+### 5.5 Create persistent storage for uploads
+
+Container filesystems are ephemeral — without persistent storage, every
+Strapi redeploy would wipe user uploads (avatars, images, attachments).
+Mount an **Azure Files** share onto `/app/apps/cms/public/uploads`:
+
+```bash
+# Create a storage account
+az storage account create \
+  --resource-group rg-sinnlos \
+  --name stsinnlos$RANDOM \
+  --location westeurope \
+  --sku Standard_LRS
+
+STORAGE_NAME=$(az storage account list \
+  --resource-group rg-sinnlos \
+  --query "[?starts_with(name, 'stsinnlos')].name" -o tsv)
+
+STORAGE_KEY=$(az storage account keys list \
+  --resource-group rg-sinnlos \
+  --account-name $STORAGE_NAME \
+  --query "[0].value" -o tsv)
+
+# Create a file share
+az storage share-rm create \
+  --resource-group rg-sinnlos \
+  --storage-account $STORAGE_NAME \
+  --name uploads \
+  --quota 50
+
+# Register the share with the Container Apps environment
+az containerapp env storage set \
+  --resource-group rg-sinnlos \
+  --name env-sinnlos \
+  --storage-name uploads \
+  --azure-file-account-name $STORAGE_NAME \
+  --azure-file-account-key $STORAGE_KEY \
+  --azure-file-share-name uploads \
+  --access-mode ReadWrite
+```
+
+### 5.6 Deploy the CMS container
 
 ```bash
 az containerapp create \
@@ -633,6 +762,7 @@ az containerapp create \
       DATABASE_USERNAME=sinnlos \
       "DATABASE_PASSWORD=<db-password>" \
       DATABASE_SSL=true \
+      DATABASE_SSL_REJECT_UNAUTHORIZED=false \
       "APP_KEYS=<secret>,<secret>" \
       "API_TOKEN_SALT=<secret>" \
       "ADMIN_JWT_SECRET=<secret>" \
@@ -644,15 +774,50 @@ az containerapp create \
       "MS_TENANT_ID=<tenant-id>"
 ```
 
-### 5.6 Deploy the Web container
+**Attach the uploads volume** (must be done via YAML because the CLI create
+doesn't accept volume mounts directly):
 
 ```bash
-# Get the internal CMS URL
+# Export the current spec
+az containerapp show \
+  --name cms-sinnlos --resource-group rg-sinnlos \
+  -o yaml > cms.yaml
+
+# Edit cms.yaml — under properties.template, add:
+#   volumes:
+#     - name: uploads-vol
+#       storageType: AzureFile
+#       storageName: uploads
+# And under properties.template.containers[0], add:
+#   volumeMounts:
+#     - volumeName: uploads-vol
+#       mountPath: /app/apps/cms/public/uploads
+
+az containerapp update \
+  --name cms-sinnlos --resource-group rg-sinnlos \
+  --yaml cms.yaml
+```
+
+> **Why `DATABASE_SSL_REJECT_UNAUTHORIZED=false`?** Azure PostgreSQL uses a
+> managed CA that is trusted by modern Node runtimes, but the Strapi Postgres
+> driver can fail cert validation in some environments. Setting this to `false`
+> keeps SSL encryption on but relaxes CA verification. For strict validation,
+> download the Baltimore/DigiCert root via `DATABASE_SSL_CA` instead.
+
+### 5.7 Deploy the Web container
+
+The web container needs `AUTH_URL` to match its own public FQDN — but the FQDN
+only exists *after* creation. We deploy once with a placeholder, then update
+the env vars with the real FQDN.
+
+```bash
+# Get the internal CMS URL (known already)
 CMS_URL=$(az containerapp show \
   --name cms-sinnlos \
   --resource-group rg-sinnlos \
   --query "properties.configuration.ingress.fqdn" -o tsv)
 
+# First creation — AUTH_URL placeholder
 az containerapp create \
   --name web-sinnlos \
   --resource-group rg-sinnlos \
@@ -668,19 +833,43 @@ az containerapp create \
   --env-vars \
       NODE_ENV=production \
       "STRAPI_URL=https://$CMS_URL" \
-      "NEXT_PUBLIC_APP_URL=https://web-sinnlos.<env-default-domain>" \
       AUTH_TRUST_HOST=true \
       "AUTH_SECRET=<secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
+
+# Now read the FQDN assigned to the web app
+WEB_FQDN=$(az containerapp show \
+  --name web-sinnlos --resource-group rg-sinnlos \
+  --query "properties.configuration.ingress.fqdn" -o tsv)
+
+echo "Web app URL: https://$WEB_FQDN"
+
+# Update env vars with the real URL
+az containerapp update \
+  --name web-sinnlos --resource-group rg-sinnlos \
+  --set-env-vars \
+      "AUTH_URL=https://$WEB_FQDN" \
+      "NEXT_PUBLIC_APP_URL=https://$WEB_FQDN"
 ```
+
+**Add the Entra redirect URI.** Go to your App registration →
+**Authentication** → **Redirect URIs** and add:
+
+```
+https://<web-fqdn>/api/auth/callback/microsoft-entra-id
+```
+
+Where `<web-fqdn>` is the value `$WEB_FQDN` printed above. Without this,
+Microsoft sign-in will fail with `AADSTS50011`.
 
 The web app gets a public FQDN (`*.azurecontainerapps.io`). Add a custom domain
 via **Container Apps → Custom domains** and Azure will provision a managed TLS
-certificate automatically.
+certificate automatically. If you add a custom domain later, re-run the
+`AUTH_URL` update step with the new hostname.
 
-### 5.7 Update images after a code change
+### 5.8 Update images after a code change
 
 ```bash
 docker build -f apps/web/Dockerfile -t acrsinnlos.azurecr.io/sinnlos-web:latest . \
@@ -690,6 +879,192 @@ az containerapp update \
   --name web-sinnlos \
   --resource-group rg-sinnlos \
   --image acrsinnlos.azurecr.io/sinnlos-web:latest
+```
+
+---
+
+## Post-Deployment Verification
+
+After any deployment, run through this smoke test to confirm everything works
+end-to-end. Replace `<URL>` with your deployment's base URL
+(`http://localhost:3000`, `http://localhost`, or `https://intranet.example.com`).
+
+### 6.1 Health checks
+
+```bash
+# Next.js responds
+curl -I <URL>/
+# Expect: HTTP/1.1 200 OK   (or 307 redirect to /sign-in)
+
+# Strapi API responds
+curl -I <URL>/api/departments
+# Expect: HTTP/1.1 200 OK (or 401 if the endpoint requires auth)
+
+# Strapi admin loads
+curl -I <URL>/admin
+# Expect: HTTP/1.1 200 OK
+```
+
+### 6.2 Content bootstrap
+
+1. Open `<URL>/admin` → create your first Strapi admin user.
+2. **Settings → Users & Permissions plugin → Roles** — confirm all six roles
+   exist: `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
+3. **Content Manager → Department → Create new entry** — create a test
+   department (name: "Engineering", slug: "engineering"), publish.
+4. Open `<URL>/departments` → the test department should render.
+
+### 6.3 Microsoft sign-in flow
+
+1. Open `<URL>/` → you should be redirected to `/sign-in`.
+2. Click **Sign in with Microsoft** → complete the OIDC flow.
+3. You should land on the dashboard with your display name in the top-right.
+4. In Strapi admin → **Content Manager → User** — confirm your account was
+   auto-created with `microsoftOid`, `displayName`, and an assigned role.
+
+### 6.4 Role enforcement (optional)
+
+As a non-admin user, try to edit a wiki page you don't own via the Strapi API:
+
+```bash
+curl -X PUT <URL>/api/wiki-pages/1 \
+  -H "Authorization: Bearer <your-strapi-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"title":"Hijacked"}}'
+# Expect: 403 Forbidden
+```
+
+### 6.5 Common failure signals
+
+| Symptom | Likely cause |
+|---|---|
+| `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
+| `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
+| MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
+| MS login succeeds but lands on a Strapi error page | Strapi users-permissions Microsoft provider not enabled or `MS_*` env vars not set |
+| Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
+
+---
+
+## Backup & Restore
+
+For any production deployment (VPS or Azure VM with Docker Compose), you are
+responsible for backing up two things:
+
+1. **Postgres database** — all content, users, revisions, announcements
+2. **Uploads volume** — images, avatars, file attachments
+
+> For Azure Container Apps, use **Azure Database for PostgreSQL automated
+> backups** (7–35 days, enabled by default) and **Azure Files snapshots**
+> for the uploads share. No manual setup needed beyond confirming backup
+> retention in the Azure portal.
+
+### 7.1 Manual Postgres backup
+
+From the Docker Compose host:
+
+```bash
+cd /opt/sinnlos/infra
+
+# Dump to a timestamped file
+docker compose exec -T db \
+  pg_dump -U sinnlos -d sinnlos --format=custom \
+  > backups/sinnlos-$(date +%Y%m%d-%H%M%S).dump
+```
+
+Restore:
+
+```bash
+# ⚠ This drops the existing database first
+docker compose exec -T db \
+  pg_restore -U sinnlos -d sinnlos --clean --if-exists \
+  < backups/sinnlos-20260415-120000.dump
+```
+
+### 7.2 Backup uploads volume
+
+```bash
+# Copy uploads out of the named volume
+docker run --rm \
+  -v sinnlos_cms_uploads:/uploads \
+  -v "$(pwd)/backups":/backup \
+  alpine tar czf /backup/uploads-$(date +%Y%m%d-%H%M%S).tar.gz -C /uploads .
+```
+
+Restore:
+
+```bash
+docker run --rm \
+  -v sinnlos_cms_uploads:/uploads \
+  -v "$(pwd)/backups":/backup \
+  alpine sh -c "cd /uploads && tar xzf /backup/uploads-20260415-120000.tar.gz"
+```
+
+### 7.3 Automated daily backups (cron)
+
+Create `/opt/sinnlos/infra/backup.sh`:
+
+```bash
+#!/bin/bash
+set -euo pipefail
+cd /opt/sinnlos/infra
+mkdir -p backups
+
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+# Database
+docker compose exec -T db \
+  pg_dump -U sinnlos -d sinnlos --format=custom \
+  > backups/db-$TIMESTAMP.dump
+
+# Uploads
+docker run --rm \
+  -v sinnlos_cms_uploads:/uploads \
+  -v "$(pwd)/backups":/backup \
+  alpine tar czf /backup/uploads-$TIMESTAMP.tar.gz -C /uploads .
+
+# Keep only the last 14 days
+find backups -type f -mtime +14 -delete
+```
+
+Register with cron:
+
+```bash
+chmod +x /opt/sinnlos/infra/backup.sh
+( crontab -l 2>/dev/null ; echo "0 3 * * * /opt/sinnlos/infra/backup.sh >> /var/log/sinnlos-backup.log 2>&1" ) | crontab -
+```
+
+For off-site storage, `rsync` or `rclone` the `backups/` directory to
+S3/Azure Blob/BorgBase after each run.
+
+### 7.4 Update procedure (production-safe)
+
+```bash
+cd /opt/sinnlos/infra
+
+# 1. Always back up first
+./backup.sh
+
+# 2. Pull latest code
+cd /opt/sinnlos && git pull
+
+# 3. Rebuild and restart (rolling, no data loss)
+cd infra && docker compose up -d --build
+
+# 4. Watch the logs until both containers report healthy
+docker compose logs -f --tail=50 cms web
+```
+
+If anything goes wrong, roll back:
+
+```bash
+cd /opt/sinnlos
+git reset --hard <previous-commit-sha>
+cd infra
+docker compose up -d --build
+# If the database schema changed, restore from backup:
+docker compose exec -T db pg_restore -U sinnlos -d sinnlos --clean --if-exists \
+  < backups/db-<timestamp>.dump
 ```
 
 ---
@@ -720,9 +1095,18 @@ sudo systemctl stop nginx
 
 **Strapi fails to start: "Cannot find module"**
 
-The build step in the Dockerfile runs `pnpm install --frozen-lockfile`. If you
-recently changed `pnpm-lock.yaml` locally, commit and push the updated lockfile
-before building.
+Usually means the builder stage ran against a stale or incomplete lockfile.
+Clear the build cache and rebuild from scratch:
+
+```bash
+cd infra
+docker compose build --no-cache cms
+docker compose up -d cms
+```
+
+The Dockerfiles use `pnpm install --frozen-lockfile=false`, so a locally-edited
+lockfile will still install — but committing the updated lockfile keeps builds
+reproducible.
 
 **Caddy "certificate authority not found" on localhost**
 
