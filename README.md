@@ -82,6 +82,13 @@ pnpm --filter @sinnlos/web dev
 - Strapi admin: http://localhost:1337/admin (create the first admin account)
 - Web: http://localhost:3000 — redirects to `/sign-in`, click **Sign in with Microsoft**
 
+> **Database:** the default `apps/cms/.env.example` uses **SQLite** (file
+> at `apps/cms/.tmp/data.db`) so local dev needs no database server. If
+> you want Postgres locally, uncomment the `DATABASE_CLIENT=postgres`
+> block and set `DATABASE_HOST=localhost`. The hostname `db` that appears
+> in `infra/.env.example` is the Docker Compose service name and only
+> resolves inside the Compose network.
+
 On first sign-in, Strapi will:
 
 1. Create a user keyed on the Entra ID `oid` claim.
