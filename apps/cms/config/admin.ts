@@ -1,4 +1,10 @@
-export default ({ env }: { env: (key: string, def?: unknown) => any }) => ({
+type Env = ((key: string, def?: unknown) => any) & {
+  int: (key: string, def?: number) => number;
+  bool: (key: string, def?: boolean) => boolean;
+  array: (key: string, def?: string[]) => string[];
+};
+
+export default ({ env }: { env: Env }) => ({
   auth: {
     secret: env("ADMIN_JWT_SECRET"),
   },

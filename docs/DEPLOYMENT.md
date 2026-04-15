@@ -24,7 +24,7 @@ Install these on any machine you are deploying **from**:
 
 | Tool | Minimum version | Install |
 |---|---|---|
-| Node.js | 20.11 LTS | [nodejs.org](https://nodejs.org) |
+| Node.js | 20.11 LTS *(or 22 LTS / 24 LTS)* | [nodejs.org](https://nodejs.org) |
 | pnpm | 9.x | `corepack enable && corepack prepare pnpm@9.12.0 --activate` |
 | Git | any recent | system package manager |
 | openssl | any recent | preinstalled on macOS/Linux; on Windows use Git Bash or WSL |
@@ -35,7 +35,7 @@ Install these on any machine you are deploying **from**:
 Check versions:
 
 ```bash
-node -v          # v20.x.x
+node -v          # v20.x.x, v22.x.x, or v24.x.x
 pnpm -v          # 9.x.x
 docker -v        # Docker version 24.x.x
 docker compose version  # Docker Compose version v2.x.x

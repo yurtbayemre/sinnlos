@@ -18,6 +18,7 @@ apps/cms/public/uploads/*
 !apps/cms/public/uploads/.gitkeep
 apps/cms/exports
 apps/cms/.strapi
+apps/cms/.strapi-updater.json
 
 # Env
 .env

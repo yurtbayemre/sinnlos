@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:20-alpine AS base
+FROM node:24-alpine AS base
 RUN apk add --no-cache libc6-compat vips-dev build-base python3
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
@@ -17,7 +17,7 @@ COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 WORKDIR /app/apps/cms
 RUN pnpm build
 
-FROM node:20-alpine AS runner
+FROM node:24-alpine AS runner
 RUN apk add --no-cache vips-dev
 WORKDIR /app
 ENV NODE_ENV=production
