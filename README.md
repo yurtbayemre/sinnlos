@@ -113,6 +113,9 @@ Strapi content types (all draft+publish):
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
 `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
+The same bootstrap grants each role sensible default REST permissions on
+every intranet content type (reads for everyone, writes scoped per role).
+Writes are then further gated by the route-level policies listed below.
 
 Policies at `apps/cms/src/policies/` enforce scoped access:
 
