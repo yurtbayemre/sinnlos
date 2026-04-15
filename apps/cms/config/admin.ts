@@ -16,6 +16,9 @@ export default ({ env }: { env: Env }) => ({
       salt: env("TRANSFER_TOKEN_SALT"),
     },
   },
+  secrets: {
+    encryptionKey: env("ENCRYPTION_KEY"),
+  },
   flags: {
     nps: env.bool("FLAG_NPS", true),
     promoteEE: env.bool("FLAG_PROMOTE_EE", true),
