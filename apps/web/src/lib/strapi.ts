@@ -98,7 +98,7 @@ export const api = {
   announcements: {
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/announcements?populate[author]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=10",
+        "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=pinned:desc,createdAt:desc&pagination[pageSize]=10",
         { tag: "announcements", revalidate: 30 },
       ),
   },

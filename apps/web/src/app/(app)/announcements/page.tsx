@@ -72,7 +72,7 @@ export default async function AnnouncementsPage() {
 function AnnouncementCard({ item, pinned = false }: { item: any; pinned?: boolean }) {
   const attrs = item.attributes ?? item;
   const author = attrs.author?.data?.attributes ?? attrs.author ?? null;
-  const authorName = author?.displayName ?? author?.username ?? "Unknown";
+  const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
   const createdAt = attrs.createdAt ? new Date(attrs.createdAt) : null;
 
   return (

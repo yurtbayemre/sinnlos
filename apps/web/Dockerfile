@@ -10,10 +10,10 @@ COPY apps/web/package.json ./apps/web/
 RUN pnpm install --filter @sinnlos/web... --frozen-lockfile=false
 
 FROM base AS builder
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 COPY apps/web ./apps/web
 COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 WORKDIR /app/apps/web
 RUN pnpm build
 
