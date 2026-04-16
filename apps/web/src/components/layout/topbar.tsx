@@ -1,7 +1,7 @@
-import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SearchCommand } from "@/components/search-command";
 import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
 
@@ -18,13 +18,8 @@ export async function Topbar() {
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/80 px-6 backdrop-blur">
       <div className="flex-1" />
 
-      <div className="relative w-full max-w-xl flex-1">
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-        <input
-          type="search"
-          placeholder="Search wiki, people, teams…"
-          className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
-        />
+      <div className="w-full max-w-xl flex-1">
+        <SearchCommand />
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-3">
