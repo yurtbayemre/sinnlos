@@ -23,7 +23,7 @@ function normalise(a: Announcement) {
     body: (attrs.body as string) ?? "",
     pinned: Boolean(attrs.pinned),
     createdAt: attrs.createdAt ? new Date(attrs.createdAt) : null,
-    authorName: author?.displayName ?? author?.username ?? "Unknown",
+    authorName: author?.displayName ?? author?.username ?? author?.email ?? "Unknown",
     authorJob: author?.jobTitle ?? null,
   };
 }

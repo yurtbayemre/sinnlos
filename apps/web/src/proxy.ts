@@ -9,7 +9,7 @@ import { NextResponse, type NextRequest } from "next/server";
  * When DEMO_MODE=1 we skip the check entirely so the UI is browsable
  * without Microsoft Entra ID configured.
  */
-export default async function middleware(req: NextRequest) {
+export default async function proxy(req: NextRequest) {
   if (process.env.DEMO_MODE === "1") return NextResponse.next();
 
   const { auth } = await import("@/auth");
