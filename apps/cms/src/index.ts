@@ -168,6 +168,15 @@ async function ensurePermission(
   return true;
 }
 
+/**
+ * Every role that can read content types also needs
+ * `plugin::users-permissions.user.find` and `findOne` so that Strapi
+ * populates user relations (author, lead, members, head, etc.)
+ * instead of silently stripping them from API responses.
+ */
+const USER_READ_ACTIONS: CrudAction[] = ["find", "findOne"];
+const USER_UID = "plugin::users-permissions.user";
+
 async function syncRolePermissions(strapi: any) {
   let granted = 0;
   for (const [roleType, matrix] of Object.entries(PERMISSION_MATRIX)) {
@@ -184,6 +193,11 @@ async function syncRolePermissions(strapi: any) {
         const created = await ensurePermission(strapi, role.id, uid, action);
         if (created) granted++;
       }
+    }
+    // Grant read access to users so populated relations work
+    for (const action of USER_READ_ACTIONS) {
+      const created = await ensurePermission(strapi, role.id, USER_UID, action);
+      if (created) granted++;
     }
   }
   if (granted > 0) {

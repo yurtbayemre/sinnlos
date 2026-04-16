@@ -250,6 +250,12 @@ export function demo(path: string): unknown {
     const page = space?.pages?.find((p: AnyEntry) => p.slug === pageSlug);
     return pack(page ? [{ ...page, space }] : []);
   }
+  if (path.startsWith("/api/wiki-pages")) {
+    const allPages = wikiSpaces.flatMap((s) =>
+      (s.pages ?? []).map((p: AnyEntry) => ({ ...p, space: { id: s.id, name: s.name, slug: s.slug } })),
+    );
+    return pack(allPages);
+  }
 
   if (path.startsWith("/api/announcements")) return pack(announcements);
 
