@@ -4,7 +4,7 @@ A self-hosted company intranet with **Microsoft Entra ID (Azure AD)** single sig
 a **wiki**, **team pages**, and **department pages**, all gated by **user roles**.
 
 - **Backend** — Strapi v5 (Postgres) at `apps/cms`
-- **Frontend** — Next.js 15 + TailwindCSS + shadcn/ui at `apps/web`
+- **Frontend** — Next.js 16 + TailwindCSS + shadcn/ui at `apps/web`
 - **Auth** — Auth.js (NextAuth v5) Microsoft Entra ID provider → Strapi
   users-permissions Microsoft provider → Strapi JWT
 - **Deployment** — Docker Compose + Caddy (automatic TLS) in `infra/`
