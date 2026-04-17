@@ -9,18 +9,19 @@ interface Props {
 
 export default async function WikiSpacePage({ params }: Props) {
   const { space } = await params;
-  const data = await api.wiki.space(space).catch(() => null);
-  const entry = data?.data?.[0];
+  // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
+  // retry prompt instead of a misleading 404.
+  const data = await api.wiki.space(space);
+  const entry = data.data?.[0];
   if (!entry) notFound();
-  const attrs = entry.attributes ?? entry;
-  const pages = attrs.pages?.data ?? attrs.pages ?? [];
+  const pages = entry.pages ?? [];
 
   return (
     <div className="space-y-6">
       <header>
         <div className="text-sm text-muted-foreground">Wiki space</div>
-        <h1 className="text-3xl font-semibold tracking-tight">{attrs.name}</h1>
-        <p className="text-muted-foreground">{attrs.description}</p>
+        <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
+        <p className="text-muted-foreground">{entry.description}</p>
       </header>
 
       {pages.length === 0 ? (
@@ -31,21 +32,18 @@ export default async function WikiSpacePage({ params }: Props) {
         </Card>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {pages.map((p: any) => {
-            const a = p.attributes ?? p;
-            return (
-              <Link key={p.id} href={`/wiki/${space}/${a.slug}`}>
-                <Card className="h-full">
-                  <CardHeader>
-                    <CardTitle className="text-base">{a.title}</CardTitle>
-                    <CardDescription className="line-clamp-2">
-                      {a.summary ?? "—"}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              </Link>
-            );
-          })}
+          {pages.map((p: any) => (
+            <Link key={p.id} href={`/wiki/${space}/${p.slug}`}>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle className="text-base">{p.title}</CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {p.summary ?? "—"}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>

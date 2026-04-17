@@ -18,6 +18,7 @@ export default async function proxy(req: NextRequest) {
   const isPublic =
     nextUrl.pathname === "/sign-in" ||
     nextUrl.pathname.startsWith("/api/auth") ||
+    nextUrl.pathname === "/api/revalidate" ||
     nextUrl.pathname.startsWith("/_next") ||
     nextUrl.pathname.startsWith("/favicon");
 

@@ -142,6 +142,85 @@ Policies at `apps/cms/src/policies/` enforce scoped access:
 - `wiki-visibility` — read filter based on `space.visibility` (public / role /
   department / team)
 
+### Role flow: Entra ID → Strapi → frontend
+
+A user's role is resolved once, at sign-in, and then propagated through the stack:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  1. Microsoft Entra ID (Azure AD)                               │
+│     User signs in → Graph /me + /me/memberOf returns groups     │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  2. Strapi users-permissions Microsoft callback                 │
+│     extensions/users-permissions/strapi-server.ts               │
+│     resolveRoleType(groups) applies rules from                  │
+│     config/ms-role-map.ts → user.role written to the DB         │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ▼ Strapi JWT issued
+┌─────────────────────────────────────────────────────────────────┐
+│  3. Next.js Auth.js jwt callback (web/src/auth.ts)              │
+│     exchangeForStrapiJwt(msAccessToken)                         │
+│     → session.user.role = strapi.user.role.type                 │
+└──────────────────────────┬──────────────────────────────────────┘
+                           ▼ session.user.role (string)
+┌─────────────────────────────────────────────────────────────────┐
+│  4. Frontend UI gating                                          │
+│     isAdmin(session.user.role) → show/hide Admin link + page    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Entra ID group → Strapi role** (configured in
+[`apps/cms/config/ms-role-map.ts`](./apps/cms/config/ms-role-map.ts)):
+
+| Microsoft group    | Strapi `role.type`             |
+| ------------------ | ------------------------------ |
+| `Intranet-Admins`  | `admin_role`                   |
+| `Intranet-Editors` | `editor`                       |
+| `Department-Heads` | `department_head`              |
+| `Team-Leads`       | `team_lead`                    |
+| *(no match)*       | `member`  ← `DEFAULT_ROLE`     |
+| *(manual only)*    | `guest`                        |
+
+`guest` has no group mapping — only an admin can assign it in Strapi.
+`authenticated` is the users-permissions plugin's built-in fallback role
+and only applies if the Microsoft callback fails to remap the user;
+its permissions mirror `member`-level read access so the dashboard still
+works in that degraded state.
+
+**Strapi role capabilities** (REST API permissions seeded by
+`apps/cms/src/index.ts`, further gated by the policies above):
+
+```
+                │ Announ  Depart  Teams   Wiki    Wiki    Users
+                │ -cement -ments          spaces  pages   (read)
+────────────────┼──────────────────────────────────────────────────
+admin_role      │ CRUD    CRUD    CRUD    CRUD    CRUD    ✓
+editor          │ CRUD    R       R       CRUD    CRUD    ✓
+department_head │ R       R + U   R + U   R       R+C+U   ✓
+team_lead       │ R       R       R + U   R       R+C+U   ✓
+member          │ R       R       R       R       R + U   ✓
+guest           │ —       —       —       R       R       ✓
+authenticated ↓ │ R       R       R       R       R       ✓
+                │   (fallback baseline; overridden by callback)
+────────────────┴──────────────────────────────────────────────────
+ R = find + findOne   C = create   U = update   D = delete
+```
+
+**The frontend has no roles of its own.** `apps/web/src/lib/roles.ts` is
+a single helper:
+
+```ts
+export const ADMIN_ROLES = new Set(["admin_role"]);
+export function isAdmin(role) { return role ? ADMIN_ROLES.has(role) : false; }
+```
+
+Used in exactly two places: the sidebar (hide/show the *Admin* link) and
+the `/admin` page (redirect non-admins to `/`). Every other authorization
+decision is made server-side by Strapi's permission matrix + route
+policies — the frontend just mirrors the role string.
+
 ## 6. Production deployment (Docker Compose + Caddy)
 
 ```bash

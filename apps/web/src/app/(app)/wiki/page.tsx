@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { api } from "@/lib/strapi";
+import { tryFetch } from "@/lib/safe-fetch";
+import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Wiki" };
 
 export default async function WikiHomePage() {
-  const data = await api.wiki.spaces().catch(() => null);
+  const { data, failed } = await tryFetch(() => api.wiki.spaces(), "wiki");
   const spaces = data?.data ?? [];
 
   return (
@@ -17,6 +19,8 @@ export default async function WikiHomePage() {
         </p>
       </header>
 
+      {failed && <FetchErrorBanner />}
+
       {spaces.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -25,21 +29,18 @@ export default async function WikiHomePage() {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {spaces.map((s: any) => {
-            const attrs = s.attributes ?? s;
-            return (
-              <Link key={s.id} href={`/wiki/${attrs.slug}`}>
-                <Card className="h-full">
-                  <CardHeader>
-                    <CardTitle>{attrs.name}</CardTitle>
-                    <CardDescription>
-                      {attrs.description ?? "No description"} · {attrs.visibility}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              </Link>
-            );
-          })}
+          {spaces.map((s: any) => (
+            <Link key={s.id} href={`/wiki/${s.slug}`}>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle>{s.name}</CardTitle>
+                  <CardDescription>
+                    {s.description ?? "No description"} · {s.visibility}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>

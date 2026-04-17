@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { api } from "@/lib/strapi";
+import { tryFetch } from "@/lib/safe-fetch";
+import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Teams" };
 
 export default async function TeamsPage() {
-  const data = await api.teams.list().catch(() => null);
+  const { data, failed } = await tryFetch(() => api.teams.list(), "teams");
   const items = data?.data ?? [];
 
   return (
@@ -15,6 +17,8 @@ export default async function TeamsPage() {
         <p className="text-muted-foreground">All teams across the company.</p>
       </header>
 
+      {failed && <FetchErrorBanner />}
+
       {items.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -23,23 +27,19 @@ export default async function TeamsPage() {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((t: any) => {
-            const attrs = t.attributes ?? t;
-            const dept = attrs.department?.data?.attributes ?? attrs.department;
-            return (
-              <Link key={t.id} href={`/teams/${attrs.slug}`}>
-                <Card className="h-full">
-                  <CardHeader>
-                    <CardTitle>{attrs.name}</CardTitle>
-                    <CardDescription>
-                      {dept?.name ? `${dept.name} · ` : ""}
-                      {attrs.members?.length ?? attrs.members?.data?.length ?? 0} members
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              </Link>
-            );
-          })}
+          {items.map((t: any) => (
+            <Link key={t.id} href={`/teams/${t.slug}`}>
+              <Card className="h-full">
+                <CardHeader>
+                  <CardTitle>{t.name}</CardTitle>
+                  <CardDescription>
+                    {t.department?.name ? `${t.department.name} · ` : ""}
+                    {t.members?.length ?? 0} members
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>
