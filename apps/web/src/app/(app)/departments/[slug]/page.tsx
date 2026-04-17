@@ -11,15 +11,16 @@ interface Props {
 
 export default async function DepartmentPage({ params }: Props) {
   const { slug } = await params;
-  const data = await api.departments.one(slug).catch(() => null);
-  const entry = data?.data?.[0];
+  // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
+  // retry prompt instead of a misleading 404.
+  const data = await api.departments.one(slug);
+  const entry = data.data?.[0];
   if (!entry) notFound();
 
-  const attrs = entry.attributes ?? entry;
-  const teams = attrs.teams?.data ?? attrs.teams ?? [];
-  const members = attrs.members?.data ?? attrs.members ?? [];
-  const head = attrs.head?.data ?? attrs.head;
-  const color = attrs.color ?? "#6366f1";
+  const teams = entry.teams ?? [];
+  const members = entry.members ?? [];
+  const head = entry.head;
+  const color = entry.color ?? "#6366f1";
 
   return (
     <div className="space-y-8">
@@ -28,9 +29,9 @@ export default async function DepartmentPage({ params }: Props) {
         style={{ background: `linear-gradient(135deg, ${color}, ${color}66)` }}
       />
       <header>
-        <h1 className="text-3xl font-semibold tracking-tight">{attrs.name}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
-          {stripHtml(attrs.description) || "No description yet."}
+          {stripHtml(entry.description) || "No description yet."}
         </p>
       </header>
 
@@ -44,21 +45,18 @@ export default async function DepartmentPage({ params }: Props) {
             {teams.length === 0 ? (
               <p className="text-sm text-muted-foreground">No teams yet.</p>
             ) : (
-              teams.map((t: any) => {
-                const a = t.attributes ?? t;
-                return (
-                  <Link
-                    key={t.id}
-                    href={`/teams/${a.slug}`}
-                    className="rounded-xl border p-4 transition hover:bg-accent"
-                  >
-                    <div className="font-medium">{a.name}</div>
-                    <div className="text-xs text-muted-foreground line-clamp-1">
-                      {stripHtml(a.description) || "—"}
-                    </div>
-                  </Link>
-                );
-              })
+              teams.map((t: any) => (
+                <Link
+                  key={t.id}
+                  href={`/teams/${t.slug}`}
+                  className="rounded-xl border p-4 transition hover:bg-accent"
+                >
+                  <div className="font-medium">{t.name}</div>
+                  <div className="text-xs text-muted-foreground line-clamp-1">
+                    {stripHtml(t.description) || "—"}
+                  </div>
+                </Link>
+              ))
             )}
           </CardContent>
         </Card>

@@ -59,10 +59,26 @@ const config: Config = {
           from: { height: "var(--radix-accordion-content-height)" },
           to: { height: "0" },
         },
+        shimmer: {
+          "0%": { transform: "translateX(-100%)" },
+          "100%": { transform: "translateX(100%)" },
+        },
+        "fade-in-up": {
+          "0%": { opacity: "0", transform: "translateY(4px)" },
+          "100%": { opacity: "1", transform: "translateY(0)" },
+        },
+        indeterminate: {
+          "0%": { left: "-40%", width: "40%" },
+          "50%": { left: "20%", width: "60%" },
+          "100%": { left: "100%", width: "30%" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        shimmer: "shimmer 1.8s ease-in-out infinite",
+        "fade-in-up": "fade-in-up 0.3s ease-out both",
+        indeterminate: "indeterminate 1.2s ease-in-out infinite",
       },
     },
   },

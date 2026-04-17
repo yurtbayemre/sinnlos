@@ -11,21 +11,22 @@ interface Props {
 
 export default async function WikiPage({ params }: Props) {
   const { space, slug } = await params;
-  const data = await api.wiki.page(space, slug).catch(() => null);
-  const entry = data?.data?.[0];
+  // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
+  // retry prompt instead of a misleading 404.
+  const data = await api.wiki.page(space, slug);
+  const entry = data.data?.[0];
   if (!entry) notFound();
-  const attrs = entry.attributes ?? entry;
 
-  const author = attrs.author?.data ?? attrs.author;
-  const lastEditor = attrs.lastEditor?.data ?? attrs.lastEditor;
-  const updated = attrs.updatedAt ? new Date(attrs.updatedAt) : null;
+  const author = entry.author;
+  const lastEditor = entry.lastEditor;
+  const updated = entry.updatedAt ? new Date(entry.updatedAt) : null;
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
       <header className="border-b pb-6">
-        <h1 className="text-4xl font-semibold tracking-tight">{attrs.title}</h1>
-        {attrs.summary ? (
-          <p className="mt-2 text-lg text-muted-foreground">{attrs.summary}</p>
+        <h1 className="text-4xl font-semibold tracking-tight">{entry.title}</h1>
+        {entry.summary ? (
+          <p className="mt-2 text-lg text-muted-foreground">{entry.summary}</p>
         ) : null}
         <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
           {author ? <span>by {author.displayName ?? author.username}</span> : null}
@@ -41,7 +42,7 @@ export default async function WikiPage({ params }: Props) {
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeSlug, [rehypeAutolinkHeadings, { behavior: "wrap" }]]}
         >
-          {attrs.body ?? ""}
+          {entry.body ?? ""}
         </ReactMarkdown>
       </div>
     </article>

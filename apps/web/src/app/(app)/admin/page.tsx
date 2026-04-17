@@ -1,5 +1,8 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock } from "lucide-react";
+import { auth } from "@/auth";
+import { isAdmin } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -48,7 +51,12 @@ const quickLinks = [
   { href: "/admin/content-manager/collection-types/api::announcement.announcement", label: "Announcements", icon: Megaphone, description: "Post company-wide news." },
 ];
 
-export default function AdminPage() {
+export default async function AdminPage() {
+  const session = await auth();
+  if (!isAdmin((session?.user as any)?.role)) {
+    redirect("/");
+  }
+
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">

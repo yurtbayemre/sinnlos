@@ -43,6 +43,9 @@ services:
       MS_CLIENT_ID: ${MS_CLIENT_ID}
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
       MS_TENANT_ID: ${MS_TENANT_ID}
+      # Revalidation webhook → Next.js
+      WEB_INTERNAL_URL: http://web:3000
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     volumes:
       - cms_uploads:/app/apps/cms/public/uploads
 
@@ -67,6 +70,8 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}
       AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
+      # Shared secret for the /api/revalidate webhook called from the CMS
+      REVALIDATE_SECRET: ${REVALIDATE_SECRET}
 
   caddy:
     image: caddy:2-alpine
