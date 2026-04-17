@@ -1,17 +1,19 @@
 import { Megaphone, Pin } from "lucide-react";
 import { api } from "@/lib/strapi";
+import { tryFetch } from "@/lib/safe-fetch";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { initials } from "@/lib/utils";
 
 export const metadata = { title: "Announcements" };
 
 export default async function AnnouncementsPage() {
-  const data = await api.announcements.list().catch(() => null);
+  const { data, failed } = await tryFetch(() => api.announcements.list(), "announcements");
   const items = (data?.data ?? []) as any[];
 
-  const pinned = items.filter((a) => a.pinned ?? a.attributes?.pinned);
-  const rest = items.filter((a) => !(a.pinned ?? a.attributes?.pinned));
+  const pinned = items.filter((a) => a.pinned);
+  const rest = items.filter((a) => !a.pinned);
 
   return (
     <div className="space-y-8">
@@ -23,6 +25,8 @@ export default async function AnnouncementsPage() {
           posts stay at the top until they&apos;re unpinned by an editor.
         </p>
       </header>
+
+      {failed && <FetchErrorBanner />}
 
       {items.length === 0 ? (
         <Card>
@@ -70,10 +74,9 @@ export default async function AnnouncementsPage() {
 }
 
 function AnnouncementCard({ item, pinned = false }: { item: any; pinned?: boolean }) {
-  const attrs = item.attributes ?? item;
-  const author = attrs.author?.data?.attributes ?? attrs.author ?? null;
+  const author = item.author ?? null;
   const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
-  const createdAt = attrs.createdAt ? new Date(attrs.createdAt) : null;
+  const createdAt = item.createdAt ? new Date(item.createdAt) : null;
 
   return (
     <Card className={pinned ? "border-primary/30 bg-primary/[0.02]" : undefined}>
@@ -82,7 +85,7 @@ function AnnouncementCard({ item, pinned = false }: { item: any; pinned?: boolea
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2 text-lg">
               {pinned && <Pin className="h-4 w-4 text-primary" />}
-              {attrs.title}
+              {item.title}
             </CardTitle>
             <CardDescription>
               {createdAt ? createdAt.toLocaleDateString(undefined, {
@@ -105,7 +108,7 @@ function AnnouncementCard({ item, pinned = false }: { item: any; pinned?: boolea
       </CardHeader>
       <CardContent>
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-          {attrs.body}
+          {item.body}
         </p>
       </CardContent>
     </Card>
