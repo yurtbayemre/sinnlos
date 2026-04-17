@@ -147,6 +147,13 @@ PUBLIC_URL=http://localhost:1337
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 MS_TENANT_ID=<your-tenant-id>
+
+# Optional — enables instant cache invalidation on content edits.
+# See "Revalidation webhook" below. Must match REVALIDATE_SECRET in
+# apps/web/.env.local. Skip for bare-metal dev if you don't mind
+# waiting for the ISR timer (30–60s).
+REVALIDATE_SECRET=<openssl rand -hex 32>
+WEB_INTERNAL_URL=http://localhost:3000
 ```
 
 > **Prefer Postgres locally?** Run one with Docker in a single command and keep
@@ -178,6 +185,10 @@ AUTH_TRUST_HOST=true
 AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-id>
 AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
 AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id>/v2.0
+
+# Must match REVALIDATE_SECRET in apps/cms/.env (or leave both unset
+# to disable webhook revalidation locally).
+REVALIDATE_SECRET=<same-value-as-cms>
 ```
 
 ### 1.3 Start the servers
@@ -258,6 +269,11 @@ TRANSFER_TOKEN_SALT=<openssl rand -base64 32>
 JWT_SECRET=<openssl rand -base64 32>
 ENCRYPTION_KEY=<openssl rand -base64 32>
 AUTH_SECRET=<openssl rand -base64 32>
+
+# Shared secret used by the Strapi → Next.js revalidation webhook.
+# Both services read this; without it, content edits take 30–60s to
+# appear on the frontend (the ISR cache timer) instead of instantly.
+REVALIDATE_SECRET=<openssl rand -hex 32>
 
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
@@ -391,6 +407,10 @@ TRANSFER_TOKEN_SALT=<secret>
 JWT_SECRET=<secret>
 ENCRYPTION_KEY=<secret>
 AUTH_SECRET=<secret>
+
+# Shared secret for the Strapi → Next.js revalidation webhook.
+# Generate with: openssl rand -hex 32
+REVALIDATE_SECRET=<secret>
 
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
@@ -769,10 +789,15 @@ az containerapp create \
       "TRANSFER_TOKEN_SALT=<secret>" \
       "JWT_SECRET=<secret>" \
       "ENCRYPTION_KEY=<secret>" \
+      "REVALIDATE_SECRET=<openssl rand -hex 32>" \
       "MS_CLIENT_ID=<client-id>" \
       "MS_CLIENT_SECRET=<client-secret>" \
       "MS_TENANT_ID=<tenant-id>"
 ```
+
+> **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to call the Next.js
+> revalidation webhook, but the web app's FQDN only exists after it's deployed.
+> We set it in a follow-up step at the end of section 5.7.
 
 **Attach the uploads volume** (must be done via YAML because the CLI create
 doesn't accept volume mounts directly):
@@ -835,6 +860,7 @@ az containerapp create \
       "STRAPI_URL=https://$CMS_URL" \
       AUTH_TRUST_HOST=true \
       "AUTH_SECRET=<secret>" \
+      "REVALIDATE_SECRET=<same-value-as-cms>" \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
@@ -846,12 +872,20 @@ WEB_FQDN=$(az containerapp show \
 
 echo "Web app URL: https://$WEB_FQDN"
 
-# Update env vars with the real URL
+# Update env vars on the web app with the real URL
 az containerapp update \
   --name web-sinnlos --resource-group rg-sinnlos \
   --set-env-vars \
       "AUTH_URL=https://$WEB_FQDN" \
       "NEXT_PUBLIC_APP_URL=https://$WEB_FQDN"
+
+# Back-fill WEB_INTERNAL_URL on the CMS so its lifecycle hooks can
+# reach the Next.js /api/revalidate webhook. Traffic between the two
+# Container Apps stays inside the environment's virtual network even
+# though we're using the public FQDN.
+az containerapp update \
+  --name cms-sinnlos --resource-group rg-sinnlos \
+  --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN"
 ```
 
 **Add the Entra redirect URI.** Go to your App registration →
@@ -880,6 +914,57 @@ az containerapp update \
   --resource-group rg-sinnlos \
   --image acrsinnlos.azurecr.io/sinnlos-web:latest
 ```
+
+---
+
+## Revalidation Webhook
+
+Strapi content changes flow to the frontend immediately via a lightweight
+webhook instead of waiting for the Next.js ISR cache to expire (30–60s).
+
+**Flow:**
+
+```
+┌──────────────┐  afterCreate /      ┌──────────────────────┐
+│   Strapi     │  afterUpdate /      │  Next.js             │
+│   (CMS)      │  afterDelete    →   │  POST /api/revalidate │
+│              │  lifecycle hooks    │  (revalidateTag)     │
+└──────────────┘                     └──────────────────────┘
+     `revalidate()` helper                 `x-revalidate-secret`
+     uses WEB_INTERNAL_URL                 header must match
+     + REVALIDATE_SECRET                   REVALIDATE_SECRET
+```
+
+**Env vars on both services:**
+
+| Var                  | On CMS | On Web | Purpose                                              |
+| -------------------- | :----: | :----: | ---------------------------------------------------- |
+| `REVALIDATE_SECRET`  |   ✓    |   ✓    | Shared bearer-style secret; must match on both sides |
+| `WEB_INTERNAL_URL`   |   ✓    |   —    | How the CMS reaches Next.js (e.g. `http://web:3000`) |
+
+**Generate the secret once:**
+
+```bash
+openssl rand -hex 32
+```
+
+Paste the same value into both services' env files.
+
+**Graceful fallback:** if either variable is unset, the CMS helper at
+`apps/cms/src/utils/revalidate.ts` silently skips the webhook call —
+the app still works, but edits take up to 60s to appear on the frontend
+(the normal ISR timer). The `/api/revalidate` endpoint also refuses
+requests whose header doesn't match, so a mismatched pair fails closed.
+
+**Affected content types:** announcement, department, team, wiki-space,
+wiki-page — each has a `lifecycles.ts` that calls `revalidate([...tags])`
+with the cache tags defined in `apps/web/src/lib/strapi.ts`.
+
+Wiki endpoints bypass the Next.js fetch cache entirely (`cache: 'no-store'`)
+because the `wiki-visibility` policy filters results per user; caching by
+URL alone would leak restricted pages across users. The webhook is
+therefore a no-op for those tags, but still invalidates the non-wiki
+content tags when wiki pages touch related data.
 
 ---
 
