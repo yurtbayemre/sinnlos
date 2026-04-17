@@ -1,3 +1,4 @@
+import { PageFade } from "../page-fade";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 
@@ -8,7 +9,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar />
         <main className="flex-1 px-6 py-8">
-          <div className="mx-auto w-full max-w-6xl">{children}</div>
+          <div className="mx-auto w-full max-w-6xl">
+            <PageFade>{children}</PageFade>
+          </div>
         </main>
       </div>
     </div>

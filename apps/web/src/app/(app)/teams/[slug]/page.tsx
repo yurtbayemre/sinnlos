@@ -10,22 +10,23 @@ interface Props {
 
 export default async function TeamPage({ params }: Props) {
   const { slug } = await params;
-  const data = await api.teams.one(slug).catch(() => null);
-  const entry = data?.data?.[0];
+  // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
+  // retry prompt instead of a misleading 404.
+  const data = await api.teams.one(slug);
+  const entry = data.data?.[0];
   if (!entry) notFound();
-  const attrs = entry.attributes ?? entry;
 
-  const members = attrs.members?.data ?? attrs.members ?? [];
-  const lead = attrs.lead?.data ?? attrs.lead;
-  const dept = attrs.department?.data ?? attrs.department;
+  const members = entry.members ?? [];
+  const lead = entry.lead;
+  const dept = entry.department;
 
   return (
     <div className="space-y-8">
       <header>
         <div className="text-sm text-muted-foreground">{dept?.name ?? ""}</div>
-        <h1 className="text-3xl font-semibold tracking-tight">{attrs.name}</h1>
+        <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
-          {stripHtml(attrs.description) || "No description yet."}
+          {stripHtml(entry.description) || "No description yet."}
         </p>
       </header>
 
