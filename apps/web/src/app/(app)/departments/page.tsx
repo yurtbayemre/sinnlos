@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { api } from "@/lib/strapi";
+import { tryFetch } from "@/lib/safe-fetch";
+import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Departments" };
 
 export default async function DepartmentsPage() {
-  const data = await api.departments.list().catch(() => null);
+  const { data, failed } = await tryFetch(() => api.departments.list(), "departments");
   const items = data?.data ?? [];
 
   return (
@@ -15,6 +17,8 @@ export default async function DepartmentsPage() {
         <p className="text-muted-foreground">Browse departments and their teams.</p>
       </header>
 
+      {failed && <FetchErrorBanner />}
+
       {items.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -23,25 +27,22 @@ export default async function DepartmentsPage() {
         </Card>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((d: any) => {
-            const attrs = d.attributes ?? d;
-            return (
-              <Link key={d.id} href={`/departments/${attrs.slug}`}>
-                <Card className="h-full">
-                  <CardHeader>
-                    <div
-                      className="mb-3 h-20 rounded-xl"
-                      style={{ background: `linear-gradient(135deg, ${attrs.color ?? "#6366f1"}, ${attrs.color ?? "#818cf8"}88)` }}
-                    />
-                    <CardTitle>{attrs.name}</CardTitle>
-                    <CardDescription className="line-clamp-2">
-                      {stripHtml(attrs.description) || "No description"}
-                    </CardDescription>
-                  </CardHeader>
-                </Card>
-              </Link>
-            );
-          })}
+          {items.map((d: any) => (
+            <Link key={d.id} href={`/departments/${d.slug}`}>
+              <Card className="h-full">
+                <CardHeader>
+                  <div
+                    className="mb-3 h-20 rounded-xl"
+                    style={{ background: `linear-gradient(135deg, ${d.color ?? "#6366f1"}, ${d.color ?? "#818cf8"}88)` }}
+                  />
+                  <CardTitle>{d.name}</CardTitle>
+                  <CardDescription className="line-clamp-2">
+                    {stripHtml(d.description) || "No description"}
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </Link>
+          ))}
         </div>
       )}
     </div>
