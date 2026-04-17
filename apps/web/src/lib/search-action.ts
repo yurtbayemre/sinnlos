@@ -14,9 +14,12 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
     api.departments.list().catch(() => ({ data: [] })),
     api.teams.list().catch(() => ({ data: [] })),
     api.wiki.spaces().catch(() => ({ data: [] })),
+    // Bypasses the Next.js fetch cache: wiki-pages are filtered by the
+    // wiki-visibility policy so cached responses would leak restricted
+    // pages across users.
     strapi<StrapiListResponse<any>>(
       "/api/wiki-pages?populate[space]=true&populate[author]=true&pagination[pageSize]=100&sort=title:asc",
-      { tag: "wiki-pages", revalidate: 60 },
+      { noCache: true },
     ).catch(() => ({ data: [] })),
     api.announcements.list().catch(() => ({ data: [] })),
   ]);

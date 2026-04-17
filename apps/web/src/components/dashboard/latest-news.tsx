@@ -10,19 +10,22 @@ type Announcement = {
   body?: string;
   pinned?: boolean;
   createdAt?: string;
-  author?: { displayName?: string; username?: string; jobTitle?: string } | null;
-  attributes?: any;
+  author?: {
+    displayName?: string;
+    username?: string;
+    email?: string;
+    jobTitle?: string;
+  } | null;
 };
 
 function normalise(a: Announcement) {
-  const attrs = a.attributes ?? a;
-  const author = attrs.author?.data?.attributes ?? attrs.author ?? null;
+  const author = a.author ?? null;
   return {
     id: a.id,
-    title: attrs.title as string,
-    body: (attrs.body as string) ?? "",
-    pinned: Boolean(attrs.pinned),
-    createdAt: attrs.createdAt ? new Date(attrs.createdAt) : null,
+    title: a.title as string,
+    body: (a.body as string) ?? "",
+    pinned: Boolean(a.pinned),
+    createdAt: a.createdAt ? new Date(a.createdAt) : null,
     authorName: author?.displayName ?? author?.username ?? author?.email ?? "Unknown",
     authorJob: author?.jobTitle ?? null,
   };
