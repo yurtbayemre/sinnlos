@@ -1,8 +1,11 @@
 import { Megaphone, Pin } from "lucide-react";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
+import type { Announcement } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { initials } from "@/lib/utils";
 
@@ -10,37 +13,27 @@ export const metadata = { title: "Announcements" };
 
 export default async function AnnouncementsPage() {
   const { data, failed } = await tryFetch(() => api.announcements.list(), "announcements");
-  const items = (data?.data ?? []) as any[];
+  const items = (data?.data ?? []) as Announcement[];
 
   const pinned = items.filter((a) => a.pinned);
   const rest = items.filter((a) => !a.pinned);
 
   return (
     <div className="space-y-8">
-      <header>
-        <p className="text-sm text-muted-foreground">Company news &amp; updates</p>
-        <h1 className="text-3xl font-semibold tracking-tight">Announcements</h1>
-        <p className="mt-2 max-w-2xl text-muted-foreground">
-          The latest news, operational updates and memos from across the company. Pinned
-          posts stay at the top until they&apos;re unpinned by an editor.
-        </p>
-      </header>
+      <PageHeader
+        eyebrow="Company news & updates"
+        title="Announcements"
+        description="The latest news, operational updates and memos from across the company. Pinned posts stay at the top until they're unpinned by an editor."
+      />
 
       {failed && <FetchErrorBanner />}
 
       {items.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
-              <Megaphone className="h-6 w-6" />
-            </div>
-            <p className="font-medium">No announcements yet</p>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Editors and admins can post company news from the Strapi admin panel. New
-              posts will appear here and in the dashboard feed.
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Megaphone}
+          title="No announcements yet"
+          hint="Editors and admins can post company news from the Strapi admin panel. New posts will appear here and in the dashboard feed."
+        />
       ) : (
         <>
           {pinned.length > 0 && (
@@ -49,7 +42,7 @@ export default async function AnnouncementsPage() {
                 <Pin className="h-3.5 w-3.5" />
                 Pinned
               </div>
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="stagger grid gap-4 md:grid-cols-2">
                 {pinned.map((a) => (
                   <AnnouncementCard key={a.id} item={a} pinned />
                 ))}
@@ -60,7 +53,7 @@ export default async function AnnouncementsPage() {
           {rest.length > 0 && (
             <section className="space-y-3">
               <div className="text-sm font-medium text-muted-foreground">Recent</div>
-              <div className="space-y-4">
+              <div className="stagger space-y-4">
                 {rest.map((a) => (
                   <AnnouncementCard key={a.id} item={a} />
                 ))}
@@ -73,7 +66,7 @@ export default async function AnnouncementsPage() {
   );
 }
 
-function AnnouncementCard({ item, pinned = false }: { item: any; pinned?: boolean }) {
+function AnnouncementCard({ item, pinned = false }: { item: Announcement; pinned?: boolean }) {
   const author = item.author ?? null;
   const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
   const createdAt = item.createdAt ? new Date(item.createdAt) : null;

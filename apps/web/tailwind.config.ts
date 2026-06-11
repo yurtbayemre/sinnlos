@@ -67,6 +67,14 @@ const config: Config = {
           "0%": { opacity: "0", transform: "translateY(4px)" },
           "100%": { opacity: "1", transform: "translateY(0)" },
         },
+        "fade-in": {
+          "0%": { opacity: "0" },
+          "100%": { opacity: "1" },
+        },
+        "scale-in": {
+          "0%": { opacity: "0", transform: "scale(0.97) translateY(-4px)" },
+          "100%": { opacity: "1", transform: "scale(1) translateY(0)" },
+        },
         indeterminate: {
           "0%": { left: "-40%", width: "40%" },
           "50%": { left: "20%", width: "60%" },
@@ -78,6 +86,8 @@ const config: Config = {
         "accordion-up": "accordion-up 0.2s ease-out",
         shimmer: "shimmer 1.8s ease-in-out infinite",
         "fade-in-up": "fade-in-up 0.3s ease-out both",
+        "fade-in": "fade-in 0.2s ease-out both",
+        "scale-in": "scale-in 0.15s ease-out both",
         indeterminate: "indeterminate 1.2s ease-in-out infinite",
       },
     },

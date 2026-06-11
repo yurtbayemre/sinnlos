@@ -91,7 +91,7 @@ export function LatestNews({ items }: { items: Announcement[] }) {
           {featured && (
             <Link
               href="/announcements"
-              className="block lg:col-span-3"
+              className="focus-card block lg:col-span-3"
             >
               <Card className="group h-full overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.06] via-background to-background transition hover:border-primary/40 hover:shadow-md">
                 <CardContent className="flex h-full flex-col gap-4 p-6">
@@ -133,7 +133,7 @@ export function LatestNews({ items }: { items: Announcement[] }) {
 
           <div className="flex flex-col gap-3 lg:col-span-2">
             {rest.map((n) => (
-              <Link key={n.id} href="/announcements" className="block">
+              <Link key={n.id} href="/announcements" className="focus-card block">
                 <Card className="group transition hover:border-primary/30 hover:shadow-sm">
                   <CardContent className="flex items-start gap-3 p-4">
                     {n.pinned && (

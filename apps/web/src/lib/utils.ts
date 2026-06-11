@@ -14,3 +14,9 @@ export function initials(name: string | undefined | null): string {
     .map((p) => p[0]!.toUpperCase())
     .join("");
 }
+
+/** Strip HTML tags from Strapi richtext for plain-text previews. */
+export function stripHtml(s?: string | null): string {
+  if (!s) return "";
+  return s.replace(/<[^>]*>?/gm, "");
+}

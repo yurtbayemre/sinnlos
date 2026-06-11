@@ -17,7 +17,15 @@
     "paths": {
       "@/*": [
         "./src/*"
-      ]
+      ],
+      // Pin React type resolution to this app's @types/react@19. Without
+      // this, Next.js' own .d.ts files resolve "react" through pnpm's
+      // hidden hoist directory, which can link Strapi's @types/react@18
+      // and break every JSX element with cross-version type errors.
+      "react": ["./node_modules/@types/react"],
+      "react/*": ["./node_modules/@types/react/*"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/*": ["./node_modules/@types/react-dom/*"]
     },
     "allowJs": true
   },

@@ -1,8 +1,8 @@
-import Link from "next/link";
 import { BookOpen, Building2, Home, Megaphone, Users2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
+import { NavLink } from "./nav-link";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -25,31 +25,19 @@ export async function Sidebar({ className }: { className?: string }) {
       )}
     >
       <div className="flex h-16 shrink-0 items-center gap-2 border-b px-6">
-        <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold">
+        <div
+          aria-hidden="true"
+          className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground"
+        >
           S
         </div>
         <span className="font-semibold tracking-tight">Sinnlos</span>
       </div>
-      <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+      <nav aria-label="Primary" className="flex-1 space-y-1 overflow-y-auto p-4">
         {nav.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="group flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
-          >
-            <item.icon className="h-4 w-4" />
-            {item.label}
-          </Link>
+          <NavLink key={item.href} {...item} />
         ))}
-        {showAdmin && (
-          <Link
-            href="/admin"
-            className="group flex items-center gap-3 rounded-xl px-3 py-2 text-sm text-muted-foreground transition hover:bg-accent hover:text-accent-foreground"
-          >
-            <Settings className="h-4 w-4" />
-            Admin
-          </Link>
-        )}
+        {showAdmin && <NavLink href="/admin" label="Admin" icon={Settings} />}
       </nav>
       <div className="shrink-0 border-t p-4 text-xs text-muted-foreground">
         Self-hosted intranet · v0.1
