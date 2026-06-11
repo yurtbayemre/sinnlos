@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import { api } from "@/lib/strapi";
+import type { Team } from "@/lib/types";
+import { initials, stripHtml } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { initials } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -13,7 +14,7 @@ export default async function TeamPage({ params }: Props) {
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.teams.one(slug);
-  const entry = data.data?.[0];
+  const entry = data.data?.[0] as Team | undefined;
   if (!entry) notFound();
 
   const members = entry.members ?? [];
@@ -23,7 +24,7 @@ export default async function TeamPage({ params }: Props) {
   return (
     <div className="space-y-8">
       <header>
-        <div className="text-sm text-muted-foreground">{dept?.name ?? ""}</div>
+        <div className="text-sm font-medium text-muted-foreground">{dept?.name ?? ""}</div>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
           {stripHtml(entry.description) || "No description yet."}
@@ -55,20 +56,27 @@ export default async function TeamPage({ params }: Props) {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Members</CardTitle>
-            <CardDescription>{members.length} members</CardDescription>
+            <CardDescription>
+              {members.length} {members.length === 1 ? "member" : "members"}
+            </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+          <CardContent className="stagger grid gap-3 sm:grid-cols-2">
             {members.length === 0 ? (
               <p className="text-sm text-muted-foreground">No members yet.</p>
             ) : (
-              members.map((m: any) => (
-                <div key={m.id} className="flex items-center gap-3 rounded-xl border p-3">
+              members.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                >
                   <Avatar>
                     <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
                     <div className="truncate font-medium">{m.displayName ?? m.username}</div>
-                    <div className="truncate text-xs text-muted-foreground">{m.jobTitle ?? m.email}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {m.jobTitle ?? m.email}
+                    </div>
                   </div>
                 </div>
               ))
@@ -78,9 +86,4 @@ export default async function TeamPage({ params }: Props) {
       </section>
     </div>
   );
-}
-
-function stripHtml(s?: string | null) {
-  if (!s) return "";
-  return s.replace(/<[^>]*>?/gm, "");
 }

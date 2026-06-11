@@ -4,10 +4,8 @@
  * stored in the Auth.js session) is injected automatically.
  */
 import { auth } from "@/auth";
+import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { demo } from "@/lib/demo";
-
-const STRAPI_URL = process.env.STRAPI_URL || "http://localhost:1337";
-const DEMO_MODE = process.env.DEMO_MODE === "1";
 
 export type StrapiListResponse<T> = {
   data: T[];

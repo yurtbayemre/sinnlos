@@ -1,9 +1,11 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { Users2 } from "lucide-react";
 import { api } from "@/lib/strapi";
+import type { Department } from "@/lib/types";
+import { initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { initials } from "@/lib/utils";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -14,7 +16,7 @@ export default async function DepartmentPage({ params }: Props) {
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.departments.one(slug);
-  const entry = data.data?.[0];
+  const entry = data.data?.[0] as Department | undefined;
   if (!entry) notFound();
 
   const teams = entry.teams ?? [];
@@ -25,6 +27,7 @@ export default async function DepartmentPage({ params }: Props) {
   return (
     <div className="space-y-8">
       <div
+        aria-hidden="true"
         className="h-40 rounded-2xl"
         style={{ background: `linear-gradient(135deg, ${color}, ${color}66)` }}
       />
@@ -39,20 +42,25 @@ export default async function DepartmentPage({ params }: Props) {
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Teams</CardTitle>
-            <CardDescription>{teams.length} teams in this department</CardDescription>
+            <CardDescription>
+              {teams.length} {teams.length === 1 ? "team" : "teams"} in this department
+            </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-3 sm:grid-cols-2">
+          <CardContent className="stagger grid gap-3 sm:grid-cols-2">
             {teams.length === 0 ? (
               <p className="text-sm text-muted-foreground">No teams yet.</p>
             ) : (
-              teams.map((t: any) => (
+              teams.map((t) => (
                 <Link
                   key={t.id}
                   href={`/teams/${t.slug}`}
-                  className="rounded-xl border p-4 transition hover:bg-accent"
+                  className="focus-card group rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-sm"
                 >
-                  <div className="font-medium">{t.name}</div>
-                  <div className="text-xs text-muted-foreground line-clamp-1">
+                  <div className="flex items-center gap-2 font-medium transition-colors group-hover:text-primary">
+                    <Users2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                    {t.name}
+                  </div>
+                  <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
                     {stripHtml(t.description) || "—"}
                   </div>
                 </Link>
@@ -69,7 +77,12 @@ export default async function DepartmentPage({ params }: Props) {
             {head ? (
               <div className="flex items-center gap-3">
                 <Avatar>
-                  {head.avatar?.url ? <AvatarImage src={head.avatar.url} /> : null}
+                  {head.avatar?.url ? (
+                    <AvatarImage
+                      src={head.avatar.url}
+                      alt={head.displayName ?? head.username ?? "Department head"}
+                    />
+                  ) : null}
                   <AvatarFallback>{initials(head.displayName ?? head.username)}</AvatarFallback>
                 </Avatar>
                 <div>
@@ -89,9 +102,12 @@ export default async function DepartmentPage({ params }: Props) {
         {members.length === 0 ? (
           <p className="text-sm text-muted-foreground">No members yet.</p>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {members.map((m: any) => (
-              <div key={m.id} className="flex items-center gap-3 rounded-xl border p-3">
+          <div className="stagger grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {members.map((m) => (
+              <div
+                key={m.id}
+                className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
+              >
                 <Avatar>
                   <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
                 </Avatar>
@@ -108,9 +124,4 @@ export default async function DepartmentPage({ params }: Props) {
       </section>
     </div>
   );
-}
-
-function stripHtml(s?: string | null) {
-  if (!s) return "";
-  return s.replace(/<[^>]*>?/gm, "");
 }

@@ -1,40 +1,49 @@
 import Link from "next/link";
+import { Users2 } from "lucide-react";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
+import type { Team } from "@/lib/types";
+import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/page-header";
+import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Teams" };
 
 export default async function TeamsPage() {
   const { data, failed } = await tryFetch(() => api.teams.list(), "teams");
-  const items = data?.data ?? [];
+  const items = (data?.data ?? []) as Team[];
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-3xl font-semibold tracking-tight">Teams</h1>
-        <p className="text-muted-foreground">All teams across the company.</p>
-      </header>
+      <PageHeader title="Teams" description="All teams across the company." />
 
       {failed && <FetchErrorBanner />}
 
       {items.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            No teams yet.
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Users2}
+          title="No teams yet"
+          hint="Teams belong to departments — add them in the Strapi admin."
+        />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {items.map((t: any) => (
-            <Link key={t.id} href={`/teams/${t.slug}`}>
-              <Card className="h-full">
+        <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {items.map((t) => (
+            <Link key={t.id} href={`/teams/${t.slug}`} className="focus-card group">
+              <Card className="card-lift h-full">
                 <CardHeader>
-                  <CardTitle>{t.name}</CardTitle>
+                  <div
+                    aria-hidden="true"
+                    className="mb-1 flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary"
+                  >
+                    <Users2 className="h-4 w-4" />
+                  </div>
+                  <CardTitle className="transition-colors group-hover:text-primary">
+                    {t.name}
+                  </CardTitle>
                   <CardDescription>
                     {t.department?.name ? `${t.department.name} · ` : ""}
-                    {t.members?.length ?? 0} members
+                    {t.members?.length ?? 0} {(t.members?.length ?? 0) === 1 ? "member" : "members"}
                   </CardDescription>
                 </CardHeader>
               </Card>
