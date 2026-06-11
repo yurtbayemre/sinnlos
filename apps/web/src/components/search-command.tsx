@@ -90,10 +90,14 @@ export function SearchCommand() {
       {/* Trigger — looks like the old search input */}
       <button
         type="button"
+        aria-label="Search (Ctrl+K)"
         onClick={() => setOpen(true)}
-        className="relative flex h-10 w-full max-w-xl items-center rounded-xl border bg-muted/40 pl-9 pr-3 text-sm text-muted-foreground outline-none hover:bg-muted/60 focus:bg-background focus:ring-2 focus:ring-ring"
+        className="relative flex h-10 w-full max-w-xl items-center rounded-xl border bg-muted/40 pl-9 pr-3 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2" />
+        <Search
+          aria-hidden="true"
+          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+        />
         <span>Search wiki, people, teams…</span>
         <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
           ⌘K
@@ -103,11 +107,12 @@ export function SearchCommand() {
       {/* Command palette overlay */}
       {open && (
         <div
-          className="fixed inset-0 z-50 flex items-start justify-center pt-[4.5rem]"
+          className="fixed inset-0 z-50 flex animate-fade-in items-start justify-center bg-background/60 pt-[4.5rem] backdrop-blur-sm"
           onMouseDown={() => setOpen(false)}
         >
           <Command
-            className="relative w-full max-w-lg overflow-hidden rounded-xl border bg-background shadow-lg"
+            label="Global search"
+            className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
             onMouseDown={(e) => e.stopPropagation()}
             shouldFilter={true}
           >

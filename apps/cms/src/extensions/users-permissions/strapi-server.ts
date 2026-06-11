@@ -83,50 +83,71 @@ export default (plugin: AnyPlugin) => {
     await originalCallback(ctx);
 
     const responseBody = ctx.body as { jwt?: string; user?: { id: number; email: string } };
-    if (!responseBody?.user) return;
-
-    const accessToken = ctx.query?.access_token as string | undefined;
-    if (!accessToken) return;
-
-    const [me, groups] = await Promise.all([
-      fetchGraphMe(accessToken),
-      fetchGraphGroups(accessToken),
-    ]);
-
-    const roleType = resolveRoleType(groups);
-
-    const roleEntity = await strapi.db.query("plugin::users-permissions.role").findOne({
-      where: { type: roleType },
-    });
-
-    // Look up department by name (if Graph exposed one)
-    let departmentId: number | undefined;
-    if (me?.department) {
-      const dept = await strapi.db.query("api::department.department").findOne({
-        where: { name: me.department },
-      });
-      if (dept) departmentId = dept.id;
+    if (!responseBody?.user) {
+      strapi.log.warn("[ms-auth] callback returned no user — skipping Graph enrichment");
+      return;
     }
 
-    const update: Record<string, unknown> = {
-      microsoftOid: me?.id,
-      displayName: me?.displayName ?? responseBody.user.email,
-      jobTitle: me?.jobTitle,
-    };
-    if (roleEntity) update.role = roleEntity.id;
-    if (departmentId) update.department = departmentId;
+    const accessToken = ctx.query?.access_token as string | undefined;
+    if (!accessToken) {
+      strapi.log.warn("[ms-auth] no access_token in callback query — skipping Graph enrichment");
+      return;
+    }
 
-    await strapi.db.query("plugin::users-permissions.user").update({
-      where: { id: responseBody.user.id },
-      data: update,
-    });
+    // Enrichment is best-effort: the user already has a valid JWT at this
+    // point, so a Graph outage or DB hiccup must degrade to "less profile
+    // data", never to a failed login.
+    try {
+      const [me, groups] = await Promise.all([
+        fetchGraphMe(accessToken),
+        fetchGraphGroups(accessToken),
+      ]);
+      if (!me) {
+        strapi.log.warn("[ms-auth] Graph /me lookup failed — profile fields not synced");
+      }
 
-    // Refresh the response user with the patched values
-    const refreshed = await strapi.db.query("plugin::users-permissions.user").findOne({
-      where: { id: responseBody.user.id },
-      populate: ["role", "department"],
-    });
-    ctx.body = { ...responseBody, user: refreshed };
+      const roleType = resolveRoleType(groups);
+
+      const roleEntity = await strapi.db.query("plugin::users-permissions.role").findOne({
+        where: { type: roleType },
+      });
+      if (!roleEntity) {
+        strapi.log.warn(`[ms-auth] role '${roleType}' not found — keeping current role`);
+      }
+
+      // Look up department by name (if Graph exposed one)
+      let departmentId: number | undefined;
+      if (me?.department) {
+        const dept = await strapi.db.query("api::department.department").findOne({
+          where: { name: me.department },
+        });
+        if (dept) departmentId = dept.id;
+      }
+
+      const update: Record<string, unknown> = {
+        microsoftOid: me?.id,
+        displayName: me?.displayName ?? responseBody.user.email,
+        jobTitle: me?.jobTitle,
+      };
+      if (roleEntity) update.role = roleEntity.id;
+      if (departmentId) update.department = departmentId;
+
+      await strapi.db.query("plugin::users-permissions.user").update({
+        where: { id: responseBody.user.id },
+        data: update,
+      });
+
+      // Refresh the response user with the patched values
+      const refreshed = await strapi.db.query("plugin::users-permissions.user").findOne({
+        where: { id: responseBody.user.id },
+        populate: ["role", "department"],
+      });
+      ctx.body = { ...responseBody, user: refreshed };
+    } catch (err) {
+      strapi.log.error(
+        `[ms-auth] enrichment failed (login still succeeds): ${(err as Error).message}`,
+      );
+    }
   };
 
   return plugin;

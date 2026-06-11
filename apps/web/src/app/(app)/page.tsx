@@ -34,11 +34,11 @@ export default async function DashboardPage() {
 
       {anyFailed && <FetchErrorBanner />}
 
-      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard icon={<Building2 className="h-5 w-5" />} label="Departments" value={deptCount} href="/departments" />
-        <StatCard icon={<Users2 className="h-5 w-5" />} label="Teams" value={teamCount} href="/teams" />
-        <StatCard icon={<BookOpen className="h-5 w-5" />} label="Wiki" value="Browse" href="/wiki" />
-        <StatCard icon={<Megaphone className="h-5 w-5" />} label="News" value={announcements.data?.data.length ?? 0} href="/announcements" />
+      <section className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label="Departments" value={deptCount} href="/departments" />
+        <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label="Teams" value={teamCount} href="/teams" />
+        <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label="Wiki" value="Browse" href="/wiki" />
+        <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label="News" value={announcements.data?.data.length ?? 0} href="/announcements" />
       </section>
 
       <LatestNews items={(announcements.data?.data ?? []) as any[]} />
@@ -58,10 +58,10 @@ function StatCard({
   href: string;
 }) {
   return (
-    <Link href={href} className="block">
-      <Card className="cursor-pointer">
+    <Link href={href} className="focus-card group block">
+      <Card className="card-lift cursor-pointer">
         <CardContent className="flex items-center gap-4 p-6">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-transform duration-200 group-hover:scale-110">
             {icon}
           </div>
           <div>

@@ -9,6 +9,7 @@
  */
 import NextAuth, { type DefaultSession } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
+import { STRAPI_URL } from "@/lib/config";
 
 // Startup env validation — fail fast if the deployment is misconfigured
 // rather than letting the auth flow silently break at first sign-in.
@@ -70,8 +71,7 @@ type StrapiExchangeResponse = {
 async function exchangeForStrapiJwt(
   accessToken: string,
 ): Promise<StrapiExchangeResponse | null> {
-  const strapiUrl = process.env.STRAPI_URL || "http://localhost:1337";
-  const url = `${strapiUrl}/api/auth/microsoft/callback?access_token=${encodeURIComponent(accessToken)}`;
+  const url = `${STRAPI_URL}/api/auth/microsoft/callback?access_token=${encodeURIComponent(accessToken)}`;
 
   // Retry only on transient failures (network error / 5xx). A 4xx means
   // Strapi actively rejected the token — retrying won't help.

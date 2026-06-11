@@ -2,13 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock } from "lucide-react";
 import { auth } from "@/auth";
+// Browser-facing URL — inside Docker the internal STRAPI_URL
+// (http://cms:1337) is not reachable from the user's browser.
+import { STRAPI_PUBLIC_URL as STRAPI_URL } from "@/lib/config";
 import { isAdmin } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata = { title: "Admin" };
-
-const STRAPI_URL = process.env.STRAPI_URL || "http://localhost:1337";
 
 const roles = [
   {
@@ -46,7 +47,7 @@ const roles = [
 const quickLinks = [
   { href: "/admin/content-manager", label: "Content Manager", icon: BookOpen, description: "Edit wiki pages, departments, teams and announcements." },
   { href: "/admin/settings/users-permissions/roles", label: "Roles & permissions", icon: Shield, description: "Configure what each role can read or write." },
-  { href: "/admin/settings/users-permissions/users", label: "Users", icon: Users, description: "Review users synced from Microsoft Entra ID." },
+  { href: "/admin/content-manager/collection-types/plugin::users-permissions.user", label: "Users", icon: Users, description: "Review users synced from Microsoft Entra ID." },
   { href: "/admin/content-manager/collection-types/api::department.department", label: "Departments", icon: Building2, description: "Add or rename org units." },
   { href: "/admin/content-manager/collection-types/api::announcement.announcement", label: "Announcements", icon: Megaphone, description: "Post company-wide news." },
 ];
