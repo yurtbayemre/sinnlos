@@ -60,6 +60,34 @@ In the Azure portal:
    - Grant admin consent.
 5. **Certificates & secrets** → new client secret, copy the value.
 
+## Running without Microsoft (standalone mode)
+
+No Entra ID tenant? Leave every `MS_*` / `AUTH_MICROSOFT_*` variable
+empty and local email+password sign-in (against Strapi) activates
+automatically on both apps — no extra configuration needed. Accounts
+are created in the Strapi admin (**Content Manager → User**) or via
+self-registration when `LOCAL_REGISTRATION=1` is set in **both**
+`apps/web/.env.local` and `apps/cms/.env`. New local users get the
+`member` role; users manage their own display name, job title and phone
+on **/profile**; password resets are done by an admin in the Strapi
+panel (no SMTP required).
+
+Quick start:
+
+1. Copy the env files (step 3 below) and leave all `MS_*` /
+   `AUTH_MICROSOFT_*` values empty; generate `AUTH_SECRET` and the
+   Strapi secrets as usual.
+2. Optionally set `LOCAL_REGISTRATION=1` in both apps to enable the
+   self-registration form on the sign-in page.
+3. Start Strapi and Next.js (step 4 below).
+4. Create users in the Strapi admin under **Content Manager → User**
+   (set email, password, and confirmed = true) — or let people register
+   themselves if you enabled registration.
+5. Sign in at http://localhost:3000/sign-in with email + password.
+
+To offer local sign-in *alongside* Microsoft, keep the Entra vars set
+and add `AUTH_LOCAL_ENABLED=1` to `apps/web/.env.local`.
+
 ## 3. Environment files
 
 ```bash

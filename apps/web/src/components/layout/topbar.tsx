@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -50,10 +51,12 @@ export async function Topbar() {
               <div className="text-sm font-medium leading-none">{name}</div>
               <div className="text-xs text-muted-foreground">{email}</div>
             </div>
-            <Avatar>
-              {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
-              <AvatarFallback>{initials(name)}</AvatarFallback>
-            </Avatar>
+            <Link href="/profile" aria-label="My profile">
+              <Avatar>
+                {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
+                <AvatarFallback>{initials(name)}</AvatarFallback>
+              </Avatar>
+            </Link>
             {DEMO_MODE ? (
               <Button variant="ghost" size="sm" disabled>
                 Demo mode
