@@ -3,7 +3,7 @@
 import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export type SearchItem = {
-  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement";
+  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person";
   title: string;
   subtitle?: string;
   href: string;
@@ -72,6 +72,20 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       title: a.title,
       subtitle: a.author?.displayName,
       href: "/announcements",
+    });
+  }
+
+  const people = await strapi<any[]>(
+    "/api/users?populate[department]=true&pagination[pageSize]=200&sort=displayName:asc",
+    { noCache: true },
+  ).catch(() => []);
+
+  for (const u of people) {
+    items.push({
+      kind: "person",
+      title: u.displayName ?? u.username ?? u.email ?? "Unknown",
+      subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
+      href: `/people/${u.id}`,
     });
   }
 

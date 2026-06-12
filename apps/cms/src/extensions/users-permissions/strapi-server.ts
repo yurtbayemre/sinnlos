@@ -25,6 +25,7 @@ interface GraphMeResponse {
   userPrincipalName?: string;
   department?: string;
   officeLocation?: string;
+  businessPhones?: string[];
 }
 
 interface GraphGroupsResponse {
@@ -33,7 +34,7 @@ interface GraphGroupsResponse {
 
 async function fetchGraphMe(accessToken: string): Promise<GraphMeResponse | null> {
   try {
-    const res = await fetch("https://graph.microsoft.com/v1.0/me", {
+    const res = await fetch("https://graph.microsoft.com/v1.0/me?$select=id,displayName,givenName,surname,jobTitle,mail,userPrincipalName,department,officeLocation,businessPhones", {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     if (!res.ok) return null;
@@ -54,6 +55,18 @@ async function fetchGraphGroups(accessToken: string): Promise<GraphGroupsRespons
     return json.value ?? [];
   } catch {
     return [];
+  }
+}
+
+async function fetchGraphManager(accessToken: string): Promise<{ id?: string } | null> {
+  try {
+    const res = await fetch("https://graph.microsoft.com/v1.0/me/manager?$select=id", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as { id?: string };
+  } catch {
+    return null;
   }
 }
 
@@ -128,9 +141,19 @@ export default (plugin: AnyPlugin) => {
         microsoftOid: me?.id,
         displayName: me?.displayName ?? responseBody.user.email,
         jobTitle: me?.jobTitle,
+        phone: me?.businessPhones?.[0],
+        officeLocation: me?.officeLocation,
       };
       if (roleEntity) update.role = roleEntity.id;
       if (departmentId) update.department = departmentId;
+
+      const mgr = await fetchGraphManager(accessToken);
+      if (mgr?.id) {
+        const mgrUser = await strapi.db.query("plugin::users-permissions.user").findOne({
+          where: { microsoftOid: mgr.id },
+        });
+        if (mgrUser) update.manager = mgrUser.id;
+      }
 
       await strapi.db.query("plugin::users-permissions.user").update({
         where: { id: responseBody.user.id },
@@ -140,7 +163,7 @@ export default (plugin: AnyPlugin) => {
       // Refresh the response user with the patched values
       const refreshed = await strapi.db.query("plugin::users-permissions.user").findOne({
         where: { id: responseBody.user.id },
-        populate: ["role", "department"],
+        populate: ["role", "department", "manager"],
       });
       ctx.body = { ...responseBody, user: refreshed };
     } catch (err) {

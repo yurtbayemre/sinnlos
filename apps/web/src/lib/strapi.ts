@@ -110,6 +110,18 @@ export const api = {
         { noCache: true },
       ),
   },
+  people: {
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/users?populate[department]=true&populate[avatar]=true&populate[role]=true&pagination[pageSize]=200&sort=displayName:asc",
+        { noCache: true },
+      ),
+    one: (id: number) =>
+      strapi<any>(
+        `/api/users/${id}?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true`,
+        { noCache: true },
+      ),
+  },
   announcements: {
     list: () =>
       strapi<StrapiListResponse<any>>(

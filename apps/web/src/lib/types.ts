@@ -11,6 +11,12 @@ export interface UserLite {
   displayName?: string;
   jobTitle?: string;
   avatar?: { url?: string } | null;
+  phone?: string;
+  officeLocation?: string;
+  department?: { id: number; name: string; slug: string } | null;
+  manager?: UserLite | null;
+  directReports?: UserLite[];
+  hireDate?: string;
 }
 
 export interface Department {
