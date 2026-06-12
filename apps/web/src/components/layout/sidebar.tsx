@@ -1,4 +1,4 @@
-import { BookOpen, Building2, Contact, Home, Megaphone, Users2, Settings } from "lucide-react";
+import { BookOpen, Building2, Calendar, Contact, Home, Megaphone, Users2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
@@ -7,6 +7,7 @@ import { NavLink } from "./nav-link";
 const nav = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/people", label: "People", icon: Contact },
+  { href: "/events", label: "Events", icon: Calendar },
   { href: "/wiki", label: "Wiki", icon: BookOpen },
   { href: "/departments", label: "Departments", icon: Building2 },
   { href: "/teams", label: "Teams", icon: Users2 },

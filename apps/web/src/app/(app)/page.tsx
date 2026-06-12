@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
+import { Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { auth } from "@/auth";
 import { api, strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -13,10 +13,10 @@ export default async function DashboardPage() {
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user
   // sees a banner instead of mistaking "API down" for "no content yet".
-  const [departments, teams, announcements, peopleResult] = await Promise.all([
+  const [departments, teams, announcements, peopleResult, events] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
-    tryFetch(() => api.announcements.list(), "dashboard"),
+    tryFetch(() => api.announcements.list((session?.user as any)?.department?.id), "dashboard"),
     tryFetch(
       () => strapi<any[]>(
         "/api/users?fields[0]=id&pagination[pageSize]=200",
@@ -24,12 +24,14 @@ export default async function DashboardPage() {
       ),
       "dashboard",
     ),
+    tryFetch(() => api.events.list(), "dashboard"),
   ]);
 
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
   const peopleCount = Array.isArray(peopleResult.data) ? peopleResult.data.length : 0;
-  const anyFailed = departments.failed || teams.failed || announcements.failed || peopleResult.failed;
+  const eventCount = events.data?.data.length ?? 0;
+  const anyFailed = departments.failed || teams.failed || announcements.failed || peopleResult.failed || events.failed;
 
   return (
     <div className="space-y-8">
@@ -42,10 +44,11 @@ export default async function DashboardPage() {
 
       {anyFailed && <FetchErrorBanner />}
 
-      <section className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+      <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
         <StatCard icon={<Contact className="h-5 w-5" aria-hidden="true" />} label="People" value={peopleCount} href="/people" />
         <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label="Departments" value={deptCount} href="/departments" />
         <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label="Teams" value={teamCount} href="/teams" />
+        <StatCard icon={<Calendar className="h-5 w-5" aria-hidden="true" />} label="Events" value={eventCount} href="/events" />
         <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label="Wiki" value="Browse" href="/wiki" />
         <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label="News" value={announcements.data?.data.length ?? 0} href="/announcements" />
       </section>

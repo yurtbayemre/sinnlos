@@ -104,3 +104,18 @@ export interface ReactionSummary {
   count: number;
   reacted: boolean;
 }
+
+export interface Event {
+  id: number;
+  documentId?: string;
+  title: string;
+  description?: string | null;
+  start: string;
+  end?: string | null;
+  allDay?: boolean;
+  location?: string | null;
+  url?: string | null;
+  departments?: Department[];
+  organizer?: UserLite | null;
+  createdAt?: string;
+}

@@ -6,6 +6,7 @@ import { Command } from "cmdk";
 import {
   Search,
   Building2,
+  Calendar,
   Contact,
   Users,
   BookOpen,
@@ -71,6 +72,8 @@ export function SearchCommand() {
         return <Megaphone className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
       case "person":
         return <Contact className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
+      case "event":
+        return <Calendar className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
     }
   };
 
@@ -87,6 +90,7 @@ export function SearchCommand() {
     "wiki-page": "Wiki Pages",
     announcement: "Announcements",
     person: "People",
+    event: "Events",
   };
 
   return (
