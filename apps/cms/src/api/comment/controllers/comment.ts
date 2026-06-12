@@ -13,8 +13,13 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
   },
 
   async delete(ctx) {
+    // The web app addresses comments by numeric id; accept both that and a
+    // documentId so direct API consumers keep working.
+    const idParam = String(ctx.params.id);
     const entity = await strapi.db.query("api::comment.comment").findOne({
-      where: { id: ctx.params.id },
+      where: /^\d+$/.test(idParam)
+        ? { id: Number(idParam) }
+        : { documentId: idParam },
       populate: { author: true },
     });
     if (!entity) return ctx.notFound();
@@ -22,6 +27,9 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
     const isOwner = entity.author?.id === user?.id;
     const isPrivileged = ["admin_role", "editor"].includes(user?.role?.type);
     if (!isOwner && !isPrivileged) return ctx.forbidden();
+    // The v5 core controller resolves by documentId — a numeric id deletes
+    // nothing while still answering 204, so translate before delegating.
+    ctx.params.id = entity.documentId;
     return super.delete(ctx);
   },
 }));
