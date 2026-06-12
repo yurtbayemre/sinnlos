@@ -123,10 +123,24 @@ export const api = {
       ),
   },
   announcements: {
+    list: (departmentId?: number) => {
+      let url = "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&populate[department]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20";
+      if (departmentId) {
+        url += `&filters[$or][0][audience][$eq]=all&filters[$or][1][audience][$null]=true&filters[$or][2][department][id][$eq]=${departmentId}`;
+      }
+      return strapi<StrapiListResponse<any>>(url, { noCache: true });
+    },
+  },
+  events: {
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=pinned:desc,createdAt:desc&pagination[pageSize]=10",
-        { tag: "announcements", revalidate: 30 },
+        "/api/events?populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=50",
+        { tag: "events", revalidate: 60 },
+      ),
+    one: (id: string) =>
+      strapi<StrapiListResponse<any>>(
+        `/api/events?filters[id][$eq]=${encodeURIComponent(id)}&populate[departments]=true&populate[organizer]=true`,
+        { tag: `event:${id}`, revalidate: 60 },
       ),
   },
 };
