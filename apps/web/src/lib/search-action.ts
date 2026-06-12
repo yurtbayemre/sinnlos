@@ -3,14 +3,14 @@
 import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export type SearchItem = {
-  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person" | "event";
+  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person" | "event" | "poll" | "document";
   title: string;
   subtitle?: string;
   href: string;
 };
 
 export async function fetchSearchItems(): Promise<SearchItem[]> {
-  const [departments, teams, wikiSpaces, wikiPages, announcements, events] = await Promise.all([
+  const [departments, teams, wikiSpaces, wikiPages, announcements, events, polls, documents] = await Promise.all([
     api.departments.list().catch(() => ({ data: [] })),
     api.teams.list().catch(() => ({ data: [] })),
     api.wiki.spaces().catch(() => ({ data: [] })),
@@ -23,6 +23,8 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
     ).catch(() => ({ data: [] })),
     api.announcements.list().catch(() => ({ data: [] })),
     api.events.list().catch(() => ({ data: [] })),
+    api.polls.list().catch(() => ({ data: [] })),
+    api.documents.list().catch(() => ({ data: [] })),
   ]);
 
   const items: SearchItem[] = [];
@@ -82,6 +84,24 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       title: e.title,
       subtitle: e.start ? new Date(e.start).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : undefined,
       href: "/events",
+    });
+  }
+
+  for (const p of polls.data) {
+    items.push({
+      kind: "poll",
+      title: p.question,
+      subtitle: p.closesAt ? `Closes ${new Date(p.closesAt).toLocaleDateString()}` : "Open",
+      href: "/polls",
+    });
+  }
+
+  for (const d of documents.data) {
+    items.push({
+      kind: "document",
+      title: d.title,
+      subtitle: d.description ?? d.category ?? undefined,
+      href: "/documents",
     });
   }
 
