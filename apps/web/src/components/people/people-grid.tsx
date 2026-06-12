@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -9,6 +10,8 @@ import { initials } from "@/lib/utils";
 import type { UserLite } from "@/lib/types";
 
 export function PeopleGrid({ people }: { people: UserLite[] }) {
+  const tPeople = useTranslations("people");
+  const tCommon = useTranslations("common");
   const [search, setSearch] = useState("");
   const [dept, setDept] = useState<string>("all");
 

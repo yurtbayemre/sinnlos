@@ -1,23 +1,29 @@
 import Link from "next/link";
+import { getTranslations } from "next-intl/server";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { signInWithMicrosoft } from "@/lib/auth-actions";
 
-export const metadata = { title: "Sign in" };
+export async function generateMetadata() {
+  const t = await getTranslations("auth");
+  return { title: t("signIn") };
+}
 
 // Provider visibility depends on runtime env vars. Without this the
 // page is prerendered inside the Docker builder stage — where no auth
 // env exists — and ships with the wrong sign-in buttons baked in.
 export const dynamic = "force-dynamic";
 
-export default function SignInPage() {
+export default async function SignInPage() {
+  const t = await getTranslations("auth");
+  const tCommon = await getTranslations("common");
   const description = MICROSOFT_ENABLED
     ? LOCAL_ENABLED
-      ? "Sign in with your Microsoft account or your email and password"
-      : "Sign in with your company Microsoft account to continue"
-    : "Sign in with your email and password to continue";
+      ? t("signInDescBoth")
+      : t("signInDescMicrosoft")
+    : t("signInDescLocal");
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-background via-background to-primary/5 p-6">
@@ -34,7 +40,7 @@ export default function SignInPage() {
           >
             S
           </div>
-          <CardTitle className="text-2xl">Welcome to Sinnlos</CardTitle>
+          <CardTitle className="text-2xl">{t("welcome")}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -46,7 +52,7 @@ export default function SignInPage() {
                 className="w-full gap-2 transition-transform active:scale-[0.99]"
               >
                 <MicrosoftIcon />
-                Sign in with Microsoft
+                {t("signInWithMicrosoft")}
               </Button>
             </form>
           )}
@@ -54,7 +60,7 @@ export default function SignInPage() {
           {MICROSOFT_ENABLED && LOCAL_ENABLED && (
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
               <div className="h-px flex-1 bg-border" />
-              or
+              {tCommon("or")}
               <div className="h-px flex-1 bg-border" />
             </div>
           )}
@@ -63,15 +69,15 @@ export default function SignInPage() {
 
           {REGISTRATION_ENABLED && (
             <p className="text-center text-sm text-muted-foreground">
-              No account?{" "}
+              {t("noAccount")}{" "}
               <Link href="/register" className="text-primary hover:underline">
-                Create one
+                {t("createOne")}
               </Link>
             </p>
           )}
 
           <p className="mt-2 text-center text-xs text-muted-foreground">
-            By signing in you agree to the company IT policy.
+            {t("itPolicy")}
           </p>
         </CardContent>
       </Card>

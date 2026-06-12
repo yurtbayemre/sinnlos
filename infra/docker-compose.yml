@@ -72,6 +72,8 @@ services:
       AUTH_SECRET: ${AUTH_SECRET}
       AUTH_URL: ${WEB_PUBLIC_URL}
       AUTH_TRUST_HOST: "true"
+      # Default UI language (en or de); users can override in their profile
+      DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
       # Standalone mode: enable local credentials alongside Microsoft
       AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
       # Standalone mode: enable the self-registration form (default off)

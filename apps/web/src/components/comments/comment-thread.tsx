@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
@@ -34,6 +35,8 @@ export function CommentThread({
   /** Called after a successful mutation so the owner can refetch its data. */
   onChanged?: () => void | Promise<void>;
 }) {
+  const tComments = useTranslations("comments");
+  const tCommon = useTranslations("common");
   const [body, setBody] = useState("");
   const [isPending, startTransition] = useTransition();
 
