@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BookOpen, Building2, Home, Megaphone, Users2 } from "lucide-react";
+import { BookOpen, Building2, Contact, Home, Users2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const items = [
   { href: "/", label: "Home", icon: Home },
+  { href: "/people", label: "People", icon: Contact },
   { href: "/wiki", label: "Wiki", icon: BookOpen },
   { href: "/departments", label: "Depts", icon: Building2 },
   { href: "/teams", label: "Teams", icon: Users2 },
-  { href: "/announcements", label: "News", icon: Megaphone },
 ] as const;
 
 /**

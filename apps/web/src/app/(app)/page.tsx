@@ -1,7 +1,7 @@
 import Link from "next/link";
-import { Building2, Megaphone, Users2, BookOpen } from "lucide-react";
+import { Building2, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { auth } from "@/auth";
-import { api } from "@/lib/strapi";
+import { api, strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { Card, CardContent } from "@/components/ui/card";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -13,15 +13,23 @@ export default async function DashboardPage() {
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user
   // sees a banner instead of mistaking "API down" for "no content yet".
-  const [departments, teams, announcements] = await Promise.all([
+  const [departments, teams, announcements, peopleResult] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
     tryFetch(() => api.announcements.list(), "dashboard"),
+    tryFetch(
+      () => strapi<any[]>(
+        "/api/users?fields[0]=id&pagination[pageSize]=200",
+        { noCache: true },
+      ),
+      "dashboard",
+    ),
   ]);
 
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
-  const anyFailed = departments.failed || teams.failed || announcements.failed;
+  const peopleCount = Array.isArray(peopleResult.data) ? peopleResult.data.length : 0;
+  const anyFailed = departments.failed || teams.failed || announcements.failed || peopleResult.failed;
 
   return (
     <div className="space-y-8">
@@ -34,7 +42,8 @@ export default async function DashboardPage() {
 
       {anyFailed && <FetchErrorBanner />}
 
-      <section className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <StatCard icon={<Contact className="h-5 w-5" aria-hidden="true" />} label="People" value={peopleCount} href="/people" />
         <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label="Departments" value={deptCount} href="/departments" />
         <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label="Teams" value={teamCount} href="/teams" />
         <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label="Wiki" value="Browse" href="/wiki" />
