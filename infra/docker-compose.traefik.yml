@@ -1,0 +1,46 @@
+# VPS-Override: Traefik (Host) statt Caddy auf 80/443.
+#   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
+# Routing spiegelt das Caddyfile: /api/auth/* -> web, Strapi-Pfade -> cms,
+# Rest -> web. TLS via Host-Traefik (certresolver lehttp).
+services:
+  caddy:
+    profiles: ["manual"]   # auf diesem Host übernimmt Traefik
+
+  web:
+    networks:
+      - default
+      - frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=frontend"
+      # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
+      - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.sinnlos-auth.priority=100"
+      - "traefik.http.routers.sinnlos-auth.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-auth.service=sinnlos-web"
+      # Catch-all -> Next.js
+      - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
+      - "traefik.http.routers.sinnlos-web.priority=1"
+      - "traefik.http.routers.sinnlos-web.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-web.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-web.service=sinnlos-web"
+      - "traefik.http.services.sinnlos-web.loadbalancer.server.port=3000"
+
+  cms:
+    networks:
+      - default
+      - frontend
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=frontend"
+      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || PathPrefix(`/uploads`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
+      - "traefik.http.routers.sinnlos-cms.priority=50"
+      - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-cms.service=sinnlos-cms"
+      - "traefik.http.services.sinnlos-cms.loadbalancer.server.port=1337"
+
+networks:
+  frontend:
+    external: true
