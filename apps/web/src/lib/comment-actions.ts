@@ -1,8 +1,13 @@
 "use server";
 
-import { revalidateTag } from "next/cache";
+import { refresh } from "next/cache";
 import { strapi } from "@/lib/strapi";
 import type { EmojiType } from "@/lib/types";
+
+// Comments and reactions are fetched with noCache (they vary per user), so
+// there is no cache tag to expire — refresh() re-renders the current route's
+// uncached data in the action response, which is what makes the new state
+// show up without a manual reload.
 
 export async function addComment(targetType: string, targetId: number, body: string) {
   await strapi("/api/comments", {
@@ -12,7 +17,7 @@ export async function addComment(targetType: string, targetId: number, body: str
     }),
     noCache: true,
   });
-  revalidateTag("comments", "default");
+  refresh();
 }
 
 export async function deleteComment(commentId: number) {
@@ -20,7 +25,7 @@ export async function deleteComment(commentId: number) {
     method: "DELETE",
     noCache: true,
   });
-  revalidateTag("comments", "default");
+  refresh();
 }
 
 export async function toggleReaction(
@@ -35,5 +40,5 @@ export async function toggleReaction(
     }),
     noCache: true,
   });
-  revalidateTag("reactions", "default");
+  refresh();
 }
