@@ -1,6 +1,7 @@
 "use client";
 
 import { useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { updateProfile, type ProfileFormState } from "@/lib/profile-actions";
 
 const inputClass =
@@ -14,6 +15,8 @@ export type ProfileInitial = {
 };
 
 export function ProfileForm({ initial }: { initial: ProfileInitial }) {
+  const tProfile = useTranslations("profile");
+  const tCommon = useTranslations("common");
   const [state, formAction, isPending] = useActionState<ProfileFormState, FormData>(
     updateProfile,
     {},
@@ -23,7 +26,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
     <form action={formAction} className="space-y-4">
       <div>
         <label htmlFor="displayName" className="mb-1 block text-sm font-medium">
-          Display name
+          {tProfile("displayName")}
         </label>
         <input
           id="displayName"
@@ -35,7 +38,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
       </div>
       <div>
         <label htmlFor="jobTitle" className="mb-1 block text-sm font-medium">
-          Job title
+          {tProfile("jobTitle")}
         </label>
         <input
           id="jobTitle"
@@ -47,7 +50,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
       </div>
       <div>
         <label htmlFor="phone" className="mb-1 block text-sm font-medium">
-          Phone
+          {tProfile("phone")}
         </label>
         <input
           id="phone"
@@ -59,7 +62,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
       </div>
       <div>
         <label htmlFor="officeLocation" className="mb-1 block text-sm font-medium">
-          Office location
+          {tProfile("officeLocation")}
         </label>
         <input
           id="officeLocation"
@@ -78,7 +81,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
         disabled={isPending}
         className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
       >
-        {isPending ? "Saving…" : "Save changes"}
+        {isPending ? tCommon("saving") : tCommon("save")}
       </button>
     </form>
   );

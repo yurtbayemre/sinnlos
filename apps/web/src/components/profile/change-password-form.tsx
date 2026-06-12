@@ -1,12 +1,15 @@
 "use client";
 
 import { useActionState } from "react";
+import { useTranslations } from "next-intl";
 import { changePassword, type ProfileFormState } from "@/lib/profile-actions";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export function ChangePasswordForm() {
+  const t = useTranslations("profile");
+  const tCommon = useTranslations("common");
   const [state, formAction, isPending] = useActionState<ProfileFormState, FormData>(
     changePassword,
     {},
@@ -16,7 +19,7 @@ export function ChangePasswordForm() {
     <form action={formAction} className="space-y-4">
       <div>
         <label htmlFor="currentPassword" className="mb-1 block text-sm font-medium">
-          Current password
+          {t("currentPassword")}
         </label>
         <input
           id="currentPassword"
@@ -29,7 +32,7 @@ export function ChangePasswordForm() {
       </div>
       <div>
         <label htmlFor="newPassword" className="mb-1 block text-sm font-medium">
-          New password
+          {t("newPassword")}
         </label>
         <input
           id="newPassword"

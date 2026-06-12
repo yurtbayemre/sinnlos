@@ -51,7 +51,9 @@ function relative(d: Date | null) {
   return formatDate(d);
 }
 
-export function LatestNews({ items }: { items: Announcement[] }) {
+export async function LatestNews({ items }: { items: Announcement[] }) {
+  const tDashboard = await getTranslations("dashboard");
+  const tCommon = await getTranslations("common");
   const normalised = items.map(normalise);
   const featured = normalised.find((n) => n.pinned) ?? normalised[0];
   const rest = normalised.filter((n) => n.id !== featured?.id).slice(0, 4);
@@ -62,15 +64,15 @@ export function LatestNews({ items }: { items: Announcement[] }) {
         <div>
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Megaphone className="h-3.5 w-3.5" />
-            What&apos;s new
+            {tDashboard("whatsNew")}
           </div>
-          <h2 className="mt-1 text-xl font-semibold tracking-tight">Latest news</h2>
+          <h2 className="mt-1 text-xl font-semibold tracking-tight">{tDashboard("latestNews")}</h2>
         </div>
         <Link
           href="/announcements"
           className="group inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline"
         >
-          View all
+          {tCommon("viewAll")}
           <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
         </Link>
       </div>
@@ -81,9 +83,9 @@ export function LatestNews({ items }: { items: Announcement[] }) {
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Megaphone className="h-5 w-5" />
             </div>
-            <p className="font-medium">No announcements yet</p>
+            <p className="font-medium">{tDashboard("noAnnouncementsYet")}</p>
             <p className="max-w-sm text-sm text-muted-foreground">
-              Editors and admins can post company news from the Strapi admin panel.
+              {tDashboard("noAnnouncementsHint")}
             </p>
           </CardContent>
         </Card>
@@ -99,11 +101,11 @@ export function LatestNews({ items }: { items: Announcement[] }) {
                   <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-primary">
                     {featured.pinned ? (
                       <>
-                        <Pin className="h-3 w-3" /> Pinned
+                        <Pin className="h-3 w-3" /> {tDashboard("pinned")}
                       </>
                     ) : (
                       <>
-                        <Megaphone className="h-3 w-3" /> Featured
+                        <Megaphone className="h-3 w-3" /> {tDashboard("featured")}
                       </>
                     )}
                     <span className="text-muted-foreground">· {relative(featured.createdAt)}</span>

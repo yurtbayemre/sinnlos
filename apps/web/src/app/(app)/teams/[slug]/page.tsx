@@ -30,7 +30,7 @@ export default async function TeamPage({ params }: Props) {
         <div className="text-sm font-medium text-muted-foreground">{dept?.name ?? ""}</div>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
-          {stripHtml(entry.description) || t("noMembersYet").replace(/\.$/, "") && tCommon("noDescription")}
+          {stripHtml(entry.description) || tCommon("noDescription")}
         </p>
       </header>
 

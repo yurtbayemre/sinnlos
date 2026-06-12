@@ -1,4 +1,5 @@
 import { Calendar, Clock, MapPin, Download } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Event } from "@/lib/types";
@@ -7,7 +8,10 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 
-export const metadata = { title: "Events" };
+export async function generateMetadata() {
+  const t = await getTranslations("events");
+  return { title: t("title") };
+}
 
 function formatDate(iso: string, allDay?: boolean) {
   const d = new Date(iso);
@@ -34,6 +38,7 @@ function isUpcoming(iso: string) {
 }
 
 export default async function EventsPage() {
+  const t = await getTranslations("events");
   const { data, failed } = await tryFetch(() => api.events.list(), "events");
   const all = (data?.data ?? []) as Event[];
 
@@ -43,8 +48,8 @@ export default async function EventsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Events"
-        description="Company events, town halls, and meetings."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -52,8 +57,8 @@ export default async function EventsPage() {
       {all.length === 0 ? (
         <EmptyState
           icon={Calendar}
-          title="No events yet"
-          hint="Admins and editors can create events from the Strapi admin panel."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <>
@@ -61,11 +66,11 @@ export default async function EventsPage() {
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Calendar className="h-3.5 w-3.5" />
-                Upcoming
+                {t("upcoming")}
               </div>
               <div className="stagger space-y-3">
                 {upcoming.map((e) => (
-                  <EventCard key={e.id} event={e} />
+                  <EventCard key={e.id} event={e} t={t} />
                 ))}
               </div>
             </section>
@@ -73,10 +78,10 @@ export default async function EventsPage() {
 
           {past.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">Past</div>
+              <div className="text-sm font-medium text-muted-foreground">{t("past")}</div>
               <div className="stagger space-y-3">
                 {past.map((e) => (
-                  <EventCard key={e.id} event={e} muted />
+                  <EventCard key={e.id} event={e} muted t={t} />
                 ))}
               </div>
             </section>
