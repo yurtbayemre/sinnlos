@@ -1,4 +1,5 @@
 import { FileText, Download, File } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { STRAPI_PUBLIC_URL } from "@/lib/config";
@@ -8,15 +9,10 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 
-export const metadata = { title: "Documents" };
-
-const CATEGORY_LABELS: Record<string, string> = {
-  policy: "Policy",
-  form: "Form",
-  template: "Template",
-  guide: "Guide",
-  other: "Other",
-};
+export async function generateMetadata() {
+  const t = await getTranslations("documents");
+  return { title: t("title") };
+}
 
 function formatSize(bytes?: number) {
   if (!bytes) return "";
@@ -26,6 +22,10 @@ function formatSize(bytes?: number) {
 }
 
 export default async function DocumentsPage() {
+  const [t, tCommon] = await Promise.all([
+    getTranslations("documents"),
+    getTranslations("common"),
+  ]);
   const { data, failed } = await tryFetch(() => api.documents.list(), "documents");
   const docs = (data?.data ?? []) as Document[];
 
@@ -39,8 +39,8 @@ export default async function DocumentsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Documents"
-        description="Company policies, forms, templates, and guides."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -48,15 +48,15 @@ export default async function DocumentsPage() {
       {docs.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No documents yet"
-          hint="Admins and editors can upload documents from the Strapi admin panel."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         Array.from(grouped.entries()).map(([category, items]) => (
           <section key={category} className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <FileText className="h-3.5 w-3.5" />
-              {CATEGORY_LABELS[category] ?? category}
+              {t.has(category) ? t(category as any) : category}
             </div>
             <div className="stagger space-y-2">
               {items.map((doc) => {
@@ -83,7 +83,7 @@ export default async function DocumentsPage() {
                           {doc.file?.size && <span>{formatSize(doc.file.size)}</span>}
                           {doc.updatedAt && (
                             <span>
-                              Updated{" "}
+                              {tCommon("updated")}{" "}
                               {new Date(doc.updatedAt).toLocaleDateString(undefined, {
                                 month: "short",
                                 day: "numeric",
@@ -98,7 +98,7 @@ export default async function DocumentsPage() {
                           href={fileUrl}
                           download
                           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition hover:bg-muted"
-                          title="Download"
+                          title={tCommon("download")}
                         >
                           <Download className="h-4 w-4" aria-hidden="true" />
                         </a>

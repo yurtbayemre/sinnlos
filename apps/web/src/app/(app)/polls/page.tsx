@@ -71,7 +71,7 @@ export default async function PollsPage() {
 
           {closed.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">Closed</div>
+              <div className="text-sm font-medium text-muted-foreground">{t("closed")}</div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {closed.map((p) => (
                   resultsMap.has(p.id) ? (

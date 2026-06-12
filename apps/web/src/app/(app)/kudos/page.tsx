@@ -1,4 +1,5 @@
 import { Award, PartyPopper } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api, strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Kudos, Celebration, UserLite } from "@/lib/types";
@@ -10,7 +11,10 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 import { GiveKudos } from "@/components/kudos/give-kudos";
 
-export const metadata = { title: "Kudos" };
+export async function generateMetadata() {
+  const t = await getTranslations("kudos");
+  return { title: t("title") };
+}
 
 const VALUE_EMOJI: Record<string, string> = {
   teamwork: "\u{1F91D}",
@@ -33,7 +37,16 @@ function relative(dateStr: string | undefined) {
   });
 }
 
+const VALUE_LABEL_KEY: Record<string, string> = {
+  teamwork: "teamwork",
+  innovation: "innovation",
+  leadership: "leadership",
+  "customer-focus": "customerFocus",
+  excellence: "excellence",
+};
+
 export default async function KudosPage() {
+  const t = await getTranslations("kudos");
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
     tryFetch(() => api.celebrations(), "celebrations"),
