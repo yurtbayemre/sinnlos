@@ -7,6 +7,21 @@
  */
 import { revalidate } from "../../../../utils/revalidate";
 
+/**
+ * Lifecycle data carries relations either as a plain id or — when the write
+ * comes through the documents service / REST — as a link object like
+ * `{ set: [{ id }] }` or `{ connect: [{ id }] }`. Normalize both to an id;
+ * anything non-numeric means "unknown" (never feed it into a where clause).
+ */
+function relationId(raw: any): number | undefined {
+  const entry =
+    raw && typeof raw === "object"
+      ? (raw.set?.[0] ?? raw.connect?.[0] ?? raw)
+      : raw;
+  const id = Number(entry && typeof entry === "object" ? entry.id : entry);
+  return Number.isFinite(id) ? id : undefined;
+}
+
 async function tagsFor(event: any): Promise<string[]> {
   const result = event?.result;
   const pageSlug: string | undefined = result?.slug;
@@ -14,8 +29,9 @@ async function tagsFor(event: any): Promise<string[]> {
 
   // Relations aren't populated on lifecycle events — query the space by id
   // to resolve its slug for the specific per-space and per-page tags.
-  const spaceId: number | undefined =
-    result?.space?.id ?? event?.params?.data?.space;
+  const spaceId: number | undefined = relationId(
+    result?.space?.id ?? event?.params?.data?.space,
+  );
   if (spaceId) {
     const space = await strapi.db
       .query("api::wiki-space.wiki-space")
