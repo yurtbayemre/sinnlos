@@ -161,6 +161,84 @@ notifies about (1.2, 1.3, 2.1).
 
 **Effort:** ~1–2 days. **Depends on:** nothing technically; pairs with 2.1/2.2.
 
+### 2.4 Live updates via SSE (research + implementation)
+
+**Value:** changes made by one session (comments, reactions, later
+notifications) appear in other open sessions in under a second. Since
+2026-06-12 the `LiveCommentSection` covers this with 10-second
+visible-tab polling — works, but latency is up to 10s and every open page
+polls in steady state. A server-push channel (Server-Sent Events) cuts
+latency to near-instant and removes the steady-state polling. SignalR-class
+functionality, self-hosted, no extra service.
+
+**Current state this builds on:**
+
+- `apps/web/src/components/comments/live-comment-section.tsx` already owns
+  the comment/reaction data client-side: refetch after own mutations +
+  10s visible-tab polling via the `getCommentSection` Server Action.
+- The CMS already pushes webhooks to the web container:
+  `apps/cms/src/utils/revalidate.ts` (wiki-page lifecycles →
+  `POST WEB_INTERNAL_URL/api/revalidate` with `REVALIDATE_SECRET`). The
+  SSE emit side is the same pattern with a different endpoint.
+- Single web instance → an in-memory pub/sub in the Next server is enough;
+  no Redis, no Centrifugo.
+
+**Research spike (~0.5–1 day, answer before building):**
+
+1. SSE from a Next.js 16 standalone route handler: `ReadableStream`
+   lifetime, abort/cleanup per connection, memory per idle connection.
+2. Traefik long-lived responses on the sinnlos router: which
+   `respondingTimeouts` (if any) kill idle streams; pick a heartbeat
+   interval (~25s comment frames) that also survives mobile carrier NAT.
+3. Auth for the `EventSource` request: cookies are sent automatically —
+   validate the Auth.js session in the route handler; confirm no extra
+   token plumbing is needed.
+4. Event payload design: notify-only (`"comments:announcement:2"` changed)
+   vs. full payload. Notify-only is the working hypothesis — the client
+   refetches through the existing Server Action with its own JWT, so all
+   visibility rules keep holding by construction.
+5. iOS Safari / Android background behavior: verify `EventSource`
+   auto-reconnect on tab resume plus the existing `visibilitychange`
+   refetch closes the catch-up gap.
+6. Scope decision: comments/reactions only first, or also the notification
+   bell and announcement list in the same pass?
+
+**Implementation sketch:**
+
+- **CMS** — `afterCreate`/`afterDelete` lifecycles on `comment` and
+  `reaction` (later `notification`) POST
+  `{ channel: "comments:<targetType>:<targetId>" }` to
+  `WEB_INTERNAL_URL/api/events/emit`, protected by `REVALIDATE_SECRET`
+  (generalize `revalidate.ts` into a small `notifyWeb()` util).
+- **Web** — two route handlers + one hook:
+  - `app/api/events/emit/route.ts`: secret-protected ingest → in-memory
+    `EventEmitter`.
+  - `app/api/events/route.ts`: SSE endpoint (GET, `ReadableStream`);
+    validates the session, subscribes to `?channels=…`, heartbeats,
+    cleanup on abort.
+  - `LiveCommentSection`: subscribe via `EventSource`, on a matching event
+    refetch (existing `getCommentSection`). Keep polling as fallback when
+    the stream errors; stretch the interval (e.g. 60s) while connected.
+- **Infra** — Traefik timeout tweak on the router if the spike says so;
+  no new container.
+
+**Out of scope:** multi-instance web scaling (needs external pub/sub),
+WebSockets/bidirectional messaging.
+
+**Acceptance criteria:**
+
+- [ ] Comment/reaction from session A visible in session B in <2s without
+      reload; only the affected component refetches.
+- [ ] Stream survives ≥10 min idle through Traefik and a mobile connection
+      (heartbeats), or reconnects transparently with a catch-up refetch.
+- [ ] Polling fallback demonstrably takes over when the SSE endpoint is
+      disabled.
+- [ ] No authz shortcut: SSE carries notify-only payloads; data is always
+      refetched with the requesting user's JWT.
+
+**Effort:** ~1 day spike + ~1–2 days implementation. **Depends on:**
+nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
+
 ---
 
 ## Phase 3 — Engagement & knowledge
@@ -249,7 +327,7 @@ public content, or filter results post-hoc against Strapi. ~2–3 days.
 | 4 | 2.2 Notifications (A then B) |
 | 5 | 3.1 Polls, 3.2 Documents |
 | 6 | 4.1 Search V1, 4.2 Analytics |
-| later | 4.1 V2 (Meilisearch), 4.3 AI assistant |
+| later | 2.4 Live updates (SSE), 4.1 V2 (Meilisearch), 4.3 AI assistant |
 
 ## Cross-cutting checklist (applies to every feature)
 
