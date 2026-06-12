@@ -19,16 +19,20 @@ export function ReactionBar({
   targetType,
   targetId,
   reactions,
+  onChanged,
 }: {
   targetType: "announcement" | "wiki-page";
   targetId: number;
   reactions: ReactionSummary[];
+  /** Called after a successful toggle so the owner can refetch its data. */
+  onChanged?: () => void | Promise<void>;
 }) {
   const [isPending, startTransition] = useTransition();
 
   const handleToggle = (emoji: EmojiType) => {
     startTransition(async () => {
       await toggleReaction(targetType, targetId, emoji);
+      await onChanged?.();
     });
   };
 

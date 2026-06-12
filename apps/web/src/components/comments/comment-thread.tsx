@@ -25,11 +25,14 @@ export function CommentThread({
   targetId,
   comments,
   currentUserId,
+  onChanged,
 }: {
   targetType: "announcement" | "wiki-page";
   targetId: number;
   comments: Comment[];
   currentUserId?: number;
+  /** Called after a successful mutation so the owner can refetch its data. */
+  onChanged?: () => void | Promise<void>;
 }) {
   const [body, setBody] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -41,12 +44,14 @@ export function CommentThread({
     setBody("");
     startTransition(async () => {
       await addComment(targetType, targetId, text);
+      await onChanged?.();
     });
   };
 
   const handleDelete = (id: number) => {
     startTransition(async () => {
       await deleteComment(id);
+      await onChanged?.();
     });
   };
 
