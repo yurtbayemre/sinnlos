@@ -257,13 +257,20 @@
   "comments": {
     "writeComment": "Kommentar schreiben…",
     "deleteComment": "Kommentar löschen",
-    "sendComment": "Kommentar senden"
+    "sendComment": "Kommentar senden",
+    "today": "heute",
+    "yesterday": "gestern",
+    "daysAgo": "vor {days} T."
   },
   "notifications": {
     "title": "Benachrichtigungen",
     "markAllRead": "Alle als gelesen markieren",
     "noNotificationsYet": "Noch keine Benachrichtigungen",
-    "unread": "ungelesen"
+    "unread": "ungelesen",
+    "justNow": "gerade eben",
+    "minutesAgo": "vor {min} Min.",
+    "hoursAgo": "vor {hours} Std.",
+    "daysAgo": "vor {days} T."
   },
   "search": {
     "label": "Suche (Strg+K)",

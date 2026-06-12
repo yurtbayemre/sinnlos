@@ -257,13 +257,20 @@
   "comments": {
     "writeComment": "Write a comment…",
     "deleteComment": "Delete comment",
-    "sendComment": "Send comment"
+    "sendComment": "Send comment",
+    "today": "today",
+    "yesterday": "yesterday",
+    "daysAgo": "{days}d ago"
   },
   "notifications": {
     "title": "Notifications",
     "markAllRead": "Mark all read",
     "noNotificationsYet": "No notifications yet",
-    "unread": "unread"
+    "unread": "unread",
+    "justNow": "just now",
+    "minutesAgo": "{min}m ago",
+    "hoursAgo": "{hours}h ago",
+    "daysAgo": "{days}d ago"
   },
   "search": {
     "label": "Search (Ctrl+K)",

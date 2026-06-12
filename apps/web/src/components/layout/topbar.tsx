@@ -8,7 +8,7 @@ import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
-import { NotificationBell } from "@/components/notifications/notification-bell";
+import { LiveNotificationBell } from "@/components/notifications/live-notification-bell";
 import { getTranslations } from "next-intl/server";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
@@ -48,7 +48,7 @@ export async function Topbar() {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
-        {session?.user && <NotificationBell notifications={notifications} />}
+        {session?.user && <LiveNotificationBell initial={notifications} />}
         <ThemeToggle />
         <LocaleSwitcher />
         {session?.user ? (

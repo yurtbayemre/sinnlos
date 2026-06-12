@@ -8,13 +8,13 @@ import { initials } from "@/lib/utils";
 import { addComment, deleteComment } from "@/lib/comment-actions";
 import type { Comment } from "@/lib/types";
 
-function relative(dateStr: string | undefined) {
+function relative(dateStr: string | undefined, t: ReturnType<typeof useTranslations<"comments">>) {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const day = 86400000;
-  if (diff < day) return "today";
-  if (diff < 2 * day) return "yesterday";
-  if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+  if (diff < day) return t("today");
+  if (diff < 2 * day) return t("yesterday");
+  if (diff < 7 * day) return t("daysAgo", { days: Math.floor(diff / day) });
   return new Date(dateStr).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -85,7 +85,7 @@ export function CommentThread({
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-medium">{name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {relative(c.createdAt)}
+                      {relative(c.createdAt, tComments)}
                     </span>
                     {isOwner && (
                       <button
