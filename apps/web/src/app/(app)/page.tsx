@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
+import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { auth } from "@/auth";
 import { api, strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -44,13 +44,14 @@ export default async function DashboardPage() {
 
       {anyFailed && <FetchErrorBanner />}
 
-      <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6">
+      <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
         <StatCard icon={<Contact className="h-5 w-5" aria-hidden="true" />} label="People" value={peopleCount} href="/people" />
         <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label="Departments" value={deptCount} href="/departments" />
         <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label="Teams" value={teamCount} href="/teams" />
         <StatCard icon={<Calendar className="h-5 w-5" aria-hidden="true" />} label="Events" value={eventCount} href="/events" />
         <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label="Wiki" value="Browse" href="/wiki" />
         <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label="News" value={announcements.data?.data.length ?? 0} href="/announcements" />
+        <StatCard icon={<Award className="h-5 w-5" aria-hidden="true" />} label="Kudos" value="Give" href="/kudos" />
       </section>
 
       <LatestNews items={(announcements.data?.data ?? []) as any[]} />

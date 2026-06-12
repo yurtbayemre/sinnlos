@@ -159,4 +159,13 @@ export const api = {
         { tag: "documents", revalidate: 60 },
       ),
   },
+  kudos: {
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30",
+        { noCache: true },
+      ),
+  },
+  celebrations: () =>
+    strapi<{ data: any[] }>("/api/celebrations?window=30", { noCache: true }),
 };

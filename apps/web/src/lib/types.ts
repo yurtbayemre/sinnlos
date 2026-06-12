@@ -169,3 +169,23 @@ export interface Document {
   createdAt?: string;
   updatedAt?: string;
 }
+
+export type KudosValue = "teamwork" | "innovation" | "leadership" | "customer-focus" | "excellence";
+
+export interface Kudos {
+  id: number;
+  documentId?: string;
+  message: string;
+  value: KudosValue;
+  from?: UserLite | null;
+  to?: UserLite | null;
+  createdAt?: string;
+}
+
+export interface Celebration {
+  user: UserLite;
+  type: "work-anniversary";
+  date: string;
+  years: number;
+  daysUntil: number;
+}
