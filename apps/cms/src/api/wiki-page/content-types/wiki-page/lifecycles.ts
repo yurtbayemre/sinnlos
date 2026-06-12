@@ -59,10 +59,9 @@ export default {
 
     // The editor making the change is set by the controller via ctx.state.user.
     // We read it off data.lastEditor if present, otherwise fall back to existing.
-    const editorId =
-      (data as any).lastEditor?.id ||
-      (data as any).lastEditor ||
-      existing.lastEditor?.id;
+    const editorId = relationId(
+      (data as any).lastEditor ?? existing.lastEditor?.id,
+    );
 
     await strapi.db.query("api::wiki-revision.wiki-revision").create({
       data: {
