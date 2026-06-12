@@ -68,8 +68,8 @@ export default async function KudosPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Kudos"
-        description="Recognize your colleagues for great work."
+        title={t("title")}
+        description={t("description")}
       >
         <GiveKudos people={people} />
       </PageHeader>
@@ -80,7 +80,7 @@ export default async function KudosPage() {
         <section className="space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <PartyPopper className="h-3.5 w-3.5" />
-            Celebrations
+            {t("celebrations")}
           </div>
           <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {celebrations.map((c) => {
@@ -96,10 +96,10 @@ export default async function KudosPage() {
                       <div className="text-xs text-muted-foreground">
                         {c.years} year{c.years !== 1 ? "s" : ""} ·{" "}
                         {c.daysUntil === 0
-                          ? "Today!"
+                          ? t("today")
                           : c.daysUntil === 1
-                            ? "Tomorrow"
-                            : `in ${c.daysUntil} days`}
+                            ? t("tomorrow")
+                            : t("inDays", { days: c.daysUntil })}
                       </div>
                     </div>
                   </CardContent>
@@ -113,14 +113,14 @@ export default async function KudosPage() {
       {kudosList.length === 0 ? (
         <EmptyState
           icon={Award}
-          title="No kudos yet"
-          hint="Be the first to recognize a colleague — click the button above!"
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <section className="space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
             <Award className="h-3.5 w-3.5" />
-            Recent kudos
+            {t("recentKudos")}
           </div>
           <div className="stagger space-y-3">
             {kudosList.map((k) => {

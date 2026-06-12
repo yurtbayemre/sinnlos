@@ -1,4 +1,5 @@
 import { Megaphone, Pin } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -11,9 +12,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { CommentSection } from "@/components/comments/comment-section";
 import { initials } from "@/lib/utils";
 
-export const metadata = { title: "Announcements" };
+export async function generateMetadata() {
+  const t = await getTranslations("announcements");
+  return { title: t("title") };
+}
 
 export default async function AnnouncementsPage() {
+  const t = await getTranslations("announcements");
   const session = await auth();
   const deptId = (session?.user as any)?.department?.id as number | undefined;
   const { data, failed } = await tryFetch(() => api.announcements.list(deptId), "announcements");
@@ -25,9 +30,9 @@ export default async function AnnouncementsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        eyebrow="Company news & updates"
-        title="Announcements"
-        description="The latest news, operational updates and memos from across the company. Pinned posts stay at the top until they're unpinned by an editor."
+        eyebrow={t("eyebrow")}
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -35,8 +40,8 @@ export default async function AnnouncementsPage() {
       {items.length === 0 ? (
         <EmptyState
           icon={Megaphone}
-          title="No announcements yet"
-          hint="Editors and admins can post company news from the Strapi admin panel. New posts will appear here and in the dashboard feed."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <>
@@ -44,7 +49,7 @@ export default async function AnnouncementsPage() {
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <Pin className="h-3.5 w-3.5" />
-                Pinned
+                {t("pinned")}
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {pinned.map((a) => (
@@ -58,7 +63,7 @@ export default async function AnnouncementsPage() {
 
           {rest.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">Recent</div>
+              <div className="text-sm font-medium text-muted-foreground">{t("recent")}</div>
               <div className="stagger space-y-4">
                 {rest.map((a) => (
                   <AnnouncementCard key={a.id} item={a}>
