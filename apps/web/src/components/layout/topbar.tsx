@@ -4,6 +4,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { SearchCommand } from "@/components/search-command";
 import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
+import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import type { Notification } from "@/lib/types";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
 
@@ -14,6 +17,22 @@ export async function Topbar() {
   const name = session?.user?.name ?? "Signed out";
   const email = session?.user?.email ?? "";
 
+  let notifications: Notification[] = [];
+  if (session?.user && !DEMO_MODE) {
+    try {
+      const userId = (session.user as any).id;
+      if (userId) {
+        const res = await strapi<StrapiListResponse<Notification>>(
+          `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
+          { noCache: true },
+        );
+        notifications = (res as any).data ?? [];
+      }
+    } catch {
+      // Notifications are non-critical — don't break the topbar
+    }
+  }
+
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/80 px-6 backdrop-blur">
       <div className="flex-1" />
@@ -23,6 +42,7 @@ export async function Topbar() {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-3">
+        {session?.user && <NotificationBell notifications={notifications} />}
         <ThemeToggle />
         {session?.user ? (
           <>
