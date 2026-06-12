@@ -1,0 +1,31 @@
+{
+  "kind": "collectionType",
+  "collectionName": "notifications",
+  "info": {
+    "singularName": "notification",
+    "pluralName": "notifications",
+    "displayName": "Notification",
+    "description": "In-app notifications for users"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "type": {
+      "type": "enumeration",
+      "enum": ["announcement", "comment", "event", "kudos"],
+      "required": true
+    },
+    "title": { "type": "string", "required": true },
+    "link": { "type": "string" },
+    "recipient": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "actor": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "readAt": { "type": "datetime" }
+  }
+}
