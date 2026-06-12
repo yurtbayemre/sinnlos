@@ -102,25 +102,23 @@ export async function seedDemoData(strapi: any) {
     hireDate.setFullYear(hireDate.getFullYear() - (USERS.length - i));
     hireDate.setMonth(i % 12);
 
-    userMap[u.username] = await strapi.db
-      .query("plugin::users-permissions.user")
-      .create({
-        data: {
-          username: u.username,
-          email: u.email,
-          displayName: u.displayName,
-          jobTitle: u.jobTitle,
-          phone: u.phone,
-          officeLocation: u.officeLocation,
-          department: deptMap[u.department].id,
-          provider: "local",
-          password: await strapi.service("admin::auth").hashPassword(PASSWORD),
-          confirmed: true,
-          blocked: false,
-          role: role?.id,
-          hireDate: hireDate.toISOString().slice(0, 10),
-          publishedAt: new Date(),
-        },
+    userMap[u.username] = await strapi
+      .plugin("users-permissions")
+      .service("user")
+      .add({
+        username: u.username,
+        email: u.email,
+        displayName: u.displayName,
+        jobTitle: u.jobTitle,
+        phone: u.phone,
+        officeLocation: u.officeLocation,
+        department: deptMap[u.department].id,
+        provider: "local",
+        password: PASSWORD,
+        confirmed: true,
+        blocked: false,
+        role: role?.id,
+        hireDate: hireDate.toISOString().slice(0, 10),
       });
   }
 
@@ -227,7 +225,7 @@ export async function seedDemoData(strapi: any) {
 
   for (const k of kudosList) {
     await strapi.db.query("api::kudos.kudos").create({
-      data: { ...k, publishedAt: new Date(daysAgo(kudosList.indexOf(k))) },
+      data: k,
     });
   }
 
@@ -251,12 +249,12 @@ export async function seedDemoData(strapi: any) {
   const voters = Object.values(userMap);
   for (let i = 0; i < voters.length && i < 7; i++) {
     await strapi.db.query("api::poll-vote.poll-vote").create({
-      data: { poll: pollEntities[0].id, optionIndex: i % 5, voter: (voters[i] as any).id, publishedAt: new Date() },
+      data: { poll: pollEntities[0].id, optionIndex: i % 5, voter: (voters[i] as any).id },
     });
   }
   for (let i = 0; i < 5; i++) {
     await strapi.db.query("api::poll-vote.poll-vote").create({
-      data: { poll: pollEntities[1].id, optionIndex: i % 3, voter: (voters[i] as any).id, publishedAt: new Date() },
+      data: { poll: pollEntities[1].id, optionIndex: i % 3, voter: (voters[i] as any).id },
     });
   }
 
@@ -287,7 +285,7 @@ export async function seedDemoData(strapi: any) {
 
   for (const c of comments) {
     await strapi.db.query("api::comment.comment").create({
-      data: { ...c, publishedAt: new Date() },
+      data: c,
     });
   }
 
@@ -306,7 +304,7 @@ export async function seedDemoData(strapi: any) {
 
   for (const r of reactions) {
     await strapi.db.query("api::reaction.reaction").create({
-      data: { ...r, publishedAt: new Date() },
+      data: r,
     });
   }
 
