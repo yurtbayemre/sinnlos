@@ -8,6 +8,7 @@ import {
   Phone,
   Users2,
 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
@@ -35,6 +36,10 @@ export default async function PersonPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
+  const [t, tNav] = await Promise.all([
+    getTranslations("people"),
+    getTranslations("nav"),
+  ]);
   const { data, failed } = await tryFetch(
     () =>
       strapi<any>(
@@ -69,7 +74,7 @@ export default async function PersonPage({
         className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        People
+        {tNav("people")}
       </Link>
 
       {failed && <FetchErrorBanner />}
@@ -101,7 +106,7 @@ export default async function PersonPage({
           {/* Contact info */}
           <Card>
             <CardHeader>
-              <CardTitle>Contact</CardTitle>
+              <CardTitle>{t("contact")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
               {person.email && (
@@ -127,7 +132,7 @@ export default async function PersonPage({
                 </div>
               )}
               {!person.email && !person.phone && !person.officeLocation && (
-                <p className="text-sm text-muted-foreground">No contact info available.</p>
+                <p className="text-sm text-muted-foreground">{t("noContactInfo")}</p>
               )}
             </CardContent>
           </Card>

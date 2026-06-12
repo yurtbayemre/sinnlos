@@ -14,6 +14,7 @@ export async function generateMetadata() {
 }
 
 export default async function PeoplePage() {
+  const t = await getTranslations("people");
   const { data, failed } = await tryFetch(
     () =>
       strapi<any[]>(
@@ -27,8 +28,7 @@ export default async function PeoplePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="People"
-        description="Find colleagues across the company."
+        title={t("title")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -36,8 +36,8 @@ export default async function PeoplePage() {
       {people.length === 0 ? (
         <EmptyState
           icon={Contact}
-          title="No people yet"
-          hint="Users are synced automatically when they sign in with Microsoft."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <PeopleGrid people={people} />
