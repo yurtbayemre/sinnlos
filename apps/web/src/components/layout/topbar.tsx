@@ -35,14 +35,14 @@ export async function Topbar() {
   }
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-background/80 px-6 backdrop-blur">
-      <div className="flex-1" />
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur sm:gap-4 sm:px-6">
+      <div className="hidden flex-1 md:block" />
 
-      <div className="w-full max-w-xl flex-1">
+      <div className="flex-1 sm:max-w-xl">
         <SearchCommand />
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-3">
+      <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
         {session?.user && <NotificationBell notifications={notifications} />}
         <ThemeToggle />
         {session?.user ? (
