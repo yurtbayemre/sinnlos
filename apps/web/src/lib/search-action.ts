@@ -121,3 +121,96 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
 
   return items;
 }
+
+export async function searchContent(query: string): Promise<SearchItem[]> {
+  if (!query || query.length < 2) return [];
+
+  const q = encodeURIComponent(query);
+  const items: SearchItem[] = [];
+
+  const [announcements, wikiPages, documents, events, polls, people] = await Promise.all([
+    strapi<StrapiListResponse<any>>(
+      `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[author]=true&pagination[pageSize]=5&sort=createdAt:desc`,
+      { noCache: true },
+    ).catch(() => ({ data: [] })),
+    strapi<StrapiListResponse<any>>(
+      `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[space]=true&pagination[pageSize]=5&sort=title:asc`,
+      { noCache: true },
+    ).catch(() => ({ data: [] })),
+    strapi<StrapiListResponse<any>>(
+      `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&populate[file]=true&pagination[pageSize]=5&sort=title:asc`,
+      { noCache: true },
+    ).catch(() => ({ data: [] })),
+    strapi<StrapiListResponse<any>>(
+      `/api/events?filters[title][$containsi]=${q}&pagination[pageSize]=5&sort=start:desc`,
+      { noCache: true },
+    ).catch(() => ({ data: [] })),
+    strapi<StrapiListResponse<any>>(
+      `/api/polls?filters[question][$containsi]=${q}&pagination[pageSize]=5&sort=createdAt:desc`,
+      { noCache: true },
+    ).catch(() => ({ data: [] })),
+    strapi<any[]>(
+      `/api/users?filters[$or][0][displayName][$containsi]=${q}&filters[$or][1][email][$containsi]=${q}&filters[$or][2][jobTitle][$containsi]=${q}&populate[department]=true&pagination[pageSize]=5&sort=displayName:asc`,
+      { noCache: true },
+    ).catch(() => []),
+  ]);
+
+  for (const a of (announcements as any).data ?? []) {
+    items.push({
+      kind: "announcement",
+      title: a.title,
+      subtitle: a.author?.displayName,
+      href: "/announcements",
+    });
+  }
+
+  for (const p of (wikiPages as any).data ?? []) {
+    const spaceSlug = p.space?.slug;
+    if (!spaceSlug) continue;
+    items.push({
+      kind: "wiki-page",
+      title: p.title,
+      subtitle: p.space?.name ?? spaceSlug,
+      href: `/wiki/${spaceSlug}/${p.slug}`,
+    });
+  }
+
+  for (const d of (documents as any).data ?? []) {
+    items.push({
+      kind: "document",
+      title: d.title,
+      subtitle: d.description ?? d.category ?? undefined,
+      href: "/documents",
+    });
+  }
+
+  for (const e of (events as any).data ?? []) {
+    items.push({
+      kind: "event",
+      title: e.title,
+      subtitle: e.start ? new Date(e.start).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : undefined,
+      href: "/events",
+    });
+  }
+
+  for (const p of (polls as any).data ?? []) {
+    items.push({
+      kind: "poll",
+      title: p.question,
+      subtitle: p.closesAt ? `Closes ${new Date(p.closesAt).toLocaleDateString()}` : "Open",
+      href: "/polls",
+    });
+  }
+
+  const peopleArr = Array.isArray(people) ? people : [];
+  for (const u of peopleArr) {
+    items.push({
+      kind: "person",
+      title: u.displayName ?? u.username ?? u.email ?? "Unknown",
+      subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
+      href: `/people/${u.id}`,
+    });
+  }
+
+  return items;
+}

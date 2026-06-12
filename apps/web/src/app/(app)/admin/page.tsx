@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock } from "lucide-react";
+import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock, BarChart3 } from "lucide-react";
 import { auth } from "@/auth";
 // Browser-facing URL — inside Docker the internal STRAPI_URL
 // (http://cms:1337) is not reachable from the user's browser.
@@ -76,6 +76,25 @@ export default async function AdminPage() {
           </a>
         </Button>
       </header>
+
+      <section className="space-y-3">
+        <h2 className="text-lg font-semibold">Intranet analytics</h2>
+        <Link href="/admin/analytics" className="focus-card block">
+          <Card className="card-lift transition hover:border-primary/40">
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <BarChart3 className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="font-medium">Analytics dashboard</div>
+                <div className="text-sm text-muted-foreground">
+                  Content counts, engagement metrics, and recent activity.
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </Link>
+      </section>
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Quick links</h2>
