@@ -60,7 +60,9 @@ export async function strapi<T>(path: string, opts: FetchOptions = {}): Promise<
     throw new Error(`Strapi ${res.status} ${res.statusText}: ${body}`);
   }
 
-  return (await res.json()) as T;
+  // DELETE answers 204 with an empty body — res.json() would throw on it.
+  const text = await res.text();
+  return (text ? JSON.parse(text) : undefined) as T;
 }
 
 /** Convenience helpers for the main collections. */
