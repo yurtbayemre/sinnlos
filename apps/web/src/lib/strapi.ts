@@ -143,4 +143,20 @@ export const api = {
         { tag: `event:${id}`, revalidate: 60 },
       ),
   },
+  polls: {
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/polls?populate[departments]=true&populate[author]=true&sort=createdAt:desc&pagination[pageSize]=20",
+        { tag: "polls", revalidate: 30 },
+      ),
+    results: (id: number) =>
+      strapi<any>(`/api/polls/${id}/results`, { noCache: true }),
+  },
+  documents: {
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort=updatedAt:desc&pagination[pageSize]=50",
+        { tag: "documents", revalidate: 60 },
+      ),
+  },
 };

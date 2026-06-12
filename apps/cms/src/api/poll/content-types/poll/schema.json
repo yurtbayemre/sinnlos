@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "polls",
+  "info": {
+    "singularName": "poll",
+    "pluralName": "polls",
+    "displayName": "Poll",
+    "description": "Quick polls for employee feedback"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "question": { "type": "string", "required": true },
+    "options": { "type": "json", "required": true },
+    "closesAt": { "type": "datetime" },
+    "anonymous": { "type": "boolean", "default": false },
+    "departments": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::department.department"
+    },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}
