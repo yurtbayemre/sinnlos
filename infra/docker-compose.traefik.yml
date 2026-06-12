@@ -13,18 +13,24 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=frontend"
+      # Parität zum Caddyfile: Security-Header + Kompression
+      - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.sinnlos-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.sinnlos-compress.compress=true"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
       - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.sinnlos-auth.priority=100"
       - "traefik.http.routers.sinnlos-auth.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-auth.service=sinnlos-web"
+      - "traefik.http.routers.sinnlos-auth.middlewares=sinnlos-headers,sinnlos-compress"
       # Catch-all -> Next.js
       - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
       - "traefik.http.routers.sinnlos-web.priority=1"
       - "traefik.http.routers.sinnlos-web.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-web.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-web.service=sinnlos-web"
+      - "traefik.http.routers.sinnlos-web.middlewares=sinnlos-headers,sinnlos-compress"
       - "traefik.http.services.sinnlos-web.loadbalancer.server.port=3000"
 
   cms:
@@ -39,6 +45,7 @@ services:
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-cms.service=sinnlos-cms"
+      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-headers,sinnlos-compress"
       - "traefik.http.services.sinnlos-cms.loadbalancer.server.port=1337"
 
 networks:

@@ -42,7 +42,9 @@ export async function Sidebar({ className }: { className?: string }) {
         {nav.map((item) => (
           <NavLink key={item.href} {...item} />
         ))}
-        {showAdmin && <NavLink href="/admin" label="Admin" icon={Settings} />}
+        {/* /manage, not /admin — the reverse proxy routes /admin* to the
+            Strapi admin panel, which would shadow an in-app /admin page. */}
+        {showAdmin && <NavLink href="/manage" label="Admin" icon={Settings} />}
       </nav>
       <div className="shrink-0 border-t p-4 text-xs text-muted-foreground">
         Self-hosted intranet · v0.1
