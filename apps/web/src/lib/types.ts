@@ -76,3 +76,31 @@ export interface Announcement {
   author?: UserLite | null;
   attributes?: Record<string, unknown>;
 }
+
+export interface Comment {
+  id: number;
+  documentId?: string;
+  body: string;
+  targetType: "announcement" | "wiki-page";
+  targetId: number;
+  createdAt?: string;
+  author?: UserLite | null;
+  parent?: { id: number } | null;
+  replies?: Comment[];
+}
+
+export type EmojiType = "thumbsup" | "heart" | "celebrate" | "lightbulb" | "laugh";
+
+export interface Reaction {
+  id: number;
+  emoji: EmojiType;
+  targetType: "announcement" | "wiki-page";
+  targetId: number;
+  author?: UserLite | null;
+}
+
+export interface ReactionSummary {
+  emoji: EmojiType;
+  count: number;
+  reacted: boolean;
+}

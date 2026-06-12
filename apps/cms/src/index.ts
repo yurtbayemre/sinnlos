@@ -57,7 +57,9 @@ const ROLES: RoleSeed[] = [
  */
 const CONTENT_TYPES = [
   "api::announcement.announcement",
+  "api::comment.comment",
   "api::department.department",
+  "api::reaction.reaction",
   "api::team.team",
   "api::wiki-space.wiki-space",
   "api::wiki-page.wiki-page",
@@ -89,7 +91,9 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
 const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
   admin_role: {
     "api::announcement.announcement": ALL_ACTIONS,
+    "api::comment.comment": ALL_ACTIONS,
     "api::department.department": ALL_ACTIONS,
+    "api::reaction.reaction": ALL_ACTIONS,
     "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -97,7 +101,9 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   },
   editor: {
     "api::announcement.announcement": ALL_ACTIONS,
+    "api::comment.comment": ALL_ACTIONS,
     "api::department.department": READ_ACTIONS,
+    "api::reaction.reaction": ALL_ACTIONS,
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -105,7 +111,9 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   },
   department_head: {
     "api::announcement.announcement": READ_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": [...READ_ACTIONS, "update"],
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "create", "update"],
@@ -113,7 +121,9 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   },
   team_lead: {
     "api::announcement.announcement": READ_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "create", "update"],
@@ -121,13 +131,17 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   },
   member: {
     "api::announcement.announcement": READ_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "update"],
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   guest: {
+    "api::comment.comment": READ_ACTIONS,
+    "api::reaction.reaction": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": READ_ACTIONS,
   },
@@ -143,7 +157,9 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
    */
   authenticated: {
     "api::announcement.announcement": READ_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create"],
     "api::department.department": READ_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": READ_ACTIONS,
