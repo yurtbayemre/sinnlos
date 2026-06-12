@@ -1,10 +1,23 @@
 "use server";
 
-import { refresh } from "next/cache";
-import { strapi } from "@/lib/strapi";
+import { auth } from "@/auth";
+import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import type { Notification } from "@/lib/types";
 
-// The topbar fetches notifications with noCache — refresh() re-renders it in
-// the action response so the unread badge updates without a manual reload.
+export async function getNotifications(): Promise<Notification[]> {
+  const session = await auth();
+  const userId = (session?.user as any)?.id;
+  if (!userId) return [];
+  try {
+    const res = await strapi<StrapiListResponse<Notification>>(
+      `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
+      { noCache: true },
+    );
+    return (res as any).data ?? [];
+  } catch {
+    return [];
+  }
+}
 
 export async function markNotificationsRead(ids: number[]) {
   await strapi("/api/notifications/mark-read", {
@@ -12,7 +25,6 @@ export async function markNotificationsRead(ids: number[]) {
     body: JSON.stringify({ ids }),
     noCache: true,
   });
-  refresh();
 }
 
 export async function markAllNotificationsRead() {
@@ -21,5 +33,4 @@ export async function markAllNotificationsRead() {
     body: JSON.stringify({}),
     noCache: true,
   });
-  refresh();
 }

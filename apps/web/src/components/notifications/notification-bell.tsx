@@ -11,16 +11,16 @@ import {
 import type { Notification } from "@/lib/types";
 import { useTranslations } from "next-intl";
 
-function relative(dateStr: string | undefined) {
+function relative(dateStr: string | undefined, t: ReturnType<typeof useTranslations<"notifications">>) {
   if (!dateStr) return "";
   const diff = Date.now() - new Date(dateStr).getTime();
   const min = 60000;
   const hour = 3600000;
   const day = 86400000;
-  if (diff < min) return "just now";
-  if (diff < hour) return `${Math.floor(diff / min)}m ago`;
-  if (diff < day) return `${Math.floor(diff / hour)}h ago`;
-  if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
+  if (diff < min) return t("justNow");
+  if (diff < hour) return t("minutesAgo", { min: Math.floor(diff / min) });
+  if (diff < day) return t("hoursAgo", { hours: Math.floor(diff / hour) });
+  if (diff < 7 * day) return t("daysAgo", { days: Math.floor(diff / day) });
   return new Date(dateStr).toLocaleDateString(undefined, {
     month: "short",
     day: "numeric",
@@ -36,8 +36,10 @@ const typeIcon: Record<string, typeof Bell> = {
 
 export function NotificationBell({
   notifications,
+  onChanged,
 }: {
   notifications: Notification[];
+  onChanged?: () => void | Promise<void>;
 }) {
   const t = useTranslations("notifications");
   const [open, setOpen] = useState(false);
@@ -65,6 +67,7 @@ export function NotificationBell({
     if (!notif.readAt) {
       startTransition(async () => {
         await markNotificationsRead([notif.id]);
+        await onChanged?.();
       });
     }
     setOpen(false);
@@ -74,6 +77,7 @@ export function NotificationBell({
   const handleMarkAll = () => {
     startTransition(async () => {
       await markAllNotificationsRead();
+      await onChanged?.();
     });
   };
 
@@ -150,7 +154,7 @@ export function NotificationBell({
                         {n.title}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {relative(n.createdAt)}
+                        {relative(n.createdAt, t)}
                       </div>
                     </div>
                     {!n.readAt && (
