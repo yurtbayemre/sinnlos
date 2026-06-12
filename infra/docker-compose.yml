@@ -44,6 +44,7 @@ services:
       MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
       MS_TENANT_ID: ${MS_TENANT_ID}
       LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
       # Admin seed — auto-create first Strapi admin on fresh database
       STRAPI_ADMIN_EMAIL: ${STRAPI_ADMIN_EMAIL:-}
       STRAPI_ADMIN_PASSWORD: ${STRAPI_ADMIN_PASSWORD:-}

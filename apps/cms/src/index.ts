@@ -418,5 +418,8 @@ export default {
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
     await seedAdminUser(strapi);
+
+    const { seedDemoData } = await import("./seed-demo");
+    await seedDemoData(strapi);
   },
 };
