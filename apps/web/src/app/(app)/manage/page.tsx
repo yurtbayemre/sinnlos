@@ -79,7 +79,7 @@ export default async function AdminPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">Intranet analytics</h2>
-        <Link href="/admin/analytics" className="focus-card block">
+        <Link href="/manage/analytics" className="focus-card block">
           <Card className="card-lift transition hover:border-primary/40">
             <CardContent className="flex items-center gap-4 p-6">
               <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
