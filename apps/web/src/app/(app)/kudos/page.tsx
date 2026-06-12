@@ -134,9 +134,7 @@ export default async function KudosPage() {
                     </Avatar>
                     <div className="min-w-0 flex-1">
                       <div className="text-sm">
-                        <span className="font-medium">{fromName}</span>
-                        {" gave kudos to "}
-                        <span className="font-medium">{toName}</span>
+                        {t("gaveKudosTo", { from: fromName, to: toName })}
                       </div>
                       <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
                         {k.message}
@@ -144,7 +142,7 @@ export default async function KudosPage() {
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
                           {VALUE_EMOJI[k.value] ?? "\u{2B50}"}{" "}
-                          {k.value.replace("-", " ")}
+                          {VALUE_LABEL_KEY[k.value] ? t(VALUE_LABEL_KEY[k.value] as any) : k.value}
                         </span>
                         <span>{relative(k.createdAt)}</span>
                       </div>
