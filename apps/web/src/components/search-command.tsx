@@ -120,18 +120,18 @@ export function SearchCommand() {
 
   return (
     <>
-      {/* Trigger — looks like the old search input */}
+      {/* Trigger — icon-only on phones, full search-input look from sm up */}
       <button
         type="button"
         aria-label="Search (Ctrl+K)"
         onClick={() => setOpen(true)}
-        className="relative flex h-10 w-full max-w-xl items-center rounded-xl border bg-muted/40 pl-9 pr-3 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
+        className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring sm:h-10 sm:w-full sm:max-w-xl sm:justify-start sm:pl-9 sm:pr-3"
       >
         <Search
           aria-hidden="true"
-          className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
+          className="h-4 w-4 sm:pointer-events-none sm:absolute sm:left-3 sm:top-1/2 sm:-translate-y-1/2"
         />
-        <span>Search wiki, people, teams…</span>
+        <span className="hidden truncate sm:inline">Search wiki, people, teams…</span>
         <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
           ⌘K
         </kbd>
@@ -140,7 +140,7 @@ export function SearchCommand() {
       {/* Command palette overlay */}
       {open && (
         <div
-          className="fixed inset-0 z-50 flex animate-fade-in items-start justify-center bg-background/60 pt-[4.5rem] backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex animate-fade-in items-start justify-center bg-background/60 px-3 pt-[4.5rem] backdrop-blur-sm"
           onMouseDown={() => setOpen(false)}
         >
           <Command
