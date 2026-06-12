@@ -12,12 +12,16 @@ import {
   ThumbsUp,
   BookOpen,
 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { Card, CardContent } from "@/components/ui/card";
 
-export const metadata = { title: "Analytics" };
+export async function generateMetadata() {
+  const t = await getTranslations("analytics");
+  return { title: t("title") };
+}
 
 async function count(path: string): Promise<number> {
   try {
@@ -75,6 +79,11 @@ export default async function AnalyticsPage() {
     redirect("/");
   }
 
+  const [t, tAdmin] = await Promise.all([
+    getTranslations("analytics"),
+    getTranslations("admin"),
+  ]);
+
   const [
     announcementCount,
     eventCount,
@@ -98,16 +107,16 @@ export default async function AnalyticsPage() {
   ]);
 
   const stats = [
-    { label: "Users", value: userCount, icon: Users, color: "text-blue-500" },
-    { label: "Announcements", value: announcementCount, icon: Megaphone, color: "text-amber-500" },
-    { label: "Events", value: eventCount, icon: Calendar, color: "text-emerald-500" },
-    { label: "Wiki pages", value: wikiPageCount, icon: BookOpen, color: "text-indigo-500" },
-    { label: "Wiki spaces", value: wikiSpaceCount, icon: BookOpen, color: "text-violet-500" },
-    { label: "Documents", value: documentCount, icon: FileText, color: "text-rose-500" },
-    { label: "Polls", value: pollCount, icon: BarChart3, color: "text-cyan-500" },
-    { label: "Comments", value: commentCount, icon: MessageCircle, color: "text-orange-500" },
-    { label: "Reactions", value: activity.totalReactions, icon: ThumbsUp, color: "text-pink-500" },
-    { label: "Unread notifications", value: activity.unreadNotifications, icon: Bell, color: "text-red-500" },
+    { label: t("users"), value: userCount, icon: Users, color: "text-blue-500" },
+    { label: t("announcements"), value: announcementCount, icon: Megaphone, color: "text-amber-500" },
+    { label: t("events"), value: eventCount, icon: Calendar, color: "text-emerald-500" },
+    { label: t("wikiPages"), value: wikiPageCount, icon: BookOpen, color: "text-indigo-500" },
+    { label: t("wikiSpaces"), value: wikiSpaceCount, icon: BookOpen, color: "text-violet-500" },
+    { label: t("documents"), value: documentCount, icon: FileText, color: "text-rose-500" },
+    { label: t("polls"), value: pollCount, icon: BarChart3, color: "text-cyan-500" },
+    { label: t("comments"), value: commentCount, icon: MessageCircle, color: "text-orange-500" },
+    { label: t("reactions"), value: activity.totalReactions, icon: ThumbsUp, color: "text-pink-500" },
+    { label: t("unreadNotifications"), value: activity.unreadNotifications, icon: Bell, color: "text-red-500" },
   ];
 
   return (
@@ -118,16 +127,16 @@ export default async function AnalyticsPage() {
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Admin
+          {tAdmin("title")}
         </Link>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Analytics</h1>
+        <h1 className="mt-2 text-3xl font-semibold tracking-tight">{t("title")}</h1>
         <p className="mt-1 text-muted-foreground">
-          Content and engagement overview across the intranet.
+          {t("description")}
         </p>
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Content overview</h2>
+        <h2 className="text-sm font-medium text-muted-foreground">{t("contentOverview")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
           {stats.map((s) => (
             <Card key={s.label}>
@@ -147,7 +156,7 @@ export default async function AnalyticsPage() {
 
       {activity.recentComments.length > 0 && (
         <section className="space-y-3">
-          <h2 className="text-sm font-medium text-muted-foreground">Recent comments</h2>
+          <h2 className="text-sm font-medium text-muted-foreground">{t("recentComments")}</h2>
           <Card>
             <CardContent className="divide-y p-0">
               {activity.recentComments.map((c: any) => (
@@ -158,7 +167,7 @@ export default async function AnalyticsPage() {
                       <span className="font-medium">
                         {c.author?.displayName ?? c.author?.username ?? "Someone"}
                       </span>
-                      {" commented"}
+                      {" "}{t("commented")}
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">
                       {c.body}

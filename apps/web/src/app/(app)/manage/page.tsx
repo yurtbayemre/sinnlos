@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock, BarChart3 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 // Browser-facing URL — inside Docker the internal STRAPI_URL
 // (http://cms:1337) is not reachable from the user's browser.
@@ -9,47 +10,26 @@ import { isAdmin } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export const metadata = { title: "Admin" };
+export async function generateMetadata() {
+  const t = await getTranslations("admin");
+  return { title: t("title") };
+}
 
-const roles = [
-  {
-    name: "Admin",
-    description: "Full CRUD on everything. Manages users, roles and departments.",
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
-  },
-  {
-    name: "Editor",
-    description: "CRUD on wiki pages and announcements. Read access to users.",
-    color: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-  },
-  {
-    name: "Department Head",
-    description: "Manages their own department, its teams and scoped wiki pages.",
-    color: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
-  },
-  {
-    name: "Team Lead",
-    description: "CRUD on their own team pages, read elsewhere.",
-    color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-  },
-  {
-    name: "Member",
-    description: "Read everything their role/department/team permits. Edits their profile.",
-    color: "bg-sky-500/10 text-sky-600 dark:text-sky-400",
-  },
-  {
-    name: "Guest",
-    description: "Read-only access to public wiki spaces.",
-    color: "bg-slate-500/10 text-slate-600 dark:text-slate-400",
-  },
+const ROLE_COLORS = [
+  "bg-red-500/10 text-red-600 dark:text-red-400",
+  "bg-amber-500/10 text-amber-600 dark:text-amber-400",
+  "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400",
+  "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+  "bg-sky-500/10 text-sky-600 dark:text-sky-400",
+  "bg-slate-500/10 text-slate-600 dark:text-slate-400",
 ];
 
-const quickLinks = [
-  { href: "/admin/content-manager", label: "Content Manager", icon: BookOpen, description: "Edit wiki pages, departments, teams and announcements." },
-  { href: "/admin/settings/users-permissions/roles", label: "Roles & permissions", icon: Shield, description: "Configure what each role can read or write." },
-  { href: "/admin/content-manager/collection-types/plugin::users-permissions.user", label: "Users", icon: Users, description: "Review users synced from Microsoft Entra ID." },
-  { href: "/admin/content-manager/collection-types/api::department.department", label: "Departments", icon: Building2, description: "Add or rename org units." },
-  { href: "/admin/content-manager/collection-types/api::announcement.announcement", label: "Announcements", icon: Megaphone, description: "Post company-wide news." },
+const QUICK_LINK_META = [
+  { href: "/admin/content-manager", labelKey: "contentManager", descKey: "contentManagerDesc", icon: BookOpen },
+  { href: "/admin/settings/users-permissions/roles", labelKey: "rolesPermissions", descKey: "rolesPermissionsDesc", icon: Shield },
+  { href: "/admin/content-manager/collection-types/plugin::users-permissions.user", labelKey: "users", descKey: "usersDesc", icon: Users },
+  { href: "/admin/content-manager/collection-types/api::department.department", labelKey: "departmentsLink", descKey: "departmentsLinkDesc", icon: Building2 },
+  { href: "/admin/content-manager/collection-types/api::announcement.announcement", labelKey: "announcementsLink", descKey: "announcementsLinkDesc", icon: Megaphone },
 ];
 
 export default async function AdminPage() {
@@ -58,27 +38,37 @@ export default async function AdminPage() {
     redirect("/");
   }
 
+  const t = await getTranslations("admin");
+
+  const roles = [
+    { name: "Admin", description: t("roleAdmin"), color: ROLE_COLORS[0] },
+    { name: "Editor", description: t("roleEditor"), color: ROLE_COLORS[1] },
+    { name: "Department Head", description: t("roleDeptManager"), color: ROLE_COLORS[2] },
+    { name: "Team Lead", description: t("roleTeamLead"), color: ROLE_COLORS[3] },
+    { name: "Member", description: t("roleMember"), color: ROLE_COLORS[4] },
+    { name: "Guest", description: t("roleGuest"), color: ROLE_COLORS[5] },
+  ];
+
   return (
     <div className="space-y-8">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-sm text-muted-foreground">Settings &amp; configuration</p>
-          <h1 className="text-3xl font-semibold tracking-tight">Admin</h1>
+          <p className="text-sm text-muted-foreground">{t("eyebrow")}</p>
+          <h1 className="text-3xl font-semibold tracking-tight">{t("title")}</h1>
           <p className="mt-2 max-w-2xl text-muted-foreground">
-            Content, users and roles are managed in the Strapi admin panel. This page
-            surfaces the most common entry points so you don&apos;t have to remember them.
+            {t("description")}
           </p>
         </div>
         <Button asChild>
           <a href={`${STRAPI_URL}/admin`} target="_blank" rel="noreferrer">
-            Open Strapi admin
+            {t("openStrapi")}
             <ExternalLink className="ml-2 h-4 w-4" />
           </a>
         </Button>
       </header>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Intranet analytics</h2>
+        <h2 className="text-lg font-semibold">{t("analyticsSection")}</h2>
         <Link href="/manage/analytics" className="focus-card block">
           <Card className="card-lift transition hover:border-primary/40">
             <CardContent className="flex items-center gap-4 p-6">
@@ -86,9 +76,9 @@ export default async function AdminPage() {
                 <BarChart3 className="h-5 w-5" />
               </div>
               <div>
-                <div className="font-medium">Analytics dashboard</div>
+                <div className="font-medium">{t("analyticsDashboard")}</div>
                 <div className="text-sm text-muted-foreground">
-                  Content counts, engagement metrics, and recent activity.
+                  {t("analyticsDesc")}
                 </div>
               </div>
             </CardContent>
@@ -97,9 +87,9 @@ export default async function AdminPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Quick links</h2>
+        <h2 className="text-lg font-semibold">{t("quickLinks")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {quickLinks.map((link) => {
+          {QUICK_LINK_META.map((link) => {
             const Icon = link.icon;
             return (
               <a
@@ -115,10 +105,10 @@ export default async function AdminPage() {
                       <Icon className="h-5 w-5" />
                     </div>
                     <CardTitle className="flex items-center gap-2 text-base">
-                      {link.label}
+                      {t(link.labelKey as any)}
                       <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
                     </CardTitle>
-                    <CardDescription>{link.description}</CardDescription>
+                    <CardDescription>{t(link.descKey as any)}</CardDescription>
                   </CardHeader>
                 </Card>
               </a>
@@ -128,10 +118,9 @@ export default async function AdminPage() {
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold">Roles</h2>
+        <h2 className="text-lg font-semibold">{t("rolesSection")}</h2>
         <p className="text-sm text-muted-foreground">
-          Sinnlos ships with six roles. New Microsoft Entra ID users are assigned via
-          group claims and the mapping in <code className="rounded bg-muted px-1.5 py-0.5 text-xs">config/ms-role-map.ts</code>.
+          {t("rolesDesc", { file: "config/ms-role-map.ts" })}
         </p>
         <div className="grid gap-4 md:grid-cols-2">
           {roles.map((r) => (
@@ -153,13 +142,13 @@ export default async function AdminPage() {
       <Card className="border-dashed">
         <CardContent className="flex flex-col gap-2 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="font-medium text-foreground">Need to change how Microsoft groups map to roles?</div>
+            <div className="font-medium text-foreground">{t("roleChangeHint")}</div>
             <div>
-              Edit <code className="rounded bg-muted px-1.5 py-0.5 text-xs">apps/cms/config/ms-role-map.ts</code> and restart Strapi.
+              {t("roleChangeInstruction", { file: "apps/cms/config/ms-role-map.ts" })}
             </div>
           </div>
           <Button variant="outline" asChild>
-            <Link href="/wiki/handbook/welcome">Read the handbook</Link>
+            <Link href="/wiki/handbook/welcome">{t("readHandbook")}</Link>
           </Button>
         </CardContent>
       </Card>
