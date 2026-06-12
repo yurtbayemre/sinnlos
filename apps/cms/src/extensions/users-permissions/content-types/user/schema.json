@@ -71,6 +71,20 @@
       "relation": "manyToMany",
       "target": "api::team.team",
       "mappedBy": "members"
-    }
+    },
+    "phone": { "type": "string" },
+    "officeLocation": { "type": "string" },
+    "manager": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "directReports": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "plugin::users-permissions.user",
+      "mappedBy": "manager"
+    },
+    "hireDate": { "type": "date" }
   }
 }
