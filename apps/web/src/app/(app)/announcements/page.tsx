@@ -1,4 +1,5 @@
 import { Megaphone, Pin } from "lucide-react";
+import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Announcement } from "@/lib/types";
@@ -13,7 +14,9 @@ import { initials } from "@/lib/utils";
 export const metadata = { title: "Announcements" };
 
 export default async function AnnouncementsPage() {
-  const { data, failed } = await tryFetch(() => api.announcements.list(), "announcements");
+  const session = await auth();
+  const deptId = (session?.user as any)?.department?.id as number | undefined;
+  const { data, failed } = await tryFetch(() => api.announcements.list(deptId), "announcements");
   const items = (data?.data ?? []) as Announcement[];
 
   const pinned = items.filter((a) => a.pinned);
