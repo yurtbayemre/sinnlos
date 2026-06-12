@@ -92,10 +92,10 @@ export function NotificationBell({
       </button>
 
       {open && (
-        {/* Phones: full-width panel pinned under the topbar (right-0 with a
-            fixed width would run off the left edge). sm+: anchored dropdown.
-            The topbar's backdrop-filter makes it the containing block for
-            `fixed`, so top-16 lands exactly at the header's bottom edge. */}
+        // Phones: full-width panel pinned under the topbar (right-0 with a
+        // fixed width would run off the left edge). sm+: anchored dropdown.
+        // The topbar's backdrop-filter makes it the containing block for
+        // `fixed`, so top-16 lands exactly at the header's bottom edge.
         <div className="fixed inset-x-3 top-16 z-50 animate-scale-in overflow-hidden rounded-xl border bg-background shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96">
           <div className="flex items-center justify-between border-b px-4 py-3">
             <span className="text-sm font-semibold">Notifications</span>
