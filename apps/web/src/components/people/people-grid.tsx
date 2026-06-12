@@ -49,7 +49,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
           />
           <input
             type="text"
-            placeholder="Search by name, title, or email…"
+            placeholder={tPeople("searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
@@ -61,7 +61,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
             onChange={(e) => setDept(e.target.value)}
             className="h-10 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors focus:bg-background focus:ring-2 focus:ring-ring"
           >
-            <option value="all">All departments</option>
+            <option value="all">{tPeople("allDepartments")}</option>
             {departments.map(([slug, name]) => (
               <option key={slug} value={slug}>
                 {name}
@@ -72,7 +72,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
       </div>
 
       <p className="text-sm text-muted-foreground">
-        {filtered.length} {filtered.length === 1 ? "person" : "people"}
+        {tCommon("person", { count: filtered.length })}
       </p>
 
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">

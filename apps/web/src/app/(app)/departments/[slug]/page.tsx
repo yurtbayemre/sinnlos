@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { Users2 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import type { Department } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
@@ -13,6 +14,9 @@ interface Props {
 
 export default async function DepartmentPage({ params }: Props) {
   const { slug } = await params;
+  const t = await getTranslations("departments");
+  const tTeams = await getTranslations("teams");
+  const tCommon = await getTranslations("common");
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.departments.one(slug);
@@ -34,34 +38,34 @@ export default async function DepartmentPage({ params }: Props) {
       <header>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
-          {stripHtml(entry.description) || "No description yet."}
+          {stripHtml(entry.description) || t("noDescriptionYet")}
         </p>
       </header>
 
       <section className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Teams</CardTitle>
+            <CardTitle>{tTeams("title")}</CardTitle>
             <CardDescription>
-              {teams.length} {teams.length === 1 ? "team" : "teams"} in this department
+              {tCommon("team", { count: teams.length })} {tCommon("inThisDepartment")}
             </CardDescription>
           </CardHeader>
           <CardContent className="stagger grid gap-3 sm:grid-cols-2">
             {teams.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No teams yet.</p>
+              <p className="text-sm text-muted-foreground">{t("noTeamsYet")}</p>
             ) : (
-              teams.map((t) => (
+              teams.map((tm) => (
                 <Link
-                  key={t.id}
-                  href={`/teams/${t.slug}`}
+                  key={tm.id}
+                  href={`/teams/${tm.slug}`}
                   className="focus-card group rounded-xl border p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:bg-accent hover:shadow-sm"
                 >
                   <div className="flex items-center gap-2 font-medium transition-colors group-hover:text-primary">
                     <Users2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                    {t.name}
+                    {tm.name}
                   </div>
                   <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">
-                    {stripHtml(t.description) || "—"}
+                    {stripHtml(tm.description) || "—"}
                   </div>
                 </Link>
               ))
@@ -71,7 +75,7 @@ export default async function DepartmentPage({ params }: Props) {
 
         <Card>
           <CardHeader>
-            <CardTitle>Head</CardTitle>
+            <CardTitle>{t("head")}</CardTitle>
           </CardHeader>
           <CardContent>
             {head ? (
@@ -91,16 +95,16 @@ export default async function DepartmentPage({ params }: Props) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No head assigned.</p>
+              <p className="text-sm text-muted-foreground">{t("noHeadAssigned")}</p>
             )}
           </CardContent>
         </Card>
       </section>
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Members</h2>
+        <h2 className="mb-3 text-lg font-semibold">{t("members")}</h2>
         {members.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No members yet.</p>
+          <p className="text-sm text-muted-foreground">{t("noMembersYet")}</p>
         ) : (
           <div className="stagger grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {members.map((m) => (

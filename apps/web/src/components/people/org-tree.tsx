@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -45,6 +46,7 @@ export function OrgTree({
 }
 
 function TreeNode({ node, level }: { node: PersonNode; level: number }) {
+  const t = useTranslations("people");
   const [expanded, setExpanded] = useState(level < 2);
   const hasChildren = node.children.length > 0;
   const name = node.displayName ?? node.username ?? node.email ?? "Unknown";
@@ -58,7 +60,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
             <button
               onClick={() => setExpanded(!expanded)}
               className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition hover:bg-muted"
-              aria-label={expanded ? "Collapse" : "Expand"}
+              aria-label={expanded ? t("collapse") : t("expand")}
             >
               {expanded ? (
                 <ChevronDown className="h-4 w-4" />

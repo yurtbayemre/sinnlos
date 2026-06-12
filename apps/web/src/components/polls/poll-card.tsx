@@ -42,13 +42,13 @@ export function PollCard({ results }: { results: PollResults }) {
           <CardTitle className="text-base">{poll.question}</CardTitle>
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <BarChart3 className="h-3.5 w-3.5" aria-hidden="true" />
-            {localTotal} {localTotal === 1 ? "vote" : "votes"}
+            {tCommon("vote", { count: localTotal })}
           </div>
         </div>
         {isClosed && (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Clock className="h-3 w-3" />
-            Closed
+            {tPolls("closed")}
           </div>
         )}
       </CardHeader>

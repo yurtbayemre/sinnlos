@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import type { Team } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
@@ -11,6 +12,8 @@ interface Props {
 
 export default async function TeamPage({ params }: Props) {
   const { slug } = await params;
+  const t = await getTranslations("teams");
+  const tCommon = await getTranslations("common");
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.teams.one(slug);
@@ -27,14 +30,14 @@ export default async function TeamPage({ params }: Props) {
         <div className="text-sm font-medium text-muted-foreground">{dept?.name ?? ""}</div>
         <h1 className="text-3xl font-semibold tracking-tight">{entry.name}</h1>
         <p className="mt-1 text-muted-foreground">
-          {stripHtml(entry.description) || "No description yet."}
+          {stripHtml(entry.description) || t("noMembersYet").replace(/\.$/, "") && tCommon("noDescription")}
         </p>
       </header>
 
       <section className="grid gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>Lead</CardTitle>
+            <CardTitle>{t("lead")}</CardTitle>
           </CardHeader>
           <CardContent>
             {lead ? (
@@ -48,21 +51,21 @@ export default async function TeamPage({ params }: Props) {
                 </div>
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No lead assigned.</p>
+              <p className="text-sm text-muted-foreground">{t("noLeadAssigned")}</p>
             )}
           </CardContent>
         </Card>
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>Members</CardTitle>
+            <CardTitle>{t("members")}</CardTitle>
             <CardDescription>
-              {members.length} {members.length === 1 ? "member" : "members"}
+              {tCommon("member", { count: members.length })}
             </CardDescription>
           </CardHeader>
           <CardContent className="stagger grid gap-3 sm:grid-cols-2">
             {members.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No members yet.</p>
+              <p className="text-sm text-muted-foreground">{t("noMembersYet")}</p>
             ) : (
               members.map((m) => (
                 <div
