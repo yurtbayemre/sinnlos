@@ -1,0 +1,36 @@
+{
+  "kind": "collectionType",
+  "collectionName": "comments",
+  "info": {
+    "singularName": "comment",
+    "pluralName": "comments",
+    "displayName": "Comment",
+    "description": "User comments on announcements and wiki pages"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "body": { "type": "text", "required": true },
+    "targetType": {
+      "type": "enumeration",
+      "enum": ["announcement", "wiki-page"],
+      "required": true
+    },
+    "targetId": { "type": "integer", "required": true },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "parent": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::comment.comment"
+    },
+    "replies": {
+      "type": "relation",
+      "relation": "oneToMany",
+      "target": "api::comment.comment",
+      "mappedBy": "parent"
+    }
+  }
+}
