@@ -1,21 +1,20 @@
-import { Award, BarChart3, BookOpen, Building2, Calendar, Contact, FileText, Home, Megaphone, Users2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
-import { NavLink } from "./nav-link";
+import { NavLink, type NavIconName } from "./nav-link";
 
 const nav = [
-  { href: "/", label: "Dashboard", icon: Home },
-  { href: "/people", label: "People", icon: Contact },
-  { href: "/events", label: "Events", icon: Calendar },
-  { href: "/wiki", label: "Wiki", icon: BookOpen },
-  { href: "/departments", label: "Departments", icon: Building2 },
-  { href: "/teams", label: "Teams", icon: Users2 },
-  { href: "/announcements", label: "Announcements", icon: Megaphone },
-  { href: "/kudos", label: "Kudos", icon: Award },
-  { href: "/polls", label: "Polls", icon: BarChart3 },
-  { href: "/documents", label: "Documents", icon: FileText },
-] as const;
+  { href: "/", label: "Dashboard", icon: "Home" },
+  { href: "/people", label: "People", icon: "Contact" },
+  { href: "/events", label: "Events", icon: "Calendar" },
+  { href: "/wiki", label: "Wiki", icon: "BookOpen" },
+  { href: "/departments", label: "Departments", icon: "Building2" },
+  { href: "/teams", label: "Teams", icon: "Users2" },
+  { href: "/announcements", label: "Announcements", icon: "Megaphone" },
+  { href: "/kudos", label: "Kudos", icon: "Award" },
+  { href: "/polls", label: "Polls", icon: "BarChart3" },
+  { href: "/documents", label: "Documents", icon: "FileText" },
+] as const satisfies readonly { href: string; label: string; icon: NavIconName }[];
 
 export async function Sidebar({ className }: { className?: string }) {
   const session = await auth();
@@ -44,7 +43,7 @@ export async function Sidebar({ className }: { className?: string }) {
         ))}
         {/* /manage, not /admin — the reverse proxy routes /admin* to the
             Strapi admin panel, which would shadow an in-app /admin page. */}
-        {showAdmin && <NavLink href="/manage" label="Admin" icon={Settings} />}
+        {showAdmin && <NavLink href="/manage" label="Admin" icon="Settings" />}
       </nav>
       <div className="shrink-0 border-t p-4 text-xs text-muted-foreground">
         Self-hosted intranet · v0.1

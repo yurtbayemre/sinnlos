@@ -2,23 +2,53 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { LucideIcon } from "lucide-react";
+import {
+  Award,
+  BarChart3,
+  BookOpen,
+  Building2,
+  Calendar,
+  Contact,
+  FileText,
+  Home,
+  Megaphone,
+  Settings,
+  Users2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
+
+// The (server) sidebar can't pass component references across the RSC
+// boundary — icons are addressed by name and resolved here on the client.
+const ICONS = {
+  Award,
+  BarChart3,
+  BookOpen,
+  Building2,
+  Calendar,
+  Contact,
+  FileText,
+  Home,
+  Megaphone,
+  Settings,
+  Users2,
+} as const;
+
+export type NavIconName = keyof typeof ICONS;
 
 /**
  * Sidebar navigation link with an animated active state. Client
- * component so it can read the current pathname; the icon comes in as
- * a component reference from the (server) sidebar.
+ * component so it can read the current pathname.
  */
 export function NavLink({
   href,
   label,
-  icon: Icon,
+  icon,
 }: {
   href: string;
   label: string;
-  icon: LucideIcon;
+  icon: NavIconName;
 }) {
+  const Icon = ICONS[icon];
   const pathname = usePathname();
   const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
 
