@@ -215,13 +215,28 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   },
 };
 
-async function ensurePermission(
-  strapi: any,
-  roleId: number,
-  uid: string,
-  action: CrudAction,
-) {
-  const actionKey = `${uid}.${action}`;
+/**
+ * Custom (non-CRUD) route actions. users-permissions gates EVERY route
+ * behind a permission row — including custom ones — so these must be
+ * seeded too or the endpoints 403 for all roles.
+ * Each entry lists the roles that may call the action. `*` = every role
+ * in PERMISSION_MATRIX (including `authenticated`).
+ */
+const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
+  "api::event.event.ics": "*",
+  "api::kudos.kudos.celebrations": "*",
+  "api::notification.notification.markRead": "*",
+  "api::notification.notification.markAllRead": "*",
+  "api::poll-vote.poll-vote.vote": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
+  "api::poll-vote.poll-vote.results": "*",
+  // Self-service profile (added in this feature)
+  "api::profile.profile.me": "*",
+  "api::profile.profile.updateMe": "*",
+  // Built-in auth action local users need to change their password
+  "plugin::users-permissions.auth.changePassword": "*",
+};
+
+async function ensureActionPermission(strapi: any, roleId: number, actionKey: string) {
   const existing = await strapi.db
     .query("plugin::users-permissions.permission")
     .findOne({ where: { action: actionKey, role: roleId } });
@@ -230,6 +245,15 @@ async function ensurePermission(
     data: { action: actionKey, role: roleId },
   });
   return true;
+}
+
+async function ensurePermission(
+  strapi: any,
+  roleId: number,
+  uid: string,
+  action: CrudAction,
+) {
+  return ensureActionPermission(strapi, roleId, `${uid}.${action}`);
 }
 
 /**
@@ -264,8 +288,58 @@ async function syncRolePermissions(strapi: any) {
       if (created) granted++;
     }
   }
+
+  // Custom (non-CRUD) route actions — see CUSTOM_ACTION_GRANTS.
+  const allRoleTypes = Object.keys(PERMISSION_MATRIX);
+  for (const [actionKey, grant] of Object.entries(CUSTOM_ACTION_GRANTS)) {
+    const roleTypes = grant === "*" ? allRoleTypes : grant;
+    for (const roleType of roleTypes) {
+      const role = await strapi.db
+        .query("plugin::users-permissions.role")
+        .findOne({ where: { type: roleType } });
+      if (!role) {
+        strapi.log.warn(
+          `[bootstrap] role ${roleType} not found, skipping custom action ${actionKey}`,
+        );
+        continue;
+      }
+      const created = await ensureActionPermission(strapi, role.id, actionKey);
+      if (created) granted++;
+    }
+  }
+
   if (granted > 0) {
     strapi.log.info(`[bootstrap] granted ${granted} permission(s) across intranet roles`);
+  }
+}
+
+/**
+ * Sync the users-permissions "advanced" settings from env so standalone
+ * (no-Microsoft) deployments work out of the box:
+ *   - default_role: new local registrations land on `member` (a real
+ *     intranet role) instead of the bare `authenticated` fallback.
+ *   - allow_register: controlled by LOCAL_REGISTRATION=1 (default off —
+ *     admins create accounts in the Strapi panel).
+ *   - email_confirmation: off; self-hosted installs rarely have SMTP.
+ */
+async function syncAdvancedSettings(strapi: any) {
+  const store = strapi.store({ type: "plugin", name: "users-permissions", key: "advanced" });
+  const current = (await store.get()) ?? {};
+  const allowRegister = process.env.LOCAL_REGISTRATION === "1";
+
+  const next = {
+    ...current,
+    unique_email: true,
+    allow_register: allowRegister,
+    email_confirmation: false,
+    default_role: "member",
+  };
+
+  if (JSON.stringify(next) !== JSON.stringify(current)) {
+    await store.set({ value: next });
+    strapi.log.info(
+      `[bootstrap] users-permissions advanced settings synced (allow_register=${allowRegister}, default_role=member)`,
+    );
   }
 }
 
@@ -342,6 +416,7 @@ export default {
     }
 
     await syncRolePermissions(strapi);
+    await syncAdvancedSettings(strapi);
     await seedAdminUser(strapi);
   },
 };

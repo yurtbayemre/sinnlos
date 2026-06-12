@@ -3,7 +3,9 @@
  *
  * The users-permissions plugin ships with a built-in Microsoft provider
  * (login.microsoftonline.com). We enable it here and provide redirect URIs
- * that point at Strapi's connect callback route.
+ * that point at Strapi's connect callback route. The provider is
+ * auto-disabled when MS_CLIENT_ID is unset, so standalone (local
+ * username/password) deployments don't advertise a dead provider.
  *
  * Entra ID (Azure AD) app registration:
  *   - Redirect URI: ${PUBLIC_URL}/api/connect/microsoft/callback
@@ -24,7 +26,7 @@ export default ({ env }: { env: Env }) => ({
       jwtSecret: env("JWT_SECRET"),
       providers: {
         microsoft: {
-          enabled: true,
+          enabled: !!env("MS_CLIENT_ID", ""),
           icon: "microsoft",
           key: env("MS_CLIENT_ID", ""),
           secret: env("MS_CLIENT_SECRET", ""),

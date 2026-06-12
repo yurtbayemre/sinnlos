@@ -1,7 +1,6 @@
 import { Calendar, Clock, MapPin, Download } from "lucide-react";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
-import { STRAPI_PUBLIC_URL } from "@/lib/config";
 import type { Event } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -126,7 +125,7 @@ function EventCard({ event, muted = false }: { event: Event; muted?: boolean }) 
           )}
         </div>
         <a
-          href={`${STRAPI_PUBLIC_URL}/api/events/${event.id}/ics`}
+          href={`/events/${event.id}/ics`}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition hover:bg-muted"
           title="Download .ics"
         >
