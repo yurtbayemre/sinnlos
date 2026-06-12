@@ -1,4 +1,4 @@
-import { BarChart3, BookOpen, Building2, Calendar, Contact, FileText, Home, Megaphone, Users2, Settings } from "lucide-react";
+import { Award, BarChart3, BookOpen, Building2, Calendar, Contact, FileText, Home, Megaphone, Users2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
@@ -12,6 +12,7 @@ const nav = [
   { href: "/departments", label: "Departments", icon: Building2 },
   { href: "/teams", label: "Teams", icon: Users2 },
   { href: "/announcements", label: "Announcements", icon: Megaphone },
+  { href: "/kudos", label: "Kudos", icon: Award },
   { href: "/polls", label: "Polls", icon: BarChart3 },
   { href: "/documents", label: "Documents", icon: FileText },
 ] as const;
