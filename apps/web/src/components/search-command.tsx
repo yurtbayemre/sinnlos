@@ -14,13 +14,14 @@ import {
   FileText,
   Megaphone,
 } from "lucide-react";
-import { fetchSearchItems, type SearchItem } from "@/lib/search-action";
+import { fetchSearchItems, searchContent, type SearchItem } from "@/lib/search-action";
 
 export function SearchCommand() {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [items, setItems] = useState<SearchItem[]>([]);
+  const [preloaded, setPreloaded] = useState<SearchItem[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
   const [isPending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
 
@@ -29,11 +30,28 @@ export function SearchCommand() {
     if (open && !loaded) {
       startTransition(async () => {
         const data = await fetchSearchItems();
-        setItems(data);
+        setPreloaded(data);
         setLoaded(true);
       });
     }
   }, [open, loaded]);
+
+  // Debounced server-side search
+  useEffect(() => {
+    if (query.length < 2) {
+      setSearchResults([]);
+      return;
+    }
+    const timeout = setTimeout(() => {
+      startTransition(async () => {
+        const results = await searchContent(query);
+        setSearchResults(results);
+      });
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [query]);
+
+  const items = query.length >= 2 ? searchResults : preloaded;
 
   // Ctrl+K / Cmd+K shortcut + Escape to close
   useEffect(() => {
@@ -129,7 +147,7 @@ export function SearchCommand() {
             label="Global search"
             className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
             onMouseDown={(e) => e.stopPropagation()}
-            shouldFilter={true}
+            shouldFilter={query.length < 2}
           >
             <div className="flex items-center border-b px-3">
               <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
