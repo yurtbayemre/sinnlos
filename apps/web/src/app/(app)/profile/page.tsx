@@ -1,3 +1,4 @@
+import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -9,9 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ProfileForm } from "@/components/profile/profile-form";
 import { ChangePasswordForm } from "@/components/profile/change-password-form";
 
-export const metadata = { title: "My profile" };
+export async function generateMetadata() {
+  const t = await getTranslations("profile");
+  return { title: t("title") };
+}
 
 export default async function ProfilePage() {
+  const t = await getTranslations("profile");
   const session = await auth();
   const isLocal = (session as any)?.provider === "local";
 
@@ -29,8 +34,8 @@ export default async function ProfilePage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="My profile"
-        description="Manage how you appear to colleagues across the intranet."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -49,9 +54,9 @@ export default async function ProfilePage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Profile details</CardTitle>
+            <CardTitle>{t("profileDetails")}</CardTitle>
             <CardDescription>
-              Your display name and contact details, shown on the people directory.
+              {t("profileDetailsDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -68,11 +73,11 @@ export default async function ProfilePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Password</CardTitle>
+            <CardTitle>{t("passwordSection")}</CardTitle>
             <CardDescription>
               {isLocal
-                ? "Change the password you use to sign in."
-                : "Account security settings."}
+                ? t("passwordDescLocal")
+                : t("passwordDescMicrosoft")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -80,7 +85,7 @@ export default async function ProfilePage() {
               <ChangePasswordForm />
             ) : (
               <p className="text-sm text-muted-foreground">
-                Your password is managed by your Microsoft account.
+                {t("passwordManagedByMicrosoft")}
               </p>
             )}
           </CardContent>

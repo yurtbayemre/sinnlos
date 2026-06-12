@@ -62,7 +62,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
         className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
       >
         <Award className="h-4 w-4" />
-        Give kudos
+        {t("giveKudos")}
       </button>
 
       {open && (
@@ -76,7 +76,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
             className="w-full max-w-md animate-scale-in rounded-2xl border bg-background p-6 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">Give kudos</h2>
+              <h2 className="text-lg font-semibold">{t("giveKudos")}</h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
@@ -89,7 +89,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
             <div className="mt-4 space-y-4">
               {/* Recipient picker */}
               <div>
-                <label className="mb-1 block text-sm font-medium">To</label>
+                <label className="mb-1 block text-sm font-medium">{t("to")}</label>
                 {selected ? (
                   <div className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
                     <Avatar className="h-7 w-7">
@@ -113,7 +113,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                     <input
                       type="text"
-                      placeholder="Search for a colleague..."
+                      placeholder={t("searchColleague")}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                       className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
@@ -148,7 +148,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
 
               {/* Value selector */}
               <div>
-                <label className="mb-1 block text-sm font-medium">For</label>
+                <label className="mb-1 block text-sm font-medium">{t("for")}</label>
                 <div className="flex flex-wrap gap-2">
                   {VALUES.map((v) => (
                     <button
@@ -163,7 +163,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                       )}
                     >
                       <span>{v.emoji}</span>
-                      {v.label}
+                      {t(v.labelKey)}
                     </button>
                   ))}
                 </div>
@@ -171,11 +171,11 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
 
               {/* Message */}
               <div>
-                <label className="mb-1 block text-sm font-medium">Message</label>
+                <label className="mb-1 block text-sm font-medium">{t("message")}</label>
                 <textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
-                  placeholder="What did they do that was great?"
+                  placeholder={t("messagePlaceholder")}
                   rows={3}
                   className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
                 />
@@ -187,7 +187,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
               >
                 <Send className="h-4 w-4" />
-                {isPending ? "Sending..." : "Send kudos"}
+                {isPending ? t("sendingKudos") : t("sendKudos")}
               </button>
             </div>
           </form>

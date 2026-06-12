@@ -1,4 +1,5 @@
 import { BarChart3 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
@@ -7,9 +8,13 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { PollCard } from "@/components/polls/poll-card";
 
-export const metadata = { title: "Polls" };
+export async function generateMetadata() {
+  const t = await getTranslations("polls");
+  return { title: t("title") };
+}
 
 export default async function PollsPage() {
+  const t = await getTranslations("polls");
   const { data, failed } = await tryFetch(() => api.polls.list(), "polls");
   const polls = (data?.data ?? []) as Poll[];
 
@@ -34,8 +39,8 @@ export default async function PollsPage() {
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Polls"
-        description="Vote on company polls and see results."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -43,8 +48,8 @@ export default async function PollsPage() {
       {polls.length === 0 ? (
         <EmptyState
           icon={BarChart3}
-          title="No polls yet"
-          hint="Admins and editors can create polls from the Strapi admin panel."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <>
@@ -52,7 +57,7 @@ export default async function PollsPage() {
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
                 <BarChart3 className="h-3.5 w-3.5" />
-                Active
+                {t("active")}
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {active.map((p) => (

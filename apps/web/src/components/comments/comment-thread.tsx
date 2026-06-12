@@ -62,7 +62,7 @@ export function CommentThread({
     <div className="space-y-4">
       <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
         <MessageCircle className="h-4 w-4" />
-        {comments.length} {comments.length === 1 ? "comment" : "comments"}
+        {tCommon("comment", { count: comments.length })}
       </div>
 
       {comments.length > 0 && (
@@ -93,7 +93,7 @@ export function CommentThread({
                         onClick={() => handleDelete(c.id)}
                         disabled={isPending}
                         className="ml-auto text-muted-foreground transition hover:text-destructive"
-                        aria-label="Delete comment"
+                        aria-label={tComments("deleteComment")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
@@ -112,7 +112,7 @@ export function CommentThread({
       <form onSubmit={handleSubmit} className="flex gap-2">
         <input
           type="text"
-          placeholder="Write a comment…"
+          placeholder={tComments("writeComment")}
           value={body}
           onChange={(e) => setBody(e.target.value)}
           disabled={isPending}
@@ -122,7 +122,7 @@ export function CommentThread({
           type="submit"
           disabled={isPending || !body.trim()}
           className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
-          aria-label="Send comment"
+          aria-label={tComments("sendComment")}
         >
           <Send className="h-4 w-4" />
         </button>

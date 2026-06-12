@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, FileText } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import type { WikiSpace } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
@@ -12,6 +13,7 @@ interface Props {
 
 export default async function WikiSpacePage({ params }: Props) {
   const { space } = await params;
+  const t = await getTranslations("wiki");
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.wiki.space(space);
@@ -27,7 +29,7 @@ export default async function WikiSpacePage({ params }: Props) {
           className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-          Wiki
+          {t("title")}
         </Link>
         <h1 className="mt-1 text-3xl font-semibold tracking-tight">{entry.name}</h1>
         {entry.description ? (
@@ -38,8 +40,8 @@ export default async function WikiSpacePage({ params }: Props) {
       {pages.length === 0 ? (
         <EmptyState
           icon={FileText}
-          title="No pages yet in this space"
-          hint="Pages created in the Strapi admin will appear here once published."
+          title={t("emptyPagesTitle")}
+          hint={t("emptyPagesHint")}
         />
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
