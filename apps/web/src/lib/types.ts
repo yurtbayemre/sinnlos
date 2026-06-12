@@ -119,3 +119,15 @@ export interface Event {
   organizer?: UserLite | null;
   createdAt?: string;
 }
+
+export interface Notification {
+  id: number;
+  documentId?: string;
+  type: "announcement" | "comment" | "event" | "kudos";
+  title: string;
+  link?: string;
+  readAt?: string | null;
+  createdAt?: string;
+  actor?: UserLite | null;
+  recipient?: UserLite | null;
+}
