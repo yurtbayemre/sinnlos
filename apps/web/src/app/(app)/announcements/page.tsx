@@ -7,6 +7,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CommentSection } from "@/components/comments/comment-section";
 import { initials } from "@/lib/utils";
 
 export const metadata = { title: "Announcements" };
@@ -44,7 +45,9 @@ export default async function AnnouncementsPage() {
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {pinned.map((a) => (
-                  <AnnouncementCard key={a.id} item={a} pinned />
+                  <AnnouncementCard key={a.id} item={a} pinned>
+                    <CommentSection targetType="announcement" targetId={a.id} />
+                  </AnnouncementCard>
                 ))}
               </div>
             </section>
@@ -55,7 +58,9 @@ export default async function AnnouncementsPage() {
               <div className="text-sm font-medium text-muted-foreground">Recent</div>
               <div className="stagger space-y-4">
                 {rest.map((a) => (
-                  <AnnouncementCard key={a.id} item={a} />
+                  <AnnouncementCard key={a.id} item={a}>
+                    <CommentSection targetType="announcement" targetId={a.id} />
+                  </AnnouncementCard>
                 ))}
               </div>
             </section>
@@ -66,7 +71,7 @@ export default async function AnnouncementsPage() {
   );
 }
 
-function AnnouncementCard({ item, pinned = false }: { item: Announcement; pinned?: boolean }) {
+function AnnouncementCard({ item, pinned = false, children }: { item: Announcement; pinned?: boolean; children?: React.ReactNode }) {
   const author = item.author ?? null;
   const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
   const createdAt = item.createdAt ? new Date(item.createdAt) : null;
@@ -103,6 +108,11 @@ function AnnouncementCard({ item, pinned = false }: { item: Announcement; pinned
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
           {item.body}
         </p>
+        {children && (
+          <div className="mt-4 border-t pt-4">
+            {children}
+          </div>
+        )}
       </CardContent>
     </Card>
   );
