@@ -12,7 +12,7 @@ export async function addComment(targetType: string, targetId: number, body: str
     }),
     noCache: true,
   });
-  revalidateTag("comments");
+  revalidateTag("comments", "default");
 }
 
 export async function deleteComment(commentId: number) {
@@ -20,7 +20,7 @@ export async function deleteComment(commentId: number) {
     method: "DELETE",
     noCache: true,
   });
-  revalidateTag("comments");
+  revalidateTag("comments", "default");
 }
 
 export async function toggleReaction(
@@ -35,5 +35,5 @@ export async function toggleReaction(
     }),
     noCache: true,
   });
-  revalidateTag("reactions");
+  revalidateTag("reactions", "default");
 }
