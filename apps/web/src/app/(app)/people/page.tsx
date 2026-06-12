@@ -1,4 +1,5 @@
 import { Contact } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
@@ -7,7 +8,10 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { PeopleGrid } from "@/components/people/people-grid";
 
-export const metadata = { title: "People" };
+export async function generateMetadata() {
+  const t = await getTranslations("people");
+  return { title: t("title") };
+}
 
 export default async function PeoplePage() {
   const { data, failed } = await tryFetch(
