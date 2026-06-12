@@ -92,7 +92,7 @@ export default async function EventsPage() {
   );
 }
 
-function EventCard({ event, muted = false }: { event: Event; muted?: boolean }) {
+function EventCard({ event, muted = false, t }: { event: Event; muted?: boolean; t: (key: string, values?: Record<string, string>) => string }) {
   const startDate = new Date(event.start);
   const month = startDate.toLocaleDateString(undefined, { month: "short" });
   const day = startDate.getDate();
@@ -125,14 +125,14 @@ function EventCard({ event, muted = false }: { event: Event; muted?: boolean }) 
           </div>
           {event.organizer?.displayName && (
             <div className="mt-1 text-xs text-muted-foreground">
-              Organized by {event.organizer.displayName}
+              {t("organizedBy", { name: event.organizer.displayName })}
             </div>
           )}
         </div>
         <a
           href={`/events/${event.id}/ics`}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition hover:bg-muted"
-          title="Download .ics"
+          title={t("downloadIcs")}
         >
           <Download className="h-4 w-4" aria-hidden="true" />
         </a>

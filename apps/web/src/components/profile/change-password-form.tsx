@@ -46,7 +46,7 @@ export function ChangePasswordForm() {
       </div>
       <div>
         <label htmlFor="passwordConfirmation" className="mb-1 block text-sm font-medium">
-          Confirm new password
+          {t("confirmPassword")}
         </label>
         <input
           id="passwordConfirmation"
@@ -67,7 +67,7 @@ export function ChangePasswordForm() {
         disabled={isPending}
         className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
       >
-        {isPending ? "Saving…" : "Change password"}
+        {isPending ? tCommon("saving") : t("changePassword")}
       </button>
     </form>
   );
