@@ -9,6 +9,7 @@
  *  - changePassword → Strapi's built-in users-permissions endpoint;
  *    only meaningful for local-credentials accounts.
  */
+import { refresh } from "next/cache";
 import { strapi } from "@/lib/strapi";
 
 export type ProfileFormState = { error?: string; success?: string };
@@ -30,6 +31,9 @@ export async function updateProfile(
       }),
       noCache: true,
     });
+    // Profile/people data is fetched with noCache — re-render so the saved
+    // values show up immediately.
+    refresh();
     return { success: "Profile updated." };
   } catch {
     return { error: "Could not save profile." };
