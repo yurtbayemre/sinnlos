@@ -141,7 +141,7 @@ export default async function PersonPage({
           {(person as any).teams?.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle>Teams</CardTitle>
+                <CardTitle>{t("teams")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
@@ -173,7 +173,7 @@ export default async function PersonPage({
           {person.manager && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Reports to</CardTitle>
+                <CardTitle className="text-base">{t("reportsTo")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <PersonMini user={person.manager} />
@@ -184,7 +184,7 @@ export default async function PersonPage({
           {person.directReports && person.directReports.length > 0 && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Direct reports</CardTitle>
+                <CardTitle className="text-base">{t("directReports")}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 {person.directReports.map((r) => (
