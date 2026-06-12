@@ -1,13 +1,37 @@
 "use server";
 
-import { refresh } from "next/cache";
-import { strapi } from "@/lib/strapi";
-import type { EmojiType } from "@/lib/types";
+import { auth } from "@/auth";
+import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { summarize, type CommentSectionData } from "@/lib/reaction-summary";
+import type { Comment, EmojiType, Reaction } from "@/lib/types";
 
-// Comments and reactions are fetched with noCache (they vary per user), so
-// there is no cache tag to expire — refresh() re-renders the current route's
-// uncached data in the action response, which is what makes the new state
-// show up without a manual reload.
+// No refresh()/revalidate here: the LiveCommentSection owns this data on the
+// client and refetches just itself — after its own mutations and on a poll
+// interval, so other sessions' comments show up without a page reload.
+
+export async function getCommentSection(
+  targetType: string,
+  targetId: number,
+): Promise<CommentSectionData> {
+  const session = await auth();
+  const userId = (session?.user as any)?.id as number | undefined;
+
+  const [commentsRes, reactionsRes] = await Promise.all([
+    strapi<StrapiListResponse<Comment>>(
+      `/api/comments?filters[targetType][$eq]=${targetType}&filters[targetId][$eq]=${targetId}&populate[author]=true&sort=createdAt:asc&pagination[pageSize]=100`,
+      { noCache: true },
+    ).catch(() => ({ data: [] as Comment[] })),
+    strapi<StrapiListResponse<Reaction>>(
+      `/api/reactions?filters[targetType][$eq]=${targetType}&filters[targetId][$eq]=${targetId}&populate[author]=true&pagination[pageSize]=500`,
+      { noCache: true },
+    ).catch(() => ({ data: [] as Reaction[] })),
+  ]);
+
+  return {
+    comments: (commentsRes as any).data ?? [],
+    reactions: summarize((reactionsRes as any).data ?? [], userId),
+  };
+}
 
 export async function addComment(targetType: string, targetId: number, body: string) {
   await strapi("/api/comments", {
@@ -17,7 +41,6 @@ export async function addComment(targetType: string, targetId: number, body: str
     }),
     noCache: true,
   });
-  refresh();
 }
 
 export async function deleteComment(commentId: number) {
@@ -25,7 +48,6 @@ export async function deleteComment(commentId: number) {
     method: "DELETE",
     noCache: true,
   });
-  refresh();
 }
 
 export async function toggleReaction(
@@ -40,5 +62,4 @@ export async function toggleReaction(
     }),
     noCache: true,
   });
-  refresh();
 }
