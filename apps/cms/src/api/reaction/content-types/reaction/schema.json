@@ -1,0 +1,29 @@
+{
+  "kind": "collectionType",
+  "collectionName": "reactions",
+  "info": {
+    "singularName": "reaction",
+    "pluralName": "reactions",
+    "displayName": "Reaction",
+    "description": "Emoji reactions on announcements and wiki pages"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "emoji": {
+      "type": "enumeration",
+      "enum": ["thumbsup", "heart", "celebrate", "lightbulb", "laugh"],
+      "required": true
+    },
+    "targetType": {
+      "type": "enumeration",
+      "enum": ["announcement", "wiki-page"],
+      "required": true
+    },
+    "targetId": { "type": "integer", "required": true },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}
