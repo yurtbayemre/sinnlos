@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import {
   Search,
+  BarChart3,
   Building2,
   Calendar,
   Contact,
@@ -74,6 +75,10 @@ export function SearchCommand() {
         return <Contact className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
       case "event":
         return <Calendar className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
+      case "poll":
+        return <BarChart3 className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
+      case "document":
+        return <FileText className="mr-2 h-4 w-4 shrink-0 opacity-60" />;
     }
   };
 
@@ -91,6 +96,8 @@ export function SearchCommand() {
     announcement: "Announcements",
     person: "People",
     event: "Events",
+    poll: "Polls",
+    document: "Documents",
   };
 
   return (

@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "documents",
+  "info": {
+    "singularName": "document",
+    "pluralName": "documents",
+    "displayName": "Document",
+    "description": "Company documents, policies, forms, and templates"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "title": { "type": "string", "required": true },
+    "description": { "type": "text" },
+    "category": {
+      "type": "enumeration",
+      "enum": ["policy", "form", "template", "guide", "other"],
+      "default": "other"
+    },
+    "file": {
+      "type": "media",
+      "allowedTypes": ["files", "images"],
+      "multiple": false
+    },
+    "departments": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::department.department"
+    },
+    "uploadedBy": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}

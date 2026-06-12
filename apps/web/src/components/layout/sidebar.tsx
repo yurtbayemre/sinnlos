@@ -1,4 +1,4 @@
-import { BookOpen, Building2, Calendar, Contact, Home, Megaphone, Users2, Settings } from "lucide-react";
+import { BarChart3, BookOpen, Building2, Calendar, Contact, FileText, Home, Megaphone, Users2, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
@@ -12,6 +12,8 @@ const nav = [
   { href: "/departments", label: "Departments", icon: Building2 },
   { href: "/teams", label: "Teams", icon: Users2 },
   { href: "/announcements", label: "Announcements", icon: Megaphone },
+  { href: "/polls", label: "Polls", icon: BarChart3 },
+  { href: "/documents", label: "Documents", icon: FileText },
 ] as const;
 
 export async function Sidebar({ className }: { className?: string }) {
