@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { BookOpen, Globe2, Lock } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { WikiSpace } from "@/lib/types";
@@ -8,17 +9,21 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export const metadata = { title: "Wiki" };
+export async function generateMetadata() {
+  const t = await getTranslations("wiki");
+  return { title: t("title") };
+}
 
 export default async function WikiHomePage() {
+  const t = await getTranslations("wiki");
   const { data, failed } = await tryFetch(() => api.wiki.spaces(), "wiki");
   const spaces = (data?.data ?? []) as WikiSpace[];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Wiki"
-        description="Knowledge base, handbooks and how-tos organised in spaces."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -26,8 +31,8 @@ export default async function WikiHomePage() {
       {spaces.length === 0 ? (
         <EmptyState
           icon={BookOpen}
-          title="No wiki spaces yet"
-          hint="Create a space in the Strapi admin to start collecting knowledge."
+          title={t("emptySpacesTitle")}
+          hint={t("emptySpacesHint")}
         />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

@@ -4,14 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { BookOpen, Calendar, Contact, Home, Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const items = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/people", label: "People", icon: Contact },
-  { href: "/events", label: "Events", icon: Calendar },
-  { href: "/wiki", label: "Wiki", icon: BookOpen },
-  { href: "/announcements", label: "News", icon: Megaphone },
-] as const;
+import { useTranslations } from "next-intl";
 
 /**
  * Bottom tab bar shown on small screens, where the sidebar is hidden.
@@ -19,6 +12,15 @@ const items = [
  */
 export function MobileNav() {
   const pathname = usePathname();
+  const t = useTranslations("nav");
+
+  const items = [
+    { href: "/", label: t("home"), icon: Home },
+    { href: "/people", label: t("people"), icon: Contact },
+    { href: "/events", label: t("events"), icon: Calendar },
+    { href: "/wiki", label: t("wiki"), icon: BookOpen },
+    { href: "/announcements", label: t("news"), icon: Megaphone },
+  ];
 
   return (
     <nav

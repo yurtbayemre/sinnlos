@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Building2 } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Department } from "@/lib/types";
@@ -9,17 +10,22 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
-export const metadata = { title: "Departments" };
+export async function generateMetadata() {
+  const t = await getTranslations("departments");
+  return { title: t("title") };
+}
 
 export default async function DepartmentsPage() {
+  const t = await getTranslations("departments");
+  const tCommon = await getTranslations("common");
   const { data, failed } = await tryFetch(() => api.departments.list(), "departments");
   const items = (data?.data ?? []) as Department[];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Departments"
-        description="Browse departments and their teams."
+        title={t("title")}
+        description={t("description")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -27,8 +33,8 @@ export default async function DepartmentsPage() {
       {items.length === 0 ? (
         <EmptyState
           icon={Building2}
-          title="No departments yet"
-          hint="Create your first department in the Strapi admin and it will show up here."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -47,7 +53,7 @@ export default async function DepartmentsPage() {
                     {d.name}
                   </CardTitle>
                   <CardDescription className="line-clamp-2">
-                    {stripHtml(d.description) || "No description"}
+                    {stripHtml(d.description) || tCommon("noDescription")}
                   </CardDescription>
                 </CardHeader>
               </Card>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { Award, Send, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sendKudos } from "@/lib/kudos-actions";
@@ -8,15 +9,16 @@ import type { UserLite, KudosValue } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 
-const VALUES: { value: KudosValue; label: string; emoji: string }[] = [
-  { value: "teamwork", label: "Teamwork", emoji: "\u{1F91D}" },
-  { value: "innovation", label: "Innovation", emoji: "\u{1F4A1}" },
-  { value: "leadership", label: "Leadership", emoji: "\u{1F31F}" },
-  { value: "customer-focus", label: "Customer Focus", emoji: "\u{1F3AF}" },
-  { value: "excellence", label: "Excellence", emoji: "\u{1F3C6}" },
+const VALUES: { value: KudosValue; labelKey: "teamwork" | "innovation" | "leadership" | "customerFocus" | "excellence"; emoji: string }[] = [
+  { value: "teamwork", labelKey: "teamwork", emoji: "\u{1F91D}" },
+  { value: "innovation", labelKey: "innovation", emoji: "\u{1F4A1}" },
+  { value: "leadership", labelKey: "leadership", emoji: "\u{1F31F}" },
+  { value: "customer-focus", labelKey: "customerFocus", emoji: "\u{1F3AF}" },
+  { value: "excellence", labelKey: "excellence", emoji: "\u{1F3C6}" },
 ];
 
 export function GiveKudos({ people }: { people: UserLite[] }) {
+  const t = useTranslations("kudos");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<UserLite | null>(null);

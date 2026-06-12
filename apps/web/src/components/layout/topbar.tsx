@@ -2,16 +2,21 @@ import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LocaleSwitcher } from "@/components/locale-switcher";
 import { SearchCommand } from "@/components/search-command";
 import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
 import { NotificationBell } from "@/components/notifications/notification-bell";
+import { getTranslations } from "next-intl/server";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
 
 export async function Topbar() {
+  const tAuth = await getTranslations("auth");
+  const tProfile = await getTranslations("profile");
+
   const session = DEMO_MODE
     ? { user: { name: "Ada Lovelace", email: "ada@sinnlos.local", image: null } }
     : await (await import("@/auth")).auth();
@@ -45,13 +50,14 @@ export async function Topbar() {
       <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
         {session?.user && <NotificationBell notifications={notifications} />}
         <ThemeToggle />
+        <LocaleSwitcher />
         {session?.user ? (
           <>
             <div className="hidden text-right md:block">
               <div className="text-sm font-medium leading-none">{name}</div>
               <div className="text-xs text-muted-foreground">{email}</div>
             </div>
-            <Link href="/profile" aria-label="My profile">
+            <Link href="/profile" aria-label={tProfile("title")}>
               <Avatar>
                 {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
                 <AvatarFallback>{initials(name)}</AvatarFallback>
@@ -59,10 +65,10 @@ export async function Topbar() {
             </Link>
             {DEMO_MODE ? (
               <Button variant="ghost" size="sm" disabled>
-                Demo mode
+                {tAuth("demoMode")}
               </Button>
             ) : (
-              <SignOutButton />
+              <SignOutButton label={tAuth("signOut")} />
             )}
           </>
         ) : null}
@@ -71,11 +77,11 @@ export async function Topbar() {
   );
 }
 
-function SignOutButton() {
+function SignOutButton({ label }: { label: string }) {
   return (
     <form action={signOutAction}>
       <Button variant="ghost" size="sm" type="submit">
-        Sign out
+        {label}
       </Button>
     </form>
   );

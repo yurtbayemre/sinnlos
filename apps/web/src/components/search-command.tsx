@@ -15,8 +15,12 @@ import {
   Megaphone,
 } from "lucide-react";
 import { fetchSearchItems, searchContent, type SearchItem } from "@/lib/search-action";
+import { useTranslations } from "next-intl";
 
 export function SearchCommand() {
+  const tSearch = useTranslations("search");
+  const tNav = useTranslations("nav");
+  const tCommon = useTranslations("common");
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -107,15 +111,15 @@ export function SearchCommand() {
   }
 
   const groupLabel: Record<string, string> = {
-    department: "Departments",
-    team: "Teams",
-    "wiki-space": "Wiki Spaces",
-    "wiki-page": "Wiki Pages",
-    announcement: "Announcements",
-    person: "People",
-    event: "Events",
-    poll: "Polls",
-    document: "Documents",
+    department: tNav("departments"),
+    team: tNav("teams"),
+    "wiki-space": tNav("wiki"),
+    "wiki-page": tNav("wiki"),
+    announcement: tNav("announcements"),
+    person: tNav("people"),
+    event: tNav("events"),
+    poll: tNav("polls"),
+    document: tNav("documents"),
   };
 
   return (
@@ -123,7 +127,7 @@ export function SearchCommand() {
       {/* Trigger — icon-only on phones, full search-input look from sm up */}
       <button
         type="button"
-        aria-label="Search (Ctrl+K)"
+        aria-label={tSearch("label")}
         onClick={() => setOpen(true)}
         className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring sm:h-10 sm:w-full sm:max-w-xl sm:justify-start sm:pl-9 sm:pr-3"
       >
@@ -131,7 +135,7 @@ export function SearchCommand() {
           aria-hidden="true"
           className="h-4 w-4 sm:pointer-events-none sm:absolute sm:left-3 sm:top-1/2 sm:-translate-y-1/2"
         />
-        <span className="hidden truncate sm:inline">Search wiki, people, teams…</span>
+        <span className="hidden truncate sm:inline">{tSearch("placeholder")}</span>
         <kbd className="ml-auto hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground sm:inline-block">
           ⌘K
         </kbd>
@@ -144,7 +148,7 @@ export function SearchCommand() {
           onMouseDown={() => setOpen(false)}
         >
           <Command
-            label="Global search"
+            label={tSearch("globalSearch")}
             className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
             onMouseDown={(e) => e.stopPropagation()}
             shouldFilter={query.length < 2}
@@ -154,7 +158,7 @@ export function SearchCommand() {
               <Command.Input
                 value={query}
                 onValueChange={setQuery}
-                placeholder="Search…"
+                placeholder={tSearch("searchPlaceholder")}
                 className="flex h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
@@ -162,12 +166,12 @@ export function SearchCommand() {
               {isPending && (
                 <Command.Loading>
                   <div className="py-6 text-center text-sm text-muted-foreground">
-                    Loading…
+                    {tCommon("loading")}
                   </div>
                 </Command.Loading>
               )}
               <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
-                No results found.
+                {tCommon("noResults")}
               </Command.Empty>
               {Object.entries(grouped).map(([kind, groupItems]) => (
                 <Command.Group

@@ -9,6 +9,7 @@ import {
   markAllNotificationsRead,
 } from "@/lib/notification-actions";
 import type { Notification } from "@/lib/types";
+import { useTranslations } from "next-intl";
 
 function relative(dateStr: string | undefined) {
   if (!dateStr) return "";
@@ -38,6 +39,7 @@ export function NotificationBell({
 }: {
   notifications: Notification[];
 }) {
+  const t = useTranslations("notifications");
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
@@ -81,7 +83,7 @@ export function NotificationBell({
         type="button"
         onClick={handleOpen}
         className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-background transition hover:bg-muted"
-        aria-label={`Notifications${unreadCount > 0 ? ` (${unreadCount} unread)` : ""}`}
+        aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount} ${t("unread")})` : ""}`}
       >
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
@@ -98,7 +100,7 @@ export function NotificationBell({
         // `fixed`, so top-16 lands exactly at the header's bottom edge.
         <div className="fixed inset-x-3 top-16 z-50 animate-scale-in overflow-hidden rounded-xl border bg-background shadow-lg sm:absolute sm:inset-x-auto sm:right-0 sm:top-full sm:mt-2 sm:w-96">
           <div className="flex items-center justify-between border-b px-4 py-3">
-            <span className="text-sm font-semibold">Notifications</span>
+            <span className="text-sm font-semibold">{t("title")}</span>
             {unreadCount > 0 && (
               <button
                 type="button"
@@ -106,14 +108,14 @@ export function NotificationBell({
                 disabled={isPending}
                 className="text-xs text-primary hover:underline disabled:opacity-50"
               >
-                Mark all read
+                {t("markAllRead")}
               </button>
             )}
           </div>
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                No notifications yet
+                {t("noNotificationsYet")}
               </div>
             ) : (
               notifications.map((n) => {

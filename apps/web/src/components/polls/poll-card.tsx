@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useTranslations } from "next-intl";
 import { BarChart3, Clock, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -8,6 +9,8 @@ import { votePoll } from "@/lib/poll-actions";
 import type { PollResults } from "@/lib/types";
 
 export function PollCard({ results }: { results: PollResults }) {
+  const tPolls = useTranslations("polls");
+  const tCommon = useTranslations("common");
   const { poll, counts, total, myVoteIndex: initialVote } = results;
   const [voted, setVoted] = useState(initialVote);
   const [localCounts, setLocalCounts] = useState(counts);

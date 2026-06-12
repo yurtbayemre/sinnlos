@@ -1,18 +1,24 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RegisterForm } from "@/components/auth/register-form";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
 
-export const metadata = { title: "Create account" };
+export async function generateMetadata() {
+  const t = await getTranslations("auth");
+  return { title: t("createAccount") };
+}
 
 // REGISTRATION_ENABLED is a runtime env decision — see sign-in/page.tsx.
 export const dynamic = "force-dynamic";
 
-export default function RegisterPage() {
+export default async function RegisterPage() {
   if (!REGISTRATION_ENABLED) {
     redirect("/sign-in");
   }
+
+  const t = await getTranslations("auth");
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-br from-background via-background to-primary/5 p-6">
@@ -29,17 +35,17 @@ export default function RegisterPage() {
           >
             S
           </div>
-          <CardTitle className="text-2xl">Create your account</CardTitle>
+          <CardTitle className="text-2xl">{t("createYourAccount")}</CardTitle>
           <CardDescription>
-            Register with your email address to join the intranet
+            {t("registerDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <RegisterForm />
           <p className="text-center text-sm text-muted-foreground">
-            Already have an account?{" "}
+            {t("alreadyHaveAccount")}{" "}
             <Link href="/sign-in" className="text-primary hover:underline">
-              Sign in
+              {t("signIn")}
             </Link>
           </p>
         </CardContent>
