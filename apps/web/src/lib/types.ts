@@ -131,3 +131,41 @@ export interface Notification {
   actor?: UserLite | null;
   recipient?: UserLite | null;
 }
+
+export interface Poll {
+  id: number;
+  documentId?: string;
+  question: string;
+  options: string[];
+  closesAt?: string | null;
+  anonymous?: boolean;
+  departments?: Department[];
+  author?: UserLite | null;
+  createdAt?: string;
+}
+
+export interface PollResults {
+  poll: {
+    id: number;
+    question: string;
+    options: string[];
+    closesAt?: string | null;
+    anonymous?: boolean;
+  };
+  counts: number[];
+  total: number;
+  myVoteIndex: number | null;
+}
+
+export interface Document {
+  id: number;
+  documentId?: string;
+  title: string;
+  description?: string | null;
+  category?: "policy" | "form" | "template" | "guide" | "other";
+  file?: { url?: string; name?: string; size?: number; mime?: string } | null;
+  departments?: Department[];
+  uploadedBy?: UserLite | null;
+  createdAt?: string;
+  updatedAt?: string;
+}
