@@ -32,6 +32,11 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "api::team.team"
+    },
+    "audience": {
+      "type": "enumeration",
+      "enum": ["all", "departments"],
+      "default": "all"
     }
   }
 }

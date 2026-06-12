@@ -3,14 +3,14 @@
 import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export type SearchItem = {
-  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person";
+  kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person" | "event";
   title: string;
   subtitle?: string;
   href: string;
 };
 
 export async function fetchSearchItems(): Promise<SearchItem[]> {
-  const [departments, teams, wikiSpaces, wikiPages, announcements] = await Promise.all([
+  const [departments, teams, wikiSpaces, wikiPages, announcements, events] = await Promise.all([
     api.departments.list().catch(() => ({ data: [] })),
     api.teams.list().catch(() => ({ data: [] })),
     api.wiki.spaces().catch(() => ({ data: [] })),
@@ -22,6 +22,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       { noCache: true },
     ).catch(() => ({ data: [] })),
     api.announcements.list().catch(() => ({ data: [] })),
+    api.events.list().catch(() => ({ data: [] })),
   ]);
 
   const items: SearchItem[] = [];
@@ -72,6 +73,15 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       title: a.title,
       subtitle: a.author?.displayName,
       href: "/announcements",
+    });
+  }
+
+  for (const e of events.data) {
+    items.push({
+      kind: "event",
+      title: e.title,
+      subtitle: e.start ? new Date(e.start).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : undefined,
+      href: "/events",
     });
   }
 
