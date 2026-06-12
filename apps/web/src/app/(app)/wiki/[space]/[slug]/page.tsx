@@ -46,7 +46,7 @@ export default async function WikiPage({ params }: Props) {
         <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
           {author ? <span>{tCommon("by")} {author.displayName ?? author.username}</span> : null}
           {lastEditor && lastEditor !== author ? (
-            <span>· {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username })}</span>
+            <span>· {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}</span>
           ) : null}
           {updated ? <span>· {updated.toLocaleString()}</span> : null}
         </div>

@@ -1,4 +1,5 @@
 import { Contact } from "lucide-react";
+import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
@@ -7,9 +8,13 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { OrgTree } from "@/components/people/org-tree";
 
-export const metadata = { title: "Org Chart" };
+export async function generateMetadata() {
+  const t = await getTranslations("people");
+  return { title: t("orgChart") };
+}
 
 export default async function OrgChartPage() {
+  const t = await getTranslations("people");
   const { data, failed } = await tryFetch(
     () =>
       strapi<any[]>(
@@ -23,8 +28,7 @@ export default async function OrgChartPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Org Chart"
-        description="Visual overview of reporting lines."
+        title={t("orgChart")}
       />
 
       {failed && <FetchErrorBanner />}
@@ -32,8 +36,8 @@ export default async function OrgChartPage() {
       {people.length === 0 ? (
         <EmptyState
           icon={Contact}
-          title="No people yet"
-          hint="Users appear here automatically after signing in."
+          title={t("emptyTitle")}
+          hint={t("emptyHint")}
         />
       ) : (
         <OrgTree people={people} />
