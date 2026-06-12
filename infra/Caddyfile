@@ -1,4 +1,10 @@
-http://{$DOMAIN:localhost} {
+# TLS is on by default: with a real DOMAIN Caddy provisions Let's
+# Encrypt certificates automatically and redirects 80 -> 443. Without
+# DOMAIN it falls back to `localhost` with a self-signed internal cert
+# (run `docker compose exec caddy caddy trust` to silence browser
+# warnings, or set DOMAIN=http://localhost to opt back into plain HTTP
+# for local development).
+{$DOMAIN:localhost} {
     encode zstd gzip
 
     # Next.js Auth.js callbacks (must come before the /api/* catch-all)
