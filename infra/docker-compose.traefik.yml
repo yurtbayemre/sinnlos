@@ -16,6 +16,9 @@ services:
       # Parität zum Caddyfile: Security-Header + Kompression
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
       - "traefik.http.middlewares.sinnlos-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      # HSTS: erzwingt HTTPS für sinnlos.yurtbay.dev (1 Jahr, inkl. Subdomains)
+      - "traefik.http.middlewares.sinnlos-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.sinnlos-headers.headers.stsIncludeSubdomains=true"
       - "traefik.http.middlewares.sinnlos-compress.compress=true"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
       - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
