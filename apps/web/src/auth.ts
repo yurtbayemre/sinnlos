@@ -12,7 +12,7 @@
  * Either way the Strapi JWT is stashed on the session and every
  * server-side Strapi fetch uses it.
  */
-import NextAuth, { type DefaultSession } from "next-auth";
+import NextAuth, { type Session } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
 import { STRAPI_URL } from "@/lib/config";
@@ -40,17 +40,7 @@ if (
   );
 }
 
-declare module "next-auth" {
-  interface Session {
-    strapiJwt?: string;
-    provider?: string;
-    user: {
-      id?: number;
-      role?: string;
-      department?: { id: number; name: string; slug: string } | null;
-    } & DefaultSession["user"];
-  }
-}
+// Session / User / JWT augmentation lives in @/types/next-auth.d.ts.
 
 type StrapiExchangeResponse = {
   jwt: string;
@@ -168,7 +158,7 @@ if (LOCAL_ENABLED) {
             strapiDepartment: me.department
               ? { id: me.department.id, name: me.department.name, slug: me.department.slug }
               : null,
-          } as any;
+          };
         } catch {
           return null;
         }
@@ -188,12 +178,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   callbacks: {
     async jwt({ token, account, user }) {
       // Local credentials path: authorize() already returned the Strapi JWT.
-      if (user && (user as any).strapiJwt) {
-        const u = user as any;
-        token.strapiJwt = u.strapiJwt;
-        token.strapiUserId = u.strapiUserId;
-        token.strapiRole = u.strapiRole;
-        token.strapiDepartment = u.strapiDepartment ?? null;
+      if (user && user.strapiJwt) {
+        token.strapiJwt = user.strapiJwt;
+        token.strapiUserId = user.strapiUserId;
+        token.strapiRole = user.strapiRole;
+        token.strapiDepartment = user.strapiDepartment ?? null;
         token.provider = "local";
         return token;
       }
@@ -226,12 +215,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return token;
     },
     async session({ session, token }) {
-      const s = session as any;
+      // The session/jwt callbacks are typed against @auth/core's Session/JWT
+      // (NextAuthConfig.callbacks = AuthConfig["callbacks"]), which don't carry
+      // our module augmentation — and @auth/core's JWT exposes an index
+      // signature returning `unknown`. Our augmentation in
+      // @/types/next-auth.d.ts types these fields on the `next-auth` Session
+      // that auth() returns, so every call site is fully typed. Here at the
+      // write site we narrow the raw token fields and the augmented session
+      // explicitly (typed assertions, not `as any`).
+      const s = session as Session;
       s.strapiJwt = token.strapiJwt as string | undefined;
       s.provider = token.provider as string | undefined;
       s.user.id = token.strapiUserId as number | undefined;
       s.user.role = token.strapiRole as string | undefined;
-      s.user.department = (token.strapiDepartment as any) ?? null;
+      s.user.department = token.strapiDepartment as
+        | { id: number; name: string; slug: string }
+        | null;
       return session;
     },
   },

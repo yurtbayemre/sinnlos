@@ -24,7 +24,7 @@
     "clsx": "2.1.1",
     "cmdk": "1.0.4",
     "lucide-react": "0.454.0",
-    "next": "16.2.4",
+    "next": "16.2.9",
     "next-auth": "5.0.0-beta.31",
     "next-intl": "^4.13.0",
     "next-themes": "0.4.3",
@@ -40,12 +40,13 @@
     "zod": "3.23.8"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.2.4",
+    "@next/eslint-plugin-next": "^16.2.9",
     "@types/node": "20.17.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "autoprefixer": "10.4.20",
     "eslint": "^9.13.0",
+    "typescript-eslint": "^8.18.0",
     "postcss": "8.4.47",
     "typescript": "5.6.3"
   }

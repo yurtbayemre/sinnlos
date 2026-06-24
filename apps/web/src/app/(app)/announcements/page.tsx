@@ -20,7 +20,7 @@ export async function generateMetadata() {
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
   const session = await auth();
-  const deptId = (session?.user as any)?.department?.id as number | undefined;
+  const deptId = session?.user?.department?.id;
   const { data, failed } = await tryFetch(() => api.announcements.list(deptId), "announcements");
   const items = (data?.data ?? []) as Announcement[];
 

@@ -6,7 +6,7 @@ import type { Notification } from "@/lib/types";
 
 export async function getNotifications(): Promise<Notification[]> {
   const session = await auth();
-  const userId = (session?.user as any)?.id;
+  const userId = session?.user?.id;
   if (!userId) return [];
   try {
     const res = await strapi<StrapiListResponse<Notification>>(

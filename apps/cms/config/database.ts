@@ -17,7 +17,7 @@ export default ({ env }: { env: Env }) => {
         port: env.int("DATABASE_PORT", 5432),
         database: env("DATABASE_NAME", "sinnlos"),
         user: env("DATABASE_USERNAME", "sinnlos"),
-        password: env("DATABASE_PASSWORD", "sinnlos"),
+        password: env("DATABASE_PASSWORD"),
         ssl: env.bool("DATABASE_SSL", false) && {
           key: env("DATABASE_SSL_KEY", undefined),
           cert: env("DATABASE_SSL_CERT", undefined),

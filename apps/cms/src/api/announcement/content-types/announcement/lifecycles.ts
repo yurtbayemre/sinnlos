@@ -42,20 +42,20 @@ async function notifyForAnnouncement(announcement: any) {
     }
 
     const authorId = full?.author?.id;
-    for (const user of recipients) {
-      if (user.id === authorId) continue;
-      await strapi.db.query("api::notification.notification").create({
-        data: {
-          type: "announcement",
-          title: `New announcement: ${announcement.title ?? "Untitled"}`,
-          link: "/announcements",
-          recipient: user.id,
-          actor: authorId ?? null,
-        },
-      });
+    const rows = recipients
+      .filter((user) => user.id !== authorId)
+      .map((user) => ({
+        type: "announcement",
+        title: `New announcement: ${announcement.title ?? "Untitled"}`,
+        link: "/announcements",
+        recipient: user.id,
+        actor: authorId ?? null,
+      }));
+    if (rows.length > 0) {
+      await strapi.db.query("api::notification.notification").createMany({ data: rows });
     }
     strapi.log.info(
-      `[notifications] created ${recipients.length} notification(s) for announcement ${announcement.id}`,
+      `[notifications] created ${rows.length} notification(s) for announcement ${announcement.id}`,
     );
   } catch (err) {
     strapi.log.error(

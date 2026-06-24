@@ -98,7 +98,7 @@ function entraEndSessionUrl(issuer: string, postLogoutRedirectUri: string): stri
  */
 export async function signOutAction() {
   const session = await auth();
-  const provider = (session as any)?.provider as string | undefined;
+  const provider = session?.provider;
 
   await signOut({ redirect: false });
 

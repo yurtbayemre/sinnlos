@@ -7,6 +7,7 @@ import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { initials } from "@/lib/utils";
+import { mediaUrl } from "@/lib/config";
 import type { UserLite } from "@/lib/types";
 
 export function PeopleGrid({ people }: { people: UserLite[] }) {
@@ -78,11 +79,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.map((p) => {
           const name = p.displayName ?? p.username ?? p.email ?? "Unknown";
-          const avatarUrl = p.avatar?.url
-            ? p.avatar.url.startsWith("http")
-              ? p.avatar.url
-              : p.avatar.url
-            : null;
+          const avatarUrl = mediaUrl(p.avatar?.url);
           return (
             <Link
               key={p.id}

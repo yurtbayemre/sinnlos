@@ -22,7 +22,7 @@ export async function GET(
   }
 
   const session = await auth();
-  const jwt = (session as { strapiJwt?: string } | null)?.strapiJwt;
+  const jwt = session?.strapiJwt;
   if (!jwt) {
     return new NextResponse("Unauthorized", { status: 401 });
   }

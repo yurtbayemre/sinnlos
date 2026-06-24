@@ -75,7 +75,7 @@ async function recentActivity() {
 
 export default async function AnalyticsPage() {
   const session = await auth();
-  if (!isAdmin((session?.user as any)?.role)) {
+  if (!isAdmin(session?.user?.role)) {
     redirect("/");
   }
 

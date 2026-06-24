@@ -8,12 +8,13 @@
     "start": "strapi start",
     "build": "strapi build",
     "strapi": "strapi",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
-    "@strapi/strapi": "5.42.1",
-    "@strapi/plugin-users-permissions": "5.42.1",
-    "@strapi/plugin-cloud": "5.42.1",
+    "@strapi/strapi": "5.49.0",
+    "@strapi/plugin-users-permissions": "5.49.0",
+    "@strapi/plugin-cloud": "5.49.0",
     "better-sqlite3": "12.9.0",
     "pg": "8.13.1",
     "react": "18.3.1",
@@ -22,7 +23,9 @@
     "styled-components": "6.1.13"
   },
   "devDependencies": {
-    "@strapi/typescript-utils": "5.42.1",
+    "@strapi/typescript-utils": "5.49.0",
+    "eslint": "^9.13.0",
+    "typescript-eslint": "^8.18.0",
     "@types/node": "22.10.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",

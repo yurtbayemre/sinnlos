@@ -29,17 +29,11 @@ export default factories.createCoreController("api::notification.notification", 
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
 
-    const unread = await strapi.db.query("api::notification.notification").findMany({
-      where: { recipient: user.id, readAt: null },
-    });
-
     const now = new Date().toISOString();
-    for (const n of unread) {
-      await strapi.db.query("api::notification.notification").update({
-        where: { id: n.id },
-        data: { readAt: now },
-      });
-    }
-    return ctx.send({ updated: unread.length });
+    const { count } = await strapi.db.query("api::notification.notification").updateMany({
+      where: { recipient: user.id, readAt: null },
+      data: { readAt: now },
+    });
+    return ctx.send({ updated: count });
   },
 }));

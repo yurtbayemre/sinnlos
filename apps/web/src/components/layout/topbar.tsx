@@ -26,7 +26,10 @@ export async function Topbar() {
   let notifications: Notification[] = [];
   if (session?.user && !DEMO_MODE) {
     try {
-      const userId = (session.user as any).id;
+      // `session` here is the real auth() session (the DEMO_MODE literal,
+      // which lacks `id`, is excluded by `!DEMO_MODE`). The `in` guard
+      // narrows the union so we read the numeric Strapi id type-safely.
+      const userId = "id" in session.user ? session.user.id : undefined;
       if (userId) {
         const res = await strapi<StrapiListResponse<Notification>>(
           `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
