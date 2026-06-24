@@ -21,7 +21,8 @@ FROM node:24-alpine AS runner
 RUN apk add --no-cache vips-dev && corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /app
 ENV NODE_ENV=production
-COPY --from=builder /app /app
+COPY --from=builder --chown=node:node /app /app
 WORKDIR /app/apps/cms
+USER node
 EXPOSE 1337
 CMD ["pnpm", "start"]

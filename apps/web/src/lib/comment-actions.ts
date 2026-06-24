@@ -14,7 +14,7 @@ export async function getCommentSection(
   targetId: number,
 ): Promise<CommentSectionData> {
   const session = await auth();
-  const userId = (session?.user as any)?.id as number | undefined;
+  const userId = session?.user?.id;
 
   const [commentsRes, reactionsRes] = await Promise.all([
     strapi<StrapiListResponse<Comment>>(

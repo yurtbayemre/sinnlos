@@ -15,7 +15,7 @@ export async function CommentSection({
   targetId: number;
 }) {
   const session = await auth();
-  const userId = (session?.user as any)?.id as number | undefined;
+  const userId = session?.user?.id;
   const initial = await getCommentSection(targetType, targetId);
 
   return (

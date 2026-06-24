@@ -34,7 +34,7 @@ export async function strapi<T>(path: string, opts: FetchOptions = {}): Promise<
     return demo(path) as T;
   }
   const session = await auth();
-  const token = opts.tokenOverride ?? (session as any)?.strapiJwt ?? null;
+  const token = opts.tokenOverride ?? session?.strapiJwt ?? null;
 
   const headers = new Headers(opts.headers);
   headers.set("Content-Type", "application/json");

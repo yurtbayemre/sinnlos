@@ -7,9 +7,11 @@ a **wiki**, **team pages**, and **department pages**, all gated by **user roles*
 - **Frontend** — Next.js 16 + TailwindCSS + shadcn/ui at `apps/web`
 - **Auth** — Auth.js (NextAuth v5) Microsoft Entra ID provider → Strapi
   users-permissions Microsoft provider → Strapi JWT
-- **Deployment** — Docker Compose + Caddy (automatic TLS) in `infra/`
+- **Deployment** — Docker Compose in `infra/`. Local full-stack runs use the
+  bundled **Caddy** (automatic TLS); the live production host (srv-prod-01)
+  fronts the same compose stack with **Traefik** via a second override file.
 
-**→ [Full deployment guide](./docs/DEPLOYMENT.md)** — bare-metal, Docker, VPS, Azure VM, Azure Container Apps.
+**→ [Full deployment guide](./docs/DEPLOYMENT.md)** — bare-metal, Docker, VPS (Traefik), Azure VM, Azure Container Apps.
 
 ## Repository layout
 
@@ -17,10 +19,13 @@ a **wiki**, **team pages**, and **department pages**, all gated by **user roles*
 .
 ├── apps/
 │   ├── cms/                Strapi v5 backend
-│   └── web/                Next.js 15 frontend
+│   └── web/                Next.js 16 frontend
 ├── infra/
-│   ├── docker-compose.yml
-│   ├── Caddyfile
+│   ├── docker-compose.yml          base stack (db, cms, web, caddy)
+│   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy)
+│   ├── deploy.sh                   direct prod deploy (backup → tag → build → smoke)
+│   ├── backup/pg-backup.sh         nightly encrypted Postgres + uploads backup
+│   ├── Caddyfile                   used only for local full-stack runs
 │   └── .env.example
 ├── pnpm-workspace.yaml
 └── package.json
@@ -249,7 +254,10 @@ the `/admin` page (redirect non-admins to `/`). Every other authorization
 decision is made server-side by Strapi's permission matrix + route
 policies — the frontend just mirrors the role string.
 
-## 6. Production deployment (Docker Compose + Caddy)
+## 6. Production deployment
+
+The base `infra/docker-compose.yml` ships a **Caddy** reverse proxy so a fresh
+self-hosted box works with one command:
 
 ```bash
 cd infra
@@ -258,12 +266,28 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Caddy automatically obtains a Let's Encrypt certificate for `$DOMAIN`, proxies
-`/api/*`, `/admin*`, `/uploads/*` and related paths to Strapi, and everything
-else to Next.js.
+Caddy obtains a Let's Encrypt certificate for `$DOMAIN`, proxies `/api/*`,
+`/admin*`, `/uploads/*` and related paths to Strapi, and everything else to
+Next.js. Point your DNS A/AAAA record at the host and the stack is live.
 
-Point your DNS A/AAAA record for `intranet.example.com` at the host and the
-stack is live.
+### Live production (srv-prod-01, Traefik)
+
+The hosted instance at <https://sinnlos.yurtbay.dev> runs the **same stack
+behind the host's shared Traefik** instead of Caddy. A second compose file
+(`docker-compose.traefik.yml`) disables the bundled Caddy and attaches `web` +
+`cms` to the external `frontend` Docker network with Traefik routing labels:
+
+```bash
+docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  up -d --build          # compose project name must stay 'infra'
+```
+
+`infra/deploy.sh` wraps this end to end: pre-deploy DB backup → tag the running
+images `:rollback` → rebuild + restart → curl smoke-check. TLS, the security
+response headers, and the admin/auth rate limits all live at the Traefik layer
+(see the override labels). The web and cms containers run **non-root** with
+`no-new-privileges`. Full details — backup/restore, rollback, hardening — are in
+**[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**.
 
 ## 7. Useful scripts
 
@@ -286,4 +310,5 @@ pnpm web:dev           # just Next.js
       your display name in the topbar
 - [ ] Editing a wiki page as a non-author member is blocked (403)
 - [ ] A member of the owning department can edit wiki pages for that department
-- [ ] `docker compose up -d` brings the full stack up behind Caddy
+- [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
+      (Caddy locally / Traefik on srv-prod-01)

@@ -7,7 +7,7 @@
  * Strapi v5 plugin extension pattern:
  *   export default (plugin) => { ...mutate plugin...; return plugin; }
  */
-import rules, { DEFAULT_ROLE, type StrapiRoleType } from "../../../config/ms-role-map";
+import { resolveRoleType } from "../../../config/ms-role-map";
 
 type AnyPlugin = {
   controllers: Record<string, any>;
@@ -68,18 +68,6 @@ async function fetchGraphManager(accessToken: string): Promise<{ id?: string } |
   } catch {
     return null;
   }
-}
-
-function resolveRoleType(groups: GraphGroupsResponse["value"]): StrapiRoleType {
-  const needle = new Set<string>();
-  for (const g of groups) {
-    if (g.id) needle.add(g.id.toLowerCase());
-    if (g.displayName) needle.add(g.displayName.toLowerCase());
-  }
-  for (const rule of rules) {
-    if (needle.has(rule.group.toLowerCase())) return rule.role;
-  }
-  return DEFAULT_ROLE;
 }
 
 export default (plugin: AnyPlugin) => {

@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: ${DATABASE_NAME:-sinnlos}
       POSTGRES_USER: ${DATABASE_USERNAME:-sinnlos}
-      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-sinnlos}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -13,6 +13,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 200
+    security_opt:
+      - no-new-privileges:true
 
   cms:
     build:
@@ -37,7 +42,7 @@ services:
       DATABASE_PORT: 5432
       DATABASE_NAME: ${DATABASE_NAME:-sinnlos}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-sinnlos}
-      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-sinnlos}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
       PUBLIC_URL: ${CMS_PUBLIC_URL}
       CORS_ORIGIN: ${WEB_PUBLIC_URL}
       MS_CLIENT_ID: ${MS_CLIENT_ID}
@@ -53,6 +58,17 @@ services:
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
     volumes:
       - cms_uploads:/app/apps/cms/public/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:1337/_health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 180s
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 512
+    security_opt:
+      - no-new-privileges:true
 
   web:
     build:
@@ -60,7 +76,8 @@ services:
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
     depends_on:
-      - cms
+      cms:
+        condition: service_healthy
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -86,6 +103,19 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
       # Shared secret for the /api/revalidate webhook called from the CMS
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    mem_limit: 512m
+    cpus: 1.0
+    pids_limit: 256
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
 
   caddy:
     image: caddy:2-alpine

@@ -9,7 +9,7 @@ export async function Sidebar({ className }: { className?: string }) {
   const tCommon = await getTranslations("common");
 
   const session = await auth();
-  const role = (session?.user as any)?.role as string | undefined;
+  const role = session?.user?.role;
   const showAdmin = isAdmin(role);
 
   const nav: { href: string; label: string; icon: NavIconName }[] = [

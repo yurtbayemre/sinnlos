@@ -48,7 +48,16 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
-        mono: ["var(--font-geist-mono)", "ui-monospace", "monospace"],
+        // --font-geist-mono was never defined (no next/font wiring), so the
+        // mono stack fell through to the system monospace anyway. Point it at
+        // an explicit system monospace stack and drop the dead CSS var.
+        mono: [
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "Consolas",
+          "monospace",
+        ],
       },
       keyframes: {
         "accordion-down": {

@@ -17,7 +17,7 @@ export default async function DashboardPage() {
   const [departments, teams, announcements, peopleResult, events] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
-    tryFetch(() => api.announcements.list((session?.user as any)?.department?.id), "dashboard"),
+    tryFetch(() => api.announcements.list(session?.user?.department?.id), "dashboard"),
     tryFetch(
       () => strapi<any[]>(
         "/api/users?fields[0]=id&pagination[pageSize]=200",

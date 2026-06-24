@@ -20,7 +20,10 @@ export default ({ env }: { env: Env }) => ({
     encryptionKey: env("ENCRYPTION_KEY"),
   },
   flags: {
-    nps: env.bool("FLAG_NPS", true),
-    promoteEE: env.bool("FLAG_PROMOTE_EE", true),
+    // NPS in-admin survey and the EE/marketplace promotion are unused on this
+    // intranet; default them off so they stay disabled unless explicitly
+    // re-enabled via env.
+    nps: env.bool("FLAG_NPS", false),
+    promoteEE: env.bool("FLAG_PROMOTE_EE", false),
   },
 });

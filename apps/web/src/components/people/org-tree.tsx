@@ -7,6 +7,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { initials } from "@/lib/utils";
+import { mediaUrl } from "@/lib/config";
 import type { UserLite } from "@/lib/types";
 
 type PersonNode = UserLite & { managerId?: number | null; children: PersonNode[] };
@@ -50,7 +51,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
   const [expanded, setExpanded] = useState(level < 2);
   const hasChildren = node.children.length > 0;
   const name = node.displayName ?? node.username ?? node.email ?? "Unknown";
-  const avatarUrl = node.avatar?.url ?? null;
+  const avatarUrl = mediaUrl(node.avatar?.url);
 
   return (
     <div style={{ marginLeft: level > 0 ? 24 : 0 }}>

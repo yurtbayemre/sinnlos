@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
+import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
 import { initials } from "@/lib/utils";
@@ -61,11 +62,7 @@ export default async function PersonPage({
   }
 
   const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
-  const avatarUrl = person.avatar?.url
-    ? person.avatar.url.startsWith("http")
-      ? person.avatar.url
-      : person.avatar.url
-    : null;
+  const avatarUrl = mediaUrl(person.avatar?.url);
 
   return (
     <div className="space-y-6">
@@ -201,7 +198,7 @@ export default async function PersonPage({
 
 function PersonMini({ user }: { user: UserLite }) {
   const name = user.displayName ?? user.username ?? user.email ?? "Unknown";
-  const avatarUrl = user.avatar?.url ?? null;
+  const avatarUrl = mediaUrl(user.avatar?.url);
   return (
     <Link
       href={`/people/${user.id}`}

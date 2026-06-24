@@ -18,7 +18,7 @@ export async function generateMetadata() {
 export default async function ProfilePage() {
   const t = await getTranslations("profile");
   const session = await auth();
-  const isLocal = (session as any)?.provider === "local";
+  const isLocal = session?.provider === "local";
 
   const { data, failed } = await tryFetch(
     () => strapi<{ data: any }>("/api/me", { noCache: true }),

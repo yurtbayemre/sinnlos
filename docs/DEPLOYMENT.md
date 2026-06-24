@@ -1,6 +1,7 @@
 # Deployment Guide
 
-This guide walks through every supported deployment method for **Sinnlos Intranet**.
+This guide walks through every supported deployment method for **Sinnlos Intranet**
+(Next.js 16 frontend + Strapi v5 CMS).
 
 | Method | Best for |
 |---|---|
@@ -9,6 +10,12 @@ This guide walks through every supported deployment method for **Sinnlos Intrane
 | [VPS (any provider)](#3-vps-deployment) | Self-hosted production on any Linux VM |
 | [Azure (VM)](#4-azure-vm-deployment) | Production on Azure using the same Docker Compose approach |
 | [Azure (Container Apps)](#5-azure-container-apps-advanced) | Cloud-native, autoscaling, no VM management |
+
+> **Reverse proxy:** the base compose stack bundles **Caddy** (auto-TLS) so a
+> stock VPS works with one command. The live production host (srv-prod-01)
+> instead fronts the same stack with the box's shared **Traefik** via the
+> `docker-compose.traefik.yml` override — see [§3.6](#36-deploy). Pick one; they
+> are mutually exclusive.
 
 After deploying, run the [post-deployment verification](#post-deployment-verification)
 and set up [backup & restore](#backup--restore) for any production environment.
@@ -241,8 +248,9 @@ Bypasses auth and Strapi entirely. Uses the in-memory fixture dataset in
 
 ## 2. Docker Local (Full Stack)
 
-Runs Postgres + Strapi + Next.js + Caddy in containers, exactly as production.
-Requires Docker Desktop (Mac/Windows) or Docker Engine (Linux).
+Runs Postgres + Strapi + Next.js + Caddy in containers — the same app images as
+production, fronted by the bundled Caddy (live prod swaps Caddy for Traefik; see
+[§3.6](#36-deploy)). Requires Docker Desktop (Mac/Windows) or Docker Engine (Linux).
 
 ### 2.1 Clone and prepare env
 
@@ -426,6 +434,12 @@ https://intranet.example.com/api/connect/microsoft/callback
 
 ### 3.6 Deploy
 
+There are two reverse-proxy modes. Use **A** for a stock standalone VPS, or **B**
+if the box already runs a shared Traefik (this is how the live
+`sinnlos.yurtbay.dev` instance is deployed).
+
+#### A. Bundled Caddy (standalone VPS)
+
 ```bash
 cd /opt/sinnlos/infra
 docker compose up -d --build
@@ -433,6 +447,44 @@ docker compose up -d --build
 
 Caddy automatically requests a **Let's Encrypt TLS certificate** for your domain.
 Wait ~30 seconds, then visit **https://intranet.example.com**.
+
+#### B. Shared Traefik (live production layout)
+
+The live host fronts the **same** db/cms/web containers with the host's existing
+Traefik instead of the bundled Caddy. The second compose file
+`docker-compose.traefik.yml`:
+
+- gives the bundled `caddy` service the `manual` profile so it does **not** start;
+- attaches `web` + `cms` to the external `frontend` Docker network (the network
+  Traefik watches — it must already exist: `docker network create frontend`);
+- adds Traefik router/middleware labels that mirror the Caddyfile routing
+  (`/api/auth/*` → web, Strapi paths → cms, everything else → web), terminate TLS
+  via the `lehttp` certresolver, and apply the security headers + rate limits
+  described in [§3.9](#39-production-hardening).
+
+Deploy with **both** files and the fixed project name `infra` (so container and
+image names stay `infra-web-1`, `infra-cms-1`, `infra-db-1` / `infra-web`,
+`infra-cms`):
+
+```bash
+cd /opt/sinnlos
+docker compose -p infra \
+  -f infra/docker-compose.yml \
+  -f infra/docker-compose.traefik.yml \
+  up -d --build
+```
+
+In practice you don't run that by hand — use the wrapper:
+
+```bash
+infra/deploy.sh
+```
+
+`deploy.sh` does, in order: (1) pre-deploy Postgres + uploads backup, (2) tags the
+currently running `infra-web` / `infra-cms` images as `:rollback`, (3) rebuilds +
+restarts the stack with the Traefik override, (4) curl smoke-checks
+`https://sinnlos.yurtbay.dev` (override with `SMOKE_URL=`). It is `set -euo
+pipefail` and re-run safe.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -446,6 +498,17 @@ systemctl start docker
 
 ### 3.8 Updates
 
+On the Traefik host (mode B), pull and re-run the wrapper — it backs up and
+rollback-tags before rebuilding:
+
+```bash
+cd /opt/sinnlos
+git pull
+infra/deploy.sh
+```
+
+On a standalone Caddy box (mode A):
+
 ```bash
 cd /opt/sinnlos
 git pull
@@ -453,9 +516,31 @@ cd infra
 docker compose up -d --build
 ```
 
-This performs a rolling restart — Postgres and existing volumes are untouched.
-For **production**, follow the safer [update procedure](#74-update-procedure-production-safe)
-that backs up the database first.
+Either way this is a rolling restart — Postgres and existing volumes are
+untouched. For the manual production-safe sequence (and rollback), see the
+[update procedure](#74-update-procedure-production-safe).
+
+### 3.9 Production hardening
+
+The live deployment applies these (already encoded in the compose files — no
+extra steps):
+
+- **Non-root containers.** Both `web` and `cms` run as an unprivileged user with
+  `no-new-privileges`, the `web` container additionally drops all Linux
+  capabilities (`cap_drop: ALL`). The Postgres and app services also carry
+  `mem_limit` / `cpus` / `pids_limit` caps.
+- **Security response headers** are set at the **Traefik** layer (override file),
+  not in the app: `X-Content-Type-Options: nosniff`, `frameDeny`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive
+  `Permissions-Policy`, and HSTS (`max-age=31536000; includeSubDomains; preload`).
+- **Rate limiting** guards brute-force / floods, again at Traefik
+  (rateLimit middleware, **not** an IP allowlist): a general limit on the web
+  router (avg 100/s, burst 50) and a stricter one on the cms router covering
+  `/api/auth` + `/admin` (avg 30/s, burst 15).
+
+> For a standalone Caddy box (mode A) these headers/limits are **not** applied —
+> Caddy only does TLS + routing here. Add equivalent directives to the Caddyfile
+> or front the box with your own proxy if you need them.
 
 ---
 
@@ -1087,48 +1172,50 @@ docker run --rm \
 
 ### 7.3 Automated daily backups (cron)
 
-Create `/opt/sinnlos/infra/backup.sh`:
+The live host ships a ready-made script: **`infra/backup/pg-backup.sh`**. It is
+the canonical backup for the `infra` project and does more than the manual
+snippets above:
+
+- dumps Postgres from `infra-db-1` (`pg_dump -Fc --no-owner`) and **verifies**
+  the dump with `pg_restore --list` before keeping it;
+- tars the `infra_cms_uploads` volume;
+- gzips each artifact, then **GPG-encrypts** it to the VPS backup public key
+  (asymmetric — a host/NAS compromise can't decrypt; the private key lives
+  off-box);
+- writes into the offsite dir under a `sinnlos/` namespace so the existing
+  NAS `rrsync` pull replicates it automatically;
+- keeps the **newest 7** of each artifact.
+
+It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
+`SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
+`/home/bigemo/backups/momsbest` keyring. `infra/deploy.sh` runs it once as a
+**pre-deploy** snapshot; register it nightly with cron:
 
 ```bash
-#!/bin/bash
-set -euo pipefail
-cd /opt/sinnlos/infra
-mkdir -p backups
-
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-
-# Database
-docker compose exec -T db \
-  pg_dump -U sinnlos -d sinnlos --format=custom \
-  > backups/db-$TIMESTAMP.dump
-
-# Uploads
-docker run --rm \
-  -v sinnlos_cms_uploads:/uploads \
-  -v "$(pwd)/backups":/backup \
-  alpine tar czf /backup/uploads-$TIMESTAMP.tar.gz -C /uploads .
-
-# Keep only the last 14 days
-find backups -type f -mtime +14 -delete
+( crontab -l 2>/dev/null ; \
+  echo "0 3 * * * /opt/sinnlos/infra/backup/pg-backup.sh >> /var/log/sinnlos-backup.log 2>&1" ) \
+  | crontab -
 ```
 
-Register with cron:
-
-```bash
-chmod +x /opt/sinnlos/infra/backup.sh
-( crontab -l 2>/dev/null ; echo "0 3 * * * /opt/sinnlos/infra/backup.sh >> /var/log/sinnlos-backup.log 2>&1" ) | crontab -
-```
-
-For off-site storage, `rsync` or `rclone` the `backups/` directory to
-S3/Azure Blob/BorgBase after each run.
+> Self-hosting without the GPG/NAS keyring? Use the manual `pg_dump` + volume-tar
+> commands in §7.1–§7.2 on a cron instead, and push the output off-site with
+> `rsync`/`rclone`.
 
 ### 7.4 Update procedure (production-safe)
 
-```bash
-cd /opt/sinnlos/infra
+On the live Traefik host the wrapper handles backup, rollback-tagging, build and
+smoke-check in one shot:
 
+```bash
+cd /opt/sinnlos && git pull
+infra/deploy.sh
+```
+
+The manual equivalent (e.g. on a standalone Caddy box):
+
+```bash
 # 1. Always back up first
-./backup.sh
+/opt/sinnlos/infra/backup/pg-backup.sh
 
 # 2. Pull latest code
 cd /opt/sinnlos && git pull
@@ -1137,19 +1224,35 @@ cd /opt/sinnlos && git pull
 cd infra && docker compose up -d --build
 
 # 4. Watch the logs until both containers report healthy
-docker compose logs -f --tail=50 cms web
+docker compose -p infra logs -f --tail=50 cms web
 ```
 
-If anything goes wrong, roll back:
+**Rollback.** `deploy.sh` tags the previously-running images `infra-web:rollback`
+and `infra-cms:rollback` before each build, so a bad deploy can be reverted
+**without** rebuilding — retag and re-up just the affected service:
+
+```bash
+docker tag infra-web:rollback infra-web:latest
+docker tag infra-cms:rollback infra-cms:latest
+docker compose -p infra \
+  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  up -d --no-build web cms
+```
+
+If a code revert is needed instead, reset and rebuild:
 
 ```bash
 cd /opt/sinnlos
 git reset --hard <previous-commit-sha>
-cd infra
-docker compose up -d --build
-# If the database schema changed, restore from backup:
-docker compose exec -T db pg_restore -U sinnlos -d sinnlos --clean --if-exists \
-  < backups/db-<timestamp>.dump
+infra/deploy.sh
+```
+
+If the database schema changed, restore from the pre-deploy backup (decrypt the
+GPG artifact first with the off-box private key):
+
+```bash
+docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
+  < sinnlos-db-<timestamp>.dump
 ```
 
 ---

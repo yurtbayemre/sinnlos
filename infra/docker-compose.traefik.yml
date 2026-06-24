@@ -20,13 +20,19 @@ services:
       - "traefik.http.middlewares.sinnlos-headers.headers.stsSeconds=31536000"
       - "traefik.http.middlewares.sinnlos-headers.headers.stsIncludeSubdomains=true"
       - "traefik.http.middlewares.sinnlos-compress.compress=true"
+      # Clickjacking-Schutz: X-Frame-Options: DENY (am bestehenden Header-Middleware)
+      - "traefik.http.middlewares.sinnlos-headers.headers.frameDeny=true"
+      # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf Auth-/CMS-Router
+      - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
+      - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.period=1s"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
       - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.sinnlos-auth.priority=100"
       - "traefik.http.routers.sinnlos-auth.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-auth.service=sinnlos-web"
-      - "traefik.http.routers.sinnlos-auth.middlewares=sinnlos-headers,sinnlos-compress"
+      - "traefik.http.routers.sinnlos-auth.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
       # Catch-all -> Next.js
       - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
       - "traefik.http.routers.sinnlos-web.priority=1"
@@ -48,7 +54,7 @@ services:
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-cms.service=sinnlos-cms"
-      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-headers,sinnlos-compress"
+      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
       - "traefik.http.services.sinnlos-cms.loadbalancer.server.port=1337"
 
 networks:
