@@ -15,8 +15,11 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
     return user.role?.type !== "guest";
   }
 
+  // v5 routes carry a documentId; accept a numeric id too so direct API
+  // consumers keep working (same gotcha as in the comment controller).
+  const idParam = String(targetId);
   const page = await strapi.db.query("api::wiki-page.wiki-page").findOne({
-    where: { id: targetId },
+    where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
     populate: {
       author: true,
       department: true,

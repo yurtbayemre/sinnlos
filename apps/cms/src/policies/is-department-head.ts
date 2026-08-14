@@ -14,8 +14,11 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const targetId = policyContext.params?.id;
   if (!targetId) return true; // collection-level create: further checks in controller
 
+  // v5 routes carry a documentId; accept a numeric id too so direct API
+  // consumers keep working (same gotcha as in the comment controller).
+  const idParam = String(targetId);
   const entity = await strapi.db.query("api::department.department").findOne({
-    where: { id: targetId },
+    where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
     populate: { members: true },
   });
   if (!entity) return false;
