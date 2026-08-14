@@ -1,4 +1,4 @@
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft,
@@ -16,6 +16,7 @@ import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { fetchAllUsers } from "@/lib/users";
 import { Card, CardContent } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -30,19 +31,24 @@ async function count(path: string): Promise<number> {
       { noCache: true },
     );
     return (res as any).meta?.pagination?.total ?? (res as any).data?.length ?? 0;
-  } catch {
+  } catch (e) {
+    unstable_rethrow(e);
     return 0;
   }
 }
 
+/**
+ * /api/users is a users-permissions route, not a content-type route: it
+ * returns a bare array without `meta.pagination` and ignores the
+ * `pagination[...]` params entirely — so there is no total to read.
+ * Count by actually fetching the (id-only) directory.
+ */
 async function countUsers(): Promise<number> {
   try {
-    const users = await strapi<any[]>(
-      "/api/users?fields[0]=id&pagination[pageSize]=1",
-      { noCache: true },
-    );
-    return Array.isArray(users) ? users.length : 0;
-  } catch {
+    const users = await fetchAllUsers("fields[0]=id");
+    return users.length;
+  } catch (e) {
+    unstable_rethrow(e);
     return 0;
   }
 }
@@ -68,7 +74,8 @@ async function recentActivity() {
       totalReactions: (reactions as any).meta?.pagination?.total ?? 0,
       unreadNotifications: (notifications as any).meta?.pagination?.total ?? 0,
     };
-  } catch {
+  } catch (e) {
+    unstable_rethrow(e);
     return { recentComments: [], totalReactions: 0, unreadNotifications: 0 };
   }
 }

@@ -1,10 +1,13 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { signInWithMicrosoft } from "@/lib/auth-actions";
+import { safeInternalPath } from "@/lib/utils";
 
 export async function generateMetadata() {
   const t = await getTranslations("auth");
@@ -16,7 +19,21 @@ export async function generateMetadata() {
 // env exists — and ships with the wrong sign-in buttons baked in.
 export const dynamic = "force-dynamic";
 
-export default async function SignInPage() {
+export default async function SignInPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; expired?: string }>;
+}) {
+  const { from: rawFrom, expired } = await searchParams;
+  const from = safeInternalPath(rawFrom);
+
+  // Already signed in? Skip the form — except when we were sent here
+  // because the Strapi JWT expired (?expired=1): the Auth.js cookie may
+  // still exist then, and redirecting away would loop right back here.
+  const session = await auth();
+  if (session && !expired) {
+    redirect(from);
+  }
   const t = await getTranslations("auth");
   const tCommon = await getTranslations("common");
   const description = MICROSOFT_ENABLED
@@ -44,8 +61,14 @@ export default async function SignInPage() {
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {expired && (
+            <p className="text-center text-sm text-destructive">
+              {t("sessionExpired")}
+            </p>
+          )}
           {MICROSOFT_ENABLED && (
             <form action={signInWithMicrosoft}>
+              <input type="hidden" name="from" value={from} />
               <Button
                 type="submit"
                 size="lg"
@@ -65,7 +88,7 @@ export default async function SignInPage() {
             </div>
           )}
 
-          {LOCAL_ENABLED && <LocalSignInForm />}
+          {LOCAL_ENABLED && <LocalSignInForm from={from} />}
 
           {REGISTRATION_ENABLED && (
             <p className="text-center text-sm text-muted-foreground">

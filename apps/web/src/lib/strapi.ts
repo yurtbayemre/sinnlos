@@ -3,6 +3,7 @@
  * The Strapi JWT (issued by the users-permissions Microsoft provider and
  * stored in the Auth.js session) is injected automatically.
  */
+import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { demo } from "@/lib/demo";
@@ -54,6 +55,16 @@ export async function strapi<T>(path: string, opts: FetchOptions = {}): Promise<
   }
 
   const res = await fetch(`${STRAPI_URL}${path}`, fetchInit);
+
+  // The session's Strapi JWT was rejected (expired, or the CMS JWT secret
+  // was rotated). The only fix is re-authenticating, so send the user to
+  // the sign-in page instead of surfacing a cryptic 401 everywhere.
+  // redirect() throws NEXT_REDIRECT, which Next.js handles in Server
+  // Components, Server Actions and Route Handlers alike; catch-all
+  // wrappers rethrow it via unstable_rethrow (see lib/safe-fetch.ts).
+  if (res.status === 401 && token && !opts.tokenOverride) {
+    redirect("/sign-in?expired=1");
+  }
 
   if (!res.ok) {
     const body = await res.text();

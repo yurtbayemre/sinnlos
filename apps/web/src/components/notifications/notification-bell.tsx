@@ -8,24 +8,9 @@ import {
   markNotificationsRead,
   markAllNotificationsRead,
 } from "@/lib/notification-actions";
+import { relativeTime } from "@/lib/relative-time";
 import type { Notification } from "@/lib/types";
 import { useTranslations } from "next-intl";
-
-function relative(dateStr: string | undefined, t: ReturnType<typeof useTranslations<"notifications">>) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const min = 60000;
-  const hour = 3600000;
-  const day = 86400000;
-  if (diff < min) return t("justNow");
-  if (diff < hour) return t("minutesAgo", { min: Math.floor(diff / min) });
-  if (diff < day) return t("hoursAgo", { hours: Math.floor(diff / hour) });
-  if (diff < 7 * day) return t("daysAgo", { days: Math.floor(diff / day) });
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
 
 const typeIcon: Record<string, typeof Bell> = {
   announcement: Megaphone,
@@ -42,6 +27,7 @@ export function NotificationBell({
   onChanged?: () => void | Promise<void>;
 }) {
   const t = useTranslations("notifications");
+  const tRel = useTranslations("relativeTime");
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
@@ -55,8 +41,17 @@ export function NotificationBell({
         setOpen(false);
       }
     }
-    if (open) document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    if (open) {
+      document.addEventListener("mousedown", handleClick);
+      document.addEventListener("keydown", handleKey);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [open]);
 
   const handleOpen = () => {
@@ -154,7 +149,7 @@ export function NotificationBell({
                         {n.title}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {relative(n.createdAt, t)}
+                        {relativeTime(n.createdAt, tRel, { granularity: "minute" })}
                       </div>
                     </div>
                     {!n.readAt && (

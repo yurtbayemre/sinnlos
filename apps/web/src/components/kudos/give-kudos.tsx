@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useMemo } from "react";
+import { useEffect, useState, useTransition, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { Award, Send, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -19,12 +19,24 @@ const VALUES: { value: KudosValue; labelKey: "teamwork" | "innovation" | "leader
 
 export function GiveKudos({ people }: { people: UserLite[] }) {
   const t = useTranslations("kudos");
+  const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<UserLite | null>(null);
   const [message, setMessage] = useState("");
   const [value, setValue] = useState<KudosValue>("teamwork");
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // Close the dialog on Escape while it is open.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open]);
 
   const filtered = useMemo(() => {
     if (!search) return [];
@@ -42,14 +54,22 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
     setSelected(null);
     setMessage("");
     setValue("teamwork");
+    setError(null);
     setOpen(false);
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected || !message.trim()) return;
+    setError(null);
     startTransition(async () => {
-      await sendKudos(selected.id, message.trim(), value);
+      try {
+        await sendKudos(selected.id, message.trim(), value);
+      } catch {
+        // Keep the dialog (and its content) so the user can retry.
+        setError(t("sendFailed"));
+        return;
+      }
       reset();
     });
   };
@@ -71,15 +91,21 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
           onMouseDown={() => setOpen(false)}
         >
           <form
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="give-kudos-title"
             onSubmit={handleSubmit}
             onMouseDown={(e) => e.stopPropagation()}
             className="w-full max-w-md animate-scale-in rounded-2xl border bg-background p-6 shadow-2xl"
           >
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{t("giveKudos")}</h2>
+              <h2 id="give-kudos-title" className="text-lg font-semibold">
+                {t("giveKudos")}
+              </h2>
               <button
                 type="button"
                 onClick={() => setOpen(false)}
+                aria-label={tCommon("close")}
                 className="rounded-lg p-1 transition hover:bg-muted"
               >
                 <X className="h-4 w-4" />
@@ -116,6 +142,8 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                       placeholder={t("searchColleague")}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
+                      // Initial focus when the dialog opens.
+                      autoFocus
                       className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
                     />
                     {filtered.length > 0 && (
@@ -180,6 +208,12 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                   className="w-full rounded-xl border bg-muted/40 px-4 py-2.5 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
                 />
               </div>
+
+              {error && (
+                <p role="alert" className="text-sm text-destructive">
+                  {error}
+                </p>
+              )}
 
               <button
                 type="submit"

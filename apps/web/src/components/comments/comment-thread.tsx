@@ -6,20 +6,8 @@ import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 import { addComment, deleteComment } from "@/lib/comment-actions";
+import { relativeTime } from "@/lib/relative-time";
 import type { Comment } from "@/lib/types";
-
-function relative(dateStr: string | undefined, t: ReturnType<typeof useTranslations<"comments">>) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const day = 86400000;
-  if (diff < day) return t("today");
-  if (diff < 2 * day) return t("yesterday");
-  if (diff < 7 * day) return t("daysAgo", { days: Math.floor(diff / day) });
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
 
 export function CommentThread({
   targetType,
@@ -37,23 +25,38 @@ export function CommentThread({
 }) {
   const tComments = useTranslations("comments");
   const tCommon = useTranslations("common");
+  const tRel = useTranslations("relativeTime");
   const [body, setBody] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = body.trim();
     if (!text) return;
-    setBody("");
+    setError(null);
     startTransition(async () => {
-      await addComment(targetType, targetId, text);
+      try {
+        await addComment(targetType, targetId, text);
+      } catch {
+        // Keep the draft in the input so the user can retry.
+        setError(tComments("sendFailed"));
+        return;
+      }
+      setBody("");
       await onChanged?.();
     });
   };
 
   const handleDelete = (id: number) => {
+    setError(null);
     startTransition(async () => {
-      await deleteComment(id);
+      try {
+        await deleteComment(id);
+      } catch {
+        setError(tComments("deleteFailed"));
+        return;
+      }
       await onChanged?.();
     });
   };
@@ -72,7 +75,7 @@ export function CommentThread({
               c.author?.displayName ??
               c.author?.username ??
               c.author?.email ??
-              "Unknown";
+              tCommon("unknown");
             const isOwner = currentUserId != null && c.author?.id === currentUserId;
             return (
               <div key={c.id} className="flex gap-3">
@@ -85,7 +88,7 @@ export function CommentThread({
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-medium">{name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {relative(c.createdAt, tComments)}
+                      {relativeTime(c.createdAt, tRel)}
                     </span>
                     {isOwner && (
                       <button
@@ -107,6 +110,12 @@ export function CommentThread({
             );
           })}
         </div>
+      )}
+
+      {error && (
+        <p role="alert" className="text-sm text-destructive">
+          {error}
+        </p>
       )}
 
       <form onSubmit={handleSubmit} className="flex gap-2">

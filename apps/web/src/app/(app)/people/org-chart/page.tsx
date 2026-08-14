@@ -1,6 +1,6 @@
 import { Contact } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { strapi } from "@/lib/strapi";
+import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
@@ -17,9 +17,8 @@ export default async function OrgChartPage() {
   const t = await getTranslations("people");
   const { data, failed } = await tryFetch(
     () =>
-      strapi<any[]>(
-        "/api/users?populate[manager]=true&populate[avatar]=true&populate[department]=true&pagination[pageSize]=500&sort=displayName:asc",
-        { noCache: true },
+      fetchAllUsers(
+        "populate[manager]=true&populate[avatar]=true&populate[department]=true&sort=displayName:asc",
       ),
     "org-chart",
   );
