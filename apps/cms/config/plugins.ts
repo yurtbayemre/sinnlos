@@ -10,6 +10,11 @@
  * Entra ID (Azure AD) app registration:
  *   - Redirect URI: ${PUBLIC_URL}/api/connect/microsoft/callback
  *   - API permissions: openid, profile, email, User.Read, GroupMember.Read.All
+ *     GroupMember.Read.All is a delegated Graph permission that REQUIRES
+ *     tenant admin consent. Without it (in the scope below AND consented in
+ *     the app registration) `/me/memberOf` returns 403, the group-based
+ *     role mapping (config/ms-role-map.ts) never matches, and every
+ *     Microsoft login falls back to the `member` role.
  */
 type Env = ((key: string, def?: unknown) => any) & {
   int: (key: string, def?: number) => number;
@@ -31,7 +36,7 @@ export default ({ env }: { env: Env }) => ({
           key: env("MS_CLIENT_ID", ""),
           secret: env("MS_CLIENT_SECRET", ""),
           callback: `${env("PUBLIC_URL", "http://localhost:1337")}/api/connect/microsoft/callback`,
-          scope: ["openid", "profile", "email", "User.Read"],
+          scope: ["openid", "profile", "email", "User.Read", "GroupMember.Read.All"],
           tenant: env("MS_TENANT_ID", "common"),
         },
       },

@@ -5,7 +5,7 @@
  * or bake it into the image). Order matters — the first match wins.
  *
  * Strapi role "type" values are lowercase identifiers. The bootstrap script
- * in src/index.ts guarantees that all five roles below exist.
+ * in src/index.ts guarantees that all six roles below exist.
  */
 export type StrapiRoleType =
   | "admin_role"
