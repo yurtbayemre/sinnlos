@@ -22,6 +22,8 @@ services:
       - "traefik.http.middlewares.sinnlos-compress.compress=true"
       # Clickjacking-Schutz: X-Frame-Options: DENY (am bestehenden Header-Middleware)
       - "traefik.http.middlewares.sinnlos-headers.headers.frameDeny=true"
+      # Restriktive Permissions-Policy: das Intranet braucht keine Sensor-/Media-APIs
+      - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
       # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf Auth-/CMS-Router
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"

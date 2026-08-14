@@ -48,7 +48,10 @@ fi
 # --- 2. Rollback-tag the currently running images ---------------------------
 # Capture the image each running container currently uses, then tag it
 # :rollback. If a deploy goes bad you can revert with, e.g.:
-#   docker tag infra-web:rollback infra-web:latest && <re-up just that service>
+#   docker tag infra-web:rollback infra-web:latest
+#   docker compose -p infra -f ... up -d --no-build web
+# The re-up MUST use --no-build: with --build compose would rebuild (and
+# re-deploy) the broken image instead of starting the retagged one.
 log "Tagging current images as :rollback"
 for svc in web cms; do
   container="${PROJECT}-${svc}-1"
@@ -82,5 +85,7 @@ done
 
 echo "ERROR: smoke check failed — ${SMOKE_URL} returned HTTP ${code}" >&2
 echo "       Inspect logs:  ${COMPOSE[*]} logs --tail=100 web cms" >&2
-echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then re-up." >&2
+echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
+echo "                      ${COMPOSE[*]} up -d --no-build web cms" >&2
+echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
 exit 1
