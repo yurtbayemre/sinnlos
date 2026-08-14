@@ -16,6 +16,8 @@
     "delete": "Delete",
     "or": "or",
     "by": "by",
+    "unknown": "Unknown",
+    "close": "Close",
     "member": "{count, plural, one {# member} other {# members}}",
     "team": "{count, plural, one {# team} other {# teams}}",
     "vote": "{count, plural, one {# vote} other {# votes}}",
@@ -61,7 +63,9 @@
     "name": "Name",
     "namePlaceholder": "Jane Doe",
     "creatingAccount": "Creating account…",
-    "demoMode": "Demo mode"
+    "demoMode": "Demo mode",
+    "registrationDisabled": "Registration is currently disabled.",
+    "sessionExpired": "Your session has expired — please sign in again."
   },
   "dashboard": {
     "welcomeBack": "Welcome back",
@@ -166,7 +170,8 @@
     "innovation": "Innovation",
     "leadership": "Leadership",
     "customerFocus": "Customer Focus",
-    "excellence": "Excellence"
+    "excellence": "Excellence",
+    "sendFailed": "Couldn't send kudos — please try again."
   },
   "polls": {
     "title": "Polls",
@@ -174,7 +179,8 @@
     "active": "Active",
     "closed": "Closed",
     "emptyTitle": "No polls yet",
-    "emptyHint": "Admins and editors can create polls from the Strapi admin panel."
+    "emptyHint": "Admins and editors can create polls from the Strapi admin panel.",
+    "voteFailed": "Your vote couldn't be saved — maybe you already voted."
   },
   "documents": {
     "title": "Documents",
@@ -258,6 +264,16 @@
     "writeComment": "Write a comment…",
     "deleteComment": "Delete comment",
     "sendComment": "Send comment",
+    "sendFailed": "Couldn't post your comment — please try again.",
+    "deleteFailed": "Couldn't delete the comment — please try again.",
+    "today": "today",
+    "yesterday": "yesterday",
+    "daysAgo": "{days}d ago"
+  },
+  "relativeTime": {
+    "justNow": "just now",
+    "minutesAgo": "{min}m ago",
+    "hoursAgo": "{hours}h ago",
     "today": "today",
     "yesterday": "yesterday",
     "daysAgo": "{days}d ago"

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
-import { api, strapi } from "@/lib/strapi";
+import { api } from "@/lib/strapi";
+import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import { Card, CardContent } from "@/components/ui/card";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -18,13 +19,7 @@ export default async function DashboardPage() {
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
     tryFetch(() => api.announcements.list(session?.user?.department?.id), "dashboard"),
-    tryFetch(
-      () => strapi<any[]>(
-        "/api/users?fields[0]=id&pagination[pageSize]=200",
-        { noCache: true },
-      ),
-      "dashboard",
-    ),
+    tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard"),
     tryFetch(() => api.events.list(), "dashboard"),
   ]);
 

@@ -7,7 +7,7 @@ import { signInWithCredentials } from "@/lib/auth-actions";
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
-export function LocalSignInForm() {
+export function LocalSignInForm({ from = "/" }: { from?: string }) {
   const t = useTranslations("auth");
   const [state, formAction, isPending] = useActionState(signInWithCredentials, {
     error: undefined,
@@ -15,6 +15,8 @@ export function LocalSignInForm() {
 
   return (
     <form action={formAction} className="space-y-3">
+      {/* Validated deep-link target from ?from= — see sign-in/page.tsx. */}
+      <input type="hidden" name="from" value={from} />
       <div>
         <label htmlFor="identifier" className="mb-1 block text-sm font-medium">
           {t("email")}

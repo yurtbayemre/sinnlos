@@ -57,20 +57,28 @@ export function SearchCommand() {
 
   const items = query.length >= 2 ? searchResults : preloaded;
 
-  // Ctrl+K / Cmd+K shortcut + Escape to close
+  // Ctrl+K / Cmd+K shortcut
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         setOpen((o) => !o);
       }
-      if (e.key === "Escape") {
-        setOpen(false);
-      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, []);
+
+  // Escape closes the palette — registered only while it is open so the
+  // handler doesn't swallow Escape presses meant for other UI.
+  useEffect(() => {
+    if (!open) return;
+    const onEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("keydown", onEscape);
+    return () => document.removeEventListener("keydown", onEscape);
+  }, [open]);
 
   const select = useCallback(
     (href: string) => {
@@ -148,6 +156,9 @@ export function SearchCommand() {
           onMouseDown={() => setOpen(false)}
         >
           <Command
+            role="dialog"
+            aria-modal="true"
+            aria-label={tSearch("globalSearch")}
             label={tSearch("globalSearch")}
             className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
             onMouseDown={(e) => e.stopPropagation()}
@@ -159,6 +170,8 @@ export function SearchCommand() {
                 value={query}
                 onValueChange={setQuery}
                 placeholder={tSearch("searchPlaceholder")}
+                // Initial focus when the palette opens.
+                autoFocus
                 className="flex h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
