@@ -2,8 +2,9 @@
  * Populates the database with realistic demo data so people can explore
  * every Sinnlos feature without manual setup. Gated behind SEED_DEMO_DATA=1.
  *
- * Idempotent — skips seeding if any departments already exist (simple
- * guard against re-running on an already-populated database).
+ * Idempotent — skips seeding if any departments OR users already exist
+ * (guard against re-running on an already-populated database, and
+ * against creating login-capable demo accounts next to real ones).
  */
 
 const DEPARTMENTS = [
@@ -54,7 +55,10 @@ export async function seedDemoData(strapi: any) {
   if (process.env.SEED_DEMO_DATA !== "1") return;
 
   const existingDepts = await strapi.db.query("api::department.department").count({});
-  if (existingDepts > 0) {
+  const existingUsers = await strapi.db
+    .query("plugin::users-permissions.user")
+    .count({});
+  if (existingDepts > 0 || existingUsers > 0) {
     strapi.log.info("[seed-demo] data already exists, skipping");
     return;
   }
@@ -308,8 +312,9 @@ export async function seedDemoData(strapi: any) {
     });
   }
 
+  // Do NOT log the demo password — logs may be shipped/retained.
   strapi.log.info(
-    `[seed-demo] done — ${USERS.length} users (password: "${PASSWORD}"), ` +
+    `[seed-demo] done — ${USERS.length} users, ` +
     `${DEPARTMENTS.length} departments, ${TEAMS.length} teams, ` +
     `${announcements.length} announcements, ${events.length} events, ` +
     `${wikiPages.length} wiki pages, ${kudosList.length} kudos, ` +
