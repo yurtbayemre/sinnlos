@@ -10,12 +10,29 @@
  *   - documents WITH departments set     → only users whose department is
  *                                          among the document's `departments`
  *
- * Admins and editors always pass. As in wiki-visibility, we mutate the
- * query filters so Strapi's core find handler does the heavy lifting.
+ * Admins and editors always pass.
+ *
+ * KNOWN OPEN ISSUE (do NOT "fix" by switching to the real request query):
+ *   This policy currently writes to `policyContext.query`, which is a
+ *   silent no-op (Koa's `query` is a prototype getter that
+ *   createPolicyContext's Object.assign never copies) — so it has never
+ *   actually filtered. Unlike wiki-visibility, the filter shape here is
+ *   structurally valid for the `document` schema (`departments` exists),
+ *   BUT filtering on the `departments` relation requires the caller to hold
+ *   `api::department.department.find` (validateQuery runs
+ *   throwRestrictedRelations on filters). The `guest` role can read
+ *   documents but is NOT granted `department.find`, so redirecting this to
+ *   the real request query would 400 every guest document read (verified
+ *   via node repro against @strapi/utils 5.49). Activating this safely
+ *   requires granting `department.find` to all document-reading roles
+ *   (incl. guest) first. Left as-is (status quo: no API-level document
+ *   visibility filtering) to avoid a 400 app.
  */
 export default async (policyContext: any, _config: unknown, { strapi }: any) => {
   const user = policyContext.state?.user;
 
+  // NOTE: writing to `policyContext.query` is intentionally a no-op today —
+  // see the KNOWN OPEN ISSUE above before changing this to the real query.
   const query = policyContext.query ?? (policyContext.query = {});
   query.filters = query.filters ?? {};
 
