@@ -232,10 +232,13 @@ export const api = {
       strapi<any>(`/api/polls/${id}/results`, { noCache: true }),
   },
   documents: {
+    // noCache since document-visibility filters per user (department scoping):
+    // the fetch cache keys by URL only, so a tagged cache would leak one
+    // user's scoped list to others — same rule as wiki/people/announcements.
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort=updatedAt:desc&pagination[pageSize]=50",
-        { tag: "documents", revalidate: 60 },
+        { noCache: true },
       ),
   },
   kudos: {
