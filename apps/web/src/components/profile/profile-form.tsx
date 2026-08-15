@@ -12,6 +12,8 @@ export type ProfileInitial = {
   jobTitle?: string | null;
   phone?: string | null;
   officeLocation?: string | null;
+  birthday?: string | null;
+  birthdayVisible?: boolean | null;
 };
 
 export function ProfileForm({ initial }: { initial: ProfileInitial }) {
@@ -72,6 +74,32 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           className={inputClass}
         />
       </div>
+      <div>
+        <label htmlFor="birthday" className="mb-1 block text-sm font-medium">
+          {tProfile("birthday")}
+        </label>
+        <input
+          id="birthday"
+          name="birthday"
+          type="date"
+          defaultValue={initial.birthday ?? ""}
+          className={inputClass}
+        />
+      </div>
+      <label className="flex items-start gap-3">
+        <input
+          type="checkbox"
+          name="birthdayVisible"
+          defaultChecked={initial.birthdayVisible ?? false}
+          className="mt-0.5 h-4 w-4 rounded border accent-primary"
+        />
+        <span className="min-w-0">
+          <span className="block text-sm font-medium">{tProfile("birthdayVisible")}</span>
+          <span className="block text-xs text-muted-foreground">
+            {tProfile("birthdayVisibleHint")}
+          </span>
+        </span>
+      </label>
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
       {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}

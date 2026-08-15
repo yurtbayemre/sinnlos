@@ -66,6 +66,8 @@ export default async function ProfilePage() {
                 jobTitle: me?.jobTitle ?? null,
                 phone: me?.phone ?? null,
                 officeLocation: me?.officeLocation ?? null,
+                birthday: me?.birthday ?? null,
+                birthdayVisible: me?.birthdayVisible ?? false,
               }}
             />
           </CardContent>
