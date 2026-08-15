@@ -302,7 +302,8 @@
     "guide": "Guide",
     "other": "Other",
     "emptyTitle": "No documents yet",
-    "emptyHint": "Admins and editors can upload documents from the Strapi admin panel."
+    "emptyHint": "Admins and editors can upload documents from the Strapi admin panel.",
+    "noFile": "No file attached"
   },
   "profile": {
     "title": "My profile",

@@ -302,7 +302,8 @@
     "guide": "Anleitung",
     "other": "Sonstiges",
     "emptyTitle": "Noch keine Dokumente",
-    "emptyHint": "Admins und Redakteure können Dokumente im Strapi-Admin-Panel hochladen."
+    "emptyHint": "Admins und Redakteure können Dokumente im Strapi-Admin-Panel hochladen.",
+    "noFile": "Keine Datei hinterlegt"
   },
   "profile": {
     "title": "Mein Profil",

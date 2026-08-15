@@ -103,6 +103,13 @@ export default async function DocumentsPage() {
                           <Download className="h-4 w-4" aria-hidden="true" />
                         </a>
                       )}
+                      {!fileUrl && (
+                        // Make the file-less state explicit: without this hint a
+                        // card is silently inert and reads as broken.
+                        <span className="shrink-0 text-xs italic text-muted-foreground">
+                          {t("noFile")}
+                        </span>
+                      )}
                     </CardContent>
                   </Card>
                 );
