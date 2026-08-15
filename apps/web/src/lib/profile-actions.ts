@@ -19,6 +19,9 @@ export async function updateProfile(
   _prev: ProfileFormState,
   formData: FormData,
 ): Promise<ProfileFormState> {
+  // Empty date input clears the stored birthday; an unchecked checkbox is
+  // absent from FormData, so map its presence ("on") to an explicit boolean.
+  const birthday = String(formData.get("birthday") ?? "").trim();
   try {
     await strapi("/api/me", {
       method: "PUT",
@@ -28,6 +31,8 @@ export async function updateProfile(
           jobTitle: formData.get("jobTitle"),
           phone: formData.get("phone"),
           officeLocation: formData.get("officeLocation"),
+          birthday: birthday || null,
+          birthdayVisible: formData.get("birthdayVisible") === "on",
         },
       }),
       noCache: true,

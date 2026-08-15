@@ -85,6 +85,8 @@
       "target": "plugin::users-permissions.user",
       "mappedBy": "manager"
     },
-    "hireDate": { "type": "date" }
+    "hireDate": { "type": "date" },
+    "birthday": { "type": "date", "private": true },
+    "birthdayVisible": { "type": "boolean", "default": false, "private": true }
   }
 }
