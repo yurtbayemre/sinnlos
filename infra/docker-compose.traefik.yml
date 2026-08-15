@@ -51,7 +51,11 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=frontend"
-      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || PathPrefix(`/uploads`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
+      # `/upload` (no trailing s) is the media-library admin API — distinct from
+      # `/uploads`, which serves the stored files. Without it those calls fall
+      # through to the web catch-all, which answers the admin's XHR with a
+      # sign-in redirect instead of JSON and crashes the media library.
+      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || PathPrefix(`/upload`) || PathPrefix(`/uploads`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
       - "traefik.http.routers.sinnlos-cms.priority=50"
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
