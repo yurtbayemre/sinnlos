@@ -143,6 +143,20 @@ export const api = {
       }
       return strapi<StrapiListResponse<any>>(url, { noCache: true });
     },
+    // Mandatory-read announcements for the ack banner and the pinned
+    // "open confirmations" section on /announcements. Same audience $or
+    // filter as list(); requiresAck is a plain boolean attribute, so the
+    // filter validates for every reading role. Author fields are
+    // populated (same as list()) so cards rendered from this query are
+    // complete; the banner just ignores them.
+    requiringAck: (departmentId?: number) => {
+      let url =
+        "/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100";
+      if (departmentId) {
+        url += `&filters[$or][0][audience][$eq]=all&filters[$or][1][audience][$null]=true&filters[$or][2][department][id][$eq]=${departmentId}`;
+      }
+      return strapi<StrapiListResponse<any>>(url, { noCache: true });
+    },
   },
   events: {
     list: () =>
@@ -176,6 +190,18 @@ export const api = {
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30",
+        { noCache: true },
+      ),
+  },
+  quickLinks: {
+    // noCache: the quick-link-visibility policy filters per user's
+    // department — caching by URL would leak scoped links across users.
+    // Deliberately NO populate of `departments`: the policy scopes
+    // server-side, and populating the relation would 400 for roles
+    // without department.find (guest).
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/quick-links?sort[0]=order:asc&sort[1]=label:asc&pagination[pageSize]=100",
         { noCache: true },
       ),
   },

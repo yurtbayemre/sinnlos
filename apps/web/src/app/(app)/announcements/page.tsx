@@ -1,15 +1,17 @@
-import { Megaphone, Pin } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { CheckCircle2, Megaphone, Pin } from "lucide-react";
+import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Announcement } from "@/lib/types";
+import { fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
+import type { Acknowledgement, Announcement } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CommentSection } from "@/components/comments/comment-section";
+import { AckButton } from "@/components/announcements/ack-button";
 import { initials } from "@/lib/utils";
 
 export async function generateMetadata() {
@@ -19,13 +21,62 @@ export async function generateMetadata() {
 
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
+  const locale = await getLocale();
   const session = await auth();
   const deptId = session?.user?.department?.id;
-  const { data, failed } = await tryFetch(() => api.announcements.list(deptId), "announcements");
+  const [{ data, failed }, requiringAckResult, acksResult] = await Promise.all([
+    tryFetch(() => api.announcements.list(deptId), "announcements"),
+    tryFetch(() => api.announcements.requiringAck(deptId), "announcements"),
+    tryFetch(() => fetchMyAnnouncementAcks(), "acknowledgements"),
+  ]);
   const items = (data?.data ?? []) as Announcement[];
 
-  const pinned = items.filter((a) => a.pinned);
-  const rest = items.filter((a) => !a.pinned);
+  // My own acks (the visibility policy scopes the endpoint to the caller),
+  // keyed by the target's stable documentId — the numeric id changes on
+  // every re-publish. Map keying also dedupes accidental duplicate ack
+  // rows (accepted check-then-insert race in the CMS).
+  const myAcks = new Map<string, Acknowledgement>();
+  for (const ack of acksResult.data ?? []) {
+    myAcks.set(ack.targetDocumentId, ack);
+  }
+
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString(locale, {
+      year: "numeric",
+      month: "long",
+      day: "numeric",
+    });
+
+  const renderAck = (a: Announcement) => {
+    if (!a.requiresAck || !a.documentId) return null;
+    const ack = myAcks.get(a.documentId);
+    const ackedAt = ack?.acknowledgedAt ?? ack?.createdAt ?? null;
+    return (
+      <AckButton
+        announcementDocumentId={a.documentId}
+        acknowledgedAtLabel={ackedAt ? formatDate(ackedAt) : null}
+        deadlineLabel={a.ackDeadline ? formatDate(a.ackDeadline) : null}
+      />
+    );
+  };
+
+  // The dashboard banner counts open confirmations across up to 100
+  // requiresAck announcements, but this list only shows the newest 20 —
+  // an older mandatory announcement could be counted as open yet never be
+  // visible here. Load the open ones explicitly and pin them on top,
+  // deduplicated against the top 20 by documentId (the top-20 copy wins,
+  // it carries the fuller populate).
+  const byDocId = new Map(
+    items.filter((a) => a.documentId).map((a) => [a.documentId!, a]),
+  );
+  const openAck = ((requiringAckResult.data?.data ?? []) as Announcement[])
+    .filter((a) => a.requiresAck && a.documentId && !myAcks.has(a.documentId))
+    .map((a) => byDocId.get(a.documentId!) ?? a);
+  const openDocIds = new Set(openAck.map((a) => a.documentId));
+  const remaining = items.filter((a) => !a.documentId || !openDocIds.has(a.documentId));
+
+  const pinned = remaining.filter((a) => a.pinned);
+  const rest = remaining.filter((a) => !a.pinned);
 
   return (
     <div className="space-y-8">
@@ -35,9 +86,9 @@ export default async function AnnouncementsPage() {
         description={t("description")}
       />
 
-      {failed && <FetchErrorBanner />}
+      {(failed || requiringAckResult.failed || acksResult.failed) && <FetchErrorBanner />}
 
-      {items.length === 0 ? (
+      {items.length === 0 && openAck.length === 0 ? (
         <EmptyState
           icon={Megaphone}
           title={t("emptyTitle")}
@@ -45,6 +96,22 @@ export default async function AnnouncementsPage() {
         />
       ) : (
         <>
+          {openAck.length > 0 && (
+            <section className="space-y-3">
+              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                {t("openAcks")}
+              </div>
+              <div className="stagger grid gap-4 md:grid-cols-2">
+                {openAck.map((a) => (
+                  <AnnouncementCard key={a.documentId ?? a.id} item={a} pinned ack={renderAck(a)}>
+                    <CommentSection targetType="announcement" targetId={a.id} />
+                  </AnnouncementCard>
+                ))}
+              </div>
+            </section>
+          )}
+
           {pinned.length > 0 && (
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -53,7 +120,7 @@ export default async function AnnouncementsPage() {
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {pinned.map((a) => (
-                  <AnnouncementCard key={a.id} item={a} pinned>
+                  <AnnouncementCard key={a.id} item={a} pinned ack={renderAck(a)}>
                     <CommentSection targetType="announcement" targetId={a.id} />
                   </AnnouncementCard>
                 ))}
@@ -66,7 +133,7 @@ export default async function AnnouncementsPage() {
               <div className="text-sm font-medium text-muted-foreground">{t("recent")}</div>
               <div className="stagger space-y-4">
                 {rest.map((a) => (
-                  <AnnouncementCard key={a.id} item={a}>
+                  <AnnouncementCard key={a.id} item={a} ack={renderAck(a)}>
                     <CommentSection targetType="announcement" targetId={a.id} />
                   </AnnouncementCard>
                 ))}
@@ -79,7 +146,7 @@ export default async function AnnouncementsPage() {
   );
 }
 
-function AnnouncementCard({ item, pinned = false, children }: { item: Announcement; pinned?: boolean; children?: React.ReactNode }) {
+function AnnouncementCard({ item, pinned = false, ack, children }: { item: Announcement; pinned?: boolean; ack?: React.ReactNode; children?: React.ReactNode }) {
   const author = item.author ?? null;
   const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
   const createdAt = item.createdAt ? new Date(item.createdAt) : null;
@@ -116,6 +183,7 @@ function AnnouncementCard({ item, pinned = false, children }: { item: Announceme
         <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
           {item.body}
         </p>
+        {ack && <div className="mt-4">{ack}</div>}
         {children && (
           <div className="mt-4 border-t pt-4">
             {children}

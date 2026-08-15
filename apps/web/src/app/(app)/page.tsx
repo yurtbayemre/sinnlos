@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Suspense } from "react";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
@@ -7,7 +8,9 @@ import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import { Card, CardContent } from "@/components/ui/card";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { AckBanner } from "@/components/dashboard/ack-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
+import { QuickLinks } from "@/components/dashboard/quick-links";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -15,19 +18,26 @@ export default async function DashboardPage() {
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user
   // sees a banner instead of mistaking "API down" for "no content yet".
-  const [departments, teams, announcements, peopleResult, events] = await Promise.all([
+  const [departments, teams, announcements, peopleResult, events, quickLinks] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
     tryFetch(() => api.announcements.list(session?.user?.department?.id), "dashboard"),
     tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard"),
     tryFetch(() => api.events.list(), "dashboard"),
+    tryFetch(() => api.quickLinks.list(), "dashboard"),
   ]);
 
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
   const peopleCount = Array.isArray(peopleResult.data) ? peopleResult.data.length : 0;
   const eventCount = events.data?.data.length ?? 0;
-  const anyFailed = departments.failed || teams.failed || announcements.failed || peopleResult.failed || events.failed;
+  const anyFailed =
+    departments.failed ||
+    teams.failed ||
+    announcements.failed ||
+    peopleResult.failed ||
+    events.failed ||
+    quickLinks.failed;
 
   const t = await getTranslations("dashboard");
   const tNav = await getTranslations("nav");
@@ -43,6 +53,13 @@ export default async function DashboardPage() {
 
       {anyFailed && <FetchErrorBanner />}
 
+      {/* AckBanner does its own per-user fetches — inside Suspense it
+          streams in after the initial dashboard flush instead of blocking
+          the whole page on the acknowledgements round-trips. */}
+      <Suspense fallback={null}>
+        <AckBanner />
+      </Suspense>
+
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
         <StatCard icon={<Contact className="h-5 w-5" aria-hidden="true" />} label={tNav("people")} value={peopleCount} href="/people" />
         <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label={tNav("departments")} value={deptCount} href="/departments" />
@@ -52,6 +69,8 @@ export default async function DashboardPage() {
         <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label={tNav("news")} value={announcements.data?.data.length ?? 0} href="/announcements" />
         <StatCard icon={<Award className="h-5 w-5" aria-hidden="true" />} label={tNav("kudos")} value={t("give")} href="/kudos" />
       </section>
+
+      <QuickLinks items={(quickLinks.data?.data ?? []) as any[]} />
 
       <LatestNews items={(announcements.data?.data ?? []) as any[]} />
     </div>

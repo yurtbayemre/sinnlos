@@ -79,7 +79,21 @@
     "noAnnouncementsYet": "No announcements yet",
     "noAnnouncementsHint": "Editors and admins can post company news from the Strapi admin panel.",
     "pinned": "Pinned",
-    "featured": "Featured"
+    "featured": "Featured",
+    "openAcksTitle": "Pending acknowledgements",
+    "openAcksCount": "{count, plural, one {# mandatory announcement is waiting for your read confirmation.} other {# mandatory announcements are waiting for your read confirmation.}}",
+    "openAcksAction": "Confirm now"
+  },
+  "quickLinks": {
+    "eyebrow": "Essential links",
+    "title": "Quick links",
+    "openInNewTab": "Opens in a new tab",
+    "categories": {
+      "hr": "HR & People",
+      "it": "IT & Support",
+      "tools": "Tools",
+      "extern": "External"
+    }
   },
   "people": {
     "title": "People",
@@ -144,13 +158,22 @@
     "description": "The latest news, operational updates and memos from across the company. Pinned posts stay at the top until they're unpinned by an editor.",
     "pinned": "Pinned",
     "recent": "Recent",
+    "openAcks": "Open confirmations",
     "emptyTitle": "No announcements yet",
-    "emptyHint": "Editors and admins can post company news from the Strapi admin panel. New posts will appear here and in the dashboard feed."
+    "emptyHint": "Editors and admins can post company news from the Strapi admin panel. New posts will appear here and in the dashboard feed.",
+    "ackButton": "I have read this",
+    "ackPending": "Confirming…",
+    "ackConfirmed": "Confirmed",
+    "ackConfirmedAt": "Confirmed on {date}",
+    "ackDeadline": "Confirm by {date}",
+    "ackFailed": "Confirmation failed. Please try again."
   },
   "kudos": {
     "title": "Kudos",
     "description": "Recognize your colleagues for great work.",
     "celebrations": "Celebrations",
+    "birthday": "Birthday",
+    "yearsCount": "{years, plural, one {# year} other {# years}}",
     "recentKudos": "Recent kudos",
     "gaveKudosTo": "{from} gave kudos to {to}",
     "giveKudos": "Give kudos",
@@ -202,6 +225,9 @@
     "jobTitle": "Job title",
     "phone": "Phone",
     "officeLocation": "Office location",
+    "birthday": "Birthday",
+    "birthdayVisible": "Show my birthday to colleagues",
+    "birthdayVisibleHint": "Opt-in: your birthday appears (without the year) on the kudos page. Leave unchecked to keep it private.",
     "passwordSection": "Password",
     "passwordDescLocal": "Change the password you use to sign in.",
     "passwordDescMicrosoft": "Account security settings.",
@@ -220,6 +246,8 @@
     "analyticsSection": "Intranet analytics",
     "analyticsDashboard": "Analytics dashboard",
     "analyticsDesc": "Content counts, engagement metrics, and recent activity.",
+    "ackReportLink": "Read confirmations",
+    "ackReportLinkDesc": "Confirmation rate and outstanding users per mandatory announcement.",
     "quickLinks": "Quick links",
     "rolesSection": "Roles",
     "rolesDesc": "Sinnlos ships with six roles. New Microsoft Entra ID users are assigned via group claims and the mapping in {file}.",
@@ -259,6 +287,18 @@
     "unreadNotifications": "Unread notifications",
     "recentComments": "Recent comments",
     "commented": "commented"
+  },
+  "ackReport": {
+    "title": "Read confirmations",
+    "description": "Acknowledgement status of every mandatory announcement: confirmation rate per post and who has not confirmed yet.",
+    "emptyTitle": "No mandatory announcements",
+    "emptyHint": "Announcements that require acknowledgement (requiresAck) will show up here with their confirmation rate.",
+    "audienceAll": "All employees",
+    "audienceDepartment": "Department: {name}",
+    "deadline": "Deadline: {date}",
+    "ackedOf": "{acked} of {total} confirmed",
+    "allAcked": "Every targeted user has confirmed.",
+    "openUsers": "{count, plural, one {# user has not confirmed yet} other {# users have not confirmed yet}}"
   },
   "comments": {
     "writeComment": "Write a comment…",

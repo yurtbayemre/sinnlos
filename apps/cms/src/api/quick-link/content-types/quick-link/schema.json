@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "quick_links",
+  "info": {
+    "singularName": "quick-link",
+    "pluralName": "quick-links",
+    "displayName": "Quick Link",
+    "description": "Central link gateway: payroll portal, ticket system, HR tools, external services"
+  },
+  "options": { "draftAndPublish": true },
+  "attributes": {
+    "label": { "type": "string", "required": true },
+    "url": { "type": "string", "required": true },
+    "icon": { "type": "string" },
+    "category": {
+      "type": "enumeration",
+      "enum": ["hr", "it", "tools", "extern"],
+      "default": "tools"
+    },
+    "order": { "type": "integer", "default": 0 },
+    "departments": {
+      "type": "relation",
+      "relation": "manyToMany",
+      "target": "api::department.department"
+    }
+  }
+}

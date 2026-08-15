@@ -72,16 +72,20 @@ export default async function KudosPage() {
           <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {celebrations.map((c) => {
               const name = c.user.displayName ?? c.user.username ?? "Someone";
+              const isBirthday = c.type === "birthday";
               return (
                 <Card key={`${c.user.id}-${c.type}`}>
                   <CardContent className="flex items-center gap-3 p-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-lg dark:bg-amber-900/30">
-                      {"\u{1F382}"}
+                      {isBirthday ? "\u{1F382}" : "\u{1F389}"}
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {c.years} year{c.years !== 1 ? "s" : ""} ·{" "}
+                        {isBirthday
+                          ? t("birthday")
+                          : t("yearsCount", { years: c.years ?? 0 })}{" "}
+                        ·{" "}
                         {c.daysUntil === 0
                           ? t("today")
                           : c.daysUntil === 1
