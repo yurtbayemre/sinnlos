@@ -20,6 +20,15 @@ const nextConfig = {
   // The old wildcard `https://**` pattern was also unnecessarily broad. If
   // a next/image consumer is ever added, scope remotePatterns to the Strapi
   // host (STRAPI_PUBLIC_URL, e.g. sinnlos.yurtbay.dev) plus localhost.
+  experimental: {
+    // Marketplace ad photos travel through a Server Action (FormData →
+    // Strapi /api/upload with the session JWT; the browser never sees the
+    // JWT). Default limit is 1 MB — allow 4 images x 5 MB plus form
+    // overhead. Strapi enforces the real per-file limits server-side.
+    serverActions: {
+      bodySizeLimit: "22mb",
+    },
+  },
 };
 
 export default withNextIntl(nextConfig);

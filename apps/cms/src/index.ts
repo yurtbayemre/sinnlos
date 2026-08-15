@@ -58,10 +58,12 @@ const ROLES: RoleSeed[] = [
 const CONTENT_TYPES = [
   "api::acknowledgement.acknowledgement",
   "api::announcement.announcement",
+  "api::classified.classified",
   "api::comment.comment",
   "api::department.department",
   "api::document.document",
   "api::event.event",
+  "api::event-rsvp.event-rsvp",
   "api::kudos.kudos",
   "api::notification.notification",
   "api::poll.poll",
@@ -100,10 +102,14 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   admin_role: {
     "api::acknowledgement.acknowledgement": ALL_ACTIONS,
     "api::announcement.announcement": ALL_ACTIONS,
+    "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": ALL_ACTIONS,
     "api::department.department": ALL_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
+    // delete deliberately admin-only across ALL roles: removing someone
+    // else's RSVP is an admin correction, not a user action.
+    "api::event-rsvp.event-rsvp": ALL_ACTIONS,
     "api::kudos.kudos": ALL_ACTIONS,
     "api::notification.notification": ALL_ACTIONS,
     "api::poll.poll": ALL_ACTIONS,
@@ -120,10 +126,16 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     // only admin_role may correct them.
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": ALL_ACTIONS,
+    // Full CRUD = moderation: editors may take down any employee ad
+    // (is-classified-author passes admin_role/editor unconditionally).
+    "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": ALL_ACTIONS,
     "api::department.department": READ_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
+    // No delete (admin-only); update is ownership-gated by
+    // is-event-rsvp-owner — editors change only their OWN answer.
+    "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ALL_ACTIONS,
     "api::notification.notification": ALL_ACTIONS,
     "api::poll.poll": ALL_ACTIONS,
@@ -138,10 +150,12 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   department_head: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
+    "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": [...READ_ACTIONS, "update"],
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
+    "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
@@ -156,10 +170,12 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   team_lead: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
+    "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
+    "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
@@ -174,10 +190,14 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   member: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
+    // update/delete are ownership-gated by is-classified-author; the grant
+    // here only lets that policy run (see file header note).
+    "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
+    "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
@@ -218,8 +238,16 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     // were dead attack surface (an authenticated guest could probe/create
     // ack rows for targets it cannot read). Revoked below in
     // REVOKED_PERMISSIONS for databases bootstrapped by older versions.
+    // NO classified grants either: the flea market is internal and ads
+    // populate author.email/jobTitle — employee contact data a restricted
+    // guest must not read. The marketplace nav entry stays visible (kudos
+    // precedent) and the page degrades to the FetchErrorBanner for guests.
+    // Revoked below for databases bootstrapped by earlier versions.
     "api::comment.comment": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
+    // NO event-rsvp grants: guest reads the calendar but neither responds
+    // nor sees who attends (attendee names are employee data; the web app
+    // skips the RSVP fetch for guests to avoid a 403 banner).
     "api::event.event": READ_ACTIONS,
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
@@ -242,10 +270,15 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
   authenticated: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
+    // Read-only on purpose: `authenticated` is only the pre-role-mapping
+    // fallback, and posting an ad requires the upload grant anyway (which
+    // this role does not get).
+    "api::classified.classified": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create"],
     "api::department.department": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
+    "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
@@ -285,6 +318,19 @@ const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   // for every populated relation, so admin_role needs role.find or the
   // populate 400s. admin only — no other role reads audienceRoles.
   "plugin::users-permissions.role.find": ["admin_role"],
+  // Marketplace ad photos: employees may CREATE uploads via POST
+  // /api/upload — deliberately NOT `find`/`findOne`/`destroy` on the
+  // upload content-api (no browsing or deleting of the media library from
+  // outside the admin panel). guest and the `authenticated` fallback get
+  // nothing. The route itself is additionally hardened (image-only magic
+  // byte allowlist, 5 MB, create-only) in extensions/upload/strapi-server.ts.
+  "plugin::upload.content-api.upload": [
+    "admin_role",
+    "editor",
+    "department_head",
+    "team_lead",
+    "member",
+  ],
 };
 
 async function ensureActionPermission(strapi: any, roleId: number, actionKey: string) {
@@ -342,6 +388,10 @@ const REVOKED_PERMISSIONS: Record<string, string[]> = {
     "api::acknowledgement.acknowledgement.find",
     "api::acknowledgement.acknowledgement.findOne",
     "api::acknowledgement.acknowledgement.create",
+    // Flea market is internal-only (ads populate author.email/jobTitle);
+    // an early version of this bootstrap granted guest read access.
+    "api::classified.classified.find",
+    "api::classified.classified.findOne",
   ],
 };
 

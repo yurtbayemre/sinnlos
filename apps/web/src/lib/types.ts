@@ -131,11 +131,35 @@ export interface Event {
   start: string;
   end?: string | null;
   allDay?: boolean;
+  rsvpEnabled?: boolean;
+  capacity?: number | null;
   location?: string | null;
   url?: string | null;
   departments?: Department[];
   organizer?: UserLite | null;
   createdAt?: string;
+}
+
+export type RsvpStatus = "yes" | "no" | "maybe";
+
+export interface EventRsvp {
+  id: number;
+  documentId?: string;
+  /** documentId of the event (stable across re-publishes). */
+  targetDocumentId: string;
+  status: RsvpStatus;
+  respondedAt?: string | null;
+  user?: UserLite | null;
+}
+
+/** Per-event aggregate the events page derives from the raw RSVP rows. */
+export interface EventRsvpSummary {
+  /** Display names of "yes" responders (names are public, per decision). */
+  yesNames: string[];
+  yesCount: number;
+  maybeCount: number;
+  noCount: number;
+  myStatus: RsvpStatus | null;
 }
 
 export interface Notification {
@@ -186,6 +210,40 @@ export interface Document {
   uploadedBy?: UserLite | null;
   createdAt?: string;
   updatedAt?: string;
+}
+
+export type ClassifiedCategory =
+  | "sale"
+  | "giveaway"
+  | "wanted"
+  | "service-offer"
+  | "service-wanted";
+
+export interface ClassifiedImage {
+  id: number;
+  url?: string;
+  name?: string;
+  formats?: {
+    thumbnail?: { url?: string };
+    small?: { url?: string };
+    medium?: { url?: string };
+  } | null;
+}
+
+export interface Classified {
+  id: number;
+  documentId?: string;
+  title: string;
+  description?: string;
+  category?: ClassifiedCategory;
+  price?: number | null;
+  priceNegotiable?: boolean;
+  location?: string | null;
+  images?: ClassifiedImage[] | null;
+  /** Date (YYYY-MM-DD); ads past this date disappear from the public list. */
+  expiresAt?: string;
+  author?: UserLite | null;
+  createdAt?: string;
 }
 
 export type KudosValue = "teamwork" | "innovation" | "leadership" | "customer-focus" | "excellence";

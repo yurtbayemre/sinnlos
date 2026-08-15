@@ -29,6 +29,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      # Users' local timezone — date math (RSVP capacity days, classified
+      # expiry, month grid) must not drift a day around UTC midnight.
+      TZ: Europe/Berlin
       HOST: 0.0.0.0
       PORT: 1337
       APP_KEYS: ${APP_KEYS}
@@ -80,6 +83,9 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
+      # Users' local timezone — server-rendered dates (events list/month
+      # grid, ad expiry) must match what employees see on their clock.
+      TZ: Europe/Berlin
       HOSTNAME: 0.0.0.0
       PORT: 3000
       STRAPI_URL: http://cms:1337
