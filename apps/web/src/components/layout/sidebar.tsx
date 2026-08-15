@@ -21,6 +21,7 @@ export async function Sidebar({ className }: { className?: string }) {
     { href: "/teams", label: t("teams"), icon: "Users2" },
     { href: "/announcements", label: t("announcements"), icon: "Megaphone" },
     { href: "/kudos", label: t("kudos"), icon: "Award" },
+    { href: "/marketplace", label: t("marketplace"), icon: "ShoppingBag" },
     { href: "/polls", label: t("polls"), icon: "BarChart3" },
     { href: "/documents", label: t("documents"), icon: "FileText" },
   ];
