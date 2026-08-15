@@ -37,3 +37,28 @@ export function getMutableQuery(policyContext: any): Record<string, any> {
   // Last-resort fallback for non-Koa policy contexts.
   return policyContext.query ?? (policyContext.query = {});
 }
+
+/**
+ * Builds the `{ id: ... }` filter clause the id-based visibility policies
+ * inject for a resolved list of visible primary-key ids.
+ *
+ * Why the empty list needs special treatment — the sanitize fail-open trap:
+ *   The core controllers run `sanitizeQuery` (@strapi/utils 5.49
+ *   `dist/sanitize/sanitizers.js`, `defaultSanitizeFilters`) over the
+ *   request filters AFTER our policy injected them. Its last visitor
+ *   removes "empty plain objects and empty arrays" as operands — so
+ *   `{ id: { $in: [] } }` loses the `$in` key and degrades to `{ id: {} }`,
+ *   which is no constraint at all. A user who may see NOTHING would
+ *   suddenly see EVERYTHING (fail-open). Verified via node repro against
+ *   the installed @strapi/utils 5.49:
+ *     { id: { $in: [] } }  → sanitized to { id: {} }
+ *     { id: { $eq: -1 } }  → survives unchanged
+ *
+ *   We therefore inject a SCALAR operand for the empty case:
+ *   `{ id: { $eq: -1 } }` is sanitize-proof (scalar, non-empty) and can
+ *   never match — Strapi primary keys are positive integers, so -1 does
+ *   not exist. Non-empty lists keep the regular `$in`.
+ */
+export function restrictiveIdFilter(idList: number[]): Record<string, any> {
+  return idList.length > 0 ? { id: { $in: idList } } : { id: { $eq: -1 } };
+}

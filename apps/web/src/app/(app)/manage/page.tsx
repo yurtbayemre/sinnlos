@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock, BarChart3 } from "lucide-react";
+import { ExternalLink, Shield, Users, BookOpen, Building2, Megaphone, Lock, BarChart3, ClipboardCheck } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 // Browser-facing URL — inside Docker the internal STRAPI_URL
@@ -69,21 +69,38 @@ export default async function AdminPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">{t("analyticsSection")}</h2>
-        <Link href="/manage/analytics" className="focus-card block">
-          <Card className="card-lift transition hover:border-primary/40">
-            <CardContent className="flex items-center gap-4 p-6">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <BarChart3 className="h-5 w-5" />
-              </div>
-              <div>
-                <div className="font-medium">{t("analyticsDashboard")}</div>
-                <div className="text-sm text-muted-foreground">
-                  {t("analyticsDesc")}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Link href="/manage/analytics" className="focus-card block">
+            <Card className="card-lift h-full transition hover:border-primary/40">
+              <CardContent className="flex items-center gap-4 p-6">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <BarChart3 className="h-5 w-5" />
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        </Link>
+                <div>
+                  <div className="font-medium">{t("analyticsDashboard")}</div>
+                  <div className="text-sm text-muted-foreground">
+                    {t("analyticsDesc")}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/manage/acknowledgements" className="focus-card block">
+            <Card className="card-lift h-full transition hover:border-primary/40">
+              <CardContent className="flex items-center gap-4 p-6">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <ClipboardCheck className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="font-medium">{t("ackReportLink")}</div>
+                  <div className="text-sm text-muted-foreground">
+                    {t("ackReportLinkDesc")}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+        </div>
       </section>
 
       <section className="space-y-3">

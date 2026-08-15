@@ -56,6 +56,7 @@ const ROLES: RoleSeed[] = [
  * per role; everything else stays untouched.
  */
 const CONTENT_TYPES = [
+  "api::acknowledgement.acknowledgement",
   "api::announcement.announcement",
   "api::comment.comment",
   "api::department.department",
@@ -65,6 +66,7 @@ const CONTENT_TYPES = [
   "api::notification.notification",
   "api::poll.poll",
   "api::poll-vote.poll-vote",
+  "api::quick-link.quick-link",
   "api::reaction.reaction",
   "api::team.team",
   "api::wiki-space.wiki-space",
@@ -96,6 +98,7 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  */
 const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
   admin_role: {
+    "api::acknowledgement.acknowledgement": ALL_ACTIONS,
     "api::announcement.announcement": ALL_ACTIONS,
     "api::comment.comment": ALL_ACTIONS,
     "api::department.department": ALL_ACTIONS,
@@ -105,6 +108,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": ALL_ACTIONS,
     "api::poll.poll": ALL_ACTIONS,
     "api::poll-vote.poll-vote": ALL_ACTIONS,
+    "api::quick-link.quick-link": ALL_ACTIONS,
     "api::reaction.reaction": ALL_ACTIONS,
     "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
@@ -112,6 +116,9 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   },
   editor: {
+    // No update/delete: acknowledgements are immutable read receipts —
+    // only admin_role may correct them.
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": ALL_ACTIONS,
     "api::comment.comment": ALL_ACTIONS,
     "api::department.department": READ_ACTIONS,
@@ -121,6 +128,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": ALL_ACTIONS,
     "api::poll.poll": ALL_ACTIONS,
     "api::poll-vote.poll-vote": ALL_ACTIONS,
+    "api::quick-link.quick-link": ALL_ACTIONS,
     "api::reaction.reaction": ALL_ACTIONS,
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
@@ -128,6 +136,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   },
   department_head: {
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": [...READ_ACTIONS, "update"],
@@ -137,6 +146,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": ["find", "findOne", "create"],
+    "api::quick-link.quick-link": READ_ACTIONS,
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
@@ -144,6 +154,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   team_lead: {
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
@@ -153,6 +164,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": ["find", "findOne", "create"],
+    "api::quick-link.quick-link": READ_ACTIONS,
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
@@ -160,6 +172,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   member: {
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
@@ -169,6 +182,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": ["find", "findOne", "create"],
+    "api::quick-link.quick-link": READ_ACTIONS,
     "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
@@ -199,12 +213,18 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
    * controller order + validateFilters/throwRestrictedRelations).
    */
   guest: {
+    // NO acknowledgement grants: guest has no announcement.find, so it can
+    // never see (let alone confirm) a mandatory announcement — the grants
+    // were dead attack surface (an authenticated guest could probe/create
+    // ack rows for targets it cannot read). Revoked below in
+    // REVOKED_PERMISSIONS for databases bootstrapped by older versions.
     "api::comment.comment": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": READ_ACTIONS,
+    "api::quick-link.quick-link": READ_ACTIONS,
     "api::reaction.reaction": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": READ_ACTIONS,
@@ -220,6 +240,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
    * so the dashboard works even in that fallback case.
    */
   authenticated: {
+    "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create"],
     "api::department.department": READ_ACTIONS,
@@ -229,6 +250,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": ["find", "findOne", "create"],
+    "api::quick-link.quick-link": READ_ACTIONS,
     "api::reaction.reaction": [...READ_ACTIONS, "create"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
@@ -257,6 +279,12 @@ const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::profile.profile.updateMe": "*",
   // Built-in auth action local users need to change their password
   "plugin::users-permissions.auth.changePassword": "*",
+  // The admin ack report populates announcement.audienceRoles to restrict
+  // the target audience per announcement. validateQuery's
+  // throwRestrictedRelations verifies the scope `<relation target>.find`
+  // for every populated relation, so admin_role needs role.find or the
+  // populate 400s. admin only — no other role reads audienceRoles.
+  "plugin::users-permissions.role.find": ["admin_role"],
 };
 
 async function ensureActionPermission(strapi: any, roleId: number, actionKey: string) {
@@ -309,6 +337,11 @@ const REVOKED_PERMISSIONS: Record<string, string[]> = {
     "api::kudos.kudos.find",
     "api::kudos.kudos.findOne",
     "api::kudos.kudos.celebrations",
+    // guest cannot read announcements, so acknowledgement grants were
+    // useless attack surface — see the guest matrix note above.
+    "api::acknowledgement.acknowledgement.find",
+    "api::acknowledgement.acknowledgement.findOne",
+    "api::acknowledgement.acknowledgement.create",
   ],
 };
 

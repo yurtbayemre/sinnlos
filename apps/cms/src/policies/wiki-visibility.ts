@@ -1,4 +1,4 @@
-import { getMutableQuery } from "../utils/policy-query";
+import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 
 /**
@@ -35,8 +35,10 @@ import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
  *
  * The clause is `$and`-wrapped with any incoming client filter so a
  * caller-supplied filter can only narrow the result set, never widen it
- * past what they are allowed to see. An empty id list yields
- * `{ id: { $in: [] } }` — correctly restrictive (sees nothing).
+ * past what they are allowed to see. An empty id list must NOT become
+ * `{ id: { $in: [] } }` — sanitizeQuery strips empty array operands, which
+ * would drop the filter entirely (fail-open, sees EVERYTHING);
+ * `restrictiveIdFilter` injects a scalar `{ id: { $eq: -1 } }` instead.
  *
  * The applicable content-type level is passed per route via the policy
  * config: `{ name: "global::wiki-visibility", config: { level: "space" } }`.
@@ -82,7 +84,7 @@ export default async (
   }
 
   const query = getMutableQuery(policyContext);
-  const idFilter = { id: { $in: idList } };
+  const idFilter = restrictiveIdFilter(idList);
   query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
 
   return true;

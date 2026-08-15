@@ -1,4 +1,4 @@
-import { getMutableQuery } from "../utils/policy-query";
+import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
 
 /**
  * Enforces document visibility on reads of the `document` content type,
@@ -32,7 +32,9 @@ import { getMutableQuery } from "../utils/policy-query";
  *
  * The clause is `$and`-wrapped with any incoming client filter so a
  * caller-supplied filter can only narrow the result set, never widen it. An
- * empty id list yields `{ id: { $in: [] } }` — correctly restrictive.
+ * empty id list must NOT become `{ id: { $in: [] } }` — sanitizeQuery strips
+ * empty array operands, which would drop the filter entirely (fail-open);
+ * `restrictiveIdFilter` injects a scalar `{ id: { $eq: -1 } }` instead.
  *
  * Draft & publish note: `strapi.db.query` returns both draft and published
  * rows; the resulting id list is a superset covering both, and the core
@@ -76,7 +78,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
     .map((doc) => doc.id);
 
   const query = getMutableQuery(policyContext);
-  const idFilter = { id: { $in: idList } };
+  const idFilter = restrictiveIdFilter(idList);
   query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
 
   return true;
