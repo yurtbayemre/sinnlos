@@ -79,7 +79,21 @@
     "noAnnouncementsYet": "Noch keine Neuigkeiten",
     "noAnnouncementsHint": "Redakteure und Admins können Unternehmensneuigkeiten im Strapi-Admin-Panel veröffentlichen.",
     "pinned": "Angepinnt",
-    "featured": "Hervorgehoben"
+    "featured": "Hervorgehoben",
+    "openAcksTitle": "Offene Bestätigungen",
+    "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
+    "openAcksAction": "Jetzt bestätigen"
+  },
+  "quickLinks": {
+    "eyebrow": "Wichtige Links",
+    "title": "Schnellzugriff",
+    "openInNewTab": "Öffnet in neuem Tab",
+    "categories": {
+      "hr": "HR & Personal",
+      "it": "IT & Support",
+      "tools": "Tools",
+      "extern": "Extern"
+    }
   },
   "people": {
     "title": "Personen",
@@ -144,13 +158,22 @@
     "description": "Aktuelle Nachrichten, Betriebsmitteilungen und Memos aus dem gesamten Unternehmen. Angepinnte Beiträge bleiben oben, bis sie von einem Redakteur gelöst werden.",
     "pinned": "Angepinnt",
     "recent": "Aktuell",
+    "openAcks": "Offene Bestätigungen",
     "emptyTitle": "Noch keine Neuigkeiten",
-    "emptyHint": "Redakteure und Admins können Unternehmensneuigkeiten im Strapi-Admin-Panel veröffentlichen. Neue Beiträge erscheinen hier und im Dashboard."
+    "emptyHint": "Redakteure und Admins können Unternehmensneuigkeiten im Strapi-Admin-Panel veröffentlichen. Neue Beiträge erscheinen hier und im Dashboard.",
+    "ackButton": "Habe gelesen",
+    "ackPending": "Wird bestätigt…",
+    "ackConfirmed": "Bestätigt",
+    "ackConfirmedAt": "Bestätigt am {date}",
+    "ackDeadline": "Bestätigen bis {date}",
+    "ackFailed": "Bestätigung fehlgeschlagen. Bitte erneut versuchen."
   },
   "kudos": {
     "title": "Kudos",
     "description": "Würdigen Sie Kolleginnen und Kollegen für großartige Arbeit.",
-    "celebrations": "Jubiläen",
+    "celebrations": "Geburtstage & Jubiläen",
+    "birthday": "Geburtstag",
+    "yearsCount": "{years, plural, one {# Jahr} other {# Jahre}}",
     "recentKudos": "Neueste Kudos",
     "gaveKudosTo": "{from} hat {to} Kudos gegeben",
     "giveKudos": "Kudos vergeben",
@@ -202,6 +225,9 @@
     "jobTitle": "Jobtitel",
     "phone": "Telefon",
     "officeLocation": "Bürostandort",
+    "birthday": "Geburtsdatum",
+    "birthdayVisible": "Geburtstag für Kolleg:innen anzeigen",
+    "birthdayVisibleHint": "Freiwillig: Ihr Geburtstag erscheint (ohne Jahr) auf der Kudos-Seite. Ohne Häkchen bleibt er privat.",
     "passwordSection": "Passwort",
     "passwordDescLocal": "Ändern Sie das Passwort, mit dem Sie sich anmelden.",
     "passwordDescMicrosoft": "Kontosicherheitseinstellungen.",
@@ -220,6 +246,8 @@
     "analyticsSection": "Intranet-Analyse",
     "analyticsDashboard": "Analyse-Dashboard",
     "analyticsDesc": "Inhaltsstatistiken, Engagement-Metriken und aktuelle Aktivitäten.",
+    "ackReportLink": "Lesebestätigungen",
+    "ackReportLinkDesc": "Bestätigungsquote und offene Nutzer je Pflichtmeldung.",
     "quickLinks": "Schnellzugriff",
     "rolesSection": "Rollen",
     "rolesDesc": "Sinnlos enthält sechs Rollen. Neue Microsoft-Entra-ID-Benutzer werden über Gruppenansprüche und die Zuordnung in {file} zugewiesen.",
@@ -259,6 +287,18 @@
     "unreadNotifications": "Ungelesene Benachrichtigungen",
     "recentComments": "Neueste Kommentare",
     "commented": "kommentierte"
+  },
+  "ackReport": {
+    "title": "Lesebestätigungen",
+    "description": "Bestätigungsstatus aller Pflichtmeldungen: Quote je Meldung und wer noch nicht bestätigt hat.",
+    "emptyTitle": "Keine Pflichtmeldungen",
+    "emptyHint": "Neuigkeiten mit Bestätigungspflicht (requiresAck) erscheinen hier mit ihrer Bestätigungsquote.",
+    "audienceAll": "Alle Mitarbeitenden",
+    "audienceDepartment": "Abteilung: {name}",
+    "deadline": "Frist: {date}",
+    "ackedOf": "{acked} von {total} bestätigt",
+    "allAcked": "Alle Zielnutzer haben bestätigt.",
+    "openUsers": "{count, plural, one {# Nutzer hat noch nicht bestätigt} other {# Nutzer haben noch nicht bestätigt}}"
   },
   "comments": {
     "writeComment": "Kommentar schreiben…",

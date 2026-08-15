@@ -37,6 +37,8 @@
       "type": "enumeration",
       "enum": ["all", "departments"],
       "default": "all"
-    }
+    },
+    "requiresAck": { "type": "boolean", "default": false },
+    "ackDeadline": { "type": "date" }
   }
 }

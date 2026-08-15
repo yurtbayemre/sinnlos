@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "acknowledgements",
+  "info": {
+    "singularName": "acknowledgement",
+    "pluralName": "acknowledgements",
+    "displayName": "Acknowledgement",
+    "description": "Read confirmation for mandatory announcements (documents prepared)"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "targetType": {
+      "type": "enumeration",
+      "enum": ["announcement", "document"],
+      "required": true
+    },
+    "targetDocumentId": { "type": "string", "required": true },
+    "acknowledgedAt": { "type": "datetime" }
+  }
+}
