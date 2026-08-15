@@ -40,7 +40,16 @@ export default ({ env }: { env: Env }) => {
     },
     "strapi::poweredBy",
     "strapi::query",
-    "strapi::body",
+    {
+      // Cap multipart bodies at the same 50 MB as the upload plugin's
+      // sizeLimit (config/plugins.ts) — formidable's default would accept
+      // 200 MB and only fail later in the provider. Both limits must be
+      // kept in sync.
+      name: "strapi::body",
+      config: {
+        formidable: { maxFileSize: 50 * 1024 * 1024 },
+      },
+    },
     "strapi::session",
     "strapi::favicon",
     "strapi::public",

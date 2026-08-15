@@ -1,0 +1,35 @@
+{
+  "kind": "collectionType",
+  "collectionName": "classifieds",
+  "info": {
+    "singularName": "classified",
+    "pluralName": "classifieds",
+    "displayName": "Classified",
+    "description": "Employee marketplace ad (internal flea market): sale, giveaway, wanted, services"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "title": { "type": "string", "required": true, "maxLength": 120 },
+    "description": { "type": "text", "required": true, "maxLength": 5000 },
+    "category": {
+      "type": "enumeration",
+      "enum": ["sale", "giveaway", "wanted", "service-offer", "service-wanted"],
+      "default": "sale",
+      "required": true
+    },
+    "price": { "type": "decimal", "min": 0 },
+    "priceNegotiable": { "type": "boolean", "default": false },
+    "location": { "type": "string", "maxLength": 120 },
+    "images": {
+      "type": "media",
+      "multiple": true,
+      "allowedTypes": ["images"]
+    },
+    "expiresAt": { "type": "date", "required": true },
+    "author": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    }
+  }
+}
