@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "event_rsvps",
+  "info": {
+    "singularName": "event-rsvp",
+    "pluralName": "event-rsvps",
+    "displayName": "Event RSVP",
+    "description": "Attendance response (yes/no/maybe) per user and event, anchored to the event documentId"
+  },
+  "options": { "draftAndPublish": false },
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "targetDocumentId": { "type": "string", "required": true },
+    "status": {
+      "type": "enumeration",
+      "enum": ["yes", "no", "maybe"],
+      "required": true
+    },
+    "respondedAt": { "type": "datetime" }
+  }
+}
