@@ -117,6 +117,8 @@ cms ──POST /api/revalidate (x-revalidate-secret)──> web (intern, WEB_INT
 - **Backup:** `infra/backup/pg-backup.sh` nightly 03:00 + pre-deploy: `pg_dump -Fc` + restore-Check, Uploads-tar, GPG (Key off-box), 7d-Retention, Offsite-Dir.
 - **CI** (`.github/workflows/ci.yml`): typecheck → lint → **`pnpm test` läuft jetzt in CI** → build; **Node 24** (= Docker, Drift behoben), pnpm 9.12.0. Tests: 4 vitest-Dateien (ms-role-map, roles, reaction-summary, **policy-query** — die fail-open/No-Op-Fallen sind getestet). CMS-Dockerfile baut jetzt reproduzierbar (`--frozen-lockfile`, `cms/Dockerfile:10`).
 
+> **Rollback-Falle (2026-08-16):** `deploy.sh` taggt `:rollback` VOR dem Build — bei einem Cache-Hit zeigt der Tag danach auf dasselbe Image wie `:latest` und ist wertlos. Nach jedem Deploy prüfen (`docker inspect -f '{{.Id}}' infra-web:rollback` vs. laufendes Image) oder auf `:<git-sha>`-Tags umstellen.
+
 ## 7. Auffälligkeiten & Risiken
 
 ### 7a. Seit der letzten Karte (2026-08-14) ERLEDIGT — am Code verifiziert
@@ -146,6 +148,14 @@ cms ──POST /api/revalidate (x-revalidate-secret)──> web (intern, WEB_INT
 **P1.2 — guest sieht das Mitarbeiterverzeichnis** ([#10](https://github.com/yurtbayemre/sinnlos/issues/10))**:** `user.find/findOne` für alle Rollen inkl. guest (E-Mail/Telefon/hireDate; birthday ist schema-private und bleibt draußen). Bewusste, dokumentierte Abwägung (`index.ts:218`): Revoke würde jede Query 400en, die User-Relationen populated/filtert — auch die eigenen Visibility-Filter. Sauberer Fix bräuchte Feld-Sanitizing statt Grant-Entzug.
 
 **P1.3 — Announcement-Audience nur query-seitig** ([#9](https://github.com/yurtbayemre/sinnlos/issues/9))**:** Der `audience`/`department`-Filter lebt allein in den Web-Queries (`strapi.ts:139-159`); `announcement.find` hat keine CMS-Policy (`routes/announcement.ts`). Direkter API-Zugriff liest alle Announcements. Folge auch: der Ack-Report zählt Nutzer als „ausstehend", die die Ankündigung per Web-Filter nie sahen (Report filtert nur Rollen, nicht Departments).
+
+**P1.4 — `/uploads/*` ohne Authentifizierung** ([#21](https://github.com/yurtbayemre/sinnlos/issues/21)): Strapis `strapi::public`-Middleware liefert Dateibytes ohne Session (verifiziert 2026-08-16: PDF → 200 ohne Cookie, während `/api/documents` 403 gibt). Dateinamen sind gehasht (kein offenes Verzeichnis), aber Department-Scoping und Offboarding wirken damit nicht auf Dateien. Entscheidung nötig: bewusst akzeptieren oder über eine authentifizierte Next-Route streamen.
+
+**P1.5 — Login ohne Rate-Limit** ([#23](https://github.com/yurtbayemre/sinnlos/issues/23)): Der Passwort-Login läuft als Server Action über den `sinnlos-web`-Router — der trägt nur `headers`+`compress`, KEIN Ratelimit (das hängt an `sinnlos-auth` und `sinnlos-cms`). Strapi drosselt zwar selbst, der Web-Pfad ist am Edge aber ungebremst.
+
+**P1.6 — Caddy/Traefik-Routing-Drift** ([#22](https://github.com/yurtbayemre/sinnlos/issues/22)): `/upload` + `/email` stehen seit 91a305a nur in den Traefik-Labels, nicht im `infra/Caddyfile` — die in §1 als Invariante dokumentierte Doppelpflege ist verletzt; ein Caddy-Deploy hätte den Media-Library-Crash erneut.
+
+**P2.0 — Keine Tests für die 12 Autorisierungs-Policies** ([#24](https://github.com/yurtbayemre/sinnlos/issues/24)): Zwei davon waren monatelang stille No-Ops, ein leeres `$in` fiel offen — beides unsichtbar im Betrieb. Genau die Regressionsklasse, die Unit-Tests billig abfangen.
 
 **P2 — akzeptierte Races & bekannte Grenzen (bewusst so gebaut, in den Controllern dokumentiert):**
 - **Ack-/RSVP-/Poll-Vote-Races (check-then-insert)** ([#16](https://github.com/yurtbayemre/sinnlos/issues/16))**:** kein DB-Unique möglich (user ist Link-Table-Relation). Duplikat-Acks sind kosmetisch (alle Konsumenten dedupen per Set über targetDocumentId); RSVP-Duplikate healt der nächste Upsert, `countYesUsers` zählt distinct; Kapazitäts-Overshoot um 1 im Foto-Finish möglich (`event-rsvp.ts:75-83`).
