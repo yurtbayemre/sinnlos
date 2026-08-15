@@ -62,3 +62,47 @@ export function getMutableQuery(policyContext: any): Record<string, any> {
 export function restrictiveIdFilter(idList: number[]): Record<string, any> {
   return idList.length > 0 ? { id: { $in: idList } } : { id: { $eq: -1 } };
 }
+
+/**
+ * Pins a read query to PUBLISHED rows for the content types that use
+ * draft & publish.
+ *
+ * Why the id filter alone is not enough — the `?status=draft` trap:
+ *   The id-based visibility policies resolve their id list via
+ *   `strapi.db.query`, which returns draft AND published rows, so the
+ *   injected `{ id: { $in: [...] } }` is a superset spanning BOTH
+ *   publication states. Which of them the caller actually gets is decided
+ *   by the `status` query param — and that param is client-supplied:
+ *     - `validateQuery` accepts it (`status` is in
+ *       `ALLOWED_QUERY_PARAM_KEYS`, @strapi/utils 5.49
+ *       `content-api-constants.js`),
+ *     - `sanitizeQuery` only rewrites `filters`/`sort`/`fields`/`populate`
+ *       and passes `status` through untouched,
+ *     - the core service merges it OVER its own default:
+ *       `getFetchParams` = `{ status: 'published', ...params }`
+ *       (@strapi/core 5.49 `core-api/service/core-service.js`), and
+ *     - the document service turns `status: 'draft'` into
+ *       `lookup.publishedAt = { $null: true }`
+ *       (`services/document-service/draft-and-publish.js`).
+ *   So EVERY role holding `<type>.find` could read unpublished drafts of
+ *   the rows it may see by appending `?status=draft` — verified against
+ *   the installed 5.49: validateQuery ACCEPTS the param and sanitizeQuery
+ *   returns it verbatim. Writing the param server-side after the
+ *   admin/editor bypass closes that: our value is what sanitizeQuery sees,
+ *   and it overrides whatever the client sent.
+ *
+ * `publicationState` is the Strapi v4 spelling of the same switch. It is
+ * inert in v5 (no occurrence anywhere in @strapi/core, @strapi/utils or
+ * @strapi/database 5.49), but it is NOT stripped either: this CMS sets no
+ * `api.rest.strictParams`, so `sanitizeQuery` keeps unknown keys and the
+ * document service passes them on. Deleting it keeps a future
+ * back-compat shim (or a plugin honouring the legacy name) from
+ * re-opening the hole.
+ *
+ * Only for draftAndPublish types — on the others `status` is ignored by
+ * the document service anyway, but setting it would be misleading.
+ */
+export function forcePublishedStatus(query: Record<string, any>): void {
+  query.status = "published";
+  delete query.publicationState;
+}

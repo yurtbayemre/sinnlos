@@ -136,27 +136,28 @@ export const api = {
       ),
   },
   announcements: {
-    list: (departmentId?: number) => {
-      let url = "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&populate[department]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20";
-      if (departmentId) {
-        url += `&filters[$or][0][audience][$eq]=all&filters[$or][1][audience][$null]=true&filters[$or][2][department][id][$eq]=${departmentId}`;
-      }
-      return strapi<StrapiListResponse<any>>(url, { noCache: true });
-    },
+    // No audience filter here: targeting (audience/department/team/
+    // audienceRoles) is enforced server-side by the CMS policy
+    // `announcement-visibility`, which injects an id filter per caller.
+    // The old client-side `$or` was redundant for department scoping and
+    // silently missed team- and role-scoped posts entirely. noCache is
+    // therefore mandatory — these responses are per-user.
+    list: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&populate[department]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20",
+        { noCache: true },
+      ),
     // Mandatory-read announcements for the ack banner and the pinned
-    // "open confirmations" section on /announcements. Same audience $or
-    // filter as list(); requiresAck is a plain boolean attribute, so the
-    // filter validates for every reading role. Author fields are
-    // populated (same as list()) so cards rendered from this query are
-    // complete; the banner just ignores them.
-    requiringAck: (departmentId?: number) => {
-      let url =
-        "/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100";
-      if (departmentId) {
-        url += `&filters[$or][0][audience][$eq]=all&filters[$or][1][audience][$null]=true&filters[$or][2][department][id][$eq]=${departmentId}`;
-      }
-      return strapi<StrapiListResponse<any>>(url, { noCache: true });
-    },
+    // "open confirmations" section on /announcements — same visibility
+    // basis as list(), narrowed to requiresAck (a plain boolean
+    // attribute, so the filter validates for every reading role). Author
+    // fields are populated (same as list()) so cards rendered from this
+    // query are complete; the banner just ignores them.
+    requiringAck: () =>
+      strapi<StrapiListResponse<any>>(
+        "/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100",
+        { noCache: true },
+      ),
   },
   events: {
     // Time-window fetches instead of one global list: a plain

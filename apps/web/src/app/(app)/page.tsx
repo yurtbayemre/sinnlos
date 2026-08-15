@@ -27,7 +27,8 @@ export default async function DashboardPage() {
   const [departments, teams, announcements, peopleResult, events, quickLinks] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
-    tryFetch(() => api.announcements.list(session?.user?.department?.id), "dashboard"),
+    // Targeting is applied by the CMS policy — no department argument.
+    tryFetch(() => api.announcements.list(), "dashboard"),
     tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard"),
     // Upcoming only — the stat card counts events that still matter, not
     // the 50 oldest history entries (api.events is time-window based now).

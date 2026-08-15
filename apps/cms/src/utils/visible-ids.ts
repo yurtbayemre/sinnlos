@@ -32,7 +32,15 @@
 export interface UserScope {
   roleId?: number;
   departmentId?: number;
+  /** Ids of the teams the user is a MEMBER of (`user.teams`). */
   teamIds: number[];
+  /**
+   * Ids of the teams the user LEADS (`team.lead`). Separate from
+   * `teamIds` because the user schema has no inverse field for it and
+   * because the two are not interchangeable: wiki team spaces scope by
+   * membership, announcement targeting by "member OR lead".
+   */
+  ledTeamIds: number[];
 }
 
 interface SpaceRow {
@@ -49,16 +57,32 @@ interface SpaceRow {
  * admin/editor bypass) but not reliably the department/team relations, so
  * we resolve them explicitly — via `strapi.db.query`, which needs no
  * relation `.find` scope.
+ *
+ * Led teams need a second query: `team.lead` is a oneToOne relation
+ * declared on the team with no inverse field on the user, so it cannot be
+ * populated from the user side. The team table is small (one row per team
+ * plus its draft), so loading it and matching the lead in JS is cheaper
+ * and less brittle than a relational `where` clause — same reasoning as
+ * the id resolution above.
  */
 export async function loadUserScope(strapi: any, userId: number): Promise<UserScope> {
-  const meFull = await strapi.db.query("plugin::users-permissions.user").findOne({
-    where: { id: userId },
-    populate: { department: true, teams: true, role: true },
-  });
+  const [meFull, teams] = await Promise.all([
+    strapi.db.query("plugin::users-permissions.user").findOne({
+      where: { id: userId },
+      populate: { department: true, teams: true, role: true },
+    }),
+    strapi.db.query("api::team.team").findMany({
+      select: ["id"],
+      populate: { lead: { select: ["id"] } },
+    }),
+  ]);
   return {
     roleId: meFull?.role?.id,
     departmentId: meFull?.department?.id,
     teamIds: (meFull?.teams ?? []).map((t: { id: number }) => t.id),
+    ledTeamIds: (teams ?? [])
+      .filter((team: { lead?: { id: number } | null }) => team.lead?.id === userId)
+      .map((team: { id: number }) => team.id),
   };
 }
 

@@ -1,4 +1,8 @@
-import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
+import {
+  forcePublishedStatus,
+  getMutableQuery,
+  restrictiveIdFilter,
+} from "../utils/policy-query";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 
 /**
@@ -42,6 +46,15 @@ import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
  *
  * The applicable content-type level is passed per route via the policy
  * config: `{ name: "global::wiki-visibility", config: { level: "space" } }`.
+ *
+ * Draft & publish note: space, page and revision are all draftAndPublish
+ * and the ids come from `strapi.db.query`, so the injected list spans BOTH
+ * publication states. Which of them the caller gets is decided by the
+ * client-supplied `status` param, so the policy pins it to "published" —
+ * otherwise `?status=draft` would hand unpublished wiki content to every
+ * role holding the respective `.find` (incl. guest). See
+ * `forcePublishedStatus` for the full trap; admin_role / editor keep draft
+ * access via the bypass above.
  */
 
 type WikiLevel = "space" | "page" | "revision";
@@ -86,6 +99,7 @@ export default async (
   const query = getMutableQuery(policyContext);
   const idFilter = restrictiveIdFilter(idList);
   query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+  forcePublishedStatus(query);
 
   return true;
 };

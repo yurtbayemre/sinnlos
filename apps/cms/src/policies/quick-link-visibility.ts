@@ -1,4 +1,8 @@
-import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
+import {
+  forcePublishedStatus,
+  getMutableQuery,
+  restrictiveIdFilter,
+} from "../utils/policy-query";
 
 /**
  * Enforces quick-link visibility on reads of the `quick-link` content
@@ -28,9 +32,13 @@ import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
  * strips empty array operands, which would drop the filter entirely
  * (fail-open); `restrictiveIdFilter` injects `{ id: { $eq: -1 } }` instead.
  *
- * Draft & publish note: `strapi.db.query` returns both draft and
- * published rows; the resulting id list is a superset covering both, and
- * the core controller still applies its own status filter on top.
+ * Draft & publish note: `strapi.db.query` returns both draft and published
+ * rows, so the id list is a superset spanning BOTH publication states.
+ * Which of them the caller gets is decided by the client-supplied `status`
+ * param, so the policy pins it to "published" — otherwise `?status=draft`
+ * would hand unpublished links to every role holding `quick-link.find`.
+ * See `forcePublishedStatus` for the full trap; admin_role / editor keep
+ * draft access via the bypass above.
  */
 
 interface LinkRow {
@@ -72,6 +80,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const query = getMutableQuery(policyContext);
   const idFilter = restrictiveIdFilter(idList);
   query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+  forcePublishedStatus(query);
 
   return true;
 };

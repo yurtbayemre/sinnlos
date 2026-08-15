@@ -1,6 +1,5 @@
 import { CheckCircle2, Megaphone, Pin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
@@ -22,11 +21,11 @@ export async function generateMetadata() {
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
   const locale = await getLocale();
-  const session = await auth();
-  const deptId = session?.user?.department?.id;
+  // No audience argument: the CMS `announcement-visibility` policy filters
+  // both queries down to what this user may see.
   const [{ data, failed }, requiringAckResult, acksResult] = await Promise.all([
-    tryFetch(() => api.announcements.list(deptId), "announcements"),
-    tryFetch(() => api.announcements.requiringAck(deptId), "announcements"),
+    tryFetch(() => api.announcements.list(), "announcements"),
+    tryFetch(() => api.announcements.requiringAck(), "announcements"),
     tryFetch(() => fetchMyAnnouncementAcks(), "acknowledgements"),
   ]);
   const items = (data?.data ?? []) as Announcement[];
