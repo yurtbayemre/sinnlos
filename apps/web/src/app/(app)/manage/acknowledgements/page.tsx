@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
+import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
+import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Acknowledgement, Announcement, UserLite } from "@/lib/types";
@@ -22,6 +24,14 @@ type ReportUser = UserLite & {
   department?: { id: number; name: string } | null;
   role?: { id: number; type?: string } | null;
   blocked?: boolean;
+};
+
+/** A mandatory announcement plus every field its targeting depends on. */
+type ReportAnnouncement = Announcement & {
+  audience?: string;
+  department?: { id: number; name?: string } | null;
+  team?: { id: number; name?: string } | null;
+  audienceRoles?: { id: number; type?: string; name?: string }[] | null;
 };
 
 /**
@@ -51,16 +61,18 @@ export default async function AcknowledgementReportPage() {
     getLocale(),
   ]);
 
-  // admin_role bypasses the acknowledgement-visibility policy, so this
-  // returns EVERY user's acks; users come via the paginated directory
-  // helper. All three are per-user/noCache fetches.
-  const [announcementsResult, acksResult, usersResult] = await Promise.all([
+  // admin_role bypasses both the acknowledgement-visibility and the
+  // announcement-visibility policy, so these return EVERY user's acks and
+  // EVERY announcement — the target audience is recomputed below instead
+  // of being handed to us by the API. Users come via the paginated
+  // directory helper. All but the teams fetch are per-user/noCache.
+  const [announcementsResult, acksResult, usersResult, teamsResult] = await Promise.all([
     tryFetch(
       () =>
         // audienceRoles populate needs `plugin::users-permissions.role.find`,
         // which the CMS bootstrap grants to admin_role for exactly this page.
         strapi<StrapiListResponse<Announcement>>(
-          "/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[audienceRoles][fields][0]=type&sort=createdAt:desc&pagination[pageSize]=100",
+          "/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort=createdAt:desc&pagination[pageSize]=100",
           { noCache: true },
         ),
       "ack-report",
@@ -75,17 +87,22 @@ export default async function AcknowledgementReportPage() {
         ),
       "ack-report",
     ),
+    // Team membership for team-scoped announcements: `team.lead` has no
+    // inverse field on the user, so the mapping can only be built from the
+    // team side (lead counts as a member for targeting). MUST be the
+    // paginated walk, not `api.teams.list()` — that one sends no pageSize
+    // and stops at Strapi's defaultLimit of 25, which would silently empty
+    // the target set of every team-scoped announcement past team #25 (see
+    // lib/teams.ts).
+    tryFetch(() => fetchAllTeams(), "ack-report"),
   ]);
 
-  const anyFailed = announcementsResult.failed || acksResult.failed || usersResult.failed;
+  const anyFailed =
+    announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed;
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
   // unfiltered, and it keeps the report honest if the query ever changes.
   const announcements = (
-    (announcementsResult.data?.data ?? []) as (Announcement & {
-      audience?: string;
-      department?: { id: number; name: string } | null;
-      audienceRoles?: { id: number; type?: string }[] | null;
-    })[]
+    (announcementsResult.data?.data ?? []) as ReportAnnouncement[]
   ).filter((a) => a.requiresAck);
   const acks = (acksResult.data ?? []) as Acknowledgement[];
   const users = usersResult.data ?? [];
@@ -96,6 +113,20 @@ export default async function AcknowledgementReportPage() {
   const eligibleUsers = users.filter(
     (u) => u.blocked !== true && ANNOUNCEMENT_READER_ROLES.has(u.role?.type ?? ""),
   );
+  const userTeamIds = teamIdsByUser(teamsResult.data?.teams ?? []);
+
+  /**
+   * Fail-closed inputs for the target-audience computation.
+   *
+   * A missing input must never masquerade as "nobody is targeted": that
+   * used to render as 0 of 0 → 100% → a green "everyone confirmed", i.e.
+   * the report claimed compliance precisely when it knew the least.
+   *   - no user directory  → NO row has a determinable audience.
+   *   - no / truncated team roster → only rows with a `team` criterion are
+   *     affected; department- and role-scoped rows stay exact.
+   */
+  const usersUnknown = usersResult.failed;
+  const teamsUnknown = teamsResult.failed || (teamsResult.data?.truncated ?? false);
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, {
@@ -105,21 +136,46 @@ export default async function AcknowledgementReportPage() {
     });
   const userName = (u: ReportUser) => u.displayName ?? u.username ?? u.email ?? `#${u.id}`;
 
+  /**
+   * One chip per targeting criterion the announcement sets — an
+   * announcement scoped to a team or to roles must not read "all
+   * employees". No criterion set = company-wide.
+   */
+  const audienceLabels = (a: ReportAnnouncement): string[] => {
+    const parts: string[] = [];
+    // No `audience === "departments"` check: a linked department restricts
+    // unconditionally (lib/audience.ts), so the chip must show it either
+    // way — otherwise the label would read "all employees" for a post the
+    // policy scopes to one department.
+    if (a.department?.id != null) {
+      parts.push(t("audienceDepartment", { name: a.department.name ?? `#${a.department.id}` }));
+    }
+    if (a.team?.id != null) {
+      parts.push(t("audienceTeam", { name: a.team.name ?? `#${a.team.id}` }));
+    }
+    const roleNames = (a.audienceRoles ?? []).map((r) => r.name ?? r.type ?? `#${r.id}`);
+    if (roleNames.length > 0) {
+      parts.push(t("audienceRoles", { names: roleNames.join(", ") }));
+    }
+    return parts.length > 0 ? parts : [t("audienceAll")];
+  };
+
   const rows = announcements.map((a) => {
-    // Same audience targeting the announcements list applies: "departments"
-    // scopes to the linked department, everything else is company-wide.
-    // When the announcement additionally names audienceRoles, the target
-    // set narrows to users holding one of those roles.
-    const audienceRoles = a.audienceRoles ?? [];
-    const targetUsers = eligibleUsers.filter((u) => {
-      if (a.audience === "departments" && a.department?.id && u.department?.id !== a.department.id) {
-        return false;
-      }
-      if (audienceRoles.length > 0 && !audienceRoles.some((r) => r.id === u.role?.id)) {
-        return false;
-      }
-      return true;
-    });
+    // The target set is only as trustworthy as its inputs — a row whose
+    // audience cannot be determined is reported as UNKNOWN, never as
+    // "everyone confirmed".
+    const targetUnknown = usersUnknown || (a.team?.id != null && teamsUnknown);
+    // Exactly the targeting the CMS policy enforces on reads (department
+    // AND team AND role, over whatever the announcement sets) — the report
+    // runs as admin_role, which bypasses that policy, so it has to
+    // recompute the audience itself. See lib/audience.ts.
+    const targetUsers = eligibleUsers.filter((u) =>
+      isAnnouncementVisibleTo(a, {
+        roleId: u.role?.id,
+        departmentId: u.department?.id,
+        teamIds: userTeamIds.get(u.id) ?? [],
+      }),
+    );
     // Acks anchor on the stable documentId (numeric ids change on every
     // re-publish); the Set dedupes duplicate ack rows (accepted
     // check-then-insert race in the CMS).
@@ -133,7 +189,7 @@ export default async function AcknowledgementReportPage() {
     const ackedCount = targetUsers.length - openUsers.length;
     const pct =
       targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
-    return { announcement: a, targetUsers, openUsers, ackedCount, pct };
+    return { announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown };
   });
 
   return (
@@ -156,18 +212,16 @@ export default async function AcknowledgementReportPage() {
         <EmptyState icon={ClipboardCheck} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-4">
-          {rows.map(({ announcement: a, targetUsers, openUsers, ackedCount, pct }) => (
+          {rows.map(({ announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown }) => (
             <Card key={a.id}>
               <CardHeader>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                   <div className="space-y-1">
                     <CardTitle className="text-base">{a.title}</CardTitle>
                     <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                      <span>
-                        {a.audience === "departments" && a.department?.name
-                          ? t("audienceDepartment", { name: a.department.name })
-                          : t("audienceAll")}
-                      </span>
+                      {audienceLabels(a).map((label) => (
+                        <span key={label}>{label}</span>
+                      ))}
                       {a.ackDeadline && (
                         <span className="inline-flex items-center gap-1">
                           <Clock className="h-3 w-3" aria-hidden="true" />
@@ -177,21 +231,36 @@ export default async function AcknowledgementReportPage() {
                     </div>
                   </div>
                   <div className="shrink-0 text-right">
-                    <div className="text-2xl font-semibold tracking-tight">{pct}%</div>
+                    {/* No percentage without a known denominator — an
+                        indeterminable audience must not read as 0 of 0. */}
+                    <div className="text-2xl font-semibold tracking-tight">
+                      {targetUnknown ? "–" : `${pct}%`}
+                    </div>
                     <div className="text-xs text-muted-foreground">
-                      {t("ackedOf", { acked: ackedCount, total: targetUsers.length })}
+                      {targetUnknown
+                        ? t("audienceUnknown")
+                        : t("ackedOf", { acked: ackedCount, total: targetUsers.length })}
                     </div>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="h-2 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-                {openUsers.length === 0 ? (
+                {!targetUnknown && (
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                )}
+                {targetUnknown ? (
+                  <div className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                    {/* The headline already sits in the card header; this
+                        line explains WHY there is no rate. */}
+                    <span>{t("audienceUnknownHint")}</span>
+                  </div>
+                ) : openUsers.length === 0 ? (
                   <div className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
                     <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                     {t("allAcked")}

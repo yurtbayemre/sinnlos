@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -10,16 +9,14 @@ import type { Acknowledgement, Announcement } from "@/lib/types";
 /**
  * Dashboard banner listing how many mandatory (requiresAck) announcements
  * the current user has not confirmed yet. Server Component — both fetches
- * are per-user (audience filter + own acks) and therefore noCache.
+ * are per-user (the CMS announcement-visibility policy filters the list by
+ * audience; the acks are the caller's own) and therefore noCache.
  * Renders nothing when everything is confirmed or a fetch fails (the
  * dashboard already shows a generic fetch-error banner).
  */
 export async function AckBanner() {
-  const session = await auth();
-  const deptId = session?.user?.department?.id;
-
   const [announcementsResult, acksResult] = await Promise.all([
-    tryFetch(() => api.announcements.requiringAck(deptId), "ack-banner"),
+    tryFetch(() => api.announcements.requiringAck(), "ack-banner"),
     tryFetch(() => fetchMyAnnouncementAcks(), "ack-banner"),
   ]);
   if (announcementsResult.failed || acksResult.failed) return null;

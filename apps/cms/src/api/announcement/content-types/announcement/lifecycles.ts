@@ -1,3 +1,4 @@
+import { isAnnouncementVisible } from "../../../../utils/announcement-audience";
 import { revalidate } from "../../../../utils/revalidate";
 
 export default {
@@ -38,17 +39,45 @@ async function notifyForAnnouncement(announcement: any) {
   try {
     const full = await strapi.db.query("api::announcement.announcement").findOne({
       where: { id: announcement.id },
-      populate: { department: true, author: true },
+      populate: { department: true, team: true, audienceRoles: true, author: true },
     });
 
-    let recipients: any[];
-    if (full?.department?.id && full?.audience === "departments") {
-      recipients = await strapi.db.query("plugin::users-permissions.user").findMany({
-        where: { department: full.department.id },
-      });
-    } else {
-      recipients = await strapi.db.query("plugin::users-permissions.user").findMany({});
+    // Notify exactly the targeted audience — the notification carries the
+    // announcement title, so a broader fan-out would leak the very thing
+    // the announcement-visibility policy hides. Same rules as the policy
+    // (utils/announcement-audience.ts): department AND team AND role, over
+    // whatever is set. A missing row (should not happen) targets everyone,
+    // which is the previous behaviour.
+    const [users, teams] = await Promise.all([
+      strapi.db.query("plugin::users-permissions.user").findMany({
+        populate: {
+          department: { select: ["id"] },
+          teams: { select: ["id"] },
+          role: { select: ["id"] },
+        },
+      }),
+      strapi.db.query("api::team.team").findMany({
+        select: ["id"],
+        populate: { lead: { select: ["id"] } },
+      }),
+    ]);
+    // team.lead has no inverse field on the user, so build the reverse map.
+    const ledTeamIds = new Map<number, number[]>();
+    for (const team of teams ?? []) {
+      const leadId = team.lead?.id;
+      if (leadId == null) continue;
+      ledTeamIds.set(leadId, [...(ledTeamIds.get(leadId) ?? []), team.id]);
     }
+    const recipients = (users ?? []).filter((user: any) =>
+      isAnnouncementVisible(full ?? {}, {
+        roleId: user.role?.id,
+        departmentId: user.department?.id,
+        teamIds: [
+          ...(user.teams ?? []).map((team: { id: number }) => team.id),
+          ...(ledTeamIds.get(user.id) ?? []),
+        ],
+      }),
+    );
 
     const authorId = full?.author?.id;
     const rows = recipients
