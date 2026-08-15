@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { BarChart3, Clock, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,11 +12,21 @@ import type { PollResults } from "@/lib/types";
 export function PollCard({ results }: { results: PollResults }) {
   const tPolls = useTranslations("polls");
   const tCommon = useTranslations("common");
+  const router = useRouter();
   const { poll, counts, total, myVoteIndex: initialVote } = results;
   const [voted, setVoted] = useState(initialVote);
   const [localCounts, setLocalCounts] = useState(counts);
   const [localTotal, setLocalTotal] = useState(total);
+  const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  // useState initialisers ignore prop changes — adopt the authoritative
+  // server numbers whenever a refresh() delivers a new results payload.
+  useEffect(() => {
+    setVoted(results.myVoteIndex);
+    setLocalCounts(results.counts);
+    setLocalTotal(results.total);
+  }, [results]);
 
   const isClosed = poll.closesAt ? new Date(poll.closesAt) < new Date() : false;
   const hasVoted = voted !== null;
@@ -23,6 +34,7 @@ export function PollCard({ results }: { results: PollResults }) {
 
   const handleVote = (index: number) => {
     if (hasVoted || isClosed || isPending) return;
+    setError(null);
     startTransition(async () => {
       try {
         await votePoll(poll.id, index);
@@ -30,7 +42,10 @@ export function PollCard({ results }: { results: PollResults }) {
         setLocalCounts((prev) => prev.map((c, i) => (i === index ? c + 1 : c)));
         setLocalTotal((prev) => prev + 1);
       } catch {
-        // vote failed — user may have already voted
+        // Vote rejected (already voted, poll closed meanwhile, …) —
+        // surface it and pull the authoritative counts from the server.
+        setError(tPolls("voteFailed"));
+        router.refresh();
       }
     });
   };
@@ -53,6 +68,11 @@ export function PollCard({ results }: { results: PollResults }) {
         )}
       </CardHeader>
       <CardContent className="space-y-2">
+        {error && (
+          <p role="alert" className="text-sm text-destructive">
+            {error}
+          </p>
+        )}
         {poll.options.map((option, i) => {
           const pct = localTotal > 0 ? Math.round((localCounts[i] / localTotal) * 100) : 0;
           const isMyVote = voted === i;

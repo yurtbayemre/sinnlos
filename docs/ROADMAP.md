@@ -1,8 +1,13 @@
 # Sinnlos Feature Roadmap
 
 Implementation plan for the 10 most-requested intranet features that Sinnlos
-does not have yet, based on market research (Staffbase, Workvivo, Sociabble,
-Simpplr, MangoApps feature guides, June 2026).
+did not have yet at the time of writing, based on market research (Staffbase,
+Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
+
+> **Status update (2026-08):** Phases 1–3 plus 4.1 (search V1) and 4.2
+> (analytics) are **implemented and live**. Each feature below carries a
+> status marker. Still open: 2.2 Phase B email digests, 2.4 SSE/live
+> updates, 4.1 V2 (Meilisearch) and 4.3 (AI assistant).
 
 ## Why this is cheaper than it looks
 
@@ -31,6 +36,9 @@ schema in `apps/cms/src/api/<name>/`, permissions added to the
 ## Phase 1 — People & conversations (the foundation)
 
 ### 1.1 Employee directory + org chart
+
+**Status: ✅ implemented** — `/people`, `/people/[id]`, `/people/org-chart`
+(manager self-relation), Graph enrichment at sign-in.
 
 **Value:** consistently a top-3 most-used intranet resource. We already store
 users with `displayName`, `jobTitle`, `department`, `teams`, `avatar`.
@@ -62,6 +70,10 @@ users with `displayName`, `jobTitle`, `department`, `teams`, `avatar`.
 
 ### 1.2 Comments & reactions
 
+**Status: ✅ implemented** — `comment` + `reaction` content types
+(`targetType`/`targetId`), mounted on announcements and wiki pages with
+visible-tab polling (`LiveCommentSection`).
+
 **Value:** turns announcements (and later wiki pages) from one-way into
 two-way communication. Prerequisite for recognition (1.3 reuses the pattern).
 
@@ -88,6 +100,9 @@ two-way communication. Prerequisite for recognition (1.3 reuses the pattern).
 
 ### 1.3 Employee recognition (kudos + celebrations)
 
+**Status: ✅ implemented** — `kudos` content type, `/kudos` page with
+give-kudos modal, `celebrations` custom route.
+
 **CMS**
 - New `kudos` content type: `from` (user), `to` (user), `message`,
   `value` (enum of company values — configurable later).
@@ -108,6 +123,10 @@ pattern, reactions on kudos).
 
 ### 2.1 Events calendar
 
+**Status: ✅ implemented** — `event` content type, `/events` page, per-event
+ICS download (served from `/events/[id]/ics`, outside `/api` because of the
+reverse-proxy split).
+
 **CMS**
 - New `event` content type: `title`, `description` (richtext), `start`,
   `end`, `allDay`, `location`, `url`, `departments` (m2m, empty = company-wide).
@@ -126,6 +145,11 @@ pattern, reactions on kudos).
 **Effort:** ~3 days. **Depends on:** nothing (targeting filter shared with 2.3).
 
 ### 2.2 Notifications
+
+**Status: ✅ implemented (rows + bell) / ⏳ email digests open** — the
+`notification` content type with lifecycle fan-out and the topbar bell
+(30s visible-tab polling) are live; the Phase B email digests (SMTP + cron)
+are not built.
 
 **Phase A — derived, no fan-out (ship first):**
 - Bell icon in the topbar with unread count = announcements/events/kudos-to-me
@@ -147,6 +171,10 @@ notifies about (1.2, 1.3, 2.1).
 
 ### 2.3 Targeted content / personalization
 
+**Status: ✅ implemented** — announcements carry `audience` /
+`audienceRoles` / department targeting; the dashboard/announcement queries
+filter accordingly.
+
 **CMS**
 - Add `departments` (m2m) + `audience` (enum: `all` | `departments`) to
   `announcement` (and reuse on `event`).
@@ -162,6 +190,9 @@ notifies about (1.2, 1.3, 2.1).
 **Effort:** ~1–2 days. **Depends on:** nothing technically; pairs with 2.1/2.2.
 
 ### 2.4 Live updates via SSE (research + implementation)
+
+**Status: ⏳ open** — live updates still run on the 10s/30s visible-tab
+polling described below.
 
 **Value:** changes made by one session (comments, reactions, later
 notifications) appear in other open sessions in under a second. Since
@@ -245,6 +276,9 @@ nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
 
 ### 3.1 Polls & surveys
 
+**Status: ✅ implemented** — `poll` + `poll-vote` with custom `vote` /
+`results` routes, `/polls` page with `PollCard`.
+
 **CMS**
 - `poll`: `question`, `options` (JSON array of strings), `closesAt`,
   `anonymous` (bool), `departments` targeting (from 2.3).
@@ -261,6 +295,9 @@ nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
 **Effort:** ~3 days. **Depends on:** 2.3 (targeting), 1.2 (write pattern).
 
 ### 3.2 Document library
+
+**Status: ✅ implemented** — `document` content type with the
+`document-visibility` read policy, `/documents` page.
 
 **CMS**
 - `document` content type: `title`, `description`, `file` (media),
@@ -281,6 +318,10 @@ nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
 
 ### 4.1 Global content search
 
+**Status: ✅ V1 implemented / ⏳ V2 open** — the ⌘K `search-command`
+palette fans out debounced queries via `lib/search-action.ts`; Meilisearch
+(V2) is not deployed.
+
 **V1 (no new infra):** route handler `GET /api/search?q=` fans out
 `filters[$containsi]` queries to announcements, wiki pages, documents, events,
 people in parallel with the user's JWT (so wiki visibility holds), merges
@@ -293,6 +334,10 @@ Meilisearch doesn't know about per-user wiki visibility — either index only
 public content, or filter results post-hoc against Strapi. ~2–3 days.
 
 ### 4.2 Analytics dashboard
+
+**Status: ✅ implemented (with Plausible instead of Umami)** — page
+analytics run through the box's self-hosted **Plausible**; the admin page
+lives at `/manage/analytics` and combines them with Strapi content stats.
 
 - Lightweight first: a `page-view` content type is write-heavy and bloats
   Postgres — instead run **self-hosted Umami** (one extra compose service,
@@ -308,6 +353,8 @@ public content, or filter results post-hoc against Strapi. ~2–3 days.
 **Effort:** ~2–3 days. **Depends on:** 4.1 for search-term capture.
 
 ### 4.3 AI assistant (exploratory — last)
+
+**Status: ⏳ open**
 
 - RAG over wiki + documents: nightly embed via Claude API, answer with
   citations in the search palette ("Ask Sinnlos").

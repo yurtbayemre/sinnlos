@@ -1,5 +1,6 @@
 "use server";
 
+import { unstable_rethrow } from "next/navigation";
 import { auth } from "@/auth";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { summarize, type CommentSectionData } from "@/lib/reaction-summary";
@@ -16,15 +17,23 @@ export async function getCommentSection(
   const session = await auth();
   const userId = session?.user?.id;
 
+  // The fallbacks rethrow Next.js control-flow errors (redirect on 401)
+  // so an expired session navigates to sign-in instead of polling forever.
   const [commentsRes, reactionsRes] = await Promise.all([
     strapi<StrapiListResponse<Comment>>(
       `/api/comments?filters[targetType][$eq]=${targetType}&filters[targetId][$eq]=${targetId}&populate[author]=true&sort=createdAt:asc&pagination[pageSize]=100`,
       { noCache: true },
-    ).catch(() => ({ data: [] as Comment[] })),
+    ).catch((e) => {
+      unstable_rethrow(e);
+      return { data: [] as Comment[] };
+    }),
     strapi<StrapiListResponse<Reaction>>(
       `/api/reactions?filters[targetType][$eq]=${targetType}&filters[targetId][$eq]=${targetId}&populate[author]=true&pagination[pageSize]=500`,
       { noCache: true },
-    ).catch(() => ({ data: [] as Reaction[] })),
+    ).catch((e) => {
+      unstable_rethrow(e);
+      return { data: [] as Reaction[] };
+    }),
   ]);
 
   return {

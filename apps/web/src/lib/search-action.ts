@@ -1,6 +1,19 @@
 "use server";
 
+import { unstable_rethrow } from "next/navigation";
 import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
+
+// Fallbacks for the best-effort fetches below. They rethrow Next.js
+// control-flow errors (e.g. the redirect strapi() issues on 401) so an
+// expired session navigates to sign-in instead of showing empty results.
+function emptyList(e: unknown): { data: any[] } {
+  unstable_rethrow(e);
+  return { data: [] };
+}
+function emptyArray(e: unknown): any[] {
+  unstable_rethrow(e);
+  return [];
+}
 
 export type SearchItem = {
   kind: "department" | "team" | "wiki-space" | "wiki-page" | "announcement" | "person" | "event" | "poll" | "document";
@@ -11,20 +24,20 @@ export type SearchItem = {
 
 export async function fetchSearchItems(): Promise<SearchItem[]> {
   const [departments, teams, wikiSpaces, wikiPages, announcements, events, polls, documents] = await Promise.all([
-    api.departments.list().catch(() => ({ data: [] })),
-    api.teams.list().catch(() => ({ data: [] })),
-    api.wiki.spaces().catch(() => ({ data: [] })),
+    api.departments.list().catch(emptyList),
+    api.teams.list().catch(emptyList),
+    api.wiki.spaces().catch(emptyList),
     // Bypasses the Next.js fetch cache: wiki-pages are filtered by the
     // wiki-visibility policy so cached responses would leak restricted
     // pages across users.
     strapi<StrapiListResponse<any>>(
       "/api/wiki-pages?populate[space]=true&populate[author]=true&pagination[pageSize]=100&sort=title:asc",
       { noCache: true },
-    ).catch(() => ({ data: [] })),
-    api.announcements.list().catch(() => ({ data: [] })),
-    api.events.list().catch(() => ({ data: [] })),
-    api.polls.list().catch(() => ({ data: [] })),
-    api.documents.list().catch(() => ({ data: [] })),
+    ).catch(emptyList),
+    api.announcements.list().catch(emptyList),
+    api.events.list().catch(emptyList),
+    api.polls.list().catch(emptyList),
+    api.documents.list().catch(emptyList),
   ]);
 
   const items: SearchItem[] = [];
@@ -108,9 +121,12 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
   const people = await strapi<any[]>(
     "/api/users?populate[department]=true&pagination[pageSize]=200&sort=displayName:asc",
     { noCache: true },
-  ).catch(() => []);
+  ).catch(emptyArray);
 
-  for (const u of people) {
+  // DEMO_MODE answers /api/users with a `{ data, meta }` object, not an
+  // array — same guard as in searchContent below.
+  const peoplePreload = Array.isArray(people) ? people : [];
+  for (const u of peoplePreload) {
     items.push({
       kind: "person",
       title: u.displayName ?? u.username ?? u.email ?? "Unknown",
@@ -132,27 +148,27 @@ export async function searchContent(query: string): Promise<SearchItem[]> {
     strapi<StrapiListResponse<any>>(
       `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[author]=true&pagination[pageSize]=5&sort=createdAt:desc`,
       { noCache: true },
-    ).catch(() => ({ data: [] })),
+    ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[space]=true&pagination[pageSize]=5&sort=title:asc`,
       { noCache: true },
-    ).catch(() => ({ data: [] })),
+    ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&populate[file]=true&pagination[pageSize]=5&sort=title:asc`,
       { noCache: true },
-    ).catch(() => ({ data: [] })),
+    ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/events?filters[title][$containsi]=${q}&pagination[pageSize]=5&sort=start:desc`,
       { noCache: true },
-    ).catch(() => ({ data: [] })),
+    ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/polls?filters[question][$containsi]=${q}&pagination[pageSize]=5&sort=createdAt:desc`,
       { noCache: true },
-    ).catch(() => ({ data: [] })),
+    ).catch(emptyList),
     strapi<any[]>(
       `/api/users?filters[$or][0][displayName][$containsi]=${q}&filters[$or][1][email][$containsi]=${q}&filters[$or][2][jobTitle][$containsi]=${q}&populate[department]=true&pagination[pageSize]=5&sort=displayName:asc`,
       { noCache: true },
-    ).catch(() => []),
+    ).catch(emptyArray),
   ]);
 
   for (const a of (announcements as any).data ?? []) {

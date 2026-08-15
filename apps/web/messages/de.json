@@ -16,6 +16,8 @@
     "delete": "Löschen",
     "or": "oder",
     "by": "von",
+    "unknown": "Unbekannt",
+    "close": "Schließen",
     "member": "{count, plural, one {# Mitglied} other {# Mitglieder}}",
     "team": "{count, plural, one {# Team} other {# Teams}}",
     "vote": "{count, plural, one {# Stimme} other {# Stimmen}}",
@@ -61,7 +63,9 @@
     "name": "Name",
     "namePlaceholder": "Max Mustermann",
     "creatingAccount": "Konto wird erstellt…",
-    "demoMode": "Demo-Modus"
+    "demoMode": "Demo-Modus",
+    "registrationDisabled": "Die Registrierung ist derzeit deaktiviert.",
+    "sessionExpired": "Ihre Sitzung ist abgelaufen – bitte melden Sie sich erneut an."
   },
   "dashboard": {
     "welcomeBack": "Willkommen zurück",
@@ -166,7 +170,8 @@
     "innovation": "Innovation",
     "leadership": "Führung",
     "customerFocus": "Kundenorientierung",
-    "excellence": "Exzellenz"
+    "excellence": "Exzellenz",
+    "sendFailed": "Kudos konnten nicht gesendet werden – bitte erneut versuchen."
   },
   "polls": {
     "title": "Umfragen",
@@ -174,7 +179,8 @@
     "active": "Aktiv",
     "closed": "Beendet",
     "emptyTitle": "Noch keine Umfragen",
-    "emptyHint": "Admins und Redakteure können Umfragen im Strapi-Admin-Panel erstellen."
+    "emptyHint": "Admins und Redakteure können Umfragen im Strapi-Admin-Panel erstellen.",
+    "voteFailed": "Ihre Stimme konnte nicht gespeichert werden – vielleicht haben Sie bereits abgestimmt."
   },
   "documents": {
     "title": "Dokumente",
@@ -258,6 +264,16 @@
     "writeComment": "Kommentar schreiben…",
     "deleteComment": "Kommentar löschen",
     "sendComment": "Kommentar senden",
+    "sendFailed": "Kommentar konnte nicht gesendet werden – bitte erneut versuchen.",
+    "deleteFailed": "Kommentar konnte nicht gelöscht werden – bitte erneut versuchen.",
+    "today": "heute",
+    "yesterday": "gestern",
+    "daysAgo": "vor {days} T."
+  },
+  "relativeTime": {
+    "justNow": "gerade eben",
+    "minutesAgo": "vor {min} Min.",
+    "hoursAgo": "vor {hours} Std.",
     "today": "heute",
     "yesterday": "gestern",
     "daysAgo": "vor {days} T."

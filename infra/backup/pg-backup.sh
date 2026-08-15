@@ -13,6 +13,10 @@ DB_C=infra-db-1
 UPLOADS_VOL=infra_cms_uploads
 
 # Keyring + keyid live in $BK (parent); only $OFFSITE is exposed to the NAS pull.
+# NOTE: the default deliberately points at the momsbest backup root — that dir
+# already holds the shared GPG keyring and is the box's single NAS-pulled
+# offsite tree. The production cron runs with exactly this path; do NOT change
+# the default without migrating the keyring and the NAS rrsync config.
 BK="${SINNLOS_BACKUP_DIR:-/home/bigemo/backups/momsbest}"
 OFFSITE="$BK/offsite/sinnlos"
 export GNUPGHOME="${SINNLOS_GNUPGHOME:-$BK/.gnupg}"
@@ -46,4 +50,17 @@ if docker volume inspect "$UPLOADS_VOL" >/dev/null 2>&1; then
   UOUT="$BK/sinnlos-uploads-$TS.tar"
   docker run --rm -v "$UPLOADS_VOL":/u:ro alpine tar -cf - -C /u . > "$UOUT"
   finalize "$UOUT" "$OFFSITE/sinnlos-uploads-*.tar.gz.gpg" sinnlos-uploads
+fi
+
+# Keep the log bounded — it lives in the NAS-replicated offsite dir and would
+# otherwise grow forever. The last 500 lines cover months of nightly runs.
+# Truncate in place: `cat "$tmp" > "$LOG"` overwrites the existing file's
+# contents WITHOUT replacing its inode, so the log keeps its original
+# owner/permissions no matter who runs the script (deploy.sh as root, cron as
+# bigemo). A `tail > tmp && mv` would instead swap in a new inode owned by the
+# caller and break the other caller's append. The scratch file comes from
+# mktemp (defaults to $TMPDIR/tmp), i.e. outside the NAS-pulled offsite tree.
+if [[ -f "$LOG" ]]; then
+  tmp=$(mktemp)
+  tail -n 500 "$LOG" > "$tmp" && cat "$tmp" > "$LOG" && rm -f "$tmp"
 fi

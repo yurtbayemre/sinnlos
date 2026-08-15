@@ -1,6 +1,8 @@
 import { Award, PartyPopper } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { api, strapi } from "@/lib/strapi";
+import { api } from "@/lib/strapi";
+import { fetchAllUsers } from "@/lib/users";
+import { relativeTime } from "@/lib/relative-time";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Kudos, Celebration, UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
@@ -24,19 +26,6 @@ const VALUE_EMOJI: Record<string, string> = {
   excellence: "\u{1F3C6}",
 };
 
-function relative(dateStr: string | undefined) {
-  if (!dateStr) return "";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const day = 86400000;
-  if (diff < day) return "today";
-  if (diff < 2 * day) return "yesterday";
-  if (diff < 7 * day) return `${Math.floor(diff / day)}d ago`;
-  return new Date(dateStr).toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
-}
-
 const VALUE_LABEL_KEY: Record<string, string> = {
   teamwork: "teamwork",
   innovation: "innovation",
@@ -47,15 +36,13 @@ const VALUE_LABEL_KEY: Record<string, string> = {
 
 export default async function KudosPage() {
   const t = await getTranslations("kudos");
+  const tRel = await getTranslations("relativeTime");
+  const relative = (d: string | undefined) => relativeTime(d, tRel);
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
     tryFetch(() => api.celebrations(), "celebrations"),
     tryFetch(
-      () =>
-        strapi<any[]>(
-          "/api/users?populate[department]=true&pagination[pageSize]=200&sort=displayName:asc",
-          { noCache: true },
-        ),
+      () => fetchAllUsers("populate[department]=true&sort=displayName:asc"),
       "people",
     ),
   ]);

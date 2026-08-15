@@ -5,6 +5,6 @@ export default factories.createCoreRouter("api::reaction.reaction", {
     find: { policies: [] },
     findOne: { policies: [] },
     create: { policies: [] },
-    delete: { policies: [] },
+    delete: { policies: ["global::is-reaction-author"] },
   },
 });
