@@ -23,6 +23,8 @@ export type SearchItem = {
 };
 
 export async function fetchSearchItems(): Promise<SearchItem[]> {
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const [departments, teams, wikiSpaces, wikiPages, announcements, events, polls, documents] = await Promise.all([
     api.departments.list().catch(emptyList),
     api.teams.list().catch(emptyList),
@@ -35,7 +37,10 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       { noCache: true },
     ).catch(emptyList),
     api.announcements.list().catch(emptyList),
-    api.events.list().catch(emptyList),
+    // Upcoming only (api.events is time-window based now): the old global
+    // list returned the 50 oldest events, so current ones were unfindable
+    // anyway once history grew past 50.
+    api.events.upcoming(startOfToday.toISOString()).catch(emptyList),
     api.polls.list().catch(emptyList),
     api.documents.list().catch(emptyList),
   ]);
