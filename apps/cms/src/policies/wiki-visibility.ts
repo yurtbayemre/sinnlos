@@ -1,89 +1,89 @@
+import { getMutableQuery } from "../utils/policy-query";
+import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
+
 /**
- * Filters wiki-space / wiki-page / wiki-revision reads based on the
- * caller's role, department and team membership.
+ * Enforces wiki-space visibility on reads of wiki-space, wiki-page and
+ * wiki-revision. wiki-page / wiki-revision have no visibility of their own —
+ * they inherit it from their owning space (page.space, revision.page.space).
  *
- * Rules:
- *   - public           → everyone (incl. authenticated members)
- *   - role             → only users whose role is in `allowedRoles`
- *   - department       → only users belonging to `space.department`
- *   - team             → only users in `space.team.members` or the lead
+ * Visibility rules (see `visibleWikiSpaceIds`):
+ *   - public     → everyone (incl. anonymous)
+ *   - role       → authenticated users whose role is in space.allowedRoles
+ *   - department → authenticated users whose department is space.department
+ *   - team       → authenticated users one of whose teams is space.team
  *
- * Admins and editors always pass.
+ * admin_role / editor bypass the filter entirely.
  *
- * KNOWN OPEN ISSUE (do NOT "fix" by switching to the real request query):
- *   This policy currently writes to `policyContext.query`, which is a
- *   silent no-op (Koa's `query` is a prototype getter that
- *   createPolicyContext's Object.assign never copies) — so it has never
- *   actually filtered. Redirecting it to the real request query (as done
- *   for notification/poll-vote-visibility) would break ALL wiki reads with
- *   a 400, for two independently-verified reasons:
- *     1. The filter shape mixes wiki-space attributes (`visibility`,
- *        `allowedRoles`) at the top level, but this policy also guards the
- *        wiki-page and wiki-revision routes, whose schemas have no such
- *        attributes → validateQuery throws "Invalid key visibility". Even
- *        for wiki-space the `{ space: ... }` clause is invalid (wiki-space
- *        has no `space` attribute). A correct fix needs per-content-type
- *        filter shapes.
- *     2. Filtering on `allowedRoles` requires the caller to hold
- *        `plugin::users-permissions.role.find`, which NO intranet role is
- *        granted; `department`/`team`/`space` clauses likewise require
- *        those targets' `.find` scopes. validateQuery runs
- *        throwRestrictedRelations on filters, so the filter 400s.
- *   Reactivating this needs a redesign (correct per-type filters + granting
- *   the referenced relations' find scopes). Left as-is (status quo: no
- *   API-level wiki visibility filtering) to avoid a 400 app. Verified via
- *   node repro against @strapi/utils 5.49.
+ * HOW IT WORKS — id-based filtering, no relation traversal:
+ *   This policy used to write a relation-traversing `$or` filter onto
+ *   `policyContext.query`, which was a silent no-op (Koa's `query` is a
+ *   prototype getter that `createPolicyContext`'s `Object.assign` never
+ *   copies) — so wiki visibility was never actually enforced at the API.
+ *   Redirecting that same filter to the REAL request query would 400 every
+ *   read, because the narrow intranet read scopes (guest has no
+ *   department/team/role/wiki-revision `.find`) make Strapi's
+ *   `validateQuery` → `throwRestrictedRelations` reject any filter that
+ *   reaches through those relations, and the wiki-page / wiki-revision
+ *   schemas have no `visibility` / `allowedRoles` attributes to filter on.
+ *
+ *   Instead we resolve the set of visible primary-key ids SERVER-SIDE via
+ *   `strapi.db.query` (which bypasses both permission gating AND
+ *   `throwRestrictedRelations`), then inject a single non-relational
+ *   `{ id: { $in: [...] } }` clause into the real request query. `id` is a
+ *   plain attribute on every one of the three content types, so the filter
+ *   validates for EVERY role and traverses nothing — no 400.
+ *
+ * The clause is `$and`-wrapped with any incoming client filter so a
+ * caller-supplied filter can only narrow the result set, never widen it
+ * past what they are allowed to see. An empty id list yields
+ * `{ id: { $in: [] } }` — correctly restrictive (sees nothing).
+ *
+ * The applicable content-type level is passed per route via the policy
+ * config: `{ name: "global::wiki-visibility", config: { level: "space" } }`.
  */
-export default async (policyContext: any, _config: unknown, { strapi }: any) => {
+
+type WikiLevel = "space" | "page" | "revision";
+
+export default async (
+  policyContext: any,
+  config: { level?: WikiLevel } | undefined,
+  { strapi }: any,
+) => {
   const user = policyContext.state?.user;
 
-  // NOTE: writing to `policyContext.query` is intentionally a no-op today —
-  // see the KNOWN OPEN ISSUE above before changing this to the real query.
-  const query = policyContext.query ?? (policyContext.query = {});
-  query.filters = query.filters ?? {};
+  // admin_role / editor see everything, no filter needed.
+  if (user && ["admin_role", "editor"].includes(user.role?.type)) return true;
 
-  if (!user) {
-    query.filters = {
-      ...query.filters,
-      $or: [{ visibility: "public" }, { space: { visibility: "public" } }],
-    };
-    return true;
+  const level: WikiLevel = config?.level ?? "space";
+
+  const scope = user ? await loadUserScope(strapi, user.id) : null;
+  const spaceIds = await visibleWikiSpaceIds(strapi, scope);
+
+  let idList: number[];
+  if (level === "space") {
+    idList = spaceIds;
+  } else if (spaceIds.length === 0) {
+    // No visible space → no visible page/revision either. Skip the join.
+    idList = [];
+  } else if (level === "page") {
+    const pages: { id: number }[] = await strapi.db
+      .query("api::wiki-page.wiki-page")
+      .findMany({ where: { space: { id: { $in: spaceIds } } }, select: ["id"] });
+    idList = pages.map((p) => p.id);
+  } else {
+    // revision → visible when its page's space is visible.
+    const revisions: { id: number }[] = await strapi.db
+      .query("api::wiki-revision.wiki-revision")
+      .findMany({
+        where: { page: { space: { id: { $in: spaceIds } } } },
+        select: ["id"],
+      });
+    idList = revisions.map((r) => r.id);
   }
 
-  if (["admin_role", "editor"].includes(user.role?.type)) return true;
-
-  const meFull = await strapi.db.query("plugin::users-permissions.user").findOne({
-    where: { id: user.id },
-    populate: { department: true, teams: true, role: true },
-  });
-  const teamIds = (meFull?.teams ?? []).map((t: { id: number }) => t.id);
-  const departmentId = meFull?.department?.id;
-  const roleId = meFull?.role?.id;
-
-  const visibilityClauses: any[] = [
-    { visibility: "public" },
-    {
-      visibility: "role",
-      allowedRoles: { id: { $in: roleId ? [roleId] : [] } },
-    },
-  ];
-  if (departmentId) {
-    visibilityClauses.push({
-      visibility: "department",
-      department: { id: departmentId },
-    });
-  }
-  if (teamIds.length > 0) {
-    visibilityClauses.push({ visibility: "team", team: { id: { $in: teamIds } } });
-  }
-
-  query.filters = {
-    ...query.filters,
-    $or: [
-      ...visibilityClauses,
-      { space: { $or: visibilityClauses } },
-    ],
-  };
+  const query = getMutableQuery(policyContext);
+  const idFilter = { id: { $in: idList } };
+  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
 
   return true;
 };

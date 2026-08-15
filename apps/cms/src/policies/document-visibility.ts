@@ -1,72 +1,83 @@
+import { getMutableQuery } from "../utils/policy-query";
+
 /**
- * Filters document reads based on the caller's department.
+ * Enforces document visibility on reads of the `document` content type,
+ * which scopes access via a `departments` (manyToMany) relation instead of
+ * a visibility enum:
+ *   - documents WITHOUT any departments → company-wide (everyone sees them,
+ *                                         incl. anonymous callers)
+ *   - documents WITH departments set    → only authenticated users whose
+ *                                         department is among them
  *
- * Mirrors the semantics of `wiki-visibility`, but for the document
- * content-type, which scopes visibility via a `departments` (manyToMany)
- * relation instead of a `visibility` enum.
+ * admin_role / editor bypass the filter entirely.
  *
- * Rules:
- *   - documents WITHOUT any departments  → company-wide (everyone sees them)
- *   - documents WITH departments set     → only users whose department is
- *                                          among the document's `departments`
+ * HOW IT WORKS — id-based filtering, no relation traversal:
+ *   This policy used to write a `departments`-traversing filter onto
+ *   `policyContext.query`, which was a silent no-op (Koa's `query` is a
+ *   prototype getter that `createPolicyContext`'s `Object.assign` never
+ *   copies) — so document visibility was never actually enforced at the
+ *   API. Redirecting that filter to the REAL request query would 400 every
+ *   `guest` document read: `guest` can read documents but has no
+ *   `api::department.department.find`, and Strapi's `validateQuery` →
+ *   `throwRestrictedRelations` rejects any filter reaching through the
+ *   `departments` relation.
  *
- * Admins and editors always pass.
+ *   Instead we resolve the set of visible primary-key ids SERVER-SIDE via
+ *   `strapi.db.query` (which bypasses both permission gating AND
+ *   `throwRestrictedRelations`): load every document with its departments
+ *   populated and decide membership in plain JS. The policy then injects a
+ *   single non-relational `{ id: { $in: [...] } }` clause — `id` is a plain
+ *   attribute, so the filter validates for every role and traverses
+ *   nothing, no 400.
  *
- * KNOWN OPEN ISSUE (do NOT "fix" by switching to the real request query):
- *   This policy currently writes to `policyContext.query`, which is a
- *   silent no-op (Koa's `query` is a prototype getter that
- *   createPolicyContext's Object.assign never copies) — so it has never
- *   actually filtered. Unlike wiki-visibility, the filter shape here is
- *   structurally valid for the `document` schema (`departments` exists),
- *   BUT filtering on the `departments` relation requires the caller to hold
- *   `api::department.department.find` (validateQuery runs
- *   throwRestrictedRelations on filters). The `guest` role can read
- *   documents but is NOT granted `department.find`, so redirecting this to
- *   the real request query would 400 every guest document read (verified
- *   via node repro against @strapi/utils 5.49). Activating this safely
- *   requires granting `department.find` to all document-reading roles
- *   (incl. guest) first. Left as-is (status quo: no API-level document
- *   visibility filtering) to avoid a 400 app.
+ * The clause is `$and`-wrapped with any incoming client filter so a
+ * caller-supplied filter can only narrow the result set, never widen it. An
+ * empty id list yields `{ id: { $in: [] } }` — correctly restrictive.
+ *
+ * Draft & publish note: `strapi.db.query` returns both draft and published
+ * rows; the resulting id list is a superset covering both, and the core
+ * controller still applies its own status filter on top.
  */
+
+interface DocRow {
+  id: number;
+  departments?: { id: number }[];
+}
+
 export default async (policyContext: any, _config: unknown, { strapi }: any) => {
   const user = policyContext.state?.user;
 
-  // NOTE: writing to `policyContext.query` is intentionally a no-op today —
-  // see the KNOWN OPEN ISSUE above before changing this to the real query.
-  const query = policyContext.query ?? (policyContext.query = {});
-  query.filters = query.filters ?? {};
+  // admin_role / editor see everything, no filter needed.
+  if (user && ["admin_role", "editor"].includes(user.role?.type)) return true;
 
-  // Department-scoped documents are only ever visible to authenticated
-  // members of the owning department. Anonymous traffic therefore only
-  // sees company-wide documents (those without any departments).
-  if (!user) {
-    query.filters = {
-      ...query.filters,
-      departments: { id: { $null: true } },
-    };
-    return true;
+  let departmentId: number | undefined;
+  if (user) {
+    const meFull = await strapi.db.query("plugin::users-permissions.user").findOne({
+      where: { id: user.id },
+      populate: { department: true },
+    });
+    departmentId = meFull?.department?.id;
   }
 
-  if (["admin_role", "editor"].includes(user.role?.type)) return true;
-
-  const meFull = await strapi.db.query("plugin::users-permissions.user").findOne({
-    where: { id: user.id },
-    populate: { department: true },
+  const docs: DocRow[] = await strapi.db.query("api::document.document").findMany({
+    select: ["id"],
+    populate: { departments: { select: ["id"] } },
   });
-  const departmentId = meFull?.department?.id;
 
-  // Company-wide documents (no departments) are always visible. Add the
-  // caller's department as the only additional clause that may match a
-  // department-scoped document.
-  const visibilityClauses: any[] = [{ departments: { id: { $null: true } } }];
-  if (departmentId) {
-    visibilityClauses.push({ departments: { id: departmentId } });
-  }
+  const idList = docs
+    .filter((doc) => {
+      const depts = doc.departments ?? [];
+      // Company-wide (no departments) → visible to everyone.
+      if (depts.length === 0) return true;
+      // Department-scoped → only the owning department's members (never
+      // anonymous, who have no departmentId).
+      return departmentId != null && depts.some((d) => d.id === departmentId);
+    })
+    .map((doc) => doc.id);
 
-  query.filters = {
-    ...query.filters,
-    $or: visibilityClauses,
-  };
+  const query = getMutableQuery(policyContext);
+  const idFilter = { id: { $in: idList } };
+  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
 
   return true;
 };
