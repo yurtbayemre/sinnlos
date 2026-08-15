@@ -2,38 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Award,
-  BarChart3,
-  BookOpen,
-  Building2,
-  Calendar,
-  Contact,
-  FileText,
-  Home,
-  Megaphone,
-  Settings,
-  Users2,
-} from "lucide-react";
 import { cn } from "@/lib/utils";
-
 // The (server) sidebar can't pass component references across the RSC
-// boundary — icons are addressed by name and resolved here on the client.
-const ICONS = {
-  Award,
-  BarChart3,
-  BookOpen,
-  Building2,
-  Calendar,
-  Contact,
-  FileText,
-  Home,
-  Megaphone,
-  Settings,
-  Users2,
-} as const;
+// boundary — icons are addressed by name and resolved here on the client
+// via the shared icon map.
+import { ICONS, type IconName } from "@/components/icon-map";
 
-export type NavIconName = keyof typeof ICONS;
+export type NavIconName = IconName;
 
 /**
  * Sidebar navigation link with an animated active state. Client
