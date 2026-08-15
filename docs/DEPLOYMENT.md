@@ -292,6 +292,11 @@ MS_CLIENT_SECRET=<your-client-secret>
 > **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
 > needed). Redirect URIs in Entra should use `http://localhost/...`.
 
+> **Timezone:** both app containers run with `TZ=Europe/Berlin` — set directly
+> in `docker-compose.yml` (cms + web), not via `.env`. Date-only logic (events
+> month grid, classified-ad expiry, RSVP/birthday date math) must not drift a
+> day around UTC midnight. Edit the compose file if your company is elsewhere.
+
 ### 2.2 Build and start
 
 ```bash
