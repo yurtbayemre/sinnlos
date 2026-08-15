@@ -6,12 +6,21 @@
  * Components that close over dynamically-imported symbols (like the
  * previous topbar sign-out button) don't work reliably.
  */
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { getTranslations } from "next-intl/server";
 import { auth, signIn, signOut } from "@/auth";
+import { REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { STRAPI_URL } from "@/lib/config";
+import { safeInternalPath } from "@/lib/utils";
 
-export async function signInWithMicrosoft() {
-  await signIn("microsoft-entra-id", { redirectTo: "/" });
+export async function signInWithMicrosoft(formData: FormData) {
+  // Deep-link restore: the route guard appends ?from=<pathname> and the
+  // sign-in page forwards it as a hidden field. Only same-origin paths
+  // pass validation (open-redirect guard).
+  await signIn("microsoft-entra-id", {
+    redirectTo: safeInternalPath(formData.get("from")),
+  });
 }
 
 export async function signInWithCredentials(_prev: unknown, formData: FormData) {
@@ -19,7 +28,7 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
     await signIn("local", {
       identifier: formData.get("identifier"),
       password: formData.get("password"),
-      redirectTo: "/",
+      redirectTo: safeInternalPath(formData.get("from")),
     });
   } catch (err) {
     // Auth.js signals success via a NEXT_REDIRECT throw — rethrow it.
@@ -30,6 +39,13 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
 }
 
 export async function registerLocalAccount(_prev: unknown, formData: FormData) {
+  // Server-side gate: the register page hides itself when registration is
+  // off, but the action must enforce it too — otherwise the endpoint stays
+  // callable directly (e.g. with a stale form or crafted request).
+  if (!REGISTRATION_ENABLED) {
+    const t = await getTranslations("auth");
+    return { error: t("registrationDisabled") };
+  }
   const username = String(formData.get("username") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -103,7 +119,19 @@ export async function signOutAction() {
   await signOut({ redirect: false });
 
   const issuer = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER;
-  const appUrl = process.env.AUTH_URL || "http://localhost:3000";
+  // Prefer AUTH_URL, otherwise reconstruct the public origin from the
+  // request headers (Traefik sets x-forwarded-*) — the old hardcoded
+  // http://localhost:3000 fallback sent Microsoft users to a dead
+  // post_logout_redirect_uri whenever AUTH_URL was missing.
+  const h = await headers();
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  const proto =
+    h.get("x-forwarded-proto") ??
+    (host && !host.startsWith("localhost") && !host.startsWith("127.")
+      ? "https"
+      : "http");
+  const appUrl =
+    process.env.AUTH_URL ?? (host ? `${proto}://${host}` : "http://localhost:3000");
   const postLogoutRedirect = `${appUrl.replace(/\/$/, "")}/sign-in`;
 
   // Federated logout only applies to Microsoft sessions — local users

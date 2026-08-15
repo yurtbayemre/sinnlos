@@ -134,11 +134,12 @@ cp apps/cms/.env.example   apps/cms/.env
 cp apps/web/.env.example   apps/web/.env.local
 ```
 
-**`apps/cms/.env`** — fill in. The `.env.example` defaults to Postgres; override
-with **SQLite** for the simplest local setup (no external database needed):
+**`apps/cms/.env`** — fill in. The `.env.example` defaults to **SQLite** — the
+intended zero-config standalone setup (no external database needed). Keep it
+for local dev; production/Docker switches to Postgres (see the tip below):
 
 ```dotenv
-# Use SQLite locally — zero-config, file-based
+# SQLite is the .env.example default — zero-config, file-based
 DATABASE_CLIENT=sqlite
 DATABASE_FILENAME=.tmp/data.db
 
@@ -163,8 +164,8 @@ REVALIDATE_SECRET=<openssl rand -hex 32>
 WEB_INTERNAL_URL=http://localhost:3000
 ```
 
-> **Prefer Postgres locally?** Run one with Docker in a single command and keep
-> the default `DATABASE_CLIENT=postgres`:
+> **Prefer Postgres locally?** Run one with Docker in a single command, set
+> `DATABASE_CLIENT=postgres` and uncomment the Postgres block in `apps/cms/.env`:
 > ```bash
 > docker run -d --name sinnlos-pg \
 >   -e POSTGRES_DB=sinnlos -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=sinnlos \
@@ -532,11 +533,13 @@ extra steps):
 - **Security response headers** are set at the **Traefik** layer (override file),
   not in the app: `X-Content-Type-Options: nosniff`, `frameDeny`,
   `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive
-  `Permissions-Policy`, and HSTS (`max-age=31536000; includeSubDomains; preload`).
+  `Permissions-Policy` (`camera=(), microphone=(), geolocation=(), payment=(),
+  usb=()`), and HSTS (`max-age=31536000; includeSubDomains`).
 - **Rate limiting** guards brute-force / floods, again at Traefik
-  (rateLimit middleware, **not** an IP allowlist): a general limit on the web
-  router (avg 100/s, burst 50) and a stricter one on the cms router covering
-  `/api/auth` + `/admin` (avg 30/s, burst 15).
+  (rateLimit middleware, **not** an IP allowlist): a single `sinnlos-ratelimit`
+  middleware (avg 100 req/s per client IP, burst 100) applied to the auth
+  router (`/api/auth/*`) and the cms router (`/api`, `/admin`, `/uploads`, …).
+  The web catch-all router deliberately carries **no** rate limit.
 
 > For a standalone Caddy box (mode A) these headers/limits are **not** applied —
 > Caddy only does TLS + routing here. Add equivalent directives to the Caddyfile
@@ -1292,9 +1295,9 @@ docker compose build --no-cache cms
 docker compose up -d cms
 ```
 
-The Dockerfiles use `pnpm install --frozen-lockfile=false`, so a locally-edited
-lockfile will still install — but committing the updated lockfile keeps builds
-reproducible.
+Both Dockerfiles install with `pnpm install --frozen-lockfile`, so the root
+`pnpm-lock.yaml` must match the package manifests. After changing any
+`package.json`, run `pnpm install` locally and commit the updated lockfile.
 
 **Caddy "certificate authority not found" on localhost**
 

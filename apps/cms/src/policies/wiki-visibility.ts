@@ -9,12 +9,36 @@
  *   - team             → only users in `space.team.members` or the lead
  *
  * Admins and editors always pass.
+ *
+ * KNOWN OPEN ISSUE (do NOT "fix" by switching to the real request query):
+ *   This policy currently writes to `policyContext.query`, which is a
+ *   silent no-op (Koa's `query` is a prototype getter that
+ *   createPolicyContext's Object.assign never copies) — so it has never
+ *   actually filtered. Redirecting it to the real request query (as done
+ *   for notification/poll-vote-visibility) would break ALL wiki reads with
+ *   a 400, for two independently-verified reasons:
+ *     1. The filter shape mixes wiki-space attributes (`visibility`,
+ *        `allowedRoles`) at the top level, but this policy also guards the
+ *        wiki-page and wiki-revision routes, whose schemas have no such
+ *        attributes → validateQuery throws "Invalid key visibility". Even
+ *        for wiki-space the `{ space: ... }` clause is invalid (wiki-space
+ *        has no `space` attribute). A correct fix needs per-content-type
+ *        filter shapes.
+ *     2. Filtering on `allowedRoles` requires the caller to hold
+ *        `plugin::users-permissions.role.find`, which NO intranet role is
+ *        granted; `department`/`team`/`space` clauses likewise require
+ *        those targets' `.find` scopes. validateQuery runs
+ *        throwRestrictedRelations on filters, so the filter 400s.
+ *   Reactivating this needs a redesign (correct per-type filters + granting
+ *   the referenced relations' find scopes). Left as-is (status quo: no
+ *   API-level wiki visibility filtering) to avoid a 400 app. Verified via
+ *   node repro against @strapi/utils 5.49.
  */
 export default async (policyContext: any, _config: unknown, { strapi }: any) => {
   const user = policyContext.state?.user;
 
-  // Anonymous traffic can read public spaces only. We mutate the query
-  // filters so Strapi's core find handler does the heavy lifting.
+  // NOTE: writing to `policyContext.query` is intentionally a no-op today —
+  // see the KNOWN OPEN ISSUE above before changing this to the real query.
   const query = policyContext.query ?? (policyContext.query = {});
   query.filters = query.filters ?? {};
 

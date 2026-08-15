@@ -1,7 +1,11 @@
 # Sinnlos Intranet
 
 A self-hosted company intranet with **Microsoft Entra ID (Azure AD)** single sign-on,
-a **wiki**, **team pages**, and **department pages**, all gated by **user roles**.
+all gated by **user roles**: announcements with **comments & reactions**, a
+**wiki** with revision history, **department/team pages**, a **people directory
++ org chart**, **events with ICS export**, **polls**, **kudos**, a **document
+library**, **notifications**, **global search (⌘K)** and an **English/German
+UI** (see [Internationalization](#internationalization-i18n)).
 
 - **Backend** — Strapi v5 (Postgres) at `apps/cms`
 - **Frontend** — Next.js 16 + TailwindCSS + shadcn/ui at `apps/web`
@@ -148,16 +152,29 @@ On first sign-in, Strapi will:
 
 ## 5. Content model + roles
 
-Strapi content types (all draft+publish):
+Strapi ships 14 collection types plus one routes-only API
+(`apps/cms/src/api/`):
 
 | Type | Purpose |
 | --- | --- |
 | **department** | Top-level org unit with head, members, teams, pages |
 | **team** | Belongs to a department, has a lead and members |
+| **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments |
+| **comment** | Comments on announcements and wiki pages (`targetType` + `targetId`, no FK) |
+| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetId` scheme |
+| **kudos** | Peer recognition (`from` → `to` user, message, company value) |
+| **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
+| **event** | Calendar events, department-scoped, ICS export via custom route |
+| **poll** | Question + options, `closesAt`, `anonymous` flag, department targeting |
+| **poll-vote** | One vote per user per poll, cast via custom `vote`/`results` routes |
+| **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| **announcement** | Dashboard news items, scoped by role / department / team |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile |
+
+The users-permissions **User** is extended with `department`, `teams`,
+`manager` (self-relation, drives the org chart) and `microsoftOid`.
 
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
@@ -174,6 +191,9 @@ Policies at `apps/cms/src/policies/` enforce scoped access:
 - `can-edit-wiki` — wiki page write gated by author / department head / team lead
 - `wiki-visibility` — read filter based on `space.visibility` (public / role /
   department / team)
+- `document-visibility` — read filter: documents without a `departments`
+  relation are company-wide, otherwise only the owning departments see them
+  (admins/editors always pass)
 
 ### Role flow: Entra ID → Strapi → frontend
 
@@ -223,23 +243,28 @@ its permissions mirror `member`-level read access so the dashboard still
 works in that degraded state.
 
 **Strapi role capabilities** (REST API permissions seeded by
-`apps/cms/src/index.ts`, further gated by the policies above):
+`PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
+above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
-```
-                │ Announ  Depart  Teams   Wiki    Wiki    Users
-                │ -cement -ments          spaces  pages   (read)
-────────────────┼──────────────────────────────────────────────────
-admin_role      │ CRUD    CRUD    CRUD    CRUD    CRUD    ✓
-editor          │ CRUD    R       R       CRUD    CRUD    ✓
-department_head │ R       R + U   R + U   R       R+C+U   ✓
-team_lead       │ R       R       R + U   R       R+C+U   ✓
-member          │ R       R       R       R       R + U   ✓
-guest           │ —       —       —       R       R       ✓
-authenticated ↓ │ R       R       R       R       R       ✓
-                │   (fallback baseline; overridden by callback)
-────────────────┴──────────────────────────────────────────────────
- R = find + findOne   C = create   U = update   D = delete
-```
+| Role | Announcements | Depts / Teams | Docs · Events · Polls | Wiki spaces · pages · revisions | Comments · Reactions | Kudos · Poll-votes | Notifications |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `admin_role` | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
+| `editor` | CRUD | R / R | CRUD | CRUD | CRUD | CRUD | CRUD |
+| `department_head` | R | R+U / R+U | R | R · R+C+U · R | R+C+D | R+C | R+D |
+| `team_lead` | R | R / R+U | R | R · R+C+U · R | R+C+D | R+C | R+D |
+| `member` | R | R / R | R | R · R+U · R | R+C+D | R+C | R+D |
+| `guest` | — | — / — | R | R · R · — | R | — · R | R |
+| `authenticated` *(fallback)* | R | R / R | R | R | R+C | R+C | R |
+
+Every role in the matrix **except `guest`** additionally gets
+`user.find`/`findOne` (so populated relations like author/lead/head survive) —
+this also powers the people directory. `guest` is deliberately excluded (see
+`USER_READ_EXCLUDED_ROLES`): `user` reads would expose the whole employee
+directory (email, phone, hire date) to a read-only visitor, so populated user
+relations are simply stripped from guest responses. Custom (non-CRUD) route
+actions (ICS export, celebrations,
+mark-read, poll `vote`/`results`, `/api/me`, `changePassword`) are seeded via
+`CUSTOM_ACTION_GRANTS` in the same file.
 
 **The frontend has no roles of its own.** `apps/web/src/lib/roles.ts` is
 a single helper:
@@ -249,10 +274,24 @@ export const ADMIN_ROLES = new Set(["admin_role"]);
 export function isAdmin(role) { return role ? ADMIN_ROLES.has(role) : false; }
 ```
 
-Used in exactly two places: the sidebar (hide/show the *Admin* link) and
-the `/admin` page (redirect non-admins to `/`). Every other authorization
+Used in exactly three places: the sidebar (hide/show the *Admin* link), the
+`/manage` page and the `/manage/analytics` page (both redirect non-admins
+to `/`). Note the admin area lives under **`/manage`** — `/admin` is reserved
+for the Strapi admin panel by the reverse proxy. Every other authorization
 decision is made server-side by Strapi's permission matrix + route
 policies — the frontend just mirrors the role string.
+
+## Internationalization (i18n)
+
+The UI ships in **English and German** via `next-intl`. Locale selection is
+**cookie-based** (no locale segment in URLs): `apps/web/src/i18n/locale.ts`
+reads the `locale` cookie and falls back to the `DEFAULT_LOCALE` env var
+(built-in default `de` when the var is unset or invalid; supported values
+`en`, `de`). Users switch languages with the
+locale switcher in the UI, which sets the cookie through a Server Action
+(`apps/web/src/lib/locale-actions.ts`). Message catalogs live in
+`apps/web/messages/en.json` and `apps/web/messages/de.json` — new
+user-visible strings must be added to **both** files.
 
 ## 6. Production deployment
 
@@ -295,6 +334,7 @@ response headers, and the admin/auth rate limits all live at the Traefik layer
 pnpm dev               # run every workspace in parallel
 pnpm build             # build every workspace
 pnpm typecheck         # tsc --noEmit everywhere
+pnpm test              # vitest unit tests (also run in CI)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 ```

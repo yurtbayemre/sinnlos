@@ -175,11 +175,33 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "update"],
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
+  /**
+   * `guest` is strictly read-only. It is denied kudos (celebrations
+   * populate user relations and leak hire dates), but it DOES keep the
+   * baseline `users-permissions.user.find/findOne` grant handed out to
+   * every reading role below.
+   *
+   * OPEN ISSUE — guest still sees employee contact data: user.find/findOne
+   * cannot be revoked from guest without breaking the app. Strapi's core
+   * controllers run validateQuery (→ throwRestrictedRelations) BEFORE
+   * sanitizeQuery, so ANY populate of a user relation (wiki-page.author,
+   * comment.author, document.uploadedBy, department.head, team.lead, ...)
+   * — and even the notification/poll-vote visibility filters, which
+   * reference the `recipient`/`voter` user relations — throw a 400 for a
+   * role lacking `user.find`. "Silently stripped" only applies to the
+   * later sanitize pass. So guest keeps user.find and can therefore read
+   * the directory's email/phone/hireDate. Protecting those fields for
+   * guest specifically needs role-aware output sanitization for POPULATED
+   * user relations (not just direct /api/users reads), which Strapi v5 has
+   * no built-in hook for — deferred rather than shipped as a risky
+   * override. Status quo (directory visible) is preferred over a 400 app.
+   * Verified via node repro against @strapi/utils 5.49 (collection-type
+   * controller order + validateFilters/throwRestrictedRelations).
+   */
   guest: {
     "api::comment.comment": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,
     "api::event.event": READ_ACTIONS,
-    "api::kudos.kudos": READ_ACTIONS,
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
     "api::poll-vote.poll-vote": READ_ACTIONS,
@@ -224,7 +246,8 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
  */
 const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::event.event.ics": "*",
-  "api::kudos.kudos.celebrations": "*",
+  // guest is excluded: celebrations leak email + hireDate of every user.
+  "api::kudos.kudos.celebrations": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
   "api::poll-vote.poll-vote.vote": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
@@ -260,10 +283,34 @@ async function ensurePermission(
  * Every role that can read content types also needs
  * `plugin::users-permissions.user.find` and `findOne` so that Strapi
  * populates user relations (author, lead, members, head, etc.)
- * instead of silently stripping them from API responses.
+ * instead of throwing a 400 on any query that populates them.
+ *
+ * This applies to `guest` too: revoking it (as an earlier audit attempt
+ * did) turned every guest read that populates a user relation — and the
+ * notification/poll-vote visibility filters — into a 400. See the OPEN
+ * ISSUE note on the `guest` matrix above. No role is excluded.
  */
 const USER_READ_ACTIONS: CrudAction[] = ["find", "findOne"];
 const USER_UID = "plugin::users-permissions.user";
+const USER_READ_EXCLUDED_ROLES: string[] = [];
+
+/**
+ * Permissions granted by earlier versions of this bootstrap that must be
+ * removed again. `ensurePermission` only ever ADDS rows, so deleting an
+ * entry from the matrix above does not revoke anything on an existing
+ * database — list the obsolete (role → action) pairs here instead.
+ */
+const REVOKED_PERMISSIONS: Record<string, string[]> = {
+  guest: [
+    // NOTE: user.find/findOne are intentionally NOT revoked — doing so
+    // 400s every guest read that populates a user relation (and the
+    // notification/poll-vote visibility filters). See the guest matrix
+    // OPEN ISSUE note above.
+    "api::kudos.kudos.find",
+    "api::kudos.kudos.findOne",
+    "api::kudos.kudos.celebrations",
+  ],
+};
 
 async function syncRolePermissions(strapi: any) {
   let granted = 0;
@@ -283,10 +330,31 @@ async function syncRolePermissions(strapi: any) {
       }
     }
     // Grant read access to users so populated relations work
-    for (const action of USER_READ_ACTIONS) {
-      const created = await ensurePermission(strapi, role.id, USER_UID, action);
-      if (created) granted++;
+    // (except for the roles excluded above — see USER_READ_EXCLUDED_ROLES).
+    if (!USER_READ_EXCLUDED_ROLES.includes(roleType)) {
+      for (const action of USER_READ_ACTIONS) {
+        const created = await ensurePermission(strapi, role.id, USER_UID, action);
+        if (created) granted++;
+      }
     }
+  }
+
+  // Remove permissions that older bootstrap versions handed out.
+  let revoked = 0;
+  for (const [roleType, actions] of Object.entries(REVOKED_PERMISSIONS)) {
+    const role = await strapi.db
+      .query("plugin::users-permissions.role")
+      .findOne({ where: { type: roleType } });
+    if (!role) continue;
+    for (const action of actions) {
+      const { count } = await strapi.db
+        .query("plugin::users-permissions.permission")
+        .deleteMany({ where: { action, role: role.id } });
+      revoked += count ?? 0;
+    }
+  }
+  if (revoked > 0) {
+    strapi.log.info(`[bootstrap] revoked ${revoked} obsolete permission(s)`);
   }
 
   // Custom (non-CRUD) route actions — see CUSTOM_ACTION_GRANTS.

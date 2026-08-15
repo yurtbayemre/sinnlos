@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -37,7 +38,11 @@ export async function Topbar() {
         );
         notifications = (res as any).data ?? [];
       }
-    } catch {
+    } catch (e) {
+      // strapi() redirects (NEXT_REDIRECT) to /sign-in on an expired
+      // session — let that escape so the whole page navigates instead of
+      // silently rendering a topbar with no notifications.
+      unstable_rethrow(e);
       // Notifications are non-critical — don't break the topbar
     }
   }

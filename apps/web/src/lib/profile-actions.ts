@@ -10,6 +10,7 @@
  *    only meaningful for local-credentials accounts.
  */
 import { refresh } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { strapi } from "@/lib/strapi";
 
 export type ProfileFormState = { error?: string; success?: string };
@@ -35,7 +36,10 @@ export async function updateProfile(
     // values show up immediately.
     refresh();
     return { success: "Profile updated." };
-  } catch {
+  } catch (e) {
+    // Don't swallow strapi()'s 401 redirect (NEXT_REDIRECT) — an expired
+    // session must navigate to sign-in, not surface as a save error.
+    unstable_rethrow(e);
     return { error: "Could not save profile." };
   }
 }
@@ -56,7 +60,11 @@ export async function changePassword(
       noCache: true,
     });
     return { success: "Password changed." };
-  } catch {
+  } catch (e) {
+    // A wrong current password is a 400 and stays a friendly error; an
+    // expired session is a 401 that strapi() turns into a redirect
+    // (NEXT_REDIRECT) — that control-flow error must not be swallowed.
+    unstable_rethrow(e);
     return { error: "Could not change password — check your current password." };
   }
 }

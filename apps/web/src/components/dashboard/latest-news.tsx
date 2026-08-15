@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { ArrowRight, Megaphone, Pin } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import { relativeTime } from "@/lib/relative-time";
 import { initials } from "@/lib/utils";
 
 type Announcement = {
@@ -27,33 +28,16 @@ function normalise(a: Announcement) {
     body: (a.body as string) ?? "",
     pinned: Boolean(a.pinned),
     createdAt: a.createdAt ? new Date(a.createdAt) : null,
-    authorName: author?.displayName ?? author?.username ?? author?.email ?? "Unknown",
+    authorName: author?.displayName ?? author?.username ?? author?.email ?? null,
     authorJob: author?.jobTitle ?? null,
   };
-}
-
-function formatDate(d: Date | null) {
-  if (!d) return "";
-  return d.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  });
-}
-
-function relative(d: Date | null) {
-  if (!d) return "";
-  const diff = Date.now() - d.getTime();
-  const day = 86400000;
-  if (diff < day) return "today";
-  if (diff < 2 * day) return "yesterday";
-  if (diff < 7 * day) return `${Math.floor(diff / day)} days ago`;
-  return formatDate(d);
 }
 
 export async function LatestNews({ items }: { items: Announcement[] }) {
   const tDashboard = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
+  const tRel = await getTranslations("relativeTime");
+  const relative = (d: Date | null) => relativeTime(d, tRel, { longDate: true });
   const normalised = items.map(normalise);
   const featured = normalised.find((n) => n.pinned) ?? normalised[0];
   const rest = normalised.filter((n) => n.id !== featured?.id).slice(0, 4);
@@ -123,7 +107,9 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
                       </AvatarFallback>
                     </Avatar>
                     <div className="text-xs">
-                      <div className="font-medium">{featured.authorName}</div>
+                      <div className="font-medium">
+                        {featured.authorName ?? tCommon("unknown")}
+                      </div>
                       {featured.authorJob && (
                         <div className="text-muted-foreground">{featured.authorJob}</div>
                       )}
@@ -152,7 +138,7 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
                         {n.body}
                       </p>
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{n.authorName}</span>
+                        <span>{n.authorName ?? tCommon("unknown")}</span>
                         <span>·</span>
                         <span>{relative(n.createdAt)}</span>
                       </div>

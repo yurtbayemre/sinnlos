@@ -1,5 +1,6 @@
 "use server";
 
+import { unstable_rethrow } from "next/navigation";
 import { auth } from "@/auth";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
@@ -14,7 +15,11 @@ export async function getNotifications(): Promise<Notification[]> {
       { noCache: true },
     );
     return (res as any).data ?? [];
-  } catch {
+  } catch (e) {
+    // strapi() issues redirect() (NEXT_REDIRECT) on an expired session —
+    // let that control-flow error escape instead of swallowing it and
+    // polling the bell forever with an empty list.
+    unstable_rethrow(e);
     return [];
   }
 }

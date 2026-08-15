@@ -6,6 +6,7 @@
  *    page lookups — see apps/cms/src/utils/revalidate.ts.
  */
 import { revalidate } from "../../../../utils/revalidate";
+import { wikiEditContext } from "../../../../utils/wiki-edit-context";
 
 /**
  * Lifecycle data carries relations either as a plain id or — when the write
@@ -57,17 +58,21 @@ export default {
     if (!existing?.body) return;
     if (existing.body === data.body) return;
 
-    // The editor making the change is set by the controller via ctx.state.user.
-    // We read it off data.lastEditor if present, otherwise fall back to existing.
-    const editorId = relationId(
-      (data as any).lastEditor ?? existing.lastEditor?.id,
-    );
+    // ctx.state.user never reaches db lifecycles — the REST controller
+    // bridges the authenticated editor (and the optional revision summary,
+    // which the core input validation would reject as an unknown key) via
+    // wikiEditContext. data.lastEditor / existing.lastEditor remain as
+    // fallbacks for writes that bypass the controller (admin panel, seeds).
+    const editContext = wikiEditContext.getStore();
+    const editorId =
+      editContext?.editorId ??
+      relationId((data as any).lastEditor ?? existing.lastEditor?.id);
 
     await strapi.db.query("api::wiki-revision.wiki-revision").create({
       data: {
         page: where.id,
         body: existing.body,
-        summary: (data as any).revisionSummary ?? null,
+        summary: editContext?.revisionSummary ?? (data as any).revisionSummary ?? null,
         editor: editorId ?? null,
         publishedAt: new Date(),
       },
