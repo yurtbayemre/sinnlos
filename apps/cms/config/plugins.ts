@@ -45,4 +45,43 @@ export default ({ env }: { env: Env }) => ({
       },
     },
   },
+  /**
+   * Upload hardening (marketplace ads opened the content-api upload route
+   * to regular employees for the first time):
+   *
+   *  - `sizeLimit` caps EVERY upload (admin panel included) at 50 MB —
+   *    down from Strapi's 1 GB default. The strapi::body formidable limit
+   *    in config/middlewares.ts is kept consistent with this value.
+   *    Employee uploads via POST /api/upload are additionally capped at
+   *    5 MB per image in src/extensions/upload/strapi-server.ts.
+   *  - `security.deniedTypes` is the native magic-byte MIME check (Strapi
+   *    >= 5.31, checks real file signatures via file-type, not extensions).
+   *    It runs for admin AND content-api uploads. SVG is denied globally:
+   *    it is a stored-XSS vector (script/event handlers in XML; Strapi
+   *    upload XSS history: CVE-2022-32114). Executables/HTML likewise.
+   *    The content-api route is further restricted to a JPEG/PNG/WebP
+   *    allowlist in the upload extension; this deny list is the backstop
+   *    that also covers admin-panel uploads.
+   */
+  upload: {
+    config: {
+      sizeLimit: 50 * 1024 * 1024,
+      security: {
+        deniedTypes: [
+          "image/svg+xml",
+          "text/html",
+          "application/xhtml+xml",
+          "text/javascript",
+          "application/javascript",
+          "application/x-sh",
+          "application/x-dosexec",
+          "application/x-msdownload",
+          "application/x-executable",
+          "application/x-elf",
+          "application/x-mach-binary",
+          "application/vnd.microsoft.portable-executable",
+        ],
+      },
+    },
+  },
 });

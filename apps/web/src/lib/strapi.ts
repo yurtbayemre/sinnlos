@@ -159,9 +159,32 @@ export const api = {
     },
   },
   events: {
-    list: () =>
+    // Time-window fetches instead of one global list: a plain
+    // sort=start:asc&pageSize=50 returns the 50 OLDEST events and starves
+    // the calendar once history grows. All three share the "events" tag +
+    // 60 s revalidate (same invalidation behavior as the old list()).
+    // Callers pass local start-of-day ISO stamps so the cache key changes
+    // at most once per day/month, not per request.
+    //
+    // Upcoming events (start >= from), soonest first.
+    upcoming: (fromIso: string) =>
       strapi<StrapiListResponse<any>>(
-        "/api/events?populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=50",
+        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=50`,
+        { tag: "events", revalidate: 60 },
+      ),
+    // The most recent past events (start < before), newest first — the
+    // list view shows only this small tail of history.
+    past: (beforeIso: string, limit = 10) =>
+      strapi<StrapiListResponse<any>>(
+        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[departments]=true&populate[organizer]=true&sort=start:desc&pagination[pageSize]=${limit}`,
+        { tag: "events", revalidate: 60 },
+      ),
+    // Events overlapping the half-open window [from, to) for the month
+    // grid — multi-day spans included: start < window end AND
+    // (end ?? start) >= window start ($or handles the nullable end).
+    window: (fromIso: string, toIso: string) =>
+      strapi<StrapiListResponse<any>>(
+        `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=100`,
         { tag: "events", revalidate: 60 },
       ),
     one: (id: string) =>
@@ -169,6 +192,35 @@ export const api = {
         `/api/events?filters[id][$eq]=${encodeURIComponent(id)}&populate[departments]=true&populate[organizer]=true`,
         { tag: `event:${id}`, revalidate: 60 },
       ),
+    // RSVP rows for a set of events. noCache: the response contains the
+    // caller's own answer (myStatus is derived from it) — user-variable
+    // data must never enter the URL-keyed fetch cache. The filter targets
+    // the plain string column targetDocumentId (no relation traversal);
+    // the user populate is field-limited to displayName. Guests never call
+    // this (no event-rsvp.find grant — the page skips the fetch).
+    // Strapi's REST maxLimit caps pageSize at 100 (see acknowledgements.ts),
+    // so this walks the pagination like the ack helpers do. Hard upper
+    // bound: 30 pages x 100 rows = 3000 rows, comfortably above 50 visible
+    // events with full attendance while still bounding a runaway loop.
+    rsvps: async (documentIds: string[]) => {
+      const filters = documentIds
+        .map((d, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(d)}`)
+        .join("&");
+      const MAX_RSVP_PAGES = 30;
+      const all: any[] = [];
+      for (let page = 1; page <= MAX_RSVP_PAGES; page++) {
+        const res = await strapi<StrapiListResponse<any>>(
+          // Secondary sort on id keeps the page walk stable when many
+          // rows share the same respondedAt (no skips/duplicates).
+          `/api/event-rsvps?${filters}&populate[user][fields][0]=displayName&sort[0]=respondedAt:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+          { noCache: true },
+        );
+        all.push(...(res?.data ?? []));
+        const pagination = res?.meta?.pagination;
+        if (!pagination || page >= pagination.pageCount) break;
+      }
+      return { data: all };
+    },
   },
   polls: {
     list: () =>
@@ -190,6 +242,32 @@ export const api = {
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30",
+        { noCache: true },
+      ),
+  },
+  classifieds: {
+    // All classified endpoints bypass the fetch cache: after create/renew
+    // the author must see the change immediately (the actions call
+    // refresh()), and a tagged cache would need lifecycle invalidation for
+    // no real gain — Strapi sits on the internal Docker network.
+    // Author populate is field-limited; email is needed for the mailto
+    // contact button on the detail page (company-internal address).
+    list: (todayIso: string, category?: string) => {
+      let url = `/api/classifieds?filters[expiresAt][$gte]=${encodeURIComponent(todayIso)}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100`;
+      if (category) url += `&filters[category][$eq]=${encodeURIComponent(category)}`;
+      return strapi<StrapiListResponse<any>>(url, { noCache: true });
+    },
+    // Own ads including expired ones (renew UI). The author filter is a
+    // user-relation traversal — fine for every posting role (all hold
+    // user.find), and guests never reach this query.
+    mine: (userId: number) =>
+      strapi<StrapiListResponse<any>>(
+        `/api/classifieds?filters[author][id][$eq]=${userId}&populate[images]=true&sort=createdAt:desc&pagination[pageSize]=100`,
+        { noCache: true },
+      ),
+    one: (id: string) =>
+      strapi<StrapiListResponse<any>>(
+        `/api/classifieds?filters[id][$eq]=${encodeURIComponent(id)}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle`,
         { noCache: true },
       ),
   },

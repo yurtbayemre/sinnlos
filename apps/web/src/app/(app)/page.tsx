@@ -12,6 +12,12 @@ import { AckBanner } from "@/components/dashboard/ack-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 
+/** Local start of today — date-based, so the events cache key changes daily. */
+function startOfToday(): Date {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
 export default async function DashboardPage() {
   const session = await auth();
 
@@ -23,7 +29,9 @@ export default async function DashboardPage() {
     tryFetch(() => api.teams.list(), "dashboard"),
     tryFetch(() => api.announcements.list(session?.user?.department?.id), "dashboard"),
     tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard"),
-    tryFetch(() => api.events.list(), "dashboard"),
+    // Upcoming only — the stat card counts events that still matter, not
+    // the 50 oldest history entries (api.events is time-window based now).
+    tryFetch(() => api.events.upcoming(startOfToday().toISOString()), "dashboard"),
     tryFetch(() => api.quickLinks.list(), "dashboard"),
   ]);
 
