@@ -1,0 +1,158 @@
+# Architektur-Karte: Sinnlos-Intranet
+
+Next.js 16 (App Router/RSC) + Strapi 5.49 + Postgres 16 · Stand 2026-08-15 (nach 5 neuen Modulen: Geburtstage, Quick-Links, Lesebestätigung, Kleinanzeigen, Event-RSVP + Security-Runden vom 2026-08-15; alles auf main, am Code verifiziert)
+
+> Lebendes Dokument: bei Struktur- oder Datenmodell-Änderungen mitpflegen.
+> Alle Angaben sind zum genannten Stand am Code verifiziert (Datei:Zeile-Verweise).
+
+---
+
+## 1. Überblick & Topologie
+
+Sinnlos ist ein Firmen-Intranet als pnpm-Monorepo mit zwei Apps: `apps/web` (Next.js 16, fast rein serverseitig, App Router + RSC) und `apps/cms` (Strapi 5, Node 24, Postgres in Prod / SQLite standalone). Das Web-Frontend ist ein dünner, session-behafteter Layer vor Strapi: alle Pages sind async Server Components, die über einen zentralen `strapi()`-Fetch-Client (`apps/web/src/lib/strapi.ts`) mit dem Strapi-JWT der Auth.js-Session lesen; Mutationen laufen ausschließlich über Server Actions in `apps/web/src/lib/*-actions.ts`. Autorisierung liegt konzeptionell im CMS (Rollen-Bootstrap + Route-Policies); das Web-Layer prüft Rollen nur für UI-Gates (`isAdmin`). Auth: Microsoft Entra ID (OAuth → Token-Exchange gegen Strapi-JWT) und/oder lokale Credentials, beides env-geschaltet; ein `DEMO_MODE=1` ersetzt Strapi komplett durch In-Memory-Fixtures (`lib/demo.ts`).
+
+Deployment: 4-Container-Stack via `docker compose -p infra` (`infra/docker-compose.yml`): `db` (postgres:16-alpine) → `cms` (Strapi :1337) → `web` (Next standalone :3000) → optional `caddy`. In Prod (VPS, `sinnlos.yurtbay.dev`) deaktiviert `infra/docker-compose.traefik.yml` den Caddy (`profiles: [manual]`) und hängt web+cms per Labels an den Host-Traefik (externes Netz `frontend`, TLS via `lehttp`). Das Pfad-Routing ist die zentrale Topologie-Invariante — **Router-Prioritäten: `/api/auth/*` → web (Prio 100), `/api|/admin|/uploads|…` → cms (Prio 50), Catch-all → web (Prio 1)** — und existiert doppelt (Traefik-Labels + `infra/Caddyfile`), muss also synchron gehalten werden. Konsequenzen im Code: Next-eigene Endpunkte dürfen nicht unter `/api/*` liegen (ICS-Route lebt unter `/events/[id]/ics`), `/admin` ist für Strapi reserviert, und der Revalidate-Webhook (`/api/revalidate`) ist von außen unerreichbar, weil Traefik `/api` zu Strapi routet — CMS ruft ihn intern über `WEB_INTERNAL_URL` auf.
+
+```
+Browser ──HTTPS──> Traefik (frontend-Netz)
+                     ├─ /api/auth/* ────────────> web:3000  (Auth.js)
+                     ├─ /api|/admin|/uploads ───> cms:1337  (Strapi)
+                     └─ /* ─────────────────────> web:3000  (Next RSC)
+web ──Bearer strapiJwt──> cms ──> db (postgres, kein Host-Port)
+cms ──POST /api/revalidate (x-revalidate-secret)──> web (intern, WEB_INTERNAL_URL)
+```
+
+## 2. Datenmodell
+
+**19 API-Verzeichnisse unter `apps/cms/src/api/`** = 18 Collection-Types + 1 routes-only API (`profile`, GET/PUT `/api/me`, ohne eigenes Schema). Neu seit 2026-08-14: `acknowledgement`, `classified`, `event-rsvp`, `quick-link` (4 Types); dazu Felderweiterungen an `user`, `announcement`, `event`.
+
+| Domäne | Types | Relationen / Kernfelder |
+|---|---|---|
+| Orga | `department`, `team`, User (users-permissions, erweitert) | department 1-n team; User: `department` m:1, `teams` m:n, `manager` Selbstreferenz (Org-Chart), `microsoftOid`; **NEU `birthday` + `birthdayVisible` (beide schema-`private`, Opt-in default false)** |
+| News/Social | `announcement`, `comment`, `reaction`, `kudos`, `notification` | announcement mit `audience`/`audienceRoles` (m:n role), `department` m:1, `team` m:1; **NEU `requiresAck` (bool) + `ackDeadline` (date)**; comment/reaction **polymorph** via `targetType`-Enum + `targetId`-Integer (Row-id, kein FK! — s. §7); kudos from→to; notification recipient/actor/link |
+| Lesebestätigung | **`acknowledgement`** (neu) | `user` m:1, `targetType` Enum (`announcement`\|`document` — document nur vorbereitet, Controller lehnt ab solange kein requiresAck-Feld), **`targetDocumentId` String = documentId-Anker** (kein FK, publish-stabil), `acknowledgedAt`; draftAndPublish OFF; immutable (update/delete nur admin) |
+| Events | `event`, **`event-rsvp`** (neu) | event: `departments` **m:n**, `organizer` m:1, **NEU `rsvpEnabled` (bool) + `capacity` (int ≥1)**; event-rsvp: `user` m:1, **`targetDocumentId` String (documentId-Anker)**, `status` Enum yes/no/maybe, `respondedAt`; draftAndPublish OFF; ICS-Export via Custom-Route |
+| Quick-Links | **`quick-link`** (neu) | `label`/`url`/`icon`/`order`, `category` Enum (hr/it/tools/extern), `departments` m:n (leer = firmenweit); draftAndPublish ON; Pflege nur im Strapi-Admin (kein Web-UI; Content-API-Writes zusätzlich `is-admin-or-editor`-gated) |
+| Kleinanzeigen | **`classified`** (neu) | `category` Enum (sale/giveaway/wanted/service-offer/service-wanted), `price`/`priceNegotiable`, `location`, `images` (media multiple, max 4, gehärteter Upload s. §5.17), `expiresAt` (date, required — Auto-Expire ohne Cron: Web filtert `expiresAt >= today`; Default +30d, Cap +90d), `author` m:1; draftAndPublish OFF |
+| Polls | `poll`, `poll-vote` | poll 1-n poll-vote; 1 Vote/User, `optionIndex`/`closesAt`-Check, `anonymous`-Flag |
+| Dokumente | `document` | `departments` m:n; **ohne** Relation = firmenweit sichtbar |
+| Wiki | `wiki-space`, `wiki-page`, `wiki-revision` | space 1-n page (parent/children-Baum) 1-n revision; Revisionen per Lifecycle, Editor/Summary via AsyncLocalStorage (§5.19) |
+
+**Rollen** (Bootstrap in `apps/cms/src/index.ts`): `admin_role`, `editor`, `department_head`, `team_lead`, `member` (Default), `guest` + `authenticated`-Fallback. Drei Sync-Mechanismen, alle idempotent: PERMISSION_MATRIX (Z.101-298), `CUSTOM_ACTION_GRANTS` für Custom-Routen (Z.302-335, inkl. `plugin::upload.content-api.upload` und `role.find` für admin), **NEU `REVOKED_PERMISSIONS` (Z.377-396)**: `ensurePermission` fügt nur hinzu — auf Bestands-DBs entzieht nur diese Liste obsolete Grants (aktuell: guest verliert kudos.find/findOne/celebrations, acknowledgement.\*, classified.find/findOne).
+
+## 3. Request-/Datenfluss
+
+**Auth-Kette:**
+1. Route-Guard: `apps/web/src/proxy.ts` (Next-16-„proxy", Nachfolger von middleware.ts) prüft pro Request die Auth.js-Session, redirectet unauth → `/sign-in?from=…`. Public-Allowlist (`proxy.ts:37-49`): `/sign-in`, **`/register` (jetzt drin, Redirect-Kreis behoben)**, `/api/auth`, `/api/revalidate`, `/_next`, `/favicon` + exakte PUBLIC_FILES. `DEMO_MODE=1` schaltet alles ab (Prod-Guard in `auth.ts:24-28` wirft dann beim Start).
+2. Login Microsoft: Entra-OAuth → `auth.ts:64-102` tauscht das Access-Token gegen einen Strapi-JWT via `/api/auth/microsoft/callback` (3 Versuche, Backoff 0/500/1500ms, 5s-Timeout, Retry nur bei 5xx). CMS-seitig (`extensions/users-permissions/strapi-server.ts:74-162`): Graph-Enrichment (/me, /memberOf, /manager), **Rollen-Remap bei jedem Login** via `config/ms-role-map.ts` (first-match-wins, Fallback `member`), Department-Match per Name, Manager via `microsoftOid`. Scope enthält jetzt `GroupMember.Read.All` (`config/plugins.ts:39`) — Gruppen-Mapping funktioniert (braucht Tenant-Admin-Consent).
+3. Login lokal: Credentials-Provider → Strapi `/api/auth/local`, dann Nachladen von `/api/users/me?populate=role,department` (`auth.ts:126-168`).
+4. Session: JWT-Strategie, `maxAge` 7d **exakt = Strapi-JWT-TTL** (`auth.ts:175` ↔ `apps/cms/config/plugins.ts`). Session trägt `strapiJwt`, `provider`, `user.id` (number), `role`, `department`.
+5. Jeder Server-Fetch: `strapi()` injiziert `Authorization: Bearer <strapiJwt>`; Autorisierung entscheidet Strapi (Matrix grob + Route-Policies fein). **NEU: 401-Handling** — abgelaufener/rotierter JWT → `redirect("/sign-in?expired=1")` statt kryptischer Fehler (`strapi.ts:65-67`).
+
+**Caching (zweigleisig, Grundregel in `strapi.ts:24-30`):**
+- Getaggte Collections (departments, teams, polls, **events — jetzt zeitfensterbasiert statt einer globalen Liste**: `api.events.upcoming/past/window`, gemeinsamer Tag `events` + 60s; Caller übergeben lokale Start-of-Day-ISO-Stamps, damit der Cache-Key max. 1×/Tag wechselt).
+- Alles Nutzer-Variable strikt `noCache: true` — der Next-Fetch-Cache keyed nur per URL und ignoriert den Authorization-Header: wiki, people, announcements (inkl. `requiringAck`), kudos, notifications, poll-results, **acknowledgements, quick-links, classifieds, event-rsvps, celebrations** (alle neuen Endpoints korrekt noCache). ⚠️ Ausnahme/Altlast: `documents.list` ist noch getaggt — seit die document-visibility-Policy wirkt, ist das ein Leak-Kandidat (§7 P1.1 [BEHOBEN c3af366 — documents.list jetzt noCache]).
+- Invalidierung: Strapi-`after*`-Lifecycles → `utils/revalidate.ts` (fire-and-forget, 3s-Timeout, Shared Secret) → `POST WEB_INTERNAL_URL/api/revalidate` → `revalidateTag(tag, "default")` (`route.ts:37`). Tag-Schema: `<typ>s` + `<typ>:<slug>`.
+- Mutierende Server Actions: `refresh()` aus `next/cache`. Kommentare/Notifications pollen client-seitig (10s/30s, nur bei sichtbarem Tab).
+- Paginierte Sammel-Fetches laufen als bounded Page-Walk (Strapi-REST maxLimit 100): Acks max 20 Seiten (`lib/acknowledgements.ts`), RSVPs max 30 Seiten (`strapi.ts` `events.rsvps`).
+
+**Fehler-Strategie:** Listen-Seiten nutzen `tryFetch()` (`lib/safe-fetch.ts`, rethrowt NEXT_REDIRECT via `unstable_rethrow`) → Inline-`FetchErrorBanner`; Detail-Seiten mit `notFound()`-Semantik lassen Fetch-Fehler bewusst zur `(app)/error.tsx` propagieren.
+
+## 4. Feature-Inventar
+
+| Feature | Route | Kernkomponenten (unter `apps/web/src/`) | CMS-Types |
+|---|---|---|---|
+| Dashboard | `/` | 6 parallele tryFetch, StatCards, `dashboard/latest-news` (jetzt i18n), **NEU `dashboard/quick-links` (Widget) + `dashboard/ack-banner` (eigene Suspense-Boundary, eigene per-User-Fetches)** | department, team, announcement, event, users, **quick-link, acknowledgement** |
+| Announcements + **Lesebestätigung** | `/announcements` | `comments/comment-section` → `live-comment-section` (10s-Poll), `reactions/reaction-bar`; **NEU: „Offene Bestätigungen"-Sektion + `announcements/ack-button` (Matching per documentId)** | announcement, acknowledgement, comment, reaction, notification |
+| **Ack-Report (Admin)** | **`/manage/acknowledgements`** | `isAdmin`-Gate + redirect (`page.tsx:44-45`); admin_role umgeht die Visibility-Policy → alle Acks; Denominator = Rollen mit announcement.find (guest ausgenommen) | acknowledgement, announcement, user |
+| Departments/Teams | `/departments[/slug]`, `/teams[/slug]` | Detail-Pages (Fehler → error.tsx) | department, team |
+| Personen-Verzeichnis | `/people`, `/people/[id]`, `/people/org-chart` | `people/people-grid` (Client-Filter), `people/org-tree` | user, department, team |
+| Events + ICS + **RSVP + Monatsansicht** | `/events` (Liste), **`/events?view=month[&month=YYYY-MM]`**, Handler `/events/[id]/ics` | **NEU `events/event-rsvp-panel`** (Zu-/Absage/Vielleicht, Kapazitätsanzeige, nur Listen-Ansicht/Upcoming-Cards) + **`events/events-month-view`** (`monthGridRange` :52-65 liefert das sichtbare Grid-Fenster inkl. mehrtägiger Events); Guests: RSVP-Fetch wird übersprungen (kein Grant) | event, **event-rsvp**, notification |
+| Wiki | `/wiki[/space/slug]` | keine eigenen Komponenten — CommentSection/ReactionBar mit `targetType="wiki-page"` | wiki-space, wiki-page, wiki-revision |
+| Dokumente | `/documents` | Sichtbarkeit via `document-visibility`-Policy (**jetzt wirksam**, s. §5.14) | document |
+| **Kleinanzeigen** | **`/marketplace`** (+ Kategorie-Filter), `/marketplace/new`, `/marketplace/[id]`, `/marketplace/[id]/edit` | **NEU `marketplace/classified-form`** (Bilder als FormData durch die Server Action — Browser hält nie den JWT), `renew-button` (Verlängern = Update mit frischem expiresAt), `delete-classified`; Nav-Eintrag `sidebar.tsx:24`; mailto-Kontakt via author.email | **classified** + upload |
+| Polls | `/polls` | `polls/poll-card` (einzige optimistische Mutation) | poll, poll-vote |
+| Kudos + Celebrations | `/kudos` | `kudos/give-kudos`; Celebrations-Tile (`GET /api/celebrations?window=30`) zeigt Work-Anniversaries **+ NEU Geburtstage (Opt-in, ohne Geburtsjahr)** | kudos, user, notification |
+| Notifications | Topbar (keine Route) | `notifications/live-notification-bell` (30s-Poll) | notification |
+| Suche | global ⌘K | `search-command` (cmdk; Preload + 300ms-Debounce → `lib/search-action.ts`) | quer über alle |
+| Profil | `/profile` | `profile-form` (**NEU: birthday-Datum + birthdayVisible-Checkbox**), `change-password-form` | user via `/api/me` (profile-API, Whitelist inkl. birthday/birthdayVisible, ISO-Datums-Validierung im Controller) |
+| Admin | `/manage`, `/manage/analytics`, `/manage/acknowledgements` | `isAdmin`-Gates, Strapi-Deeplinks; Analytics zählt jetzt korrekt via `meta.pagination.total` | alle (counts) |
+| Auth | `/sign-in`, `/register` | `local-sign-in-form`, `register-form`; Registrierung serverseitig gated (`auth-actions.ts:45`, `REGISTRATION_ENABLED`) | users-permissions |
+
+## 5. Konventionen & Patterns (beim Ändern zwingend kennen)
+
+1. **Reverse-Proxy-Vertrag:** Neue Next-Endpunkte NIE unter `/api/*` (geht zu Strapi) außer `/api/auth/*`; `/admin` ist Strapi. Routing-Änderungen immer doppelt: Traefik-Labels (`infra/docker-compose.traefik.yml`) **und** `infra/Caddyfile`.
+2. **Guard = `src/proxy.ts`, nicht middleware.ts** (Next 16). Neue öffentliche Routen müssen in die `isPublic`-Liste (`proxy.ts:37-49`; `/register` ist inzwischen drin).
+3. **Server/Client-Split:** Pages sind ausnahmslos async RSC; Interaktivität nur in `src/components`. Über die RSC-Grenze nur serialisierbare Props — Icons als String via ICONS-Map.
+4. **Mutationen = Server Actions** in `lib/*-actions.ts`; Formular-Signatur `(_prev, formData) → {error?/success?}` mit `useActionState`; Fehler-Rückgaben als Machine-Codes, Übersetzung im Form (i18n-Regel, Muster `classified-actions.ts`). Datei-Uploads laufen als FormData durch die Action (Browser hält nie den Strapi-JWT).
+5. **`strapi()`-Client (`lib/strapi.ts:33-77`):** DEMO_MODE-Kurzschluss, JWT-Injektion, 401 → `redirect("/sign-in?expired=1")` (Z.65-67), `!res.ok` → throw, 204-Toleranz. Cache-Regel: per-User-Daten IMMER `noCache: true`. Neue getaggte Endpoints nur, wenn die Collection garantiert von KEINER Policy per-User gefiltert wird (Gegenbeispiel/Altlast: documents, §7 P1.1).
+6. **documentId-Regel (numerische Web-ids):** Web arbeitet mit numerischen ids + Filter-Queries. Wo Strapi-v5-Core-Routen documentId erwarten, übersetzt der CMS-Controller (`comment.ts:30-32`; gleiches Muster in `classified.ts` update/delete — untranslated numeric id würde 404/204-ins-Leere).
+7. **Live-Wrapper-Muster** (kein SWR/React-Query): Server-Entry lädt initial, Client-Wrapper pollt per `setInterval` nur bei `visibilityState==='visible'`; Mutations-Kinder rufen Action, dann `onChanged?.()`.
+8. **CMS-Authz zweistufig:** users-permissions-Matrix (`src/index.ts:101-298`) + Route-Policies (`src/policies/`, 14 Stück). Neue Content-Types brauchen Matrix-Eintrag UND Policy-Verdrahtung im Router UND ggf. `CUSTOM_ACTION_GRANTS`-Zeile (Custom-Routen 403en sonst für alle).
+9. **Lifecycles:** `relationId()`-Normalisierung vor DB-where; Notification-Fan-out per-row `create()` — NIE `createMany()` (attachRelations wird übersprungen, recipient bliebe null; belegt in `announcement/lifecycles.ts:63-69`).
+10. **Rollen:** `isAdmin()` fail-closed, exakt `"admin_role"`. MS-Login remappt die Rolle bei JEDEM Login.
+11. **i18n:** Cookie-basiert ohne Locale-Routing (en/de); Auth-Seiten `force-dynamic` (Runtime-Env nicht ins Image backen).
+12. **URLs:** `STRAPI_URL` (intern) vs. `STRAPI_PUBLIC_URL` (Browser/Media); Client-Bundle bleibt relativ.
+13. **Loading-UX:** jede Route hat `loading.tsx` + Skeleton; `PageFade` remountet per `key={pathname}`.
+
+**NEU (Pflicht-Muster seit den Security-Runden + Modulen vom 2026-08-15):**
+
+14. **`getMutableQuery` — die Policy-No-Op-Falle** (`apps/cms/src/utils/policy-query.ts:30-39`): Read-Policies dürfen Filter NIE auf `policyContext.query` schreiben — Koa exponiert `query` als Prototype-Getter, `createPolicyContext`s `Object.assign` kopiert ihn nicht → stiller No-Op (genau so waren wiki-/document-visibility monatelang wirkungslos, Fix-Commit bcb40c4). Immer `getMutableQuery(policyContext)` (mutiert `policyContext.request.query` in place) und den eigenen Filter per `$and` mit dem Client-Filter verknüpfen (narrow-only, nie widen). So machen es alle 6 Visibility-Policies (acknowledgement/notification/poll-vote/quick-link/wiki/document).
+15. **`restrictiveIdFilter` — die sanitize-fail-open-Falle** (`policy-query.ts:62-64`): id-basierte Policies injizieren `{id:{$in:[...]}}`; bei LEERER Liste würde `sanitizeQuery` das leere Array-Operand strippen → `{id:{}}` = kein Constraint = wer NICHTS sehen darf, sähe ALLES. Deshalb Skalar-Fallback `{id:{$eq:-1}}`. Beides gegen die installierte @strapi/utils 5.49 per Repro verifiziert und in `utils/policy-query.test.ts` getestet. Verwendet von `wiki-visibility.ts:86-88`, `document-visibility.ts:80-82`, `quick-link-visibility.ts:72-74`.
+16. **id-Berechnung server-seitig statt Relations-Filter** (`utils/visible-ids.ts`): REST-Filter, die Relationen traversieren, 400en für Rollen ohne `<target>.find`-Scope (`throwRestrictedRelations`). Sichtbare Primärschlüssel daher via `strapi.db.query` (umgeht Permission-Gating) in JS bestimmen, dann nur den nicht-relationalen id-Filter injizieren.
+17. **documentId-Anker für Referenzen auf draftAndPublish-Types:** Strapi 5 published per delete+recreate — die numerische id einer published Row wechselt bei JEDEM Publish. Referenzen auf announcement/event daher als `targetDocumentId`-String: `acknowledgement/controllers/acknowledgement.ts:9-15`, `event-rsvp/controllers/event-rsvp.ts:10-15`; Web matcht ebenso per documentId (`dashboard/ack-banner.tsx`). Beide Controller prüfen das Ziel als published + Feature-Flag (requiresAck bzw. rsvpEnabled) mit EINEM identischen Fehler für alle Fail-Modes (kein Existenz-Orakel für Draft-documentIds). comment/reaction hängen noch am alten Row-id-Anker (§7).
+18. **Write-Policy-Lookups akzeptieren id UND documentId:** `/^\d+$/`-Weiche in allen Ownership-Policies (`can-edit-wiki.ts:22`, `is-department-head.ts:21`, `is-team-member-or-lead.ts:19`, `is-classified-author.ts:18`, `is-event-rsvp-owner.ts:19`, `is-notification-recipient.ts`, `is-reaction-author.ts`) — v5-Routen tragen documentId, das Web schickt numerische ids.
+19. **Upload-Härtung** (`extensions/upload/strapi-server.ts`): Content-API `POST /api/upload` ist gewrappt — (a) create-only, `?id=`-Replace verboten (Z.83-85; mit nur upload-Grant könnte man sonst JEDE Media-Datei überschreiben), (b) max 4 Dateien/Request, (c) 5MB/Datei mit fs.stat-Fallback, (d) **Magic-Byte-Allowlist JPEG/PNG/WebP** (Z.47-68, kein SVG/XSS, kein GIF; client-mimetype wird auf den gesnifften Wert normalisiert), (e) `provider_metadata.uploadedBy` = Caller-id auf jede erzeugte Datei (Z.144-161). Der classified-Controller akzeptiert nur Bild-ids mit eigenem uploadedBy (`classified.ts:74-103`, admin/editor-Bypass) — fremde Media-ids (Avatare, Dokumente) sind nicht anhängbar. Upload-Grant: 5 Rollen, nie guest/authenticated; kein find/destroy auf der Media-Library von außen.
+20. **Privacy-Stripping im event-rsvp-Controller** (`event-rsvp.ts:36-44` + find/findOne-Overrides): Zusagen sind intern öffentlich, Absagen/Vielleicht nicht — `user`-Relation wird aus jeder fremden non-yes-Row gelöscht (admin sieht alles); Counts bleiben möglich. `create` ist ein **Upsert** pro (user, targetDocumentId) mit Duplikat-Healing (Z.139-155: findMany, neueste Row gewinnt, Rest wird gelöscht) und Kapazitäts-Gate nur für Übergänge NACH "yes" (`isAtCapacity` Z.84-89, zählt **distinct** Ja-User via `countYesUsers` Z.54-69).
+21. **Server-authoritative Ownership:** `author`/`user`/`from` kommen IMMER aus `ctx.state.user`, nie aus dem Payload (kudos, comment, classified, acknowledgement, event-rsvp); bei classified-Update wird `author` nie kopiert (Ownership immutable). `expiresAt` wird server-seitig geclampt auf [heute, +90d], Default +30d (`classified.ts:45-59`; DST-sichere Kalender-Arithmetik, kein ×86400000).
+22. **`REVOKED_PERMISSIONS`** (`index.ts:377-396`): Der Bootstrap-Sync fügt Grants nur HINZU — einen Matrix-Eintrag löschen entzieht auf einer Bestands-DB nichts. Obsolete (Rolle→Action)-Paare müssen explizit in REVOKED_PERMISSIONS, sonst bleiben sie live (so wurden guest-Kudos/-Classified/-Ack-Grants zurückgenommen).
+23. **Wiki-Revision-Kontext** (`utils/wiki-edit-context.ts` + `wiki-page/controllers/wiki-page.ts:23`): Controller wrappt das Core-Update in `wikiEditContext.run({editorId, revisionSummary}, …)` (AsyncLocalStorage); der beforeUpdate-Lifecycle liest Editor/Summary via `getStore()` — Lifecycles haben kein ctx.state.
+
+## 6. Betrieb
+
+- **Deploy** (manuell, Host): `infra/deploy.sh` = Pflicht-DB-Backup → laufende Images als `:rollback` taggen → `up -d --build` → Smoke-Check. **Rollback-Falle:** nach `docker tag infra-web:rollback infra-web:latest` MUSS `up -d --no-build web` folgen.
+- **env:** `infra/.env` (mode 600); Pflicht `DATABASE_PASSWORD`. `REVALIDATE_SECRET` an web+cms, `MS_*` an beide, `AUTH_SECRET` nur web, Strapi-Secrets nur cms. **NEU: `TZ: Europe/Berlin` fest in beiden App-Containern** (`docker-compose.yml:34` cms, `:88` web) — Datums-Arithmetik (RSVP, Classified-Expiry, Monats-Grid, Celebrations) rechnet mit lokalen Mitternachten und würde um UTC-Mitternacht sonst einen Tag driften.
+- **Hardening:** mem_limit/cpus/pids_limit, `no-new-privileges`, web `cap_drop: ALL`; beide Images `USER node`; Postgres ohne Host-Port; Healthchecks gegen `127.0.0.1` (IPv6-Landmine). Traefik: Header-MW, Compress, Ratelimit nur auf auth+cms-Routern.
+- **Berechtigungs-Grants (neu dazugekommen, alle idempotent im Bootstrap):** `plugin::upload.content-api.upload` für admin/editor/department_head/team_lead/member (nie guest); `plugin::users-permissions.role.find` NUR admin_role (der Ack-Report populated `audienceRoles`, sonst 400 via throwRestrictedRelations); `user.find/findOne` bewusst für ALLE Rollen inkl. guest (Revoke 400t jede Query, die eine User-Relation populated oder filtert — dokumentierte OPEN-ISSUE-Abwägung `index.ts:218`).
+- **Backup:** `infra/backup/pg-backup.sh` nightly 03:00 + pre-deploy: `pg_dump -Fc` + restore-Check, Uploads-tar, GPG (Key off-box), 7d-Retention, Offsite-Dir.
+- **CI** (`.github/workflows/ci.yml`): typecheck → lint → **`pnpm test` läuft jetzt in CI** → build; **Node 24** (= Docker, Drift behoben), pnpm 9.12.0. Tests: 4 vitest-Dateien (ms-role-map, roles, reaction-summary, **policy-query** — die fail-open/No-Op-Fallen sind getestet). CMS-Dockerfile baut jetzt reproduzierbar (`--frozen-lockfile`, `cms/Dockerfile:10`).
+
+## 7. Auffälligkeiten & Risiken
+
+### 7a. Seit der letzten Karte (2026-08-14) ERLEDIGT — am Code verifiziert
+
+1. ~~Visibility-Policies wirkungslos~~ → wiki-/document-visibility waren stille No-Ops (policyContext.query-Falle); jetzt wirksam via getMutableQuery + server-seitiger id-Auflösung + restrictiveIdFilter (Commit bcb40c4, §5.14-16).
+2. ~~id-vs-documentId in Write-Policies~~ → alle Policies machen die `/^\d+$/`-Weiche (§5.18).
+3. ~~Notifications ohne recipient-Filter~~ → `notification-visibility` (own-only, admin-Bypass für Analytics) + `is-notification-recipient` auf delete; `reaction.delete` → `is-reaction-author`.
+4. ~~Anonyme Polls leaken via /api/poll-votes~~ → `poll-vote-visibility` beschränkt JEDEN Caller auf eigene Votes; Aggregation nur über die results-Route (respektiert `anonymous`).
+5. ~~guest liest Kudos/Celebrations~~ → per REVOKED_PERMISSIONS entzogen (celebrations leakt email+hireDate aller User); guest hat außerdem keine classified-/acknowledgement-Grants (Anzeigen populaten author.email/jobTitle).
+6. ~~Demo-Seed-Gefahr~~ → Guard jetzt „departments ODER users vorhanden → skip", Demo-Passwort wird nicht mehr geloggt (`seed-demo.ts:315`).
+7. ~~Registrierung nicht serverseitig gegated~~ → `registerLocalAccount` prüft `REGISTRATION_ENABLED` (`auth-actions.ts:45`); `/register` ist in der isPublic-Liste (`proxy.ts:41`).
+8. ~~Entra-Gruppen-Mapping wirkungslos~~ → Scope enthält `GroupMember.Read.All` (`plugins.ts:39`).
+9. ~~Analytics zählt immer 1~~ → zählt `meta.pagination.total` (`manage/analytics/page.tsx:30-33`).
+10. ~~Toter Wiki-Revision-Pfad~~ → AsyncLocalStorage-Brücke Controller→Lifecycle (§5.23), editor/summary werden befüllt.
+11. ~~Kein 401-Handling in strapi()~~ → Redirect `/sign-in?expired=1` (`strapi.ts:65-67`).
+12. ~~DEMO_MODE-Suche crasht~~ → `Array.isArray`-Guards (`search-action.ts:131-133, 226`); `demo()` beantwortet unbekannte Pfade mit `pack([])` — neue Module liefern im Demo leere Listen statt Fehler.
+13. ~~CI ohne Tests / CMS-Build nicht reproduzierbar / Node-Drift~~ → alles behoben (§6 CI).
+14. ~~Doku-Drift README~~ → README beschreibt jetzt die aktuellen Features inkl. der 5 neuen Module (Commit 664b240).
+15. UI-Runde b805b40: latest-news i18n'd, `relative()`-Helfer in `lib/relative-time.ts` konsolidiert, a11y-Nacharbeiten.
+
+### 7b. OFFEN — priorisiert
+
+**P1.1 — documents-Cache-Landmine ist jetzt SCHARF:** `api.documents.list()` cached weiterhin getaggt (`strapi.ts:236-239`, Tag `documents`/60s, URL-keyed), aber die document-visibility-Policy filtert seit bcb40c4 per User (Department-Scope). Explizites `revalidate` opted trotz Authorization-Header in den Fetch-Cache ein → die department-gefilterte Liste von User A kann aus dem Cache an User B gehen (genau das in der alten Karte als „künftige Landmine" beschriebene Szenario). Betroffen: `/documents` + Such-Preload (`search-action.ts:45`). **Fix: auf `noCache: true` umstellen** (wie wiki es von jeher macht). Einziger nicht adressierter Punkt der Security-Runde.
+
+**P1.2 — guest sieht das Mitarbeiterverzeichnis:** `user.find/findOne` für alle Rollen inkl. guest (E-Mail/Telefon/hireDate; birthday ist schema-private und bleibt draußen). Bewusste, dokumentierte Abwägung (`index.ts:218`): Revoke würde jede Query 400en, die User-Relationen populated/filtert — auch die eigenen Visibility-Filter. Sauberer Fix bräuchte Feld-Sanitizing statt Grant-Entzug.
+
+**P1.3 — Announcement-Audience nur query-seitig:** Der `audience`/`department`-Filter lebt allein in den Web-Queries (`strapi.ts:139-159`); `announcement.find` hat keine CMS-Policy (`routes/announcement.ts`). Direkter API-Zugriff liest alle Announcements. Folge auch: der Ack-Report zählt Nutzer als „ausstehend", die die Ankündigung per Web-Filter nie sahen (Report filtert nur Rollen, nicht Departments).
+
+**P2 — akzeptierte Races & bekannte Grenzen (bewusst so gebaut, in den Controllern dokumentiert):**
+- **Ack-/RSVP-/Poll-Vote-Races (check-then-insert):** kein DB-Unique möglich (user ist Link-Table-Relation). Duplikat-Acks sind kosmetisch (alle Konsumenten dedupen per Set über targetDocumentId); RSVP-Duplikate healt der nächste Upsert, `countYesUsers` zählt distinct; Kapazitäts-Overshoot um 1 im Foto-Finish möglich (`event-rsvp.ts:75-83`).
+- **Re-Notify-Duplikate bei Re-Publish:** publish = delete+recreate → JEDES Re-Publish feuert den afterCreate-Fan-out erneut (der frühere beforeUpdate-Guard zielte auf den falschen Trigger und wurde entfernt — OPEN-ISSUE-Kommentar in `announcement`- und `event`-lifecycles). Dedup bräuchte eine Quell-Referenz im notification-Schema.
+- **comment/reaction hängen am Row-id-Anker** (`targetId`-Integer): beim Re-Publish eines Announcements wechselt dessen numerische id → Kommentare/Reaktionen verwaisen. Genau das Problem, das acks/rsvps per documentId lösen; Migration steht aus.
+- **Verwaiste Uploads:** schlägt der Classified-Create nach erfolgreichem Bild-Upload fehl, bleiben die Bilder in der Media-Library (Mitarbeiter haben bewusst kein upload.destroy; `classified-actions.ts:17-20`); auch beim Löschen einer Anzeige bleiben die Dateien. Admin räumt übers Panel auf.
+- **Stille Deckelungen:** people pageSize 200 / Org-Chart 500; Classifieds/Acks/Announcements-requiringAck pageSize 100 (Acks/RSVPs immerhin mit bounded Page-Walk). `?from=`-Deep-Link-Restore weiterhin tot.
+- **Demo-Fixtures** decken nur departments/teams/wiki/announcements ab — alle neueren Features zeigen im Demo leere Listen (kein Crash mehr, aber ROADMAP-Checklist-Punkt weiter verletzt).
+
+## 8. Roadmap-Stand
+
+`docs/ROADMAP.md` (Juni 2026) ist **nicht nachgeführt** — real sind Phase 1–3 sowie 4.1/4.2 umgesetzt, dazu **fünf Module, die die Roadmap gar nicht kannte** (Stand 2026-08-15, alle deployed): Opt-in-Geburtstage im Celebrations-Tile, Quick-Links-Widget, Lesebestätigungen mit Admin-Report, Kleinanzeigen-Marktplatz mit gehärtetem Upload, Event-RSVP mit Kapazität + Monatsansicht. **Offen bleiben:** 2.4 SSE/Realtime (weiter 10s/30s-Polling), 2.2B E-Mail-Digests, Meilisearch, 4.3 AI-Features — plus die P1-Punkte aus §7b als eigentliche nächste Arbeit.

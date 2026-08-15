@@ -20,6 +20,8 @@ UI** (see [Internationalization](#internationalization-i18n)).
 
 **→ [Full deployment guide](./docs/DEPLOYMENT.md)** — bare-metal, Docker, VPS (Traefik), Azure VM, Azure Container Apps.
 
+**→ [Architecture map](./docs/architecture.md)** — topology, data model, request/caching flow, the conventions you must know before changing code, and the known open issues.
+
 ## Repository layout
 
 ```
