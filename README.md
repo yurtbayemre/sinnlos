@@ -1,10 +1,13 @@
 # Sinnlos Intranet
 
 A self-hosted company intranet with **Microsoft Entra ID (Azure AD)** single sign-on,
-all gated by **user roles**: announcements with **comments & reactions**, a
-**wiki** with revision history, **department/team pages**, a **people directory
-+ org chart**, **events with ICS export**, **polls**, **kudos**, a **document
-library**, **notifications**, **global search (⌘K)** and an **English/German
+all gated by **user roles**: announcements with **comments & reactions** and
+**read confirmation** for mandatory news, a **wiki** with revision history,
+**department/team pages**, a **people directory + org chart** with **opt-in
+birthday celebrations**, **events with ICS export & RSVP** (list + month view),
+**polls**, **kudos**, a **document library**, an **employee marketplace**
+(classified ads with hardened photo upload), **quick links**,
+**notifications**, **global search (⌘K)** and an **English/German
 UI** (see [Internationalization](#internationalization-i18n)).
 
 - **Backend** — Strapi v5 (Postgres) at `apps/cms`
@@ -152,48 +155,88 @@ On first sign-in, Strapi will:
 
 ## 5. Content model + roles
 
-Strapi ships 14 collection types plus one routes-only API
+Strapi ships 18 collection types plus one routes-only API
 (`apps/cms/src/api/`):
 
 | Type | Purpose |
 | --- | --- |
 | **department** | Top-level org unit with head, members, teams, pages |
 | **team** | Belongs to a department, has a lead and members |
-| **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments |
+| **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`) |
+| **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created |
 | **comment** | Comments on announcements and wiki pages (`targetType` + `targetId`, no FK) |
 | **reaction** | Emoji reactions, same polymorphic `targetType`/`targetId` scheme |
 | **kudos** | Peer recognition (`from` → `to` user, message, company value) |
 | **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
-| **event** | Calendar events, department-scoped, ICS export via custom route |
+| **event** | Calendar events, department-scoped, ICS export via custom route; optional RSVP (`rsvpEnabled` + `capacity`) |
+| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
 | **poll** | Question + options, `closesAt`, `anonymous` flag, department targeting |
 | **poll-vote** | One vote per user per poll, cast via custom `vote`/`results` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
+| **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
+| **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields below) |
 
 The users-permissions **User** is extended with `department`, `teams`,
-`manager` (self-relation, drives the org chart) and `microsoftOid`.
+`manager` (self-relation, drives the org chart), `microsoftOid`, and the
+schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
+**opt-in** (maintained via `/api/me`, never exposed through user reads) and
+only surface — without the year of birth — in the celebrations feed when
+`birthdayVisible` is set.
 
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
 `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
 The same bootstrap grants each role sensible default REST permissions on
-every intranet content type (reads for everyone, writes scoped per role).
+every intranet content type (broad reads, writes scoped per role — with the
+deliberate `guest` exceptions listed under the permission matrix below).
 Writes are then further gated by the route-level policies listed below.
 
-Policies at `apps/cms/src/policies/` enforce scoped access:
+Policies at `apps/cms/src/policies/` enforce scoped access.
+
+Write-side guards:
 
 - `is-admin-or-editor` — global write guard
 - `is-department-head` — department update requires matching department
 - `is-team-member-or-lead` — team update requires membership/lead
 - `can-edit-wiki` — wiki page write gated by author / department head / team lead
+- `is-classified-author` — marketplace ad update/delete only by its author
+  (admin/editor bypass for moderation)
+- `is-event-rsvp-owner` — RSVP update only by the responding user (admin
+  bypass; deliberately **no** editor bypass — an RSVP is a personal statement,
+  not content)
+- `is-reaction-author` — reaction delete only by its author (admin/editor bypass)
+- `is-notification-recipient` — notification delete only by its recipient (or admin)
+
+Read-side filters:
+
 - `wiki-visibility` — read filter based on `space.visibility` (public / role /
   department / team)
 - `document-visibility` — read filter: documents without a `departments`
   relation are company-wide, otherwise only the owning departments see them
   (admins/editors always pass)
+- `quick-link-visibility` — same `departments`-relation scheme as documents
+- `notification-visibility` — reads restricted to the caller's own rows
+  (recipient = caller)
+- `poll-vote-visibility` — reads restricted to the caller's own votes
+  (protects anonymous polls from `voter` populates; aggregates come from the
+  `results` route)
+- `acknowledgement-visibility` — reads restricted to the caller's own read
+  receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
+
+The read-side policies share helpers in `apps/cms/src/utils/`:
+`policy-query.ts` provides `getMutableQuery` (policies must mutate the real
+Koa `request.query` — `policyContext.query` is a copy the core controllers
+never read) and `restrictiveIdFilter` (an empty id allow-list is injected as
+`{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an empty
+`$in: []`, which would fail **open**). `visible-ids.ts` (`loadUserScope`,
+`visibleWikiSpaceIds`) resolves per-user wiki-space visibility, and
+`wiki-edit-context.ts` carries the authenticated editor from the wiki-page
+controller into the revision-snapshot lifecycle via `AsyncLocalStorage`, so
+revisions record who actually edited.
 
 ### Role flow: Entra ID → Strapi → frontend
 
@@ -246,25 +289,72 @@ works in that degraded state.
 `PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
-| Role | Announcements | Depts / Teams | Docs · Events · Polls | Wiki spaces · pages · revisions | Comments · Reactions | Kudos · Poll-votes | Notifications |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| `admin_role` | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
-| `editor` | CRUD | R / R | CRUD | CRUD | CRUD | CRUD | CRUD |
-| `department_head` | R | R+U / R+U | R | R · R+C+U · R | R+C+D | R+C | R+D |
-| `team_lead` | R | R / R+U | R | R · R+C+U · R | R+C+D | R+C | R+D |
-| `member` | R | R / R | R | R · R+U · R | R+C+D | R+C | R+D |
-| `guest` | — | — / — | R | R · R · — | R | — · R | R |
-| `authenticated` *(fallback)* | R | R / R | R | R | R+C | R+C | R |
+| Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos · Poll-votes | Notifications |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `admin_role` | CRUD | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
+| `editor` | CRUD | R+C · R+C+U | R / R | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
+| `department_head` | R | R+C · R+C+U | R+U / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D |
+| `team_lead` | R | R+C · R+C+U | R / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D |
+| `member` | R | R+C · R+C+U | R / R | R | CRUD | R | R · R+U · R | R+C+D | R+C | R+D |
+| `guest` | — | — · — | — / — | R | — | R | R · R · — | R | — · R | R |
+| `authenticated` *(fallback)* | R | R+C · R+C+U | R / R | R | R | R | R | R+C | R+C | R |
 
-Every role in the matrix **except `guest`** additionally gets
-`user.find`/`findOne` (so populated relations like author/lead/head survive) —
-this also powers the people directory. `guest` is deliberately excluded (see
-`USER_READ_EXCLUDED_ROLES`): `user` reads would expose the whole employee
-directory (email, phone, hire date) to a read-only visitor, so populated user
-relations are simply stripped from guest responses. Custom (non-CRUD) route
-actions (ICS export, celebrations,
-mark-read, poll `vote`/`results`, `/api/me`, `changePassword`) are seeded via
-`CUSTOM_ACTION_GRANTS` in the same file.
+Fine print encoded in the matrix (and enforced by the policies/controllers):
+acknowledgements are **immutable read receipts** — only `admin_role` may
+update/delete them; RSVP `delete` is admin-only across all roles (removing
+someone else's RSVP is an admin correction) and `update` is ownership-gated;
+classified `CRUD` for non-admins is ownership-gated by `is-classified-author`.
+`guest` is a deliberate exception on four modules: **no kudos** (celebrations
+leak hire dates), **no classifieds** (the flea market is internal and ads
+populate author contact data), **no announcements and therefore no
+acknowledgements** (a guest can never see a mandatory announcement, so ack
+grants were dead attack surface), and **no event-rsvp** (guests read the
+calendar but neither respond nor see attendee names). Grants that older
+bootstrap versions handed to `guest` are actively removed again via the
+`REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
+*adds* rows, so revocations must be listed explicitly to take effect on
+existing databases).
+
+Every role in the matrix — **including `guest`** — additionally gets
+`user.find`/`findOne` (so populated relations like author/lead/head survive);
+this also powers the people directory. `USER_READ_EXCLUDED_ROLES` is empty:
+an earlier audit attempt to revoke the grant from `guest` turned every guest
+read that populates a user relation (and the notification/poll-vote
+visibility filters) into a 400, because Strapi's core controllers run
+`validateQuery` → `throwRestrictedRelations` *before* the sanitize pass.
+That guest can consequently still read directory fields is a documented
+**open issue** — see the `OPEN ISSUE` note on the `guest` matrix in
+`src/index.ts`. Custom (non-CRUD) route actions (ICS export, celebrations
+and poll `vote` — both minus `guest` —, mark-read/mark-all-read, poll
+`results`, `/api/me`, `changePassword`, `role.find` for the admin ack
+report, and the upload grant below) are seeded via `CUSTOM_ACTION_GRANTS`
+in the same file.
+
+### Upload hardening
+
+The only content-API upload route, `POST /api/upload` (used for marketplace
+ad photos), is wrapped by `apps/cms/src/extensions/upload/strapi-server.ts`
+on top of the permission grant — the admin panel's media library uses the
+separate admin routes and is unaffected:
+
+- **Create-only** — the core action's `?id=` replace/update path is rejected
+  (it would let any uploader overwrite arbitrary existing media).
+- **Max 4 files per request, 5 MB per file** (with an `fs.stat` fallback when
+  the reported size is missing — never waved through).
+- **Strict image allowlist verified by magic bytes** of the temp file, not
+  the client-declared mimetype: JPEG/PNG/WebP only. **No SVG** (stored-XSS
+  vector) and no GIF (decompression-bomb surface) on purpose.
+- **Uploader attribution** — every stored file is stamped with the caller's
+  user id in `provider_metadata.uploadedBy`; the classified controller only
+  accepts image ids whose `uploadedBy` matches the caller (admin/editor
+  bypass), so nobody can attach foreign media — avatars, documents, other
+  people's photos — to their own ad.
+
+The grant itself (`plugin::upload.content-api.upload`) is only handed to
+`member`/`team_lead`/`department_head`/`editor`/`admin_role` — never `guest`
+or the `authenticated` fallback — and there are deliberately no
+`find`/`findOne`/`destroy` grants on the upload content-API (no browsing or
+deleting the media library from outside the admin panel).
 
 **The frontend has no roles of its own.** `apps/web/src/lib/roles.ts` is
 a single helper:
@@ -274,9 +364,11 @@ export const ADMIN_ROLES = new Set(["admin_role"]);
 export function isAdmin(role) { return role ? ADMIN_ROLES.has(role) : false; }
 ```
 
-Used in exactly three places: the sidebar (hide/show the *Admin* link), the
-`/manage` page and the `/manage/analytics` page (both redirect non-admins
-to `/`). Note the admin area lives under **`/manage`** — `/admin` is reserved
+Used in a handful of places: the sidebar (hide/show the *Admin* link), the
+`/manage`, `/manage/acknowledgements` and `/manage/analytics` pages (all
+redirect non-admins to `/`), and the marketplace detail/edit pages (show the
+moderation controls for admin/editor alongside the ad owner). Note the admin
+area lives under **`/manage`** — `/admin` is reserved
 for the Strapi admin panel by the reverse proxy. Every other authorization
 decision is made server-side by Strapi's permission matrix + route
 policies — the frontend just mirrors the role string.

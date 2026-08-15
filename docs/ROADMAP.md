@@ -8,6 +8,13 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > (analytics) are **implemented and live**. Each feature below carries a
 > status marker. Still open: 2.2 Phase B email digests, 2.4 SSE/live
 > updates, 4.1 V2 (Meilisearch) and 4.3 (AI assistant).
+>
+> **Done beyond this roadmap (2026-08):** five modules shipped that were not
+> part of the original research list — opt-in **birthdays** in the
+> celebrations feed, dashboard **quick links**, announcement **read
+> confirmation** (acknowledgements), an employee **marketplace**
+> (classifieds with hardened photo upload) and **event RSVPs** with month
+> view. See the README feature list and content-model table.
 
 ## Why this is cheaper than it looks
 
@@ -101,7 +108,9 @@ two-way communication. Prerequisite for recognition (1.3 reuses the pattern).
 ### 1.3 Employee recognition (kudos + celebrations)
 
 **Status: ✅ implemented** — `kudos` content type, `/kudos` page with
-give-kudos modal, `celebrations` custom route.
+give-kudos modal, `celebrations` custom route (since 2026-08 also with
+opt-in birthdays: `user.birthday`/`birthdayVisible`, maintained via
+`/api/me`, surfaced year-less).
 
 **CMS**
 - New `kudos` content type: `from` (user), `to` (user), `message`,
@@ -125,7 +134,10 @@ pattern, reactions on kudos).
 
 **Status: ✅ implemented** — `event` content type, `/events` page, per-event
 ICS download (served from `/events/[id]/ics`, outside `/api` because of the
-reverse-proxy split).
+reverse-proxy split). Since 2026-08 also with a month grid
+(`/events?view=month`, time-window-based fetches) and **RSVPs**
+(`event-rsvp` content type: yes/no/maybe upsert per user, capacity gate,
+decliner privacy).
 
 **CMS**
 - New `event` content type: `title`, `description` (richtext), `start`,
