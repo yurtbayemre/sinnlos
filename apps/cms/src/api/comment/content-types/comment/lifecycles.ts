@@ -1,3 +1,5 @@
+import { findCommentTarget } from "../../../../utils/comment-target";
+
 export default {
   async afterCreate(event: any) {
     const { result } = event;
@@ -8,9 +10,18 @@ export default {
       });
       if (!full) return;
 
+      // Only announcement comments notify anybody: wiki pages have no
+      // author-notification feature yet (the wiki-page branch of targetType
+      // exists in the schema and is handled by findCommentTarget, it just has
+      // no recipient to fan out to here).
       if (full.targetType === "announcement") {
-        const announcement = await strapi.db.query("api::announcement.announcement").findOne({
-          where: { id: full.targetId },
+        // Resolve via the documentId anchor, NOT the numeric targetId: the
+        // published row id changes on every re-publish (delete+recreate), so
+        // an id lookup either found nothing or — after id recycling — the
+        // wrong announcement, and the author of a foreign entry got the
+        // notification (issue #11). findCommentTarget still falls back to
+        // targetId for rows the bootstrap backfill could not anchor yet.
+        const announcement = await findCommentTarget(strapi, full, {
           populate: { author: true },
         });
         if (announcement?.author?.id && announcement.author.id !== full.author?.id) {

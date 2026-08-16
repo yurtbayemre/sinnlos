@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { getCommentSection } from "@/lib/comment-actions";
+import type { CommentTarget } from "@/lib/comment-target";
 import type { CommentSectionData } from "@/lib/reaction-summary";
 import { CommentThread } from "./comment-thread";
 import { ReactionBar } from "@/components/reactions/reaction-bar";
@@ -17,26 +18,33 @@ import { ReactionBar } from "@/components/reactions/reaction-bar";
 const POLL_MS = 10_000;
 
 export function LiveCommentSection({
-  targetType,
-  targetId,
+  target,
   currentUserId,
   initial,
 }: {
-  targetType: "announcement" | "wiki-page";
-  targetId: number;
+  target: CommentTarget;
   currentUserId?: number;
   initial: CommentSectionData;
 }) {
   const [data, setData] = useState(initial);
 
+  // Rebuild the target from its primitives so the polling effect below does
+  // not restart on every render just because the prop object is a new
+  // reference.
+  const { type, documentId, id: legacyId } = target;
+  const stableTarget = useMemo<CommentTarget>(
+    () => ({ type, documentId, id: legacyId }),
+    [type, documentId, legacyId],
+  );
+
   const refetch = useCallback(async () => {
     try {
-      setData(await getCommentSection(targetType, targetId));
+      setData(await getCommentSection(stableTarget));
     } catch {
       // Transient fetch errors just mean we keep showing the current state
       // until the next poll.
     }
-  }, [targetType, targetId]);
+  }, [stableTarget]);
 
   useEffect(() => {
     const tick = () => {
@@ -54,15 +62,9 @@ export function LiveCommentSection({
 
   return (
     <div className="space-y-4">
-      <ReactionBar
-        targetType={targetType}
-        targetId={targetId}
-        reactions={data.reactions}
-        onChanged={refetch}
-      />
+      <ReactionBar target={stableTarget} reactions={data.reactions} onChanged={refetch} />
       <CommentThread
-        targetType={targetType}
-        targetId={targetId}
+        target={stableTarget}
         comments={data.comments}
         currentUserId={currentUserId}
         onChanged={refetch}

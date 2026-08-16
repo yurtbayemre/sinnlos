@@ -104,7 +104,9 @@ export default async function AnnouncementsPage() {
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {openAck.map((a) => (
                   <AnnouncementCard key={a.documentId ?? a.id} item={a} pinned ack={renderAck(a)}>
-                    <CommentSection targetType="announcement" targetId={a.id} />
+                    <CommentSection
+                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                    />
                   </AnnouncementCard>
                 ))}
               </div>
@@ -120,7 +122,9 @@ export default async function AnnouncementsPage() {
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {pinned.map((a) => (
                   <AnnouncementCard key={a.id} item={a} pinned ack={renderAck(a)}>
-                    <CommentSection targetType="announcement" targetId={a.id} />
+                    <CommentSection
+                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                    />
                   </AnnouncementCard>
                 ))}
               </div>
@@ -133,7 +137,9 @@ export default async function AnnouncementsPage() {
               <div className="stagger space-y-4">
                 {rest.map((a) => (
                   <AnnouncementCard key={a.id} item={a} ack={renderAck(a)}>
-                    <CommentSection targetType="announcement" targetId={a.id} />
+                    <CommentSection
+                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                    />
                   </AnnouncementCard>
                 ))}
               </div>

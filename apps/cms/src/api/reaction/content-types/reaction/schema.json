@@ -5,7 +5,7 @@
     "singularName": "reaction",
     "pluralName": "reactions",
     "displayName": "Reaction",
-    "description": "Emoji reactions on announcements and wiki pages"
+    "description": "Emoji reactions on announcements and wiki pages. Anchored by targetType + targetDocumentId (the target's documentId). DEPRECATED: targetId (numeric row id) — Strapi 5 publishes by delete+recreate, so the row id changes on every re-publish and the reaction detaches (issue #11). It is kept as the bridge for the bootstrap backfill and as the rollback anchor, and is DUAL-WRITTEN for the transition period (new rows carry the anchor AND the target's current row id, so a rollback to the id-only code still finds them). The follow-up ticket to #11 drops this column, the dual-write and the legacy read branches together."
   },
   "options": { "draftAndPublish": false },
   "attributes": {
@@ -19,7 +19,8 @@
       "enum": ["announcement", "wiki-page"],
       "required": true
     },
-    "targetId": { "type": "integer", "required": true },
+    "targetDocumentId": { "type": "string" },
+    "targetId": { "type": "integer" },
     "author": {
       "type": "relation",
       "relation": "manyToOne",
