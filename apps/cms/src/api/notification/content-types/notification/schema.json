@@ -26,6 +26,11 @@
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user"
     },
-    "readAt": { "type": "datetime" }
+    "readAt": { "type": "datetime" },
+    "sourceType": {
+      "type": "enumeration",
+      "enum": ["announcement", "event"]
+    },
+    "sourceDocumentId": { "type": "string" }
   }
 }
