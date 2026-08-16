@@ -100,7 +100,14 @@ export interface Comment {
   documentId?: string;
   body: string;
   targetType: "announcement" | "wiki-page";
-  targetId: number;
+  /**
+   * documentId of the commented entry — NOT the numeric id: Strapi 5
+   * re-publishing deletes + recreates the published row (new numeric id),
+   * while the documentId is stable across the publish lifecycle (issue #11).
+   */
+  targetDocumentId?: string | null;
+  /** @deprecated numeric row id — only rows the CMS backfill has not anchored yet. */
+  targetId?: number | null;
   createdAt?: string;
   author?: UserLite | null;
   parent?: { id: number } | null;
@@ -113,7 +120,10 @@ export interface Reaction {
   id: number;
   emoji: EmojiType;
   targetType: "announcement" | "wiki-page";
-  targetId: number;
+  /** documentId of the reacted-to entry — the publish-stable anchor (issue #11). */
+  targetDocumentId?: string | null;
+  /** @deprecated numeric row id — only rows the CMS backfill has not anchored yet. */
+  targetId?: number | null;
   author?: UserLite | null;
 }
 

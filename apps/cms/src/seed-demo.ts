@@ -279,12 +279,15 @@ export async function seedDemoData(strapi: any) {
   }
 
   // --- Comments on announcements ---
+  // Anchored by the announcement's documentId, never its numeric row id:
+  // publishing is delete+recreate in Strapi 5, so an id anchor detaches on
+  // the next publish (issue #11, see utils/comment-target.ts).
   const comments = [
-    { body: "This is great! Love the new platform. The search is super fast.", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["sam.chen"].id },
-    { body: "Really nice work everyone. Quick question — can we customize the sidebar nav?", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["casey.jones"].id },
-    { body: "Will this be recorded? I have a conflict with a client call.", targetType: "announcement", targetId: announcementEntities[1].id, author: userMap["quinn.wilson"].id },
-    { body: "Yes, we'll record and post the link here afterwards!", targetType: "announcement", targetId: announcementEntities[1].id, author: alex.id },
-    { body: "The dark mode support is amazing. Huge quality-of-life improvement.", targetType: "announcement", targetId: announcementEntities[2].id, author: userMap["jordan.lee"].id },
+    { body: "This is great! Love the new platform. The search is super fast.", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["sam.chen"].id },
+    { body: "Really nice work everyone. Quick question — can we customize the sidebar nav?", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["casey.jones"].id },
+    { body: "Will this be recorded? I have a conflict with a client call.", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: userMap["quinn.wilson"].id },
+    { body: "Yes, we'll record and post the link here afterwards!", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: alex.id },
+    { body: "The dark mode support is amazing. Huge quality-of-life improvement.", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["jordan.lee"].id },
   ];
 
   for (const c of comments) {
@@ -295,15 +298,15 @@ export async function seedDemoData(strapi: any) {
 
   // --- Reactions on announcements ---
   const reactions = [
-    { emoji: "thumbsup", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["sam.chen"].id },
-    { emoji: "heart", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["riley.kim"].id },
-    { emoji: "celebrate", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["jordan.lee"].id },
-    { emoji: "celebrate", targetType: "announcement", targetId: announcementEntities[0].id, author: userMap["casey.jones"].id },
-    { emoji: "thumbsup", targetType: "announcement", targetId: announcementEntities[1].id, author: userMap["dana.patel"].id },
-    { emoji: "lightbulb", targetType: "announcement", targetId: announcementEntities[2].id, author: userMap["sam.chen"].id },
-    { emoji: "thumbsup", targetType: "announcement", targetId: announcementEntities[2].id, author: userMap["taylor.swift"].id },
-    { emoji: "heart", targetType: "announcement", targetId: announcementEntities[2].id, author: alex.id },
-    { emoji: "thumbsup", targetType: "announcement", targetId: announcementEntities[3].id, author: userMap["quinn.wilson"].id },
+    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["sam.chen"].id },
+    { emoji: "heart", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["riley.kim"].id },
+    { emoji: "celebrate", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["jordan.lee"].id },
+    { emoji: "celebrate", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["casey.jones"].id },
+    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: userMap["dana.patel"].id },
+    { emoji: "lightbulb", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["sam.chen"].id },
+    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["taylor.swift"].id },
+    { emoji: "heart", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: alex.id },
+    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[3].documentId, author: userMap["quinn.wilson"].id },
   ];
 
   for (const r of reactions) {

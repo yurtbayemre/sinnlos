@@ -6,18 +6,18 @@ import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 import { addComment, deleteComment } from "@/lib/comment-actions";
+import type { CommentTarget } from "@/lib/comment-target";
 import { relativeTime } from "@/lib/relative-time";
 import type { Comment } from "@/lib/types";
 
 export function CommentThread({
-  targetType,
-  targetId,
+  target,
   comments,
   currentUserId,
   onChanged,
 }: {
-  targetType: "announcement" | "wiki-page";
-  targetId: number;
+  /** Target of the thread, anchored by documentId (issue #11). */
+  target: CommentTarget;
   comments: Comment[];
   currentUserId?: number;
   /** Called after a successful mutation so the owner can refetch its data. */
@@ -29,15 +29,18 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  // Writing requires the documentId anchor. Every Strapi 5 row has one, so
+  // this only guards against an unanchored write (issue #11).
+  const canWrite = Boolean(target.documentId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const text = body.trim();
-    if (!text) return;
+    if (!text || !canWrite) return;
     setError(null);
     startTransition(async () => {
       try {
-        await addComment(targetType, targetId, text);
+        await addComment(target, text);
       } catch {
         // Keep the draft in the input so the user can retry.
         setError(tComments("sendFailed"));
@@ -124,12 +127,12 @@ export function CommentThread({
           placeholder={tComments("writeComment")}
           value={body}
           onChange={(e) => setBody(e.target.value)}
-          disabled={isPending}
+          disabled={isPending || !canWrite}
           className="h-10 flex-1 rounded-xl border bg-muted/40 px-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-50"
         />
         <button
           type="submit"
-          disabled={isPending || !body.trim()}
+          disabled={isPending || !canWrite || !body.trim()}
           className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
           aria-label={tComments("sendComment")}
         >

@@ -1,3 +1,4 @@
+import { matchesTarget, type CommentTarget } from "@/lib/comment-target";
 import type { Comment, EmojiType, Reaction, ReactionSummary } from "@/lib/types";
 
 export type CommentSectionData = {
@@ -13,13 +14,26 @@ export const ALL_EMOJIS: EmojiType[] = [
   "laugh",
 ];
 
-/** Collapse raw reaction rows into per-emoji counts + "did I react". */
-export function summarize(reactions: Reaction[], userId?: number): ReactionSummary[] {
+/**
+ * Collapse raw reaction rows into per-emoji counts + "did I react".
+ *
+ * Pass `target` to also verify that every row really belongs to that entry:
+ * rows are anchored by `targetDocumentId` (issue #11) and the fetch filter
+ * still carries a temporary branch for not-yet-anchored rows, so the counts
+ * re-check the anchor rather than trusting the query. Without `target` every
+ * row is counted (the pre-#11 behaviour).
+ */
+export function summarize(
+  reactions: Reaction[],
+  userId?: number,
+  target?: CommentTarget,
+): ReactionSummary[] {
   const map = new Map<EmojiType, { count: number; reacted: boolean }>();
   for (const emoji of ALL_EMOJIS) {
     map.set(emoji, { count: 0, reacted: false });
   }
   for (const r of reactions) {
+    if (target && !matchesTarget(r, target)) continue;
     const entry = map.get(r.emoji);
     if (entry) {
       entry.count++;
