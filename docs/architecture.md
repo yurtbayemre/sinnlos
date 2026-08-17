@@ -1,6 +1,6 @@
 # Architektur-Karte: Sinnlos-Intranet
 
-Next.js 16 (App Router/RSC) + Strapi 5.49 + Postgres 16 · Stand 2026-08-15 (nach 5 neuen Modulen: Geburtstage, Quick-Links, Lesebestätigung, Kleinanzeigen, Event-RSVP + Security-Runden vom 2026-08-15; alles auf main, am Code verifiziert) · **Nachtrag 2026-08-16: comment/reaction auf den documentId-Anker migriert ([#11](https://github.com/yurtbayemre/sinnlos/issues/11), §5.27) — noch nicht deployed** · **Nachtrag 2026-08-17: Login-Rate-Limit in `authorize()` + Edge-Router ([#23](https://github.com/yurtbayemre/sinnlos/issues/23), §7b P1.5) — noch nicht deployed**
+Next.js 16 (App Router/RSC) + Strapi 5.49 + Postgres 16 · Stand 2026-08-15 (nach 5 neuen Modulen: Geburtstage, Quick-Links, Lesebestätigung, Kleinanzeigen, Event-RSVP + Security-Runden vom 2026-08-15; alles auf main, am Code verifiziert) · **Nachtrag 2026-08-16: comment/reaction auf den documentId-Anker migriert ([#11](https://github.com/yurtbayemre/sinnlos/issues/11), §5.27) — deployed 2026-08-16** · **Nachtrag 2026-08-17: Login-Rate-Limit in `authorize()` + Edge-Router ([#23](https://github.com/yurtbayemre/sinnlos/issues/23), §7b P1.5) — deployed + live verifiziert 2026-08-17**
 
 > Lebendes Dokument: bei Struktur- oder Datenmodell-Änderungen mitpflegen.
 > Alle Angaben sind zum genannten Stand am Code verifiziert (Datei:Zeile-Verweise).
