@@ -333,6 +333,18 @@ const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
     "team_lead",
     "member",
   ],
+  // Best-effort orphan cleanup for the two-step ad flow (issue #13): same
+  // five posting roles as the upload grant above, never guest. The action
+  // only ever deletes files stamped with the CALLER's own
+  // provider_metadata.uploadedBy and without any remaining relation — see
+  // controllers/classified.ts.
+  "api::classified.classified.cleanupUploads": [
+    "admin_role",
+    "editor",
+    "department_head",
+    "team_lead",
+    "member",
+  ],
 };
 
 async function ensureActionPermission(strapi: any, roleId: number, actionKey: string) {

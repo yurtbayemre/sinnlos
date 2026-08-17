@@ -11,8 +11,15 @@
     @nextauth path /api/auth/*
     reverse_proxy @nextauth web:3000
 
-    # Strapi admin panel and REST/GraphQL API
-    @strapi path /api/* /admin* /uploads/* /content-manager/* /content-type-builder/* /users-permissions/* /i18n/* /content-api/*
+    # Strapi admin panel and REST/GraphQL API. This prefix list is the
+    # Caddy half of the routing invariant (Traefik half:
+    # docker-compose.traefik.yml, sinnlos-cms router) — keep both in sync,
+    # guarded by infra/routing-parity.test.ts. `/upload` (bare, admin POST)
+    # + `/upload/*` is the media-library admin API; `/uploads/*` (the file
+    # bytes) deliberately falls through to web since issue #21, where the
+    # session-gated route apps/web/src/app/uploads/[...path]/route.ts
+    # serves it.
+    @strapi path /api/* /admin* /upload /upload/* /email/* /content-manager/* /content-type-builder/* /users-permissions/* /i18n/* /content-api/*
     reverse_proxy @strapi cms:1337
 
     # Everything else → Next.js

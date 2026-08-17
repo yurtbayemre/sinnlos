@@ -52,6 +52,11 @@ export default ({ env }: { env: Env }) => {
     },
     "strapi::session",
     "strapi::favicon",
+    // Routing-independent gate on the /uploads bytes (issue #21, K1): must run
+    // BEFORE strapi::public so it intercepts the koa-static route that would
+    // otherwise resolve `/api/../uploads/x` back into public/uploads and serve
+    // the bytes without a session. See src/middlewares/uploads-auth.ts.
+    "global::uploads-auth",
     "strapi::public",
   ];
 };

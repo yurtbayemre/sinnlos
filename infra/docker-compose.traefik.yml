@@ -68,11 +68,20 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=frontend"
-      # `/upload` (no trailing s) is the media-library admin API — distinct from
-      # `/uploads`, which serves the stored files. Without it those calls fall
-      # through to the web catch-all, which answers the admin's XHR with a
-      # sign-in redirect instead of JSON and crashes the media library.
-      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || PathPrefix(`/upload`) || PathPrefix(`/uploads`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
+      # `/upload` (no trailing s) is the media-library admin API — distinct
+      # from `/uploads`, which serves the stored file bytes. Without it those
+      # calls fall through to the web catch-all, which answers the admin's
+      # XHR with a sign-in redirect instead of JSON and crashes the media
+      # library. `/uploads` is deliberately ABSENT since issue #21: it falls
+      # to the web catch-all, where the session-gated proxy route
+      # (apps/web/src/app/uploads/[...path]/route.ts) serves the bytes —
+      # admin media-library thumbnails therefore need a parallel intranet
+      # session in the same browser. CAUTION: Traefik's PathPrefix is a RAW
+      # string prefix (verified against Traefik 3.7: `/email` matches
+      # `/emailXYZ`), so `PathPrefix(`/upload`)` would still swallow
+      # `/uploads` — hence the segment-exact `Path(`/upload`) ||
+      # PathPrefix(`/upload/`)` pair. Guarded by infra/routing-parity.test.ts.
+      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || Path(`/upload`) || PathPrefix(`/upload/`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
       - "traefik.http.routers.sinnlos-cms.priority=50"
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"

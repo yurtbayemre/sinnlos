@@ -14,9 +14,14 @@
  * Error contract: actions return machine codes (ClassifiedErrorCode); the
  * form translates them (i18n rule — no user-facing strings here).
  *
- * Known trade-off: if step 2 fails after step 1 succeeded, the uploaded
- * images stay orphaned in the media library (employees hold no
- * upload.destroy permission by design). Admins can prune via the panel.
+ * Orphan handling (issue #13): if step 2 fails after step 1 succeeded (or
+ * an update deselects images), the action best-effort POSTs the ids to
+ * /api/classifieds/cleanup-uploads — the CMS only deletes files the caller
+ * uploaded (provider_metadata.uploadedBy) that hang on no ad. Failures are
+ * ignored on purpose: the CMS-side nightly janitor
+ * (apps/cms/src/cron/sweep-orphaned-uploads.ts) is the actual safety net,
+ * and deleting an ad removes its images via the classified delete
+ * lifecycle. Employees still hold no generic upload.destroy permission.
  */
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
@@ -161,6 +166,43 @@ async function uploadAdImages(files: File[]): Promise<number[]> {
   return uploaded.map((f) => f.id);
 }
 
+/**
+ * Best-effort orphan cleanup (issue #13): ask the CMS to drop the given
+ * upload ids. Server-side it only deletes files the CALLER uploaded
+ * (provider_metadata.uploadedBy) that are attached to nothing, so stale or
+ * foreign ids are harmless. Real errors are swallowed — the nightly CMS
+ * janitor is the net —, only NEXT_REDIRECT (401 → sign-in) propagates.
+ */
+async function cleanupOrphanedUploads(imageIds: number[]): Promise<void> {
+  if (imageIds.length === 0 || DEMO_MODE) return;
+  try {
+    await strapi("/api/classifieds/cleanup-uploads", {
+      method: "POST",
+      body: JSON.stringify({ imageIds }),
+      noCache: true,
+    });
+  } catch (e) {
+    unstable_rethrow(e);
+    console.error("[classifieds] upload cleanup failed", e);
+  }
+}
+
+/** Image ids currently attached to an ad — [] when the lookup fails. */
+async function currentImageIds(id: number): Promise<number[]> {
+  try {
+    const res = await strapi<{ data: Array<{ images?: Array<{ id: number }> }> }>(
+      `/api/classifieds?filters[id][$eq]=${id}&populate[images][fields][0]=id`,
+      { noCache: true },
+    );
+    return (res.data?.[0]?.images ?? []).map((img) => img.id);
+  } catch (e) {
+    unstable_rethrow(e);
+    // Non-fatal: without the old list we simply skip the deselect cleanup
+    // (janitor territory) instead of failing the update.
+    return [];
+  }
+}
+
 export async function createClassified(
   _prev: ClassifiedFormState,
   formData: FormData,
@@ -171,8 +213,11 @@ export async function createClassified(
   const parsed = parseAdForm(formData);
   if ("error" in parsed) return { error: parsed.error, values };
 
+  // Hoisted out of the try: the catch needs the ids of a SUCCESSFUL step 1
+  // to clean up after a failed step 2 (issue #13).
+  let imageIds: number[] = [];
   try {
-    const imageIds = await uploadAdImages(parsed.files);
+    imageIds = await uploadAdImages(parsed.files);
     await strapi("/api/classifieds", {
       method: "POST",
       body: JSON.stringify({
@@ -188,6 +233,8 @@ export async function createClassified(
     // strapi()'s 401 → sign-in redirect (NEXT_REDIRECT) must propagate.
     unstable_rethrow(e);
     console.error("[classifieds] create failed", e);
+    // Step 1 succeeded, step 2 failed: sweep the just-uploaded images.
+    await cleanupOrphanedUploads(imageIds);
     return { error: "failed", values };
   }
   refresh();
@@ -204,8 +251,13 @@ export async function updateClassified(
   const parsed = parseAdForm(formData);
   if ("error" in parsed) return { error: parsed.error, values };
 
+  // The form only submits the KEPT ids — fetch the ad's current images
+  // first so deselected ones can be cleaned up after a successful update.
+  const previousImageIds = await currentImageIds(id);
+
+  let newImageIds: number[] = [];
   try {
-    const newImageIds = await uploadAdImages(parsed.files);
+    newImageIds = await uploadAdImages(parsed.files);
     const data: Record<string, unknown> = {
       ...parsed.fields,
       images: [...parsed.keepImageIds, ...newImageIds],
@@ -221,8 +273,16 @@ export async function updateClassified(
   } catch (e) {
     unstable_rethrow(e);
     console.error("[classifieds] update failed", e);
+    // Same orphan case as in create: fresh uploads whose PUT never landed.
+    await cleanupOrphanedUploads(newImageIds);
     return { error: "failed", values };
   }
+  // Deselected images now hang on nothing — sweep the caller's own ones.
+  // (For a moderator edit the ids belong to the ad's author, so the CMS
+  // skips them and the nightly janitor takes over.)
+  await cleanupOrphanedUploads(
+    previousImageIds.filter((imgId) => !parsed.keepImageIds.includes(imgId)),
+  );
   refresh();
   redirect(`/marketplace/${id}`);
 }
