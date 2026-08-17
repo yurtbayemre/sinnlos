@@ -17,6 +17,7 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
 import { STRAPI_URL } from "@/lib/config";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED } from "@/lib/auth-config";
+import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
@@ -101,6 +102,23 @@ async function exchangeForStrapiJwt(
   return null;
 }
 
+/**
+ * Client IP for the current sign-in attempt. Auth.js hands authorize() the
+ * incoming request (Traefik/Caddy overwrite spoofed x-forwarded-for, so the
+ * first entry is the real client). The fallback reads the Server Action's
+ * own request headers — dynamically imported so this module stays loadable
+ * outside a request scope (e.g. during the build), mirroring proxy.ts.
+ */
+async function clientIpForSignIn(request: Request | undefined): Promise<string> {
+  if (request?.headers) return clientIpFrom(request.headers);
+  try {
+    const { headers } = await import("next/headers");
+    return clientIpFrom(await headers());
+  } catch {
+    return "unknown";
+  }
+}
+
 const providers = [];
 if (MICROSOFT_ENABLED) {
   providers.push(
@@ -123,19 +141,58 @@ if (LOCAL_ENABLED) {
         identifier: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         const identifier = credentials?.identifier as string | undefined;
         const password = credentials?.password as string | undefined;
         if (!identifier || !password) return null;
+        // Rate-limit BEFORE touching Strapi — the authoritative gate for
+        // issue #23. Both entry points land here (the sign-in Server Action
+        // AND a raw POST /api/auth/callback/local), so a limiter on either
+        // outer path alone would be bypassable.
+        const clientIp = await clientIpForSignIn(request);
+        if (loginRateLimiter.isBlocked(clientIp, identifier)) {
+          // No log here: the transition INTO the block state is logged once
+          // below (recordFailure returns it) — logging every rejected
+          // follow-up would let a script generate ~100 log lines/s through
+          // the /api/auth callback (edge limit is 100/s).
+          return null;
+        }
         try {
           const res = await fetch(`${STRAPI_URL}/api/auth/local`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              // Forward the real client IP: Strapi's users-permissions
+              // throttle counts per ctx.ip and the CMS runs proxy:true.
+              // Without this header every user shares the web container's
+              // IP as ONE bucket — 10 failures/min would lock everyone out.
+              "X-Forwarded-For": clientIp,
+            },
             body: JSON.stringify({ identifier, password }),
             cache: "no-store",
             signal: AbortSignal.timeout(5000),
           });
-          if (!res.ok) return null;
+          if (!res.ok) {
+            // Only genuine verification failures count — Strapi answers bad
+            // credentials with 400. 5xx and 429 mean Strapi/DB trouble, not
+            // a wrong password: counting those would keep legitimate retry
+            // users locked out for up to 15 min AFTER an outage recovers.
+            // Network errors (the catch below) don't count either.
+            if (res.status < 500 && res.status !== 429) {
+              const justBlocked = loginRateLimiter.recordFailure(clientIp, identifier);
+              if (justBlocked) {
+                // Logged once per lock window, at the transition. The full
+                // IP is intentional: this is a security log of an attack
+                // pattern (legitimate interest) and the IP is what an admin
+                // needs to correlate with edge logs or block upstream.
+                console.warn(
+                  `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(identifier)}`,
+                );
+              }
+            }
+            return null;
+          }
+          loginRateLimiter.recordSuccess(identifier);
           const data = (await res.json()) as StrapiExchangeResponse;
           // Strapi's /api/auth/local doesn't populate role/department —
           // fetch the full user with the fresh JWT.

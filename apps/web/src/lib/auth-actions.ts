@@ -12,6 +12,7 @@ import { getTranslations } from "next-intl/server";
 import { auth, signIn, signOut } from "@/auth";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { STRAPI_URL } from "@/lib/config";
+import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function signInWithMicrosoft(formData: FormData) {
@@ -24,6 +25,13 @@ export async function signInWithMicrosoft(formData: FormData) {
 }
 
 export async function signInWithCredentials(_prev: unknown, formData: FormData) {
+  // Read-only peek (never counts as an attempt) for an honest message —
+  // enforcement lives in authorize() (@/auth, issue #23), which would
+  // otherwise answer with the misleading "Invalid email or password.".
+  const identifier = String(formData.get("identifier") ?? "");
+  if (loginRateLimiter.isBlocked(clientIpFrom(await headers()), identifier)) {
+    return { error: "Too many failed attempts — please try again later." };
+  }
   try {
     await signIn("local", {
       identifier: formData.get("identifier"),
@@ -52,13 +60,47 @@ export async function registerLocalAccount(_prev: unknown, formData: FormData) {
   if (!username || !email || password.length < 6) {
     return { error: "Fill in all fields; password needs at least 6 characters." };
   }
-  const res = await fetch(`${STRAPI_URL}/api/auth/local/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, email, password, displayName: username }),
-    cache: "no-store",
-  });
+  // Same limiter as the login (issue #23): registration is part of the auth
+  // surface, so a blocked source may not probe here either.
+  const clientIp = clientIpFrom(await headers());
+  if (loginRateLimiter.isBlocked(clientIp, email)) {
+    return { error: "Too many failed attempts — please try again later." };
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${STRAPI_URL}/api/auth/local/register`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        // Forward the real client IP so Strapi's per-IP throttle counts per
+        // client instead of pooling everyone on the web container's IP
+        // (issue #23; Traefik overwrites client-spoofed values).
+        "X-Forwarded-For": clientIp,
+      },
+      body: JSON.stringify({ username, email, password, displayName: username }),
+      cache: "no-store",
+      // Timeout parity with the login/exchange fetches in @/auth.
+      signal: AbortSignal.timeout(5000),
+    });
+  } catch {
+    // The timeout (or a network failure) would otherwise throw uncaught out
+    // of the Server Action — an opaque digest error page instead of the
+    // {error} form state.
+    return { error: "Registration failed — please try again." };
+  }
   if (!res.ok) {
+    // Counting rule mirrors authorize(): only real rejections (Strapi
+    // answers invalid input with 400) count, never 5xx/429 outages. The
+    // transition log matches the one in authorize() so a block engaged via
+    // this path is visible too.
+    if (res.status < 500 && res.status !== 429) {
+      const justBlocked = loginRateLimiter.recordFailure(clientIp, email);
+      if (justBlocked) {
+        console.warn(
+          `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(email)}`,
+        );
+      }
+    }
     const body = await res.json().catch(() => null);
     return { error: body?.error?.message ?? "Registration failed." };
   }

@@ -28,6 +28,23 @@ services:
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.period=1s"
+      # Schärferes Limit für die Login-/Register-POSTs (Server Actions, die
+      # sonst am ungebremsten Catch-all hängen — Issue #23). Edge-Limit ist
+      # nur Grobschutz und zählt auch ERFOLGREICHE Logins — daher NAT-
+      # freundlich dimensioniert (Montagmorgen hinter einer Büro-NAT-IP darf
+      # nicht 429en). Autoritativ bleibt der App-Limiter in
+      # apps/web/src/lib/login-rate-limit.ts: Server-Action-POSTs sind nicht
+      # pfadgebunden, /api/auth/callback/local ruft authorize() direkt auf,
+      # und nur der App-Limiter zählt ausschließlich Fehlversuche.
+      - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.average=10"
+      - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.burst=20"
+      - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.period=1s"
+      - "traefik.http.routers.sinnlos-signin.rule=Host(`sinnlos.yurtbay.dev`) && (Path(`/sign-in`) || Path(`/register`)) && Method(`POST`)"
+      - "traefik.http.routers.sinnlos-signin.priority=90"
+      - "traefik.http.routers.sinnlos-signin.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-signin.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-signin.service=sinnlos-web"
+      - "traefik.http.routers.sinnlos-signin.middlewares=sinnlos-headers,sinnlos-authlimit,sinnlos-compress"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
       - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.sinnlos-auth.priority=100"
