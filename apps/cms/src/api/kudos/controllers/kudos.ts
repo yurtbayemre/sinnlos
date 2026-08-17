@@ -51,11 +51,16 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
       };
     };
 
+    // celebrations answers via ctx.send with raw db.query rows, which BYPASS
+    // the content-api output sanitizer (issue #10). So the shape here is the
+    // security boundary — it must not carry any sensitive contact field.
+    // `email` is deliberately omitted: a birthday/anniversary card never shows
+    // it, and this endpoint is granted to the non-privileged `authenticated`
+    // fallback role too, which must never read staff email (F2).
     const publicUser = (u: any) => ({
       id: u.id,
       displayName: u.displayName,
       username: u.username,
-      email: u.email,
       jobTitle: u.jobTitle,
       avatar: u.avatar,
       department: u.department,
@@ -65,10 +70,15 @@ export default factories.createCoreController("api::kudos.kudos", ({ strapi }) =
       if (u.hireDate) {
         const occ = nextOccurrence(u.hireDate);
         if (occ && occ.daysUntil <= windowDays) {
+          // No absolute `date` on purpose (F2): the anniversary occurrence date
+          // combined with `years` would let a non-privileged caller (the
+          // `authenticated` fallback that also holds this grant) reconstruct the
+          // exact hireDate — a sensitive field the sanitizer strips everywhere
+          // else. Emit only the jubilee count (integer) + a relative countdown;
+          // the card renders "N years · in M days", never a hire date.
           upcoming.push({
             user: publicUser(u),
             type: "work-anniversary",
-            date: occ.next.toISOString().split("T")[0],
             years: occ.next.getFullYear() - new Date(u.hireDate).getFullYear(),
             daysUntil: occ.daysUntil,
           });

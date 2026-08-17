@@ -148,10 +148,17 @@ export default (plugin: AnyPlugin) => {
         data: update,
       });
 
-      // Refresh the response user with the patched values
+      // Refresh the response user with the patched values. This custom
+      // ctx.body BYPASSES the content-api output sanitizer (issue #10), so it
+      // must not carry a FOREIGN user's contact data. `manager` is deliberately
+      // NOT populated here: the manager relation is already persisted by the
+      // update above, and the sign-in consumer (auth.ts) reads only
+      // role/department/email/displayName — populating the manager would return
+      // a colleague's email/phone/hireDate/officeLocation/microsoftOid in the
+      // login response of a possibly non-privileged (guest-mapped) caller (F5).
       const refreshed = await strapi.db.query("plugin::users-permissions.user").findOne({
         where: { id: responseBody.user.id },
-        populate: ["role", "department", "manager"],
+        populate: ["role", "department"],
       });
       ctx.body = { ...responseBody, user: refreshed };
     } catch (err) {

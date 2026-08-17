@@ -8,7 +8,23 @@
  * REST sanitization. That is deliberate — the caller sees their OWN
  * record, including schema-`private` fields (birthday, birthdayVisible)
  * that must never appear on /api/users for other people.
+ *
+ * The caller's OWN sensitive fields (email/phone/hireDate/...) are fine to
+ * return to themselves. But `me` also populates `manager` — a DIFFERENT user —
+ * and answers via ctx.send, which BYPASSES the content-api output sanitizer
+ * (issue #10). So a non-privileged caller (guest / the pre-role-mapping
+ * `authenticated` fallback) would otherwise read their manager's
+ * email/phone/hireDate/officeLocation/microsoftOid. We reduce `safe.manager`
+ * for exactly the roles the sanitizer would strip, keeping privileged callers'
+ * manager contact intact (consistent with the /api/users directory). F3.
  */
+import {
+  USER_UID,
+  shouldSanitizeForRole,
+  stripSensitiveUserFields,
+  type ModelSchema,
+} from "../../../utils/sanitize-user-contact";
+
 const EDITABLE_FIELDS = [
   "displayName",
   "jobTitle",
@@ -33,6 +49,18 @@ export default {
     if (!full) return ctx.notFound();
 
     const { password, resetPasswordToken, confirmationToken, ...safe } = full;
+
+    // `manager` is a foreign user reached via ctx.send (sanitizer bypassed).
+    // Strip its contact fields for the same roles the content-api sanitizer
+    // would (guest / authenticated / unknown); privileged callers keep it.
+    // department/avatar/role are populated too but are NOT user relations
+    // (department scalars, a media file, the role row), so they carry no
+    // foreign staff contact data and are left untouched.
+    if (safe.manager && shouldSanitizeForRole(user.role?.type)) {
+      const getModel = (uid: string): ModelSchema | undefined => (strapi as any).getModel(uid);
+      stripSensitiveUserFields(safe.manager, getModel(USER_UID), { getModel });
+    }
+
     return ctx.send({ data: safe });
   },
 
@@ -78,6 +106,9 @@ export default {
       data,
     });
 
+    // No `manager` populate here (unlike `me`), and role/department/avatar are
+    // not user relations — so `safe` is the caller's OWN record only and needs
+    // no foreign-user stripping (F3 audit).
     const refreshed = await strapi.db.query("plugin::users-permissions.user").findOne({
       where: { id: user.id },
       populate: { role: true, department: true, avatar: true },

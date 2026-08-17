@@ -79,27 +79,48 @@ export async function strapi<T>(path: string, opts: FetchOptions = {}): Promise<
 /** Convenience helpers for the main collections. */
 export const api = {
   departments: {
+    // The list view (and the dashboard/search consumers) only ever renders
+    // the department's own fields + team/member COUNTS — never a head/member
+    // contact field. Field-limit the `head` user relation to non-sensitive
+    // columns so NO sensitive field (email/phone/hireDate/officeLocation/
+    // microsoftOid) is in the payload: the response is then role-invariant and
+    // may safely stay in the URL-keyed fetch cache (issue #10 / F1 — the
+    // content-api sanitizer runs per-request and would otherwise be bypassed
+    // by a cache entry shared across roles).
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/departments?populate[head]=true&populate[teams]=true&populate[headerImage]=true&sort=name:asc",
+        "/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&populate[headerImage]=true&sort=name:asc",
         { tag: "departments", revalidate: 60 },
       ),
+    // noCache: the detail page shows the head's and each member's email as the
+    // internal contact line (`jobTitle ?? email`). That is a per-user response
+    // — the CMS content-api sanitizer strips email for non-privileged callers,
+    // so a URL-keyed cache would leak a member's cache entry (with email) to a
+    // guest, and vice versa. Same rule as people/wiki (issue #10 / F1).
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/departments?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true&populate[headerImage]=true`,
-        { tag: `department:${slug}`, revalidate: 60 },
+        { noCache: true },
       ),
   },
   teams: {
+    // Field-limited like departments.list: the list/dashboard/search consumers
+    // use only team fields + member COUNT, never a lead/member contact field,
+    // so limiting the `lead`/`members` user relations to non-sensitive columns
+    // keeps the payload role-invariant and cacheable (issue #10 / F1).
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/teams?populate[department]=true&populate[lead]=true&populate[members]=true&sort=name:asc",
+        "/api/teams?populate[department]=true&populate[lead][fields][0]=displayName&populate[lead][fields][1]=jobTitle&populate[members][fields][0]=displayName&populate[members][fields][1]=jobTitle&sort=name:asc",
         { tag: "teams", revalidate: 60 },
       ),
+    // noCache: the detail page renders the lead's and members' email as the
+    // internal contact line (`jobTitle ?? email`) — a per-user response the
+    // sanitizer strips for non-privileged callers, so it must not enter the
+    // URL-keyed cache (issue #10 / F1, same as departments.one).
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/teams?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[department]=true&populate[lead]=true&populate[members]=true&populate[pages]=true`,
-        { tag: `team:${slug}`, revalidate: 60 },
+        { noCache: true },
       ),
   },
   wiki: {
@@ -167,17 +188,23 @@ export const api = {
     // Callers pass local start-of-day ISO stamps so the cache key changes
     // at most once per day/month, not per request.
     //
+    // The `organizer` user relation is field-limited to displayName — the only
+    // organizer field any events consumer renders (`organizedBy { name }`). No
+    // sensitive user field enters the payload, so these tagged/ISR-cached
+    // responses stay role-invariant and never leak contact data across roles
+    // via the URL-keyed cache (issue #10 / F1).
+    //
     // Upcoming events (start >= from), soonest first.
     upcoming: (fromIso: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=50`,
+        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
         { tag: "events", revalidate: 60 },
       ),
     // The most recent past events (start < before), newest first — the
     // list view shows only this small tail of history.
     past: (beforeIso: string, limit = 10) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[departments]=true&populate[organizer]=true&sort=start:desc&pagination[pageSize]=${limit}`,
+        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=${limit}`,
         { tag: "events", revalidate: 60 },
       ),
     // Events overlapping the half-open window [from, to) for the month
@@ -185,12 +212,12 @@ export const api = {
     // (end ?? start) >= window start ($or handles the nullable end).
     window: (fromIso: string, toIso: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer]=true&sort=start:asc&pagination[pageSize]=100`,
+        `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100`,
         { tag: "events", revalidate: 60 },
       ),
     one: (id: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[id][$eq]=${encodeURIComponent(id)}&populate[departments]=true&populate[organizer]=true`,
+        `/api/events?filters[id][$eq]=${encodeURIComponent(id)}&populate[departments]=true&populate[organizer][fields][0]=displayName`,
         { tag: `event:${id}`, revalidate: 60 },
       ),
     // RSVP rows for a set of events. noCache: the response contains the
@@ -224,9 +251,13 @@ export const api = {
     },
   },
   polls: {
+    // The `author` user relation is field-limited to displayName: no poll
+    // consumer renders an author contact field (the poll cards are built from
+    // the noCache results() endpoint), so limiting it keeps no sensitive user
+    // field in this tagged/ISR-cached, role-invariant payload (issue #10 / F1).
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/polls?populate[departments]=true&populate[author]=true&sort=createdAt:desc&pagination[pageSize]=20",
+        "/api/polls?populate[departments]=true&populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
         { tag: "polls", revalidate: 30 },
       ),
     results: (id: number) =>
