@@ -1,5 +1,7 @@
 import { factories } from "@strapi/strapi";
 
+import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
+
 /**
  * Classifieds are user-generated content created from the web app (not the
  * admin panel), so every write path is sanitized server-side:
@@ -215,5 +217,50 @@ export default factories.createCoreController("api::classified.classified", ({ s
     if (!entity) return ctx.notFound();
     ctx.params.id = entity.documentId;
     return super.delete(ctx);
+  },
+
+  /**
+   * POST /api/classifieds/cleanup-uploads — best-effort orphan removal for
+   * the two-step web flow (issue #13): when step 2 (create/update) fails
+   * after step 1 (upload) succeeded, or when an update deselects images,
+   * the web action posts the ids here instead of leaving them for the
+   * nightly janitor.
+   *
+   * Strictly self-service, no moderator bypass: a file is only removed
+   * when it (a) exists, (b) is stamped with the CALLER's id in
+   * provider_metadata.uploadedBy (the marketplace-upload stamp — admin
+   * uploads like avatars/documents carry none and can never match), and
+   * (c) has no relation left in files_related_mph (the same image may hang
+   * on another of the caller's ads). Anything else is silently skipped —
+   * the endpoint is idempotent and safe to call with stale ids.
+   */
+  async cleanupUploads(ctx) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+
+    const body = (ctx.request.body ?? {}) as any;
+    const raw = (body.data ?? body)?.imageIds;
+    if (!Array.isArray(raw) || raw.length === 0 || raw.length > MAX_IMAGES) {
+      return ctx.badRequest(`imageIds must be 1-${MAX_IMAGES} file ids`);
+    }
+    const ids: number[] = [];
+    for (const entry of raw) {
+      const id = Number(entry);
+      if (!Number.isInteger(id) || id <= 0) return ctx.badRequest("Invalid file id");
+      if (!ids.includes(id)) ids.push(id);
+    }
+
+    const files = await strapi.db
+      .query("plugin::upload.file")
+      .findMany({ where: { id: { $in: ids } } });
+    const stillAttached = await attachedFileIds(strapi, ids);
+
+    let removed = 0;
+    for (const file of files) {
+      if (uploadedByOf(file) !== user.id) continue;
+      if (stillAttached.has(file.id)) continue;
+      if (await removeUploadFile(strapi, file)) removed += 1;
+    }
+    ctx.body = { removed };
   },
 }));

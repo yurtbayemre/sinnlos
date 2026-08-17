@@ -19,7 +19,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["apps/**/*.test.ts"],
+    include: ["apps/**/*.test.ts", "infra/**/*.test.ts"],
     exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**", "**/build/**"],
   },
 });

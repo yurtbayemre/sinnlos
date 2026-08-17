@@ -59,6 +59,11 @@ services:
       # Revalidation webhook → Next.js
       WEB_INTERNAL_URL: http://web:3000
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # Shared secret guarding the raw /uploads bytes (issue #21, K1): the cms
+      # uploads-auth middleware only serves /uploads to callers presenting this
+      # token, i.e. the web session-gate proxy — closing the /api/../uploads
+      # traversal side channel that routes around the edge.
+      INTERNAL_UPLOAD_TOKEN: ${INTERNAL_UPLOAD_TOKEN}
     volumes:
       - cms_uploads:/app/apps/cms/public/uploads
     healthcheck:
@@ -109,6 +114,8 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
       # Shared secret for the /api/revalidate webhook called from the CMS
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # Shared secret the /uploads proxy route sends to cms (issue #21, K1).
+      INTERNAL_UPLOAD_TOKEN: ${INTERNAL_UPLOAD_TOKEN}
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
       interval: 15s
