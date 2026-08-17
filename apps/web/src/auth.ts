@@ -208,7 +208,15 @@ if (LOCAL_ENABLED) {
           return {
             id: String(me.id),
             name: me.displayName ?? me.username,
-            email: me.email,
+            // Take the email from the /api/auth/local response, NOT from
+            // /api/users/me: the latter now runs through the content-api
+            // sanitizer (issue #10), which strips email for non-privileged
+            // roles (guest / the pre-role-mapping `authenticated` fallback),
+            // so me.email would be undefined for them. The auth endpoint's
+            // user payload is not sanitized and always carries the real email.
+            // (Session identity is the id/JWT, never the email — this only
+            // fixes the displayed address; F4.)
+            email: data.user.email ?? me.email,
             strapiJwt: data.jwt,
             strapiUserId: me.id,
             strapiRole: me.role?.type,

@@ -1,4 +1,5 @@
 import { ANCHORED_UIDS, anchorFromTargetRow, planAnchorBackfill } from "./utils/comment-target";
+import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitize-user-contact";
 
 /**
  * Strapi application lifecycle.
@@ -225,14 +226,15 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
    * — and even the notification/poll-vote visibility filters, which
    * reference the `recipient`/`voter` user relations — throw a 400 for a
    * role lacking `user.find`. "Silently stripped" only applies to the
-   * later sanitize pass. So guest keeps user.find and can therefore read
-   * the directory's email/phone/hireDate. Protecting those fields for
-   * guest specifically needs role-aware output sanitization for POPULATED
-   * user relations (not just direct /api/users reads), which Strapi v5 has
-   * no built-in hook for — deferred rather than shipped as a risky
-   * override. Status quo (directory visible) is preferred over a 400 app.
-   * Verified via node repro against @strapi/utils 5.49 (collection-type
-   * controller order + validateFilters/throwRestrictedRelations).
+   * later sanitize pass. So guest keeps user.find; the email/phone/hireDate
+   * it could therefore read from the directory are now removed OUTPUT-side by
+   * a role-aware content-api.output sanitizer (registerUserContactSanitizer
+   * below → utils/sanitize-user-contact.ts, issue #10): it covers both direct
+   * /api/users reads and POPULATED user relations, runs AFTER
+   * validateQuery/sanitizeQuery (so it never trips throwRestrictedRelations),
+   * and strips only for non-privileged callers (guest/authenticated/public/
+   * unknown). Verified via node repro against @strapi/utils 5.49 (collection-
+   * type controller order + validateFilters/throwRestrictedRelations).
    */
   guest: {
     // NO acknowledgement grants: guest has no announcement.find, so it can
@@ -303,8 +305,10 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
  */
 const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::event.event.ics": "*",
-  // guest is excluded: celebrations leak email + hireDate of every user.
-  "api::kudos.kudos.celebrations": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
+  // guest and the `authenticated` fallback are excluded: even with email
+  // dropped from the payload, years + daysUntil still reconstruct every
+  // user's exact hireDate, so this stays limited to the mapped staff roles.
+  "api::kudos.kudos.celebrations": ["admin_role", "editor", "department_head", "team_lead", "member"],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
   "api::poll-vote.poll-vote.vote": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
@@ -690,8 +694,57 @@ async function seedAdminUser(strapi: any) {
   }
 }
 
+/**
+ * Register a role-aware `content-api.output` sanitizer that removes employee
+ * contact fields (email/phone/hireDate/officeLocation/microsoftOid) from
+ * every response served to a non-privileged caller — the directory itself
+ * (/api/users*, /api/users/me) AND every populated user relation in any
+ * content type (announcement/wiki author, document.uploadedBy,
+ * event.organizer, notification.actor, comment/reaction author, manager,
+ * directReports, team.members, …). Issue #10 / P1.2.
+ *
+ * WHY output-side and role-aware instead of revoking guest's `user.find` or
+ * marking the fields schema-`private`: see the OPEN ISSUE note on the guest
+ * matrix above and `utils/sanitize-user-contact.ts`. Revoking `user.find`
+ * 400s every guest read that populates/filters a user relation; `private`
+ * would hide the fields from the member+ directory and /people too.
+ *
+ * WHY `set`-append and NOT `strapi.sanitizers.add(...)`: the sanitizers
+ * registry's `add(path, fn)` reads the target list with a FRESH `[]` default
+ * when the path is uninitialized and pushes onto that throwaway array — it
+ * does not persist (verified against @strapi/core 5.49
+ * registries/sanitizers.js; `content-api.output` is never pre-`set`). A plain
+ * `.add` here would be a silent no-op. We read the current list (default [])
+ * and `set` it back with our factory appended, which also initializes the
+ * path so any later `.add` behaves.
+ *
+ * The factory is appended as the LAST output transform, so it runs AFTER
+ * validateQuery/sanitizeQuery (never triggers throwRestrictedRelations) and
+ * AFTER the core sanitizers (private/restricted-relation removal). It reads
+ * the caller's role from the request AsyncLocalStorage — the same source the
+ * controllers use for their `role.type` checks. No request context
+ * (lifecycles, seed, cron, internal document-service reads) ⇒ never strip, so
+ * internal callers keep email/phone/hireDate.
+ */
+export function registerUserContactSanitizer(strapi: any) {
+  const factory = (schema: any) => (data: any) => {
+    const ctx = strapi.requestContext.get();
+    // No HTTP request in scope → internal call; leave the data untouched.
+    if (!ctx) return data;
+    if (!shouldSanitizeForRole(ctx.state?.user?.role?.type)) return data;
+    return stripSensitiveUserFields(data, schema, {
+      getModel: (uid: string) => strapi.getModel(uid),
+    });
+  };
+
+  const current = strapi.sanitizers.get("content-api.output");
+  strapi.sanitizers.set("content-api.output", [...current, factory]);
+}
+
 export default {
-  register(/* { strapi } */) {},
+  register({ strapi }: { strapi: any }) {
+    registerUserContactSanitizer(strapi);
+  },
 
   async bootstrap({ strapi }: { strapi: any }) {
     for (const seed of ROLES) {
