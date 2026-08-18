@@ -1,4 +1,5 @@
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { walkAllPages } from "@/lib/paginate";
 import type { TeamMembership } from "@/lib/audience";
 
 /**
@@ -43,22 +44,16 @@ export interface AllTeamsResult {
 }
 
 export async function fetchAllTeams(): Promise<AllTeamsResult> {
-  const teams: TeamMembership[] = [];
-  let truncated = false;
-
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const res = await strapi<StrapiListResponse<TeamMembership>>(
-      // sort=id:asc keeps the page walk stable (Postgres returns rows in
-      // an undefined order without ORDER BY, so pages could skip rows).
-      `/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-      { tag: "teams", revalidate: 60 },
-    );
-    teams.push(...(res?.data ?? []));
-
-    const pageCount = res?.meta?.pagination?.pageCount;
-    if (pageCount == null || page >= pageCount) break;
-    if (page === MAX_PAGES) truncated = true;
-  }
+  const { data: teams, truncated } = await walkAllPages<TeamMembership>(
+    (page) =>
+      strapi<StrapiListResponse<TeamMembership>>(
+        // sort=id:asc keeps the page walk stable (Postgres returns rows in
+        // an undefined order without ORDER BY, so pages could skip rows).
+        `/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
+        { tag: "teams", revalidate: 60 },
+      ),
+    { maxPages: MAX_PAGES, label: "team roster" },
+  );
 
   return { teams, truncated };
 }

@@ -30,7 +30,7 @@ export async function AckBanner() {
     (a) => a.requiresAck && a.documentId,
   );
   const acked = new Set(
-    ((acksResult.data ?? []) as Acknowledgement[]).map((a) => a.targetDocumentId),
+    ((acksResult.data?.acks ?? []) as Acknowledgement[]).map((a) => a.targetDocumentId),
   );
   const openCount = required.filter((a) => !acked.has(a.documentId!)).length;
   if (openCount === 0) return null;

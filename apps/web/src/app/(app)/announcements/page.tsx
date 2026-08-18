@@ -35,7 +35,7 @@ export default async function AnnouncementsPage() {
   // every re-publish. Map keying also dedupes accidental duplicate ack
   // rows (accepted check-then-insert race in the CMS).
   const myAcks = new Map<string, Acknowledgement>();
-  for (const ack of acksResult.data ?? []) {
+  for (const ack of acksResult.data?.acks ?? []) {
     myAcks.set(ack.targetDocumentId, ack);
   }
 

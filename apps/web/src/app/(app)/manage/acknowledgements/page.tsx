@@ -4,8 +4,10 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } 
 import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
+import { reportCompleteness } from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { walkAllPages } from "@/lib/paginate";
 import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
 import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
@@ -71,17 +73,25 @@ export default async function AcknowledgementReportPage() {
       () =>
         // audienceRoles populate needs `plugin::users-permissions.role.find`,
         // which the CMS bootstrap grants to admin_role for exactly this page.
-        strapi<StrapiListResponse<Announcement>>(
-          "/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort=createdAt:desc&pagination[pageSize]=100",
-          { noCache: true },
+        // Full page walk, not a single pageSize=100 request: a mandatory
+        // announcement dropped past the first page would silently vanish from
+        // the report and never be chased for confirmation (#14). Secondary
+        // sort on id keeps the walk stable when rows share a createdAt.
+        walkAllPages<Announcement>(
+          (page) =>
+            strapi<StrapiListResponse<Announcement>>(
+              `/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+              { noCache: true },
+            ),
+          { maxPages: 50, label: "ack-report announcements" },
         ),
       "ack-report",
     ),
     tryFetch(() => fetchAllAnnouncementAcks(), "ack-report"),
     tryFetch(
       () =>
-        // role is populated the same way people.list does it; blocked is a
-        // plain (non-private) users-permissions field.
+        // role is populated with the users-permissions role.find grant;
+        // blocked is a plain (non-private) users-permissions field.
         fetchAllUsers<ReportUser>(
           "fields[0]=id&fields[1]=username&fields[2]=displayName&fields[3]=email&fields[4]=blocked&populate[department][fields][0]=name&populate[role]=true",
         ),
@@ -104,8 +114,8 @@ export default async function AcknowledgementReportPage() {
   const announcements = (
     (announcementsResult.data?.data ?? []) as ReportAnnouncement[]
   ).filter((a) => a.requiresAck);
-  const acks = (acksResult.data ?? []) as Acknowledgement[];
-  const users = usersResult.data ?? [];
+  const acks = (acksResult.data?.acks ?? []) as Acknowledgement[];
+  const users = usersResult.data?.users ?? [];
 
   // Only unblocked users whose role can actually read announcements count
   // toward the report — a blocked account or a guest can never confirm
@@ -124,9 +134,24 @@ export default async function AcknowledgementReportPage() {
    *   - no user directory  → NO row has a determinable audience.
    *   - no / truncated team roster → only rows with a `team` criterion are
    *     affected; department- and role-scoped rows stay exact.
+   *
+   * `reportTruncated` additionally covers the announcement and ack walks:
+   * either being cut short makes the WHOLE report undercount, so a banner
+   * warns that the numbers may be too low and no result reads as complete.
+   * `fetchAllUsers` now reports whether its MAX_USERS cap was hit, so a
+   * directory of >2000 users no longer silently shrinks the denominator
+   * into a false-green rate (#14) — see users.ts.
    */
-  const usersUnknown = usersResult.failed;
-  const teamsUnknown = teamsResult.failed || (teamsResult.data?.truncated ?? false);
+  const { usersUnknown, teamsUnknown, truncated: reportTruncated } = reportCompleteness({
+    usersFailed: usersResult.failed,
+    usersTruncated: usersResult.data?.truncated ?? false,
+    teamsFailed: teamsResult.failed,
+    teamsTruncated: teamsResult.data?.truncated ?? false,
+    acksFailed: acksResult.failed,
+    acksTruncated: acksResult.data?.truncated ?? false,
+    announcementsFailed: announcementsResult.failed,
+    announcementsTruncated: announcementsResult.data?.truncated ?? false,
+  });
 
   const formatDate = (iso: string) =>
     new Date(iso).toLocaleDateString(locale, {
@@ -207,6 +232,21 @@ export default async function AcknowledgementReportPage() {
       </div>
 
       {anyFailed && <FetchErrorBanner />}
+
+      {/* Fail-closed: a truncated input walk makes the numbers below too
+          low, so warn explicitly and never let the report read as a
+          complete, green "everyone confirmed" (#14). */}
+      {reportTruncated && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <div>
+            <div className="font-medium">{t("reportIncompleteTitle")}</div>
+            <div className="text-amber-700/90 dark:text-amber-300/90">
+              {t("reportIncompleteHint")}
+            </div>
+          </div>
+        </div>
+      )}
 
       {rows.length === 0 ? (
         <EmptyState icon={ClipboardCheck} title={t("emptyTitle")} hint={t("emptyHint")} />

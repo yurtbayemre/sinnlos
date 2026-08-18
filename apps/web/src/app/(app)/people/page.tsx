@@ -22,7 +22,7 @@ export default async function PeoplePage() {
       ),
     "people",
   );
-  const people = (data ?? []) as UserLite[];
+  const people = (data?.users ?? []) as UserLite[];
 
   return (
     <div className="space-y-6">

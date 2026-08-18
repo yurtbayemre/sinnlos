@@ -49,7 +49,7 @@ export default async function KudosPage() {
 
   const kudosList = (kudosResult.data?.data ?? []) as Kudos[];
   const celebrations = (celebrationsResult.data?.data ?? []) as Celebration[];
-  const people = (peopleResult.data ?? []) as UserLite[];
+  const people = (peopleResult.data?.users ?? []) as UserLite[];
   const anyFailed = kudosResult.failed || celebrationsResult.failed;
 
   return (

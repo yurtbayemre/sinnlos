@@ -388,6 +388,8 @@
     "audienceRoles": "Rollen: {names}",
     "audienceUnknown": "Zielgruppe nicht ermittelbar",
     "audienceUnknownHint": "Nutzer- oder Team-Daten konnten nicht vollständig geladen werden. Eine Quote wäre irreführend und wird deshalb nicht angezeigt.",
+    "reportIncompleteTitle": "Report unvollständig — Zahlen können zu niedrig sein",
+    "reportIncompleteHint": "Eine Liste hat ihre Sicherheitsgrenze erreicht, daher fehlen einige Meldungen oder Bestätigungen. Die Bestätigungsquoten können hier nur zu niedrig ausfallen — werte dies nicht als vollständige Compliance.",
     "deadline": "Frist: {date}",
     "ackedOf": "{acked} von {total} bestätigt",
     "allAcked": "Alle Zielnutzer haben bestätigt.",

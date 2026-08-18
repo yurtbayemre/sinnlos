@@ -38,7 +38,7 @@ export default async function DashboardPage() {
 
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
-  const peopleCount = Array.isArray(peopleResult.data) ? peopleResult.data.length : 0;
+  const peopleCount = peopleResult.data?.users.length ?? 0;
   const eventCount = events.data?.data.length ?? 0;
   const anyFailed =
     departments.failed ||
