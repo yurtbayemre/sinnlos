@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { demo } from "@/lib/demo";
+import { walkAllPages, type WalkResult } from "@/lib/paginate";
 
 export type StrapiListResponse<T> = {
   data: T[];
@@ -144,18 +145,6 @@ export const api = {
         { noCache: true },
       ),
   },
-  people: {
-    list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/users?populate[department]=true&populate[avatar]=true&populate[role]=true&pagination[pageSize]=200&sort=displayName:asc",
-        { noCache: true },
-      ),
-    one: (id: number) =>
-      strapi<any>(
-        `/api/users/${id}?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true`,
-        { noCache: true },
-      ),
-  },
   announcements: {
     // No audience filter here: targeting (audience/department/team/
     // audienceRoles) is enforced server-side by the CMS policy
@@ -174,10 +163,20 @@ export const api = {
     // attribute, so the filter validates for every reading role). Author
     // fields are populated (same as list()) so cards rendered from this
     // query are complete; the banner just ignores them.
-    requiringAck: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100",
-        { noCache: true },
+    //
+    // A single request is bounded by its pageSize, so this walks every page
+    // — dropping mandatory announcements past the first page would silently
+    // undercount open confirmations in the banner and report (issue #14).
+    // Secondary sort on id keeps the page walk stable when many rows share
+    // the same createdAt. Hard cap: 50 pages x 100 = 5000 mandatory posts.
+    requiringAck: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 50, label: "mandatory announcements" },
       ),
   },
   events: {
@@ -226,28 +225,24 @@ export const api = {
     // the plain string column targetDocumentId (no relation traversal);
     // the user populate is field-limited to displayName. Guests never call
     // this (no event-rsvp.find grant — the page skips the fetch).
-    // Strapi's REST maxLimit caps pageSize at 100 (see acknowledgements.ts),
-    // so this walks the pagination like the ack helpers do. Hard upper
-    // bound: 30 pages x 100 rows = 3000 rows, comfortably above 50 visible
-    // events with full attendance while still bounding a runaway loop.
-    rsvps: async (documentIds: string[]) => {
+    // A single request is bounded by its pageSize, so this walks the
+    // pagination. Hard upper bound: 30 pages x 100 rows = 3000 rows,
+    // comfortably above 50 visible events with full attendance while still
+    // bounding a runaway loop (issue #14).
+    rsvps: (documentIds: string[]): Promise<WalkResult<any>> => {
       const filters = documentIds
         .map((d, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(d)}`)
         .join("&");
-      const MAX_RSVP_PAGES = 30;
-      const all: any[] = [];
-      for (let page = 1; page <= MAX_RSVP_PAGES; page++) {
-        const res = await strapi<StrapiListResponse<any>>(
-          // Secondary sort on id keeps the page walk stable when many
-          // rows share the same respondedAt (no skips/duplicates).
-          `/api/event-rsvps?${filters}&populate[user][fields][0]=displayName&sort[0]=respondedAt:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
-          { noCache: true },
-        );
-        all.push(...(res?.data ?? []));
-        const pagination = res?.meta?.pagination;
-        if (!pagination || page >= pagination.pageCount) break;
-      }
-      return { data: all };
+      return walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            // Secondary sort on id keeps the page walk stable when many
+            // rows share the same respondedAt (no skips/duplicates).
+            `/api/event-rsvps?${filters}&populate[user][fields][0]=displayName&sort[0]=respondedAt:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 30, label: "event RSVPs" },
+      );
     },
   },
   polls: {
@@ -287,18 +282,35 @@ export const api = {
     // no real gain — Strapi sits on the internal Docker network.
     // Author populate is field-limited; email is needed for the mailto
     // contact button on the detail page (company-internal address).
-    list: (todayIso: string, category?: string) => {
-      let url = `/api/classifieds?filters[expiresAt][$gte]=${encodeURIComponent(todayIso)}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort=createdAt:desc&pagination[pageSize]=100`;
-      if (category) url += `&filters[category][$eq]=${encodeURIComponent(category)}`;
-      return strapi<StrapiListResponse<any>>(url, { noCache: true });
+    //
+    // Both list endpoints walk every page — a single request is bounded by
+    // its pageSize, so a busy board would silently lose every ad past the
+    // first 100 (issue #14). Secondary sort on id keeps the walk stable
+    // when many ads share a createdAt. Hard cap: 50 pages x 100 = 5000 ads.
+    list: (todayIso: string, category?: string): Promise<WalkResult<any>> => {
+      const categoryFilter = category
+        ? `&filters[category][$eq]=${encodeURIComponent(category)}`
+        : "";
+      return walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/classifieds?filters[expiresAt][$gte]=${encodeURIComponent(todayIso)}${categoryFilter}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 50, label: "marketplace ads" },
+      );
     },
     // Own ads including expired ones (renew UI). The author filter is a
     // user-relation traversal — fine for every posting role (all hold
     // user.find), and guests never reach this query.
-    mine: (userId: number) =>
-      strapi<StrapiListResponse<any>>(
-        `/api/classifieds?filters[author][id][$eq]=${userId}&populate[images]=true&sort=createdAt:desc&pagination[pageSize]=100`,
-        { noCache: true },
+    mine: (userId: number): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/classifieds?filters[author][id][$eq]=${userId}&populate[images]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 50, label: "own marketplace ads" },
       ),
     one: (id: string) =>
       strapi<StrapiListResponse<any>>(

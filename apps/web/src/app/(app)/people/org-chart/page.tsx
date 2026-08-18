@@ -22,7 +22,7 @@ export default async function OrgChartPage() {
       ),
     "org-chart",
   );
-  const people = (data ?? []) as (UserLite & { manager?: { id: number } | null })[];
+  const people = (data?.users ?? []) as (UserLite & { manager?: { id: number } | null })[];
 
   return (
     <div className="space-y-6">

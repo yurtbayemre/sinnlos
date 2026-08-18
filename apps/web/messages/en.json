@@ -388,6 +388,8 @@
     "audienceRoles": "Roles: {names}",
     "audienceUnknown": "Target audience could not be determined",
     "audienceUnknownHint": "The user or team data could not be loaded completely. A rate would be misleading and is therefore not shown.",
+    "reportIncompleteTitle": "Report incomplete — figures may be too low",
+    "reportIncompleteHint": "A list hit its safety cap, so some announcements or confirmations are missing. Confirmation rates can only be undercounted here — do not read this as full compliance.",
     "deadline": "Deadline: {date}",
     "ackedOf": "{acked} of {total} confirmed",
     "allAcked": "Every targeted user has confirmed.",

@@ -45,7 +45,7 @@ async function count(path: string): Promise<number> {
  */
 async function countUsers(): Promise<number> {
   try {
-    const users = await fetchAllUsers("fields[0]=id");
+    const { users } = await fetchAllUsers("fields[0]=id");
     return users.length;
   } catch (e) {
     unstable_rethrow(e);
