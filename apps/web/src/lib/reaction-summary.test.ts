@@ -6,7 +6,7 @@ import { ALL_EMOJIS, summarize } from "./reaction-summary";
 /** The announcement every reaction below belongs to (documentId-anchored). */
 const DOC = "a1b2c3d4e5f6g7h8i9j0kl";
 const OTHER_DOC = "z9y8x7w6v5u4t3s2r1q0po";
-const TARGET: CommentTarget = { type: "announcement", documentId: DOC, id: 1 };
+const TARGET: CommentTarget = { type: "announcement", documentId: DOC };
 
 /** Minimal Reaction factory — only the fields `summarize` reads matter. */
 function reaction(emoji: Reaction["emoji"], authorId?: number): Reaction {
@@ -96,9 +96,9 @@ describe("summarize", () => {
 
 /**
  * Target-scoped aggregation (issue #11): rows are anchored by
- * `targetDocumentId`, and the fetch filter still carries a temporary branch
- * for rows the CMS backfill has not anchored yet — so the counts re-check the
- * anchor instead of trusting the query.
+ * `targetDocumentId`, and the counts re-check the anchor instead of trusting
+ * the query (permanent defense-in-depth). Since #25 an unanchored row is
+ * dropped — the legacy targetId bridge is gone.
  */
 describe("summarize with a target", () => {
   const me = 5;
@@ -110,13 +110,12 @@ describe("summarize with a target", () => {
     expect(heart.reacted).toBe(true);
   });
 
-  it("drops rows of another entry that reuse the target's old row id", () => {
-    // Post-re-publish trap: row id 1 now belongs to this announcement, but
-    // this reaction is anchored to a different document.
+  it("drops rows of another entry", () => {
+    // Post-re-publish trap: this reaction is anchored to a different
+    // document and must never count towards this section.
     const foreign = {
       ...reaction("heart", me),
       targetDocumentId: OTHER_DOC,
-      targetId: 1,
     } as Reaction;
     const result = summarize([foreign, reaction("thumbsup", 9)], me, TARGET);
     const byEmoji = Object.fromEntries(result.map((r) => [r.emoji, r.count]));
@@ -125,16 +124,15 @@ describe("summarize with a target", () => {
     expect(result.find((r) => r.emoji === "heart")!.reacted).toBe(false);
   });
 
-  it("still counts unanchored legacy rows of the target (temporary bridge)", () => {
-    const legacy = {
+  it("drops unanchored rows (#25 — the legacy targetId bridge is gone)", () => {
+    const unanchored = {
       ...reaction("celebrate", me),
       targetDocumentId: null,
-      targetId: 1,
     } as Reaction;
-    const result = summarize([legacy], me, TARGET);
+    const result = summarize([unanchored], me, TARGET);
     const celebrate = result.find((r) => r.emoji === "celebrate")!;
-    expect(celebrate.count).toBe(1);
-    expect(celebrate.reacted).toBe(true);
+    expect(celebrate.count).toBe(0);
+    expect(celebrate.reacted).toBe(false);
   });
 
   it("drops rows of the other targetType with the same documentId", () => {

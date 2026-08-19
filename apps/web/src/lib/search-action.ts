@@ -25,6 +25,14 @@ export type SearchItem = {
 export async function fetchSearchItems(): Promise<SearchItem[]> {
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  // Preload coverage (issue #26): departments/teams/wiki-spaces are full
+  // page walks since #26, so those indexes are complete. Deliberately
+  // capped remain the wiki-pages preload (pageSize=100), announcements
+  // (20), events.upcoming (50), polls (20), documents (50) and the users
+  // preload below (users-permissions ignores pagination[] params anyway,
+  // see the analytics countUsers note). That is fine: this preload is a
+  // best-effort typeahead — the live search in searchContent() queries
+  // Strapi with $containsi and finds everything beyond these windows.
   const [departments, teams, wikiSpaces, wikiPages, announcements, events, polls, documents] = await Promise.all([
     api.departments.list().catch(emptyList),
     api.teams.list().catch(emptyList),

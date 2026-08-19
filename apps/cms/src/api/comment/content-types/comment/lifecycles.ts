@@ -15,12 +15,11 @@ export default {
       // exists in the schema and is handled by findCommentTarget, it just has
       // no recipient to fan out to here).
       if (full.targetType === "announcement") {
-        // Resolve via the documentId anchor, NOT the numeric targetId: the
+        // Resolve via the documentId anchor, NOT the numeric row id: the
         // published row id changes on every re-publish (delete+recreate), so
         // an id lookup either found nothing or — after id recycling — the
         // wrong announcement, and the author of a foreign entry got the
-        // notification (issue #11). findCommentTarget still falls back to
-        // targetId for rows the bootstrap backfill could not anchor yet.
+        // notification (issue #11).
         const announcement = await findCommentTarget(strapi, full, {
           populate: { author: true },
         });

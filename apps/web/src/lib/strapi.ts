@@ -88,16 +88,30 @@ export const api = {
     // may safely stay in the URL-keyed fetch cache (issue #10 / F1 — the
     // content-api sanitizer runs per-request and would otherwise be bypassed
     // by a cache entry shared across roles).
-    list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&populate[headerImage]=true&sort=name:asc",
-        { tag: "departments", revalidate: 60 },
+    // Walks every page: without an explicit pageSize Strapi serves only
+    // `api.rest.defaultLimit` = 25 rows, so department #26 silently vanished
+    // from the index, the dashboard count and the search preload (issue #26).
+    // Secondary sort on id keeps the walk stable — `name` is not unique.
+    // Hard cap: 10 pages x 100 = 1000 departments.
+    list: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&populate[headerImage]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { tag: "departments", revalidate: 60 },
+          ),
+        { maxPages: 10, label: "departments" },
       ),
     // noCache: the detail page shows the head's and each member's email as the
     // internal contact line (`jobTitle ?? email`). That is a per-user response
     // — the CMS content-api sanitizer strips email for non-privileged callers,
     // so a URL-keyed cache would leak a member's cache entry (with email) to a
     // guest, and vice versa. Same rule as people/wiki (issue #10 / F1).
+    //
+    // No page walk needed here: `slug` is a uid attribute (unique), so the
+    // top-level result is 0..1 rows — the defaultLimit of 25 only bounds
+    // top-level pagination, and Strapi 5 REST does not paginate populated
+    // relations (teams/members arrive in full).
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/departments?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true&populate[headerImage]=true`,
@@ -109,15 +123,28 @@ export const api = {
     // use only team fields + member COUNT, never a lead/member contact field,
     // so limiting the `lead`/`members` user relations to non-sensitive columns
     // keeps the payload role-invariant and cacheable (issue #10 / F1).
-    list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/teams?populate[department]=true&populate[lead][fields][0]=displayName&populate[lead][fields][1]=jobTitle&populate[members][fields][0]=displayName&populate[members][fields][1]=jobTitle&sort=name:asc",
-        { tag: "teams", revalidate: 60 },
+    //
+    // Walks every page (issue #26): the old single request sent no pageSize
+    // and stopped at Strapi's defaultLimit of 25, so team #26 was missing
+    // from the index, the dashboard count and the search preload. Secondary
+    // sort on id keeps the walk stable — `name` is not unique. Hard cap:
+    // 20 pages x 100 = 2000 teams (parity with lib/teams.ts MAX_PAGES).
+    list: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/teams?populate[department]=true&populate[lead][fields][0]=displayName&populate[lead][fields][1]=jobTitle&populate[members][fields][0]=displayName&populate[members][fields][1]=jobTitle&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { tag: "teams", revalidate: 60 },
+          ),
+        { maxPages: 20, label: "teams" },
       ),
     // noCache: the detail page renders the lead's and members' email as the
     // internal contact line (`jobTitle ?? email`) — a per-user response the
     // sanitizer strips for non-privileged callers, so it must not enter the
     // URL-keyed cache (issue #10 / F1, same as departments.one).
+    //
+    // No page walk needed: `slug` is a uid attribute (unique) → 0..1 top-level
+    // rows; populated relations are not paginated by Strapi 5 REST.
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/teams?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[department]=true&populate[lead]=true&populate[members]=true&populate[pages]=true`,
@@ -129,11 +156,24 @@ export const api = {
     // wiki-visibility policy filters results per user — caching by URL
     // alone would leak restricted pages across users. Strapi is on the
     // internal Docker network so the round-trip cost is low.
-    spaces: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/wiki-spaces?populate[department]=true&populate[team]=true&sort=name:asc",
-        { noCache: true },
+    //
+    // Walks every page (issue #26): without a pageSize the wiki index stopped
+    // at Strapi's defaultLimit of 25 and whole knowledge-base sections fell
+    // out of the index and the search preload. Secondary sort on id keeps the
+    // walk stable. Hard cap: 10 pages x 100 = 1000 spaces.
+    spaces: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/wiki-spaces?populate[department]=true&populate[team]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 10, label: "wiki spaces" },
       ),
+    // No page walk for space()/page(): `slug` is a uid attribute (unique) →
+    // 0..1 top-level rows; the defaultLimit of 25 bounds only top-level
+    // pagination, and Strapi 5 REST does not paginate populated relations
+    // (pages/revisions arrive in full).
     space: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/wiki-spaces?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[pages][populate][author]=true`,
@@ -152,6 +192,12 @@ export const api = {
     // The old client-side `$or` was redundant for department scoping and
     // silently missed team- and role-scoped posts entirely. noCache is
     // therefore mandatory — these responses are per-user.
+    //
+    // pageSize=20 is a deliberate feed/render cap (issue #26). Anyone who
+    // needs a COUNT must read `meta.pagination.total` (the count() pattern
+    // from manage/analytics), never `data.length` — the total is correct
+    // per user because the visibility policy filters the query before the
+    // count.
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&populate[department]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20",
@@ -193,7 +239,9 @@ export const api = {
     // responses stay role-invariant and never leak contact data across roles
     // via the URL-keyed cache (issue #10 / F1).
     //
-    // Upcoming events (start >= from), soonest first.
+    // Upcoming events (start >= from), soonest first. pageSize=50 is a
+    // deliberate feed/render cap (issue #26) — counts must come from
+    // `meta.pagination.total`, never `data.length` (see the dashboard).
     upcoming: (fromIso: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
@@ -209,6 +257,9 @@ export const api = {
     // Events overlapping the half-open window [from, to) for the month
     // grid — multi-day spans included: start < window end AND
     // (end ?? start) >= window start ($or handles the nullable end).
+    // pageSize=100 is a deliberate render cap (issue #26): a single month
+    // with >100 events would drop entries from the grid, with no truncated
+    // signal on this path — accepted as far beyond realistic volume.
     window: (fromIso: string, toIso: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100`,
@@ -250,6 +301,9 @@ export const api = {
     // consumer renders an author contact field (the poll cards are built from
     // the noCache results() endpoint), so limiting it keeps no sensitive user
     // field in this tagged/ISR-cached, role-invariant payload (issue #10 / F1).
+    //
+    // pageSize=20 is a deliberate feed/render cap (issue #26) — counts must
+    // come from `meta.pagination.total`, never `data.length`.
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/polls?populate[departments]=true&populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
@@ -262,6 +316,10 @@ export const api = {
     // noCache since document-visibility filters per user (department scoping):
     // the fetch cache keys by URL only, so a tagged cache would leak one
     // user's scoped list to others — same rule as wiki/people/announcements.
+    //
+    // pageSize=50 is a deliberate render cap (issue #26): the documents page
+    // shows the 50 most recently updated files, no truncated signal. Counts
+    // must come from `meta.pagination.total`, never `data.length`.
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort=updatedAt:desc&pagination[pageSize]=50",
@@ -269,6 +327,8 @@ export const api = {
       ),
   },
   kudos: {
+    // pageSize=30 is a deliberate feed/render cap (issue #26) — counts must
+    // come from `meta.pagination.total`, never `data.length`.
     list: () =>
       strapi<StrapiListResponse<any>>(
         "/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30",
@@ -324,10 +384,19 @@ export const api = {
     // Deliberately NO populate of `departments`: the policy scopes
     // server-side, and populating the relation would 400 for roles
     // without department.find (guest).
-    list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/quick-links?sort[0]=order:asc&sort[1]=label:asc&pagination[pageSize]=100",
-        { noCache: true },
+    //
+    // Walks every page (issue #26): the list is curated and stays well below
+    // 100 links, so this still costs exactly one request (the walk stops at
+    // pageCount=1) — but if it ever grows past 100 nothing is silently lost.
+    // Secondary sort on id keeps the walk stable. Hard cap: 5 x 100 = 500.
+    list: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/quick-links?sort[0]=order:asc&sort[1]=label:asc&sort[2]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 5, label: "quick links" },
       ),
   },
   celebrations: () =>

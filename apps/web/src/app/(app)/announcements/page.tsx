@@ -105,7 +105,7 @@ export default async function AnnouncementsPage() {
                 {openAck.map((a) => (
                   <AnnouncementCard key={a.documentId ?? a.id} item={a} pinned ack={renderAck(a)}>
                     <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                      target={{ type: "announcement", documentId: a.documentId }}
                     />
                   </AnnouncementCard>
                 ))}
@@ -123,7 +123,7 @@ export default async function AnnouncementsPage() {
                 {pinned.map((a) => (
                   <AnnouncementCard key={a.id} item={a} pinned ack={renderAck(a)}>
                     <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                      target={{ type: "announcement", documentId: a.documentId }}
                     />
                   </AnnouncementCard>
                 ))}
@@ -138,7 +138,7 @@ export default async function AnnouncementsPage() {
                 {rest.map((a) => (
                   <AnnouncementCard key={a.id} item={a} ack={renderAck(a)}>
                     <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId, id: a.id }}
+                      target={{ type: "announcement", documentId: a.documentId }}
                     />
                   </AnnouncementCard>
                 ))}

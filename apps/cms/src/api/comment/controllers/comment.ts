@@ -8,29 +8,28 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
    * Strapi 5 is delete+recreate, so an id-anchored comment detaches on the
    * next "Publish" (issue #11, see utils/comment-target.ts).
    *
-   * TEMPORARY MIGRATION BRIDGE (issue #11, removed by its follow-up ticket
-   * together with the `targetId` column): `resolveWriteTarget` also accepts a
-   * payload that carries ONLY the deprecated `targetId` — an old web
-   * container against this CMS, the partial rollback documented in
-   * infra/deploy.sh — and writes BOTH keys, so a full rollback to the id-only
-   * code still sees the rows created in the meantime. The client-supplied
-   * targetId is never stored as-is; the resolved target's current row id is.
+   * Only the documentId anchor is accepted (#25 removed the targetId
+   * migration bridge): a payload carrying nothing but the legacy `targetId`
+   * is answered with 400 "targetDocumentId required".
    */
   async create(ctx) {
     ctx.request.body = ctx.request.body ?? {};
     const body = ctx.request.body as any;
     const data = body.data ?? body;
 
+    // `targetId` is stripped here on purpose: it is no longer a schema
+    // attribute, and forwarding an old client's extra key to the core create
+    // would risk an "Invalid key" rejection.
+    const { targetType: _t, targetDocumentId: _d, targetId: _i, ...rest } = data ?? {};
+
     const target = await resolveWriteTarget(strapi, data);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
 
-    const { targetType: _t, targetDocumentId: _d, targetId: _i, ...rest } = data ?? {};
     ctx.request.body = {
       data: {
         ...rest,
         targetType: target.targetType,
         targetDocumentId: target.targetDocumentId,
-        targetId: target.targetId,
         author: ctx.state.user?.id,
       },
     };

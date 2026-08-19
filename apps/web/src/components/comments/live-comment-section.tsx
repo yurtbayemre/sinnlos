@@ -31,11 +31,8 @@ export function LiveCommentSection({
   // Rebuild the target from its primitives so the polling effect below does
   // not restart on every render just because the prop object is a new
   // reference.
-  const { type, documentId, id: legacyId } = target;
-  const stableTarget = useMemo<CommentTarget>(
-    () => ({ type, documentId, id: legacyId }),
-    [type, documentId, legacyId],
-  );
+  const { type, documentId } = target;
+  const stableTarget = useMemo<CommentTarget>(() => ({ type, documentId }), [type, documentId]);
 
   const refetch = useCallback(async () => {
     try {

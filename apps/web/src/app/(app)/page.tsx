@@ -36,10 +36,19 @@ export default async function DashboardPage() {
     tryFetch(() => api.quickLinks.list(), "dashboard"),
   ]);
 
+  // Stat-card counts are decoupled from any render cap (issue #26):
+  // departments/teams are now COMPLETE page walks (data.length is the real
+  // total), while events/news keep their feed pageSize and read the count
+  // from `meta.pagination.total` of the same response — no extra request,
+  // and correct per user (the announcement-visibility policy filters the
+  // query before the count). Optional chaining on meta: DEMO_MODE and the
+  // walk results are covered, but a future fixture drift must not crash.
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
   const peopleCount = peopleResult.data?.users.length ?? 0;
-  const eventCount = events.data?.data.length ?? 0;
+  const eventCount = events.data?.meta?.pagination?.total ?? events.data?.data.length ?? 0;
+  const newsCount =
+    announcements.data?.meta?.pagination?.total ?? announcements.data?.data.length ?? 0;
   const anyFailed =
     departments.failed ||
     teams.failed ||
@@ -75,7 +84,7 @@ export default async function DashboardPage() {
         <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label={tNav("teams")} value={teamCount} href="/teams" />
         <StatCard icon={<Calendar className="h-5 w-5" aria-hidden="true" />} label={tNav("events")} value={eventCount} href="/events" />
         <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label={tNav("wiki")} value={t("browse")} href="/wiki" />
-        <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label={tNav("news")} value={announcements.data?.data.length ?? 0} href="/announcements" />
+        <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label={tNav("news")} value={newsCount} href="/announcements" />
         <StatCard icon={<Award className="h-5 w-5" aria-hidden="true" />} label={tNav("kudos")} value={t("give")} href="/kudos" />
       </section>
 
