@@ -317,13 +317,19 @@ export const api = {
     // the fetch cache keys by URL only, so a tagged cache would leak one
     // user's scoped list to others — same rule as wiki/people/announcements.
     //
-    // pageSize=50 is a deliberate render cap (issue #26): the documents page
-    // shows the 50 most recently updated files, no truncated signal. Counts
-    // must come from `meta.pagination.total`, never `data.length`.
-    list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort=updatedAt:desc&pagination[pageSize]=50",
-        { noCache: true },
+    // Walks every page (issue #26 follow-up): the documents page is a
+    // complete library grouped by category with no pagination UI, so the old
+    // pageSize=50 render cap silently hid document #51+. Secondary sort on id
+    // keeps the walk stable — `updatedAt` is not unique. Hard cap: 10 pages
+    // x 100 = 1000 documents.
+    list: (): Promise<WalkResult<any>> =>
+      walkAllPages<any>(
+        (page) =>
+          strapi<StrapiListResponse<any>>(
+            `/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+            { noCache: true },
+          ),
+        { maxPages: 10, label: "documents" },
       ),
   },
   kudos: {
