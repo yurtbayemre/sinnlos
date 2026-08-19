@@ -49,5 +49,18 @@ export default ({ env }: { env: Env }) => {
       ...(connections as any)[client],
       acquireConnectionTimeout: env.int("DATABASE_CONNECTION_TIMEOUT", 60000),
     },
+    settings: {
+      // Destructive schema sync is OFF (#25): @strapi/database defaults
+      // forceMigration to TRUE, i.e. on boot it DROPS columns/tables/indexes
+      // that a removed attribute leaves behind. We keep the orphaned
+      // `target_id` columns in comments+reactions as the rollback anchor for
+      // pre-#25 images, so drops must not happen implicitly. Additive sync
+      // (new columns/tables/indexes) is unaffected by this flag.
+      // The deliberate cleanup later: one-off boot with
+      // DATABASE_FORCE_MIGRATION=true after pg backup (drops ALL orphaned
+      // tracked columns), or manual ALTER TABLE — see docs/architecture.md
+      // §5.27.
+      forceMigration: env.bool("DATABASE_FORCE_MIGRATION", false),
+    },
   };
 };

@@ -6,14 +6,16 @@ import type { TeamMembership } from "@/lib/audience";
  * Server-side helper for reading the COMPLETE team roster.
  *
  * Why this exists — the silent 25-row cap:
- *   `api.teams.list()` passes no `pagination[pageSize]`, so Strapi applies
- *   `api.rest.defaultLimit` = 25 (@strapi/core 5.49
+ *   `api.teams.list()` used to pass no `pagination[pageSize]`, so Strapi
+ *   applied `api.rest.defaultLimit` = 25 (@strapi/core 5.49
  *   `core-api/service/pagination.js:9`; this CMS sets no override). Any
  *   consumer that needs the FULL mapping — the acknowledgement report
  *   builds user → teams from it, because `team.lead` has no inverse field
  *   on the user — would silently lose every team past the 25th and then
  *   compute an EMPTY target audience for team-scoped announcements, which
  *   the report used to render as a green "everyone confirmed".
+ *   (`api.teams.list()` walks its pages too since #26, but it populates
+ *   display fields this roster does not need — see below.)
  *
  * So we walk the pagination like `fetchAllAnnouncementAcks` /
  * `fetchAllUsers` do, and report back whether the walk actually finished:

@@ -99,11 +99,11 @@ export default async function AcknowledgementReportPage() {
     ),
     // Team membership for team-scoped announcements: `team.lead` has no
     // inverse field on the user, so the mapping can only be built from the
-    // team side (lead counts as a member for targeting). MUST be the
-    // paginated walk, not `api.teams.list()` — that one sends no pageSize
-    // and stops at Strapi's defaultLimit of 25, which would silently empty
-    // the target set of every team-scoped announcement past team #25 (see
-    // lib/teams.ts).
+    // team side (lead counts as a member for targeting). `api.teams.list()`
+    // is a full page walk too since #26, but fetchAllTeams stays the right
+    // fetch here: (a) it field-limits the user populates to username/ids —
+    // no contact payload in the tagged cache — and (b) its `truncated`
+    // signal is already wired into reportCompleteness below (fail-closed).
     tryFetch(() => fetchAllTeams(), "ack-report"),
   ]);
 

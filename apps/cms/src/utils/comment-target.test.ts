@@ -4,8 +4,6 @@ import {
   anchorFromTargetRow,
   findCommentTarget,
   isCommentTargetType,
-  legacyTargetId,
-  planAnchorBackfill,
   resolveWriteTarget,
   targetAnchor,
   targetMatchWhere,
@@ -14,24 +12,19 @@ import {
 } from "./comment-target";
 
 /**
- * Anchor resolution + backfill decision for comments and reactions
- * (GitHub issue #11).
+ * Anchor resolution for comments and reactions (GitHub issue #11, bridge
+ * removed with #25).
  *
  * Both target types are draftAndPublish and Strapi 5 publishes by
  * delete-then-recreate, so the numeric row id a comment used to point at is
- * gone after the next "Publish" click. These tests pin the three things the
- * migration hinges on:
- *   1. the anchor is the documentId, resolved published-row-first, and an
- *      anchored row NEVER falls back to the stale numeric id,
- *   2. the backfill decision is idempotent (anchored rows are skipped) and
- *      never guesses (missing target / unusable row → skip, keep the legacy
- *      id, warn),
- *   3. the temporary legacy read branch only ever matches UNANCHORED rows,
- *      so a recycled row id cannot drag a foreign discussion into a target,
- *   4. the temporary write bridge: a payload with only the deprecated
- *      `targetId` (old web container, partial rollback) still produces a
- *      correctly anchored row, and every write dual-writes both keys so a
- *      FULL rollback to the id-only code still sees the new rows.
+ * gone after the next "Publish" click. These tests pin the two things the
+ * anchoring hinges on:
+ *   1. the anchor is the documentId, resolved published-row-first, and a row
+ *      id is NEVER looked up — not even when a client still sends the
+ *      removed legacy `targetId`,
+ *   2. an unanchored row (`targetDocumentId IS NULL`) never matches and a
+ *      targetId-only payload is rejected without touching the database
+ *      (regression pins for the #25 bridge removal).
  *
  * Pure logic plus a db.query stub — no Strapi runtime, no database.
  */
@@ -66,68 +59,6 @@ describe("targetAnchor", () => {
   });
 });
 
-describe("legacyTargetId", () => {
-  it("accepts positive integers and their string form", () => {
-    expect(legacyTargetId(42)).toBe(42);
-    expect(legacyTargetId(" 42 ")).toBe(42);
-  });
-
-  it("rejects everything that is not a usable row id", () => {
-    for (const value of [0, -1, 1.5, "abc", "", null, undefined, {}]) {
-      expect(legacyTargetId(value)).toBeNull();
-    }
-  });
-});
-
-describe("planAnchorBackfill", () => {
-  it("skips rows that already carry an anchor (idempotent re-runs)", () => {
-    const row: AnchorableRow = {
-      id: 1,
-      targetType: "announcement",
-      targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 7,
-    };
-    expect(planAnchorBackfill(row)).toEqual({ action: "skip", reason: "already-anchored" });
-  });
-
-  it("treats a blank anchor as missing and still migrates the row", () => {
-    const row: AnchorableRow = {
-      id: 1,
-      targetType: "announcement",
-      targetDocumentId: "   ",
-      targetId: 7,
-    };
-    expect(planAnchorBackfill(row)).toEqual({
-      action: "resolve",
-      uid: "api::announcement.announcement",
-      legacyTargetId: 7,
-    });
-  });
-
-  it("resolves the wiki-page branch against the wiki-page uid", () => {
-    expect(planAnchorBackfill({ id: 2, targetType: "wiki-page", targetId: 3 })).toEqual({
-      action: "resolve",
-      uid: "api::wiki-page.wiki-page",
-      legacyTargetId: 3,
-    });
-  });
-
-  it("skips rows with an unknown targetType instead of guessing a uid", () => {
-    expect(planAnchorBackfill({ id: 3, targetType: "document", targetId: 9 })).toEqual({
-      action: "skip",
-      reason: "unknown-target-type",
-    });
-  });
-
-  it("skips rows without a usable legacy id — nothing left to resolve from", () => {
-    expect(planAnchorBackfill({ id: 4, targetType: "announcement", targetId: null })).toEqual({
-      action: "skip",
-      reason: "no-legacy-id",
-    });
-    expect(planAnchorBackfill(null)).toEqual({ action: "skip", reason: "unknown-target-type" });
-  });
-});
-
 describe("anchorFromTargetRow", () => {
   it("returns the documentId of the resolved target", () => {
     expect(anchorFromTargetRow({ documentId: ANNOUNCEMENT_DOC })).toBe(ANNOUNCEMENT_DOC);
@@ -142,58 +73,39 @@ describe("anchorFromTargetRow", () => {
 });
 
 describe("targetMatchWhere", () => {
-  it("matches by anchor alone when no legacy id is known", () => {
+  it("matches by the anchor pair alone", () => {
     expect(targetMatchWhere("announcement", ANNOUNCEMENT_DOC)).toEqual({
       targetType: "announcement",
       targetDocumentId: ANNOUNCEMENT_DOC,
     });
-    expect(targetMatchWhere("announcement", ANNOUNCEMENT_DOC, null)).toEqual({
-      targetType: "announcement",
-      targetDocumentId: ANNOUNCEMENT_DOC,
-    });
-  });
-
-  it("adds the legacy branch guarded by 'targetDocumentId IS NULL'", () => {
-    expect(targetMatchWhere("wiki-page", WIKI_DOC, 12)).toEqual({
-      targetType: "wiki-page",
-      $or: [{ targetDocumentId: WIKI_DOC }, { targetDocumentId: { $null: true }, targetId: 12 }],
-    });
   });
 
   /**
-   * The dual-write (`resolveWriteTarget`) stores BOTH keys on every new row,
-   * so the guard is what keeps the two branches disjoint. Evaluated against
-   * real rows, not just the clause shape.
+   * Evaluated against real rows, not just the clause shape: only anchored
+   * rows of the target match — foreign documents, the other targetType and
+   * unanchored rows never do (#25 removed the legacy targetId branch).
    */
   describe("evaluated against rows", () => {
     const rows = [
-      // Written by the current code: anchor + dual-written row id.
-      { id: 1, targetType: "announcement", targetDocumentId: ANNOUNCEMENT_DOC, targetId: 91 },
-      // Written before the anchor existed, backfill has not reached it yet.
-      { id: 2, targetType: "announcement", targetDocumentId: null, targetId: 91 },
-      // Foreign entry that owns row id 91 now (publish = delete+recreate).
-      { id: 3, targetType: "announcement", targetDocumentId: WIKI_DOC, targetId: 91 },
-      { id: 4, targetType: "announcement", targetDocumentId: null, targetId: 92 },
-      { id: 5, targetType: "wiki-page", targetDocumentId: ANNOUNCEMENT_DOC, targetId: 91 },
+      // Anchored row of the target.
+      { id: 1, targetType: "announcement", targetDocumentId: ANNOUNCEMENT_DOC },
+      // Unanchored pre-#11 row — must NEVER match since #25.
+      { id: 2, targetType: "announcement", targetDocumentId: null },
+      // Anchored row of a foreign document.
+      { id: 3, targetType: "announcement", targetDocumentId: WIKI_DOC },
+      // Same documentId but the other targetType.
+      { id: 4, targetType: "wiki-page", targetDocumentId: ANNOUNCEMENT_DOC },
     ];
     const matching = (where: Record<string, unknown>) =>
       rows.filter((row) => whereMatches(row, where)).map((row) => row.id);
 
-    it("matches the target's rows and neither the foreign nor the wiki-page row", () => {
-      expect(matching(targetMatchWhere("announcement", ANNOUNCEMENT_DOC, 91))).toEqual([1, 2]);
-    });
-
-    it("matches a dual-written row through the ANCHOR branch only, never twice", () => {
-      const where = targetMatchWhere("announcement", ANNOUNCEMENT_DOC, 91);
-      const [anchorBranch, legacyBranch] = where.$or as Record<string, unknown>[];
-      // Row 1 carries anchor AND targetId 91 — the guard keeps it out of the
-      // legacy branch, so it can never be counted/loaded twice.
-      expect(matching({ targetType: "announcement", ...anchorBranch })).toEqual([1]);
-      expect(matching({ targetType: "announcement", ...legacyBranch })).toEqual([2]);
-    });
-
-    it("drops the legacy branch entirely once no legacy id is known", () => {
+    it("matches only the anchored rows of the target", () => {
       expect(matching(targetMatchWhere("announcement", ANNOUNCEMENT_DOC))).toEqual([1]);
+    });
+
+    it("never matches a row with targetDocumentId null (#25 regression pin)", () => {
+      const where = targetMatchWhere("announcement", ANNOUNCEMENT_DOC);
+      expect(whereMatches(rows[1], where)).toBe(false);
     });
   });
 });
@@ -201,8 +113,7 @@ describe("targetMatchWhere", () => {
 /**
  * Minimal `where` evaluator with the operators used here: `$or` (array of
  * sub-clauses), `$null` / `$notNull`, everything else exact equality. Several
- * keys in one object are an implicit AND — exactly the semantics
- * `targetMatchWhere` relies on for its guarded legacy branch.
+ * keys in one object are an implicit AND.
  */
 function whereMatches(row: any, where: Record<string, unknown>): boolean {
   return Object.entries(where).every(([key, condition]) => {
@@ -268,9 +179,9 @@ describe("findCommentTarget", () => {
     expect(target?.id).toBe(90);
   });
 
-  it("never falls back to the stale numeric id once a row is anchored", async () => {
-    // Row 91 now belongs to a DIFFERENT document (ids are recycled by
-    // delete+recreate) — resolving it would attach the comment to it.
+  it("returns null when the anchor resolves to nothing — never looks a row id up", async () => {
+    // Row 91 exists but belongs to a DIFFERENT document (ids are recycled by
+    // delete+recreate) — an id lookup would attach the comment to it.
     const strapi = stubStrapi({
       "api::announcement.announcement": [
         { id: 91, documentId: WIKI_DOC, publishedAt: "2026-08-02T10:00:00.000Z" },
@@ -279,19 +190,9 @@ describe("findCommentTarget", () => {
     const target = await findCommentTarget(strapi, {
       targetType: "announcement",
       targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 91,
     });
     expect(target).toBeNull();
-  });
-
-  it("resolves an unanchored legacy row by its numeric id (temporary bridge)", async () => {
-    const strapi = stubStrapi({ "api::announcement.announcement": [publishedAnnouncement] });
-    const target = await findCommentTarget(strapi, {
-      targetType: "announcement",
-      targetDocumentId: null,
-      targetId: 91,
-    });
-    expect(target?.documentId).toBe(ANNOUNCEMENT_DOC);
+    expect(strapi.calls.every((call) => !("id" in call.where))).toBe(true);
   });
 
   it("resolves the wiki-page branch from its own table", async () => {
@@ -309,23 +210,21 @@ describe("findCommentTarget", () => {
     expect(strapi.calls.every((call) => call.uid === "api::wiki-page.wiki-page")).toBe(true);
   });
 
-  it("returns null without querying for unknown target types or missing keys", async () => {
+  it("returns null without querying for unknown target types or missing anchors", async () => {
     const strapi = stubStrapi({ "api::announcement.announcement": [publishedAnnouncement] });
-    expect(await findCommentTarget(strapi, { targetType: "document", targetId: 91 })).toBeNull();
+    expect(
+      await findCommentTarget(strapi, { targetType: "document", targetDocumentId: WIKI_DOC }),
+    ).toBeNull();
     expect(await findCommentTarget(strapi, { targetType: "announcement" })).toBeNull();
     expect(strapi.calls).toHaveLength(0);
   });
 });
 
 /**
- * The write path (issue #11): dual-write + write bridge, both TEMPORARY until
- * the follow-up ticket removes the `targetId` column.
- *
- * Dual-write exists for the rollback: the id-only code filters on `targetId`
- * alone, so a row written without it would be invisible after a full
- * rollback. The bridge exists for the PARTIAL rollback (old web container,
- * new CMS — the example in infra/deploy.sh): that web sends only `targetId`,
- * and rejecting it would kill every comment and every reaction.
+ * The write path: anchor-only since #25. A targetId-only payload — the old
+ * partial-rollback bridge — is now rejected with `missing-target` (400), and
+ * a `targetId` sent alongside a valid anchor is ignored (no id lookup, so a
+ * stale/foreign id cannot redirect the write).
  */
 describe("resolveWriteTarget", () => {
   const foreignAnnouncement = {
@@ -334,7 +233,7 @@ describe("resolveWriteTarget", () => {
     publishedAt: "2026-08-03T10:00:00.000Z",
   };
 
-  it("dual-writes anchor + the published row id (rollback anchor)", async () => {
+  it("resolves the anchor pair, published row preferred", async () => {
     const strapi = stubStrapi({
       "api::announcement.announcement": [draftAnnouncement, publishedAnnouncement],
     });
@@ -347,57 +246,37 @@ describe("resolveWriteTarget", () => {
       status: "ok",
       targetType: "announcement",
       targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 91,
     });
   });
 
-  it("falls back to the draft row id while the target is unpublished", async () => {
+  it("accepts a target that only exists as a draft", async () => {
     const strapi = stubStrapi({ "api::announcement.announcement": [draftAnnouncement] });
     expect(
       await resolveWriteTarget(strapi, {
         targetType: "announcement",
         targetDocumentId: ANNOUNCEMENT_DOC,
       }),
-    ).toMatchObject({ status: "ok", targetDocumentId: ANNOUNCEMENT_DOC, targetId: 90 });
-  });
-
-  it("bridges a legacy targetId-only payload to the anchor (old web, new CMS)", async () => {
-    const strapi = stubStrapi({
-      "api::announcement.announcement": [draftAnnouncement, publishedAnnouncement],
-    });
-    expect(await resolveWriteTarget(strapi, { targetType: "announcement", targetId: 91 })).toEqual({
+    ).toEqual({
       status: "ok",
       targetType: "announcement",
       targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 91,
     });
   });
 
-  it("accepts the numeric string form an API caller may send", async () => {
-    const strapi = stubStrapi({ "api::wiki-page.wiki-page": [{ id: 5, documentId: WIKI_DOC }] });
-    expect(await resolveWriteTarget(strapi, { targetType: "wiki-page", targetId: " 5 " })).toEqual({
-      status: "ok",
-      targetType: "wiki-page",
-      targetDocumentId: WIKI_DOC,
-      targetId: 5,
-    });
-  });
-
-  it("bridges a DRAFT row id to the published row id, not the one it was sent", async () => {
-    // The rolled-back code filters on the published row id, so the bridge has
-    // to canonicalise instead of storing whatever id came in.
+  it("rejects a payload with ONLY the removed legacy targetId — no DB query (#25)", async () => {
     const strapi = stubStrapi({
       "api::announcement.announcement": [draftAnnouncement, publishedAnnouncement],
     });
-    expect(await resolveWriteTarget(strapi, { targetType: "announcement", targetId: 90 })).toEqual({
-      status: "ok",
-      targetType: "announcement",
-      targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 91,
-    });
+    expect(
+      await resolveWriteTarget(strapi, {
+        targetType: "announcement",
+        targetId: 91,
+      } as AnchorableRow),
+    ).toEqual({ status: "rejected", reason: "missing-target" });
+    expect(strapi.calls).toHaveLength(0);
   });
 
-  it("lets the anchor win over a stale targetId in the same payload", async () => {
+  it("ignores a stale targetId sent alongside a valid anchor — no id lookup (#25)", async () => {
     const strapi = stubStrapi({
       "api::announcement.announcement": [publishedAnnouncement, foreignAnnouncement],
     });
@@ -406,12 +285,11 @@ describe("resolveWriteTarget", () => {
         targetType: "announcement",
         targetDocumentId: ANNOUNCEMENT_DOC,
         targetId: 77,
-      }),
+      } as AnchorableRow),
     ).toEqual({
       status: "ok",
       targetType: "announcement",
       targetDocumentId: ANNOUNCEMENT_DOC,
-      targetId: 91,
     });
     // Never looked the client's row id up — it cannot redirect the write.
     expect(strapi.calls.some((call) => "id" in call.where)).toBe(false);
@@ -419,14 +297,16 @@ describe("resolveWriteTarget", () => {
 
   it("rejects an unknown targetType without touching the database", async () => {
     const strapi = stubStrapi({ "api::announcement.announcement": [publishedAnnouncement] });
-    expect(await resolveWriteTarget(strapi, { targetType: "document", targetId: 91 })).toEqual({
+    expect(
+      await resolveWriteTarget(strapi, { targetType: "document", targetDocumentId: WIKI_DOC }),
+    ).toEqual({
       status: "rejected",
       reason: "invalid-target-type",
     });
     expect(strapi.calls).toHaveLength(0);
   });
 
-  it("rejects a payload with neither key — including blank/unusable values", async () => {
+  it("rejects a payload without a usable anchor — including blank values", async () => {
     const strapi = stubStrapi({ "api::announcement.announcement": [publishedAnnouncement] });
     for (const payload of [
       { targetType: "announcement" },
@@ -440,7 +320,7 @@ describe("resolveWriteTarget", () => {
     expect(strapi.calls).toHaveLength(0);
   });
 
-  it("rejects an anchor or a legacy id that resolves to nothing", async () => {
+  it("rejects an anchor that resolves to nothing", async () => {
     const strapi = stubStrapi({ "api::announcement.announcement": [] });
     expect(
       await resolveWriteTarget(strapi, {
@@ -448,10 +328,6 @@ describe("resolveWriteTarget", () => {
         targetDocumentId: ANNOUNCEMENT_DOC,
       }),
     ).toEqual({ status: "rejected", reason: "unresolved-target" });
-    expect(await resolveWriteTarget(strapi, { targetType: "announcement", targetId: 91 })).toEqual({
-      status: "rejected",
-      reason: "unresolved-target",
-    });
   });
 
   it("answers 'missing' and 'unresolved' identically — no documentId oracle", () => {

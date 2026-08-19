@@ -20,9 +20,8 @@ import type { Comment, EmojiType, Reaction } from "@/lib/types";
  * Comments and reactions are addressed by the target's documentId (issue
  * #11): announcements and wiki pages are draftAndPublish, and Strapi 5
  * publishes by delete+recreate, so the numeric row id they used to be
- * anchored to changes with every publish. `targetFilterQuery` still matches
- * rows the CMS bootstrap backfill has not anchored yet — see the TEMPORARY
- * note there.
+ * anchored to changes with every publish. The documentId anchor is the ONLY
+ * target key — the legacy targetId bridge was removed with #25.
  */
 export async function getCommentSection(target: CommentTarget): Promise<CommentSectionData> {
   const session = await auth();
@@ -35,16 +34,29 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
 
   // The fallbacks rethrow Next.js control-flow errors (redirect on 401)
   // so an expired session navigates to sign-in instead of polling forever.
+  //
+  // Both fetches are deliberate NEWEST-first windows, not page walks (issue
+  // #26): getCommentSection is re-fetched by LiveCommentSection on a poll
+  // interval, so a full walk would multiply requests per open tab. The old
+  // `sort=createdAt:asc` cut off the NEWEST comments once a thread passed
+  // 100 rows — fetching descending flips that: past 100 only the oldest
+  // history falls off. Secondary sort on id disambiguates equal createdAt
+  // (same pattern as announcements.requiringAck).
   const [commentsRes, reactionsRes] = await Promise.all([
     strapi<StrapiListResponse<Comment>>(
-      `/api/comments?${filters}&populate[author]=true&sort=createdAt:asc&pagination[pageSize]=100`,
+      `/api/comments?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=100`,
       { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
       return { data: [] as Comment[] };
     }),
+    // Newest-500 reaction window. The explicit sort makes the window
+    // deterministic (unsorted, Postgres returns rows in arbitrary order).
+    // The cap is accepted: past 500 rows the summary counters can
+    // undercount, and summarize() may miss the caller's own OLD reaction —
+    // display only; toggleReaction writes server-side and stays correct.
     strapi<StrapiListResponse<Reaction>>(
-      `/api/reactions?${filters}&populate[author]=true&pagination[pageSize]=500`,
+      `/api/reactions?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=500`,
       { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
@@ -53,21 +65,22 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
   ]);
 
   return {
-    // Re-check the anchor per row: the filter carries the temporary legacy
-    // branch, and a foreign discussion must never leak into a section.
-    comments: (((commentsRes as any).data ?? []) as Comment[]).filter((c) =>
-      matchesTarget(c, target),
-    ),
+    // Re-check the anchor per row (matchesTarget = permanent
+    // defense-in-depth): a mis-built filter must never leak a foreign
+    // discussion into a section.
+    // .reverse() restores the display order (oldest first, as before) after
+    // the descending fetch above.
+    comments: (((commentsRes as any).data ?? []) as Comment[])
+      .filter((c) => matchesTarget(c, target))
+      .reverse(),
     reactions: summarize((reactionsRes as any).data ?? [], userId, target),
   };
 }
 
 /**
- * Writes send the documentId anchor ONLY. The CMS resolves the target and
- * additionally stores its current row id (dual-write, TEMPORARY — issue #11),
- * so a rollback to the id-only code still finds rows written in the meantime.
- * That does not affect the temporary legacy read branch here: it is clamped
- * to `targetDocumentId IS NULL`, i.e. rows written before the anchor existed.
+ * Writes send the documentId anchor ONLY — since #25 it is the only key the
+ * CMS accepts (a targetId-only payload answers 400 "targetDocumentId
+ * required").
  */
 function requireAnchor(target: CommentTarget): string {
   const anchor = anchorOf(target.documentId);

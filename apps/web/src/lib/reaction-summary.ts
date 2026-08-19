@@ -18,9 +18,9 @@ export const ALL_EMOJIS: EmojiType[] = [
  * Collapse raw reaction rows into per-emoji counts + "did I react".
  *
  * Pass `target` to also verify that every row really belongs to that entry:
- * rows are anchored by `targetDocumentId` (issue #11) and the fetch filter
- * still carries a temporary branch for not-yet-anchored rows, so the counts
- * re-check the anchor rather than trusting the query. Without `target` every
+ * rows are anchored by `targetDocumentId` (issue #11), and the counts
+ * re-check the anchor rather than trusting the query — permanent
+ * defense-in-depth against a mis-built fetch filter. Without `target` every
  * row is counted (the pre-#11 behaviour).
  */
 export function summarize(

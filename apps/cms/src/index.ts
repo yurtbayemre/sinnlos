@@ -1,4 +1,3 @@
-import { ANCHORED_UIDS, anchorFromTargetRow, planAnchorBackfill } from "./utils/comment-target";
 import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitize-user-contact";
 
 /**
@@ -483,132 +482,6 @@ async function syncRolePermissions(strapi: any) {
 }
 
 /**
- * Backfill the documentId anchor of comments and reactions (issue #11).
- *
- * `comment` and `reaction` used to reference their announcement / wiki page
- * by its NUMERIC row id. Both target types are draftAndPublish and Strapi 5
- * publishes by delete-then-recreate, so that id changes on every publish —
- * the next "Publish" click orphaned every comment and reaction on the entry.
- * They now carry `targetDocumentId` (see `utils/comment-target.ts`); this
- * migration copies the anchor onto the rows written before that field
- * existed, while their `targetId` still resolves.
- *
- * Idempotent, exactly like REVOKED_PERMISSIONS: it only ever looks at rows
- * whose anchor is NULL, so after the first successful run every start is a
- * no-op (and logs nothing). It runs during bootstrap, i.e. BEFORE the server
- * accepts the first request.
- *
- * NEVER GUESSES. A row whose target no longer exists keeps its legacy
- * targetId untouched and is only counted in a warning — inventing an anchor
- * would move somebody's comment to a foreign announcement, and the deleted
- * numeric id may since have been recycled by a re-publish.
- */
-const ANCHOR_BACKFILL_BATCH_SIZE = 500;
-/** Ceiling of ANCHOR_BACKFILL_BATCH_SIZE × this many rows per collection. */
-const ANCHOR_BACKFILL_MAX_BATCHES = 200;
-
-async function backfillTargetAnchors(strapi: any) {
-  // documentId per (target uid, row id) — comments and reactions of the same
-  // announcement share it, so the lookups collapse to one query per target.
-  const anchorCache = new Map<string, string | null>();
-
-  for (const uid of ANCHORED_UIDS) {
-    const label = uid.split(".").pop();
-    let migrated = 0;
-    let targetMissing = 0;
-    let unusable = 0;
-    const skippedSamples: unknown[] = [];
-
-    try {
-      // Page walk: a backfilled row leaves the `targetDocumentId IS NULL`
-      // set, so the offset only has to skip the rows we deliberately left
-      // behind — that keeps the walk moving instead of re-reading them.
-      let skipped = 0;
-      let done = false;
-      for (let batch = 0; batch < ANCHOR_BACKFILL_MAX_BATCHES && !done; batch++) {
-        const rows = await strapi.db.query(uid).findMany({
-          where: { targetDocumentId: { $null: true } },
-          select: ["id", "targetType", "targetId", "targetDocumentId"],
-          orderBy: { id: "asc" },
-          limit: ANCHOR_BACKFILL_BATCH_SIZE,
-          offset: skipped,
-        });
-        if (!rows?.length) {
-          done = true;
-          break;
-        }
-
-        for (const row of rows) {
-          const plan = planAnchorBackfill(row);
-          if (plan.action === "skip") {
-            skipped++;
-            if (plan.reason !== "already-anchored") {
-              unusable++;
-              if (skippedSamples.length < 10) skippedSamples.push(row.id);
-            }
-            continue;
-          }
-
-          const cacheKey = `${plan.uid}#${plan.legacyTargetId}`;
-          if (!anchorCache.has(cacheKey)) {
-            const target = await strapi.db
-              .query(plan.uid)
-              .findOne({ where: { id: plan.legacyTargetId }, select: ["id", "documentId"] });
-            anchorCache.set(cacheKey, anchorFromTargetRow(target));
-          }
-          const targetDocumentId = anchorCache.get(cacheKey) ?? null;
-
-          if (targetDocumentId == null) {
-            // Target row is gone — skip, keep targetId, report below.
-            skipped++;
-            targetMissing++;
-            if (skippedSamples.length < 10) skippedSamples.push(row.id);
-            continue;
-          }
-
-          await strapi.db.query(uid).update({
-            where: { id: row.id },
-            data: { targetDocumentId },
-          });
-          migrated++;
-        }
-
-        if (rows.length < ANCHOR_BACKFILL_BATCH_SIZE) done = true;
-      }
-      if (!done) {
-        // Never silently stop half-way: say so, the next start continues.
-        strapi.log.warn(
-          `[bootstrap] ${label} target anchoring hit the batch ceiling ` +
-            `(${ANCHOR_BACKFILL_BATCH_SIZE * ANCHOR_BACKFILL_MAX_BATCHES} rows) — ` +
-            `the remaining rows are migrated on the next start (issue #11)`,
-        );
-      }
-    } catch (err) {
-      // Never fail the boot over the migration: the read paths still fall
-      // back to targetId, and the next start resumes where this one stopped.
-      strapi.log.error(
-        `[bootstrap] ${label} target anchoring failed after ${migrated} row(s): ` +
-          `${(err as Error).message}`,
-      );
-    }
-
-    if (migrated > 0) {
-      strapi.log.info(
-        `[bootstrap] anchored ${migrated} ${label} row(s) to their target documentId (issue #11)`,
-      );
-    }
-    if (targetMissing + unusable > 0) {
-      strapi.log.warn(
-        `[bootstrap] ${targetMissing + unusable} ${label} row(s) could not be anchored ` +
-          `(${targetMissing} target row gone, ${unusable} unusable targetType/targetId) — ` +
-          `left untouched with their legacy targetId, no anchor is guessed ` +
-          `(ids: ${skippedSamples.join(", ")}${unusable + targetMissing > skippedSamples.length ? ", …" : ""})`,
-      );
-    }
-  }
-}
-
-/**
  * Sync the users-permissions "advanced" settings from env so standalone
  * (no-Microsoft) deployments work out of the box:
  *   - default_role: new local registrations land on `member` (a real
@@ -762,8 +635,6 @@ export default {
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
     await seedAdminUser(strapi);
-    // Data migration, idempotent and before the first request is served.
-    await backfillTargetAnchors(strapi);
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);

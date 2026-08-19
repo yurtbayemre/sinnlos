@@ -15,13 +15,8 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
    * publishing an announcement/wiki page in Strapi 5 is delete+recreate, so
    * an id-anchored reaction detaches on the next "Publish" (issue #11, see
    * utils/comment-target.ts). Author is server-authoritative (§5.21).
-   *
-   * TEMPORARY MIGRATION BRIDGE (issue #11, removed by its follow-up ticket
-   * together with the `targetId` column): `resolveWriteTarget` also accepts a
-   * payload carrying ONLY the deprecated `targetId` (an old web container
-   * against this CMS — the partial rollback in infra/deploy.sh) and returns
-   * the target's current row id, which is dual-written so a full rollback to
-   * the id-only code still sees these reactions.
+   * Only the documentId anchor is accepted (#25 removed the targetId
+   * migration bridge): a targetId-only payload is answered with 400.
    */
   async create(ctx) {
     const user = ctx.state.user;
@@ -37,17 +32,15 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
 
     const target = await resolveWriteTarget(strapi, body);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
-    const { targetType, targetDocumentId, targetId } = target;
+    const { targetType, targetDocumentId } = target;
 
-    // The legacy branch of `targetMatchWhere` is TEMPORARY (issue #11): it
-    // also recognises a reaction of this user that the bootstrap backfill has
-    // not anchored yet, so toggling it off still works instead of adding a
-    // second row. It is clamped to `targetDocumentId IS NULL`, so the rows
-    // this controller writes — which carry BOTH keys — only ever match via
-    // the anchor. Remove it together with the targetId column.
+    // Toggle lookup by the anchor pair only. Behaviour change with #25: a
+    // reaction row WITHOUT an anchor (targetDocumentId IS NULL) can no longer
+    // be toggled off — per §7b the #11 backfill left 0 unresolvable rows, so
+    // no such row exists.
     const existing = await strapi.db.query(REACTION_UID).findOne({
       where: {
-        ...targetMatchWhere(targetType, targetDocumentId, targetId),
+        ...targetMatchWhere(targetType, targetDocumentId),
         emoji,
         author: user.id,
       },
@@ -60,10 +53,10 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
       return ctx.send({ data: null, toggled: "removed" });
     }
 
-    // Dual-write, TEMPORARY (issue #11): the anchor plus the target's current
-    // row id, so a rollback to the id-only code still finds this reaction.
+    // Rebuilding the data object also implicitly strips a client-sent
+    // targetId — it is no longer a schema attribute.
     ctx.request.body = {
-      data: { emoji, targetType, targetDocumentId, targetId, author: user.id },
+      data: { emoji, targetType, targetDocumentId, author: user.id },
     };
     return super.create(ctx);
   },

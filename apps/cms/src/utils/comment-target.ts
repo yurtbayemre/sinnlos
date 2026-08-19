@@ -16,25 +16,18 @@
  * acknowledgement, event-rsvp and notification already do (docs/architecture
  * .md §5.17 / §5.26).
  *
- * `targetId` stays in the schema, deprecated — but it is still WRITTEN for
- * the transition period (`resolveWriteTarget`, "dual-write"): every new row
- * gets the anchor AND the target's current row id. Two reasons, both about
- * rollback (see `infra/deploy.sh`):
- *   - a FULL rollback to the id-only code filters on `targetId` alone, so
- *     rows written in the meantime would be invisible without it,
- *   - the bootstrap backfill (`src/index.ts`) has no other bridge for rows
- *     written before the anchor existed.
+ * The migration bridge (deprecated `targetId` attribute, dual-write, write
+ * bridge, legacy read branches, bootstrap backfill) was removed with the
+ * follow-up ticket #25. The anchor is the ONLY target key now; the DB column
+ * `target_id` still exists but is orphaned — Strapi's schema sync would drop
+ * it on boot by default, so `config/database.ts` sets
+ * `settings.forceMigration: false` to keep it as the rollback anchor. See
+ * docs/architecture.md §5.27 for the deliberate drop later.
  *
- * TEMPORARY MIGRATION BRIDGE. The follow-up ticket to #11 ("remove the
- * deprecated targetId column", planned a few weeks after this deploy) drops
- * the column, the dual-write, the `targetId` acceptance in `resolveWriteTarget`
- * and every legacy branch in this file at once — see docs/architecture.md
- * §5.27.
- *
- * Pure decision logic, no Strapi runtime, so the migration and the anchor
- * resolution are unit testable (`comment-target.test.ts`); the runtime
- * helpers at the bottom are thin wrappers over `strapi.db.query`, following
- * the `notification-source.ts` pattern.
+ * Pure decision logic, no Strapi runtime, so the anchor resolution is unit
+ * testable (`comment-target.test.ts`); the runtime helpers at the bottom are
+ * thin wrappers over `strapi.db.query`, following the
+ * `notification-source.ts` pattern.
  */
 
 /** The polymorph targets a comment/reaction can point at. */
@@ -45,9 +38,6 @@ export const TARGET_UIDS: Record<CommentTargetType, string> = {
   announcement: "api::announcement.announcement",
   "wiki-page": "api::wiki-page.wiki-page",
 };
-
-/** The collections whose rows carry a (targetType, targetDocumentId) anchor. */
-export const ANCHORED_UIDS = ["api::comment.comment", "api::reaction.reaction"] as const;
 
 export function isCommentTargetType(value: unknown): value is CommentTargetType {
   return typeof value === "string" && value in TARGET_UIDS;
@@ -69,54 +59,11 @@ export function targetAnchor(value: unknown): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
-/**
- * Normalise the deprecated numeric anchor. Accepts the integer the DB
- * returns and the numeric string an API caller may send; rejects 0, negative
- * values and non-integers (no valid row id).
- */
-export function legacyTargetId(value: unknown): number | null {
-  const num = typeof value === "string" ? Number(value.trim()) : value;
-  if (typeof num !== "number" || !Number.isInteger(num) || num <= 0) return null;
-  return num;
-}
-
-/** Whatever the backfill reads: a comment or reaction row. */
+/** Input of the target resolution: the target keys of a comment/reaction. */
 export interface AnchorableRow {
   id?: number | string | null;
   targetType?: string | null;
   targetDocumentId?: string | null;
-  targetId?: number | string | null;
-}
-
-export type BackfillPlan =
-  /** Nothing to do — the row already carries an anchor. */
-  | { action: "skip"; reason: "already-anchored" }
-  /** targetType is not one of the known targets — cannot resolve a uid. */
-  | { action: "skip"; reason: "unknown-target-type" }
-  /** No anchor AND no usable legacy id — nothing left to resolve from. */
-  | { action: "skip"; reason: "no-legacy-id" }
-  /** Look the target row up by its numeric id and copy its documentId. */
-  | { action: "resolve"; uid: string; legacyTargetId: number };
-
-/**
- * Decide what the backfill has to do with ONE row.
- *
- * Idempotent by construction: a row that already has an anchor is skipped,
- * so the bootstrap can run this on every start and does real work only once.
- * A row that cannot be resolved is skipped too — the caller must never guess
- * an anchor, a wrong one would move the comment to a foreign announcement.
- */
-export function planAnchorBackfill(row: AnchorableRow | null | undefined): BackfillPlan {
-  if (targetAnchor(row?.targetDocumentId) != null) {
-    return { action: "skip", reason: "already-anchored" };
-  }
-  const uid = targetUid(row?.targetType);
-  if (uid == null) return { action: "skip", reason: "unknown-target-type" };
-
-  const legacy = legacyTargetId(row?.targetId);
-  if (legacy == null) return { action: "skip", reason: "no-legacy-id" };
-
-  return { action: "resolve", uid, legacyTargetId: legacy };
 }
 
 /**
@@ -131,32 +78,15 @@ export function anchorFromTargetRow(
 }
 
 /**
- * `where` clause matching every comment/reaction of one target.
- *
- * The second branch is TEMPORARY (issue #11): rows the bootstrap backfill has
- * not anchored yet are matched by their deprecated numeric id. It is guarded
- * by `targetDocumentId IS NULL` on purpose, and that guard is what makes the
- * dual-write (`resolveWriteTarget`) safe: a row that carries BOTH keys is
- * matched by the first branch only, never twice, and an ANCHORED row of a
- * different target cannot sneak in via the second branch once a re-publish
- * hands its old numeric id to another row. Drop the branch (and the `legacy`
- * argument) with the column.
+ * `where` clause matching every comment/reaction of one target — the anchor
+ * pair only. A row with `targetDocumentId IS NULL` never matches (the legacy
+ * `targetId` read branch was removed with #25).
  */
 export function targetMatchWhere(
   targetType: CommentTargetType,
   targetDocumentId: string,
-  legacy?: number | string | null,
 ): Record<string, unknown> {
-  const legacyId = legacyTargetId(legacy);
-  if (legacyId == null) return { targetType, targetDocumentId };
-  return {
-    targetType,
-    $or: [
-      { targetDocumentId },
-      // Object with two keys = implicit AND: unanchored AND that row id.
-      { targetDocumentId: { $null: true }, targetId: legacyId },
-    ],
-  };
+  return { targetType, targetDocumentId };
 }
 
 /** Minimal slice of the Strapi instance the runtime helpers need. */
@@ -176,12 +106,10 @@ export interface TargetLookupStrapi {
  * (that is what readers commented on), with the draft as fallback so a
  * target that is currently unpublished still resolves.
  *
- * An anchored row NEVER falls back to `targetId`: if the documentId resolves
- * to nothing the target is gone, and the stale numeric id may meanwhile
- * belong to a completely different entry.
- *
- * The `targetId` path is the TEMPORARY bridge (issue #11) for rows the
- * bootstrap backfill could not anchor yet.
+ * The anchor is the ONLY key: a row without a usable `targetDocumentId`
+ * resolves to `null`, and a stale numeric row id is NEVER looked up — after
+ * a re-publish it may belong to a completely different entry (the legacy
+ * bridge was removed with #25).
  */
 export async function findCommentTarget(
   strapiInstance: TargetLookupStrapi,
@@ -192,21 +120,15 @@ export async function findCommentTarget(
   if (uid == null) return null;
 
   const anchor = targetAnchor(row?.targetDocumentId);
-  if (anchor != null) {
-    const published = await strapiInstance.db
-      .query(uid)
-      .findOne({ ...options, where: { documentId: anchor, publishedAt: { $notNull: true } } });
-    if (published) return published;
-    return (
-      (await strapiInstance.db.query(uid).findOne({ ...options, where: { documentId: anchor } })) ??
-      null
-    );
-  }
+  if (anchor == null) return null;
 
-  const legacy = legacyTargetId(row?.targetId);
-  if (legacy == null) return null;
+  const published = await strapiInstance.db
+    .query(uid)
+    .findOne({ ...options, where: { documentId: anchor, publishedAt: { $notNull: true } } });
+  if (published) return published;
   return (
-    (await strapiInstance.db.query(uid).findOne({ ...options, where: { id: legacy } })) ?? null
+    (await strapiInstance.db.query(uid).findOne({ ...options, where: { documentId: anchor } })) ??
+    null
   );
 }
 
@@ -224,11 +146,6 @@ export type WriteTargetResolution =
       targetType: CommentTargetType;
       /** The anchor to store. */
       targetDocumentId: string;
-      /**
-       * DEPRECATED dual-write value: the target's CURRENT row id, published
-       * row preferred. `null` only if the resolved row has no usable id.
-       */
-      targetId: number | null;
     }
   | { status: "rejected"; reason: WriteTargetError };
 
@@ -244,29 +161,18 @@ export const WRITE_TARGET_ERRORS: Record<WriteTargetError, string> = {
 
 /**
  * Resolve the target of an incoming comment/reaction write and produce the
- * two anchor columns to store.
+ * anchor to store.
  *
- * The anchor is `targetDocumentId`; the numeric `targetId` is written
- * alongside it (dual-write) so a rollback to the id-only code still finds
- * these rows. It is the target's CURRENT row id — published row preferred,
- * exactly what `findCommentTarget` resolves — and it can NOT be matched twice
- * by the legacy read branch, which is clamped to `targetDocumentId IS NULL`
- * (`targetMatchWhere`).
+ * Only `targetType` + `targetDocumentId` are accepted — a payload carrying
+ * nothing but the removed legacy `targetId` is rejected with `missing-target`
+ * (400), and a `targetId` sent alongside a valid anchor is simply ignored:
+ * `findCommentTarget` never looks a row id up, so a stale/foreign id cannot
+ * redirect the write (#25 removed the write bridge and the dual-write).
  *
- * WRITE BRIDGE, TEMPORARY (issue #11): a caller that only sends the
- * deprecated `targetId` — an OLD web container against a NEW CMS, i.e. the
- * partial rollback documented in `infra/deploy.sh` — is not rejected; the
- * target is looked up by row id and ITS documentId becomes the anchor. So a
- * half-rolled-back deployment keeps writing correctly anchored rows instead
- * of failing every comment and every reaction with a 400.
- *
- * A write is rejected only when the targetType is unknown, when NEITHER key
- * is usable, or when the target cannot be resolved at all (which also stops
- * the unanchored orphan rows the previous version happily created for a
- * bogus documentId).
- *
- * Remove the `targetId` acceptance, the `targetId` in the result and this
- * whole paragraph together with the column (follow-up ticket to #11).
+ * A write is rejected when the targetType is unknown, when the anchor is
+ * missing/blank, or when it resolves to nothing (which also stops the
+ * unanchored orphan rows the pre-#11 code happily created for a bogus
+ * documentId).
  */
 export async function resolveWriteTarget(
   strapiInstance: TargetLookupStrapi,
@@ -277,36 +183,18 @@ export async function resolveWriteTarget(
     return { status: "rejected", reason: "invalid-target-type" };
 
   const anchor = targetAnchor(input?.targetDocumentId);
-  const legacy = legacyTargetId(input?.targetId);
-  if (anchor == null && legacy == null) return { status: "rejected", reason: "missing-target" };
+  if (anchor == null) return { status: "rejected", reason: "missing-target" };
 
-  // Anchor wins whenever it is present: `findCommentTarget` ignores the
-  // numeric id then, so a stale/foreign targetId in the payload cannot
-  // redirect the write.
   const target = await findCommentTarget(strapiInstance, {
     targetType,
     targetDocumentId: anchor,
-    targetId: legacy,
   });
   const resolvedAnchor = anchorFromTargetRow(target);
   if (resolvedAnchor == null) return { status: "rejected", reason: "unresolved-target" };
-
-  // Anchored path: `target` already IS the published-preferred row. Only the
-  // bridge path may have landed on a draft row (it looked up one exact id),
-  // so re-resolve there — the dual-written id must be the one the rolled-back
-  // code filters on, and that code reads published rows.
-  const canonical =
-    anchor != null
-      ? target
-      : ((await findCommentTarget(strapiInstance, {
-          targetType,
-          targetDocumentId: resolvedAnchor,
-        })) ?? target);
 
   return {
     status: "ok",
     targetType,
     targetDocumentId: resolvedAnchor,
-    targetId: legacyTargetId(canonical?.id),
   };
 }
