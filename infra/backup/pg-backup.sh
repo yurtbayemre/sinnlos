@@ -52,6 +52,26 @@ if docker volume inspect "$UPLOADS_VOL" >/dev/null 2>&1; then
   finalize "$UOUT" "$OFFSITE/sinnlos-uploads-*.tar.gz.gpg" sinnlos-uploads
 fi
 
+# ---- infra/.env ----
+# The compose env file is gitignored and holds every secret (Strapi keys,
+# INTERNAL_UPLOAD_TOKEN, ...) — the DB/uploads dumps above don't cover it,
+# and losing it would be unrecoverable. Encrypted copy goes offsite (same key
+# and 7-day retention as the dumps). The plaintext quick-access copy in
+# ~bigemo/.sinnlos-env-backup is refreshed with `cat >` so the existing inode
+# keeps its bigemo/600 ownership regardless of who runs the script (cron as
+# bigemo, deploy.sh as root); it is only refreshed, never created, so a root
+# run can't leave a root-owned secret file behind.
+ENV_SRC="${SINNLOS_ENV_FILE:-/home/bigemo/git/sinnlos/infra/.env}"
+if [[ -f "$ENV_SRC" ]]; then
+  EOUT="$BK/sinnlos-env-$TS.env"
+  cat "$ENV_SRC" > "$EOUT"
+  finalize "$EOUT" "$OFFSITE/sinnlos-env-*.env.gz.gpg" sinnlos-env
+  LOCAL_ENV_BK=/home/bigemo/.sinnlos-env-backup/.env
+  if [[ -f "$LOCAL_ENV_BK" ]]; then
+    cat "$ENV_SRC" > "$LOCAL_ENV_BK"
+  fi
+fi
+
 # Keep the log bounded — it lives in the NAS-replicated offsite dir and would
 # otherwise grow forever. The last 500 lines cover months of nightly runs.
 # Truncate in place: `cat "$tmp" > "$LOG"` overwrites the existing file's
