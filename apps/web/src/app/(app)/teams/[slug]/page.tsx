@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
@@ -41,7 +42,10 @@ export default async function TeamPage({ params }: Props) {
           </CardHeader>
           <CardContent>
             {lead ? (
-              <div className="flex items-center gap-3">
+              <Link
+                href={`/people/${lead.id}`}
+                className="focus-card -m-2 flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-accent/50"
+              >
                 <Avatar>
                   <AvatarFallback>{initials(lead.displayName ?? lead.username)}</AvatarFallback>
                 </Avatar>
@@ -49,7 +53,7 @@ export default async function TeamPage({ params }: Props) {
                   <div className="font-medium">{lead.displayName ?? lead.username}</div>
                   <div className="text-xs text-muted-foreground">{lead.jobTitle ?? lead.email}</div>
                 </div>
-              </div>
+              </Link>
             ) : (
               <p className="text-sm text-muted-foreground">{t("noLeadAssigned")}</p>
             )}
@@ -66,9 +70,10 @@ export default async function TeamPage({ params }: Props) {
               <p className="text-sm text-muted-foreground">{t("noMembersYet")}</p>
             ) : (
               members.map((m) => (
-                <div
+                <Link
                   key={m.id}
-                  className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                  href={`/people/${m.id}`}
+                  className="focus-card flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
                 >
                   <Avatar>
                     <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
@@ -79,7 +84,7 @@ export default async function TeamPage({ params }: Props) {
                       {m.jobTitle ?? m.email}
                     </div>
                   </div>
-                </div>
+                </Link>
               ))
             )}
           </CardContent>
