@@ -307,10 +307,23 @@ const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   // guest and the `authenticated` fallback are excluded: even with email
   // dropped from the payload, years + daysUntil still reconstruct every
   // user's exact hireDate, so this stays limited to the mapped staff roles.
-  "api::kudos.kudos.celebrations": ["admin_role", "editor", "department_head", "team_lead", "member"],
+  "api::kudos.kudos.celebrations": [
+    "admin_role",
+    "editor",
+    "department_head",
+    "team_lead",
+    "member",
+  ],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
-  "api::poll-vote.poll-vote.vote": ["admin_role", "editor", "department_head", "team_lead", "member", "authenticated"],
+  "api::poll-vote.poll-vote.vote": [
+    "admin_role",
+    "editor",
+    "department_head",
+    "team_lead",
+    "member",
+    "authenticated",
+  ],
   "api::poll-vote.poll-vote.results": "*",
   // Self-service profile (added in this feature)
   "api::profile.profile.me": "*",
@@ -365,7 +378,7 @@ async function ensurePermission(
   strapi: any,
   roleId: number,
   uid: string,
-  action: CrudAction,
+  action: CrudAction | "me",
 ) {
   return ensureActionPermission(strapi, roleId, `${uid}.${action}`);
 }
@@ -380,8 +393,16 @@ async function ensurePermission(
  * did) turned every guest read that populates a user relation — and the
  * notification/poll-vote visibility filters — into a 400. See the OPEN
  * ISSUE note on the `guest` matrix above. No role is excluded.
+ *
+ * `me` is equally required for every role: the web app's sign-in flow
+ * fetches `/api/users/me?populate[role]=true` to stamp role + department
+ * into the session. Before the role mapping all users sat on
+ * `Authenticated` (which Strapi grants `me` by default); the mapped roles
+ * never received it, so the fetch 403'd on every login and the silent
+ * fallback in `apps/web/src/auth.ts` left sessions without a role — which
+ * in turn hid all role-gated UI (e.g. the admin "/manage" nav entry).
  */
-const USER_READ_ACTIONS: CrudAction[] = ["find", "findOne"];
+const USER_READ_ACTIONS: (CrudAction | "me")[] = ["find", "findOne", "me"];
 const USER_UID = "plugin::users-permissions.user";
 const USER_READ_EXCLUDED_ROLES: string[] = [];
 
@@ -561,9 +582,7 @@ async function seedAdminUser(strapi: any) {
     });
     strapi.log.info(`[bootstrap] created initial Super Admin ${email}`);
   } catch (err) {
-    strapi.log.error(
-      `[bootstrap] failed to create initial admin user: ${(err as Error).message}`,
-    );
+    strapi.log.error(`[bootstrap] failed to create initial admin user: ${(err as Error).message}`);
   }
 }
 
