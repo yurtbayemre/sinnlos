@@ -81,7 +81,10 @@ export default async function DepartmentPage({ params }: Props) {
           </CardHeader>
           <CardContent>
             {head ? (
-              <div className="flex items-center gap-3">
+              <Link
+                href={`/people/${head.id}`}
+                className="focus-card -m-2 flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-accent/50"
+              >
                 <Avatar>
                   {headAvatarUrl ? (
                     <AvatarImage
@@ -95,7 +98,7 @@ export default async function DepartmentPage({ params }: Props) {
                   <div className="font-medium">{head.displayName ?? head.username}</div>
                   <div className="text-xs text-muted-foreground">{head.jobTitle ?? head.email}</div>
                 </div>
-              </div>
+              </Link>
             ) : (
               <p className="text-sm text-muted-foreground">{t("noHeadAssigned")}</p>
             )}
@@ -110,9 +113,10 @@ export default async function DepartmentPage({ params }: Props) {
         ) : (
           <div className="stagger grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {members.map((m) => (
-              <div
+              <Link
                 key={m.id}
-                className="flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
+                href={`/people/${m.id}`}
+                className="focus-card flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
               >
                 <Avatar>
                   <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
@@ -123,7 +127,7 @@ export default async function DepartmentPage({ params }: Props) {
                     {m.jobTitle ?? m.email}
                   </div>
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         )}
