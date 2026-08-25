@@ -33,9 +33,7 @@ function stubStrapi(rows: StubRow[]) {
           if (uid !== "api::classified.classified") return null;
           // Trap c: honour whichever column the policy chose to look up on.
           const match = (r: StubRow) =>
-            where.documentId !== undefined
-              ? r.documentId === where.documentId
-              : r.id === where.id;
+            where.documentId !== undefined ? r.documentId === where.documentId : r.id === where.id;
           return rows.find(match) ?? null;
         },
       }),
@@ -51,8 +49,12 @@ function context(user: unknown | null, id?: string | number) {
   } as any;
 }
 
-const run = (ctx: any, rows: StubRow[] = [CLASSIFIED]) =>
-  isClassifiedAuthor(ctx, undefined, { strapi: stubStrapi(rows) } as any);
+const run = (ctx: any, rows: StubRow[] = [CLASSIFIED], config?: { bypassRoles?: string[] }) =>
+  isClassifiedAuthor(ctx, config, { strapi: stubStrapi(rows) } as any);
+
+/** Route configs as wired in api/classified/routes/classified.ts. */
+const UPDATE_CONFIG = { bypassRoles: ["admin_role"] };
+const DELETE_CONFIG = { bypassRoles: ["admin_role", "editor"] };
 
 const author = { id: AUTHOR, role: { id: 5, type: "member" } };
 const stranger = { id: STRANGER, role: { id: 5, type: "member" } };
@@ -72,12 +74,23 @@ describe("is-classified-author policy", () => {
     await expect(run(context(stranger, 1))).resolves.toBe(false);
   });
 
-  it("lets admin_role bypass for moderation", async () => {
+  it("lets admin_role bypass for moderation (default config)", async () => {
     await expect(run(context(admin, 1))).resolves.toBe(true);
   });
 
-  it("lets an editor bypass for moderation", async () => {
+  it("lets an editor bypass for moderation (default config)", async () => {
     await expect(run(context(editor, 1))).resolves.toBe(true);
+  });
+
+  it("update config: admin bypasses, editor must own", async () => {
+    await expect(run(context(admin, 1), [CLASSIFIED], UPDATE_CONFIG)).resolves.toBe(true);
+    await expect(run(context(editor, 1), [CLASSIFIED], UPDATE_CONFIG)).resolves.toBe(false);
+    await expect(run(context(author, 1), [CLASSIFIED], UPDATE_CONFIG)).resolves.toBe(true);
+  });
+
+  it("delete config: editor keeps the takedown bypass", async () => {
+    await expect(run(context(editor, 1), [CLASSIFIED], DELETE_CONFIG)).resolves.toBe(true);
+    await expect(run(context(stranger, 1), [CLASSIFIED], DELETE_CONFIG)).resolves.toBe(false);
   });
 
   it("rejects an anonymous caller", async () => {
