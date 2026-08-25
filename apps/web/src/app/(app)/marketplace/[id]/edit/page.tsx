@@ -34,10 +34,11 @@ export default async function EditClassifiedPage({ params }: { params: Promise<{
   }
 
   // UI gate mirroring the CMS is-classified-author policy (owner, or
-  // admin/editor moderation) — the CMS enforces it authoritatively.
+  // admin bypass; editors may only delete, not edit) — the CMS enforces it
+  // authoritatively via the update-route policy config.
   const role = session?.user?.role;
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
-  if (!isOwner && !isAdmin(role) && role !== "editor") {
+  if (!isOwner && !isAdmin(role)) {
     redirect(`/marketplace/${ad.id}`);
   }
 

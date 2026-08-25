@@ -1,13 +1,24 @@
 /**
  * Write-side guard for marketplace ads: only the author may update or
- * delete their classified. Admins and editors pass for moderation (same
- * semantics as is-reaction-author / comment delete).
+ * delete their classified. Which roles bypass ownership is configurable
+ * per route via `config.bypassRoles`:
+ *   - update: ["admin_role"] — editing someone's ad text/price is an
+ *     owner/admin matter, not moderation.
+ *   - delete: ["admin_role", "editor"] — taking down an inappropriate ad
+ *     stays an editor moderation tool (same semantics as
+ *     is-reaction-author / comment delete).
+ * Default (no config) keeps the historical admin+editor bypass.
  */
-export default async (policyContext: any, _config: unknown, { strapi }: any) => {
+export default async (
+  policyContext: any,
+  config: { bypassRoles?: string[] } | undefined,
+  { strapi }: any,
+) => {
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  if (["admin_role", "editor"].includes(user.role?.type)) return true;
+  const bypassRoles = config?.bypassRoles ?? ["admin_role", "editor"];
+  if (bypassRoles.includes(user.role?.type)) return true;
 
   // v5 routes carry a documentId; the web app sends numeric ids — accept
   // both (same gotcha as in the comment controller).

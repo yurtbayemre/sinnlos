@@ -49,7 +49,9 @@ export default async function ClassifiedDetailPage({
 
   const role = session?.user?.role;
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
-  const canManage = isOwner || isAdmin(role) || role === "editor";
+  // Editing is owner/admin only (editors keep only the delete takedown,
+  // enforced CMS-side) — mirrors the update-route policy config.
+  const canManage = isOwner || isAdmin(role);
   const expired = isClassifiedExpired(ad.expiresAt);
   const images = (ad.images ?? [])
     .map((img) => ({

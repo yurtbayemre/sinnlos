@@ -6,11 +6,21 @@ import { factories } from "@strapi/strapi";
  * confidential). Create is limited via the bootstrap permission matrix to
  * member/team_lead/department_head/editor/admin — the controller then pins
  * the author to the caller. update/delete additionally require ownership
- * (admin/editor bypass for moderation) via the policy below.
+ * via the policy below: editing bypasses ownership only for admins, while
+ * delete keeps the editor takedown (moderation) bypass.
  */
 export default factories.createCoreRouter("api::classified.classified", {
   config: {
-    update: { policies: ["global::is-classified-author"] },
-    delete: { policies: ["global::is-classified-author"] },
+    update: {
+      policies: [{ name: "global::is-classified-author", config: { bypassRoles: ["admin_role"] } }],
+    },
+    delete: {
+      policies: [
+        {
+          name: "global::is-classified-author",
+          config: { bypassRoles: ["admin_role", "editor"] },
+        },
+      ],
+    },
   },
 });
