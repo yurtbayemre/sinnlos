@@ -1,5 +1,7 @@
-import { BarChart3 } from "lucide-react";
+import Link from "next/link";
+import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
@@ -13,8 +15,12 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
+const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
+
 export default async function PollsPage() {
   const t = await getTranslations("polls");
+  const session = await auth();
+  const canCreate = POLL_CREATOR_ROLES.has(session?.user?.role ?? "");
   const { data, failed } = await tryFetch(() => api.polls.list(), "polls");
   const polls = (data?.data ?? []) as Poll[];
 
@@ -30,7 +36,17 @@ export default async function PollsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title={t("title")} description={t("description")} />
+      <PageHeader title={t("title")} description={t("description")}>
+        {canCreate && (
+          <Link
+            href="/polls/new"
+            className="inline-flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <Plus aria-hidden="true" className="h-4 w-4" />
+            {t("newPoll")}
+          </Link>
+        )}
+      </PageHeader>
 
       {failed && <FetchErrorBanner />}
 
