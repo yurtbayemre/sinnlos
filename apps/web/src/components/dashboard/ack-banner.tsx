@@ -40,10 +40,13 @@ export async function AckBanner() {
   return (
     <Link
       href="/announcements"
-      className="flex items-center justify-between gap-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 transition hover:border-amber-500/60"
+      className="focus-card flex items-center justify-between gap-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 transition-colors hover:border-amber-500/60"
     >
       <div className="flex items-center gap-3">
-        <CheckCircle2 className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+        <CheckCircle2
+          className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400"
+          aria-hidden="true"
+        />
         <div>
           <div className="text-sm font-medium">{t("openAcksTitle")}</div>
           <div className="text-sm text-muted-foreground">
@@ -51,9 +54,7 @@ export async function AckBanner() {
           </div>
         </div>
       </div>
-      <span className="shrink-0 text-sm font-medium text-primary">
-        {t("openAcksAction")}
-      </span>
+      <span className="shrink-0 text-sm font-medium text-primary">{t("openAcksAction")}</span>
     </Link>
   );
 }

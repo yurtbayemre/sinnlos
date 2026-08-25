@@ -60,11 +60,7 @@ export async function QuickLinks({ items }: { items: QuickLink[] }) {
             </h3>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {group.links.map((link) => (
-                <QuickLinkCard
-                  key={link.id}
-                  link={link}
-                  newTabLabel={t("openInNewTab")}
-                />
+                <QuickLinkCard key={link.id} link={link} newTabLabel={t("openInNewTab")} />
               ))}
             </div>
           </div>
@@ -100,12 +96,7 @@ function QuickLinkCard({ link, newTabLabel }: { link: QuickLink; newTabLabel: st
   );
 
   return external ? (
-    <a
-      href={link.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="focus-card group block"
-    >
+    <a href={link.url} target="_blank" rel="noopener noreferrer" className="focus-card group block">
       {card}
     </a>
   ) : (

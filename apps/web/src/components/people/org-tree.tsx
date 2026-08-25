@@ -60,8 +60,9 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
           {hasChildren ? (
             <button
               onClick={() => setExpanded(!expanded)}
-              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md transition hover:bg-muted"
-              aria-label={expanded ? t("collapse") : t("expand")}
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              aria-expanded={expanded}
+              aria-label={t("expand")}
             >
               {expanded ? (
                 <ChevronDown className="h-4 w-4" />
@@ -74,20 +75,16 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
           )}
           <Link
             href={`/people/${node.id}`}
-            className="flex items-center gap-3 transition hover:opacity-80"
+            className="flex items-center gap-3 rounded-lg outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Avatar className="h-9 w-9">
               {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
-              <AvatarFallback className="text-xs">
-                {initials(name)}
-              </AvatarFallback>
+              <AvatarFallback className="text-xs">{initials(name)}</AvatarFallback>
             </Avatar>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{name}</div>
               {node.jobTitle && (
-                <div className="truncate text-xs text-muted-foreground">
-                  {node.jobTitle}
-                </div>
+                <div className="truncate text-xs text-muted-foreground">{node.jobTitle}</div>
               )}
             </div>
           </Link>

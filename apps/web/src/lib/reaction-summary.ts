@@ -6,13 +6,7 @@ export type CommentSectionData = {
   reactions: ReactionSummary[];
 };
 
-export const ALL_EMOJIS: EmojiType[] = [
-  "thumbsup",
-  "heart",
-  "celebrate",
-  "lightbulb",
-  "laugh",
-];
+export const ALL_EMOJIS: EmojiType[] = ["thumbsup", "heart", "celebrate", "lightbulb", "laugh"];
 
 /**
  * Collapse raw reaction rows into per-emoji counts + "did I react".

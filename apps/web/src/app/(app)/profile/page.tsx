@@ -16,7 +16,7 @@ export async function generateMetadata() {
 }
 
 export default async function ProfilePage() {
-  const t = await getTranslations("profile");
+  const [t, tCommon] = await Promise.all([getTranslations("profile"), getTranslations("common")]);
   const session = await auth();
   const isLocal = session?.provider === "local";
 
@@ -26,17 +26,13 @@ export default async function ProfilePage() {
   );
   const me = data?.data ?? null;
 
-  const name =
-    me?.displayName ?? me?.username ?? session?.user?.name ?? "Unknown";
+  const name = me?.displayName ?? me?.username ?? session?.user?.name ?? tCommon("unknown");
   const email = me?.email ?? session?.user?.email ?? "";
   const avatarUrl = me?.avatar?.url ?? session?.user?.image ?? null;
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       {failed && <FetchErrorBanner />}
 
@@ -55,9 +51,7 @@ export default async function ProfilePage() {
         <Card>
           <CardHeader>
             <CardTitle>{t("profileDetails")}</CardTitle>
-            <CardDescription>
-              {t("profileDetailsDesc")}
-            </CardDescription>
+            <CardDescription>{t("profileDetailsDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <ProfileForm
@@ -77,18 +71,14 @@ export default async function ProfilePage() {
           <CardHeader>
             <CardTitle>{t("passwordSection")}</CardTitle>
             <CardDescription>
-              {isLocal
-                ? t("passwordDescLocal")
-                : t("passwordDescMicrosoft")}
+              {isLocal ? t("passwordDescLocal") : t("passwordDescMicrosoft")}
             </CardDescription>
           </CardHeader>
           <CardContent>
             {isLocal ? (
               <ChangePasswordForm />
             ) : (
-              <p className="text-sm text-muted-foreground">
-                {t("passwordManagedByMicrosoft")}
-              </p>
+              <p className="text-sm text-muted-foreground">{t("passwordManagedByMicrosoft")}</p>
             )}
           </CardContent>
         </Card>

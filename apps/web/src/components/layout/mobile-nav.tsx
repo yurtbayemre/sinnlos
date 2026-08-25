@@ -13,6 +13,7 @@ import { useTranslations } from "next-intl";
 export function MobileNav() {
   const pathname = usePathname();
   const t = useTranslations("nav");
+  const tCommon = useTranslations("common");
 
   const items = [
     { href: "/", label: t("home"), icon: Home },
@@ -24,14 +25,13 @@ export function MobileNav() {
 
   return (
     <nav
-      aria-label="Primary"
+      aria-label={tCommon("bottomNav")}
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
       <div className="grid grid-cols-5">
         {items.map((item) => {
-          const active =
-            item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
           return (
             <Link
               key={item.href}
@@ -45,10 +45,7 @@ export function MobileNav() {
             >
               <item.icon
                 aria-hidden="true"
-                className={cn(
-                  "h-5 w-5 transition-transform duration-150",
-                  active && "scale-110",
-                )}
+                className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
               />
               {item.label}
             </Link>

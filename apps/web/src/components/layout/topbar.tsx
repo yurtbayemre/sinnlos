@@ -16,12 +16,13 @@ const DEMO_MODE = process.env.DEMO_MODE === "1";
 
 export async function Topbar() {
   const tAuth = await getTranslations("auth");
+  const tCommon = await getTranslations("common");
   const tProfile = await getTranslations("profile");
 
   const session = DEMO_MODE
     ? { user: { name: "Ada Lovelace", email: "ada@sinnlos.local", image: null } }
     : await (await import("@/auth")).auth();
-  const name = session?.user?.name ?? "Signed out";
+  const name = session?.user?.name ?? tCommon("signedOut");
   const email = session?.user?.email ?? "";
 
   let notifications: Notification[] = [];
@@ -65,7 +66,11 @@ export async function Topbar() {
               <div className="text-sm font-medium leading-none">{name}</div>
               <div className="text-xs text-muted-foreground">{email}</div>
             </div>
-            <Link href="/profile" aria-label={tProfile("title")}>
+            <Link
+              href="/profile"
+              aria-label={tProfile("title")}
+              className="rounded-full outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+            >
               <Avatar>
                 {session.user.image ? <AvatarImage src={session.user.image} alt={name} /> : null}
                 <AvatarFallback>{initials(name)}</AvatarFallback>

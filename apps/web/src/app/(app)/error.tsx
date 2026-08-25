@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 
@@ -17,6 +18,8 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
+  const t = useTranslations("errors");
+
   useEffect(() => {
     console.error("[app] unhandled error", error);
   }, [error]);
@@ -28,14 +31,12 @@ export default function AppError({
           <AlertTriangle className="h-6 w-6" />
         </div>
         <div className="space-y-1">
-          <p className="font-medium">Something went wrong</p>
-          <p className="max-w-sm text-sm text-muted-foreground">
-            We couldn&apos;t load this page. The CMS may be temporarily unreachable.
-          </p>
+          <p className="font-medium">{t("somethingWrong")}</p>
+          <p className="max-w-sm text-sm text-muted-foreground">{t("somethingWrongHint")}</p>
         </div>
         <Button onClick={() => reset()} variant="outline" size="sm">
           <RefreshCw className="mr-2 h-4 w-4" />
-          Try again
+          {t("tryAgain")}
         </Button>
       </CardContent>
     </Card>

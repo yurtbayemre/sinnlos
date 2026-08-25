@@ -1,13 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  ArrowLeft,
-  CalendarClock,
-  Mail,
-  MapPin,
-  Pencil,
-  TriangleAlert,
-} from "lucide-react";
+import { ArrowLeft, CalendarClock, Mail, MapPin, Pencil, TriangleAlert } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
@@ -80,14 +73,14 @@ export default async function ClassifiedDetailPage({
     <div className="space-y-6">
       <Link
         href="/marketplace"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         {t("backToList")}
       </Link>
 
       {expired && (
-        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-100">
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
           <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
           <span className="flex-1">{t("expiredNotice")}</span>
           {isOwner && <RenewButton id={ad.id} />}
@@ -185,7 +178,7 @@ export default async function ClassifiedDetailPage({
                   href={`mailto:${ad.author.email}?subject=${encodeURIComponent(
                     t("mailSubject", { title: ad.title }),
                   )}`}
-                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+                  className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <Mail className="h-4 w-4" aria-hidden="true" />
                   {t("contact")}
@@ -197,7 +190,7 @@ export default async function ClassifiedDetailPage({
           {canManage && (
             <Link
               href={`/marketplace/${ad.id}/edit`}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium transition hover:bg-muted"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
             >
               <Pencil className="h-4 w-4" aria-hidden="true" />
               {t("editAd")}

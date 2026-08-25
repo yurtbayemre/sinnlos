@@ -23,19 +23,12 @@ export default async function DepartmentsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       {failed && <FetchErrorBanner />}
 
       {items.length === 0 ? (
-        <EmptyState
-          icon={Building2}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Building2} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((d) => (

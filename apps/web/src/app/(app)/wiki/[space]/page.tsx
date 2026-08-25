@@ -38,11 +38,7 @@ export default async function WikiSpacePage({ params }: Props) {
       </header>
 
       {pages.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title={t("emptyPagesTitle")}
-          hint={t("emptyPagesHint")}
-        />
+        <EmptyState icon={FileText} title={t("emptyPagesTitle")} hint={t("emptyPagesHint")} />
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
           {pages.map((p) => (

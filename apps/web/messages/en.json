@@ -24,7 +24,11 @@
     "comment": "{count, plural, one {# comment} other {# comments}}",
     "person": "{count, plural, one {# person} other {# people}}",
     "inThisDepartment": "in this department",
-    "noDescription": "No description"
+    "noDescription": "No description",
+    "mainNav": "Main navigation",
+    "bottomNav": "Bottom navigation",
+    "loadingPage": "Loading page",
+    "signedOut": "Signed out"
   },
   "nav": {
     "dashboard": "Dashboard",
@@ -83,7 +87,8 @@
     "featured": "Featured",
     "openAcksTitle": "Pending acknowledgements",
     "openAcksCount": "{count, plural, one {# mandatory announcement is waiting for your read confirmation.} other {# mandatory announcements are waiting for your read confirmation.}}",
-    "openAcksAction": "Confirm now"
+    "openAcksAction": "Confirm now",
+    "friendFallback": "colleague"
   },
   "quickLinks": {
     "eyebrow": "Essential links",
@@ -109,7 +114,8 @@
     "collapse": "Collapse",
     "expand": "Expand",
     "emptyTitle": "No people yet",
-    "emptyHint": "Users will appear here once they sign in."
+    "emptyHint": "Users will appear here once they sign in.",
+    "filterByDepartment": "Filter by department"
   },
   "events": {
     "title": "Events",
@@ -216,7 +222,8 @@
     "leadership": "Leadership",
     "customerFocus": "Customer Focus",
     "excellence": "Excellence",
-    "sendFailed": "Couldn't send kudos — please try again."
+    "sendFailed": "Couldn't send kudos — please try again.",
+    "removeRecipient": "Remove selection"
   },
   "marketplace": {
     "title": "Marketplace",
@@ -427,16 +434,27 @@
     "label": "Search (Ctrl+K)",
     "placeholder": "Search wiki, people, teams…",
     "searchPlaceholder": "Search…",
-    "globalSearch": "Global search"
+    "globalSearch": "Global search",
+    "pollCloses": "Closes {date}",
+    "pollOpen": "Open"
   },
   "theme": {
     "toggle": "Toggle theme"
   },
   "errors": {
     "contentLoadFailed": "Some content couldn't be loaded",
-    "cmsUnreachable": "The CMS is unreachable or returned an error. Content below may be incomplete — refresh once Strapi is back up."
+    "cmsUnreachable": "The CMS is unreachable or returned an error. Content below may be incomplete — refresh once Strapi is back up.",
+    "somethingWrong": "Something went wrong",
+    "somethingWrongHint": "An unexpected error occurred. Please try again.",
+    "tryAgain": "Try again",
+    "notFoundTitle": "Page not found",
+    "notFoundHint": "The page you requested does not exist or has moved.",
+    "backToDashboard": "Back to dashboard"
   },
   "locale": {
     "label": "Language"
+  },
+  "localeSwitcher": {
+    "label": "Choose language"
   }
 }

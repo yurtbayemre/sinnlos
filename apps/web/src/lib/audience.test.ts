@@ -56,9 +56,9 @@ describe("isAnnouncementVisibleTo", () => {
     });
 
     it("does not target a user without a department", () => {
-      expect(
-        isAnnouncementVisibleTo(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] }),
-      ).toBe(false);
+      expect(isAnnouncementVisibleTo(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] })).toBe(
+        false,
+      );
     });
 
     it("restricts on a department link even on an audience=all announcement", () => {
@@ -90,9 +90,9 @@ describe("isAnnouncementVisibleTo", () => {
     });
 
     it("does not target another team", () => {
-      expect(
-        isAnnouncementVisibleTo(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] }),
-      ).toBe(false);
+      expect(isAnnouncementVisibleTo(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] })).toBe(
+        false,
+      );
     });
 
     it("does not target a user without a team", () => {
@@ -127,9 +127,7 @@ describe("isAnnouncementVisibleTo", () => {
     });
 
     it("requires all of them", () => {
-      expect(isAnnouncementVisibleTo(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
-        true,
-      );
+      expect(isAnnouncementVisibleTo(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(true);
       // right department + role, wrong team
       expect(
         isAnnouncementVisibleTo(combined, {

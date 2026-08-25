@@ -6,11 +6,7 @@ import { getTranslations } from "next-intl/server";
  * page still renders so the user gets the rest of the UI; this bar makes
  * it clear that what they see below may be incomplete.
  */
-export async function FetchErrorBanner({
-  message,
-}: {
-  message?: string;
-}) {
+export async function FetchErrorBanner({ message }: { message?: string }) {
   const tErrors = await getTranslations("errors");
 
   return (

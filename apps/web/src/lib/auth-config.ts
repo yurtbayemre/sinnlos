@@ -10,7 +10,6 @@ export const MICROSOFT_ENABLED = Boolean(
   process.env.AUTH_MICROSOFT_ENTRA_ID_ID && process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET,
 );
 
-export const LOCAL_ENABLED =
-  process.env.AUTH_LOCAL_ENABLED === "1" || !MICROSOFT_ENABLED;
+export const LOCAL_ENABLED = process.env.AUTH_LOCAL_ENABLED === "1" || !MICROSOFT_ENABLED;
 
 export const REGISTRATION_ENABLED = LOCAL_ENABLED && process.env.LOCAL_REGISTRATION === "1";

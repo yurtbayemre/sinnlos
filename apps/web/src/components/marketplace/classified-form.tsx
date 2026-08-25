@@ -20,6 +20,7 @@ import {
   MAX_AD_IMAGE_MB,
 } from "@/lib/classified-shared";
 import type { ClassifiedCategory } from "@/lib/types";
+import { SelectMenu } from "@/components/ui/select-menu";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
@@ -44,23 +45,23 @@ export type ClassifiedFormInitial = {
  * EVEN when it returns an error. The action therefore echoes the submitted
  * values back in the error state, and every uncontrolled field derives its
  * defaultValue from them — the reset then restores exactly what the user
- * typed. `category` is controlled (state) and survives the reset natively;
- * the file input cannot be replayed (browser security), so its selection
- * display is cleared to match.
+ * typed. `category` and `days` are controlled (state, submitted via the
+ * SelectMenu hidden inputs) and survive the reset natively; the file input
+ * cannot be replayed (browser security), so its selection display is
+ * cleared to match.
  */
 export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial }) {
   const t = useTranslations("marketplace");
   const tCommon = useTranslations("common");
 
   const action = initial ? updateClassified.bind(null, initial.id) : createClassified;
-  const [state, formAction, isPending] = useActionState<ClassifiedFormState, FormData>(
-    action,
-    {},
-  );
+  const [state, formAction, isPending] = useActionState<ClassifiedFormState, FormData>(action, {});
   // Submitted values echoed back by a failed action — see doc comment.
   const v = state.values;
 
   const [category, setCategory] = useState<ClassifiedCategory>(initial?.category ?? "sale");
+  // Editing keeps the current expiry ("") unless a new lifetime is picked.
+  const [days, setDays] = useState<string>(initial ? "" : String(AD_DEFAULT_DURATION_DAYS));
   const [keptImages, setKeptImages] = useState(initial?.images ?? []);
   const [fileNames, setFileNames] = useState<string[]>([]);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -120,22 +121,18 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
       </div>
 
       <div>
-        <label htmlFor="ad-category" className="mb-1 block text-sm font-medium">
-          {t("categoryLabel")}
-        </label>
-        <select
-          id="ad-category"
+        <span className="mb-1 block text-sm font-medium">{t("categoryLabel")}</span>
+        <SelectMenu
           name="category"
           value={category}
-          onChange={(e) => setCategory(e.target.value as ClassifiedCategory)}
-          className={inputClass}
-        >
-          {AD_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {t(AD_CATEGORY_KEYS[c] as Parameters<typeof t>[0])}
-            </option>
-          ))}
-        </select>
+          onChange={(next) => setCategory(next as ClassifiedCategory)}
+          ariaLabel={t("categoryLabel")}
+          buttonClassName="w-full"
+          options={AD_CATEGORIES.map((c) => ({
+            value: c,
+            label: t(AD_CATEGORY_KEYS[c] as Parameters<typeof t>[0]),
+          }))}
+        />
       </div>
 
       <div>
@@ -168,7 +165,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
               step="0.01"
               inputMode="decimal"
               defaultValue={v ? v.price : (initial?.price ?? "")}
-              className={inputClass}
+              className={`${inputClass} [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
             />
           </div>
           <label className="flex items-center gap-2 self-end pb-2.5 text-sm">
@@ -176,7 +173,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
               type="checkbox"
               name="priceNegotiable"
               defaultChecked={v ? v.priceNegotiable : (initial?.priceNegotiable ?? false)}
-              className="h-4 w-4 rounded border"
+              className="h-4 w-4 rounded border accent-primary"
             />
             {t("negotiableLabel")}
           </label>
@@ -208,11 +205,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
                 <input type="hidden" name="keepImages" value={img.id} />
                 {img.url ? (
                   // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={img.url}
-                    alt=""
-                    className="h-20 w-20 rounded-xl border object-cover"
-                  />
+                  <img src={img.url} alt="" className="h-20 w-20 rounded-xl border object-cover" />
                 ) : (
                   <div className="flex h-20 w-20 items-center justify-center rounded-xl border bg-muted">
                     <ImagePlus className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
@@ -222,7 +215,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
                   type="button"
                   onClick={() => setKeptImages(keptImages.filter((k) => k.id !== img.id))}
                   aria-label={t("removeImage")}
-                  className="absolute -right-2 -top-2 rounded-full border bg-background p-1 shadow transition hover:bg-muted"
+                  className="absolute -right-2 -top-2 rounded-full border bg-background p-1 shadow outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                 >
                   <X className="h-3 w-3" aria-hidden="true" />
                 </button>
@@ -243,7 +236,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
           multiple
           accept={AD_IMAGE_TYPES.join(",")}
           onChange={onFilesChange}
-          className="w-full rounded-xl border bg-muted/40 px-4 py-2 text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary"
+          className="w-full rounded-xl border bg-muted/40 px-4 py-2 text-sm file:mr-3 file:cursor-pointer file:rounded-lg file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-primary file:transition-colors file:hover:bg-primary/20"
         />
         <p className="mt-1 text-xs text-muted-foreground">
           {t("imagesHint", { count: MAX_AD_IMAGES, size: MAX_AD_IMAGE_MB })}
@@ -261,23 +254,21 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
       </div>
 
       <div>
-        <label htmlFor="ad-days" className="mb-1 block text-sm font-medium">
-          {t("durationLabel")}
-        </label>
-        <select
-          id="ad-days"
+        <span className="mb-1 block text-sm font-medium">{t("durationLabel")}</span>
+        <SelectMenu
           name="days"
-          defaultValue={v ? v.days : initial ? "" : String(AD_DEFAULT_DURATION_DAYS)}
-          className={inputClass}
-        >
-          {/* Editing keeps the current expiry unless a new lifetime is picked. */}
-          {initial && <option value="">{t("durationUnchanged")}</option>}
-          {AD_DURATION_DAYS.map((d) => (
-            <option key={d} value={d}>
-              {t("durationDays", { days: d })}
-            </option>
-          ))}
-        </select>
+          value={days}
+          onChange={setDays}
+          ariaLabel={t("durationLabel")}
+          buttonClassName="w-full"
+          options={[
+            ...(initial ? [{ value: "", label: t("durationUnchanged") }] : []),
+            ...AD_DURATION_DAYS.map((d) => ({
+              value: String(d),
+              label: t("durationDays", { days: d }),
+            })),
+          ]}
+        />
       </div>
 
       {serverError && (
@@ -290,7 +281,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
         <button
           type="submit"
           disabled={isPending}
-          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
         >
           {isPending
             ? initial
@@ -302,7 +293,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
         </button>
         <Link
           href={initial ? `/marketplace/${initial.id}` : "/marketplace"}
-          className="rounded-xl border px-4 py-2.5 text-sm transition hover:bg-muted"
+          className="rounded-xl border px-4 py-2.5 text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           {tCommon("cancel")}
         </Link>

@@ -110,9 +110,7 @@ function parseAdForm(formData: FormData): { error: ClassifiedErrorCode } | Parse
     price = Math.round(parsed * 100) / 100;
   }
 
-  const files = formData
-    .getAll("images")
-    .filter((f): f is File => f instanceof File && f.size > 0);
+  const files = formData.getAll("images").filter((f): f is File => f instanceof File && f.size > 0);
   const keepImageIds = formData
     .getAll("keepImages")
     .map((v) => Number(v))

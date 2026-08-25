@@ -18,18 +18,10 @@ export default async function PollsPage() {
   const { data, failed } = await tryFetch(() => api.polls.list(), "polls");
   const polls = (data?.data ?? []) as Poll[];
 
-  const resultsArr = await Promise.all(
-    polls.map((p) =>
-      api.polls.results(p.id).catch(() => null),
-    ),
-  );
+  const resultsArr = await Promise.all(polls.map((p) => api.polls.results(p.id).catch(() => null)));
 
-  const active = polls.filter(
-    (p) => !p.closesAt || new Date(p.closesAt) > new Date(),
-  );
-  const closed = polls.filter(
-    (p) => p.closesAt && new Date(p.closesAt) <= new Date(),
-  );
+  const active = polls.filter((p) => !p.closesAt || new Date(p.closesAt) > new Date());
+  const closed = polls.filter((p) => p.closesAt && new Date(p.closesAt) <= new Date());
 
   const resultsMap = new Map<number, any>();
   polls.forEach((p, i) => {
@@ -38,19 +30,12 @@ export default async function PollsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       {failed && <FetchErrorBanner />}
 
       {polls.length === 0 ? (
-        <EmptyState
-          icon={BarChart3}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={BarChart3} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <>
           {active.length > 0 && (
@@ -60,11 +45,11 @@ export default async function PollsPage() {
                 {t("active")}
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
-                {active.map((p) => (
+                {active.map((p) =>
                   resultsMap.has(p.id) ? (
                     <PollCard key={p.id} results={resultsMap.get(p.id)} />
-                  ) : null
-                ))}
+                  ) : null,
+                )}
               </div>
             </section>
           )}
@@ -73,11 +58,11 @@ export default async function PollsPage() {
             <section className="space-y-3">
               <div className="text-sm font-medium text-muted-foreground">{t("closed")}</div>
               <div className="stagger grid gap-4 md:grid-cols-2">
-                {closed.map((p) => (
+                {closed.map((p) =>
                   resultsMap.has(p.id) ? (
                     <PollCard key={p.id} results={resultsMap.get(p.id)} />
-                  ) : null
-                ))}
+                  ) : null,
+                )}
               </div>
             </section>
           )}

@@ -5,7 +5,7 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { ArrowLeft } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import type { WikiPage as WikiPageEntry } from "@/lib/types";
 
@@ -15,9 +15,10 @@ interface Props {
 
 export default async function WikiPage({ params }: Props) {
   const { space, slug } = await params;
-  const [t, tCommon] = await Promise.all([
+  const [t, tCommon, locale] = await Promise.all([
     getTranslations("wiki"),
     getTranslations("common"),
+    getLocale(),
   ]);
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
@@ -44,15 +45,30 @@ export default async function WikiPage({ params }: Props) {
           <p className="mt-2 text-lg text-muted-foreground">{entry.summary}</p>
         ) : null}
         <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
-          {author ? <span>{tCommon("by")} {author.displayName ?? author.username}</span> : null}
-          {lastEditor && lastEditor !== author ? (
-            <span>· {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}</span>
+          {author ? (
+            <span>
+              {tCommon("by")} {author.displayName ?? author.username}
+            </span>
           ) : null}
-          {updated ? <span>· {updated.toLocaleString()}</span> : null}
+          {lastEditor && lastEditor !== author ? (
+            <span>
+              · {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}
+            </span>
+          ) : null}
+          {updated ? (
+            <span>
+              ·{" "}
+              {updated.toLocaleDateString(locale, {
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              })}
+            </span>
+          ) : null}
         </div>
       </header>
 
-      <div className="prose prose-neutral max-w-none dark:prose-invert">
+      <div className="prose prose-slate max-w-none dark:prose-invert">
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           rehypePlugins={[rehypeSlug, [rehypeAutolinkHeadings, { behavior: "wrap" }]]}

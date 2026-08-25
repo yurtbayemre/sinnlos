@@ -64,7 +64,7 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <header>
         <p className="text-sm text-muted-foreground">
-          {greeting(t)}, {session?.user?.name ?? "friend"}
+          {greeting(t)}, {session?.user?.name ?? t("friendFallback")}
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">{t("welcomeBack")}</h1>
       </header>
@@ -79,13 +79,48 @@ export default async function DashboardPage() {
       </Suspense>
 
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-        <StatCard icon={<Contact className="h-5 w-5" aria-hidden="true" />} label={tNav("people")} value={peopleCount} href="/people" />
-        <StatCard icon={<Building2 className="h-5 w-5" aria-hidden="true" />} label={tNav("departments")} value={deptCount} href="/departments" />
-        <StatCard icon={<Users2 className="h-5 w-5" aria-hidden="true" />} label={tNav("teams")} value={teamCount} href="/teams" />
-        <StatCard icon={<Calendar className="h-5 w-5" aria-hidden="true" />} label={tNav("events")} value={eventCount} href="/events" />
-        <StatCard icon={<BookOpen className="h-5 w-5" aria-hidden="true" />} label={tNav("wiki")} value={t("browse")} href="/wiki" />
-        <StatCard icon={<Megaphone className="h-5 w-5" aria-hidden="true" />} label={tNav("news")} value={newsCount} href="/announcements" />
-        <StatCard icon={<Award className="h-5 w-5" aria-hidden="true" />} label={tNav("kudos")} value={t("give")} href="/kudos" />
+        <StatCard
+          icon={<Contact className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("people")}
+          value={peopleCount}
+          href="/people"
+        />
+        <StatCard
+          icon={<Building2 className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("departments")}
+          value={deptCount}
+          href="/departments"
+        />
+        <StatCard
+          icon={<Users2 className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("teams")}
+          value={teamCount}
+          href="/teams"
+        />
+        <StatCard
+          icon={<Calendar className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("events")}
+          value={eventCount}
+          href="/events"
+        />
+        <StatCard
+          icon={<BookOpen className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("wiki")}
+          value={t("browse")}
+          href="/wiki"
+        />
+        <StatCard
+          icon={<Megaphone className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("news")}
+          value={newsCount}
+          href="/announcements"
+        />
+        <StatCard
+          icon={<Award className="h-5 w-5" aria-hidden="true" />}
+          label={tNav("kudos")}
+          value={t("give")}
+          href="/kudos"
+        />
       </section>
 
       <QuickLinks items={(quickLinks.data?.data ?? []) as any[]} />
@@ -129,4 +164,3 @@ function greeting(t: (key: string) => string) {
   if (h < 18) return t("goodAfternoon");
   return t("goodEvening");
 }
-

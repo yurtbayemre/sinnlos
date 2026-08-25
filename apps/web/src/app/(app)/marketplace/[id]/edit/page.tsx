@@ -18,11 +18,7 @@ export async function generateMetadata() {
   return { title: t("formTitleEdit") };
 }
 
-export default async function EditClassifiedPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function EditClassifiedPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const [t, session] = await Promise.all([getTranslations("marketplace"), auth()]);
 
@@ -63,7 +59,7 @@ export default async function EditClassifiedPage({
     <div className="space-y-8">
       <Link
         href={`/marketplace/${ad.id}`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         {t("backToAd")}

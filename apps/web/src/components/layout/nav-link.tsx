@@ -14,15 +14,7 @@ export type NavIconName = IconName;
  * Sidebar navigation link with an animated active state. Client
  * component so it can read the current pathname.
  */
-export function NavLink({
-  href,
-  label,
-  icon,
-}: {
-  href: string;
-  label: string;
-  icon: NavIconName;
-}) {
+export function NavLink({ href, label, icon }: { href: string; label: string; icon: NavIconName }) {
   const Icon = ICONS[icon];
   const pathname = usePathname();
   const active = href === "/" ? pathname === "/" : pathname.startsWith(href);

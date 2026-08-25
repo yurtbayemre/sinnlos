@@ -12,10 +12,7 @@ import { STRAPI_URL } from "@/lib/config";
  * Lives under /events/[id]/ics (NOT /api/...) because the Caddy reverse
  * proxy routes /api/* straight to Strapi.
  */
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> },
-) {
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!/^\d+$/.test(id)) {
     return new NextResponse("Invalid event id", { status: 400 });
@@ -39,8 +36,7 @@ export async function GET(
     headers: {
       "Content-Type": "text/calendar; charset=utf-8",
       "Content-Disposition":
-        res.headers.get("Content-Disposition") ??
-        `attachment; filename="event-${id}.ics"`,
+        res.headers.get("Content-Disposition") ?? `attachment; filename="event-${id}.ics"`,
     },
   });
 }

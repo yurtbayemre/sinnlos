@@ -26,18 +26,12 @@ export default async function OrgChartPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("orgChart")}
-      />
+      <PageHeader title={t("orgChart")} />
 
       {failed && <FetchErrorBanner />}
 
       {people.length === 0 ? (
-        <EmptyState
-          icon={Contact}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Contact} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <OrgTree people={people} />
       )}

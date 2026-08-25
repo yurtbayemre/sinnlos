@@ -4,10 +4,7 @@ import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  markNotificationsRead,
-  markAllNotificationsRead,
-} from "@/lib/notification-actions";
+import { markNotificationsRead, markAllNotificationsRead } from "@/lib/notification-actions";
 import { relativeTime } from "@/lib/relative-time";
 import type { Notification } from "@/lib/types";
 import { useTranslations } from "next-intl";
@@ -81,7 +78,7 @@ export function NotificationBell({
       <button
         type="button"
         onClick={handleOpen}
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-lg border bg-background transition hover:bg-muted"
+        className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
         aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount} ${t("unread")})` : ""}`}
       >
         <Bell className="h-4 w-4" />
@@ -105,7 +102,7 @@ export function NotificationBell({
                 type="button"
                 onClick={handleMarkAll}
                 disabled={isPending}
-                className="text-xs text-primary hover:underline disabled:opacity-50"
+                className="rounded-md text-xs text-primary outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
               >
                 {t("markAllRead")}
               </button>
@@ -125,16 +122,14 @@ export function NotificationBell({
                     type="button"
                     onClick={() => handleClick(n)}
                     className={cn(
-                      "flex w-full items-start gap-3 px-4 py-3 text-left transition hover:bg-muted",
+                      "flex w-full items-start gap-3 px-4 py-3 text-left outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                       !n.readAt && "bg-primary/[0.04]",
                     )}
                   >
                     <div
                       className={cn(
                         "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
-                        !n.readAt
-                          ? "bg-primary/10 text-primary"
-                          : "bg-muted text-muted-foreground",
+                        !n.readAt ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground",
                       )}
                     >
                       <Icon className="h-4 w-4" />
@@ -152,9 +147,7 @@ export function NotificationBell({
                         {relativeTime(n.createdAt, tRel, { granularity: "minute" })}
                       </div>
                     </div>
-                    {!n.readAt && (
-                      <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />
-                    )}
+                    {!n.readAt && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}
                   </button>
                 );
               })
