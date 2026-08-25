@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
 import {
@@ -149,73 +150,80 @@ export function SearchCommand() {
         </kbd>
       </button>
 
-      {/* Command palette overlay */}
-      {open && (
-        <div
-          className="fixed inset-0 z-50 flex animate-fade-in items-start justify-center bg-background/60 px-3 pt-[4.5rem] backdrop-blur-sm"
-          onMouseDown={() => setOpen(false)}
-        >
-          <Command
-            role="dialog"
-            aria-modal="true"
-            aria-label={tSearch("globalSearch")}
-            label={tSearch("globalSearch")}
-            className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
-            onMouseDown={(e) => e.stopPropagation()}
-            shouldFilter={query.length < 2}
+      {/* Command palette overlay.
+          Portaled to <body>: the sticky topbar has backdrop-blur, and a
+          backdrop-filter turns the header into the containing block for
+          fixed descendants — inside the header this overlay would only
+          span the 64px header strip, so clicks below it never hit the
+          backdrop (and never close the palette). */}
+      {open &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex animate-fade-in items-start justify-center bg-background/60 px-3 pt-[4.5rem] backdrop-blur-sm"
+            onMouseDown={() => setOpen(false)}
           >
-            <div className="flex items-center border-b px-3">
-              <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
-              <Command.Input
-                value={query}
-                onValueChange={setQuery}
-                placeholder={tSearch("searchPlaceholder")}
-                // Initial focus when the palette opens.
-                autoFocus
-                className="flex h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-            <Command.List className="max-h-80 overflow-y-auto p-2">
-              {isPending && (
-                <Command.Loading>
-                  <div className="py-6 text-center text-sm text-muted-foreground">
-                    {tCommon("loading")}
-                  </div>
-                </Command.Loading>
-              )}
-              <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
-                {tCommon("noResults")}
-              </Command.Empty>
-              {Object.entries(grouped).map(([kind, groupItems]) => (
-                <Command.Group
-                  key={kind}
-                  heading={groupLabel[kind] ?? kind}
-                  className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
-                >
-                  {groupItems.map((item) => (
-                    <Command.Item
-                      key={`${item.kind}-${item.href}`}
-                      value={`${item.title} ${item.subtitle ?? ""}`}
-                      onSelect={() => select(item.href)}
-                      className="flex cursor-pointer items-center rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
-                    >
-                      {icon(item.kind)}
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate">{item.title}</div>
-                        {item.subtitle && (
-                          <div className="truncate text-xs text-muted-foreground">
-                            {item.subtitle}
-                          </div>
-                        )}
-                      </div>
-                    </Command.Item>
-                  ))}
-                </Command.Group>
-              ))}
-            </Command.List>
-          </Command>
-        </div>
-      )}
+            <Command
+              role="dialog"
+              aria-modal="true"
+              aria-label={tSearch("globalSearch")}
+              label={tSearch("globalSearch")}
+              className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
+              onMouseDown={(e) => e.stopPropagation()}
+              shouldFilter={query.length < 2}
+            >
+              <div className="flex items-center border-b px-3">
+                <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
+                <Command.Input
+                  value={query}
+                  onValueChange={setQuery}
+                  placeholder={tSearch("searchPlaceholder")}
+                  // Initial focus when the palette opens.
+                  autoFocus
+                  className="flex h-12 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              <Command.List className="max-h-80 overflow-y-auto p-2">
+                {isPending && (
+                  <Command.Loading>
+                    <div className="py-6 text-center text-sm text-muted-foreground">
+                      {tCommon("loading")}
+                    </div>
+                  </Command.Loading>
+                )}
+                <Command.Empty className="py-6 text-center text-sm text-muted-foreground">
+                  {tCommon("noResults")}
+                </Command.Empty>
+                {Object.entries(grouped).map(([kind, groupItems]) => (
+                  <Command.Group
+                    key={kind}
+                    heading={groupLabel[kind] ?? kind}
+                    className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground"
+                  >
+                    {groupItems.map((item) => (
+                      <Command.Item
+                        key={`${item.kind}-${item.href}`}
+                        value={`${item.title} ${item.subtitle ?? ""}`}
+                        onSelect={() => select(item.href)}
+                        className="flex cursor-pointer items-center rounded-md px-2 py-2 text-sm aria-selected:bg-accent aria-selected:text-accent-foreground"
+                      >
+                        {icon(item.kind)}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate">{item.title}</div>
+                          {item.subtitle && (
+                            <div className="truncate text-xs text-muted-foreground">
+                              {item.subtitle}
+                            </div>
+                          )}
+                        </div>
+                      </Command.Item>
+                    ))}
+                  </Command.Group>
+                ))}
+              </Command.List>
+            </Command>
+          </div>,
+          document.body,
+        )}
     </>
   );
 }
