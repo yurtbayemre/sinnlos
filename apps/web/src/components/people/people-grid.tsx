@@ -6,6 +6,7 @@ import Link from "next/link";
 import { Search } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import { SelectMenu } from "@/components/ui/select-menu";
 import { initials } from "@/lib/utils";
 import { mediaUrl } from "@/lib/config";
 import type { UserLite } from "@/lib/types";
@@ -29,8 +30,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return people.filter((p) => {
-      if (dept !== "all" && (p.department?.slug ?? p.department?.name) !== dept)
-        return false;
+      if (dept !== "all" && (p.department?.slug ?? p.department?.name) !== dept) return false;
       if (!q) return true;
       const hay = [p.displayName, p.email, p.jobTitle, p.department?.name]
         .filter(Boolean)
@@ -50,6 +50,7 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
           />
           <input
             type="text"
+            aria-label={tPeople("searchPlaceholder")}
             placeholder={tPeople("searchPlaceholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -57,18 +58,17 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
           />
         </div>
         {departments.length > 1 && (
-          <select
+          <SelectMenu
             value={dept}
-            onChange={(e) => setDept(e.target.value)}
-            className="h-10 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors focus:bg-background focus:ring-2 focus:ring-ring"
-          >
-            <option value="all">{tPeople("allDepartments")}</option>
-            {departments.map(([slug, name]) => (
-              <option key={slug} value={slug}>
-                {name}
-              </option>
-            ))}
-          </select>
+            onChange={setDept}
+            ariaLabel={tPeople("filterByDepartment")}
+            align="right"
+            buttonClassName="w-full sm:w-52"
+            options={[
+              { value: "all", label: tPeople("allDepartments") },
+              ...departments.map(([slug, name]) => ({ value: slug, label: name })),
+            ]}
+          />
         )}
       </div>
 
@@ -78,32 +78,22 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
 
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         {filtered.map((p) => {
-          const name = p.displayName ?? p.username ?? p.email ?? "Unknown";
+          const name = p.displayName ?? p.username ?? p.email ?? tCommon("unknown");
           const avatarUrl = mediaUrl(p.avatar?.url);
           return (
-            <Link
-              key={p.id}
-              href={`/people/${p.id}`}
-              className="focus-card group block"
-            >
+            <Link key={p.id} href={`/people/${p.id}`} className="focus-card group block">
               <Card className="card-lift h-full">
                 <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
                   <Avatar className="h-16 w-16">
-                    {avatarUrl ? (
-                      <AvatarImage src={avatarUrl} alt={name} />
-                    ) : null}
-                    <AvatarFallback className="text-lg">
-                      {initials(name)}
-                    </AvatarFallback>
+                    {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
+                    <AvatarFallback className="text-lg">{initials(name)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
                     <div className="truncate font-medium transition-colors group-hover:text-primary">
                       {name}
                     </div>
                     {p.jobTitle && (
-                      <div className="truncate text-sm text-muted-foreground">
-                        {p.jobTitle}
-                      </div>
+                      <div className="truncate text-sm text-muted-foreground">{p.jobTitle}</div>
                     )}
                     {p.department?.name && (
                       <div className="mt-1 truncate text-xs text-muted-foreground">

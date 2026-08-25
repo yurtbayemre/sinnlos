@@ -54,15 +54,17 @@ export function ReactionBar({
             type="button"
             onClick={() => handleToggle(emoji)}
             disabled={isPending || !canReact}
+            aria-pressed={reacted}
+            aria-label={`${EMOJI_MAP[emoji]} ${count}`}
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors",
+              "inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
               reacted
                 ? "border-primary/40 bg-primary/10 text-primary"
                 : "border-transparent hover:border-border hover:bg-muted",
               count === 0 && !reacted && "opacity-40 hover:opacity-100",
             )}
           >
-            <span>{EMOJI_MAP[emoji]}</span>
+            <span aria-hidden="true">{EMOJI_MAP[emoji]}</span>
             {count > 0 && <span className="font-medium">{count}</span>}
           </button>
         );

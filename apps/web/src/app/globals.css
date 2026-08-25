@@ -22,6 +22,10 @@
     --input: 214.3 31.8% 91.4%;
     --ring: 243 75% 59%;
     --radius: 1rem;
+    /* Switches ALL native widgets (select popups, date pickers, scrollbars,
+       autofill, file buttons) to the active theme. Without it they render
+       light-mode UI on the dark theme. */
+    color-scheme: light;
   }
 
   .dark {
@@ -30,7 +34,10 @@
     --card: 222.2 47.4% 11%;
     --card-foreground: 210 40% 98%;
     --primary: 243 75% 65%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    /* Must stay light: dark indigo primary needs white label text — the old
+       navy value put #0f172a on indigo (~3.9:1, below AA) on every
+       bg-primary button in dark mode. */
+    --primary-foreground: 210 40% 98%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
@@ -42,6 +49,7 @@
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 243 75% 65%;
+    color-scheme: dark;
   }
 }
 
@@ -51,7 +59,26 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
-    font-feature-settings: "rlig" 1, "calt" 1;
+    font-feature-settings:
+      "rlig" 1,
+      "calt" 1;
+  }
+
+  /* Chrome paints autofilled inputs with an opaque yellow/blue fill that
+     ignores our translucent input backgrounds — repaint with theme colors. */
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px hsl(var(--background)) inset;
+    -webkit-text-fill-color: hsl(var(--foreground));
+    caret-color: hsl(var(--foreground));
+    transition: background-color 9999s ease-in-out 0s;
+  }
+
+  /* Firefox counterpart of the webkit scrollbar styling below. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.25) transparent;
   }
 
   /* Subtle, theme-aware scrollbars */
@@ -77,15 +104,33 @@
   .stagger > * {
     animation: fade-in-up 0.35s ease-out both;
   }
-  .stagger > *:nth-child(1) { animation-delay: 0ms; }
-  .stagger > *:nth-child(2) { animation-delay: 40ms; }
-  .stagger > *:nth-child(3) { animation-delay: 80ms; }
-  .stagger > *:nth-child(4) { animation-delay: 120ms; }
-  .stagger > *:nth-child(5) { animation-delay: 160ms; }
-  .stagger > *:nth-child(6) { animation-delay: 200ms; }
-  .stagger > *:nth-child(7) { animation-delay: 240ms; }
-  .stagger > *:nth-child(8) { animation-delay: 280ms; }
-  .stagger > *:nth-child(n + 9) { animation-delay: 320ms; }
+  .stagger > *:nth-child(1) {
+    animation-delay: 0ms;
+  }
+  .stagger > *:nth-child(2) {
+    animation-delay: 40ms;
+  }
+  .stagger > *:nth-child(3) {
+    animation-delay: 80ms;
+  }
+  .stagger > *:nth-child(4) {
+    animation-delay: 120ms;
+  }
+  .stagger > *:nth-child(5) {
+    animation-delay: 160ms;
+  }
+  .stagger > *:nth-child(6) {
+    animation-delay: 200ms;
+  }
+  .stagger > *:nth-child(7) {
+    animation-delay: 240ms;
+  }
+  .stagger > *:nth-child(8) {
+    animation-delay: 280ms;
+  }
+  .stagger > *:nth-child(n + 9) {
+    animation-delay: 320ms;
+  }
 
   /* Interactive card affordance: lift on hover, ring on keyboard focus. */
   .card-lift {

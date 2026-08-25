@@ -49,7 +49,7 @@ export default async function SignInPage({
         aria-hidden="true"
         className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
       />
-      <Card className="w-full max-w-md animate-fade-in-up shadow-lg">
+      <Card className="w-full max-w-md animate-fade-in-up shadow-lg hover:shadow-lg">
         <CardHeader className="text-center">
           <div
             aria-hidden="true"
@@ -61,11 +61,7 @@ export default async function SignInPage({
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          {expired && (
-            <p className="text-center text-sm text-destructive">
-              {t("sessionExpired")}
-            </p>
-          )}
+          {expired && <p className="text-center text-sm text-destructive">{t("sessionExpired")}</p>}
           {MICROSOFT_ENABLED && (
             <form action={signInWithMicrosoft}>
               <input type="hidden" name="from" value={from} />
@@ -99,9 +95,7 @@ export default async function SignInPage({
             </p>
           )}
 
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            {t("itPolicy")}
-          </p>
+          <p className="mt-2 text-center text-xs text-muted-foreground">{t("itPolicy")}</p>
         </CardContent>
       </Card>
     </div>

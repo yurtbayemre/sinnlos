@@ -42,7 +42,7 @@ export async function Sidebar({ className }: { className?: string }) {
         </div>
         <span className="font-semibold tracking-tight">Sinnlos</span>
       </div>
-      <nav aria-label="Primary" className="flex-1 space-y-1 overflow-y-auto p-4">
+      <nav aria-label={tCommon("mainNav")} className="flex-1 space-y-1 overflow-y-auto p-4">
         {nav.map((item) => (
           <NavLink key={item.href} {...item} />
         ))}

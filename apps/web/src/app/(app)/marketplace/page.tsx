@@ -46,8 +46,7 @@ export default async function MarketplacePage({
   searchParams: Promise<{ category?: string }>;
 }) {
   const { category: rawCategory } = await searchParams;
-  const category =
-    rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
+  const category = rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
 
   const [t, tRel, locale, session] = await Promise.all([
     getTranslations("marketplace"),
@@ -75,7 +74,7 @@ export default async function MarketplacePage({
   const newAdButton = (
     <Link
       href="/marketplace/new"
-      className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary/90"
+      className="inline-flex items-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
     >
       <Plus className="h-4 w-4" aria-hidden="true" />
       {t("newAd")}
@@ -119,10 +118,7 @@ export default async function MarketplacePage({
                 <Card key={ad.id} className={expired ? "border-amber-500/40" : undefined}>
                   <CardContent className="flex flex-wrap items-center gap-3 p-4">
                     <div className="min-w-0 flex-1">
-                      <Link
-                        href={`/marketplace/${ad.id}`}
-                        className="font-medium hover:underline"
-                      >
+                      <Link href={`/marketplace/${ad.id}`} className="font-medium hover:underline">
                         {ad.title}
                       </Link>
                       <div className="mt-0.5 text-xs text-muted-foreground">
@@ -130,8 +126,8 @@ export default async function MarketplacePage({
                           className={cn(
                             "mr-2 inline-flex rounded-full px-2 py-0.5 text-xs font-medium",
                             expired
-                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
-                              : "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-200",
+                              ? "bg-amber-500/10 text-amber-700 dark:text-amber-300"
+                              : "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
                           )}
                         >
                           {expired ? t("statusExpired") : t("statusActive")}
@@ -153,7 +149,7 @@ export default async function MarketplacePage({
                       {expired && <RenewButton id={ad.id} />}
                       <Link
                         href={`/marketplace/${ad.id}/edit`}
-                        className="rounded-lg border px-3 py-1.5 text-xs font-medium transition hover:bg-muted"
+                        className="rounded-lg border px-3 py-1.5 text-xs font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                       >
                         {t("editAd")}
                       </Link>
@@ -175,8 +171,8 @@ export default async function MarketplacePage({
           {ads.map((ad) => {
             const thumb = thumbnailUrl(ad);
             return (
-              <Link key={ad.id} href={`/marketplace/${ad.id}`} className="group">
-                <Card className="h-full overflow-hidden transition group-hover:border-primary/40">
+              <Link key={ad.id} href={`/marketplace/${ad.id}`} className="focus-card group">
+                <Card className="card-lift h-full overflow-hidden">
                   <div className="flex aspect-[4/3] items-center justify-center bg-muted/60">
                     {thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -186,10 +182,7 @@ export default async function MarketplacePage({
                         className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                       />
                     ) : (
-                      <ImageIcon
-                        className="h-8 w-8 text-muted-foreground/60"
-                        aria-hidden="true"
-                      />
+                      <ImageIcon className="h-8 w-8 text-muted-foreground/60" aria-hidden="true" />
                     )}
                   </div>
                   <CardContent className="space-y-1.5 p-4">
@@ -224,21 +217,13 @@ export default async function MarketplacePage({
   );
 }
 
-function CategoryTab({
-  href,
-  active,
-  label,
-}: {
-  href: string;
-  active: boolean;
-  label: string;
-}) {
+function CategoryTab({ href, active, label }: { href: string; active: boolean; label: string }) {
   return (
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+        "rounded-full border px-3 py-1.5 text-xs font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
         active
           ? "border-primary/40 bg-primary/10 text-primary"
           : "text-muted-foreground hover:bg-muted hover:text-foreground",

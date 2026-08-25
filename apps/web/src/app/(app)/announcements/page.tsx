@@ -20,6 +20,7 @@ export async function generateMetadata() {
 
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
+  const tCommon = await getTranslations("common");
   const locale = await getLocale();
   // No audience argument: the CMS `announcement-visibility` policy filters
   // both queries down to what this user may see.
@@ -65,9 +66,7 @@ export default async function AnnouncementsPage() {
   // visible here. Load the open ones explicitly and pin them on top,
   // deduplicated against the top 20 by documentId (the top-20 copy wins,
   // it carries the fuller populate).
-  const byDocId = new Map(
-    items.filter((a) => a.documentId).map((a) => [a.documentId!, a]),
-  );
+  const byDocId = new Map(items.filter((a) => a.documentId).map((a) => [a.documentId!, a]));
   const openAck = ((requiringAckResult.data?.data ?? []) as Announcement[])
     .filter((a) => a.requiresAck && a.documentId && !myAcks.has(a.documentId))
     .map((a) => byDocId.get(a.documentId!) ?? a);
@@ -79,20 +78,12 @@ export default async function AnnouncementsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        eyebrow={t("eyebrow")}
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
 
       {(failed || requiringAckResult.failed || acksResult.failed) && <FetchErrorBanner />}
 
       {items.length === 0 && openAck.length === 0 ? (
-        <EmptyState
-          icon={Megaphone}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Megaphone} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <>
           {openAck.length > 0 && (
@@ -103,10 +94,15 @@ export default async function AnnouncementsPage() {
               </div>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {openAck.map((a) => (
-                  <AnnouncementCard key={a.documentId ?? a.id} item={a} pinned ack={renderAck(a)}>
-                    <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId }}
-                    />
+                  <AnnouncementCard
+                    key={a.documentId ?? a.id}
+                    item={a}
+                    pinned
+                    locale={locale}
+                    unknownLabel={tCommon("unknown")}
+                    ack={renderAck(a)}
+                  >
+                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
                   </AnnouncementCard>
                 ))}
               </div>
@@ -119,12 +115,21 @@ export default async function AnnouncementsPage() {
                 <Pin className="h-3.5 w-3.5" />
                 {t("pinned")}
               </div>
-              <div className="stagger grid gap-4 md:grid-cols-2">
+              <div
+                className={
+                  pinned.length > 1 ? "stagger grid gap-4 md:grid-cols-2" : "stagger grid gap-4"
+                }
+              >
                 {pinned.map((a) => (
-                  <AnnouncementCard key={a.id} item={a} pinned ack={renderAck(a)}>
-                    <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId }}
-                    />
+                  <AnnouncementCard
+                    key={a.id}
+                    item={a}
+                    pinned
+                    locale={locale}
+                    unknownLabel={tCommon("unknown")}
+                    ack={renderAck(a)}
+                  >
+                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
                   </AnnouncementCard>
                 ))}
               </div>
@@ -136,10 +141,14 @@ export default async function AnnouncementsPage() {
               <div className="text-sm font-medium text-muted-foreground">{t("recent")}</div>
               <div className="stagger space-y-4">
                 {rest.map((a) => (
-                  <AnnouncementCard key={a.id} item={a} ack={renderAck(a)}>
-                    <CommentSection
-                      target={{ type: "announcement", documentId: a.documentId }}
-                    />
+                  <AnnouncementCard
+                    key={a.id}
+                    item={a}
+                    locale={locale}
+                    unknownLabel={tCommon("unknown")}
+                    ack={renderAck(a)}
+                  >
+                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
                   </AnnouncementCard>
                 ))}
               </div>
@@ -151,9 +160,23 @@ export default async function AnnouncementsPage() {
   );
 }
 
-function AnnouncementCard({ item, pinned = false, ack, children }: { item: Announcement; pinned?: boolean; ack?: React.ReactNode; children?: React.ReactNode }) {
+function AnnouncementCard({
+  item,
+  pinned = false,
+  locale,
+  unknownLabel,
+  ack,
+  children,
+}: {
+  item: Announcement;
+  pinned?: boolean;
+  locale: string;
+  unknownLabel: string;
+  ack?: React.ReactNode;
+  children?: React.ReactNode;
+}) {
   const author = item.author ?? null;
-  const authorName = author?.displayName ?? author?.username ?? author?.email ?? "Unknown";
+  const authorName = author?.displayName ?? author?.username ?? author?.email ?? unknownLabel;
   const createdAt = item.createdAt ? new Date(item.createdAt) : null;
 
   return (
@@ -166,11 +189,13 @@ function AnnouncementCard({ item, pinned = false, ack, children }: { item: Annou
               {item.title}
             </CardTitle>
             <CardDescription>
-              {createdAt ? createdAt.toLocaleDateString(undefined, {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              }) : null}
+              {createdAt
+                ? createdAt.toLocaleDateString(locale, {
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })
+                : null}
             </CardDescription>
           </div>
           <div className="flex items-center gap-2">
@@ -189,11 +214,7 @@ function AnnouncementCard({ item, pinned = false, ack, children }: { item: Annou
           {item.body}
         </p>
         {ack && <div className="mt-4">{ack}</div>}
-        {children && (
-          <div className="mt-4 border-t pt-4">
-            {children}
-          </div>
-        )}
+        {children && <div className="mt-4 border-t pt-4">{children}</div>}
       </CardContent>
     </Card>
   );

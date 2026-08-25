@@ -13,10 +13,7 @@ import { NextResponse, type NextRequest } from "next/server";
 export async function POST(req: NextRequest) {
   const secret = process.env.REVALIDATE_SECRET;
   if (!secret) {
-    return NextResponse.json(
-      { error: "REVALIDATE_SECRET is not configured" },
-      { status: 503 },
-    );
+    return NextResponse.json({ error: "REVALIDATE_SECRET is not configured" }, { status: 503 });
   }
 
   const provided = req.headers.get("x-revalidate-secret");
@@ -26,9 +23,7 @@ export async function POST(req: NextRequest) {
 
   const body = (await req.json().catch(() => null)) as { tags?: unknown } | null;
   const tags = Array.isArray(body?.tags)
-    ? (body!.tags as unknown[]).filter(
-        (t): t is string => typeof t === "string" && t.length > 0,
-      )
+    ? (body!.tags as unknown[]).filter((t): t is string => typeof t === "string" && t.length > 0)
     : [];
 
   for (const tag of tags) {

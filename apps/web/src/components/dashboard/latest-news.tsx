@@ -3,6 +3,7 @@ import { getTranslations } from "next-intl/server";
 import { ArrowRight, Megaphone, Pin } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
+import { EmptyState } from "@/components/empty-state";
 import { relativeTime } from "@/lib/relative-time";
 import { initials } from "@/lib/utils";
 
@@ -62,26 +63,17 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
       </div>
 
       {normalised.length === 0 ? (
-        <Card>
-          <CardContent className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <Megaphone className="h-5 w-5" />
-            </div>
-            <p className="font-medium">{tDashboard("noAnnouncementsYet")}</p>
-            <p className="max-w-sm text-sm text-muted-foreground">
-              {tDashboard("noAnnouncementsHint")}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Megaphone}
+          title={tDashboard("noAnnouncementsYet")}
+          hint={tDashboard("noAnnouncementsHint")}
+        />
       ) : (
         <div className="grid gap-4 lg:grid-cols-5">
           {featured && (
-            <Link
-              href="/announcements"
-              className="focus-card block lg:col-span-3"
-            >
+            <Link href="/announcements" className="focus-card block lg:col-span-3">
               <Card className="group h-full overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.06] via-background to-background transition hover:border-primary/40 hover:shadow-md">
-                <CardContent className="flex h-full flex-col gap-4 p-6">
+                <CardContent className="flex flex-col gap-4 p-6">
                   <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-primary">
                     {featured.pinned ? (
                       <>
@@ -94,22 +86,20 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
                     )}
                     <span className="text-muted-foreground">· {relative(featured.createdAt)}</span>
                   </div>
-                  <h3 className="text-2xl font-semibold leading-tight tracking-tight transition group-hover:text-primary">
+                  <h3 className="text-2xl font-semibold leading-tight tracking-tight transition-colors group-hover:text-primary">
                     {featured.title}
                   </h3>
                   <p className="line-clamp-3 text-sm leading-relaxed text-muted-foreground">
                     {featured.body}
                   </p>
-                  <div className="mt-auto flex items-center gap-3 pt-2">
+                  <div className="flex items-center gap-3 pt-2">
                     <Avatar className="h-8 w-8">
                       <AvatarFallback className="text-xs">
                         {initials(featured.authorName)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="text-xs">
-                      <div className="font-medium">
-                        {featured.authorName ?? tCommon("unknown")}
-                      </div>
+                      <div className="font-medium">{featured.authorName ?? tCommon("unknown")}</div>
                       {featured.authorJob && (
                         <div className="text-muted-foreground">{featured.authorJob}</div>
                       )}
@@ -131,12 +121,10 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
                       </div>
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium transition group-hover:text-primary">
+                      <div className="truncate text-sm font-medium transition-colors group-hover:text-primary">
                         {n.title}
                       </div>
-                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                        {n.body}
-                      </p>
+                      <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{n.body}</p>
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                         <span>{n.authorName ?? tCommon("unknown")}</span>
                         <span>·</span>

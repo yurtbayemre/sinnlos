@@ -22,9 +22,7 @@ function reaction(emoji: Reaction["emoji"], authorId?: number): Reaction {
 describe("summarize", () => {
   it("returns one entry per known emoji, all zeroed, for empty input", () => {
     const result = summarize([]);
-    expect(result).toEqual(
-      ALL_EMOJIS.map((emoji) => ({ emoji, count: 0, reacted: false })),
-    );
+    expect(result).toEqual(ALL_EMOJIS.map((emoji) => ({ emoji, count: 0, reacted: false })));
   });
 
   it("preserves the canonical ALL_EMOJIS order regardless of input order", () => {
@@ -33,11 +31,7 @@ describe("summarize", () => {
   });
 
   it("counts reactions per emoji", () => {
-    const result = summarize([
-      reaction("thumbsup"),
-      reaction("thumbsup"),
-      reaction("heart"),
-    ]);
+    const result = summarize([reaction("thumbsup"), reaction("thumbsup"), reaction("heart")]);
     const byEmoji = Object.fromEntries(result.map((r) => [r.emoji, r.count]));
     expect(byEmoji.thumbsup).toBe(2);
     expect(byEmoji.heart).toBe(1);

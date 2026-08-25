@@ -23,9 +23,7 @@ const DEMO_MODE = process.env.DEMO_MODE === "1";
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
 
 if (!IS_BUILD && DEMO_MODE && process.env.NODE_ENV === "production") {
-  throw new Error(
-    "DEMO_MODE=1 must not be enabled in production — it disables all auth checks.",
-  );
+  throw new Error("DEMO_MODE=1 must not be enabled in production — it disables all auth checks.");
 }
 
 // Half-configured Microsoft setups are almost always a mistake — warn
@@ -62,9 +60,7 @@ type StrapiExchangeResponse = {
  * sign-in, and uses a short per-attempt timeout so we don't hang Auth.js
  * indefinitely if Strapi is unreachable.
  */
-async function exchangeForStrapiJwt(
-  accessToken: string,
-): Promise<StrapiExchangeResponse | null> {
+async function exchangeForStrapiJwt(accessToken: string): Promise<StrapiExchangeResponse | null> {
   const url = `${STRAPI_URL}/api/auth/microsoft/callback?access_token=${encodeURIComponent(accessToken)}`;
 
   // Retry only on transient failures (network error / 5xx). A 4xx means
@@ -293,9 +289,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       s.provider = token.provider as string | undefined;
       s.user.id = token.strapiUserId as number | undefined;
       s.user.role = token.strapiRole as string | undefined;
-      s.user.department = token.strapiDepartment as
-        | { id: number; name: string; slug: string }
-        | null;
+      s.user.department = token.strapiDepartment as {
+        id: number;
+        name: string;
+        slug: string;
+      } | null;
       return session;
     },
   },

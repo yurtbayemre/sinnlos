@@ -243,16 +243,17 @@ export function demo(path: string): unknown {
     const spaceSlug = decodeURIComponent(
       path.split("filters[space][slug][$eq]=")[1]!.split("&")[0]!,
     );
-    const pageSlug = decodeURIComponent(
-      path.split("filters[slug][$eq]=")[1]!.split("&")[0]!,
-    );
+    const pageSlug = decodeURIComponent(path.split("filters[slug][$eq]=")[1]!.split("&")[0]!);
     const space = findBy(wikiSpaces, spaceSlug);
     const page = space?.pages?.find((p: AnyEntry) => p.slug === pageSlug);
     return pack(page ? [{ ...page, space }] : []);
   }
   if (path.startsWith("/api/wiki-pages")) {
     const allPages = wikiSpaces.flatMap((s) =>
-      (s.pages ?? []).map((p: AnyEntry) => ({ ...p, space: { id: s.id, name: s.name, slug: s.slug } })),
+      (s.pages ?? []).map((p: AnyEntry) => ({
+        ...p,
+        space: { id: s.id, name: s.name, slug: s.slug },
+      })),
     );
     return pack(allPages);
   }

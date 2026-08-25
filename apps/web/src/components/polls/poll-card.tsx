@@ -83,8 +83,9 @@ export function PollCard({ results }: { results: PollResults }) {
               onClick={() => handleVote(i)}
               disabled={hasVoted || isClosed || isPending}
               className={cn(
-                "relative w-full overflow-hidden rounded-lg border px-4 py-2.5 text-left text-sm transition",
+                "relative w-full overflow-hidden rounded-lg border px-4 py-2.5 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 !showResults && "hover:border-primary/40 hover:bg-muted",
+                isPending && !showResults && "opacity-60",
                 isMyVote && "border-primary/40",
                 (hasVoted || isClosed) && "cursor-default",
               )}
@@ -103,9 +104,7 @@ export function PollCard({ results }: { results: PollResults }) {
                   {isMyVote && <Check className="mr-1.5 inline h-3.5 w-3.5" />}
                   {option}
                 </span>
-                {showResults && (
-                  <span className="text-xs text-muted-foreground">{pct}%</span>
-                )}
+                {showResults && <span className="text-xs text-muted-foreground">{pct}%</span>}
               </div>
             </button>
           );

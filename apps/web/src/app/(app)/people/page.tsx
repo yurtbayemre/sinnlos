@@ -26,18 +26,12 @@ export default async function PeoplePage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("title")}
-      />
+      <PageHeader title={t("title")} />
 
       {failed && <FetchErrorBanner />}
 
       {people.length === 0 ? (
-        <EmptyState
-          icon={Contact}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Contact} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <PeopleGrid people={people} />
       )}

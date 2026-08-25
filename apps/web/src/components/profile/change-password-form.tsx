@@ -60,12 +60,14 @@ export function ChangePasswordForm() {
       </div>
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
-      {state.success && <p className="text-sm text-emerald-600">{state.success}</p>}
+      {state.success && (
+        <p className="text-sm text-emerald-600 dark:text-emerald-400">{state.success}</p>
+      )}
 
       <button
         type="submit"
         disabled={isPending}
-        className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+        className="inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
       >
         {isPending ? tCommon("saving") : t("changePassword")}
       </button>

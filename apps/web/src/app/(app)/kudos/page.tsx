@@ -36,15 +36,13 @@ const VALUE_LABEL_KEY: Record<string, string> = {
 
 export default async function KudosPage() {
   const t = await getTranslations("kudos");
+  const tCommon = await getTranslations("common");
   const tRel = await getTranslations("relativeTime");
   const relative = (d: string | undefined) => relativeTime(d, tRel);
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
     tryFetch(() => api.celebrations(), "celebrations"),
-    tryFetch(
-      () => fetchAllUsers("populate[department]=true&sort=displayName:asc"),
-      "people",
-    ),
+    tryFetch(() => fetchAllUsers("populate[department]=true&sort=displayName:asc"), "people"),
   ]);
 
   const kudosList = (kudosResult.data?.data ?? []) as Kudos[];
@@ -54,10 +52,7 @@ export default async function KudosPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      >
+      <PageHeader title={t("title")} description={t("description")}>
         <GiveKudos people={people} />
       </PageHeader>
 
@@ -71,21 +66,18 @@ export default async function KudosPage() {
           </div>
           <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {celebrations.map((c) => {
-              const name = c.user.displayName ?? c.user.username ?? "Someone";
+              const name = c.user.displayName ?? c.user.username ?? tCommon("unknown");
               const isBirthday = c.type === "birthday";
               return (
                 <Card key={`${c.user.id}-${c.type}`}>
                   <CardContent className="flex items-center gap-3 p-4">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-lg dark:bg-amber-900/30">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-lg">
                       {isBirthday ? "\u{1F382}" : "\u{1F389}"}
                     </div>
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{name}</div>
                       <div className="text-xs text-muted-foreground">
-                        {isBirthday
-                          ? t("birthday")
-                          : t("yearsCount", { years: c.years ?? 0 })}{" "}
-                        ·{" "}
+                        {isBirthday ? t("birthday") : t("yearsCount", { years: c.years ?? 0 })} ·{" "}
                         {c.daysUntil === 0
                           ? t("today")
                           : c.daysUntil === 1
@@ -102,11 +94,7 @@ export default async function KudosPage() {
       )}
 
       {kudosList.length === 0 ? (
-        <EmptyState
-          icon={Award}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Award} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <section className="space-y-3">
           <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -115,8 +103,8 @@ export default async function KudosPage() {
           </div>
           <div className="stagger space-y-3">
             {kudosList.map((k) => {
-              const fromName = k.from?.displayName ?? k.from?.username ?? "Someone";
-              const toName = k.to?.displayName ?? k.to?.username ?? "Someone";
+              const fromName = k.from?.displayName ?? k.from?.username ?? tCommon("unknown");
+              const toName = k.to?.displayName ?? k.to?.username ?? tCommon("unknown");
               return (
                 <Card key={k.id}>
                   <CardContent className="flex items-start gap-4 p-4">

@@ -27,7 +27,7 @@ export function RenewButton({ id }: { id: number }) {
             if (result?.error) setError(true);
           })
         }
-        className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition hover:bg-muted disabled:opacity-50"
+        className="inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
       >
         <RotateCw className="h-3.5 w-3.5" aria-hidden="true" />
         {isPending ? t("renewing") : t("renew")}

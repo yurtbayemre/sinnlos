@@ -15,25 +15,18 @@ export async function generateMetadata() {
 }
 
 export default async function WikiHomePage() {
-  const t = await getTranslations("wiki");
+  const [t, tCommon] = await Promise.all([getTranslations("wiki"), getTranslations("common")]);
   const { data, failed } = await tryFetch(() => api.wiki.spaces(), "wiki");
   const spaces = (data?.data ?? []) as WikiSpace[];
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       {failed && <FetchErrorBanner />}
 
       {spaces.length === 0 ? (
-        <EmptyState
-          icon={BookOpen}
-          title={t("emptySpacesTitle")}
-          hint={t("emptySpacesHint")}
-        />
+        <EmptyState icon={BookOpen} title={t("emptySpacesTitle")} hint={t("emptySpacesHint")} />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {spaces.map((s) => (
@@ -55,7 +48,7 @@ export default async function WikiHomePage() {
                     ) : (
                       <Lock className="h-3 w-3 shrink-0" aria-hidden="true" />
                     )}
-                    <span className="truncate">{s.description ?? "No description"}</span>
+                    <span className="truncate">{s.description ?? tCommon("noDescription")}</span>
                   </CardDescription>
                 </CardHeader>
               </Card>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -18,17 +18,17 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-function formatDate(iso: string, allDay?: boolean) {
+function formatDate(iso: string, locale: string, allDay?: boolean) {
   const d = new Date(iso);
   if (allDay) {
-    return d.toLocaleDateString(undefined, {
+    return d.toLocaleDateString(locale, {
       weekday: "short",
       year: "numeric",
       month: "short",
       day: "numeric",
     });
   }
-  return d.toLocaleDateString(undefined, {
+  return d.toLocaleDateString(locale, {
     weekday: "short",
     year: "numeric",
     month: "short",
@@ -91,7 +91,7 @@ export default async function EventsPage({
   const { view, month } = await searchParams;
   const isMonthView = view === "month";
 
-  const [t, session] = await Promise.all([getTranslations("events"), auth()]);
+  const [t, locale, session] = await Promise.all([getTranslations("events"), getLocale(), auth()]);
 
   // Time-window fetches (see api.events): a global "first 50 by start asc"
   // list would show the 50 OLDEST events forever. The list view gets all
@@ -144,22 +144,24 @@ export default async function EventsPage({
     canRsvp && rsvpDocIds.length > 0
       ? await tryFetch(() => api.events.rsvps(rsvpDocIds), "event-rsvps")
       : { data: null, failed: false };
-  const summaries = buildRsvpSummaries(
-    (rsvpResult.data?.data ?? []) as EventRsvp[],
-    userId,
-  );
+  const summaries = buildRsvpSummaries((rsvpResult.data?.data ?? []) as EventRsvp[], userId);
   const anyFailed = failed || rsvpResult.failed;
 
   const switchLinkClass = (active: boolean) =>
     cn(
-      "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition",
+      "inline-flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-sm font-medium transition-colors",
+      "outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
       active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
     );
 
   return (
     <div className="space-y-8">
       <PageHeader title={t("title")} description={t("description")}>
-        <div role="group" aria-label={t("viewLabel")} className="inline-flex rounded-xl border p-0.5">
+        <div
+          role="group"
+          aria-label={t("viewLabel")}
+          className="inline-flex rounded-xl border p-0.5"
+        >
           <Link
             href="/events"
             aria-current={!isMonthView ? "page" : undefined}
@@ -199,6 +201,7 @@ export default async function EventsPage({
                     key={e.id}
                     event={e}
                     t={t}
+                    locale={locale}
                     rsvp={
                       canRsvp && e.rsvpEnabled && typeof e.documentId === "string"
                         ? {
@@ -218,7 +221,7 @@ export default async function EventsPage({
               <div className="text-sm font-medium text-muted-foreground">{t("past")}</div>
               <div className="stagger space-y-3">
                 {past.map((e) => (
-                  <EventCard key={e.id} event={e} muted t={t} rsvp={null} />
+                  <EventCard key={e.id} event={e} muted t={t} locale={locale} rsvp={null} />
                 ))}
               </div>
             </section>
@@ -233,25 +236,25 @@ function EventCard({
   event,
   muted = false,
   t,
+  locale,
   rsvp,
 }: {
   event: Event;
   muted?: boolean;
   t: (key: string, values?: Record<string, string>) => string;
+  locale: string;
   /** null = no RSVP UI (disabled, guest, past event). */
   rsvp: { summary: EventRsvpSummary; selfName: string | null } | null;
 }) {
   const startDate = new Date(event.start);
-  const month = startDate.toLocaleDateString(undefined, { month: "short" });
+  const month = startDate.toLocaleDateString(locale, { month: "short" });
   const day = startDate.getDate();
 
   return (
     <Card className={muted ? "opacity-60" : undefined}>
       <CardContent className="flex items-start gap-4 p-4 sm:p-6">
         <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <span className="text-[10px] font-semibold uppercase leading-none">
-            {month}
-          </span>
+          <span className="text-[10px] font-semibold uppercase leading-none">{month}</span>
           <span className="text-xl font-bold leading-tight">{day}</span>
         </div>
         <div className="min-w-0 flex-1">
@@ -259,9 +262,16 @@ function EventCard({
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" aria-hidden="true" />
-              {formatDate(event.start, event.allDay)}
+              {formatDate(event.start, locale, event.allDay)}
               {event.end && !event.allDay && (
-                <> &ndash; {new Date(event.end).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</>
+                <>
+                  {" "}
+                  &ndash;{" "}
+                  {new Date(event.end).toLocaleTimeString(locale, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </>
               )}
             </span>
             {event.location && (
@@ -287,8 +297,9 @@ function EventCard({
         </div>
         <a
           href={`/events/${event.id}/ics`}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition hover:bg-muted"
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           title={t("downloadIcs")}
+          aria-label={t("downloadIcs")}
         >
           <Download className="h-4 w-4" aria-hidden="true" />
         </a>

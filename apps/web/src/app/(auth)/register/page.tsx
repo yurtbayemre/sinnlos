@@ -27,7 +27,7 @@ export default async function RegisterPage() {
         aria-hidden="true"
         className="pointer-events-none absolute -top-32 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-primary/10 blur-3xl"
       />
-      <Card className="w-full max-w-md animate-fade-in-up shadow-lg">
+      <Card className="w-full max-w-md animate-fade-in-up shadow-lg hover:shadow-lg">
         <CardHeader className="text-center">
           <div
             aria-hidden="true"
@@ -36,9 +36,7 @@ export default async function RegisterPage() {
             S
           </div>
           <CardTitle className="text-2xl">{t("createYourAccount")}</CardTitle>
-          <CardDescription>
-            {t("registerDesc")}
-          </CardDescription>
+          <CardDescription>{t("registerDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <RegisterForm />

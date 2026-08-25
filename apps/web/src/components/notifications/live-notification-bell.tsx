@@ -7,11 +7,7 @@ import type { Notification } from "@/lib/types";
 
 const POLL_MS = 30_000;
 
-export function LiveNotificationBell({
-  initial,
-}: {
-  initial: Notification[];
-}) {
+export function LiveNotificationBell({ initial }: { initial: Notification[] }) {
   const [notifications, setNotifications] = useState(initial);
 
   const refetch = useCallback(async () => {

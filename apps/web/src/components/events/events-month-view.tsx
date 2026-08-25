@@ -141,20 +141,20 @@ export async function EventsMonthView({
           <Link
             href={`/events?view=month&month=${prevParam}`}
             aria-label={t("prevMonth")}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border transition hover:bg-muted"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Link>
           <Link
             href="/events?view=month"
-            className="inline-flex h-8 items-center rounded-lg border px-3 text-xs font-medium transition hover:bg-muted"
+            className="inline-flex h-8 items-center rounded-lg border px-3 text-xs font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             {t("currentMonth")}
           </Link>
           <Link
             href={`/events?view=month&month=${nextParam}`}
             aria-label={t("nextMonth")}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border transition hover:bg-muted"
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
           </Link>

@@ -1,16 +1,38 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import { useTranslations } from "next-intl";
+
 /**
  * Thin indeterminate progress bar rendered at the top of the viewport
  * whenever Next.js is loading a new route segment. Used from the route
  * loading.tsx files so it shows on every navigation between app pages.
+ *
+ * Portaled to <body>: loading.tsx renders inside PageFade, whose
+ * persistent transform (animate-fade-in-up with fill both) makes it the
+ * containing block for fixed descendants — without the portal the bar
+ * sticks to the content column instead of the viewport. Renders null
+ * before mount (SSR has no document to portal into).
  */
 export function RouteProgress() {
-  return (
+  const tCommon = useTranslations("common");
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
+  return createPortal(
     <div
       role="progressbar"
-      aria-label="Loading page"
+      aria-label={tCommon("loadingPage")}
       className="fixed left-0 right-0 top-0 z-[60] h-0.5 overflow-hidden bg-transparent"
     >
-      <div className="absolute top-0 h-full rounded-full bg-primary/80 shadow-[0_0_8px_rgba(99,102,241,0.6)] animate-indeterminate" />
-    </div>
+      <div className="absolute top-0 h-full rounded-full bg-primary/80 shadow-[0_0_8px_hsl(var(--primary)/0.6)] animate-indeterminate" />
+    </div>,
+    document.body,
   );
 }

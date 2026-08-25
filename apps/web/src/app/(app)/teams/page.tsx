@@ -27,11 +27,7 @@ export default async function TeamsPage() {
       {failed && <FetchErrorBanner />}
 
       {items.length === 0 ? (
-        <EmptyState
-          icon={Users2}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={Users2} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((team) => (

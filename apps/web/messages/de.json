@@ -24,7 +24,11 @@
     "comment": "{count, plural, one {# Kommentar} other {# Kommentare}}",
     "person": "{count, plural, one {# Person} other {# Personen}}",
     "inThisDepartment": "in dieser Abteilung",
-    "noDescription": "Keine Beschreibung"
+    "noDescription": "Keine Beschreibung",
+    "mainNav": "Hauptnavigation",
+    "bottomNav": "Untere Navigation",
+    "loadingPage": "Seite lädt",
+    "signedOut": "Abgemeldet"
   },
   "nav": {
     "dashboard": "Übersicht",
@@ -83,7 +87,8 @@
     "featured": "Hervorgehoben",
     "openAcksTitle": "Offene Bestätigungen",
     "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
-    "openAcksAction": "Jetzt bestätigen"
+    "openAcksAction": "Jetzt bestätigen",
+    "friendFallback": "Kolleg:in"
   },
   "quickLinks": {
     "eyebrow": "Wichtige Links",
@@ -109,7 +114,8 @@
     "collapse": "Einklappen",
     "expand": "Ausklappen",
     "emptyTitle": "Noch keine Personen",
-    "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden."
+    "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden.",
+    "filterByDepartment": "Nach Abteilung filtern"
   },
   "events": {
     "title": "Termine",
@@ -216,7 +222,8 @@
     "leadership": "Führung",
     "customerFocus": "Kundenorientierung",
     "excellence": "Exzellenz",
-    "sendFailed": "Kudos konnten nicht gesendet werden – bitte erneut versuchen."
+    "sendFailed": "Kudos konnten nicht gesendet werden – bitte erneut versuchen.",
+    "removeRecipient": "Auswahl entfernen"
   },
   "marketplace": {
     "title": "Kleinanzeigen",
@@ -427,16 +434,27 @@
     "label": "Suche (Strg+K)",
     "placeholder": "Wiki, Personen, Teams suchen…",
     "searchPlaceholder": "Suchen…",
-    "globalSearch": "Globale Suche"
+    "globalSearch": "Globale Suche",
+    "pollCloses": "Endet am {date}",
+    "pollOpen": "Offen"
   },
   "theme": {
     "toggle": "Design wechseln"
   },
   "errors": {
     "contentLoadFailed": "Einige Inhalte konnten nicht geladen werden",
-    "cmsUnreachable": "Das CMS ist nicht erreichbar oder hat einen Fehler zurückgegeben. Inhalte können unvollständig sein – aktualisieren Sie die Seite, sobald Strapi wieder verfügbar ist."
+    "cmsUnreachable": "Das CMS ist nicht erreichbar oder hat einen Fehler zurückgegeben. Inhalte können unvollständig sein – aktualisieren Sie die Seite, sobald Strapi wieder verfügbar ist.",
+    "somethingWrong": "Da ist etwas schiefgelaufen",
+    "somethingWrongHint": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
+    "tryAgain": "Erneut versuchen",
+    "notFoundTitle": "Seite nicht gefunden",
+    "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
+    "backToDashboard": "Zurück zum Dashboard"
   },
   "locale": {
     "label": "Sprache"
+  },
+  "localeSwitcher": {
+    "label": "Sprache wählen"
   }
 }

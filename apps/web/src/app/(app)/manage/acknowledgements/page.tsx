@@ -111,9 +111,9 @@ export default async function AcknowledgementReportPage() {
     announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed;
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
   // unfiltered, and it keeps the report honest if the query ever changes.
-  const announcements = (
-    (announcementsResult.data?.data ?? []) as ReportAnnouncement[]
-  ).filter((a) => a.requiresAck);
+  const announcements = ((announcementsResult.data?.data ?? []) as ReportAnnouncement[]).filter(
+    (a) => a.requiresAck,
+  );
   const acks = (acksResult.data?.acks ?? []) as Acknowledgement[];
   const users = usersResult.data?.users ?? [];
 
@@ -142,7 +142,11 @@ export default async function AcknowledgementReportPage() {
    * directory of >2000 users no longer silently shrinks the denominator
    * into a false-green rate (#14) — see users.ts.
    */
-  const { usersUnknown, teamsUnknown, truncated: reportTruncated } = reportCompleteness({
+  const {
+    usersUnknown,
+    teamsUnknown,
+    truncated: reportTruncated,
+  } = reportCompleteness({
     usersFailed: usersResult.failed,
     usersTruncated: usersResult.data?.truncated ?? false,
     teamsFailed: teamsResult.failed,
@@ -212,8 +216,7 @@ export default async function AcknowledgementReportPage() {
     );
     const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
     const ackedCount = targetUsers.length - openUsers.length;
-    const pct =
-      targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
+    const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
     return { announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown };
   });
 
@@ -222,7 +225,7 @@ export default async function AcknowledgementReportPage() {
       <div>
         <Link
           href="/manage"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {tAdmin("title")}
@@ -252,80 +255,82 @@ export default async function AcknowledgementReportPage() {
         <EmptyState icon={ClipboardCheck} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-4">
-          {rows.map(({ announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown }) => (
-            <Card key={a.id}>
-              <CardHeader>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="space-y-1">
-                    <CardTitle className="text-base">{a.title}</CardTitle>
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                      {audienceLabels(a).map((label) => (
-                        <span key={label}>{label}</span>
-                      ))}
-                      {a.ackDeadline && (
-                        <span className="inline-flex items-center gap-1">
-                          <Clock className="h-3 w-3" aria-hidden="true" />
-                          {t("deadline", { date: formatDate(a.ackDeadline) })}
-                        </span>
-                      )}
+          {rows.map(
+            ({ announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown }) => (
+              <Card key={a.id}>
+                <CardHeader>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <CardTitle className="text-base">{a.title}</CardTitle>
+                      <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                        {audienceLabels(a).map((label) => (
+                          <span key={label}>{label}</span>
+                        ))}
+                        {a.ackDeadline && (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="h-3 w-3" aria-hidden="true" />
+                            {t("deadline", { date: formatDate(a.ackDeadline) })}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    {/* No percentage without a known denominator — an
+                    <div className="shrink-0 text-right">
+                      {/* No percentage without a known denominator — an
                         indeterminable audience must not read as 0 of 0. */}
-                    <div className="text-2xl font-semibold tracking-tight">
-                      {targetUnknown ? "–" : `${pct}%`}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {targetUnknown
-                        ? t("audienceUnknown")
-                        : t("ackedOf", { acked: ackedCount, total: targetUsers.length })}
+                      <div className="text-2xl font-semibold tracking-tight">
+                        {targetUnknown ? "–" : `${pct}%`}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {targetUnknown
+                          ? t("audienceUnknown")
+                          : t("ackedOf", { acked: ackedCount, total: targetUsers.length })}
+                      </div>
                     </div>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {!targetUnknown && (
-                  <div className="h-2 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-all"
-                      style={{ width: `${pct}%` }}
-                    />
-                  </div>
-                )}
-                {targetUnknown ? (
-                  <div className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400">
-                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-                    {/* The headline already sits in the card header; this
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {!targetUnknown && (
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  )}
+                  {targetUnknown ? (
+                    <div className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      {/* The headline already sits in the card header; this
                         line explains WHY there is no rate. */}
-                    <span>{t("audienceUnknownHint")}</span>
-                  </div>
-                ) : openUsers.length === 0 ? (
-                  <div className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
-                    <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-                    {t("allAcked")}
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <div className="inline-flex items-center gap-1.5 text-sm font-medium">
-                      <UserX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                      {t("openUsers", { count: openUsers.length })}
+                      <span>{t("audienceUnknownHint")}</span>
                     </div>
-                    <ul className="flex flex-wrap gap-1.5">
-                      {openUsers.map((u) => (
-                        <li
-                          key={u.id}
-                          className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
-                        >
-                          {userName(u)}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
+                  ) : openUsers.length === 0 ? (
+                    <div className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+                      <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
+                      {t("allAcked")}
+                    </div>
+                  ) : (
+                    <div className="space-y-1.5">
+                      <div className="inline-flex items-center gap-1.5 text-sm font-medium">
+                        <UserX className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                        {t("openUsers", { count: openUsers.length })}
+                      </div>
+                      <ul className="flex flex-wrap gap-1.5">
+                        {openUsers.map((u) => (
+                          <li
+                            key={u.id}
+                            className="rounded-full border bg-muted/40 px-2.5 py-0.5 text-xs text-muted-foreground"
+                          >
+                            {userName(u)}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            ),
+          )}
         </div>
       )}
     </div>

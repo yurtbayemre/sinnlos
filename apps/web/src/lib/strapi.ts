@@ -309,8 +309,7 @@ export const api = {
         "/api/polls?populate[departments]=true&populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
         { tag: "polls", revalidate: 30 },
       ),
-    results: (id: number) =>
-      strapi<any>(`/api/polls/${id}/results`, { noCache: true }),
+    results: (id: number) => strapi<any>(`/api/polls/${id}/results`, { noCache: true }),
   },
   documents: {
     // noCache since document-visibility filters per user (department scoping):
@@ -405,6 +404,5 @@ export const api = {
         { maxPages: 5, label: "quick links" },
       ),
   },
-  celebrations: () =>
-    strapi<{ data: any[] }>("/api/celebrations?window=30", { noCache: true }),
+  celebrations: () => strapi<{ data: any[] }>("/api/celebrations?window=30", { noCache: true }),
 };

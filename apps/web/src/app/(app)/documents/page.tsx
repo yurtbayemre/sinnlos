@@ -1,5 +1,5 @@
 import { FileText, Download, File } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { STRAPI_PUBLIC_URL } from "@/lib/config";
@@ -14,17 +14,21 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-function formatSize(bytes?: number) {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
+// Strapi's upload plugin reports `size` in KILOBYTES, not bytes — convert
+// first, otherwise a 1 MB file renders as "0.97 B".
+function formatSize(sizeInKb?: number) {
+  if (!sizeInKb) return "";
+  const bytes = sizeInKb * 1024;
+  if (bytes < 1024) return `${Math.round(bytes)} B`;
   if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
 export default async function DocumentsPage() {
-  const [t, tCommon] = await Promise.all([
+  const [t, tCommon, locale] = await Promise.all([
     getTranslations("documents"),
     getTranslations("common"),
+    getLocale(),
   ]);
   const { data, failed } = await tryFetch(() => api.documents.list(), "documents");
   const docs = (data?.data ?? []) as Document[];
@@ -38,19 +42,12 @@ export default async function DocumentsPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader
-        title={t("title")}
-        description={t("description")}
-      />
+      <PageHeader title={t("title")} description={t("description")} />
 
       {failed && <FetchErrorBanner />}
 
       {docs.length === 0 ? (
-        <EmptyState
-          icon={FileText}
-          title={t("emptyTitle")}
-          hint={t("emptyHint")}
-        />
+        <EmptyState icon={FileText} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         Array.from(grouped.entries()).map(([category, items]) => (
           <section key={category} className="space-y-3">
@@ -68,7 +65,7 @@ export default async function DocumentsPage() {
                 return (
                   <Card key={doc.id}>
                     <CardContent className="flex items-center gap-4 p-4">
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                         <File className="h-5 w-5" aria-hidden="true" />
                       </div>
                       <div className="min-w-0 flex-1">
@@ -84,7 +81,7 @@ export default async function DocumentsPage() {
                           {doc.updatedAt && (
                             <span>
                               {tCommon("updated")}{" "}
-                              {new Date(doc.updatedAt).toLocaleDateString(undefined, {
+                              {new Date(doc.updatedAt).toLocaleDateString(locale, {
                                 month: "short",
                                 day: "numeric",
                                 year: "numeric",
@@ -97,8 +94,9 @@ export default async function DocumentsPage() {
                         <a
                           href={fileUrl}
                           download
-                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition hover:bg-muted"
+                          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                           title={tCommon("download")}
+                          aria-label={tCommon("download")}
                         >
                           <Download className="h-4 w-4" aria-hidden="true" />
                         </a>

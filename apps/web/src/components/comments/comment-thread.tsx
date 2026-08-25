@@ -75,17 +75,12 @@ export function CommentThread({
         <div className="space-y-3">
           {comments.map((c) => {
             const name =
-              c.author?.displayName ??
-              c.author?.username ??
-              c.author?.email ??
-              tCommon("unknown");
+              c.author?.displayName ?? c.author?.username ?? c.author?.email ?? tCommon("unknown");
             const isOwner = currentUserId != null && c.author?.id === currentUserId;
             return (
               <div key={c.id} className="flex gap-3">
                 <Avatar className="h-8 w-8 shrink-0">
-                  <AvatarFallback className="text-xs">
-                    {initials(name)}
-                  </AvatarFallback>
+                  <AvatarFallback className="text-xs">{initials(name)}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline gap-2">
@@ -98,7 +93,7 @@ export function CommentThread({
                         type="button"
                         onClick={() => handleDelete(c.id)}
                         disabled={isPending}
-                        className="ml-auto text-muted-foreground transition hover:text-destructive"
+                        className="ml-auto rounded-md text-muted-foreground outline-none transition-colors hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                         aria-label={tComments("deleteComment")}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -133,7 +128,7 @@ export function CommentThread({
         <button
           type="submit"
           disabled={isPending || !canWrite || !body.trim()}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition hover:bg-primary/90 disabled:opacity-50"
+          className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
           aria-label={tComments("sendComment")}
         >
           <Send className="h-4 w-4" />

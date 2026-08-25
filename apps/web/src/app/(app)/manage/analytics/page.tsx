@@ -12,7 +12,7 @@ import {
   ThumbsUp,
   BookOpen,
 } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
@@ -26,10 +26,9 @@ export async function generateMetadata() {
 
 async function count(path: string): Promise<number> {
   try {
-    const res = await strapi<StrapiListResponse<any>>(
-      `${path}&pagination[pageSize]=1`,
-      { noCache: true },
-    );
+    const res = await strapi<StrapiListResponse<any>>(`${path}&pagination[pageSize]=1`, {
+      noCache: true,
+    });
     return (res as any).meta?.pagination?.total ?? (res as any).data?.length ?? 0;
   } catch (e) {
     unstable_rethrow(e);
@@ -60,10 +59,9 @@ async function recentActivity() {
         "/api/comments?sort=createdAt:desc&pagination[pageSize]=5&populate[author]=true",
         { noCache: true },
       ),
-      strapi<StrapiListResponse<any>>(
-        "/api/reactions?sort=createdAt:desc&pagination[pageSize]=1",
-        { noCache: true },
-      ),
+      strapi<StrapiListResponse<any>>("/api/reactions?sort=createdAt:desc&pagination[pageSize]=1", {
+        noCache: true,
+      }),
       strapi<StrapiListResponse<any>>(
         "/api/notifications?sort=createdAt:desc&pagination[pageSize]=1&filters[readAt][$null]=true",
         { noCache: true },
@@ -86,9 +84,11 @@ export default async function AnalyticsPage() {
     redirect("/");
   }
 
-  const [t, tAdmin] = await Promise.all([
+  const [t, tAdmin, tCommon, locale] = await Promise.all([
     getTranslations("analytics"),
     getTranslations("admin"),
+    getTranslations("common"),
+    getLocale(),
   ]);
 
   const [
@@ -115,15 +115,30 @@ export default async function AnalyticsPage() {
 
   const stats = [
     { label: t("users"), value: userCount, icon: Users, color: "text-blue-500" },
-    { label: t("announcements"), value: announcementCount, icon: Megaphone, color: "text-amber-500" },
+    {
+      label: t("announcements"),
+      value: announcementCount,
+      icon: Megaphone,
+      color: "text-amber-500",
+    },
     { label: t("events"), value: eventCount, icon: Calendar, color: "text-emerald-500" },
     { label: t("wikiPages"), value: wikiPageCount, icon: BookOpen, color: "text-indigo-500" },
     { label: t("wikiSpaces"), value: wikiSpaceCount, icon: BookOpen, color: "text-violet-500" },
     { label: t("documents"), value: documentCount, icon: FileText, color: "text-rose-500" },
     { label: t("polls"), value: pollCount, icon: BarChart3, color: "text-cyan-500" },
     { label: t("comments"), value: commentCount, icon: MessageCircle, color: "text-orange-500" },
-    { label: t("reactions"), value: activity.totalReactions, icon: ThumbsUp, color: "text-pink-500" },
-    { label: t("unreadNotifications"), value: activity.unreadNotifications, icon: Bell, color: "text-red-500" },
+    {
+      label: t("reactions"),
+      value: activity.totalReactions,
+      icon: ThumbsUp,
+      color: "text-pink-500",
+    },
+    {
+      label: t("unreadNotifications"),
+      value: activity.unreadNotifications,
+      icon: Bell,
+      color: "text-red-500",
+    },
   ];
 
   return (
@@ -131,15 +146,13 @@ export default async function AnalyticsPage() {
       <div>
         <Link
           href="/manage"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
+          className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
           {tAdmin("title")}
         </Link>
         <h1 className="mt-2 text-3xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-1 text-muted-foreground">
-          {t("description")}
-        </p>
+        <p className="mt-1 text-muted-foreground">{t("description")}</p>
       </div>
 
       <section className="space-y-3">
@@ -148,7 +161,9 @@ export default async function AnalyticsPage() {
           {stats.map((s) => (
             <Card key={s.label}>
               <CardContent className="flex items-center gap-4 p-4">
-                <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${s.color}`}>
+                <div
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${s.color}`}
+                >
                   <s.icon className="h-5 w-5" aria-hidden="true" />
                 </div>
                 <div>
@@ -172,16 +187,14 @@ export default async function AnalyticsPage() {
                   <div className="min-w-0 flex-1">
                     <div className="text-sm">
                       <span className="font-medium">
-                        {c.author?.displayName ?? c.author?.username ?? "Someone"}
-                      </span>
-                      {" "}{t("commented")}
+                        {c.author?.displayName ?? c.author?.username ?? tCommon("unknown")}
+                      </span>{" "}
+                      {t("commented")}
                     </div>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      {c.body}
-                    </p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{c.body}</p>
                     {c.createdAt && (
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {new Date(c.createdAt).toLocaleDateString(undefined, {
+                        {new Date(c.createdAt).toLocaleDateString(locale, {
                           month: "short",
                           day: "numeric",
                           hour: "2-digit",

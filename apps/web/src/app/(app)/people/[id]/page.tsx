@@ -1,13 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  ArrowLeft,
-  Building2,
-  Mail,
-  MapPin,
-  Phone,
-  Users2,
-} from "lucide-react";
+import { ArrowLeft, Building2, Mail, MapPin, Phone, Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
 import { mediaUrl } from "@/lib/config";
@@ -22,25 +15,17 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   const { id } = await params;
   const { data } = await tryFetch(
     () =>
-      strapi<any>(
-        `/api/users/${id}?populate[department]=true&populate[avatar]=true`,
-        { noCache: true },
-      ),
+      strapi<any>(`/api/users/${id}?populate[department]=true&populate[avatar]=true`, {
+        noCache: true,
+      }),
     "person-meta",
   );
   return { title: data?.displayName ?? data?.username ?? "Person" };
 }
 
-export default async function PersonPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [t, tNav] = await Promise.all([
-    getTranslations("people"),
-    getTranslations("nav"),
-  ]);
+  const [t, tNav] = await Promise.all([getTranslations("people"), getTranslations("nav")]);
   const { data, failed } = await tryFetch(
     () =>
       strapi<any>(
@@ -54,11 +39,7 @@ export default async function PersonPage({
 
   const person = data as UserLite | null;
   if (!person) {
-    return (
-      <div className="space-y-6">
-        {failed && <FetchErrorBanner />}
-      </div>
-    );
+    return <div className="space-y-6">{failed && <FetchErrorBanner />}</div>;
   }
 
   const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
@@ -68,7 +49,7 @@ export default async function PersonPage({
     <div className="space-y-6">
       <Link
         href="/people"
-        className="inline-flex items-center gap-1 text-sm text-muted-foreground transition hover:text-foreground"
+        className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         {tNav("people")}
@@ -146,15 +127,13 @@ export default async function PersonPage({
                     <Link
                       key={t.id}
                       href={`/teams/${t.slug}`}
-                      className="flex items-center gap-3 rounded-lg p-2 text-sm transition hover:bg-muted"
+                      className="flex items-center gap-3 rounded-lg p-2 text-sm transition-colors hover:bg-muted"
                     >
                       <Users2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                       <div>
                         <div className="font-medium">{t.name}</div>
                         {t.department?.name && (
-                          <div className="text-xs text-muted-foreground">
-                            {t.department.name}
-                          </div>
+                          <div className="text-xs text-muted-foreground">{t.department.name}</div>
                         )}
                       </div>
                     </Link>
@@ -202,7 +181,7 @@ function PersonMini({ user }: { user: UserLite }) {
   return (
     <Link
       href={`/people/${user.id}`}
-      className="flex items-center gap-3 rounded-lg p-2 transition hover:bg-muted"
+      className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted"
     >
       <Avatar className="h-9 w-9">
         {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} /> : null}
@@ -211,9 +190,7 @@ function PersonMini({ user }: { user: UserLite }) {
       <div className="min-w-0">
         <div className="truncate text-sm font-medium">{name}</div>
         {user.jobTitle && (
-          <div className="truncate text-xs text-muted-foreground">
-            {user.jobTitle}
-          </div>
+          <div className="truncate text-xs text-muted-foreground">{user.jobTitle}</div>
         )}
       </div>
     </Link>

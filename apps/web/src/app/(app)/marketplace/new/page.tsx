@@ -22,7 +22,7 @@ export default async function NewClassifiedPage() {
     <div className="space-y-8">
       <Link
         href="/marketplace"
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition hover:text-foreground"
+        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />
         {t("backToList")}

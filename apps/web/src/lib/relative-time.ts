@@ -16,10 +16,7 @@ export type RelativeTimeKey =
   | "yesterday"
   | "daysAgo";
 
-export type RelativeTimeT = (
-  key: RelativeTimeKey,
-  values?: Record<string, number>,
-) => string;
+export type RelativeTimeT = (key: RelativeTimeKey, values?: Record<string, number>) => string;
 
 const MIN = 60_000;
 const HOUR = 3_600_000;
@@ -36,6 +33,11 @@ export function relativeTime(
     granularity?: "minute" | "day";
     /** Include the year in the absolute-date fallback (>= 7 days old). */
     longDate?: boolean;
+    /**
+     * BCP 47 locale for the absolute-date fallback (>= 7 days old).
+     * Defaults to the runtime locale (previous behavior) when omitted.
+     */
+    locale?: string;
   } = {},
 ): string {
   if (!input) return "";
@@ -43,7 +45,7 @@ export function relativeTime(
   if (Number.isNaN(date.getTime())) return "";
 
   const diff = Date.now() - date.getTime();
-  const { granularity = "day", longDate = false } = opts;
+  const { granularity = "day", longDate = false, locale } = opts;
 
   if (granularity === "minute") {
     if (diff < MIN) return t("justNow");
@@ -55,7 +57,7 @@ export function relativeTime(
   }
   if (diff < 7 * DAY) return t("daysAgo", { days: Math.floor(diff / DAY) });
 
-  return date.toLocaleDateString(undefined, {
+  return date.toLocaleDateString(locale, {
     ...(longDate ? { year: "numeric" as const } : {}),
     month: "short",
     day: "numeric",

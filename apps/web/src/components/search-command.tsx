@@ -167,7 +167,7 @@ export function SearchCommand() {
               aria-modal="true"
               aria-label={tSearch("globalSearch")}
               label={tSearch("globalSearch")}
-              className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-xl border bg-background shadow-2xl"
+              className="relative w-full max-w-lg animate-scale-in overflow-hidden rounded-2xl border bg-background shadow-2xl"
               onMouseDown={(e) => e.stopPropagation()}
               shouldFilter={query.length < 2}
             >
