@@ -203,8 +203,26 @@ filter accordingly.
 
 ### 2.4 Live updates via SSE (research + implementation)
 
-**Status: ⏳ open** — live updates still run on the 10s/30s visible-tab
-polling described below.
+**Status: ✅ shipped 2026-09 (issues #17/#27, branch feat/live-sse)** — one
+multiplexed `EventSource` per visible tab (`/live/stream`, layout-level
+`LiveEventsProvider`), CMS→web pings via `emitLiveEvent()` (revalidate.ts
+pattern, same `REVALIDATE_SECRET`), in-memory bus, content-free pings,
+refetch through the caller's own session. Polling demoted to backstop
+(healthy 60s/120s, degraded = the old 10s/30s). Kill switch
+`LIVE_EVENTS_DISABLED=1`. See docs/architecture.md §6 (Live-Updates).
+
+Two details below turned out WRONG during implementation and are corrected
+in the shipped design — kept here so nobody "fixes" the code back to the
+sketch: the endpoints live at `/live/stream` + `/api/live/emit` (NOT
+`/api/events*` — external /api/* is swallowed by the cms Traefik rule,
+which is exactly what makes the emit ingest internal-only), and channels
+key on `targetDocumentId` (NOT the numeric `targetId`, which died with
+issue #25). Also answered from the spike list: Traefik's websecure
+entrypoint needed `respondingTimeouts.readTimeout: 0` (host traefik.yaml —
+the 3.x default of 60s kills idle streams), comment/reaction channels are
+subscription-based rather than broadcast (documentIds are capability
+tokens, §5.17), and the heartbeat must be a real `hb` event because SSE
+comment frames are invisible to the EventSource API.
 
 **Value:** changes made by one session (comments, reactions, later
 notifications) appear in other open sessions in under a second. Since

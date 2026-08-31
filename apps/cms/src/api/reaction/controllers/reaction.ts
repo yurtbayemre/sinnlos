@@ -4,6 +4,7 @@ import {
   resolveWriteTarget,
   targetMatchWhere,
 } from "../../../utils/comment-target";
+import { emitLiveEvent } from "../../../utils/live-events";
 
 const REACTION_UID = "api::reaction.reaction";
 
@@ -50,6 +51,10 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
       await strapi.db.query(REACTION_UID).delete({
         where: { id: existing.id },
       });
+      // Belt-and-braces alongside the global DB-lifecycle subscriber:
+      // whether afterDelete fires for db.query deletes is version-
+      // sensitive, and the 100ms emit batch dedupes the channel anyway.
+      emitLiveEvent({ kind: "content", targetType, targetDocumentId });
       return ctx.send({ data: null, toggled: "removed" });
     }
 

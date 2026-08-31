@@ -76,6 +76,24 @@ for ((i = 1; i <= attempts; i++)); do
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "${SMOKE_URL}" || echo 000)"
   if [[ "${code}" =~ ^(200|301|302|307|308)$ ]]; then
     log "Smoke check OK (HTTP ${code} after ${i} attempt(s))"
+    # --- 5. Live-pipeline smoke (issue #17/#27) ------------------------------
+    # The SSE chain is fire-and-forget and can fail silently while every
+    # container reports healthy — this probe is the only end-to-end proof.
+    # Skipped (with a loud note) when the demo credentials file is absent
+    # or the kill switch is on.
+    if [[ "${LIVE_EVENTS_DISABLED:-0}" == "1" ]]; then
+      log "live-smoke skipped: LIVE_EVENTS_DISABLED=1"
+    elif [[ -r "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" ]]; then
+      log "Running live-pipeline smoke (infra/live-smoke.sh)"
+      if ! "${SCRIPT_DIR}/live-smoke.sh"; then
+        echo "ERROR: live-smoke failed — the SSE pipeline is NOT delivering pings." >&2
+        echo "       App still works on polling fallback; investigate before calling this deploy done:" >&2
+        echo "       docker logs ${PROJECT}-cms-1 2>&1 | grep live-emit ; docker logs ${PROJECT}-web-1 2>&1 | grep '\\[live\\]'" >&2
+        exit 1
+      fi
+    else
+      log "live-smoke SKIPPED: demo credentials file not readable — run infra/live-smoke.sh manually"
+    fi
     log "Deploy complete."
     exit 0
   fi

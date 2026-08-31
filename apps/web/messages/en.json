@@ -194,7 +194,8 @@
     "ackConfirmed": "Confirmed",
     "ackConfirmedAt": "Confirmed on {date}",
     "ackDeadline": "Confirm by {date}",
-    "ackFailed": "Confirmation failed. Please try again."
+    "ackFailed": "Confirmation failed. Please try again.",
+    "liveNewHint": "New announcements — show"
   },
   "kudos": {
     "title": "Kudos",
