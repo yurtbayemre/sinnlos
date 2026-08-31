@@ -67,6 +67,27 @@ STREAM_LOG="${WORKDIR}/stream.log"
 COOKIES="${WORKDIR}/cookies.txt"
 cleanup() {
   [[ -n "${STREAM_PID:-}" ]] && kill "${STREAM_PID}" 2>/dev/null || true
+  # Best-effort: remove the probe comments this (and any earlier crashed)
+  # run left behind — every deploy runs this script, and without cleanup
+  # the newest announcement accumulates two "[live-smoke]" comments per
+  # deploy. Runs in the EXIT trap so the failure paths clean up too.
+  docker exec -i "${CMS_CONTAINER}" node --input-type=module - \
+    "${SMOKE_AUTHOR_EMAIL}" "${SMOKE_AUTHOR_PASSWORD}" << 'NODE' 2>/dev/null || true
+const [email, password] = process.argv.slice(2);
+const base = "http://127.0.0.1:1337";
+const { jwt } = await (await fetch(`${base}/api/auth/local`, {
+  method: "POST", headers: { "content-type": "application/json" },
+  body: JSON.stringify({ identifier: email, password }),
+})).json();
+const res = await fetch(`${base}/api/comments?filters[body][$startsWith]=${encodeURIComponent("[live-smoke]")}&pagination[pageSize]=50`, {
+  headers: { authorization: `Bearer ${jwt}` },
+});
+for (const r of (await res.json())?.data ?? []) {
+  await fetch(`${base}/api/comments/${r.documentId}`, {
+    method: "DELETE", headers: { authorization: `Bearer ${jwt}` },
+  });
+}
+NODE
   rm -rf "${WORKDIR}"
 }
 trap cleanup EXIT
