@@ -6,10 +6,12 @@
  * pattern as /events/[id]/ics). Keep it that way; the routing-parity
  * test pins it.
  *
- * Edge prerequisite: the websecure entrypoint carries
- * respondingTimeouts.readTimeout=0 (host traefik.yaml) — the Traefik
- * default of 60s kills idle streaming responses. Never put this route
- * behind a buffering middleware or a writeTimeout.
+ * Edge note: the websecure entrypoint pins
+ * respondingTimeouts.readTimeout=0 (host traefik.yaml) as a DEFENSIVE
+ * measure — measured 2026-09-01, the 60s default only kills idle
+ * connections without a request; active streams with the 25s heartbeat
+ * survived >10min on the default. Never put this route behind a
+ * buffering middleware or a writeTimeout.
  *
  * Frames are content-free pings; all data flows through the existing
  * session-authenticated server actions on refetch.

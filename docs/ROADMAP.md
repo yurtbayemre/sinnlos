@@ -217,9 +217,12 @@ sketch: the endpoints live at `/live/stream` + `/api/live/emit` (NOT
 `/api/events*` — external /api/* is swallowed by the cms Traefik rule,
 which is exactly what makes the emit ingest internal-only), and channels
 key on `targetDocumentId` (NOT the numeric `targetId`, which died with
-issue #25). Also answered from the spike list: Traefik's websecure
-entrypoint needed `respondingTimeouts.readTimeout: 0` (host traefik.yaml —
-the 3.x default of 60s kills idle streams), comment/reaction channels are
+issue #25). Also answered from the spike list: Traefik's 60s `readTimeout` default
+turned out to kill only idle connections WITHOUT a request — active
+streaming responses (25s heartbeat) survived >10min through the live
+edge with the default config; `respondingTimeouts.readTimeout: 0` is
+set in the host traefik.yaml anyway as a defensive pin against future
+default changes. Comment/reaction channels are
 subscription-based rather than broadcast (documentIds are capability
 tokens, §5.17), and the heartbeat must be a real `hb` event because SSE
 comment frames are invisible to the EventSource API.
