@@ -5,6 +5,7 @@ import {
   targetMatchWhere,
 } from "../../../utils/comment-target";
 import { emitLiveEvent } from "../../../utils/live-events";
+import { isTargetVisible } from "../../../utils/target-visibility";
 
 const REACTION_UID = "api::reaction.reaction";
 
@@ -34,6 +35,13 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     const target = await resolveWriteTarget(strapi, body);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
     const { targetType, targetDocumentId } = target;
+
+    // #28: an existing-but-invisible target answers with the EXACT same
+    // 400 as a nonexistent one (§5.17, no existence oracle). Checked
+    // before the toggle lookup so an out-of-audience caller can neither
+    // add NOR remove a reaction in a hidden discussion.
+    const visible = await isTargetVisible(strapi, targetType, targetDocumentId, ctx.state.user);
+    if (!visible) return ctx.badRequest(WRITE_TARGET_ERRORS["unresolved-target"]);
 
     // Toggle lookup by the anchor pair only. Behaviour change with #25: a
     // reaction row WITHOUT an anchor (targetDocumentId IS NULL) can no longer
