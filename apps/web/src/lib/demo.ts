@@ -164,7 +164,10 @@ const wikiSpaces: AnyEntry[] = [
 const announcements: AnyEntry[] = [
   {
     id: 1,
+    documentId: "demo-ann-1",
     title: "Q2 All-hands this Friday",
+    requiresAck: true,
+    ackDeadline: new Date(Date.now() + 7 * 86400000).toISOString(),
     body: "Join us at 15:00 CET in the main auditorium or on Teams. Agenda: quarterly numbers, product roadmap, and a live demo of the new intranet.",
     pinned: true,
     createdAt: new Date().toISOString(),
@@ -172,6 +175,7 @@ const announcements: AnyEntry[] = [
   },
   {
     id: 2,
+    documentId: "demo-ann-2",
     title: "New wiki search is live",
     body: "Hit ⌘K anywhere in the app to fuzzy search wiki pages, people and teams. Special filters: `in:handbook`, `by:@grace`, `tag:runbook`.",
     pinned: true,
@@ -180,6 +184,7 @@ const announcements: AnyEntry[] = [
   },
   {
     id: 3,
+    documentId: "demo-ann-3",
     title: "Office closed Mon 2026-05-01",
     body: "Public holiday. Remote work as usual. On-call rotation is unchanged — please check your PagerDuty schedule.",
     pinned: false,
@@ -188,6 +193,7 @@ const announcements: AnyEntry[] = [
   },
   {
     id: 4,
+    documentId: "demo-ann-4",
     title: "Welcome Sofia to Marketing",
     body: "Sofia Martín joins us this week as Head of Marketing, coming from a background in brand and growth at two previous startups.",
     pinned: false,
@@ -196,6 +202,7 @@ const announcements: AnyEntry[] = [
   },
   {
     id: 5,
+    documentId: "demo-ann-5",
     title: "Infra maintenance window: Sat 02:00–04:00 CET",
     body: "Platform team will be upgrading Postgres and rotating TLS certificates. Expect brief blips on API calls during the window.",
     pinned: false,
@@ -204,6 +211,7 @@ const announcements: AnyEntry[] = [
   },
   {
     id: 6,
+    documentId: "demo-ann-6",
     title: "Engineering handbook v2 published",
     body: "New sections on incident response, ADR workflow, and our updated code review checklist. Read it in the Wiki → Engineering space.",
     pinned: false,
@@ -211,6 +219,376 @@ const announcements: AnyEntry[] = [
     author: users.linus,
   },
 ];
+
+/**
+ * Fixtures for the modules added after the original demo set (issue #15):
+ * kudos, polls, events + RSVPs, documents, notifications, quick links,
+ * marketplace, celebrations. Shapes mirror the real API responses the
+ * pages consume — dates are computed relative to "now" so the events
+ * month view and expiry filters always show content.
+ */
+const day = 86400000;
+const iso = (offsetDays: number, hour = 10) => {
+  const d = new Date(Date.now() + offsetDays * day);
+  d.setHours(hour, 0, 0, 0);
+  return d.toISOString();
+};
+const dateOnly = (offsetDays: number) => iso(offsetDays).slice(0, 10);
+
+const events: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-event-1",
+    title: "Summer team barbecue",
+    description: "Rooftop terrace, vegetarian options included. Bring your +1!",
+    start: iso(3, 17),
+    end: iso(3, 21),
+    rsvpEnabled: true,
+    capacity: 40,
+    location: "Rooftop, HQ",
+    organizer: users.maria,
+    departments: [],
+    createdAt: iso(-10),
+  },
+  {
+    id: 2,
+    documentId: "demo-event-2",
+    title: "Engineering demo day",
+    description: "Platform, Web and Data show what shipped this quarter.",
+    start: iso(8, 14),
+    end: iso(8, 16),
+    rsvpEnabled: false,
+    location: "Auditorium + Teams",
+    organizer: users.ada,
+    departments: [{ id: 1, name: "Engineering", slug: "engineering" }],
+    createdAt: iso(-6),
+  },
+  {
+    id: 3,
+    documentId: "demo-event-3",
+    title: "Onboarding week welcome breakfast",
+    description: "Meet the new joiners over coffee and croissants.",
+    start: iso(-4, 9),
+    end: iso(-4, 10),
+    allDay: false,
+    location: "Kitchen, 2nd floor",
+    organizer: users.jonas,
+    departments: [{ id: 2, name: "People & Culture", slug: "people-culture" }],
+    createdAt: iso(-15),
+  },
+];
+
+const eventRsvps: AnyEntry[] = [
+  { id: 1, targetDocumentId: "demo-event-1", status: "yes", respondedAt: iso(-2), user: users.ada },
+  {
+    id: 2,
+    targetDocumentId: "demo-event-1",
+    status: "yes",
+    respondedAt: iso(-1),
+    user: users.grace,
+  },
+  {
+    id: 3,
+    targetDocumentId: "demo-event-1",
+    status: "maybe",
+    respondedAt: iso(-1),
+    user: users.linus,
+  },
+  {
+    id: 4,
+    targetDocumentId: "demo-event-1",
+    status: "no",
+    respondedAt: iso(-3),
+    user: users.sofia,
+  },
+];
+
+const polls: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-poll-1",
+    question: "Where should the winter offsite happen?",
+    options: ["Mountains (ski + sauna)", "City trip (Lisbon)", "Countryside retreat"],
+    closesAt: iso(5),
+    anonymous: false,
+    author: users.maria,
+    departments: [],
+    createdAt: iso(-2),
+  },
+  {
+    id: 2,
+    documentId: "demo-poll-2",
+    question: "How useful was the new incident-response training?",
+    options: ["Very useful", "Somewhat useful", "Not useful"],
+    closesAt: iso(-1),
+    anonymous: true,
+    author: users.grace,
+    departments: [{ id: 1, name: "Engineering", slug: "engineering" }],
+    createdAt: iso(-9),
+  },
+];
+
+const pollResults: Record<number, unknown> = {
+  1: {
+    poll: {
+      id: 1,
+      question: polls[0].question,
+      options: polls[0].options,
+      closesAt: polls[0].closesAt,
+      anonymous: false,
+    },
+    counts: [9, 6, 4],
+    total: 19,
+    myVoteIndex: null,
+  },
+  2: {
+    poll: {
+      id: 2,
+      question: polls[1].question,
+      options: polls[1].options,
+      closesAt: polls[1].closesAt,
+      anonymous: true,
+    },
+    counts: [14, 5, 1],
+    total: 20,
+    myVoteIndex: 0,
+  },
+};
+
+const kudosEntries: AnyEntry[] = [
+  {
+    id: 1,
+    message: "For calmly steering the Sev2 last Tuesday to a fix before lunch.",
+    value: "leadership",
+    from: users.ada,
+    to: users.grace,
+    createdAt: iso(-1),
+  },
+  {
+    id: 2,
+    message: "The new onboarding checklist is a thing of beauty — new joiners notice.",
+    value: "excellence",
+    from: users.grace,
+    to: users.jonas,
+    createdAt: iso(-2),
+  },
+  {
+    id: 3,
+    message: "Jumped on the landing-page bug on a Friday evening. Above and beyond.",
+    value: "teamwork",
+    from: users.sofia,
+    to: users.linus,
+    createdAt: iso(-4),
+  },
+  {
+    id: 4,
+    message: "Turned a vague idea into a working prototype in two days.",
+    value: "innovation",
+    from: users.maria,
+    to: users.ada,
+    createdAt: iso(-6),
+  },
+];
+
+const celebrations: AnyEntry[] = [
+  { id: 1, user: users.jonas, type: "birthday", date: dateOnly(2), daysUntil: 2 },
+  { id: 2, user: users.grace, type: "work-anniversary", years: 3, daysUntil: 9 },
+];
+
+const documents: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-doc-1",
+    title: "Travel & expense policy",
+    description: "Per-diems, booking rules and how to file expenses.",
+    category: "policy",
+    file: {
+      url: "/uploads/demo-travel-policy.pdf",
+      name: "travel-policy.pdf",
+      size: 412,
+      mime: "application/pdf",
+    },
+    departments: [],
+    uploadedBy: users.maria,
+    createdAt: iso(-30),
+    updatedAt: iso(-3),
+  },
+  {
+    id: 2,
+    documentId: "demo-doc-2",
+    title: "Equipment request form",
+    description: "Laptops, monitors, chairs — one form for everything.",
+    category: "form",
+    file: {
+      url: "/uploads/demo-equipment-form.pdf",
+      name: "equipment-form.pdf",
+      size: 96,
+      mime: "application/pdf",
+    },
+    departments: [{ id: 2, name: "People & Culture", slug: "people-culture" }],
+    uploadedBy: users.jonas,
+    createdAt: iso(-20),
+    updatedAt: iso(-20),
+  },
+  {
+    id: 3,
+    documentId: "demo-doc-3",
+    title: "Brand guidelines v3",
+    description: "Logo usage, color palette and tone of voice.",
+    category: "guide",
+    file: {
+      url: "/uploads/demo-brand-guidelines.pdf",
+      name: "brand-guidelines.pdf",
+      size: 2380,
+      mime: "application/pdf",
+    },
+    departments: [{ id: 3, name: "Marketing", slug: "marketing" }],
+    uploadedBy: users.sofia,
+    createdAt: iso(-12),
+    updatedAt: iso(-5),
+  },
+];
+
+const classifieds: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-ad-1",
+    title: "City bike, 3 years old, well maintained",
+    description: "Freshly serviced, new brake pads. Pickup near the office.",
+    category: "sale",
+    price: 180,
+    priceNegotiable: true,
+    location: "HQ / city center",
+    images: null,
+    expiresAt: dateOnly(21),
+    author: users.linus,
+    createdAt: iso(-3),
+  },
+  {
+    id: 2,
+    documentId: "demo-ad-2",
+    title: "Moving boxes to give away",
+    description: "About 15 sturdy boxes from a recent move. First come, first served.",
+    category: "giveaway",
+    price: null,
+    location: "2nd floor storage",
+    images: null,
+    expiresAt: dateOnly(10),
+    author: users.jonas,
+    createdAt: iso(-1),
+  },
+  {
+    id: 3,
+    documentId: "demo-ad-3",
+    title: "Looking for a German tandem partner",
+    description: "Native Spanish speaker, B1 German — happy to trade lunch breaks.",
+    category: "service-wanted",
+    price: null,
+    location: "Remote / office",
+    images: null,
+    expiresAt: dateOnly(30),
+    author: users.sofia,
+    createdAt: iso(-5),
+  },
+];
+
+const quickLinks: AnyEntry[] = [
+  { id: 1, label: "HR portal", url: "https://example.com/hr", icon: "Contact", order: 1 },
+  { id: 2, label: "Expense tool", url: "https://example.com/expenses", icon: "Wallet", order: 2 },
+  { id: 3, label: "IT helpdesk", url: "https://example.com/helpdesk", icon: "LifeBuoy", order: 3 },
+  { id: 4, label: "Meeting rooms", url: "https://example.com/rooms", icon: "Calendar", order: 4 },
+  { id: 5, label: "Status page", url: "https://status.example.com", icon: "Globe", order: 5 },
+];
+
+const notifications: AnyEntry[] = [
+  {
+    id: 1,
+    type: "comment",
+    title: 'Grace Hopper commented on "Q2 All-hands this Friday"',
+    link: "/announcements",
+    readAt: null,
+    createdAt: iso(0, 8),
+    actor: users.grace,
+  },
+  {
+    id: 2,
+    type: "kudos",
+    title: "Sofia Martín sent you kudos",
+    link: "/kudos",
+    readAt: null,
+    createdAt: iso(-1),
+    actor: users.sofia,
+  },
+  {
+    id: 3,
+    type: "announcement",
+    title: "New announcement: Engineering handbook v2 published",
+    link: "/announcements",
+    readAt: iso(-2),
+    createdAt: iso(-2),
+    actor: users.linus,
+  },
+];
+
+const demoComments: AnyEntry[] = [
+  {
+    id: 1,
+    body: "Will the session be recorded for the folks on parental leave?",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-1",
+    author: users.grace,
+    createdAt: iso(-1, 9),
+    replies: [],
+  },
+  {
+    id: 2,
+    body: "Yes — recording lands in the wiki right after. 🎥",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-1",
+    author: users.maria,
+    createdAt: iso(-1, 11),
+    replies: [],
+  },
+  {
+    id: 3,
+    body: "The new search filters are a game changer, thanks team!",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-2",
+    author: users.jonas,
+    createdAt: iso(0, 7),
+    replies: [],
+  },
+];
+
+const demoReactions: AnyEntry[] = [
+  {
+    id: 1,
+    emoji: "celebrate",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-1",
+    author: users.grace,
+  },
+  {
+    id: 2,
+    emoji: "thumbsup",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-1",
+    author: users.linus,
+  },
+  {
+    id: 3,
+    emoji: "heart",
+    targetType: "announcement",
+    targetDocumentId: "demo-ann-4",
+    author: users.ada,
+  },
+];
+
+/** Value of a query param inside the raw path, or null. */
+function param(path: string, key: string): string | null {
+  const m = path.match(new RegExp(`[?&]${key.replace(/[[\]$]/g, "\\$&")}=([^&]*)`));
+  return m ? decodeURIComponent(m[1]!) : null;
+}
 
 function findBy<T extends AnyEntry>(items: T[], slug: string): T | undefined {
   return items.find((i) => i.slug === slug);
@@ -258,7 +636,80 @@ export function demo(path: string): unknown {
     return pack(allPages);
   }
 
-  if (path.startsWith("/api/announcements")) return pack(announcements);
+  if (path.startsWith("/api/announcements")) {
+    // The requiresAck probe (dashboard banner + announcements page) filters
+    // on requiresAck=true — return only those there.
+    if (param(path, "filters[requiresAck][$eq]") === "true")
+      return pack(announcements.filter((a) => a.requiresAck));
+    return pack(announcements);
+  }
+
+  // /api/users is the users-permissions plugin: it answers with a PLAIN
+  // ARRAY (no data/meta envelope) — users.ts pages it via start/limit.
+  if (path.startsWith("/api/users")) {
+    const start = Number(param(path, "start") ?? 0);
+    return start > 0
+      ? []
+      : Object.values(users).map((u) => ({
+          ...u,
+          department: departments[0]
+            ? { id: departments[0].id, name: departments[0].name, slug: departments[0].slug }
+            : null,
+        }));
+  }
+
+  if (path.startsWith("/api/events")) {
+    const id = param(path, "filters[id][$eq]");
+    if (id) return pack(events.filter((e) => String(e.id) === id));
+    return pack([...events].sort((a, b) => a.start.localeCompare(b.start)));
+  }
+  if (path.startsWith("/api/event-rsvps")) {
+    const target = param(path, "filters[targetDocumentId][$eq]");
+    return pack(target ? eventRsvps.filter((r) => r.targetDocumentId === target) : eventRsvps);
+  }
+
+  // /api/polls/:id/results is a custom route with its own (non-list) shape.
+  const resultsMatch = path.match(/^\/api\/polls\/(\d+)\/results/);
+  if (resultsMatch) return pollResults[Number(resultsMatch[1])] ?? pollResults[1];
+  if (path.startsWith("/api/polls")) return pack(polls);
+
+  if (path.startsWith("/api/kudos-entries")) return pack(kudosEntries);
+  if (path.startsWith("/api/celebrations")) return pack(celebrations);
+  if (path.startsWith("/api/documents")) return pack(documents);
+
+  if (path.startsWith("/api/classifieds")) {
+    const id = param(path, "filters[id][$eq]");
+    if (id) return pack(classifieds.filter((c) => String(c.id) === id));
+    // "my ads" filter — the demo session has no user, show nothing there.
+    if (param(path, "filters[author][id][$eq]")) return pack([]);
+    return pack(classifieds);
+  }
+
+  if (path.startsWith("/api/quick-links")) return pack(quickLinks);
+  if (path.startsWith("/api/notifications")) return pack(notifications);
+  if (path.startsWith("/api/acknowledgements")) return pack([]);
+
+  if (path.startsWith("/api/comments")) {
+    const target = param(path, "filters[targetDocumentId][$eq]");
+    return pack(target ? demoComments.filter((c) => c.targetDocumentId === target) : demoComments);
+  }
+  if (path.startsWith("/api/reactions")) {
+    const target = param(path, "filters[targetDocumentId][$eq]");
+    return pack(
+      target ? demoReactions.filter((r) => r.targetDocumentId === target) : demoReactions,
+    );
+  }
+
+  // Profile page: { data: <user> } envelope.
+  if (path.startsWith("/api/me")) {
+    return {
+      data: {
+        ...users.ada,
+        department: { id: 1, name: "Engineering", slug: "engineering" },
+        birthdayVisible: false,
+      },
+    };
+  }
 
   return pack([]);
 }
