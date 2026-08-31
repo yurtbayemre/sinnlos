@@ -194,7 +194,8 @@
     "ackConfirmed": "Bestätigt",
     "ackConfirmedAt": "Bestätigt am {date}",
     "ackDeadline": "Bestätigen bis {date}",
-    "ackFailed": "Bestätigung fehlgeschlagen. Bitte erneut versuchen."
+    "ackFailed": "Bestätigung fehlgeschlagen. Bitte erneut versuchen.",
+    "liveNewHint": "Neue Neuigkeiten — anzeigen"
   },
   "kudos": {
     "title": "Kudos",

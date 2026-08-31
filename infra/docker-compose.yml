@@ -56,9 +56,14 @@ services:
       # Admin seed — auto-create first Strapi admin on fresh database
       STRAPI_ADMIN_EMAIL: ${STRAPI_ADMIN_EMAIL:-}
       STRAPI_ADMIN_PASSWORD: ${STRAPI_ADMIN_PASSWORD:-}
-      # Revalidation webhook → Next.js
+      # Revalidation webhook + live-event pings → Next.js. The secret
+      # guards BOTH internal endpoints (/api/revalidate, /api/live/emit) —
+      # rotation affects both.
       WEB_INTERNAL_URL: http://web:3000
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
+      # no-ops and the app runs byte-for-byte on the pre-SSE polling.
+      LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
       # Shared secret guarding the raw /uploads bytes (issue #21, K1): the cms
       # uploads-auth middleware only serves /uploads to callers presenting this
       # token, i.e. the web session-gate proxy — closing the /api/../uploads
@@ -112,8 +117,12 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}
       AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
-      # Shared secret for the /api/revalidate webhook called from the CMS
+      # Shared secret for the /api/revalidate + /api/live/emit webhooks
+      # called from the CMS (rotation affects both).
       REVALIDATE_SECRET: ${REVALIDATE_SECRET}
+      # Kill switch for the live SSE pipeline: 1 = /live/stream 404s and
+      # the wrappers poll at the pre-SSE 10s/30s intervals.
+      LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
       # Shared secret the /uploads proxy route sends to cms (issue #21, K1).
       INTERNAL_UPLOAD_TOKEN: ${INTERNAL_UPLOAD_TOKEN}
     healthcheck:
