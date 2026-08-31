@@ -41,6 +41,11 @@ export default async function proxy(req: NextRequest) {
     nextUrl.pathname === "/register" ||
     nextUrl.pathname.startsWith("/api/auth") ||
     nextUrl.pathname === "/api/revalidate" ||
+    // Internal CMS→web live-event ingest: session-less by design (secret-
+    // gated in the route, externally swallowed by Traefik's /api rule).
+    // Without this entry the CMS POST gets a 307 and live updates die
+    // silently (issue #17 plan, WP2).
+    nextUrl.pathname === "/api/live/emit" ||
     nextUrl.pathname.startsWith("/_next") ||
     nextUrl.pathname.startsWith("/favicon") ||
     // Known static files served from /public. Exact allowlist (see

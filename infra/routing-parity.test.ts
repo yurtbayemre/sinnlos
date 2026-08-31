@@ -85,6 +85,15 @@ const PROBES: Array<[string, Backend]> = [
   ["/sign-in", "web"],
   ["/marketplace", "web"],
   ["/documents", "web"],
+  // Live SSE (issue #17/#27): the stream + subscribe endpoints live
+  // OUTSIDE /api on purpose so they reach the web catch-all…
+  ["/live/stream", "web"],
+  ["/live/subscribe", "web"],
+  // …while the internal CMS→web emit ingest is EXTERNALLY swallowed by
+  // the cms /api rule (no such Strapi route → 404). Only the Docker-
+  // internal http://web:3000 path reaches the real handler; this probe
+  // pins that external unreachability.
+  ["/api/live/emit", "cms"],
 ];
 
 /**

@@ -7,6 +7,7 @@
  * Auth: a shared secret is checked against the REVALIDATE_SECRET env var.
  * Both this service and the CMS must be configured with the same value.
  */
+import { timingSafeEqual } from "node:crypto";
 import { revalidateTag } from "next/cache";
 import { NextResponse, type NextRequest } from "next/server";
 
@@ -17,7 +18,9 @@ export async function POST(req: NextRequest) {
   }
 
   const provided = req.headers.get("x-revalidate-secret");
-  if (provided !== secret) {
+  const a = provided ? Buffer.from(provided) : null;
+  const b = Buffer.from(secret);
+  if (!a || a.length !== b.length || !timingSafeEqual(a, b)) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 

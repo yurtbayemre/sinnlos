@@ -1,3 +1,4 @@
+import { registerLiveEventSubscriber } from "./utils/live-events";
 import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitize-user-contact";
 
 /**
@@ -639,6 +640,11 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
+    // Live-update pings for the web SSE bus (issue #17/#27). Registered
+    // before any seeding so bulk writes exercise the batching path; the
+    // emitter itself no-ops unless WEB_INTERNAL_URL is set.
+    registerLiveEventSubscriber(strapi);
+
     for (const seed of ROLES) {
       const existing = await strapi.db
         .query("plugin::users-permissions.role")
