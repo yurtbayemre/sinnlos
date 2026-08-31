@@ -54,6 +54,7 @@ const STABLE_STREAM_MS = 60_000;
 const REOPEN_SPREAD_MS = 15_000;
 const INSTANT_CLOSE_MS = 2_000;
 const TERMINAL_INSTANT_CLOSES = 5;
+const STOPPED_RETRY_MS = 5 * 60_000;
 const COALESCE_CONTENT_MS = 400;
 const COALESCE_NOTIFICATIONS_JITTER_MS = 3_000;
 const COALESCE_ANNOUNCEMENTS_JITTER_MS = 10_000;
@@ -91,6 +92,7 @@ export function LiveEventsProvider({
   const attemptRef = useRef(0);
   const instantClosesRef = useRef(0);
   const stoppedRef = useRef(false);
+  const stoppedAtRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const everOpenedRef = useRef(false);
   const coalesceTimersRef = useRef(new Map<LiveChannel, ReturnType<typeof setTimeout>>());
@@ -262,9 +264,13 @@ export function LiveEventsProvider({
       if (lifetime < INSTANT_CLOSE_MS) {
         instantClosesRef.current += 1;
         if (instantClosesRef.current >= TERMINAL_INSTANT_CLOSES) {
-          // Kill switch / auth wall: stop burning retries. Visibility
-          // regain resets this; polling fallback is active throughout.
+          // Kill switch / auth wall / long deploy window: stop burning
+          // retries. Visibility regain resets this immediately; the
+          // watchdog additionally retries after STOPPED_RETRY_MS so a
+          // tab that stays visible through a long deploy recovers on its
+          // own. Polling fallback is active throughout.
           stoppedRef.current = true;
+          stoppedAtRef.current = Date.now();
           return;
         }
       } else {
@@ -307,6 +313,20 @@ export function LiveEventsProvider({
     };
 
     const watchdog = setInterval(() => {
+      // Self-heal a terminal stop (deploy outlasted the retry budget while
+      // the tab stayed visible): one fresh attempt every STOPPED_RETRY_MS.
+      if (stoppedRef.current) {
+        if (
+          document.visibilityState === "visible" &&
+          Date.now() - stoppedAtRef.current > STOPPED_RETRY_MS
+        ) {
+          stoppedRef.current = false;
+          instantClosesRef.current = 0;
+          attemptRef.current = 0;
+          connectRef.current();
+        }
+        return;
+      }
       if (!sourceRef.current) return;
       if (Date.now() - lastBeatRef.current > HEARTBEAT_TIMEOUT_MS) {
         // Half-open connection: TCP is up but nothing flows. Force a
