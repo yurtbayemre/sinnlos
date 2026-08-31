@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Command } from "cmdk";
@@ -15,7 +15,7 @@ import {
   FileText,
   Megaphone,
 } from "lucide-react";
-import { fetchSearchItems, searchContent, type SearchItem } from "@/lib/search-action";
+import { fetchSearchItems, logSearch, searchContent, type SearchItem } from "@/lib/search-action";
 import { useTranslations } from "next-intl";
 
 export function SearchCommand() {
@@ -29,6 +29,43 @@ export function SearchCommand() {
   const [searchResults, setSearchResults] = useState<SearchItem[]>([]);
   const [isPending, startTransition] = useTransition();
   const [loaded, setLoaded] = useState(false);
+
+  // --- Search instrumentation (issue #19, stage 1) -----------------------
+  // Only SETTLED queries are logged: the newest (query, resultCount) pair
+  // becomes pending whenever results arrive, and is flushed after 2s of
+  // stability, on selection, or when the palette closes. Logging inside
+  // the 300ms debounce directly would record every typed prefix and bury
+  // the zero-result signal the Meilisearch decision depends on.
+  const pendingLogRef = useRef<{ term: string; count: number } | null>(null);
+  const lastLoggedTermRef = useRef("");
+  const logTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushSearchLog = useCallback(() => {
+    if (logTimerRef.current) {
+      clearTimeout(logTimerRef.current);
+      logTimerRef.current = null;
+    }
+    const pending = pendingLogRef.current;
+    pendingLogRef.current = null;
+    if (!pending || pending.term === lastLoggedTermRef.current) return;
+    lastLoggedTermRef.current = pending.term;
+    void logSearch(pending.term, pending.count);
+  }, []);
+
+  const scheduleSearchLog = useCallback(
+    (term: string, count: number) => {
+      pendingLogRef.current = { term, count };
+      if (logTimerRef.current) clearTimeout(logTimerRef.current);
+      logTimerRef.current = setTimeout(flushSearchLog, 2000);
+    },
+    [flushSearchLog],
+  );
+
+  useEffect(() => {
+    if (!open) flushSearchLog();
+  }, [open, flushSearchLog]);
+
+  useEffect(() => () => flushSearchLog(), [flushSearchLog]);
 
   // Load items when the dialog first opens
   useEffect(() => {
@@ -51,10 +88,11 @@ export function SearchCommand() {
       startTransition(async () => {
         const results = await searchContent(query);
         setSearchResults(results);
+        scheduleSearchLog(query, results.length);
       });
     }, 300);
     return () => clearTimeout(timeout);
-  }, [query]);
+  }, [query, scheduleSearchLog]);
 
   const items = query.length >= 2 ? searchResults : preloaded;
 
@@ -83,11 +121,13 @@ export function SearchCommand() {
 
   const select = useCallback(
     (href: string) => {
+      // A selection is the strongest "this query settled" signal.
+      flushSearchLog();
       setOpen(false);
       setQuery("");
       router.push(href);
     },
-    [router],
+    [router, flushSearchLog],
   );
 
   const icon = (kind: SearchItem["kind"]) => {

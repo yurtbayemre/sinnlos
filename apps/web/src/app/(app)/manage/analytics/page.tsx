@@ -11,6 +11,8 @@ import {
   Users,
   ThumbsUp,
   BookOpen,
+  Search as SearchIcon,
+  SearchX,
 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
@@ -49,6 +51,24 @@ async function countUsers(): Promise<number> {
   } catch (e) {
     unstable_rethrow(e);
     return 0;
+  }
+}
+
+type SearchSummary = {
+  windowDays: number;
+  total: number;
+  zeroResultCount: number;
+  topTerms: { term: string; count: number; avgResults: number }[];
+  topZeroTerms: { term: string; count: number }[];
+};
+
+/** Aggregated search telemetry (issue #19) — admin-only custom route. */
+async function searchSummary(): Promise<SearchSummary | null> {
+  try {
+    return await strapi<SearchSummary>("/api/search-logs/summary?days=30", { noCache: true });
+  } catch (e) {
+    unstable_rethrow(e);
+    return null;
   }
 }
 
@@ -101,6 +121,7 @@ export default async function AnalyticsPage() {
     commentCount,
     userCount,
     activity,
+    search,
   ] = await Promise.all([
     count("/api/announcements?"),
     count("/api/events?"),
@@ -111,7 +132,11 @@ export default async function AnalyticsPage() {
     count("/api/comments?"),
     countUsers(),
     recentActivity(),
+    searchSummary(),
   ]);
+
+  const zeroRate =
+    search && search.total > 0 ? Math.round((search.zeroResultCount / search.total) * 100) : 0;
 
   const stats = [
     { label: t("users"), value: userCount, icon: Users, color: "text-blue-500" },
@@ -175,6 +200,93 @@ export default async function AnalyticsPage() {
           ))}
         </div>
       </section>
+
+      {search && (
+        <section className="space-y-3">
+          <h2 className="text-sm font-medium text-muted-foreground">
+            {t("searchSection", { days: search.windowDays })}
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Card>
+              <CardContent className="flex items-center gap-4 p-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-sky-500">
+                  <SearchIcon className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight">{search.total}</div>
+                  <div className="text-xs text-muted-foreground">{t("searchTotal")}</div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="flex items-center gap-4 p-4">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted text-red-500">
+                  <SearchX className="h-5 w-5" aria-hidden="true" />
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold tracking-tight">
+                    {search.zeroResultCount}
+                    {search.total > 0 && (
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        ({zeroRate}%)
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">{t("searchZeroResults")}</div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          {(search.topTerms.length > 0 || search.topZeroTerms.length > 0) && (
+            <div className="grid gap-4 md:grid-cols-2">
+              {search.topTerms.length > 0 && (
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">
+                      {t("searchTopTerms")}
+                    </div>
+                    <div className="divide-y">
+                      {search.topTerms.map((row) => (
+                        <div
+                          key={row.term}
+                          className="flex items-center justify-between gap-3 py-1.5 text-sm"
+                        >
+                          <span className="truncate">{row.term}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {t("searchTermMeta", { count: row.count, avg: row.avgResults })}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+              {search.topZeroTerms.length > 0 && (
+                <Card>
+                  <CardContent className="p-4">
+                    <div className="mb-2 text-xs font-medium text-muted-foreground">
+                      {t("searchTopZeroTerms")}
+                    </div>
+                    <div className="divide-y">
+                      {search.topZeroTerms.map((row) => (
+                        <div
+                          key={row.term}
+                          className="flex items-center justify-between gap-3 py-1.5 text-sm"
+                        >
+                          <span className="truncate">{row.term}</span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {row.count}×
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {activity.recentComments.length > 0 && (
         <section className="space-y-3">

@@ -405,7 +405,13 @@
     "reactions": "Reactions",
     "unreadNotifications": "Unread notifications",
     "recentComments": "Recent comments",
-    "commented": "commented"
+    "commented": "commented",
+    "searchSection": "Search (last {days} days)",
+    "searchTotal": "Search queries",
+    "searchZeroResults": "Zero results",
+    "searchTopTerms": "Top search terms",
+    "searchTopZeroTerms": "Top zero-result searches",
+    "searchTermMeta": "{count}× · avg {avg} results"
   },
   "ackReport": {
     "title": "Read confirmations",

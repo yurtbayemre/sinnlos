@@ -3,6 +3,7 @@
 // other direction: src/extensions/users-permissions imports
 // config/ms-role-map). The module runs no code at load time — config files
 // are loaded before the `strapi` global exists.
+import { pruneSearchLogs } from "../src/cron/prune-search-logs";
 import { sweepOrphanedUploads } from "../src/cron/sweep-orphaned-uploads";
 
 type Env = ((key: string, def?: unknown) => any) & {
@@ -29,6 +30,12 @@ export default ({ env }: { env: Env }) => ({
       "uploads-janitor": {
         task: ({ strapi }: { strapi: any }) => sweepOrphanedUploads(strapi),
         options: { rule: "30 3 * * *", tz: "Europe/Berlin" },
+      },
+      // 90-day retention for the anonymous search telemetry (issue #19),
+      // after the 03:00 pg-backup like the uploads janitor.
+      "search-log-janitor": {
+        task: ({ strapi }: { strapi: any }) => pruneSearchLogs(strapi),
+        options: { rule: "35 3 * * *", tz: "Europe/Berlin" },
       },
     },
   },

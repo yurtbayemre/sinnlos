@@ -280,3 +280,27 @@ export async function searchContent(query: string): Promise<SearchItem[]> {
 
   return items;
 }
+
+/**
+ * Anonymous search instrumentation (issue #19, stage 1). Fire-and-forget:
+ * a failed log write must never surface in the palette. The palette calls
+ * this only for SETTLED queries (2s stable, a selection, or close) — the
+ * debounced typeahead would otherwise log every prefix the user types
+ * ("of", "off", "offs", …) and drown the zero-result signal in noise.
+ */
+export async function logSearch(term: string, resultCount: number): Promise<void> {
+  const trimmed = term.trim();
+  if (trimmed.length < 2) return;
+  try {
+    await strapi("/api/search-logs", {
+      method: "POST",
+      body: JSON.stringify({
+        data: { term: trimmed.slice(0, 120), resultCount: Math.max(0, resultCount | 0) },
+      }),
+      noCache: true,
+    });
+  } catch (e) {
+    unstable_rethrow(e);
+    // Swallow: telemetry only.
+  }
+}
