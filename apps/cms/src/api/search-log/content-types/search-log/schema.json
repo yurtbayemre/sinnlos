@@ -1,0 +1,25 @@
+{
+  "kind": "collectionType",
+  "collectionName": "search_logs",
+  "info": {
+    "singularName": "search-log",
+    "pluralName": "search-logs",
+    "displayName": "Search log",
+    "description": "Anonymous search instrumentation (issue #19): settled query terms and their result counts. Deliberately NO user relation — the analytics question is \"does search work\", not \"who searched what\"."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "term": {
+      "type": "string",
+      "required": true,
+      "maxLength": 120
+    },
+    "resultCount": {
+      "type": "integer",
+      "required": true,
+      "min": 0
+    }
+  }
+}
