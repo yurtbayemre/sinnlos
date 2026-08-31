@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { emitLiveEvent } from "../../../utils/live-events";
 
 export default factories.createCoreController("api::notification.notification", ({ strapi }) => ({
   async markRead(ctx) {
@@ -22,6 +23,10 @@ export default factories.createCoreController("api::notification.notification", 
         updated++;
       }
     }
+    // Emit here, not via lifecycle: db.query updates fire per-row events
+    // whose result rows don't populate the recipient relation. This
+    // handler already knows the recipient — it is the caller.
+    if (updated > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
     return ctx.send({ updated });
   },
 
@@ -34,6 +39,10 @@ export default factories.createCoreController("api::notification.notification", 
       where: { recipient: user.id, readAt: null },
       data: { readAt: now },
     });
+    // updateMany fires afterUpdateMany, which carries only the where
+    // clause and a count — no rows. Emit directly so the user's other
+    // tabs sync their unread badge without waiting for the backstop poll.
+    if (count > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
     return ctx.send({ updated: count });
   },
 }));

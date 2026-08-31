@@ -11,6 +11,7 @@ import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { CommentSection } from "@/components/comments/comment-section";
 import { AckButton } from "@/components/announcements/ack-button";
+import { AnnouncementsLiveHint } from "@/components/announcements/announcements-live-hint";
 import { initials } from "@/lib/utils";
 
 export async function generateMetadata() {
@@ -79,6 +80,10 @@ export default async function AnnouncementsPage() {
   return (
     <div className="space-y-8">
       <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
+
+      <AnnouncementsLiveHint
+        initialIds={items.map((a) => a.documentId).filter((id): id is string => !!id)}
+      />
 
       {(failed || requiringAckResult.failed || acksResult.failed) && <FetchErrorBanner />}
 
