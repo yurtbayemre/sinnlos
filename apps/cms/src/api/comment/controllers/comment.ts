@@ -1,5 +1,6 @@
 import { factories } from "@strapi/strapi";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
+import { isTargetVisible } from "../../../utils/target-visibility";
 
 export default factories.createCoreController("api::comment.comment", ({ strapi }) => ({
   /**
@@ -24,6 +25,17 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
 
     const target = await resolveWriteTarget(strapi, data);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
+
+    // #28: an existing-but-invisible target answers with the EXACT same
+    // 400 as a nonexistent one — create must not become an existence
+    // oracle for documentIds the caller may not read (§5.17).
+    const visible = await isTargetVisible(
+      strapi,
+      target.targetType,
+      target.targetDocumentId,
+      ctx.state.user,
+    );
+    if (!visible) return ctx.badRequest(WRITE_TARGET_ERRORS["unresolved-target"]);
 
     ctx.request.body = {
       data: {
