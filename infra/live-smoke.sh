@@ -45,7 +45,10 @@ SMOKE_AUTHOR_EMAIL="${SMOKE_AUTHOR_EMAIL:-sam.chen@sinnlos.local}"
 
 lookup_password() {
   local email="$1"
-  grep "^${email} " "${PASSWORDS_FILE}" | awk '{print $2}' | head -1
+  # File is TAB-separated; [[:space:]] matches both. `|| true` keeps a
+  # missing entry from silently killing the whole script via pipefail —
+  # the explicit -z check below reports it loudly instead.
+  { grep "^${email}[[:space:]]" "${PASSWORDS_FILE}" 2>/dev/null | awk '{print $2}' | head -1; } || true
 }
 
 if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
@@ -76,7 +79,7 @@ CSRF_TOKEN="$(printf '%s' "${CSRF_JSON}" | sed -n 's/.*"csrfToken":"\([^"]*\)".*
 curl -fsS -o /dev/null -b "${COOKIES}" -c "${COOKIES}" \
   -X POST "${BASE_URL}/api/auth/callback/local" \
   --data-urlencode "csrfToken=${CSRF_TOKEN}" \
-  --data-urlencode "email=${SMOKE_EMAIL}" \
+  --data-urlencode "identifier=${SMOKE_EMAIL}" \
   --data-urlencode "password=${SMOKE_PASSWORD}"
 
 grep -q 'session-token' "${COOKIES}" || {
