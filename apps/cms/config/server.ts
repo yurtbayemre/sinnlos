@@ -3,6 +3,7 @@
 // other direction: src/extensions/users-permissions imports
 // config/ms-role-map). The module runs no code at load time — config files
 // are loaded before the `strapi` global exists.
+import { sendDigests } from "../src/digest/send-digests";
 import { pruneSearchLogs } from "../src/cron/prune-search-logs";
 import { sweepOrphanedUploads } from "../src/cron/sweep-orphaned-uploads";
 
@@ -36,6 +37,13 @@ export default ({ env }: { env: Env }) => ({
       "search-log-janitor": {
         task: ({ strapi }: { strapi: any }) => pruneSearchLogs(strapi),
         options: { rule: "35 3 * * *", tz: "Europe/Berlin" },
+      },
+      // Morning e-mail digests (issue #18): daily users every day, weekly
+      // users on Mondays — the per-user decision lives in digest-plan.ts;
+      // without SMTP_* env the run is a logged no-op.
+      "digest-mailer": {
+        task: ({ strapi }: { strapi: any }) => sendDigests(strapi),
+        options: { rule: "30 7 * * *", tz: "Europe/Berlin" },
       },
     },
   },

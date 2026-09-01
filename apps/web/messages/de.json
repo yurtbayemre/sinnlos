@@ -355,7 +355,15 @@
     "newPassword": "Neues Passwort",
     "confirmPassword": "Neues Passwort bestätigen",
     "changePassword": "Passwort ändern",
-    "profileUpdated": "Profil aktualisiert."
+    "profileUpdated": "Profil aktualisiert.",
+    "digestSection": "E-Mail-Zusammenfassungen",
+    "digestHint": "Erhalte morgens eine Zusammenfassung per E-Mail — täglich oder wöchentlich (montags). Ohne Auswahl wird nichts versendet.",
+    "digestAnnouncements": "Neuigkeiten & Ankündigungen",
+    "digestMentions": "Erwähnungen & Antworten auf meine Beiträge",
+    "digestKudos": "Kudos, die ich erhalten habe",
+    "digestFrequency": "Häufigkeit",
+    "digestFrequency_weekly": "Wöchentlich (montags)",
+    "digestFrequency_daily": "Täglich"
   },
   "admin": {
     "title": "Admin",

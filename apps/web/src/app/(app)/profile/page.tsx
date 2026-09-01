@@ -62,6 +62,10 @@ export default async function ProfilePage() {
                 officeLocation: me?.officeLocation ?? null,
                 birthday: me?.birthday ?? null,
                 birthdayVisible: me?.birthdayVisible ?? false,
+                digestAnnouncements: me?.digestAnnouncements ?? false,
+                digestMentions: me?.digestMentions ?? false,
+                digestKudos: me?.digestKudos ?? false,
+                digestFrequency: me?.digestFrequency ?? "weekly",
               }}
             />
           </CardContent>

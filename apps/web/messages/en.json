@@ -355,7 +355,15 @@
     "newPassword": "New password",
     "confirmPassword": "Confirm new password",
     "changePassword": "Change password",
-    "profileUpdated": "Profile updated."
+    "profileUpdated": "Profile updated.",
+    "digestSection": "E-mail digests",
+    "digestHint": "Get a morning e-mail summary — daily or weekly (Mondays). Nothing is sent unless you opt in.",
+    "digestAnnouncements": "News & announcements",
+    "digestMentions": "Mentions & replies to my posts",
+    "digestKudos": "Kudos I received",
+    "digestFrequency": "Frequency",
+    "digestFrequency_weekly": "Weekly (Mondays)",
+    "digestFrequency_daily": "Daily"
   },
   "admin": {
     "title": "Admin",

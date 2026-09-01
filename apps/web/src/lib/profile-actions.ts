@@ -33,6 +33,11 @@ export async function updateProfile(
           officeLocation: formData.get("officeLocation"),
           birthday: birthday || null,
           birthdayVisible: formData.get("birthdayVisible") === "on",
+          // E-mail digest opt-ins (issue #18) — checkbox presence → boolean.
+          digestAnnouncements: formData.get("digestAnnouncements") === "on",
+          digestMentions: formData.get("digestMentions") === "on",
+          digestKudos: formData.get("digestKudos") === "on",
+          digestFrequency: formData.get("digestFrequency") === "daily" ? "daily" : "weekly",
         },
       }),
       noCache: true,

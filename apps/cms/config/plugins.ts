@@ -84,4 +84,27 @@ export default ({ env }: { env: Env }) => ({
       },
     },
   },
+  // E-mail digests (issue #18). Authenticated submission against the own
+  // mailcow on mail.yurtbay.dev:587 (STARTTLS) — deliberately NOT via the
+  // mailcow-internal Docker network (that attachment is a documented
+  // mailcow-update landmine). Sender identity = a mailbox app password
+  // (SMTP-only) in infra/.env; without SMTP_* the digest cron no-ops.
+  email: {
+    config: {
+      provider: "nodemailer",
+      providerOptions: {
+        host: env("SMTP_HOST", ""),
+        port: env.int("SMTP_PORT", 587),
+        secure: false,
+        auth: env("SMTP_USER", "")
+          ? { user: env("SMTP_USER", ""), pass: env("SMTP_PASS", "") }
+          : undefined,
+        requireTLS: true,
+      },
+      settings: {
+        defaultFrom: env("DIGEST_FROM", "Sinnlos Intranet <noreply@yurtbay.dev>"),
+        defaultReplyTo: env("DIGEST_REPLY_TO", "noreply@yurtbay.dev"),
+      },
+    },
+  },
 });

@@ -14,6 +14,10 @@ export type ProfileInitial = {
   officeLocation?: string | null;
   birthday?: string | null;
   birthdayVisible?: boolean | null;
+  digestAnnouncements?: boolean | null;
+  digestMentions?: boolean | null;
+  digestKudos?: boolean | null;
+  digestFrequency?: string | null;
 };
 
 export function ProfileForm({ initial }: { initial: ProfileInitial }) {
@@ -100,6 +104,42 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           </span>
         </span>
       </label>
+
+      <fieldset className="space-y-3 rounded-xl border p-4">
+        <legend className="px-1 text-sm font-medium">{tProfile("digestSection")}</legend>
+        <p className="text-xs text-muted-foreground">{tProfile("digestHint")}</p>
+        {(
+          [
+            ["digestAnnouncements", initial.digestAnnouncements],
+            ["digestMentions", initial.digestMentions],
+            ["digestKudos", initial.digestKudos],
+          ] as const
+        ).map(([name, checked]) => (
+          <label key={name} className="flex items-start gap-3">
+            <input
+              type="checkbox"
+              name={name}
+              defaultChecked={checked ?? false}
+              className="mt-0.5 h-4 w-4 rounded border accent-primary"
+            />
+            <span className="block text-sm">{tProfile(name)}</span>
+          </label>
+        ))}
+        <div className="flex gap-6 pt-1" role="radiogroup" aria-label={tProfile("digestFrequency")}>
+          {(["weekly", "daily"] as const).map((freq) => (
+            <label key={freq} className="flex items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="digestFrequency"
+                value={freq}
+                defaultChecked={(initial.digestFrequency ?? "weekly") === freq}
+                className="h-4 w-4 accent-primary"
+              />
+              {tProfile(`digestFrequency_${freq}`)}
+            </label>
+          ))}
+        </div>
+      </fieldset>
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
       {state.success && (
