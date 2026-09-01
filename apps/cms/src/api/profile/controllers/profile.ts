@@ -33,6 +33,13 @@ const EDITABLE_FIELDS = [
   "locale",
   "birthday",
   "birthdayVisible",
+  // E-mail digest opt-ins (issue #18) — booleans + frequency, coerced and
+  // validated in updateMe below. `lastDigestAt` is deliberately NOT here:
+  // it is cron-owned state, private on the schema.
+  "digestAnnouncements",
+  "digestMentions",
+  "digestKudos",
+  "digestFrequency",
 ] as const;
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -99,6 +106,16 @@ export default {
     if ("birthdayVisible" in data) {
       data.birthdayVisible =
         data.birthdayVisible === true || data.birthdayVisible === "true" || data.birthdayVisible === "on";
+    }
+    // Digest opt-ins: same boolean coercion as birthdayVisible; the
+    // frequency must be one of the schema enum values.
+    for (const flag of ["digestAnnouncements", "digestMentions", "digestKudos"] as const) {
+      if (flag in data) {
+        data[flag] = data[flag] === true || data[flag] === "true" || data[flag] === "on";
+      }
+    }
+    if ("digestFrequency" in data && !["daily", "weekly"].includes(data.digestFrequency as string)) {
+      return ctx.badRequest("digestFrequency must be daily or weekly");
     }
 
     await strapi.db.query("plugin::users-permissions.user").update({

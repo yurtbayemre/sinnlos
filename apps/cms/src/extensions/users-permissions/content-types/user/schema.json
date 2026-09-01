@@ -26,7 +26,10 @@
       "configurable": false,
       "required": true
     },
-    "provider": { "type": "string", "configurable": false },
+    "provider": {
+      "type": "string",
+      "configurable": false
+    },
     "password": {
       "type": "password",
       "minLength": 6,
@@ -46,8 +49,16 @@
       "private": true,
       "searchable": false
     },
-    "confirmed": { "type": "boolean", "default": false, "configurable": false },
-    "blocked": { "type": "boolean", "default": false, "configurable": false },
+    "confirmed": {
+      "type": "boolean",
+      "default": false,
+      "configurable": false
+    },
+    "blocked": {
+      "type": "boolean",
+      "default": false,
+      "configurable": false
+    },
     "role": {
       "type": "relation",
       "relation": "manyToOne",
@@ -55,11 +66,25 @@
       "inversedBy": "users",
       "configurable": false
     },
-    "microsoftOid": { "type": "string", "unique": true },
-    "displayName": { "type": "string" },
-    "jobTitle": { "type": "string" },
-    "avatar": { "type": "media", "allowedTypes": ["images"], "multiple": false },
-    "locale": { "type": "string", "default": "en" },
+    "microsoftOid": {
+      "type": "string",
+      "unique": true
+    },
+    "displayName": {
+      "type": "string"
+    },
+    "jobTitle": {
+      "type": "string"
+    },
+    "avatar": {
+      "type": "media",
+      "allowedTypes": ["images"],
+      "multiple": false
+    },
+    "locale": {
+      "type": "string",
+      "default": "en"
+    },
     "department": {
       "type": "relation",
       "relation": "manyToOne",
@@ -72,8 +97,12 @@
       "target": "api::team.team",
       "mappedBy": "members"
     },
-    "phone": { "type": "string" },
-    "officeLocation": { "type": "string" },
+    "phone": {
+      "type": "string"
+    },
+    "officeLocation": {
+      "type": "string"
+    },
     "manager": {
       "type": "relation",
       "relation": "manyToOne",
@@ -85,8 +114,38 @@
       "target": "plugin::users-permissions.user",
       "mappedBy": "manager"
     },
-    "hireDate": { "type": "date" },
-    "birthday": { "type": "date", "private": true },
-    "birthdayVisible": { "type": "boolean", "default": false, "private": true }
+    "hireDate": {
+      "type": "date"
+    },
+    "birthday": {
+      "type": "date",
+      "private": true
+    },
+    "birthdayVisible": {
+      "type": "boolean",
+      "default": false,
+      "private": true
+    },
+    "digestAnnouncements": {
+      "type": "boolean",
+      "default": false
+    },
+    "digestMentions": {
+      "type": "boolean",
+      "default": false
+    },
+    "digestKudos": {
+      "type": "boolean",
+      "default": false
+    },
+    "digestFrequency": {
+      "type": "enumeration",
+      "enum": ["daily", "weekly"],
+      "default": "weekly"
+    },
+    "lastDigestAt": {
+      "type": "datetime",
+      "private": true
+    }
   }
 }

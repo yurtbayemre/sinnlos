@@ -29,6 +29,9 @@ importers:
       '@strapi/plugin-users-permissions':
         specifier: 5.49.0
         version: 5.49.0(uhkdfbyzsmb2q25dyk6kgl7saq)
+      '@strapi/provider-email-nodemailer':
+        specifier: ^5.52.2
+        version: 5.52.2
       '@strapi/strapi':
         specifier: 5.49.0
         version: 5.49.0(@babel/runtime@7.29.2)(@codemirror/autocomplete@6.20.1)(@codemirror/language@6.12.3)(@codemirror/lint@6.9.5)(@codemirror/search@6.6.0)(@codemirror/state@6.6.0)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.41.0)(@emotion/is-prop-valid@1.2.2)(@swc/helpers@0.5.21)(@types/hoist-non-react-statics@3.3.7(@types/react@18.3.12))(@types/node@22.10.0)(@types/react-dom@18.3.1)(@types/react@18.3.12)(better-sqlite3@12.9.0)(codemirror@5.65.21)(esbuild@0.27.7)(koa@2.16.4)(pg@8.13.1)(react-dom@18.3.1(react@18.3.1))(react-router-dom@6.30.3(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(react@18.3.1)(redux@4.2.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1))(terser@5.46.1)(type-fest@4.41.0)
@@ -2907,6 +2910,10 @@ packages:
       react-dom: ^17.0.0 || ^18.0.0
       react-router-dom: ^6.30.3
       styled-components: ^6.0.0
+
+  '@strapi/provider-email-nodemailer@5.52.2':
+    resolution: {integrity: sha512-uojF39xjHHmiOBrAlBSAe51LXR8WyxVPXJDdXoh2daZHYLzNlytmHXIrQUf69BVoH67nZe/K+mzO1JfrnVDNDg==}
+    engines: {node: '>=20.0.0 <=26.x.x', npm: '>=6.0.0'}
 
   '@strapi/provider-email-sendmail@5.49.0':
     resolution: {integrity: sha512-Rr+tGc2YfWcL3WRvetaSnnwphVDzbDn/cPU7+DgcFe9CjUkXE+EFpwUsWLRl8MvvQwSnyDysKz4kzIYfeX6X/A==}
@@ -6067,6 +6074,10 @@ packages:
 
   nodemailer@8.0.9:
     resolution: {integrity: sha512-5ofa7BUN8+C+Hckh5V2GjeeOGRQBx0CJQA6KxrvuZfC8iU4/q7sLn8XrtEEhJkjV6HdyIiQs7Bba6bTao8JhkA==}
+    engines: {node: '>=6.0.0'}
+
+  nodemailer@9.0.1:
+    resolution: {integrity: sha512-Gwv8SQewT616ZM/URn0H54b8PWo/Wum7md3EW2aWy1lO27+WZCX+Xyak3J+NlmHUjDh5ME+uesJUDRbR3Ye8Bw==}
     engines: {node: '>=6.0.0'}
 
   nodemon@3.0.2:
@@ -10496,7 +10507,7 @@ snapshots:
       '@strapi/design-system': 2.2.0(@babel/runtime@7.29.2)(@codemirror/autocomplete@6.20.1)(@codemirror/language@6.12.3)(@codemirror/lint@6.9.5)(@codemirror/search@6.6.0)(@codemirror/state@6.6.0)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.41.0)(@strapi/icons@2.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1)))(@types/react-dom@18.3.1)(@types/react@18.3.12)(codemirror@5.65.21)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       '@strapi/icons': 2.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       '@strapi/permissions': 5.49.0
-      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.4.5)
+      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.6.3)
       '@strapi/typescript-utils': 5.49.0
       '@strapi/utils': 5.49.0
       '@testing-library/dom': 10.4.1
@@ -10697,7 +10708,7 @@ snapshots:
       '@strapi/database': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)
       '@strapi/design-system': 2.2.0(@babel/runtime@7.29.2)(@codemirror/autocomplete@6.20.1)(@codemirror/language@6.12.3)(@codemirror/lint@6.9.5)(@codemirror/search@6.6.0)(@codemirror/state@6.6.0)(@codemirror/theme-one-dark@6.1.3)(@codemirror/view@6.41.0)(@strapi/icons@2.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1)))(@types/react-dom@18.3.1)(@types/react@18.3.12)(codemirror@5.65.21)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
       '@strapi/icons': 2.2.0(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(styled-components@6.1.13(react-dom@18.3.1(react@18.3.1))(react@18.3.1))
-      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.4.5)
+      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.6.3)
       '@strapi/utils': 5.49.0
       date-fns: 2.30.0
       date-fns-tz: 2.0.1(date-fns@2.30.0)
@@ -10802,7 +10813,7 @@ snapshots:
       '@strapi/logger': 5.49.0
       '@strapi/openapi': 5.49.0
       '@strapi/permissions': 5.49.0
-      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.4.5)
+      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.6.3)
       '@strapi/typescript-utils': 5.49.0
       '@strapi/utils': 5.49.0
       '@vercel/stega': 0.1.2
@@ -11174,6 +11185,10 @@ snapshots:
       - supports-color
       - typescript
 
+  '@strapi/provider-email-nodemailer@5.52.2':
+    dependencies:
+      nodemailer: 9.0.1
+
   '@strapi/provider-email-sendmail@5.49.0':
     dependencies:
       nodemailer: 8.0.9
@@ -11238,7 +11253,7 @@ snapshots:
       '@strapi/openapi': 5.49.0
       '@strapi/permissions': 5.49.0
       '@strapi/review-workflows': 5.49.0(dvghu4hdyzactnv2nue4gzdoty)
-      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.4.5)
+      '@strapi/types': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.6.3)
       '@strapi/typescript-utils': 5.49.0
       '@strapi/upload': 5.49.0(5hikhjvvqluzk73lhtcb6w573m)
       '@strapi/utils': 5.49.0
@@ -11340,38 +11355,6 @@ snapshots:
       - webpack-cli
       - webpack-dev-server
       - webpack-plugin-serve
-
-  '@strapi/types@5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.4.5)':
-    dependencies:
-      '@casl/ability': 6.7.5
-      '@koa/cors': 5.0.0
-      '@koa/router': 12.0.2
-      '@modelcontextprotocol/sdk': 1.29.0(zod@3.25.67)
-      '@strapi/database': 5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)
-      '@strapi/logger': 5.49.0
-      '@strapi/permissions': 5.49.0
-      '@strapi/utils': 5.49.0
-      commander: 8.3.0
-      json-logic-js: 2.0.5
-      koa: 2.16.4
-      koa-body: 6.0.1
-      node-schedule: 2.1.1
-      typedoc: 0.28.19(typescript@5.4.5)
-      typedoc-github-wiki-theme: 2.1.0(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.6.3)))
-      typedoc-plugin-markdown: 4.11.0(typedoc@0.28.19(typescript@5.6.3))
-      zod: 3.25.67
-    transitivePeerDependencies:
-      - '@cfworker/json-schema'
-      - '@types/node'
-      - better-sqlite3
-      - mysql
-      - mysql2
-      - pg
-      - pg-native
-      - sqlite3
-      - supports-color
-      - tedious
-      - typescript
 
   '@strapi/types@5.49.0(@types/node@22.10.0)(better-sqlite3@12.9.0)(pg@8.13.1)(typescript@5.6.3)':
     dependencies:
@@ -15030,6 +15013,8 @@ snapshots:
 
   nodemailer@8.0.9: {}
 
+  nodemailer@9.0.1: {}
+
   nodemon@3.0.2:
     dependencies:
       chokidar: 3.6.0
@@ -16696,15 +16681,6 @@ snapshots:
   typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.6.3)):
     dependencies:
       typedoc: 0.28.19(typescript@5.6.3)
-
-  typedoc@0.28.19(typescript@5.4.5):
-    dependencies:
-      '@gerrit0/mini-shiki': 3.23.0
-      lunr: 2.3.9
-      markdown-it: 14.2.0
-      minimatch: 10.2.5
-      typescript: 5.4.5
-      yaml: 2.8.3
 
   typedoc@0.28.19(typescript@5.6.3):
     dependencies:

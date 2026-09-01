@@ -64,6 +64,18 @@ services:
       # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
       # no-ops and the app runs byte-for-byte on the pre-SSE polling.
       LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
+      # E-mail digests (issue #18): authenticated submission against the
+      # own mailcow (mail.yurtbay.dev:587 STARTTLS). SMTP_USER/PASS = a
+      # mailbox app password (SMTP-only) — without them the digest cron
+      # is a logged no-op. Deliberately NOT attached to the mailcow
+      # docker network (documented update landmine).
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      DIGEST_FROM: ${DIGEST_FROM:-Sinnlos Intranet <noreply@yurtbay.dev>}
+      DIGESTS_DISABLED: ${DIGESTS_DISABLED:-0}
+      PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-https://sinnlos.yurtbay.dev}
       # Shared secret guarding the raw /uploads bytes (issue #21, K1): the cms
       # uploads-auth middleware only serves /uploads to callers presenting this
       # token, i.e. the web session-gate proxy — closing the /api/../uploads
