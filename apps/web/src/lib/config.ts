@@ -38,3 +38,24 @@ export function mediaUrl(url: string | null | undefined): string | null {
   if (url.startsWith("http")) return url;
   return `${MEDIA_BASE}${url}`;
 }
+
+/**
+ * Smallest usable rendition of an avatar upload (issue #30): profile
+ * photos are shown in 40–64px circles, but the type used to model only
+ * the original `url` — a phone photo (3–8 MB) was delivered N× through
+ * the auth-gated /uploads proxy (JWT decode + internal fetch per image).
+ * Strapi generates `formats` for every image upload; prefer thumbnail
+ * (156px box), then small, then the original as last resort.
+ */
+export function avatarThumbUrl(
+  avatar:
+    | {
+        url?: string;
+        formats?: { thumbnail?: { url?: string }; small?: { url?: string } } | null;
+      }
+    | null
+    | undefined,
+): string | null {
+  if (!avatar) return null;
+  return mediaUrl(avatar.formats?.thumbnail?.url ?? avatar.formats?.small?.url ?? avatar.url);
+}

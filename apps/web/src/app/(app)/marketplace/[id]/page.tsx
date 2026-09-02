@@ -54,11 +54,18 @@ export default async function ClassifiedDetailPage({
   const canManage = isOwner || isAdmin(role);
   const expired = isClassifiedExpired(ad.expiresAt);
   const images = (ad.images ?? [])
-    .map((img) => ({
-      id: img.id,
-      url: mediaUrl(img.formats?.medium?.url ?? img.url ?? null),
-    }))
-    .filter((img): img is { id: number; url: string } => !!img.url);
+    .map((img) => {
+      // Medium rendition preferred; carry its dimensions so the browser
+      // reserves layout space (no CLS) — issue #30.
+      const fmt = img.formats?.medium ?? img;
+      return {
+        id: img.id,
+        url: mediaUrl(fmt.url ?? img.url ?? null),
+        width: fmt.width,
+        height: fmt.height,
+      };
+    })
+    .filter((img): img is typeof img & { url: string } => !!img.url);
 
   const priceLine =
     ad.category === "giveaway"
@@ -112,6 +119,9 @@ export default async function ClassifiedDetailPage({
                   key={img.id}
                   src={img.url}
                   alt={`${ad.title} (${i + 1})`}
+                  width={img.width}
+                  height={img.height}
+                  loading={i === 0 ? undefined : "lazy"}
                   className={
                     i === 0 && images.length > 1
                       ? "max-h-96 w-full rounded-2xl border object-cover sm:col-span-2"
