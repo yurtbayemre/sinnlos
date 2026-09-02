@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Check, HelpCircle, Users, X } from "lucide-react";
@@ -10,10 +10,11 @@ import type { EventRsvpSummary, RsvpStatus } from "@/lib/types";
 
 /**
  * Yes/no/maybe buttons + attendee summary for one event card. Optimistic
- * like poll-card: counts and own status flip locally, the action's
- * refresh() then delivers the authoritative numbers; on rejection
- * (capacity race, event unpublished meanwhile, …) the error is surfaced
- * and router.refresh() restores server state.
+ * via useOptimistic (issue #34): counts and own status flip instantly,
+ * the action's refresh() delivers the authoritative summary prop within
+ * the same transition, and a rejected action (capacity race, event
+ * unpublished meanwhile, …) rolls back automatically — the error is
+ * surfaced and router.refresh() re-syncs server state.
  *
  * Privacy shape (per research decision): "yes" responders are listed by
  * name, maybe/no appear only as counts.
@@ -32,19 +33,10 @@ export function EventRsvpPanel({
 }) {
   const t = useTranslations("events");
   const router = useRouter();
-  const [local, setLocal] = useState(summary);
   const [error, setError] = useState<"full" | "failed" | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // useState initialisers ignore prop changes — adopt the authoritative
-  // server summary whenever a refresh() delivers a new payload.
-  useEffect(() => {
-    setLocal(summary);
-  }, [summary]);
-
-  const isFull = capacity != null && local.yesCount >= capacity;
-
-  const applyOptimistic = (prev: EventRsvpSummary, status: RsvpStatus): EventRsvpSummary => {
+  const applyRsvp = (prev: EventRsvpSummary, status: RsvpStatus): EventRsvpSummary => {
     const next = { ...prev, yesNames: [...prev.yesNames], myStatus: status };
     // Remove the old answer from its bucket …
     if (prev.myStatus === "yes") {
@@ -64,15 +56,16 @@ export function EventRsvpPanel({
     return next;
   };
 
+  const [local, applyOptimistic] = useOptimistic(summary, applyRsvp);
+  const isFull = capacity != null && local.yesCount >= capacity;
+
   const respond = (status: RsvpStatus) => {
     if (isPending || local.myStatus === status) return;
     setError(null);
     startTransition(async () => {
-      const before = local;
-      setLocal((prev) => applyOptimistic(prev, status));
+      applyOptimistic(status);
       const result = await rsvpToEvent(eventDocumentId, status);
       if (result.error) {
-        setLocal(before);
         setError(result.error);
         router.refresh();
       }
