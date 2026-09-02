@@ -3,7 +3,7 @@ import Link from "next/link";
 import { Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
-import { mediaUrl } from "@/lib/config";
+import { avatarThumbUrl } from "@/lib/config";
 import type { Department } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -27,7 +27,7 @@ export default async function DepartmentPage({ params }: Props) {
   const teams = entry.teams ?? [];
   const members = entry.members ?? [];
   const head = entry.head;
-  const headAvatarUrl = mediaUrl(head?.avatar?.url);
+  const headAvatarUrl = avatarThumbUrl(head?.avatar);
   const color = entry.color ?? "#6366f1";
 
   return (

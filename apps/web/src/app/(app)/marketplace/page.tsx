@@ -34,10 +34,15 @@ function priceLabel(ad: Classified, t: (key: string) => string, locale: string) 
   return ad.priceNegotiable ? `${formatted} ${t("negotiable")}` : formatted;
 }
 
-function thumbnailUrl(ad: Classified): string | null {
+function thumbnail(ad: Classified): { url: string; width?: number; height?: number } | null {
   const img = ad.images?.[0];
   if (!img) return null;
-  return mediaUrl(img.formats?.small?.url ?? img.formats?.thumbnail?.url ?? img.url ?? null);
+  // Prefer the small rendition (issue #30): the list renders up to 100
+  // cards, each request through the auth-gated /uploads proxy — original
+  // uploads would be megabytes per tile. Dimensions reserve layout space.
+  const fmt = img.formats?.small ?? img.formats?.thumbnail ?? img;
+  const url = mediaUrl(fmt.url ?? img.url ?? null);
+  return url ? { url, width: fmt.width, height: fmt.height } : null;
 }
 
 export default async function MarketplacePage({
@@ -169,7 +174,7 @@ export default async function MarketplacePage({
       ) : (
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {ads.map((ad) => {
-            const thumb = thumbnailUrl(ad);
+            const thumb = thumbnail(ad);
             return (
               <Link key={ad.id} href={`/marketplace/${ad.id}`} className="focus-card group">
                 <Card className="card-lift h-full overflow-hidden">
@@ -177,8 +182,11 @@ export default async function MarketplacePage({
                     {thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element
                       <img
-                        src={thumb}
+                        src={thumb.url}
                         alt=""
+                        width={thumb.width}
+                        height={thumb.height}
+                        loading="lazy"
                         className="h-full w-full object-cover transition group-hover:scale-[1.02]"
                       />
                     ) : (

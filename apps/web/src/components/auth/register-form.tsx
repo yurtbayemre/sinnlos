@@ -2,16 +2,21 @@
 
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
-import { registerLocalAccount } from "@/lib/auth-actions";
+import { registerLocalAccount, type RegisterFormState } from "@/lib/auth-actions";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export function RegisterForm() {
   const t = useTranslations("auth");
-  const [state, formAction, isPending] = useActionState(registerLocalAccount, {
-    error: undefined,
-  });
+  const [state, formAction, isPending] = useActionState<RegisterFormState, FormData>(
+    registerLocalAccount,
+    {},
+  );
+  // Values echoed back by a failed action — React 19 resets the form on
+  // every settled submission, this restores what the user typed (the
+  // password is never echoed and must be re-entered on error).
+  const v = state.values;
 
   return (
     <form action={formAction} className="space-y-3">
@@ -25,6 +30,7 @@ export function RegisterForm() {
           type="text"
           autoComplete="name"
           required
+          defaultValue={v?.username ?? ""}
           placeholder={t("namePlaceholder")}
           className={inputClass}
         />
@@ -39,6 +45,7 @@ export function RegisterForm() {
           type="email"
           autoComplete="email"
           required
+          defaultValue={v?.email ?? ""}
           placeholder={t("emailPlaceholder")}
           className={inputClass}
         />

@@ -30,9 +30,13 @@ export async function POST(req: NextRequest) {
     : [];
 
   for (const tag of tags) {
-    // Next.js 16 requires a cacheLife profile — "default" matches the
-    // behavior of single-arg revalidateTag in earlier versions.
-    revalidateTag(tag, "default");
+    // { expire: 0 } is load-bearing (SOTA-audit find, issue #30): the
+    // "default" cacheLife profile has `expire: never`, so entries were
+    // only marked stale and editors kept seeing old content until the
+    // ISR timer + next request. The docs recommend exactly this form
+    // for webhook invalidation — it matches the old single-arg
+    // behaviour ("behaves like { expire: 0 }").
+    revalidateTag(tag, { expire: 0 });
   }
 
   return NextResponse.json({ revalidated: tags });

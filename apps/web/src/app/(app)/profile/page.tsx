@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { initials } from "@/lib/utils";
+import { avatarThumbUrl } from "@/lib/config";
 import { PageHeader } from "@/components/page-header";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -28,7 +29,7 @@ export default async function ProfilePage() {
 
   const name = me?.displayName ?? me?.username ?? session?.user?.name ?? tCommon("unknown");
   const email = me?.email ?? session?.user?.email ?? "";
-  const avatarUrl = me?.avatar?.url ?? session?.user?.image ?? null;
+  const avatarUrl = avatarThumbUrl(me?.avatar) ?? session?.user?.image ?? null;
 
   return (
     <div className="space-y-6">
