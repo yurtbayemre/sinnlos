@@ -27,6 +27,10 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
     updateProfile,
     {},
   );
+  // Submitted values echoed back by a failed action — React 19 resets the
+  // form after every settled submission; without this a transient CMS
+  // error silently reverted everything typed (issue #30).
+  const v = state.values;
 
   return (
     <form action={formAction} className="space-y-4">
@@ -38,7 +42,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           id="displayName"
           name="displayName"
           type="text"
-          defaultValue={initial.displayName ?? ""}
+          defaultValue={v?.displayName ?? initial.displayName ?? ""}
           className={inputClass}
         />
       </div>
@@ -50,7 +54,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           id="jobTitle"
           name="jobTitle"
           type="text"
-          defaultValue={initial.jobTitle ?? ""}
+          defaultValue={v?.jobTitle ?? initial.jobTitle ?? ""}
           className={inputClass}
         />
       </div>
@@ -62,7 +66,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           id="phone"
           name="phone"
           type="tel"
-          defaultValue={initial.phone ?? ""}
+          defaultValue={v?.phone ?? initial.phone ?? ""}
           className={inputClass}
         />
       </div>
@@ -74,7 +78,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           id="officeLocation"
           name="officeLocation"
           type="text"
-          defaultValue={initial.officeLocation ?? ""}
+          defaultValue={v?.officeLocation ?? initial.officeLocation ?? ""}
           className={inputClass}
         />
       </div>
@@ -86,7 +90,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
           id="birthday"
           name="birthday"
           type="date"
-          defaultValue={initial.birthday ?? ""}
+          defaultValue={v?.birthday ?? initial.birthday ?? ""}
           className={inputClass}
         />
       </div>
@@ -94,7 +98,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
         <input
           type="checkbox"
           name="birthdayVisible"
-          defaultChecked={initial.birthdayVisible ?? false}
+          defaultChecked={v?.birthdayVisible ?? initial.birthdayVisible ?? false}
           className="mt-0.5 h-4 w-4 rounded border accent-primary"
         />
         <span className="min-w-0">
@@ -119,7 +123,7 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
             <input
               type="checkbox"
               name={name}
-              defaultChecked={checked ?? false}
+              defaultChecked={(v ? v[name] : checked) ?? false}
               className="mt-0.5 h-4 w-4 rounded border accent-primary"
             />
             <span className="block text-sm">{tProfile(name)}</span>
@@ -132,7 +136,9 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
                 type="radio"
                 name="digestFrequency"
                 value={freq}
-                defaultChecked={(initial.digestFrequency ?? "weekly") === freq}
+                defaultChecked={
+                  (v?.digestFrequency ?? initial.digestFrequency ?? "weekly") === freq
+                }
                 className="h-4 w-4 accent-primary"
               />
               {tProfile(`digestFrequency_${freq}`)}

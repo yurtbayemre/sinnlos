@@ -13,7 +13,19 @@ import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { strapi } from "@/lib/strapi";
 
-export type ProfileFormState = { error?: string; success?: string };
+export type ProfileFormValues = {
+  displayName: string;
+  jobTitle: string;
+  phone: string;
+  officeLocation: string;
+  birthday: string;
+  birthdayVisible: boolean;
+  digestAnnouncements: boolean;
+  digestMentions: boolean;
+  digestKudos: boolean;
+  digestFrequency: "daily" | "weekly";
+};
+export type ProfileFormState = { error?: string; success?: string; values?: ProfileFormValues };
 
 export async function updateProfile(
   _prev: ProfileFormState,
@@ -22,6 +34,21 @@ export async function updateProfile(
   // Empty date input clears the stored birthday; an unchecked checkbox is
   // absent from FormData, so map its presence ("on") to an explicit boolean.
   const birthday = String(formData.get("birthday") ?? "").trim();
+  // Echoed back on error: React 19 resets the form after every settled
+  // action, which silently reverted all typed changes on a transient CMS
+  // failure (issue #30; classified-form pattern).
+  const values: ProfileFormValues = {
+    displayName: String(formData.get("displayName") ?? ""),
+    jobTitle: String(formData.get("jobTitle") ?? ""),
+    phone: String(formData.get("phone") ?? ""),
+    officeLocation: String(formData.get("officeLocation") ?? ""),
+    birthday,
+    birthdayVisible: formData.get("birthdayVisible") === "on",
+    digestAnnouncements: formData.get("digestAnnouncements") === "on",
+    digestMentions: formData.get("digestMentions") === "on",
+    digestKudos: formData.get("digestKudos") === "on",
+    digestFrequency: formData.get("digestFrequency") === "daily" ? "daily" : "weekly",
+  };
   try {
     await strapi("/api/me", {
       method: "PUT",
@@ -50,7 +77,7 @@ export async function updateProfile(
     // Don't swallow strapi()'s 401 redirect (NEXT_REDIRECT) — an expired
     // session must navigate to sign-in, not surface as a save error.
     unstable_rethrow(e);
-    return { error: "Could not save profile." };
+    return { error: "Could not save profile.", values };
   }
 }
 

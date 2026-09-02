@@ -46,7 +46,15 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
   return { error: undefined };
 }
 
-export async function registerLocalAccount(_prev: unknown, formData: FormData) {
+export type RegisterFormState = {
+  error?: string;
+  values?: { username: string; email: string };
+};
+
+export async function registerLocalAccount(
+  _prev: RegisterFormState,
+  formData: FormData,
+): Promise<RegisterFormState> {
   // Server-side gate: the register page hides itself when registration is
   // off, but the action must enforce it too — otherwise the endpoint stays
   // callable directly (e.g. with a stale form or crafted request).
@@ -57,14 +65,19 @@ export async function registerLocalAccount(_prev: unknown, formData: FormData) {
   const username = String(formData.get("username") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
+  // React 19 resets the form after EVERY settled action, incl. error
+  // returns — echo the typed values back so the form can restore them
+  // (issue #30; classified-form pattern). The password is deliberately
+  // NEVER echoed through the server roundtrip.
+  const values = { username, email };
   if (!username || !email || password.length < 6) {
-    return { error: "Fill in all fields; password needs at least 6 characters." };
+    return { values, error: "Fill in all fields; password needs at least 6 characters." };
   }
   // Same limiter as the login (issue #23): registration is part of the auth
   // surface, so a blocked source may not probe here either.
   const clientIp = clientIpFrom(await headers());
   if (loginRateLimiter.isBlocked(clientIp, email)) {
-    return { error: "Too many failed attempts — please try again later." };
+    return { values, error: "Too many failed attempts — please try again later." };
   }
   let res: Response;
   try {
@@ -86,7 +99,7 @@ export async function registerLocalAccount(_prev: unknown, formData: FormData) {
     // The timeout (or a network failure) would otherwise throw uncaught out
     // of the Server Action — an opaque digest error page instead of the
     // {error} form state.
-    return { error: "Registration failed — please try again." };
+    return { values, error: "Registration failed — please try again." };
   }
   if (!res.ok) {
     // Counting rule mirrors authorize(): only real rejections (Strapi
@@ -102,16 +115,16 @@ export async function registerLocalAccount(_prev: unknown, formData: FormData) {
       }
     }
     const body = await res.json().catch(() => null);
-    return { error: body?.error?.message ?? "Registration failed." };
+    return { values, error: body?.error?.message ?? "Registration failed." };
   }
   // Sign straight in with the new credentials.
   try {
     await signIn("local", { identifier: email, password, redirectTo: "/" });
   } catch (err) {
     if ((err as any)?.digest?.startsWith?.("NEXT_REDIRECT")) throw err;
-    return { error: "Account created — sign in manually." };
+    return { values, error: "Account created — sign in manually." };
   }
-  return { error: undefined };
+  return {};
 }
 
 /**
