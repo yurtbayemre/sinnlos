@@ -10,7 +10,13 @@ export interface UserLite {
   email?: string;
   displayName?: string;
   jobTitle?: string;
-  avatar?: { url?: string } | null;
+  avatar?: {
+    url?: string;
+    formats?: {
+      thumbnail?: { url?: string };
+      small?: { url?: string };
+    } | null;
+  } | null;
   phone?: string;
   officeLocation?: string;
   department?: { id: number; name: string; slug: string } | null;
@@ -229,10 +235,12 @@ export interface ClassifiedImage {
   id: number;
   url?: string;
   name?: string;
+  width?: number;
+  height?: number;
   formats?: {
-    thumbnail?: { url?: string };
-    small?: { url?: string };
-    medium?: { url?: string };
+    thumbnail?: { url?: string; width?: number; height?: number };
+    small?: { url?: string; width?: number; height?: number };
+    medium?: { url?: string; width?: number; height?: number };
   } | null;
 }
 

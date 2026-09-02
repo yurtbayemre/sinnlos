@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Building2, Mail, MapPin, Phone, Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
-import { mediaUrl } from "@/lib/config";
+import { avatarThumbUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
 import { initials } from "@/lib/utils";
@@ -43,7 +43,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
   }
 
   const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
-  const avatarUrl = mediaUrl(person.avatar?.url);
+  const avatarUrl = avatarThumbUrl(person.avatar);
 
   return (
     <div className="space-y-6">
@@ -177,7 +177,7 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
 
 function PersonMini({ user }: { user: UserLite }) {
   const name = user.displayName ?? user.username ?? user.email ?? "Unknown";
-  const avatarUrl = mediaUrl(user.avatar?.url);
+  const avatarUrl = avatarThumbUrl(user.avatar);
   return (
     <Link
       href={`/people/${user.id}`}

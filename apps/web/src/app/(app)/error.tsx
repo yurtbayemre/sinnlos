@@ -10,13 +10,18 @@ import { Card, CardContent } from "@/components/ui/card";
  * Error boundary for the authenticated app. Handles unhandled Strapi or
  * render errors thrown from server components. Pages that want the
  * inline banner instead should catch errors themselves with tryFetch().
+ *
+ * Uses `retry()` (stable since Next 16.3), NOT `reset()`: reset only
+ * re-renders the client tree without re-fetching server content, so
+ * after a transient CMS outage "Try again" would stay stuck on the
+ * error (SOTA-audit find, issue #30).
  */
 export default function AppError({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   const t = useTranslations("errors");
 
@@ -34,7 +39,7 @@ export default function AppError({
           <p className="font-medium">{t("somethingWrong")}</p>
           <p className="max-w-sm text-sm text-muted-foreground">{t("somethingWrongHint")}</p>
         </div>
-        <Button onClick={() => reset()} variant="outline" size="sm">
+        <Button onClick={() => retry()} variant="outline" size="sm">
           <RefreshCw className="mr-2 h-4 w-4" />
           {t("tryAgain")}
         </Button>
