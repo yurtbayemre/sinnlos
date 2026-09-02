@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { Suspense } from "react";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
@@ -145,7 +146,7 @@ function StatCard({
   icon: React.ReactNode;
   label: string;
   value: React.ReactNode;
-  href: string;
+  href: Route;
 }) {
   return (
     <Link href={href} className="focus-card group block">

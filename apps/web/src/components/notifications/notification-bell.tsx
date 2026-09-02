@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { markNotificationsRead, markAllNotificationsRead } from "@/lib/notification-actions";
@@ -63,7 +64,9 @@ export function NotificationBell({
       });
     }
     setOpen(false);
-    if (notif.link) router.push(notif.link);
+    // Server-authored notification links ("/announcements", …) — data-
+    // driven, so typedRoutes needs the cast.
+    if (notif.link) router.push(notif.link as Route);
   };
 
   const handleMarkAll = () => {
