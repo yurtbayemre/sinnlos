@@ -1,0 +1,39 @@
+{
+  "kind": "collectionType",
+  "collectionName": "lessons",
+  "info": {
+    "singularName": "lesson",
+    "pluralName": "lessons",
+    "displayName": "Lesson",
+    "description": "One lesson of a training course. body = markdown (admin markdown editor, same pipeline as wiki); videoUrl = YouTube only (validated in lifecycles AND render-gated in the web player); quiz = JSON self-check (see utils/training-validation.ts for the shape)."
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "attributes": {
+    "title": {
+      "type": "string",
+      "required": true
+    },
+    "body": {
+      "type": "richtext"
+    },
+    "order": {
+      "type": "integer",
+      "default": 0,
+      "min": 0
+    },
+    "course": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::course.course",
+      "inversedBy": "lessons"
+    },
+    "videoUrl": {
+      "type": "string"
+    },
+    "quiz": {
+      "type": "json"
+    }
+  }
+}

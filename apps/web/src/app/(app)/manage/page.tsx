@@ -10,6 +10,7 @@ import {
   Lock,
   BarChart3,
   ClipboardCheck,
+  GraduationCap,
 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
@@ -121,6 +122,19 @@ export default async function AdminPage() {
                 <div>
                   <div className="font-medium">{t("ackReportLink")}</div>
                   <div className="text-sm text-muted-foreground">{t("ackReportLinkDesc")}</div>
+                </div>
+              </CardContent>
+            </Card>
+          </Link>
+          <Link href="/manage/training" className="focus-card block">
+            <Card className="card-lift h-full transition hover:border-primary/40">
+              <CardContent className="flex items-center gap-4 p-6">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <GraduationCap className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="font-medium">{t("trainingReportLink")}</div>
+                  <div className="text-sm text-muted-foreground">{t("trainingReportLinkDesc")}</div>
                 </div>
               </CardContent>
             </Card>
