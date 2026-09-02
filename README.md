@@ -1,14 +1,19 @@
 # Sinnlos Intranet
 
 A self-hosted company intranet with **Microsoft Entra ID (Azure AD)** single sign-on,
-all gated by **user roles**: announcements with **comments & reactions** and
-**read confirmation** for mandatory news, a **wiki** with revision history,
-**department/team pages**, a **people directory + org chart** with **opt-in
-birthday celebrations**, **events with ICS export & RSVP** (list + month view),
-**polls**, **kudos**, a **document library**, an **employee marketplace**
-(classified ads with hardened photo upload), **quick links**,
-**notifications**, **global search (⌘K)** and an **English/German
-UI** (see [Internationalization](#internationalization-i18n)).
+all gated by **user roles**: announcements with **live comments & reactions**
+(SSE push — other sessions see new comments in under two seconds, with
+polling as the fallback) and **read confirmation** for mandatory news, a
+**wiki** with revision history, **department/team pages**, a **people
+directory + org chart** with **opt-in birthday celebrations**, **events with
+ICS export & RSVP** (list + month view), **polls**, **kudos**, a **document
+library**, an **employee marketplace** (classified ads with hardened photo
+upload), **quick links**, a **training platform** (courses with lessons,
+YouTube embeds, comprehension quizzes with an optional completion gate, and
+per-user completion tracking incl. an admin report), **notifications** with
+opt-in **e-mail digests** (daily/weekly), **global search (⌘K)** with
+anonymous search analytics, and an **English/German UI**
+(see [Internationalization](#internationalization-i18n)).
 
 - **Backend** — Strapi v5 (Postgres) at `apps/cms`
 - **Frontend** — Next.js 16 + TailwindCSS + shadcn/ui at `apps/web`
@@ -33,6 +38,7 @@ UI** (see [Internationalization](#internationalization-i18n)).
 │   ├── docker-compose.yml          base stack (db, cms, web, caddy)
 │   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy)
 │   ├── deploy.sh                   direct prod deploy (backup → tag → build → smoke)
+│   ├── live-smoke.sh               end-to-end SSE pipeline probe (run by deploy.sh)
 │   ├── backup/pg-backup.sh         nightly encrypted Postgres + uploads backup
 │   ├── Caddyfile                   used only for local full-stack runs
 │   └── .env.example
@@ -94,7 +100,11 @@ Quick start:
 2. Optionally set `LOCAL_REGISTRATION=1` in both apps to enable the
    self-registration form on the sign-in page.
 3. Start Strapi and Next.js (step 4 below).
-4. Create users in the Strapi admin under **Content Manager → User**
+4. Optional shortcut: set `SEED_DEMO_DATA=1` in `apps/cms/.env` for the
+   FIRST boot — the built-in seed (`apps/cms/src/seed-demo.ts`, idempotent,
+   skips itself once data exists) populates departments, teams, demo users
+   and content for every module. Otherwise create users in the Strapi admin
+   under **Content Manager → User**
    (set email, password, and confirmed = true) — or let people register
    themselves if you enabled registration.
 5. Sign in at http://localhost:3000/sign-in with email + password.
@@ -157,7 +167,7 @@ On first sign-in, Strapi will:
 
 ## 5. Content model + roles
 
-Strapi ships 18 collection types plus one routes-only API
+Strapi ships 22 collection types plus one routes-only API
 (`apps/cms/src/api/`):
 
 | Type | Purpose |
@@ -166,8 +176,8 @@ Strapi ships 18 collection types plus one routes-only API
 | **team** | Belongs to a department, has a lead and members |
 | **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`) |
 | **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created |
-| **comment** | Comments on announcements and wiki pages (`targetType` + `targetId`, no FK) |
-| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetId` scheme |
+| **comment** | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28) |
+| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement |
 | **kudos** | Peer recognition (`from` → `to` user, message, company value) |
 | **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
 | **event** | Calendar events, department-scoped, ICS export via custom route; optional RSVP (`rsvpEnabled` + `capacity`) |
@@ -177,17 +187,25 @@ Strapi ships 18 collection types plus one routes-only API
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
 | **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
+| **course** | Training course (draft & publish): ordered lessons, `mandatory` flag, `completionMode` (`confirm` \| `quizGate` — quiz must be passed before completion unlocks). Maintained in the Strapi admin panel; the content api is read-only |
+| **lesson** | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check. First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers) |
+| **lesson-progress** | Completion receipt per user + lesson, anchored on the lesson's `documentId` (survives re-publish); own-rows read policy, admin report at `/manage/training`. Course completion is derived at read time — a lesson added later re-opens the course |
+| **search-log** | Anonymous search telemetry (term + result count, deliberately NO user relation): write-only content api, aggregated admin-only `/search-logs/summary`, 90-day retention cron. Feeds the Meilisearch go/no-go decision |
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields below) |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below) |
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart), `microsoftOid`, and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
 **opt-in** (maintained via `/api/me`, never exposed through user reads) and
 only surface — without the year of birth — in the celebrations feed when
-`birthdayVisible` is set.
+`birthdayVisible` is set. Since the e-mail digests (#18) the user also
+carries `digestAnnouncements` / `digestMentions` / `digestKudos` (booleans),
+`digestFrequency` (`daily` | `weekly`, default weekly) and the
+schema-`private`, cron-owned `lastDigestAt` — the opt-ins are maintained on
+the profile page via the same `/api/me` whitelist.
 
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
@@ -228,6 +246,18 @@ Read-side filters:
   `results` route)
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
+- `announcement-visibility` — server-side audience targeting (#9):
+  department AND team AND audienceRoles, resolved to a non-relational id
+  filter; pins `status=published`
+- `comment-target-visibility` — comment/reaction reads filtered to targets
+  the caller may see (#28; the create counterpart lives in the controllers
+  via `isTargetVisible`)
+- `training-visibility` — courses/lessons pinned to `status=published`;
+  lessons only visible when their owning course is published (fail-closed);
+  admin/editor bypass for draft preview (#29)
+- `lesson-progress-visibility` — reads restricted to the caller's own
+  completion receipts; `admin_role` bypasses for the `/manage/training`
+  report (#29)
 
 The read-side policies share helpers in `apps/cms/src/utils/`:
 `policy-query.ts` provides `getMutableQuery` (policies must mutate the real
@@ -235,7 +265,9 @@ Koa `request.query` — `policyContext.query` is a copy the core controllers
 never read) and `restrictiveIdFilter` (an empty id allow-list is injected as
 `{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an empty
 `$in: []`, which would fail **open**). `visible-ids.ts` (`loadUserScope`,
-`visibleWikiSpaceIds`) resolves per-user wiki-space visibility, and
+`visibleWikiSpaceIds`) resolves per-user wiki-space visibility,
+`target-visibility.ts` (`visibleTargetAnchors`, `isTargetVisible`) decides
+comment/reaction target visibility for #28, and
 `wiki-edit-context.ts` carries the authenticated editor from the wiki-page
 controller into the revision-snapshot lifecycle via `AsyncLocalStorage`, so
 revisions record who actually edited.
@@ -291,27 +323,34 @@ works in that degraded state.
 `PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
-| Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos · Poll-votes | Notifications |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `admin_role` | CRUD | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
-| `editor` | CRUD | R+C · R+C+U | R / R | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD |
-| `department_head` | R | R+C · R+C+U | R+U / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D |
-| `team_lead` | R | R+C · R+C+U | R / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D |
-| `member` | R | R+C · R+C+U | R / R | R | CRUD | R | R · R+U · R | R+C+D | R+C | R+D |
-| `guest` | — | — · — | — / — | R | — | R | R · R · — | R | — · R | R |
-| `authenticated` *(fallback)* | R | R+C · R+C+U | R / R | R | R | R | R | R+C | R+C | R |
+| Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos · Poll-votes | Notifications | Courses · Lessons / Progress | Search-log |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `admin_role` | CRUD | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | R / CRUD | C |
+| `editor` | CRUD | R+C · R+C+U | R / R | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | CRUD | R / R+C | C |
+| `department_head` | R | R+C · R+C+U | R+U / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D | R / R+C | C |
+| `team_lead` | R | R+C · R+C+U | R / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D | R / R+C | C |
+| `member` | R | R+C · R+C+U | R / R | R | CRUD | R | R · R+U · R | R+C+D | R+C | R+D | R / R+C | C |
+| `guest` | — | — · — | — / — | R | — | R | R · R · — | R | — · R | R | — / — | C |
+| `authenticated` *(fallback)* | R | R+C · R+C+U | R / R | R | R | R | R | R+C | R+C | R | R / R+C | C |
 
 Fine print encoded in the matrix (and enforced by the policies/controllers):
 acknowledgements are **immutable read receipts** — only `admin_role` may
 update/delete them; RSVP `delete` is admin-only across all roles (removing
 someone else's RSVP is an admin correction) and `update` is ownership-gated;
-classified `CRUD` for non-admins is ownership-gated by `is-classified-author`.
-`guest` is a deliberate exception on four modules: **no kudos** (celebrations
+classified `CRUD` for non-admins is ownership-gated by `is-classified-author`;
+course/lesson content-api **write routes do not exist at all** (`only:
+["find", "findOne"]` routers — authoring happens in the Strapi admin) and
+lesson-progress receipts are immutable (update/delete admin-only);
+`search-log` is write-only telemetry — nobody lists raw rows, aggregates come
+from the admin-only `summary` route.
+`guest` is a deliberate exception on five modules: **no kudos** (celebrations
 leak hire dates), **no classifieds** (the flea market is internal and ads
 populate author contact data), **no announcements and therefore no
 acknowledgements** (a guest can never see a mandatory announcement, so ack
-grants were dead attack surface), and **no event-rsvp** (guests read the
-calendar but neither respond nor see attendee names). Grants that older
+grants were dead attack surface), **no event-rsvp** (guests read the
+calendar but neither respond nor see attendee names), and **no training**
+(no course/lesson/lesson-progress grants at all — while `search-log.create`
+IS granted to guest: search telemetry is anonymous by design). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
 `REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
@@ -329,8 +368,9 @@ That guest can consequently still read directory fields is a documented
 `src/index.ts`. Custom (non-CRUD) route actions (ICS export, celebrations
 and poll `vote` — both minus `guest` —, mark-read/mark-all-read, poll
 `results`, `/api/me`, `changePassword`, `role.find` for the admin ack
-report, and the upload grant below) are seeded via `CUSTOM_ACTION_GRANTS`
-in the same file.
+report, the classified `cleanupUploads` endpoint, the admin-only
+search-log `summary` aggregate behind `/manage/analytics`, and the upload
+grant below) are seeded via `CUSTOM_ACTION_GRANTS` in the same file.
 
 ### Upload hardening
 
@@ -367,8 +407,8 @@ export function isAdmin(role) { return role ? ADMIN_ROLES.has(role) : false; }
 ```
 
 Used in a handful of places: the sidebar (hide/show the *Admin* link), the
-`/manage`, `/manage/acknowledgements` and `/manage/analytics` pages (all
-redirect non-admins to `/`), and the marketplace detail/edit pages (show the
+`/manage`, `/manage/acknowledgements`, `/manage/analytics` and
+`/manage/training` pages (all redirect non-admins to `/`), and the marketplace detail/edit pages (show the
 moderation controls for admin/editor alongside the ad owner). Note the admin
 area lives under **`/manage`** — `/admin` is reserved
 for the Strapi admin panel by the reverse proxy. Every other authorization
@@ -431,6 +471,7 @@ pnpm typecheck         # tsc --noEmit everywhere
 pnpm test              # vitest unit tests (also run in CI)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
+infra/live-smoke.sh    # prove the SSE live pipeline end to end (comment → ping frame)
 ```
 
 ## 8. Verification checklist
@@ -446,3 +487,12 @@ pnpm web:dev           # just Next.js
 - [ ] A member of the owning department can edit wiki pages for that department
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
+- [ ] A comment posted in session A appears in session B in under two
+      seconds without a reload (SSE) — or run `infra/live-smoke.sh`
+- [ ] `/training` lists published courses; on a `quizGate` course the
+      completion button stays locked until every quiz answer is correct;
+      `/manage/training` shows the completion report (admin)
+- [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
+      (totals, zero-result rate, top terms)
+- [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
+      logs `[digest] skipped` (dark mode)

@@ -287,6 +287,21 @@ REVALIDATE_SECRET=<openssl rand -hex 32>
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
+
+# --- Optional features (safe to leave unset) --------------------------
+# Live updates (SSE, issue #17/#27): set to 1 to revert the app to the
+# pre-SSE polling behaviour entirely (kill switch / rollback lever).
+LIVE_EVENTS_DISABLED=0
+
+# E-mail digests (issue #18): authenticated SMTP submission. Without
+# SMTP_HOST/USER/PASS the digest cron is a logged no-op ("ships dark").
+# Use a mailbox app password (SMTP-only) — never a login password.
+SMTP_HOST=<mail.example.com>
+SMTP_PORT=587
+SMTP_USER=<noreply@example.com>
+SMTP_PASS=<mailbox-app-password>
+DIGEST_FROM=Intranet <noreply@example.com>
+DIGESTS_DISABLED=0
 ```
 
 > **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
@@ -429,6 +444,18 @@ REVALIDATE_SECRET=<secret>
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
+
+# --- Optional features (safe to leave unset) --------------------------
+# SSE live updates kill switch (1 = revert to pre-SSE polling entirely).
+LIVE_EVENTS_DISABLED=0
+# E-mail digests: without SMTP_HOST/USER/PASS the 07:30 digest cron is a
+# logged no-op. Use a mailbox app password (SMTP-only).
+SMTP_HOST=<mail.example.com>
+SMTP_PORT=587
+SMTP_USER=<noreply@example.com>
+SMTP_PASS=<mailbox-app-password>
+DIGEST_FROM=Intranet <noreply@example.com>
+DIGESTS_DISABLED=0
 ```
 
 Update Entra ID redirect URIs:
@@ -489,8 +516,12 @@ infra/deploy.sh
 `deploy.sh` does, in order: (1) pre-deploy Postgres + uploads backup, (2) tags the
 currently running `infra-web` / `infra-cms` images as `:rollback`, (3) rebuilds +
 restarts the stack with the Traefik override, (4) curl smoke-checks
-`https://sinnlos.yurtbay.dev` (override with `SMOKE_URL=`). It is `set -euo
-pipefail` and re-run safe.
+`https://sinnlos.yurtbay.dev` (override with `SMOKE_URL=`), (5) runs
+`infra/live-smoke.sh` — the end-to-end SSE pipeline probe (comment posted via
+the cms → ping frame on a subscribed stream). Step 5 **fails the deploy**
+when the pipeline delivers no pings; it is skipped with
+`LIVE_EVENTS_DISABLED=1` or when the demo credentials file is absent. It is
+`set -euo pipefail` and re-run safe.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -885,8 +916,18 @@ az containerapp create \
       "REVALIDATE_SECRET=<openssl rand -hex 32>" \
       "MS_CLIENT_ID=<client-id>" \
       "MS_CLIENT_SECRET=<client-secret>" \
-      "MS_TENANT_ID=<tenant-id>"
+      "MS_TENANT_ID=<tenant-id>" \
+      "LIVE_EVENTS_DISABLED=0" \
+      "SMTP_HOST=<mail.example.com>" \
+      "SMTP_PORT=587" \
+      "SMTP_USER=<noreply@example.com>" \
+      "SMTP_PASS=<mailbox-app-password>" \
+      "DIGEST_FROM=Intranet <noreply@example.com>"
 ```
+
+> The `SMTP_*` block is optional — without it the 07:30 digest cron is a
+> logged no-op. `LIVE_EVENTS_DISABLED` must be set to the SAME value on the
+> web container (the kill switch is read on both sides).
 
 > **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to call the Next.js
 > revalidation webhook, but the web app's FQDN only exists after it's deployed.
@@ -956,7 +997,8 @@ az containerapp create \
       "REVALIDATE_SECRET=<same-value-as-cms>" \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
-      "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0"
+      "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
+      "LIVE_EVENTS_DISABLED=0"
 
 # Now read the FQDN assigned to the web app
 WEB_FQDN=$(az containerapp show \
@@ -1073,6 +1115,12 @@ end-to-end. Replace `<URL>` with your deployment's base URL
 # Next.js responds
 curl -I <URL>/
 # Expect: HTTP/1.1 200 OK   (or 307 redirect to /sign-in)
+
+# SSE live pipeline (the one subsystem that can be silently dead while
+# every container looks healthy): expect an open stream emitting hb events
+# — or run infra/live-smoke.sh for the full comment→ping proof.
+curl -N -H 'Accept: text/event-stream' <URL>/live/stream --max-time 30
+# Expect (signed-in cookie required): "event: hello" then "event: hb" frames
 
 # Strapi API responds
 curl -I <URL>/api/departments
