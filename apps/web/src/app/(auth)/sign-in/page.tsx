@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,8 @@ export default async function SignInPage({
   // still exist then, and redirecting away would loop right back here.
   const session = await auth();
   if (session && !expired) {
-    redirect(from);
+    // safeInternalPath guarantees an internal path — cast for typedRoutes.
+    redirect(from as Route);
   }
   const t = await getTranslations("auth");
   const tCommon = await getTranslations("common");

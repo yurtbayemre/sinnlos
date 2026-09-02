@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
@@ -99,7 +100,9 @@ export default async function LessonPage({
         completionMode={(course.completionMode ?? "confirm") as CompletionMode}
         lessonDocumentId={lessonId}
         completedAtLabel={completedAtLabel}
-        nextHref={next?.documentId ? `/training/${course.slug}/${next.documentId}` : null}
+        nextHref={
+          next?.documentId ? (`/training/${course.slug}/${next.documentId}` as Route) : null
+        }
       />
     </article>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 // The (server) sidebar can't pass component references across the RSC
@@ -14,7 +15,7 @@ export type NavIconName = IconName;
  * Sidebar navigation link with an animated active state. Client
  * component so it can read the current pathname.
  */
-export function NavLink({ href, label, icon }: { href: string; label: string; icon: NavIconName }) {
+export function NavLink({ href, label, icon }: { href: Route; label: string; icon: NavIconName }) {
   const Icon = ICONS[icon];
   const pathname = usePathname();
   const active = href === "/" ? pathname === "/" : pathname.startsWith(href);

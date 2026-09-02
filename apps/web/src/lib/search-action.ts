@@ -1,6 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
+import type { Route } from "next";
 import { getLocale, getTranslations } from "next-intl/server";
 import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
 
@@ -29,7 +30,7 @@ export type SearchItem = {
     | "document";
   title: string;
   subtitle?: string;
-  href: string;
+  href: Route;
 };
 
 export async function fetchSearchItems(): Promise<SearchItem[]> {
@@ -76,7 +77,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       kind: "department",
       title: d.name,
       subtitle: d.description,
-      href: `/departments/${d.slug}`,
+      href: `/departments/${d.slug}` as Route,
     });
   }
 
@@ -87,7 +88,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       subtitle: t.department?.name
         ? `${t.department.name} · ${t.description ?? ""}`
         : t.description,
-      href: `/teams/${t.slug}`,
+      href: `/teams/${t.slug}` as Route,
     });
   }
 
@@ -96,7 +97,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       kind: "wiki-space",
       title: s.name,
       subtitle: s.description,
-      href: `/wiki/${s.slug}`,
+      href: `/wiki/${s.slug}` as Route,
     });
   }
 
@@ -107,7 +108,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       kind: "wiki-page",
       title: p.title,
       subtitle: `${p.space.name ?? spaceSlug} · ${p.summary ?? ""}`,
-      href: `/wiki/${spaceSlug}/${p.slug}`,
+      href: `/wiki/${spaceSlug}/${p.slug}` as Route,
     });
   }
 
@@ -168,7 +169,7 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       kind: "person",
       title: u.displayName ?? u.username ?? u.email ?? tCommon("unknown"),
       subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
-      href: `/people/${u.id}`,
+      href: `/people/${u.id}` as Route,
     });
   }
 
@@ -229,7 +230,7 @@ export async function searchContent(query: string): Promise<SearchItem[]> {
       kind: "wiki-page",
       title: p.title,
       subtitle: p.space?.name ?? spaceSlug,
-      href: `/wiki/${spaceSlug}/${p.slug}`,
+      href: `/wiki/${spaceSlug}/${p.slug}` as Route,
     });
   }
 
@@ -274,7 +275,7 @@ export async function searchContent(query: string): Promise<SearchItem[]> {
       kind: "person",
       title: u.displayName ?? u.username ?? u.email ?? tCommon("unknown"),
       subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
-      href: `/people/${u.id}`,
+      href: `/people/${u.id}` as Route,
     });
   }
 
