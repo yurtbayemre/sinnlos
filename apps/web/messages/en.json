@@ -44,7 +44,8 @@
     "admin": "Admin",
     "home": "Home",
     "news": "News",
-    "marketplace": "Marketplace"
+    "marketplace": "Marketplace",
+    "training": "Training"
   },
   "auth": {
     "signIn": "Sign in",
@@ -88,7 +89,10 @@
     "openAcksTitle": "Pending acknowledgements",
     "openAcksCount": "{count, plural, one {# mandatory announcement is waiting for your read confirmation.} other {# mandatory announcements are waiting for your read confirmation.}}",
     "openAcksAction": "Confirm now",
-    "friendFallback": "colleague"
+    "friendFallback": "colleague",
+    "trainingOpen": "{count, plural, one {# open mandatory course} other {# open mandatory courses}}",
+    "trainingOpenHint": "Please complete your mandatory training.",
+    "trainingOpenCta": "Go to training"
   },
   "quickLinks": {
     "eyebrow": "Essential links",
@@ -396,7 +400,9 @@
     "roleDeptManager": "Manages their own department, its teams and scoped wiki pages.",
     "roleTeamLead": "CRUD on their own team pages, read elsewhere.",
     "roleMember": "Read everything their role/department/team permits. Edits their profile.",
-    "roleGuest": "Read-only access to public wiki spaces."
+    "roleGuest": "Read-only access to public wiki spaces.",
+    "trainingReportLink": "Training report",
+    "trainingReportLinkDesc": "Who completed which mandatory course"
   },
   "analytics": {
     "title": "Analytics",
@@ -493,5 +499,38 @@
   },
   "localeSwitcher": {
     "label": "Choose language"
+  },
+  "training": {
+    "title": "Training",
+    "eyebrow": "Learning & development",
+    "description": "Internal training courses and mandatory instructions. Courses consist of lessons — completed lessons are tracked per person.",
+    "emptyTitle": "No courses yet",
+    "emptyHint": "Admins and editors can create courses in the Strapi admin panel. Published courses will appear here.",
+    "mandatory": "Mandatory",
+    "lessonCount": "{count} lessons",
+    "statusDone": "Completed",
+    "statusProgress": "{done} of {total} done",
+    "startCourse": "Start course",
+    "continueCourse": "Continue",
+    "noLessons": "This course has no lessons yet.",
+    "lessonPosition": "Lesson {current} of {total}",
+    "quizTitle": "Self-check questions",
+    "quizCorrect": "Correct!",
+    "quizWrong": "Not quite — try again.",
+    "completeButton": "Complete lesson",
+    "completing": "Saving…",
+    "completedNow": "Completed",
+    "completedAt": "Completed on {date}",
+    "completeFailed": "Could not save completion. Please try again.",
+    "nextLesson": "Next lesson"
+  },
+  "trainingReport": {
+    "title": "Training report",
+    "description": "Completion state of mandatory courses across {count} staff members.",
+    "truncatedWarning": "Some data sources are incomplete — numbers are suppressed rather than shown wrong.",
+    "emptyTitle": "No mandatory courses",
+    "emptyHint": "Published courses flagged as mandatory will appear here with their completion rate.",
+    "completedOf": "{done} of {total} completed",
+    "updatedAt": "As of {date}"
   }
 }

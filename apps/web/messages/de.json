@@ -44,7 +44,8 @@
     "admin": "Admin",
     "home": "Start",
     "news": "News",
-    "marketplace": "Kleinanzeigen"
+    "marketplace": "Kleinanzeigen",
+    "training": "Schulungen"
   },
   "auth": {
     "signIn": "Anmelden",
@@ -88,7 +89,10 @@
     "openAcksTitle": "Offene Bestätigungen",
     "openAcksCount": "{count, plural, one {# Pflichtmeldung wartet auf deine Lesebestätigung.} other {# Pflichtmeldungen warten auf deine Lesebestätigung.}}",
     "openAcksAction": "Jetzt bestätigen",
-    "friendFallback": "Kolleg:in"
+    "friendFallback": "Kolleg:in",
+    "trainingOpen": "{count, plural, one {# offene Pflichtschulung} other {# offene Pflichtschulungen}}",
+    "trainingOpenHint": "Bitte schließe deine Pflichtschulungen ab.",
+    "trainingOpenCta": "Zu den Schulungen"
   },
   "quickLinks": {
     "eyebrow": "Wichtige Links",
@@ -396,7 +400,9 @@
     "roleDeptManager": "Verwaltet die eigene Abteilung, deren Teams und Wiki-Seiten.",
     "roleTeamLead": "CRUD für eigene Team-Seiten, Lesezugriff anderswo.",
     "roleMember": "Lesezugriff je nach Rolle/Abteilung/Team. Eigenes Profil bearbeiten.",
-    "roleGuest": "Nur Lesezugriff auf öffentliche Wiki-Bereiche."
+    "roleGuest": "Nur Lesezugriff auf öffentliche Wiki-Bereiche.",
+    "trainingReportLink": "Schulungs-Report",
+    "trainingReportLinkDesc": "Wer hat welche Pflichtschulung abgeschlossen"
   },
   "analytics": {
     "title": "Analyse",
@@ -493,5 +499,38 @@
   },
   "localeSwitcher": {
     "label": "Sprache wählen"
+  },
+  "training": {
+    "title": "Schulungen",
+    "eyebrow": "Weiterbildung",
+    "description": "Interne Schulungen und Pflichtunterweisungen. Kurse bestehen aus Lektionen — abgeschlossene Lektionen werden pro Person nachgehalten.",
+    "emptyTitle": "Noch keine Schulungen",
+    "emptyHint": "Admins und Redakteure können Kurse im Strapi-Admin-Panel anlegen. Veröffentlichte Kurse erscheinen hier.",
+    "mandatory": "Pflicht",
+    "lessonCount": "{count} Lektionen",
+    "statusDone": "Abgeschlossen",
+    "statusProgress": "{done} von {total} erledigt",
+    "startCourse": "Kurs starten",
+    "continueCourse": "Fortsetzen",
+    "noLessons": "Dieser Kurs hat noch keine Lektionen.",
+    "lessonPosition": "Lektion {current} von {total}",
+    "quizTitle": "Verständnisfragen (Selbstkontrolle)",
+    "quizCorrect": "Richtig!",
+    "quizWrong": "Nicht ganz — probier es nochmal.",
+    "completeButton": "Lektion abschließen",
+    "completing": "Wird gespeichert…",
+    "completedNow": "Abgeschlossen",
+    "completedAt": "Abgeschlossen am {date}",
+    "completeFailed": "Abschluss fehlgeschlagen. Bitte erneut versuchen.",
+    "nextLesson": "Nächste Lektion"
+  },
+  "trainingReport": {
+    "title": "Schulungs-Report",
+    "description": "Abschlussstand der Pflichtschulungen über {count} Mitarbeitende.",
+    "truncatedWarning": "Einzelne Datenquellen sind unvollständig — Zahlen werden unterdrückt statt falsch angezeigt.",
+    "emptyTitle": "Keine Pflichtkurse",
+    "emptyHint": "Veröffentlichte Kurse mit Pflicht-Flag erscheinen hier mit ihrer Abschlussquote.",
+    "completedOf": "{done} von {total} abgeschlossen",
+    "updatedAt": "Stand {date}"
   }
 }
