@@ -1,0 +1,27 @@
+{
+  "kind": "collectionType",
+  "collectionName": "lesson_progresses",
+  "info": {
+    "singularName": "lesson-progress",
+    "pluralName": "lesson-progresses",
+    "displayName": "Lesson progress",
+    "description": "Completion receipt per user + lesson (acknowledgement clone, issue #29): anchored on the lesson's documentId (stable across re-publish), immutable once created (update/delete admin-only via grants)."
+  },
+  "options": {
+    "draftAndPublish": false
+  },
+  "attributes": {
+    "user": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "plugin::users-permissions.user"
+    },
+    "targetDocumentId": {
+      "type": "string",
+      "required": true
+    },
+    "completedAt": {
+      "type": "datetime"
+    }
+  }
+}
