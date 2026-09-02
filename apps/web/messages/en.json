@@ -522,7 +522,14 @@
     "completedNow": "Completed",
     "completedAt": "Completed on {date}",
     "completeFailed": "Could not save completion. Please try again.",
-    "nextLesson": "Next lesson"
+    "nextLesson": "Next lesson",
+    "quizGateTitle": "Comprehension check (required to complete)",
+    "quizGateHint": "Answer all questions and check your answers. Completion unlocks once everything is correct — retrying is expressly allowed.",
+    "quizCheckButton": "Check answers",
+    "quizAnswerAll": "Please answer all questions first.",
+    "quizAllCorrect": "All correct!",
+    "quizSomeWrong": "{count, plural, one {# answer is not right yet} other {# answers are not right yet}} — adjust and check again.",
+    "completeLocked": "Completion unlocks after passing the comprehension check."
   },
   "trainingReport": {
     "title": "Training report",

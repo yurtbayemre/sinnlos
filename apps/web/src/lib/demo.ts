@@ -628,6 +628,7 @@ const demoCourses: AnyEntry[] = [
     documentId: "demo-course-1",
     title: "Security awareness basics",
     slug: "security-awareness-basics",
+    completionMode: "quizGate",
     description: "Mandatory annual security training: phishing, passwords, incident reporting.",
     mandatory: true,
     lessons: demoLessons,

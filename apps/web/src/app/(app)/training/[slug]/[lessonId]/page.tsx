@@ -1,19 +1,18 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
-import { CompleteLessonButton } from "@/components/training/complete-lesson-button";
+import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
-import { QuizBlock } from "@/components/training/quiz-block";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
-import { parseQuiz, sortLessons } from "@/lib/training-shared";
+import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
 
 /**
  * Lesson player (issue #29): markdown body (same pipeline as the wiki —
@@ -35,7 +34,10 @@ export default async function LessonPage({
     tryFetch(() => fetchCourseBySlug(slug), "training"),
     tryFetch(() => fetchMyProgress(), "training"),
   ]);
-  if (lessonResult.failed || courseResult.failed) {
+  // progressResult.failed included since the quiz-gate: a silently
+  // missing progress row would RE-LOCK an already-completed quizGate
+  // lesson behind the quiz (review find) — honest banner instead.
+  if (lessonResult.failed || courseResult.failed || progressResult.failed) {
     return (
       <div className="space-y-6">
         <FetchErrorBanner />
@@ -92,23 +94,13 @@ export default async function LessonPage({
         </div>
       )}
 
-      <QuizBlock quiz={quiz} />
-
-      <footer className="flex flex-wrap items-center justify-between gap-4 border-t pt-6">
-        <CompleteLessonButton
-          lessonDocumentId={lessonId}
-          completedAtLabel={completedAtLabel}
-        />
-        {next?.documentId && (
-          <Link
-            href={`/training/${course.slug}/${next.documentId}`}
-            className="inline-flex items-center gap-1.5 text-sm font-medium text-primary outline-none transition-colors hover:underline focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-          >
-            {t("nextLesson")}
-            <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-          </Link>
-        )}
-      </footer>
+      <LessonCompletion
+        quiz={quiz}
+        completionMode={(course.completionMode ?? "confirm") as CompletionMode}
+        lessonDocumentId={lessonId}
+        completedAtLabel={completedAtLabel}
+        nextHref={next?.documentId ? `/training/${course.slug}/${next.documentId}` : null}
+      />
     </article>
   );
 }

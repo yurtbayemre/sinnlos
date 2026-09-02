@@ -105,3 +105,37 @@ export function courseCompletion(
 export function sortLessons<T extends { order?: number | null; id: number }>(lessons: T[]): T[] {
   return [...lessons].sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || a.id - b.id);
 }
+
+export type CompletionMode = "confirm" | "quizGate";
+
+export interface QuizEvaluation {
+  /** Question indexes answered wrongly (empty = all correct). */
+  wrong: number[];
+  /** True when every question has an answer AND all are correct. */
+  passed: boolean;
+  answeredAll: boolean;
+}
+
+/**
+ * Batch evaluation for the quiz-gate flow (pure, tested): answers map
+ * question index → picked option index. Unanswered questions count as
+ * not passed but not as "wrong" (the UI nudges for completeness first).
+ * An empty quiz passes trivially — a quizGate course whose lesson has
+ * no (or malformed → dropped) quiz must not dead-lock completion;
+ * content errors fail open by design.
+ */
+export function evaluateQuiz(
+  quiz: QuizQuestion[],
+  answers: Record<number, number | undefined>,
+): QuizEvaluation {
+  const wrong: number[] = [];
+  let answered = 0;
+  quiz.forEach((q, i) => {
+    const picked = answers[i];
+    if (picked === undefined) return;
+    answered++;
+    if (picked !== q.correctIndex) wrong.push(i);
+  });
+  const answeredAll = answered === quiz.length;
+  return { wrong, answeredAll, passed: answeredAll && wrong.length === 0 };
+}
