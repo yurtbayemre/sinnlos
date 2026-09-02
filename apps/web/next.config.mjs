@@ -10,6 +10,9 @@ const withNextIntl = createNextIntlPlugin("./src/i18n/request.ts");
 const nextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // Route strings in <Link>/router.push are type-checked at build time
+  // (issue #32) — a renamed route fails the typecheck instead of 404ing.
+  typedRoutes: true,
   outputFileTracingRoot: path.join(__dirname, "../../"),
   devIndicators: false,
   // Don't advertise the framework in responses.
