@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
+
+import { useHydrated } from "@/lib/use-hydrated";
 
 /**
  * Thin indeterminate progress bar rendered at the top of the viewport
@@ -17,13 +18,9 @@ import { useTranslations } from "next-intl";
  */
 export function RouteProgress() {
   const tCommon = useTranslations("common");
-  const [mounted, setMounted] = useState(false);
+  const hydrated = useHydrated();
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
-  if (!mounted) return null;
+  if (!hydrated) return null;
 
   return createPortal(
     <div
