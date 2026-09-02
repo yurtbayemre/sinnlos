@@ -9,6 +9,7 @@ import { tryFetch } from "@/lib/safe-fetch";
 import { Card, CardContent } from "@/components/ui/card";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { AckBanner } from "@/components/dashboard/ack-banner";
+import { TrainingBanner } from "@/components/training/training-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 
@@ -76,6 +77,11 @@ export default async function DashboardPage() {
           the whole page on the acknowledgements round-trips. */}
       <Suspense fallback={null}>
         <AckBanner />
+      </Suspense>
+
+      {/* Same streaming rationale as AckBanner — per-user training state. */}
+      <Suspense fallback={null}>
+        <TrainingBanner />
       </Suspense>
 
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">

@@ -17,6 +17,7 @@ export async function Sidebar({ className }: { className?: string }) {
     { href: "/people", label: t("people"), icon: "Contact" },
     { href: "/events", label: t("events"), icon: "Calendar" },
     { href: "/wiki", label: t("wiki"), icon: "BookOpen" },
+    { href: "/training", label: t("training"), icon: "GraduationCap" },
     { href: "/departments", label: t("departments"), icon: "Building2" },
     { href: "/teams", label: t("teams"), icon: "Users2" },
     { href: "/announcements", label: t("announcements"), icon: "Megaphone" },

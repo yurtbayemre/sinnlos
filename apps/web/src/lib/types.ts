@@ -277,3 +277,39 @@ export interface Celebration {
   years?: number;
   daysUntil: number;
 }
+
+/** Training course (issue #29) — admin-authored, native draft & publish. */
+export interface Course {
+  id: number;
+  documentId?: string;
+  title: string;
+  slug?: string;
+  description?: string | null;
+  mandatory?: boolean;
+  coverImage?: { url?: string; formats?: { small?: { url?: string } } | null } | null;
+  lessons?: Lesson[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Lesson {
+  id: number;
+  documentId?: string;
+  title: string;
+  body?: string | null;
+  order?: number | null;
+  videoUrl?: string | null;
+  /** Raw quiz JSON — parse with parseQuiz() (defensive, admin-authored). */
+  quiz?: unknown;
+  course?: Course | null;
+  updatedAt?: string;
+}
+
+/** Completion receipt — anchored on the lesson's documentId. */
+export interface LessonProgress {
+  id: number;
+  documentId?: string;
+  targetDocumentId: string;
+  completedAt?: string | null;
+  user?: UserLite | null;
+}

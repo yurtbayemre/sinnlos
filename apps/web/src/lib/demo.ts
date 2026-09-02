@@ -584,6 +584,79 @@ const demoReactions: AnyEntry[] = [
   },
 ];
 
+const demoLessons: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-lesson-1",
+    title: "Why security awareness matters",
+    order: 1,
+    body: '# Why this matters\n\nPhishing is the #1 entry vector. This 5-minute lesson shows the three patterns to watch for:\n\n1. **Urgency** ("act now!")\n2. **Authority** ("the CEO needs...")\n3. **Unusual channels**\n\n> When in doubt: verify via a second channel.',
+    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    quiz: [
+      {
+        question: "A mail urges you to pay an invoice within 30 minutes. What do you do?",
+        options: [
+          "Pay it — sounds urgent",
+          "Verify via a known contact on a second channel",
+          "Forward it to a colleague",
+        ],
+        correctIndex: 1,
+      },
+    ],
+  },
+  {
+    id: 2,
+    documentId: "demo-lesson-2",
+    title: "Passwords & 2FA",
+    order: 2,
+    body: "## Rules of thumb\n\n- Use the password manager for **everything**\n- One account, one password\n- 2FA on for mail, VPN and admin tools",
+    quiz: [],
+  },
+  {
+    id: 3,
+    documentId: "demo-lesson-3",
+    title: "Reporting an incident",
+    order: 3,
+    body: "If something feels off: **report early**. There is no penalty for false alarms — there is for silence.",
+    quiz: [],
+  },
+];
+
+const demoCourses: AnyEntry[] = [
+  {
+    id: 1,
+    documentId: "demo-course-1",
+    title: "Security awareness basics",
+    slug: "security-awareness-basics",
+    description: "Mandatory annual security training: phishing, passwords, incident reporting.",
+    mandatory: true,
+    lessons: demoLessons,
+    updatedAt: iso(-4),
+  },
+  {
+    id: 2,
+    documentId: "demo-course-2",
+    title: "Working with the intranet",
+    slug: "working-with-the-intranet",
+    description: "Optional tour: wiki, announcements, events and the marketplace.",
+    mandatory: false,
+    lessons: [
+      {
+        id: 10,
+        documentId: "demo-lesson-10",
+        title: "Finding things (search & wiki)",
+        order: 1,
+        body: "Press **Ctrl+K** anywhere.",
+      },
+    ],
+    updatedAt: iso(-10),
+  },
+];
+
+const demoLessonProgress: AnyEntry[] = [
+  { id: 1, targetDocumentId: "demo-lesson-1", completedAt: iso(-2) },
+];
+
 /** Value of a query param inside the raw path, or null. */
 function param(path: string, key: string): string | null {
   const m = path.match(new RegExp(`[?&]${key.replace(/[[\]$]/g, "\\$&")}=([^&]*)`));
@@ -684,6 +757,23 @@ export function demo(path: string): unknown {
     if (param(path, "filters[author][id][$eq]")) return pack([]);
     return pack(classifieds);
   }
+
+  if (path.startsWith("/api/courses")) {
+    const slug = param(path, "filters[slug][$eq]");
+    if (slug) return pack(demoCourses.filter((c) => c.slug === slug));
+    return pack(demoCourses);
+  }
+  if (path.startsWith("/api/lessons")) {
+    const docId = param(path, "filters[documentId][$eq]");
+    const all = demoCourses.flatMap((c) =>
+      (c.lessons ?? []).map((l: AnyEntry) => ({
+        ...l,
+        course: { id: c.id, documentId: c.documentId, title: c.title, slug: c.slug },
+      })),
+    );
+    return pack(docId ? all.filter((l) => l.documentId === docId) : all);
+  }
+  if (path.startsWith("/api/lesson-progresses")) return pack(demoLessonProgress);
 
   if (path.startsWith("/api/quick-links")) return pack(quickLinks);
   if (path.startsWith("/api/notifications")) return pack(notifications);
