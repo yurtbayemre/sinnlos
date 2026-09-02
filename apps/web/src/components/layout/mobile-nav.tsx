@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { BookOpen, Calendar, Contact, Home, Megaphone } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -15,7 +16,7 @@ export function MobileNav() {
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
 
-  const items = [
+  const items: { href: Route; label: string; icon: typeof Home }[] = [
     { href: "/", label: t("home"), icon: Home },
     { href: "/people", label: t("people"), icon: Contact },
     { href: "/events", label: t("events"), icon: Calendar },

@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
+import type { Route } from "next";
 import { NavLink, type NavIconName } from "./nav-link";
 import { getTranslations } from "next-intl/server";
 
@@ -12,7 +13,7 @@ export async function Sidebar({ className }: { className?: string }) {
   const role = session?.user?.role;
   const showAdmin = isAdmin(role);
 
-  const nav: { href: string; label: string; icon: NavIconName }[] = [
+  const nav: { href: Route; label: string; icon: NavIconName }[] = [
     { href: "/", label: t("dashboard"), icon: "Home" },
     { href: "/people", label: t("people"), icon: "Contact" },
     { href: "/events", label: t("events"), icon: "Calendar" },

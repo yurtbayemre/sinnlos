@@ -31,7 +31,7 @@ Install these on any machine you are deploying **from**:
 
 | Tool | Minimum version | Install |
 |---|---|---|
-| Node.js | 20.11 LTS *(or 22 LTS / 24 LTS)* | [nodejs.org](https://nodejs.org) |
+| Node.js | 22 LTS or 24 LTS *(Node 20 is EOL — do not use)* | [nodejs.org](https://nodejs.org) |
 | pnpm | 9.x | `corepack enable && corepack prepare pnpm@9.12.0 --activate` |
 | Git | any recent | system package manager |
 | openssl | any recent | preinstalled on macOS/Linux; on Windows use Git Bash or WSL |

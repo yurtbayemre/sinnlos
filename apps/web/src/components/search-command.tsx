@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
+import type { Route } from "next";
 import { Command } from "cmdk";
 import {
   Search,
@@ -120,7 +121,7 @@ export function SearchCommand() {
   }, [open]);
 
   const select = useCallback(
-    (href: string) => {
+    (href: Route) => {
       // A selection is the strongest "this query settled" signal.
       flushSearchLog();
       setOpen(false);
