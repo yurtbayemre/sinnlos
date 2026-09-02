@@ -73,7 +73,12 @@ export function QuizBlock({
         return (
           <div key={qi} className="space-y-2">
             <div className="text-sm font-medium">{q.question}</div>
-            <div className="grid gap-2" role="radiogroup" aria-label={q.question}>
+            {/* Honest toggle-button semantics (issue #35): role="radio"
+                would demand APG roving tabindex + arrow-key movement.
+                Plain buttons with aria-pressed announce exactly the
+                interaction model that exists — every option a tab stop,
+                Enter/Space picks. */}
+            <div className="grid gap-2" role="group" aria-label={q.question}>
               {q.options.map((option, oi) => {
                 const isPicked = picked === oi;
                 const isCorrect = oi === q.correctIndex;
@@ -82,8 +87,7 @@ export function QuizBlock({
                   <button
                     key={oi}
                     type="button"
-                    role="radio"
-                    aria-checked={isPicked}
+                    aria-pressed={isPicked}
                     disabled={passed}
                     onClick={() => pick(qi, oi)}
                     className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-default ${
