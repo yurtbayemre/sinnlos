@@ -34,7 +34,10 @@ export default async function LessonPage({
     tryFetch(() => fetchCourseBySlug(slug), "training"),
     tryFetch(() => fetchMyProgress(), "training"),
   ]);
-  if (lessonResult.failed || courseResult.failed) {
+  // progressResult.failed included since the quiz-gate: a silently
+  // missing progress row would RE-LOCK an already-completed quizGate
+  // lesson behind the quiz (review find) — honest banner instead.
+  if (lessonResult.failed || courseResult.failed || progressResult.failed) {
     return (
       <div className="space-y-6">
         <FetchErrorBanner />
