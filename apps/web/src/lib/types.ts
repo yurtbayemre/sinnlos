@@ -286,6 +286,7 @@ export interface Course {
   slug?: string;
   description?: string | null;
   mandatory?: boolean;
+  completionMode?: "confirm" | "quizGate";
   coverImage?: { url?: string; formats?: { small?: { url?: string } } | null } | null;
   lessons?: Lesson[];
   createdAt?: string;

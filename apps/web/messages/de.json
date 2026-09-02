@@ -522,7 +522,14 @@
     "completedNow": "Abgeschlossen",
     "completedAt": "Abgeschlossen am {date}",
     "completeFailed": "Abschluss fehlgeschlagen. Bitte erneut versuchen.",
-    "nextLesson": "Nächste Lektion"
+    "nextLesson": "Nächste Lektion",
+    "quizGateTitle": "Verständnisfragen (zum Abschluss erforderlich)",
+    "quizGateHint": "Beantworte alle Fragen und prüfe deine Antworten. Erst wenn alles richtig ist, kannst du die Lektion abschließen — Wiederholen ist ausdrücklich erlaubt.",
+    "quizCheckButton": "Antworten prüfen",
+    "quizAnswerAll": "Bitte beantworte zuerst alle Fragen.",
+    "quizAllCorrect": "Alles richtig!",
+    "quizSomeWrong": "{count, plural, one {# Antwort stimmt noch nicht} other {# Antworten stimmen noch nicht}} — korrigiere und prüfe erneut.",
+    "completeLocked": "Der Abschluss wird nach bestandenen Verständnisfragen freigeschaltet."
   },
   "trainingReport": {
     "title": "Schulungs-Report",

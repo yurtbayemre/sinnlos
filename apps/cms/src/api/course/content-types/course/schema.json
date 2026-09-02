@@ -5,7 +5,7 @@
     "singularName": "course",
     "pluralName": "courses",
     "displayName": "Course",
-    "description": "Training course (issue #29): ordered lessons, mandatory completion tracking. Maintained in the Strapi admin (no frontend authoring in v1); native draft & publish drives visibility."
+    "description": "Training course (issue #29): ordered lessons, mandatory completion tracking. Maintained in the Strapi admin (no frontend authoring in v1); native draft & publish drives visibility. completionMode: confirm = Abschluss per Klick; quizGate = alle Quizfragen richtig (Retry erlaubt) schalten den Abschluss frei. Geplante v2-Werte (dokumentiert, NICHT bauen ohne eigenes Design): exam, plus validityMonths fuer wiederkehrende Unterweisungen."
   },
   "options": {
     "draftAndPublish": true
@@ -26,6 +26,11 @@
     "mandatory": {
       "type": "boolean",
       "default": true
+    },
+    "completionMode": {
+      "type": "enumeration",
+      "enum": ["confirm", "quizGate"],
+      "default": "confirm"
     },
     "coverImage": {
       "type": "media",
