@@ -16,11 +16,14 @@ import { completeLesson } from "@/lib/training-actions";
 export function CompleteLessonButton({
   lessonDocumentId,
   completedAtLabel,
+  disabled = false,
 }: {
   /** Strapi documentId of the lesson (stable across re-publishes). */
   lessonDocumentId: string;
   /** Pre-formatted date of the caller's own completion, or null. */
   completedAtLabel: string | null;
+  /** quizGate lock — the quiz must be passed first (client nudge). */
+  disabled?: boolean;
 }) {
   const t = useTranslations("training");
   const router = useRouter();
@@ -31,7 +34,7 @@ export function CompleteLessonButton({
   const completed = completedAtLabel !== null || justCompleted;
 
   const handleComplete = () => {
-    if (completed || isPending) return;
+    if (completed || isPending || disabled) return;
     setError(null);
     startTransition(async () => {
       try {
@@ -51,12 +54,10 @@ export function CompleteLessonButton({
       {completed ? (
         <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-          {completedAtLabel
-            ? t("completedAt", { date: completedAtLabel })
-            : t("completedNow")}
+          {completedAtLabel ? t("completedAt", { date: completedAtLabel }) : t("completedNow")}
         </span>
       ) : (
-        <Button onClick={handleComplete} disabled={isPending}>
+        <Button onClick={handleComplete} disabled={isPending || disabled}>
           {isPending ? t("completing") : t("completeButton")}
         </Button>
       )}
