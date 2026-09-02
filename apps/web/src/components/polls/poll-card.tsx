@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { BarChart3, Clock, Check } from "lucide-react";
@@ -13,20 +13,20 @@ export function PollCard({ results }: { results: PollResults }) {
   const tPolls = useTranslations("polls");
   const tCommon = useTranslations("common");
   const router = useRouter();
-  const { poll, counts, total, myVoteIndex: initialVote } = results;
-  const [voted, setVoted] = useState(initialVote);
-  const [localCounts, setLocalCounts] = useState(counts);
-  const [localTotal, setLocalTotal] = useState(total);
+  const { poll } = results;
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  // useState initialisers ignore prop changes — adopt the authoritative
-  // server numbers whenever a refresh() delivers a new results payload.
-  useEffect(() => {
-    setVoted(results.myVoteIndex);
-    setLocalCounts(results.counts);
-    setLocalTotal(results.total);
-  }, [results]);
+  // Optimistic vote (issue #34): own vote and counts flip instantly, the
+  // action's refresh() delivers the authoritative results prop within the
+  // same transition, and a rejected vote rolls back automatically.
+  const [optimistic, applyVote] = useOptimistic(results, (prev: PollResults, index: number) => ({
+    ...prev,
+    myVoteIndex: index,
+    counts: prev.counts.map((c, i) => (i === index ? c + 1 : c)),
+    total: prev.total + 1,
+  }));
+  const { counts: localCounts, total: localTotal, myVoteIndex: voted } = optimistic;
 
   const isClosed = poll.closesAt ? new Date(poll.closesAt) < new Date() : false;
   const hasVoted = voted !== null;
@@ -36,11 +36,9 @@ export function PollCard({ results }: { results: PollResults }) {
     if (hasVoted || isClosed || isPending) return;
     setError(null);
     startTransition(async () => {
+      applyVote(index);
       try {
         await votePoll(poll.id, index);
-        setVoted(index);
-        setLocalCounts((prev) => prev.map((c, i) => (i === index ? c + 1 : c)));
-        setLocalTotal((prev) => prev + 1);
       } catch {
         // Vote rejected (already voted, poll closed meanwhile, …) —
         // surface it and pull the authoritative counts from the server.
