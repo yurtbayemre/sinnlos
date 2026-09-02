@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { Megaphone } from "lucide-react";
 import { useTranslations } from "next-intl";
 
 import { getVisibleAnnouncementDocumentIds } from "@/lib/announcement-live-actions";
+import { useHydrated } from "@/lib/use-hydrated";
 import { useLiveChannel } from "@/components/live/live-events-provider";
 
 /**
@@ -26,28 +27,33 @@ import { useLiveChannel } from "@/components/live/live-events-provider";
 export function AnnouncementsLiveHint({ initialIds }: { initialIds: string[] }) {
   const router = useRouter();
   const t = useTranslations("announcements");
+  const hydrated = useHydrated();
   const [showHint, setShowHint] = useState(false);
-  const [mounted, setMounted] = useState(false);
-  const knownIdsRef = useRef(new Set(initialIds));
-
-  useEffect(() => setMounted(true), []);
+  const [baseline, setBaseline] = useState(() => ({
+    source: initialIds,
+    ids: new Set(initialIds),
+  }));
 
   // A server re-render (router.refresh, navigation) delivers the fresh
-  // list — whatever it now shows is the new baseline.
-  useEffect(() => {
-    knownIdsRef.current = new Set(initialIds);
+  // list — whatever it now shows is the new baseline. Adopted via the
+  // compare-and-set-during-render pattern (issue #36) instead of an
+  // effect, so the reset happens in the same render pass.
+  if (baseline.source !== initialIds) {
+    setBaseline({ source: initialIds, ids: new Set(initialIds) });
     setShowHint(false);
-  }, [initialIds]);
+  }
 
-  const check = useCallback(async () => {
+  // Plain closure: useLiveChannel wraps it in an Effect Event, so the
+  // latest render's baseline is always seen without memoisation.
+  const check = async () => {
     const ids = await getVisibleAnnouncementDocumentIds();
     if (ids.length === 0) return; // probe failed or truly empty — no hint
-    if (ids.some((id) => !knownIdsRef.current.has(id))) setShowHint(true);
-  }, []);
+    if (ids.some((id) => !baseline.ids.has(id))) setShowHint(true);
+  };
 
   useLiveChannel("announcements", check);
 
-  if (!mounted || !showHint) return null;
+  if (!hydrated || !showHint) return null;
 
   return createPortal(
     <div className="fixed inset-x-0 bottom-6 z-50 flex justify-center px-4">

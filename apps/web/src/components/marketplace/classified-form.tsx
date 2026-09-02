@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useActionState } from "react";
+import { useState, useActionState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
 import { ImagePlus, X } from "lucide-react";
@@ -68,9 +68,12 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
 
   // A failed submit still resets the native file input (files cannot be
   // echoed back) — drop the stale "selected files" display with it.
-  useEffect(() => {
+  // Compare-and-set during render (issue #36) instead of an effect.
+  const [prevActionState, setPrevActionState] = useState(state);
+  if (prevActionState !== state) {
+    setPrevActionState(state);
     if (state.error) setFileNames([]);
-  }, [state]);
+  }
 
   const errorValues = { count: MAX_AD_IMAGES, size: MAX_AD_IMAGE_MB };
   const serverError = state.error

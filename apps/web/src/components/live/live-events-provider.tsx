@@ -30,7 +30,15 @@
  *    polling fallback covers from t=0.
  */
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useEffectEvent,
+  useRef,
+  useState,
+} from "react";
 
 export type LiveChannel = string; // "announcement:<docId>" | "wiki-page:<docId>" | "notifications" | "announcements"
 
@@ -146,17 +154,22 @@ export function LiveEventsProvider({
   );
 
   const pumpCatchup = useCallback(() => {
-    while (
-      catchupActiveRef.current < CATCHUP_CONCURRENCY &&
-      catchupQueueRef.current.length > 0
-    ) {
-      const channel = catchupQueueRef.current.shift()!;
-      catchupActiveRef.current += 1;
-      void runChannel(channel).finally(() => {
-        catchupActiveRef.current -= 1;
-        pumpCatchup();
-      });
+    // Hoisted declaration so the completion callback can re-enter the
+    // pump without the useCallback const referencing itself.
+    function pump() {
+      while (
+        catchupActiveRef.current < CATCHUP_CONCURRENCY &&
+        catchupQueueRef.current.length > 0
+      ) {
+        const channel = catchupQueueRef.current.shift()!;
+        catchupActiveRef.current += 1;
+        void runChannel(channel).finally(() => {
+          catchupActiveRef.current -= 1;
+          pump();
+        });
+      }
     }
+    pump();
   }, [runChannel]);
 
   /** One refetch per registered channel, notifications first, bounded. */
@@ -386,11 +399,14 @@ export function LiveEventsProvider({
  */
 export function useLiveChannel(channel: LiveChannel, refetch: Listener): boolean {
   const { register, healthy } = useContext(LiveEventsContext);
-  const refetchRef = useRef(refetch);
-  refetchRef.current = refetch;
+  // Effect Event instead of the latest-ref pattern (issue #36): always
+  // calls the latest refetch without re-registering, and without the
+  // ref write during render the useRef docs forbid. Wrapped in a plain
+  // closure at registration — Effect Events must not be passed around.
+  const onLiveEvent = useEffectEvent(refetch);
 
   useEffect(() => {
-    return register(channel, () => refetchRef.current());
+    return register(channel, () => onLiveEvent());
   }, [register, channel]);
 
   return healthy;

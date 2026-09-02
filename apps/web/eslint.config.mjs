@@ -25,15 +25,6 @@ export default tseslint.config(
       // warning rather than a CI-breaking error (true errors still fail).
       "@typescript-eslint/no-explicit-any": "warn",
       "@typescript-eslint/no-require-imports": "warn",
-      // The compiler-era hook rules (new in react-hooks v6) flag existing
-      // patterns that already have their own tickets: #34 (useOptimistic
-      // replaces the prop→state sync effects) and #36 (useEffectEvent
-      // replaces the latest-ref pattern in the live provider). Warnings
-      // until those land — the classic rules-of-hooks/exhaustive-deps
-      // protection stays at its default severity.
-      "react-hooks/set-state-in-effect": "warn",
-      "react-hooks/refs": "warn",
-      "react-hooks/immutability": "warn",
     },
   },
 );
