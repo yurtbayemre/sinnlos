@@ -34,7 +34,7 @@ export async function fetchCourseBySlug(slug: string): Promise<Course | null> {
 
 export async function fetchLessonByDocumentId(documentId: string): Promise<Lesson | null> {
   const res = await strapi<StrapiListResponse<Lesson>>(
-    `/api/lessons?filters[documentId][$eq]=${encodeURIComponent(documentId)}&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId&populate[course][fields][3]=completionMode`,
+    `/api/lessons?filters[documentId][$eq]=${encodeURIComponent(documentId)}&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId`,
     { noCache: true },
   );
   return (res.data?.[0] as Lesson | undefined) ?? null;
