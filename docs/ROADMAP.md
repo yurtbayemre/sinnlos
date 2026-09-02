@@ -6,8 +6,16 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 
 > **Status update (2026-08):** Phases 1–3 plus 4.1 (search V1) and 4.2
 > (analytics) are **implemented and live**. Each feature below carries a
-> status marker. Still open: 2.2 Phase B email digests, 2.4 SSE/live
-> updates, 4.1 V2 (Meilisearch) and 4.3 (AI assistant).
+> status marker. **Status update (2026-09):** 2.2 Phase B (email digests)
+> and 2.4 (SSE/live updates) shipped 2026-09-01; 4.1 V2 is instrumented
+> (anonymous search analytics live — Meilisearch go/no-go once ~4 weeks of
+> data exist, ~October 2026). Still open: 4.3 (AI assistant).
+>
+> **Done beyond this roadmap (2026-09):** a full **training platform**
+> (courses + ordered lessons + per-user completion tracking + admin
+> report; admin-authored, YouTube-only videos behind a render gate,
+> comprehension quizzes with an optional `quizGate` completion mode) and
+> **target visibility on comment/reaction reads/creates** (issue #28).
 >
 > **Done beyond this roadmap (2026-08):** five modules shipped that were not
 > part of the original research list — opt-in **birthdays** in the
@@ -158,10 +166,14 @@ decliner privacy).
 
 ### 2.2 Notifications
 
-**Status: ✅ implemented (rows + bell) / ⏳ email digests open** — the
-`notification` content type with lifecycle fan-out and the topbar bell
-(30s visible-tab polling) are live; the Phase B email digests (SMTP + cron)
-are not built.
+**Status: ✅ fully implemented (2026-09-01)** — notification rows with
+lifecycle fan-out, the topbar bell (SSE push since 2.4 shipped, with
+30s/120s polling as fallback), AND the Phase B e-mail digests: per-type
+opt-in (announcements/mentions/kudos) + daily/weekly frequency on the
+profile page, a 07:30 cron with audience-filtered content, idempotent via
+`lastDigestAt` on the user row, sent through the own mailcow
+(nodemailer, STARTTLS, mailbox app password). Kill switch
+`DIGESTS_DISABLED=1`; without SMTP env the cron is a logged no-op.
 
 **Phase A — derived, no fan-out (ship first):**
 - Bell icon in the topbar with unread count = announcements/events/kudos-to-me
@@ -174,9 +186,11 @@ are not built.
   `readAt`) created by lifecycle hooks (`afterCreate` on announcement →
   notify targeted users; on comment reply → notify parent author; on kudos →
   notify recipient).
-- Email digests via Strapi's email plugin + SMTP env vars (`EMAIL_SMTP_*` in
-  `.env.example`), sent by a cron job (`config/cron-tasks.ts`) — daily digest,
-  not per-event spam.
+- Email digests (shipped 2026-09-01, #18): Strapi email plugin with the
+  nodemailer provider, `SMTP_HOST/PORT/USER/PASS` + `DIGEST_FROM` in
+  `infra/.env`, sent by the `digest-mailer` cron (07:30, registered in
+  `apps/cms/config/server.ts`) — per-type opt-in on the profile, daily or
+  weekly, not per-event spam.
 
 **Effort:** A: ~1–2 days, B: ~3 days. **Depends on:** the content types it
 notifies about (1.2, 1.3, 2.1).
@@ -247,7 +261,7 @@ functionality, self-hosted, no extra service.
 - Single web instance → an in-memory pub/sub in the Next server is enough;
   no Redis, no Centrifugo.
 
-**Research spike (~0.5–1 day, answer before building):**
+**Research spike — answered; results in the status block above:**
 
 1. SSE from a Next.js 16 standalone route handler: `ReadableStream`
    lifetime, abort/cleanup per connection, memory per idle connection.
@@ -291,13 +305,15 @@ WebSockets/bidirectional messaging.
 
 **Acceptance criteria:**
 
-- [ ] Comment/reaction from session A visible in session B in <2s without
+All verified in production (2026-09-01, `infra/live-smoke.sh` + manual
+two-session tests):
+
+- [x] Comment/reaction from session A visible in session B in <2s without
       reload; only the affected component refetches.
-- [ ] Stream survives ≥10 min idle through Traefik and a mobile connection
-      (heartbeats), or reconnects transparently with a catch-up refetch.
-- [ ] Polling fallback demonstrably takes over when the SSE endpoint is
-      disabled.
-- [ ] No authz shortcut: SSE carries notify-only payloads; data is always
+- [x] Stream survives ≥10 min idle through Traefik (measured: 630s with
+      all heartbeats), reconnects with catch-up refetch.
+- [x] Polling fallback demonstrably takes over (`LIVE_EVENTS_DISABLED=1`).
+- [x] No authz shortcut: SSE carries notify-only payloads; data is always
       refetched with the requesting user's JWT.
 
 **Effort:** ~1 day spike + ~1–2 days implementation. **Depends on:**
@@ -351,9 +367,13 @@ nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
 
 ### 4.1 Global content search
 
-**Status: ✅ V1 implemented / ⏳ V2 open** — the ⌘K `search-command`
-palette fans out debounced queries via `lib/search-action.ts`; Meilisearch
-(V2) is not deployed.
+**Status: ✅ V1 implemented / V2 instrumented (2026-09-01, #19)** — the ⌘K
+`search-command` palette fans out debounced queries via
+`lib/search-action.ts`. Stage 1 of V2 is live: settled queries are logged
+anonymously (write-only `search-log`, term + result count), aggregated in
+the admin-only search section of `/manage/analytics`, 90-day retention
+cron. Meilisearch itself is deliberately NOT deployed — go/no-go once ~4
+weeks of data exist (~October 2026).
 
 **V1 (no new infra):** route handler `GET /api/search?q=` fans out
 `filters[$containsi]` queries to announcements, wiki pages, documents, events,
@@ -380,7 +400,8 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
   Umami stats (via its API) with content stats (announcements without
   comments/reactions = unread signal, top wiki pages, kudos volume,
   poll participation).
-- Track search terms with zero results from the 4.1 route handler — the
+- ~~Track search terms with zero results~~ ✅ shipped 2026-09-01 with the
+  search analytics (#19, incl. top zero-result terms in /manage/analytics) — the
   single most actionable comms metric.
 
 **Effort:** ~2–3 days. **Depends on:** 4.1 for search-term capture.
@@ -407,7 +428,7 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
 | 4 | 2.2 Notifications (A then B) |
 | 5 | 3.1 Polls, 3.2 Documents |
 | 6 | 4.1 Search V1, 4.2 Analytics |
-| later | 2.4 Live updates (SSE), 4.1 V2 (Meilisearch), 4.3 AI assistant |
+| later | ~~2.4 Live updates (SSE)~~ ✅ 2026-09, 4.1 V2 (Meilisearch — data-driven decision ~Oct 2026), 4.3 AI assistant |
 
 ## Cross-cutting checklist (applies to every feature)
 
