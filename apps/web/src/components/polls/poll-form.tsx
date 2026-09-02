@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
@@ -23,16 +23,27 @@ export function PollForm({ departments }: { departments: { id: number; name: str
   const t = useTranslations("polls");
   const router = useRouter();
   const [question, setQuestion] = useState("");
-  const [options, setOptions] = useState<string[]>(["", ""]);
+  // Options carry a counter-based id as the React key (issue #36): with
+  // the array index as key, deleting a middle row re-keys everything
+  // after it and uncontrolled DOM state (cursor, IME, undo) jumps rows.
+  const [options, setOptions] = useState<{ id: number; text: string }[]>([
+    { id: 0, text: "" },
+    { id: 1, text: "" },
+  ]);
+  const nextOptionIdRef = useRef(2);
   const [closesAt, setClosesAt] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [departmentIds, setDepartmentIds] = useState<number[]>([]);
   const [error, setError] = useState<CreatePollErrorCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
-  const setOption = (i: number, value: string) =>
-    setOptions((prev) => prev.map((o, idx) => (idx === i ? value : o)));
-  const removeOption = (i: number) => setOptions((prev) => prev.filter((_, idx) => idx !== i));
+  const setOption = (id: number, value: string) =>
+    setOptions((prev) => prev.map((o) => (o.id === id ? { ...o, text: value } : o)));
+  const removeOption = (id: number) => setOptions((prev) => prev.filter((o) => o.id !== id));
+  const addOption = () => {
+    const id = nextOptionIdRef.current++;
+    setOptions((prev) => [...prev, { id, text: "" }]);
+  };
   const toggleDepartment = (id: number) =>
     setDepartmentIds((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
 
@@ -42,7 +53,13 @@ export function PollForm({ departments }: { departments: { id: number; name: str
     e.preventDefault();
     setError(null);
     startTransition(async () => {
-      const result = await createPoll({ question, options, closesAt, anonymous, departmentIds });
+      const result = await createPoll({
+        question,
+        options: options.map((o) => o.text),
+        closesAt,
+        anonymous,
+        departmentIds,
+      });
       if (result.ok) {
         router.push("/polls");
       } else {
@@ -72,10 +89,10 @@ export function PollForm({ departments }: { departments: { id: number; name: str
         <legend className="text-sm font-medium">{t("formOptions")}</legend>
         <p className="text-xs text-muted-foreground">{t("formOptionsHint")}</p>
         {options.map((option, i) => (
-          <div key={i} className="flex items-center gap-2">
+          <div key={option.id} className="flex items-center gap-2">
             <input
-              value={option}
-              onChange={(e) => setOption(i, e.target.value)}
+              value={option.text}
+              onChange={(e) => setOption(option.id, e.target.value)}
               placeholder={t("formOptionPlaceholder", { number: i + 1 })}
               aria-label={t("formOptionPlaceholder", { number: i + 1 })}
               maxLength={120}
@@ -84,7 +101,7 @@ export function PollForm({ departments }: { departments: { id: number; name: str
             {options.length > 2 && (
               <button
                 type="button"
-                onClick={() => removeOption(i)}
+                onClick={() => removeOption(option.id)}
                 aria-label={t("formRemoveOption", { number: i + 1 })}
                 className={cn(
                   "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
@@ -99,7 +116,7 @@ export function PollForm({ departments }: { departments: { id: number; name: str
         {options.length < MAX_OPTIONS && (
           <button
             type="button"
-            onClick={() => setOptions((prev) => [...prev, ""])}
+            onClick={addOption}
             className={cn(
               "inline-flex items-center gap-1.5 rounded-xl border border-dashed px-3 py-2 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground",
               focusRing,

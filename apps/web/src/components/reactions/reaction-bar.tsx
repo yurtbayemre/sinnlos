@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useOptimistic, useTransition } from "react";
 import { cn } from "@/lib/utils";
 import { toggleReaction } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
@@ -27,7 +27,21 @@ export function ReactionBar({
   /** Called after a successful toggle so the owner can refetch its data. */
   onChanged?: () => void | Promise<void>;
 }) {
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  // Optimistic toggle (issue #34): the bar flips instantly, the awaited
+  // refetch in the same transition delivers the authoritative summary as
+  // the new base state, and a rejected action rolls back automatically —
+  // no dead UI during the two roundtrips.
+  const [optimisticReactions, applyToggle] = useOptimistic(
+    reactions,
+    (current: ReactionSummary[], emoji: EmojiType) => {
+      const existing = current.find((r) => r.emoji === emoji);
+      if (!existing) return [...current, { emoji, count: 1, reacted: true }];
+      return current.map((r) =>
+        r.emoji === emoji ? { ...r, count: r.count + (r.reacted ? -1 : 1), reacted: !r.reacted } : r,
+      );
+    },
+  );
   // Toggling requires the documentId anchor. Every Strapi 5 row has one, so
   // this only guards against an unanchored write (issue #11).
   const canReact = Boolean(target.documentId);
@@ -35,15 +49,16 @@ export function ReactionBar({
   const handleToggle = (emoji: EmojiType) => {
     if (!canReact) return;
     startTransition(async () => {
+      applyToggle(emoji);
       await toggleReaction(target, emoji);
       await onChanged?.();
     });
   };
 
-  const reactionMap = new Map(reactions.map((r) => [r.emoji, r]));
+  const reactionMap = new Map(optimisticReactions.map((r) => [r.emoji, r]));
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-1.5", isPending && "opacity-60")}>
+    <div className="flex flex-wrap items-center gap-1.5">
       {ALL_EMOJIS.map((emoji) => {
         const r = reactionMap.get(emoji);
         const count = r?.count ?? 0;
@@ -53,7 +68,7 @@ export function ReactionBar({
             key={emoji}
             type="button"
             onClick={() => handleToggle(emoji)}
-            disabled={isPending || !canReact}
+            disabled={!canReact}
             aria-pressed={reacted}
             aria-label={`${EMOJI_MAP[emoji]} ${count}`}
             className={cn(
