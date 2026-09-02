@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import type { Route } from "next";
 import { ArrowRight } from "lucide-react";
 import { useTranslations } from "next-intl";
 
@@ -28,7 +29,7 @@ export function LessonCompletion({
   completionMode: CompletionMode;
   lessonDocumentId: string;
   completedAtLabel: string | null;
-  nextHref: string | null;
+  nextHref: Route | null;
 }) {
   const t = useTranslations("training");
   const alreadyCompleted = completedAtLabel !== null;

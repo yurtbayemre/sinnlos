@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { ImageIcon, MapPin, Plus, ShoppingBag, Tag } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { auth } from "@/auth";
@@ -100,7 +101,7 @@ export default async function MarketplacePage({
         {AD_CATEGORIES.map((c) => (
           <CategoryTab
             key={c}
-            href={`/marketplace?category=${c}`}
+            href={`/marketplace?category=${c}` as Route}
             active={category === c}
             label={t(AD_CATEGORY_KEYS[c] as Parameters<typeof t>[0])}
           />
@@ -225,7 +226,7 @@ export default async function MarketplacePage({
   );
 }
 
-function CategoryTab({ href, active, label }: { href: string; active: boolean; label: string }) {
+function CategoryTab({ href, active, label }: { href: Route; active: boolean; label: string }) {
   return (
     <Link
       href={href}

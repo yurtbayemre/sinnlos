@@ -8,6 +8,7 @@
  */
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { auth, signIn, signOut } from "@/auth";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
@@ -189,7 +190,9 @@ export async function signOutAction() {
   // Federated logout only applies to Microsoft sessions — local users
   // would otherwise get bounced to a Microsoft logout page.
   if (provider === "microsoft-entra-id" && issuer) {
-    redirect(entraEndSessionUrl(issuer, postLogoutRedirect));
+    // External Microsoft end-session URL — typedRoutes only models
+    // internal routes, the cast is the documented escape hatch.
+    redirect(entraEndSessionUrl(issuer, postLogoutRedirect) as Route);
   }
 
   redirect("/sign-in");

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { ExternalLink, Link2 } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -100,7 +101,9 @@ function QuickLinkCard({ link, newTabLabel }: { link: QuickLink; newTabLabel: st
       {card}
     </a>
   ) : (
-    <Link href={link.url!} className="focus-card group block">
+    // CMS-provided path: typedRoutes cannot verify data-driven strings —
+    // `external` above already ensured this is an internal path.
+    <Link href={link.url! as Route} className="focus-card group block">
       {card}
     </Link>
   );
