@@ -12,8 +12,13 @@
  * plain [A-Za-z0-9._-] segments that never START with a dot. Anything else
  * (traversal attempts, encoded slashes, empty segments) is a 404 before we
  * ever talk to the CMS.
+ *
+ * A leading `_` is allowed: core stores `${nameToSlug(stem)}_<hex>`, and a
+ * stem it cannot slug (CJK, emoji, punctuation only, e.g. an admin upload
+ * of `写真.png`) yields `_<hex>.png` (final review C2-UPLOAD-EMPTY-SLUG).
+ * `.`/`..` and dot-files stay out: a segment still never starts with `.`.
  */
-export const SEGMENT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+export const SEGMENT_RE = /^[A-Za-z0-9_][A-Za-z0-9._-]*$/;
 
 /** Conditional/range request headers the browser may send — pass through. */
 export const FORWARD_REQUEST_HEADERS = ["range", "if-none-match", "if-modified-since"] as const;

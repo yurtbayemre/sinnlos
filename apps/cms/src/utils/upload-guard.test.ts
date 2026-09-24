@@ -11,6 +11,7 @@ import {
   isAllowedUploadBody,
   sniffImageMime,
   toFileArray,
+  uploadHashSlug,
 } from "./upload-guard";
 
 /** First bytes of real files, padded to the sniff window. */
@@ -68,6 +69,24 @@ describe("canonicalFilename", () => {
     expect(canonicalFilename("", "image/webp")).toBe("image.webp");
     expect(canonicalFilename("dir/", "image/png")).toBe("image.png");
     expect(canonicalFilename("  .pdf", "image/png")).toBe("image.png");
+  });
+
+  it("falls back to 'image' for a stem core slugs to nothing (C2-UPLOAD-EMPTY-SLUG)", () => {
+    for (const name of ["写真.png", "截图.jpg", "🙂.webp", "€.png", "—.png", "---.png", "_.png"]) {
+      expect(canonicalFilename(name, "image/png"), name).toBe("image.png");
+    }
+    // Anything core can slug keeps the client's stem (core transliterates it).
+    expect(canonicalFilename("Ärger.jpg", "image/jpeg")).toBe("Ärger.jpg");
+    expect(canonicalFilename("é.jpg", "image/jpeg")).toBe("é.jpg");
+    expect(canonicalFilename("写真 2.png", "image/png")).toBe("写真 2.png");
+  });
+
+  it("never hands core a stem whose stored hash would start with `_`", () => {
+    for (const name of ["写真.png", "a.png", "🙂.png", ".png", "Ärger.png", "-_-.png", "x🙂.png"]) {
+      const stored = canonicalFilename(name, "image/png");
+      const slug = uploadHashSlug(stored.slice(0, stored.lastIndexOf(".")));
+      expect(slug, name).toMatch(/^[A-Za-z0-9]/);
+    }
   });
 
   it("always ends in exactly the canonical extension", () => {

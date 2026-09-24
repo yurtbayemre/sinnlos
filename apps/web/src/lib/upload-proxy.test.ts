@@ -28,6 +28,10 @@ describe("isValidUploadPath / SEGMENT_RE", () => {
     for (const path of [
       ["report_abc123.pdf"],
       ["thumbnail_team-photo_4f2a9c.jpg"],
+      // A stem core slugs to "" (写真.png, 🙂.png): C2-UPLOAD-EMPTY-SLUG.
+      ["_3f9a1c0b2e.png"],
+      ["thumbnail__3f9a1c0b2e.png"],
+      ["_x.pdf"],
       ["large_Logo_9A8B.PNG"],
       ["a"],
       ["sub", "x.png"],
@@ -48,8 +52,9 @@ describe("isValidUploadPath / SEGMENT_RE", () => {
       ["a\\b.pdf"],
       [""],
       ["x.pdf", ""],
-      ["_x.pdf"],
       ["-x.pdf"],
+      ["_", ".."],
+      ["._x.pdf"],
       ["a b.pdf"],
       ["ä.png"],
       ["x.pdf\n"],

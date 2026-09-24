@@ -16,6 +16,8 @@
  *    `x.pdf` would be stored and served as application/pdf.
  */
 
+import { strings } from "@strapi/utils";
+
 export const MAX_FILES_PER_REQUEST = 4;
 export const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
 /** Bytes the sniffer needs (the WebP signature ends at offset 12). */
@@ -56,17 +58,31 @@ export function sniffImageMime(head: Uint8Array): AllowedImageMime | null {
 }
 
 /**
+ * The slug core puts in front of the stored hash: @strapi/upload 5.49
+ * image-manipulation.js generateFileName → `${nameToSlug(stem)}_<10 hex>`,
+ * with exactly these options.
+ */
+export function uploadHashSlug(stem: string): string {
+  return strings.nameToSlug(stem, { separator: "_", lowercase: false });
+}
+
+/**
  * `<basename>.<canonical ext>`: directory parts (either separator) and the
  * client's extension are dropped, so the stored ext, the stored mime and the
- * content agree. An empty stem (".jpg", "", "/") falls back to "image".
- * Characters core rejects (reserved/control chars) are left for core's own
- * isValidFilename check — fail closed, not silently rewritten.
+ * content agree. A stem core cannot slug falls back to "image": an empty
+ * one (".jpg", "", "/"), but also a CJK, emoji or punctuation-only one
+ * ("写真", "🙂", "---"). Core would slug it to "" and store the file as
+ * `_<hex>.<ext>`, a name the web /uploads proxy 404'd before its segment
+ * rule allowed a leading `_` (final review C2-UPLOAD-EMPTY-SLUG).
+ * Characters core rejects (reserved/control chars) in an otherwise
+ * sluggable stem are left for core's own isValidFilename check — fail
+ * closed, not silently rewritten.
  */
 export function canonicalFilename(originalName: string, mime: AllowedImageMime): string {
   const base = originalName.replace(/\\/g, "/").split("/").pop() ?? "";
   const dot = base.lastIndexOf(".");
   const stem = (dot >= 0 ? base.slice(0, dot) : base).trim();
-  return `${stem || "image"}${CANONICAL_EXTENSION[mime]}`;
+  return `${uploadHashSlug(stem) ? stem : "image"}${CANONICAL_EXTENSION[mime]}`;
 }
 
 /** formidable hands a single file as an object and several as an array. */
