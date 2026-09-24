@@ -6,10 +6,11 @@
  *
  * Caching contract (D-DC01, deep-dive decisions/03-caching.md §1-§5):
  *   - The web keeps NO server-side copy of Strapi responses between
- *     requests: no Next fetch/Data Cache entry, no unstable_cache, no
- *     'use cache', no in-process memo of response bodies. Every request is
- *     sent with cache: "no-store"; StrapiInit rejects `cache`/`next` and
- *     strapi() strips both at runtime. Why: the Data Cache key hashes every
+ *     requests: no Next fetch/Data Cache entry, none of the next/cache
+ *     cache APIs or cache directives (the ESLint rules list them), no
+ *     in-process memo of response bodies. Every request is sent with
+ *     cache: "no-store"; StrapiInit rejects `cache`/`next` and strapi()
+ *     strips both at runtime. Why: the Data Cache key hashes every
  *     request header, Authorization included, so the old tagged reads were
  *     one entry per JWT — reused only by the same user, served stale while
  *     revalidating (also to a since-blocked user or an expired JWT) and
@@ -45,13 +46,7 @@ export type StrapiListResponse<T> = {
  * no-store (see the contract above), so `cache` and `next` are rejected at
  * compile time — and stripped at runtime for a caller that casts past this.
  */
-export type StrapiInit = Omit<RequestInit, "cache" | "next"> & {
-  /**
-   * @deprecated No-op since D-DC01 — every request is no-store. Kept only
-   * until the call sites drop it (next commit); do not add new uses.
-   */
-  noCache?: boolean;
-};
+export type StrapiInit = Omit<RequestInit, "cache" | "next">;
 
 export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T> {
   // DEMO_MODE answers from fixtures before any session read or fetch.
@@ -62,10 +57,9 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
 
   // Runtime strip on top of the StrapiInit type: a caller that casts its way
   // past the type must still never reach the Data Cache.
-  const { headers: callerHeaders, ...rest } = init as RequestInit & Pick<StrapiInit, "noCache">;
+  const { headers: callerHeaders, ...rest } = init as RequestInit;
   delete rest.cache;
   delete rest.next;
-  delete rest.noCache;
 
   const headers = new Headers(callerHeaders);
   headers.set("Content-Type", "application/json");

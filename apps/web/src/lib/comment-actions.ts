@@ -45,7 +45,6 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
   const [commentsRes, reactionsRes] = await Promise.all([
     strapi<StrapiListResponse<Comment>>(
       `/api/comments?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=100`,
-      { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
       return { data: [] as Comment[] };
@@ -57,7 +56,6 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
     // display only; toggleReaction writes server-side and stays correct.
     strapi<StrapiListResponse<Reaction>>(
       `/api/reactions?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=500`,
-      { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
       return { data: [] as Reaction[] };
@@ -99,14 +97,12 @@ export async function addComment(target: CommentTarget, body: string) {
     body: JSON.stringify({
       data: { body, targetType: target.type, targetDocumentId },
     }),
-    noCache: true,
   });
 }
 
 export async function deleteComment(commentId: number) {
   await strapi(`/api/comments/${commentId}`, {
     method: "DELETE",
-    noCache: true,
   });
 }
 
@@ -117,6 +113,5 @@ export async function toggleReaction(target: CommentTarget, emoji: EmojiType) {
     body: JSON.stringify({
       data: { emoji, targetType: target.type, targetDocumentId },
     }),
-    noCache: true,
   });
 }

@@ -12,7 +12,6 @@ export async function getNotifications(): Promise<Notification[]> {
   try {
     const res = await strapi<StrapiListResponse<Notification>>(
       `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
-      { noCache: true },
     );
     return (res as any).data ?? [];
   } catch (e) {
@@ -28,7 +27,6 @@ export async function markNotificationsRead(ids: number[]) {
   await strapi("/api/notifications/mark-read", {
     method: "POST",
     body: JSON.stringify({ ids }),
-    noCache: true,
   });
 }
 
@@ -36,6 +34,5 @@ export async function markAllNotificationsRead() {
   await strapi("/api/notifications/mark-all-read", {
     method: "POST",
     body: JSON.stringify({}),
-    noCache: true,
   });
 }

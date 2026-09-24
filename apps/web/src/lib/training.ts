@@ -3,10 +3,10 @@ import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import type { Course, Lesson, LessonProgress } from "@/lib/types";
 
 /**
- * Training data helpers (issue #29). Everything runs noCache: courses
+ * Training data helpers (issue #29). Every response is per-user: courses
  * and lessons are status-gated per role (admin/editor see drafts) and
- * progress is strictly per-user — a URL-keyed cache entry would leak
- * across users (§ caching rule: user-variable ⇒ noCache).
+ * progress is strictly the caller's own. Uncached like every strapi()
+ * read (D-DC01).
  */
 
 const COURSE_POPULATE =
@@ -17,7 +17,6 @@ export async function fetchCourses(): Promise<{ courses: Course[]; truncated: bo
     (page) =>
       strapi<StrapiListResponse<Course>>(
         `/api/courses?${COURSE_POPULATE}&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
-        { noCache: true },
       ),
     { maxPages: 20, label: "courses" },
   );
@@ -27,7 +26,6 @@ export async function fetchCourses(): Promise<{ courses: Course[]; truncated: bo
 export async function fetchCourseBySlug(slug: string): Promise<Course | null> {
   const res = await strapi<StrapiListResponse<Course>>(
     `/api/courses?filters[slug][$eq]=${encodeURIComponent(slug)}&${COURSE_POPULATE}`,
-    { noCache: true },
   );
   return (res.data?.[0] as Course | undefined) ?? null;
 }
@@ -35,7 +33,6 @@ export async function fetchCourseBySlug(slug: string): Promise<Course | null> {
 export async function fetchLessonByDocumentId(documentId: string): Promise<Lesson | null> {
   const res = await strapi<StrapiListResponse<Lesson>>(
     `/api/lessons?filters[documentId][$eq]=${encodeURIComponent(documentId)}&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId`,
-    { noCache: true },
   );
   return (res.data?.[0] as Lesson | undefined) ?? null;
 }
@@ -55,7 +52,6 @@ export async function fetchMyProgress(): Promise<{
     (page) =>
       strapi<StrapiListResponse<LessonProgress>>(
         `/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&pagination[page]=${page}&pagination[pageSize]=100`,
-        { noCache: true },
       ),
     { maxPages: 20, label: "lesson-progress" },
   );

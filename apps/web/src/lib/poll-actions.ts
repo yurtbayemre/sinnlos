@@ -52,7 +52,6 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
           departments: input.departmentIds,
         },
       }),
-      noCache: true,
     });
   } catch {
     return { ok: false, code: "failed" };
@@ -68,9 +67,8 @@ export async function votePoll(pollId: number, optionIndex: number) {
   const result = await strapi<any>(`/api/polls/${pollId}/vote`, {
     method: "POST",
     body: JSON.stringify({ optionIndex }),
-    noCache: true,
   });
-  // Poll results are fetched with noCache — refresh so a revisit and the
+  // Poll results are read uncached (D-DC01) — refresh so a revisit and the
   // other polls on the page show current counts without a manual reload.
   refresh();
   return result;

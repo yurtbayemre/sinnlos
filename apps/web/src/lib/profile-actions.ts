@@ -67,9 +67,8 @@ export async function updateProfile(
           digestFrequency: formData.get("digestFrequency") === "daily" ? "daily" : "weekly",
         },
       }),
-      noCache: true,
     });
-    // Profile/people data is fetched with noCache — re-render so the saved
+    // Profile/people data is read uncached (D-DC01) — re-render so the saved
     // values show up immediately.
     refresh();
     return { success: "Profile updated." };
@@ -94,7 +93,6 @@ export async function changePassword(
     await strapi("/api/auth/change-password", {
       method: "POST",
       body: JSON.stringify({ currentPassword, password, passwordConfirmation }),
-      noCache: true,
     });
     return { success: "Password changed." };
   } catch (e) {

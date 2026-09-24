@@ -27,7 +27,6 @@ export async function rsvpToEvent(
     await strapi("/api/event-rsvps", {
       method: "POST",
       body: JSON.stringify({ data: { targetDocumentId, status } }),
-      noCache: true,
     });
   } catch (e) {
     // strapi()'s 401 → sign-in redirect (NEXT_REDIRECT) must propagate.

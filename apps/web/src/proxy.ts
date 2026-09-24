@@ -27,8 +27,9 @@ const PUBLIC_FILES = new Set([
  * The public allowlist: paths reachable without a session. Pure and exported
  * for the boundary tests (proxy.test.ts, S06). /uploads and /live/* must
  * never be listed — their bytes/streams are per-session. /api/live/emit is
- * the ONLY session-less internal endpoint; the /api/revalidate webhook was
- * removed with the Strapi fetch cache (D-DC01) and is guarded like any path.
+ * the ONLY session-less internal endpoint; the cache-revalidation webhook
+ * was removed with the Strapi fetch cache (D-DC01), so its old path is
+ * guarded like any other.
  */
 export function isPublicPath(pathname: string): boolean {
   return (

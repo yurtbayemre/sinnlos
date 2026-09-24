@@ -6,9 +6,9 @@ import type { Acknowledgement } from "@/lib/types";
  * Server-side helpers around /api/acknowledgements.
  *
  * The acknowledgement-visibility policy scopes reads to the caller's own
- * rows (admin_role bypasses), so every fetch here MUST use noCache —
- * the Next.js fetch cache keys by URL only and would leak one user's
- * acknowledgement state to everyone else.
+ * rows (admin_role bypasses): every response here is per-user. strapi()
+ * never caches (D-DC01), so no user's acknowledgement state can be served
+ * to anyone else.
  *
  * A single request is bounded by its `pageSize`, so both helpers walk the
  * pagination until exhausted and report back whether the walk actually
@@ -30,7 +30,6 @@ function fetchAllAnnouncementAcksPaged(params: string): Promise<AnnouncementAcks
     (page) =>
       strapi<StrapiListResponse<Acknowledgement>>(
         `/api/acknowledgements?filters[targetType][$eq]=announcement${params}&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-        { noCache: true },
       ),
     { maxPages: MAX_PAGES, label: "announcement acknowledgements" },
   ).then(({ data, truncated }) => ({ acks: data, truncated }));

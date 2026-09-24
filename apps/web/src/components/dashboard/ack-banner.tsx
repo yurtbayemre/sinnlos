@@ -10,7 +10,8 @@ import type { Acknowledgement, Announcement } from "@/lib/types";
  * Dashboard banner listing how many mandatory (requiresAck) announcements
  * the current user has not confirmed yet. Server Component — both fetches
  * are per-user (the CMS announcement-visibility policy filters the list by
- * audience; the acks are the caller's own) and therefore noCache.
+ * audience; the acks are the caller's own), like every strapi() read
+ * uncached (D-DC01).
  * Renders nothing when everything is confirmed or a fetch fails (the
  * dashboard already shows a generic fetch-error banner).
  */

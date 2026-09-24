@@ -36,7 +36,6 @@ export async function Topbar() {
       if (userId) {
         const res = await strapi<StrapiListResponse<Notification>>(
           `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
-          { noCache: true },
         );
         notifications = (res as any).data ?? [];
       }

@@ -21,10 +21,7 @@ export default async function ProfilePage() {
   const session = await getSession();
   const isLocal = session?.provider === "local";
 
-  const { data, failed } = await tryFetch(
-    () => strapi<{ data: any }>("/api/me", { noCache: true }),
-    "profile",
-  );
+  const { data, failed } = await tryFetch(() => strapi<{ data: any }>("/api/me"), "profile");
   const me = data?.data ?? null;
 
   const name = me?.displayName ?? me?.username ?? session?.user?.name ?? tCommon("unknown");

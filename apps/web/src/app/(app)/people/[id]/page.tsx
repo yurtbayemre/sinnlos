@@ -14,10 +14,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const { data } = await tryFetch(
-    () =>
-      strapi<any>(`/api/users/${id}?populate[department]=true&populate[avatar]=true`, {
-        noCache: true,
-      }),
+    () => strapi<any>(`/api/users/${id}?populate[department]=true&populate[avatar]=true`),
     "person-meta",
   );
   return { title: data?.displayName ?? data?.username ?? "Person" };
@@ -30,7 +27,6 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
     () =>
       strapi<any>(
         `/api/users/${id}?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true`,
-        { noCache: true },
       ),
     "person",
   );

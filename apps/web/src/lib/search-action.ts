@@ -54,12 +54,9 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
       api.departments.list().catch(emptyList),
       api.teams.list().catch(emptyList),
       api.wiki.spaces().catch(emptyList),
-      // Bypasses the Next.js fetch cache: wiki-pages are filtered by the
-      // wiki-visibility policy so cached responses would leak restricted
-      // pages across users.
+      // Per-user: wiki-pages are filtered by the wiki-visibility policy.
       strapi<StrapiListResponse<any>>(
         "/api/wiki-pages?populate[space]=true&populate[author]=true&pagination[pageSize]=100&sort=title:asc",
-        { noCache: true },
       ).catch(emptyList),
       api.announcements.list().catch(emptyList),
       // Upcoming only (api.events is time-window based now): the old global
@@ -158,7 +155,6 @@ export async function fetchSearchItems(): Promise<SearchItem[]> {
 
   const people = await strapi<any[]>(
     "/api/users?populate[department]=true&pagination[pageSize]=200&sort=displayName:asc",
-    { noCache: true },
   ).catch(emptyArray);
 
   // DEMO_MODE answers /api/users with a `{ data, meta }` object, not an
@@ -190,27 +186,21 @@ export async function searchContent(query: string): Promise<SearchItem[]> {
   const [announcements, wikiPages, documents, events, polls, people] = await Promise.all([
     strapi<StrapiListResponse<any>>(
       `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[author]=true&pagination[pageSize]=5&sort=createdAt:desc`,
-      { noCache: true },
     ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[space]=true&pagination[pageSize]=5&sort=title:asc`,
-      { noCache: true },
     ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&populate[file]=true&pagination[pageSize]=5&sort=title:asc`,
-      { noCache: true },
     ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/events?filters[title][$containsi]=${q}&pagination[pageSize]=5&sort=start:desc`,
-      { noCache: true },
     ).catch(emptyList),
     strapi<StrapiListResponse<any>>(
       `/api/polls?filters[question][$containsi]=${q}&pagination[pageSize]=5&sort=createdAt:desc`,
-      { noCache: true },
     ).catch(emptyList),
     strapi<any[]>(
       `/api/users?filters[$or][0][displayName][$containsi]=${q}&filters[$or][1][email][$containsi]=${q}&filters[$or][2][jobTitle][$containsi]=${q}&populate[department]=true&pagination[pageSize]=5&sort=displayName:asc`,
-      { noCache: true },
     ).catch(emptyArray),
   ]);
 
@@ -298,7 +288,6 @@ export async function logSearch(term: string, resultCount: number): Promise<void
       body: JSON.stringify({
         data: { term: trimmed.slice(0, 120), resultCount: Math.max(0, resultCount | 0) },
       }),
-      noCache: true,
     });
   } catch (e) {
     unstable_rethrow(e);

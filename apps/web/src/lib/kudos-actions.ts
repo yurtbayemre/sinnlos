@@ -10,9 +10,8 @@ export async function sendKudos(toUserId: number, message: string, value: KudosV
     body: JSON.stringify({
       data: { to: toUserId, message, value },
     }),
-    noCache: true,
   });
-  // Kudos feed is fetched with noCache — re-render it in the action response
+  // The kudos feed is read uncached (D-DC01) — re-render it in the action response
   // so the new entry appears without a manual reload.
   refresh();
 }

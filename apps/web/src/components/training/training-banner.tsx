@@ -9,7 +9,7 @@ import { courseCompletion } from "@/lib/training-shared";
 /**
  * Dashboard banner counting the mandatory courses the current user has
  * not completed yet (ack-banner clone, issue #29). Server Component,
- * both fetches per-user ⇒ noCache. Renders nothing when everything is
+ * both fetches per-user (uncached, D-DC01). Renders nothing when everything is
  * done, nothing is assigned, or a fetch fails/truncates — fail-closed
  * means no banner rather than a wrong count.
  */

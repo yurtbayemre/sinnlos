@@ -104,7 +104,6 @@ export default async function TrainingReportPage() {
             (page) =>
               strapi<StrapiListResponse<LessonProgress>>(
                 `/api/lesson-progresses?${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&pagination[page]=${page}&pagination[pageSize]=100`,
-                { noCache: true },
               ),
             { maxPages: 20, label: `training-report:${course.slug}` },
           ),
