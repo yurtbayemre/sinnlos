@@ -12,6 +12,7 @@ import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { signIn, signOut } from "@/auth";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
+import { isRateLimitedSignIn } from "@/lib/auth-errors";
 import { STRAPI_URL } from "@/lib/config";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
@@ -43,6 +44,8 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
   } catch (err) {
     // Auth.js signals success via a NEXT_REDIRECT throw — rethrow it.
     if ((err as any)?.digest?.startsWith?.("NEXT_REDIRECT")) throw err;
+    // Strapi's own throttle answered 429 (FX11): not a wrong password.
+    if (isRateLimitedSignIn(err)) return { error: (await getTranslations("auth"))("rateLimited") };
     return { error: "Invalid email or password." };
   }
   return { error: undefined };

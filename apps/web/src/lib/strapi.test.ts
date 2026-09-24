@@ -35,6 +35,7 @@ vi.stubGlobal("fetch", fetchMock);
 
 const { api, strapi } = await import("./strapi");
 const { demo } = await import("./demo");
+const { StrapiError } = await import("./strapi-error");
 
 /** A one-page Strapi list body — ends every page walk after one request. */
 const onePage = {
@@ -175,6 +176,20 @@ describe("strapi() — responses", () => {
     );
     await expect(strapi("/api/me")).rejects.toThrow("Strapi 403 Forbidden: denied");
     expect(redirectMock).not.toHaveBeenCalled();
+  });
+
+  it("carries the HTTP status on a StrapiError (e.g. the auth throttle's 429, FX11)", async () => {
+    fetchMock.mockImplementation(
+      async () => new Response("slow down", { status: 429, statusText: "Too Many Requests" }),
+    );
+    const error = await strapi("/api/auth/change-password", { method: "POST" }).catch(
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(StrapiError);
+    expect(error).toMatchObject({
+      status: 429,
+      message: "Strapi 429 Too Many Requests: slow down",
+    });
   });
 
   it("returns undefined for a 204 without a body", async () => {

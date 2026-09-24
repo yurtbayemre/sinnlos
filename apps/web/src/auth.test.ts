@@ -31,6 +31,8 @@ function fakeStrapiJwt(exp: number, id = 7): string {
 const stub = vi.hoisted(() => ({
   /** Headers the server-side auth()/getStrapiJwt() read via next/headers. */
   headers: new Headers(),
+  /** HTTP status of Strapi's POST /api/auth/local (429 = its throttle). */
+  localStatus: 200,
   localExp: 0,
   localJwt: "",
   exchangeExp: 0,
@@ -55,6 +57,9 @@ const json = (body: unknown, status = 200) =>
 const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
   const url = input instanceof Request ? input.url : String(input);
   if (url === `${STRAPI}/api/auth/local`) {
+    if (stub.localStatus !== 200) {
+      return json({ error: { status: stub.localStatus } }, stub.localStatus);
+    }
     return json({
       jwt: stub.localJwt,
       user: { id: 7, username: "ada", email: "ada@example.test" },
@@ -103,6 +108,9 @@ const BASE_ENV: Env = {
 /** Fresh auth.ts (+ session/token modules) under the given env. */
 async function load(env: Env = {}) {
   vi.resetModules();
+  // The login limiter lives on globalThis (lib/login-rate-limit.ts) and
+  // would otherwise outlive resetModules().
+  delete (globalThis as { __sinnlosLoginRateLimiter?: unknown }).__sinnlosLoginRateLimiter;
   for (const [key, value] of Object.entries({ ...BASE_ENV, ...env })) vi.stubEnv(key, value);
   const authModule = await import("@/auth");
   const session = await import("@/lib/session");
@@ -163,6 +171,7 @@ function expectNoStrapiSecrets(body: unknown, jwt: string) {
 
 beforeEach(() => {
   stub.headers = new Headers();
+  stub.localStatus = 200;
   stub.localExp = nowSec() + 7 * DAY;
   stub.localJwt = fakeStrapiJwt(stub.localExp);
   stub.exchangeExp = nowSec() + 7 * DAY - 5;
@@ -454,5 +463,30 @@ describe("getStrapiToken() reads the cookie Auth.js actually set", () => {
     // Auth.js defaults to https when neither AUTH_URL nor the header is set.
     expect(usesSecureSessionCookie({}, h())).toBe(true);
     expect(usesSecureSessionCookie({ AUTH_URL: "" }, h("http"))).toBe(false);
+  });
+});
+
+describe("Strapi's auth throttle (FX11)", () => {
+  it("a 429 from /api/auth/local is a distinct rate_limited sign-in error, not a failure count", async () => {
+    const mod = await load();
+    const { loginRateLimiter } = await import("@/lib/login-rate-limit");
+    stub.localStatus = 429;
+    // More attempts than the web limiter's per-IP and per-identifier budget.
+    for (let i = 0; i < 12; i++) {
+      const { res } = await signInLocal(mod, "http://localhost:3000");
+      const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+      expect(location.pathname).toBe("/sign-in");
+      expect(location.searchParams.get("error")).toBe("CredentialsSignin");
+      expect(location.searchParams.get("code")).toBe("rate_limited");
+    }
+    expect(loginRateLimiter.isBlocked("unknown", "ada@example.test")).toBe(false);
+  });
+
+  it("a wrong password stays the generic credentials error", async () => {
+    const mod = await load();
+    stub.localStatus = 400;
+    const { res } = await signInLocal(mod, "http://localhost:3000");
+    const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+    expect(location.searchParams.get("code")).toBe("credentials");
   });
 });

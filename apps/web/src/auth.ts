@@ -21,6 +21,7 @@ import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
 import { STRAPI_URL } from "@/lib/config";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED } from "@/lib/auth-config";
+import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
 import { strapiJwtExp, strapiSessionExpired } from "@/lib/strapi-jwt";
 
@@ -164,9 +165,10 @@ if (LOCAL_ENABLED) {
             headers: {
               "Content-Type": "application/json",
               // Forward the real client IP: Strapi's users-permissions
-              // throttle counts per ctx.ip and the CMS runs proxy:true.
-              // Without this header every user shares the web container's
-              // IP as ONE bucket — 10 failures/min would lock everyone out.
+              // throttle keys /auth/local on ctx.request.ip, which honours
+              // this header only since server.proxy.koa (FX11). Without it
+              // every user shares the web container's IP as ONE bucket —
+              // 10 requests/min would lock everyone out.
               "X-Forwarded-For": clientIp,
             },
             body: JSON.stringify({ identifier, password }),
@@ -191,6 +193,9 @@ if (LOCAL_ENABLED) {
                 );
               }
             }
+            // Strapi's own throttle: a distinct error so the form says "too
+            // many attempts" instead of "invalid email or password" (FX11).
+            if (res.status === 429) throw new StrapiRateLimitedSignIn();
             return null;
           }
           loginRateLimiter.recordSuccess(identifier);
@@ -220,7 +225,8 @@ if (LOCAL_ENABLED) {
             strapiJwt: data.jwt,
             strapiUserId: me.id,
           };
-        } catch {
+        } catch (e) {
+          if (e instanceof StrapiRateLimitedSignIn) throw e;
           return null;
         }
       },

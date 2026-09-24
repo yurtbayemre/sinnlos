@@ -10,8 +10,12 @@
  *    only meaningful for local-credentials accounts.
  */
 import { refresh } from "next/cache";
+import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
+import { getTranslations } from "next-intl/server";
+import { clientIpFrom } from "@/lib/login-rate-limit";
 import { strapi } from "@/lib/strapi";
+import { StrapiError } from "@/lib/strapi-error";
 
 export type ProfileFormValues = {
   displayName: string;
@@ -92,6 +96,11 @@ export async function changePassword(
   try {
     await strapi("/api/auth/change-password", {
       method: "POST",
+      // Real client IP, like sign-in/register (FX11): the CMS trusts it via
+      // server.proxy.koa. The throttle key here is path + ctx.request.ip +
+      // the caller's user id (koa2-ratelimit appends it), so users never
+      // shared a bucket; the header makes the IP part the client's.
+      headers: { "X-Forwarded-For": clientIpFrom(await headers()) },
       body: JSON.stringify({ currentPassword, password, passwordConfirmation }),
     });
     return { success: "Password changed." };
@@ -100,6 +109,11 @@ export async function changePassword(
     // expired session is a 401 that strapi() turns into a redirect
     // (NEXT_REDIRECT) — that control-flow error must not be swallowed.
     unstable_rethrow(e);
+    // Strapi's throttle (10 attempts/min): say so instead of blaming the
+    // current password (FX11).
+    if (e instanceof StrapiError && e.status === 429) {
+      return { error: (await getTranslations("profile"))("passwordRateLimited") };
+    }
     return { error: "Could not change password — check your current password." };
   }
 }

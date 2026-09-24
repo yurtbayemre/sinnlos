@@ -40,6 +40,7 @@ import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { demo } from "@/lib/demo";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import { getStrapiToken } from "@/lib/session";
+import { StrapiError } from "@/lib/strapi-error";
 
 export type StrapiListResponse<T> = {
   data: T[];
@@ -85,8 +86,7 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
   }
 
   if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Strapi ${res.status} ${res.statusText}: ${body}`);
+    throw new StrapiError(res.status, res.statusText, await res.text());
   }
 
   // DELETE answers 204 with an empty body — res.json() would throw on it.

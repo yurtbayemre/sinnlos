@@ -20,7 +20,19 @@ export default ({ env }: { env: Env }) => ({
     keys: env.array("APP_KEYS"),
   },
   url: env("PUBLIC_URL", "http://localhost:1337"),
-  proxy: true,
+  // Trust X-Forwarded-* (FX11). Strapi 5 reads ONLY `server.proxy.koa`
+  // (@strapi/core dist/services/server/index.js:23); the v4 spelling
+  // `proxy: true` was silently ignored, so ctx.request.ip was the web
+  // container for every sign-in and the users-permissions throttle
+  // (plugin rateLimit middleware: noIdentifier:<path>:<ip> for /auth/local,
+  // 10 requests/min by default) pooled ALL local logins into one bucket.
+  // Now the client IP the web forwards as X-Forwarded-For keys the bucket.
+  // Spoofing needs direct network access: Traefik and Caddy overwrite a
+  // client-supplied X-Forwarded-For, and only containers on the shared
+  // frontend network reach the cms without them (IN04). Side effect,
+  // intended: ctx.request.secure follows X-Forwarded-Proto, so the admin
+  // refresh cookie is Secure behind the TLS edge in production.
+  proxy: { koa: true },
   // Strapi-native cron (node-schedule via @strapi/core, no extra dep).
   cron: {
     enabled: true,
