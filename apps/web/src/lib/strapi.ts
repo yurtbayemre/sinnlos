@@ -146,7 +146,7 @@ export const api = {
     // No page walk needed: `slug` is a uid attribute (unique) → 0..1 top-level
     // rows; populated relations are not paginated by Strapi 5 REST.
     // No populate[pages]: the page never rendered it, and the CMS strips it
-    // for non-admin/editor callers anyway (strip-restricted-populate, FX05).
+    // for non-admin/editor callers anyway (global relation guard, FX05).
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
         `/api/teams?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[department]=true&populate[lead]=true&populate[members]=true`,

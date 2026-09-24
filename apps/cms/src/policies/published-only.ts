@@ -15,8 +15,8 @@ import { forcePublishedStatus, getMutableQuery } from "../utils/policy-query";
  * drafts); everyone else — including an anonymous caller — gets
  * `status=published` written onto the REAL query via getMutableQuery
  * (`policyContext.query` is a throw-away copy, §5.14), which also removes
- * the legacy v4 `publicationState`. Composes with strip-restricted-populate
- * on department/team (different query keys). Harmless on a type whose
+ * the legacy v4 `publicationState`. Composes with the global relation guard
+ * (FX05, runs later in sanitize.query on other keys). Harmless on a type whose
  * draftAndPublish is later switched off: the document service ignores
  * `status` there. Returns a strict boolean (undefined counts as PASS).
  *

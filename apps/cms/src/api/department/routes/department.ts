@@ -1,21 +1,17 @@
 import { factories } from "@strapi/strapi";
 
 /**
- * Reads are pinned to published rows (FX06, §5.24) and drop every populate
- * path into wiki pages for non-admin/editor callers (FX05): `pages` is the
- * inverse of wiki-page.department, and the department routes carry no
- * wiki-visibility filter — `populate[pages]` (or `*`, `teams.pages`, ...)
- * returned pages of hidden spaces.
+ * Reads are pinned to published rows (FX06, §5.24). No populate guard here:
+ * `pages` (inverse of wiki-page.department) is cut for non-admin/editor
+ * callers on EVERY content-api route — populate, filters and sort — by the
+ * global relation guard (FX05, registerRestrictedRelationGuard in
+ * src/index.ts), because /api/users, wiki-spaces, events, ... reach
+ * `department.pages` just as well as these routes do.
  */
-const STRIP_WIKI_POPULATE = {
-  name: "global::strip-restricted-populate",
-  config: { uid: "api::department.department", targets: ["api::wiki-page.wiki-page"] },
-};
-
 export default factories.createCoreRouter("api::department.department", {
   config: {
-    find: { policies: ["global::published-only", STRIP_WIKI_POPULATE] },
-    findOne: { policies: ["global::published-only", STRIP_WIKI_POPULATE] },
+    find: { policies: ["global::published-only"] },
+    findOne: { policies: ["global::published-only"] },
     create: { policies: ["global::is-admin-or-editor"] },
     update: { policies: ["global::is-department-head"] },
     delete: { policies: ["global::is-admin-or-editor"] },

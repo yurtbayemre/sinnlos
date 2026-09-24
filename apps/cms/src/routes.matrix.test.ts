@@ -2,6 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CUSTOM_ACTION_GRANTS, PERMISSION_MATRIX, REVOKED_PERMISSIONS } from "./index";
+import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 
 /**
  * Route → policy golden matrix and grant cross-check (roadmap S01).
@@ -30,8 +31,9 @@ import { CUSTOM_ACTION_GRANTS, PERMISSION_MATRIX, REVOKED_PERMISSIONS } from "./
  *       CUSTOM_ACTION_GRANTS key (and every api:: key has a route),
  *   (d) REVOKED_PERMISSIONS is disjoint from every grant,
  * plus two structural read-side invariants derived from the schemas: every
- * draft & publish type pins `status=published` on its reads (§5.24), and no
- * populate path leads from an unfiltered type into a visibility-filtered one.
+ * draft & publish type pins `status=published` on its reads (§5.24), and
+ * every relation from outside a visibility-filtered type's policy domain
+ * into that type is cut by the global relation guard (FX05).
  *
  * Known holes start as `it.fails` (the KNOWN_* sets). vitest reports an
  * `it.fails` that starts passing as a failure, so every fix has to flip its
@@ -208,14 +210,6 @@ function splitAction(action: string): [string, string] {
 const ADMIN_OR_EDITOR = ["global::is-admin-or-editor"];
 const wiki = (level: string) => [{ name: "global::wiki-visibility", config: { level } }];
 const training = (level: string) => [{ name: "global::training-visibility", config: { level } }];
-/** department/team reads: publication pin (FX06) + no populate into wiki pages (FX05). */
-const orgRead = (uid: string) => [
-  "global::published-only",
-  {
-    name: "global::strip-restricted-populate",
-    config: { uid, targets: ["api::wiki-page.wiki-page"] },
-  },
-];
 
 const GOLDEN: Record<string, PolicySpec[]> = {
   "api::acknowledgement.acknowledgement.find": ["global::acknowledgement-visibility"],
@@ -249,8 +243,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::course.course.find": training("course"),
   "api::course.course.findOne": training("course"),
 
-  "api::department.department.find": orgRead("api::department.department"),
-  "api::department.department.findOne": orgRead("api::department.department"),
+  "api::department.department.find": ["global::published-only"],
+  "api::department.department.findOne": ["global::published-only"],
   "api::department.department.create": ADMIN_OR_EDITOR,
   "api::department.department.update": ["global::is-department-head"],
   "api::department.department.delete": ADMIN_OR_EDITOR,
@@ -319,8 +313,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::search-log.search-log.create": [],
   "api::search-log.search-log.summary": ADMIN_OR_EDITOR,
 
-  "api::team.team.find": orgRead("api::team.team"),
-  "api::team.team.findOne": orgRead("api::team.team"),
+  "api::team.team.find": ["global::published-only"],
+  "api::team.team.findOne": ["global::published-only"],
   "api::team.team.create": ADMIN_OR_EDITOR,
   "api::team.team.update": ["global::is-team-member-or-lead"],
   "api::team.team.delete": ADMIN_OR_EDITOR,
@@ -406,10 +400,18 @@ const PUBLISHED_PINNING_POLICIES = new Set([
 const KNOWN_DRAFT_READS = new Set<string>([]);
 
 // ---------------------------------------------------------------------------
-// Populate side channels. Filter policies act on the ROOT query of their own
-// route only: a type whose reads are NOT in the target's visibility domain
-// hands out the target's rows via `populate[<relation>]`. Such relations must
-// be dropped by `global::strip-restricted-populate` on the source's reads.
+// Relation side channels (FX05). Filter policies act on the ROOT query of
+// their own routes only: a relation from a type OUTSIDE a filtered type's
+// policy domain hands the filtered rows out through populate, filters or
+// sort. It works from every route whose model reaches that relation, at any
+// depth, on writes as well as reads. So the check is per RELATION, not per
+// route: the global guard (registerRestrictedRelationGuard in src/index.ts,
+// pinned in index.register.test.ts) applies RESTRICTED_RELATION_TARGETS on
+// every content-api query, and this block derives every such relation from
+// the schemas (src/api + the users-permissions user extension). Coverage is
+// transitive: a path into a filtered type either crosses one of these
+// relations or starts at a root that the type's own policy narrows, and
+// every trusted source must itself sit in the target's policy domain.
 // ---------------------------------------------------------------------------
 
 /** Read policies that decide WHICH rows a caller may see. */
@@ -425,13 +427,20 @@ const VISIBILITY_FILTER_POLICIES = new Set([
   "global::wiki-visibility",
 ]);
 
-const STRIP_POPULATE_POLICY = "global::strip-restricted-populate";
+const USER_SCHEMA_FILE = join(
+  __dirname,
+  "extensions",
+  "users-permissions",
+  "content-types",
+  "user",
+  "schema.json",
+);
 
 /**
- * `<source uid>.<relation>` paths that still leak. Empty since FX05 put
- * strip-restricted-populate on the department/team reads.
+ * `<source uid>.<relation>` paths that still leak. Empty since FX05 cut
+ * department.pages and team.pages globally.
  */
-const KNOWN_POPULATE_LEAKS = new Set<string>([]);
+const KNOWN_RELATION_LEAKS = new Set<string>([]);
 
 describe("route → policy matrix (S01)", async () => {
   const { routes, controllerMethods, schemas } = await load();
@@ -581,7 +590,7 @@ describe("route → policy matrix (S01)", async () => {
     });
   });
 
-  describe("no populate path from an unfiltered type into a visibility-filtered one", () => {
+  describe("no relation from outside a filter domain into a visibility-filtered type", () => {
     const filterDomain = (uid: string) =>
       new Set(
         policiesOf(`${uid}.find`)
@@ -589,19 +598,26 @@ describe("route → policy matrix (S01)", async () => {
           .filter((n) => VISIBILITY_FILTER_POLICIES.has(n)),
       );
 
-    /** `<source>.<relation>` → target uid + the target's filter policies. */
-    const sideChannels = new Map<string, { target: string; domain: string[] }>();
-    for (const [source, schema] of schemas) {
-      if (!routes.has(`${source}.find`)) continue;
+    // Every model a query can walk through — not only types with a route:
+    // /api/users reaches department and teams through the user model.
+    const models = new Map(schemas);
+    models.set(
+      "plugin::users-permissions.user",
+      JSON.parse(readFileSync(USER_SCHEMA_FILE, "utf8")) as ContentTypeSchema,
+    );
+
+    /** `<source>.<relation>` → relation definition + the target's filter policies. */
+    const sideChannels = new Map<string, { def: AttributeSchema; domain: string[] }>();
+    for (const [source, schema] of models) {
       const sourceDomain = filterDomain(source);
       for (const [attr, def] of Object.entries(schema.attributes)) {
-        if (def.type !== "relation" || !def.target?.startsWith("api::")) continue;
+        if (def.type !== "relation" || !def.target) continue;
         const targetDomain = [...filterDomain(def.target)];
         // Unfiltered target, or both sides decided by the same policy
-        // family (e.g. wiki-space.pages under wiki-visibility): populate
+        // family (e.g. wiki-space.pages under wiki-visibility): the relation
         // cannot reach rows the root filter would hide.
         if (targetDomain.length === 0 || targetDomain.some((n) => sourceDomain.has(n))) continue;
-        sideChannels.set(`${source}.${attr}`, { target: def.target, domain: targetDomain });
+        sideChannels.set(`${source}.${attr}`, { def, domain: targetDomain });
       }
     }
 
@@ -611,26 +627,29 @@ describe("route → policy matrix (S01)", async () => {
       );
     });
 
-    for (const [path, { target, domain }] of sideChannels) {
-      const [source, attr] = splitAction(path);
-      const test = KNOWN_POPULATE_LEAKS.has(path) ? it.fails : it;
-      test(`populate[${attr}] on ${source} cannot bypass ${domain.join(", ")}`, () => {
-        for (const action of liveReads(source)) {
-          // The guard walks the populate tree from config.uid, so that must
-          // be the route's own type; the nested paths (teams.pages,
-          // members.department.pages, ...) are pinned by the policy test.
-          const strips = policiesOf(action).some((p) => {
-            if (typeof p === "string" || p.name !== STRIP_POPULATE_POLICY) return false;
-            const targets = p.config?.targets;
-            return p.config?.uid === source && Array.isArray(targets) && targets.includes(target);
-          });
-          expect(strips, action).toBe(true);
-        }
+    for (const [path, { def, domain }] of sideChannels) {
+      const [source] = splitAction(path);
+      const test = KNOWN_RELATION_LEAKS.has(path) ? it.fails : it;
+      test(`${path} → ${def.target} cannot bypass ${domain.join(", ")}`, () => {
+        expect(isRestrictedRelation({ uid: source }, def, RESTRICTED_RELATION_TARGETS)).toBe(true);
       });
     }
 
-    it("KNOWN_POPULATE_LEAKS only lists detected side channels", () => {
-      expect([...KNOWN_POPULATE_LEAKS].filter((p) => !sideChannels.has(p))).toEqual([]);
+    it("every trusted source sits in its target's filter domain", () => {
+      for (const [target, sources] of Object.entries(RESTRICTED_RELATION_TARGETS)) {
+        const domain = filterDomain(target);
+        expect(domain.size, target).toBeGreaterThan(0);
+        for (const source of sources) {
+          expect(
+            [...filterDomain(source)].some((n) => domain.has(n)),
+            `${source} → ${target}`,
+          ).toBe(true);
+        }
+      }
+    });
+
+    it("KNOWN_RELATION_LEAKS only lists detected side channels", () => {
+      expect([...KNOWN_RELATION_LEAKS].filter((p) => !sideChannels.has(p))).toEqual([]);
     });
   });
 

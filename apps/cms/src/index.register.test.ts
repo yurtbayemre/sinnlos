@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
-import { registerUserContactSanitizer } from "./index";
+import { errors } from "@strapi/utils";
+import { describe, expect, it, vi } from "vitest";
+import lifecycle, { registerRestrictedRelationGuard, registerUserContactSanitizer } from "./index";
+import type { RelationModel } from "./utils/restricted-relations";
 import { SENSITIVE_USER_FIELDS, USER_UID, type ModelSchema } from "./utils/sanitize-user-contact";
 
 /**
@@ -122,5 +124,130 @@ describe("content-api.output sanitizer registration (issue #10 / F6)", () => {
     holder.ctx = undefined;
     const internal = sanitize(fullUser());
     expect(internal.email).toBe("ada@example.com");
+  });
+});
+
+/**
+ * Wiring test for the relation side-channel guard (FX05). The walk itself is
+ * pinned in utils/restricted-relations.test.ts; this pins where it hangs:
+ *   - it WRAPS `strapi.contentAPI.sanitize.query`, the one function every
+ *     content-api controller (core, users-permissions, upload) calls on the
+ *     client query, and runs on the core's RESULT (after validateQuery),
+ *   - a restricted filter becomes the core's own ValidationError (400),
+ *   - the output backstop lands via get()+set() (never `.add`),
+ *   - admin_role/editor bypass both; no request context = guard applies,
+ *   - boot fails when the hook point is gone (no silent re-open),
+ *   - register() installs it next to the contact sanitizer.
+ */
+describe("relation side-channel guard registration (FX05)", () => {
+  const WIKI_PAGE = "api::wiki-page.wiki-page";
+  const department: RelationModel = {
+    uid: "api::department.department",
+    attributes: {
+      name: { type: "string" },
+      teams: { type: "relation", target: "api::team.team" },
+      pages: { type: "relation", target: WIKI_PAGE },
+    },
+  };
+  const models: Record<string, RelationModel> = { [department.uid as string]: department };
+
+  type RequestState = { state?: { user?: { role?: { type?: string } | null } | null } };
+
+  function host(role?: string) {
+    const holder: { ctx: RequestState | undefined } = {
+      ctx: role === undefined ? undefined : { state: { user: { role: { type: role } } } },
+    };
+    // Stands in for the core sanitizer: marks its output so the test can
+    // tell that the guard ran on the RESULT, not on the raw query.
+    const coreSanitizeQuery = vi.fn(
+      async (
+        query: Record<string, unknown>,
+        _schema: RelationModel,
+        _options?: unknown,
+      ): Promise<Record<string, unknown>> => ({ ...query, sanitizedByCore: true }),
+    );
+    const strapi = {
+      getModel: (uid: string) => models[uid],
+      requestContext: { get: () => holder.ctx },
+      sanitizers: makeSanitizers(),
+      contentAPI: { sanitize: { query: coreSanitizeQuery } },
+    };
+    return { strapi, holder, coreSanitizeQuery };
+  }
+
+  const pagesAndTeams = () => ({ populate: { pages: "true", teams: "true" } });
+
+  it("wraps contentAPI.sanitize.query and strips the core's result for a member", async () => {
+    const { strapi, coreSanitizeQuery } = host("member");
+    registerRestrictedRelationGuard(strapi);
+    expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
+
+    const auth = { auth: { strategy: "users-permissions" } };
+    const out = await strapi.contentAPI.sanitize.query(pagesAndTeams(), department, auth);
+    expect(coreSanitizeQuery).toHaveBeenCalledWith(pagesAndTeams(), department, auth);
+    expect(out).toEqual({ populate: { teams: "true" }, sanitizedByCore: true });
+  });
+
+  it("applies without a request context (fail closed) and for guest", async () => {
+    for (const role of [undefined, "guest"]) {
+      const { strapi } = host(role);
+      registerRestrictedRelationGuard(strapi);
+      const out = await strapi.contentAPI.sanitize.query(pagesAndTeams(), department);
+      expect(out.populate, String(role)).toEqual({ teams: "true" });
+    }
+  });
+
+  it.each(["admin_role", "editor"])("hands %s the core's result untouched", async (role) => {
+    const { strapi } = host(role);
+    registerRestrictedRelationGuard(strapi);
+    const out = await strapi.contentAPI.sanitize.query(
+      { ...pagesAndTeams(), filters: { pages: { title: "x" } } },
+      department,
+    );
+    expect(out.populate).toEqual({ pages: "true", teams: "true" });
+  });
+
+  it("turns a filter across a restricted relation into the core's 400", async () => {
+    const { strapi } = host("member");
+    registerRestrictedRelationGuard(strapi);
+    const query = strapi.contentAPI.sanitize.query(
+      { filters: { teams: { name: "x" }, pages: { body: { $startsWith: "Conf" } } } },
+      department,
+    );
+    await expect(query).rejects.toBeInstanceOf(errors.ValidationError);
+    await expect(query).rejects.toThrow("Invalid key pages");
+  });
+
+  it("appends the output backstop via get()+set(): member stripped, editor kept", () => {
+    const { strapi, holder } = host("member");
+    registerRestrictedRelationGuard(strapi);
+
+    const registered = strapi.sanitizers.get("content-api.output") as Array<
+      (schema: RelationModel) => (data: unknown) => unknown
+    >;
+    // Would be 0 with `strapi.sanitizers.add(...)` (see the trap above).
+    expect(registered).toHaveLength(1);
+    const sanitize = registered[0](department);
+
+    expect(sanitize({ id: 1, name: "Eng", pages: [{ id: 2 }] })).toEqual({ id: 1, name: "Eng" });
+    holder.ctx = { state: { user: { role: { type: "editor" } } } };
+    expect(sanitize({ id: 1, pages: [{ id: 2 }] })).toEqual({ id: 1, pages: [{ id: 2 }] });
+  });
+
+  it("refuses to boot when contentAPI.sanitize.query is gone", () => {
+    const { strapi } = host("member");
+    expect(() => registerRestrictedRelationGuard({ ...strapi, contentAPI: {} })).toThrow(
+      /sanitize\.query/,
+    );
+    expect(() =>
+      registerRestrictedRelationGuard({ ...strapi, contentAPI: { sanitize: {} } }),
+    ).toThrow(/FX05/);
+  });
+
+  it("register() installs the guard next to the contact sanitizer", () => {
+    const { strapi, coreSanitizeQuery } = host("member");
+    lifecycle.register({ strapi });
+    expect(strapi.sanitizers.get("content-api.output")).toHaveLength(2);
+    expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
   });
 });
