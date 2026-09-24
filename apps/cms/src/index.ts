@@ -104,8 +104,11 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  *
  * `member` can update wiki pages they authored (gated by
  * `can-edit-wiki`). `guest` is strict read-only on wiki content.
+ *
+ * Exported (with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS) only for
+ * the route/grant cross-check in `routes.matrix.test.ts` (roadmap S01).
  */
-const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
+export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
   admin_role: {
     "api::acknowledgement.acknowledgement": ALL_ACTIONS,
     // Training (issue #29, admin-authoring variant): course/lesson are
@@ -335,7 +338,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
  * Each entry lists the roles that may call the action. `*` = every role
  * in PERMISSION_MATRIX (including `authenticated`).
  */
-const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
+export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::event.event.ics": "*",
   // guest and the `authenticated` fallback are excluded: even with email
   // dropped from the payload, years + daysUntil still reconstruct every
@@ -448,7 +451,7 @@ const USER_READ_EXCLUDED_ROLES: string[] = [];
  * entry from the matrix above does not revoke anything on an existing
  * database — list the obsolete (role → action) pairs here instead.
  */
-const REVOKED_PERMISSIONS: Record<string, string[]> = {
+export const REVOKED_PERMISSIONS: Record<string, string[]> = {
   guest: [
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
