@@ -121,11 +121,32 @@ cp infra/.env.example infra/.env
 ```
 
 Fill in `MS_CLIENT_ID`, `MS_CLIENT_SECRET`, `MS_TENANT_ID`, and generate
-strong secrets for every `change-me` / `toBeModified` placeholder:
+strong secrets for every empty secret in `infra/.env` and every
+`toBeModified` placeholder in `apps/cms/.env`:
 
 ```bash
-openssl rand -base64 32
+openssl rand -base64 32   # APP_KEYS (two, comma-separated), *_SALT, *_SECRET, ENCRYPTION_KEY
+openssl rand -hex 32      # REVALIDATE_SECRET, INTERNAL_UPLOAD_TOKEN
 ```
+
+Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
+
+- **Required for Docker Compose** (`docker compose` refuses to start while one
+  is empty): `DATABASE_PASSWORD`, `APP_KEYS`, `API_TOKEN_SALT`,
+  `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`, `JWT_SECRET`, `ENCRYPTION_KEY`,
+  `AUTH_SECRET`, `REVALIDATE_SECRET` (guards `/api/revalidate` and
+  `/api/live/emit`) and `INTERNAL_UPLOAD_TOKEN` (the web's `/uploads` proxy
+  presents it to the cms; without it every uploaded file answers 404 in
+  production). The last two must be identical on cms and web.
+- **Placeholder guard:** with `NODE_ENV=production` the cms refuses to start
+  while a Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still
+  holds a template placeholder (`change-me…`, `toBeModified…`, `<secret>`);
+  in development it only warns.
+- **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
+  (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
+  enable the e-mail digests (dark without them); once SMTP is set,
+  `DIGEST_FROM` is required too, digest links use `PUBLIC_WEB_URL` (compose
+  default: `WEB_PUBLIC_URL`), and `DIGESTS_DISABLED=1` is the kill switch.
 
 ## 4. Run locally (two terminals)
 
@@ -145,7 +166,10 @@ pnpm --filter @sinnlos/web dev
 > **Super Admin** from `STRAPI_ADMIN_EMAIL` / `STRAPI_ADMIN_PASSWORD`
 > in `apps/cms/.env`. Set those before the first boot and you can log
 > straight into `/admin` with no registration form. Leave them blank to
-> keep the classic interactive flow. Strapi CE does **not** support SSO
+> keep the classic interactive flow. The seed refuses template placeholders
+> and passwords failing the Strapi admin policy (8+ characters with an
+> uppercase letter, a lowercase letter and a digit): it logs an error and
+> creates no admin. Strapi CE does **not** support SSO
 > for the admin panel — Entra ID SSO only applies to the Next.js
 > frontend (i.e. `users-permissions` users, not `admin_users`). Admin
 > SSO is a Strapi Enterprise Edition feature.

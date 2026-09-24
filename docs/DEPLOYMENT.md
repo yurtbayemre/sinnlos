@@ -162,7 +162,24 @@ MS_TENANT_ID=<your-tenant-id>
 # waiting for the ISR timer (30–60s).
 REVALIDATE_SECRET=<openssl rand -hex 32>
 WEB_INTERNAL_URL=http://localhost:3000
+
+# Optional outside production — the /uploads gate is a no-op in dev when
+# unset. In production it is required on cms AND web (same value).
+INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>
+
+# Optional — seed the first Strapi super-admin on an empty database.
+# Refused (error log, no admin) for placeholders and passwords failing the
+# admin policy (8+ chars, upper, lower, digit). Leave empty to register
+# the first admin at /admin.
+STRAPI_ADMIN_EMAIL=
+STRAPI_ADMIN_PASSWORD=
 ```
+
+> **Placeholder guard:** the `toBeModified` values in `apps/cms/.env.example`
+> only produce a warning in development. With `NODE_ENV=production` the cms
+> refuses to start while any Strapi secret, `REVALIDATE_SECRET` or
+> `INTERNAL_UPLOAD_TOKEN` still holds a template placeholder (`change-me…`,
+> `toBeModified…`, `<secret>`).
 
 > **Prefer Postgres locally?** Run one with Docker in a single command, set
 > `DATABASE_CLIENT=postgres` and uncomment the Postgres block in `apps/cms/.env`:
@@ -197,6 +214,9 @@ AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id
 # Must match REVALIDATE_SECRET in apps/cms/.env (or leave both unset
 # to disable webhook revalidation locally).
 REVALIDATE_SECRET=<same-value-as-cms>
+
+# Must match INTERNAL_UPLOAD_TOKEN in apps/cms/.env when set there.
+INTERNAL_UPLOAD_TOKEN=<same-value-as-cms>
 ```
 
 ### 1.3 Start the servers
@@ -269,6 +289,7 @@ DOMAIN=localhost
 WEB_PUBLIC_URL=http://localhost
 CMS_PUBLIC_URL=http://localhost
 
+# --- Required: compose refuses to start while any of these is empty ---
 DATABASE_PASSWORD=<strong-random-password>
 
 APP_KEYS=<openssl rand -base64 32>,<openssl rand -base64 32>
@@ -279,16 +300,25 @@ JWT_SECRET=<openssl rand -base64 32>
 ENCRYPTION_KEY=<openssl rand -base64 32>
 AUTH_SECRET=<openssl rand -base64 32>
 
-# Shared secret used by the Strapi → Next.js revalidation webhook.
-# Both services read this; without it, content edits take 30–60s to
-# appear on the frontend (the ISR cache timer) instead of instantly.
+# Shared secret used by the Strapi → Next.js revalidation webhook and the
+# live-event pings (/api/revalidate + /api/live/emit). Both services read it.
 REVALIDATE_SECRET=<openssl rand -hex 32>
+
+# Shared secret the web's session-gated /uploads proxy presents to the cms.
+# Without it every uploaded file answers 404 (fail closed).
+INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>
 
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 
 # --- Optional features (safe to leave unset) --------------------------
+# First Strapi super-admin on an empty database (else: register at /admin).
+# Refused for placeholders and passwords failing the admin policy
+# (8+ chars, upper, lower, digit).
+STRAPI_ADMIN_EMAIL=
+STRAPI_ADMIN_PASSWORD=
+
 # Live updates (SSE, issue #17/#27): set to 1 to revert the app to the
 # pre-SSE polling behaviour entirely (kill switch / rollback lever).
 LIVE_EVENTS_DISABLED=0
@@ -296,13 +326,21 @@ LIVE_EVENTS_DISABLED=0
 # E-mail digests (issue #18): authenticated SMTP submission. Without
 # SMTP_HOST/USER/PASS the digest cron is a logged no-op ("ships dark").
 # Use a mailbox app password (SMTP-only) — never a login password.
+# With SMTP set, DIGEST_FROM is required (the run is skipped with a
+# warning otherwise). Links use PUBLIC_WEB_URL, default WEB_PUBLIC_URL.
 SMTP_HOST=<mail.example.com>
 SMTP_PORT=587
 SMTP_USER=<noreply@example.com>
 SMTP_PASS=<mailbox-app-password>
 DIGEST_FROM=Intranet <noreply@example.com>
+DIGEST_REPLY_TO=
 DIGESTS_DISABLED=0
 ```
+
+> The `<…>` values above are stand-ins: with `NODE_ENV=production` (as in
+> compose) the cms refuses to start while a Strapi secret, `REVALIDATE_SECRET`
+> or `INTERNAL_UPLOAD_TOKEN` still holds `<…>`, `change-me…` or
+> `toBeModified…`.
 
 > **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
 > needed). Redirect URIs in Entra should use `http://localhost/...`.
@@ -427,8 +465,10 @@ DOMAIN=intranet.example.com
 WEB_PUBLIC_URL=https://intranet.example.com
 CMS_PUBLIC_URL=https://intranet.example.com
 
+# --- Required: compose refuses to start while any of these is empty ---
 DATABASE_PASSWORD=<strong-random-password>
 
+# openssl rand -base64 32 each (APP_KEYS: two, comma-separated)
 APP_KEYS=<secret>,<secret>
 API_TOKEN_SALT=<secret>
 ADMIN_JWT_SECRET=<secret>
@@ -437,26 +477,39 @@ JWT_SECRET=<secret>
 ENCRYPTION_KEY=<secret>
 AUTH_SECRET=<secret>
 
-# Shared secret for the Strapi → Next.js revalidation webhook.
-# Generate with: openssl rand -hex 32
+# Shared cms <-> web secrets. Generate with: openssl rand -hex 32
+# REVALIDATE_SECRET guards /api/revalidate + /api/live/emit;
+# INTERNAL_UPLOAD_TOKEN lets the web /uploads proxy fetch file bytes
+# (without it every uploaded file answers 404).
 REVALIDATE_SECRET=<secret>
+INTERNAL_UPLOAD_TOKEN=<secret>
 
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 
 # --- Optional features (safe to leave unset) --------------------------
+# First Strapi super-admin on an empty database (else: register at /admin).
+# Refused for placeholders and passwords failing the admin policy.
+STRAPI_ADMIN_EMAIL=
+STRAPI_ADMIN_PASSWORD=
 # SSE live updates kill switch (1 = revert to pre-SSE polling entirely).
 LIVE_EVENTS_DISABLED=0
 # E-mail digests: without SMTP_HOST/USER/PASS the 07:30 digest cron is a
-# logged no-op. Use a mailbox app password (SMTP-only).
+# logged no-op. Use a mailbox app password (SMTP-only). With SMTP set,
+# DIGEST_FROM is required; links use PUBLIC_WEB_URL (default WEB_PUBLIC_URL).
 SMTP_HOST=<mail.example.com>
 SMTP_PORT=587
 SMTP_USER=<noreply@example.com>
 SMTP_PASS=<mailbox-app-password>
 DIGEST_FROM=Intranet <noreply@example.com>
+DIGEST_REPLY_TO=
 DIGESTS_DISABLED=0
 ```
+
+> Replace every `<secret>` — the cms refuses to start in production while a
+> Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a
+> template placeholder (`<…>`, `change-me…`, `toBeModified…`).
 
 Update Entra ID redirect URIs:
 
@@ -914,6 +967,7 @@ az containerapp create \
       "JWT_SECRET=<secret>" \
       "ENCRYPTION_KEY=<secret>" \
       "REVALIDATE_SECRET=<openssl rand -hex 32>" \
+      "INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>" \
       "MS_CLIENT_ID=<client-id>" \
       "MS_CLIENT_SECRET=<client-secret>" \
       "MS_TENANT_ID=<tenant-id>" \
@@ -926,8 +980,13 @@ az containerapp create \
 ```
 
 > The `SMTP_*` block is optional — without it the 07:30 digest cron is a
-> logged no-op. `LIVE_EVENTS_DISABLED` must be set to the SAME value on the
-> web container (the kill switch is read on both sides).
+> logged no-op. With it, `DIGEST_FROM` and `PUBLIC_WEB_URL` (the digest link
+> base, back-filled in §5.7) are required, or the run is skipped with a
+> warning. `LIVE_EVENTS_DISABLED` must be set to the SAME value on the
+> web container (the kill switch is read on both sides), and
+> `INTERNAL_UPLOAD_TOKEN` must be identical on both containers. Replace every
+> `<…>` stand-in: the cms refuses to start in production with a placeholder
+> secret.
 
 > **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to call the Next.js
 > revalidation webhook, but the web app's FQDN only exists after it's deployed.
@@ -995,6 +1054,7 @@ az containerapp create \
       AUTH_TRUST_HOST=true \
       "AUTH_SECRET=<secret>" \
       "REVALIDATE_SECRET=<same-value-as-cms>" \
+      "INTERNAL_UPLOAD_TOKEN=<same-value-as-cms>" \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
@@ -1011,16 +1071,16 @@ echo "Web app URL: https://$WEB_FQDN"
 az containerapp update \
   --name web-sinnlos --resource-group rg-sinnlos \
   --set-env-vars \
-      "AUTH_URL=https://$WEB_FQDN" \
-      "NEXT_PUBLIC_APP_URL=https://$WEB_FQDN"
+      "AUTH_URL=https://$WEB_FQDN"
 
 # Back-fill WEB_INTERNAL_URL on the CMS so its lifecycle hooks can
 # reach the Next.js /api/revalidate webhook. Traffic between the two
 # Container Apps stays inside the environment's virtual network even
-# though we're using the public FQDN.
+# though we're using the public FQDN. PUBLIC_WEB_URL is the link base
+# of the digest e-mails (no default outside compose).
 az containerapp update \
   --name cms-sinnlos --resource-group rg-sinnlos \
-  --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN"
+  --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN" "PUBLIC_WEB_URL=https://$WEB_FQDN"
 ```
 
 **Add the Entra redirect URI.** Go to your App registration →
