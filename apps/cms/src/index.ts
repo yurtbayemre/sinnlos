@@ -9,6 +9,7 @@ import {
   stripRestrictedRelationsFromOutput,
   type RelationModel,
 } from "./utils/restricted-relations";
+import { pickContentApiQueryParams, type RouteWithQuerySchema } from "./utils/rest-query-params";
 import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitize-user-contact";
 
 /**
@@ -674,7 +675,7 @@ export function registerUserContactSanitizer(strapi: any) {
 type SanitizeQuery = (
   query: Record<string, unknown>,
   schema: RelationModel,
-  options?: unknown,
+  options?: { route?: RouteWithQuerySchema | null; [option: string]: unknown },
 ) => Promise<Record<string, unknown>>;
 
 /** The slice of the Strapi instance registerRestrictedRelationGuard touches. */
@@ -716,8 +717,17 @@ export interface RestrictedRelationGuardHost {
  * populates without going through sanitize.query. Appended via get()+set(),
  * never `.add` (silent no-op, see registerUserContactSanitizer).
  *
- * admin_role / editor bypass both. They see every wiki page anyway
- * (wiki-visibility bypass). The role comes from the request
+ * Root keys (final review C1-RAW-WHERE) — the same wrapper first drops
+ * every root key outside the content-api allowlist
+ * (utils/rest-query-params.ts). The core sanitizer keeps unknown keys, and
+ * users-permissions and upload hand them to `strapi.db.query`, so a raw
+ * `?where[department][pages][body]…` or `?orderBy`/`?select` skipped every
+ * check above. This pick applies to EVERY caller, admin_role and editor
+ * included: `where` also reaches private fields (password hash, reset
+ * token) that no role may probe.
+ *
+ * admin_role / editor bypass the relation cut on both sides. They see every
+ * wiki page anyway (wiki-visibility bypass). The role comes from the request
  * AsyncLocalStorage, as in registerUserContactSanitizer. Without a request
  * context the guard APPLIES (fail closed): nothing internal reads through
  * the content API.
@@ -741,7 +751,10 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
   const bypass = () => hasAudienceBypass(strapi.requestContext.get()?.state?.user?.role?.type);
 
   sanitize.query = async (query, schema, sanitizeOptions) => {
-    const sanitized = await sanitizeQuery.call(sanitize, query, schema, sanitizeOptions);
+    const sanitized = pickContentApiQueryParams(
+      await sanitizeQuery.call(sanitize, query, schema, sanitizeOptions),
+      sanitizeOptions?.route,
+    );
     if (bypass()) return sanitized;
     return guardRestrictedRelations(sanitized, schema, options);
   };
