@@ -114,8 +114,6 @@ export interface Comment {
   targetDocumentId?: string | null;
   createdAt?: string;
   author?: UserLite | null;
-  parent?: { id: number } | null;
-  replies?: Comment[];
 }
 
 export type EmojiType = "thumbsup" | "heart" | "celebrate" | "lightbulb" | "laugh";
