@@ -1,8 +1,9 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { getSession } from "@/lib/session";
+import { canCreatePolls } from "@/lib/roles";
 import { strapi } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 
 export type CreatePollErrorCode = "missingQuestion" | "tooFewOptions" | "forbidden" | "failed";
 
@@ -19,14 +20,11 @@ export type CreatePollInput = {
 
 export type CreatePollResult = { ok: true } | { ok: false; code: CreatePollErrorCode };
 
-/** Poll creation is CMS-gated by global::is-admin-or-editor — mirror that
- * here so non-privileged users get a clean error instead of a 403. */
-const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
-
 export async function createPoll(input: CreatePollInput): Promise<CreatePollResult> {
-  const session = await getSession();
-  const role = session?.user?.role;
-  if (!role || !POLL_CREATOR_ROLES.has(role)) return { ok: false, code: "forbidden" };
+  // Poll creation is CMS-gated by global::is-admin-or-editor — mirror that
+  // here so non-privileged users get a clean error instead of a 403. The
+  // role is read fresh from the CMS (no render memo in a Server Action).
+  if (!canCreatePolls((await getViewer()).role)) return { ok: false, code: "forbidden" };
 
   const question = input.question.trim();
   if (!question) return { ok: false, code: "missingQuestion" };

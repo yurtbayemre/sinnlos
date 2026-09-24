@@ -2,10 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { getSession } from "@/lib/session";
 import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
 import { reportCompleteness } from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { walkAllPages } from "@/lib/paginate";
 import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
@@ -52,8 +52,7 @@ const ANNOUNCEMENT_READER_ROLES = new Set([
 ]);
 
 export default async function AcknowledgementReportPage() {
-  const session = await getSession();
-  if (!isAdmin(session?.user?.role)) {
+  if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 

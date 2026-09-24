@@ -1,12 +1,11 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { getSession } from "@/lib/session";
+import { canCreatePolls } from "@/lib/roles";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { tryFetch } from "@/lib/safe-fetch";
 import { PageHeader } from "@/components/page-header";
 import { PollForm } from "@/components/polls/poll-form";
-
-const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
 
 export async function generateMetadata() {
   const t = await getTranslations("polls");
@@ -14,9 +13,7 @@ export async function generateMetadata() {
 }
 
 export default async function NewPollPage() {
-  const session = await getSession();
-  const role = session?.user?.role;
-  if (!role || !POLL_CREATOR_ROLES.has(role)) redirect("/polls");
+  if (!canCreatePolls((await getViewer()).role)) redirect("/polls");
 
   const t = await getTranslations("polls");
   const { data } = await tryFetch(() => api.departments.list(), "departments");

@@ -2,8 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { getSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { walkAllPages } from "@/lib/paginate";
 import { fetchCourses } from "@/lib/training";
@@ -49,8 +49,7 @@ const TRAINING_ROLES = new Set([
  * truncated/failed input suppresses the numbers ("–"), never false-green.
  */
 export default async function TrainingReportPage() {
-  const session = await getSession();
-  if (!isAdmin(session?.user?.role)) {
+  if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 

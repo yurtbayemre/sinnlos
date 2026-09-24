@@ -4,6 +4,7 @@ import { ArrowLeft, CalendarClock, Mail, MapPin, Pencil, TriangleAlert } from "l
 import { getLocale, getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
@@ -29,11 +30,12 @@ export default async function ClassifiedDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [t, tRel, locale, session] = await Promise.all([
+  const [t, tRel, locale, session, viewer] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
+    getViewer(),
   ]);
 
   const { data, failed } = await tryFetch(() => api.classifieds.one(id), "classified");
@@ -47,11 +49,10 @@ export default async function ClassifiedDetailPage({
     );
   }
 
-  const role = session?.user?.role;
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
   // Editing is owner/admin only (editors keep only the delete takedown,
   // enforced CMS-side) — mirrors the update-route policy config.
-  const canManage = isOwner || isAdmin(role);
+  const canManage = isOwner || isAdmin(viewer.role);
   const expired = isClassifiedExpired(ad.expiresAt);
   const images = (ad.images ?? [])
     .map((img) => {

@@ -2,8 +2,10 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ImageIcon, MapPin, Plus, ShoppingBag, Tag } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import { canPostAds } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
@@ -54,16 +56,19 @@ export default async function MarketplacePage({
   const { category: rawCategory } = await searchParams;
   const category = rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
 
-  const [t, tRel, locale, session] = await Promise.all([
+  const [t, tRel, locale, session, viewer] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
+    getViewer(),
   ]);
   const relative = (d: string | undefined) => relativeTime(d, tRel);
 
   const userId = session?.user?.id;
-  const canCreate = typeof userId === "number" && session?.user?.role !== "guest";
+  // Fail-closed allowlist (lib/roles.ts): guest, the `authenticated`
+  // fallback and an unreadable role get no create button and no "mine" fetch.
+  const canCreate = typeof userId === "number" && canPostAds(viewer.role);
   const today = localDateString(new Date());
 
   const [listResult, mineResult] = await Promise.all([

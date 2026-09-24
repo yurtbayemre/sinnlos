@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Event, EventRsvp, EventRsvpSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -91,10 +93,11 @@ export default async function EventsPage({
   const { view, month } = await searchParams;
   const isMonthView = view === "month";
 
-  const [t, locale, session] = await Promise.all([
+  const [t, locale, session, viewer] = await Promise.all([
     getTranslations("events"),
     getLocale(),
     getSession(),
+    getViewer(),
   ]);
 
   // Time-window fetches (see api.events): a global "first 50 by start asc"
@@ -129,8 +132,9 @@ export default async function EventsPage({
 
   const userId = typeof session?.user?.id === "number" ? session.user.id : null;
   // Guests hold no event-rsvp grants — skip the fetch instead of running
-  // into a 403 error banner (marketplace canCreate pattern).
-  const canRsvp = userId != null && session?.user?.role !== "guest";
+  // into a 403 error banner (marketplace canCreate pattern). Fail-closed
+  // allowlist (lib/roles.ts): an unreadable role gets no RSVP UI either.
+  const canRsvp = userId != null && roleCanRsvp(viewer.role);
   const selfName = session?.user?.name ?? null;
 
   // RSVPs are only rendered in the list view and only on UPCOMING cards;

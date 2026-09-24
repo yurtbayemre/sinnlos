@@ -13,11 +13,11 @@ import {
   GraduationCap,
 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { getSession } from "@/lib/session";
 // Browser-facing URL — inside Docker the internal STRAPI_URL
 // (http://cms:1337) is not reachable from the user's browser.
 import { STRAPI_PUBLIC_URL as STRAPI_URL } from "@/lib/config";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,8 +70,7 @@ const QUICK_LINK_META = [
 ];
 
 export default async function AdminPage() {
-  const session = await getSession();
-  if (!isAdmin(session?.user?.role)) {
+  if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 

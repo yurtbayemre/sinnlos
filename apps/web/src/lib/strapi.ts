@@ -18,9 +18,10 @@
  *     documents, quick links, contact-field sanitising) make most responses
  *     unshareable anyway.
  *   - Reuse happens within ONE request only: identical GETs (same URL and
- *     headers) in one RSC render are merged by Next's fetch dedupe, and
- *     getSession() decodes the session once per render. Server Actions and
- *     Route Handlers get neither.
+ *     headers) in one RSC render are merged by Next's fetch dedupe,
+ *     getSession() decodes the session once per render and getViewer()
+ *     (lib/viewer.ts, D-SESSION-01) reads the caller's own /api/me once per
+ *     render. Server Actions and Route Handlers get none of these.
  *   - Freshness: a committed Strapi write shows on the next server render
  *     (navigation, reload, refresh() in an action, router.refresh()) — no
  *     webhook involved. While Strapi is down pages show the FetchErrorBanner
