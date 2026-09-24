@@ -46,7 +46,6 @@ export interface Team {
   department?: Department | null;
   lead?: UserLite | null;
   members?: UserLite[];
-  pages?: WikiPage[];
 }
 
 export interface WikiSpace {

@@ -203,6 +203,9 @@ function splitAction(action: string): [string, string] {
 const ADMIN_OR_EDITOR = ["global::is-admin-or-editor"];
 const wiki = (level: string) => [{ name: "global::wiki-visibility", config: { level } }];
 const training = (level: string) => [{ name: "global::training-visibility", config: { level } }];
+const stripWikiPopulate = (uid: string) => [
+  { name: "global::strip-restricted-populate", config: { uid, targets: ["api::wiki-page.wiki-page"] } },
+];
 
 const GOLDEN: Record<string, PolicySpec[]> = {
   "api::acknowledgement.acknowledgement.find": ["global::acknowledgement-visibility"],
@@ -236,8 +239,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::course.course.find": training("course"),
   "api::course.course.findOne": training("course"),
 
-  "api::department.department.find": [],
-  "api::department.department.findOne": [],
+  "api::department.department.find": stripWikiPopulate("api::department.department"),
+  "api::department.department.findOne": stripWikiPopulate("api::department.department"),
   "api::department.department.create": ADMIN_OR_EDITOR,
   "api::department.department.update": ["global::is-department-head"],
   "api::department.department.delete": ADMIN_OR_EDITOR,
@@ -306,8 +309,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::search-log.search-log.create": [],
   "api::search-log.search-log.summary": ADMIN_OR_EDITOR,
 
-  "api::team.team.find": [],
-  "api::team.team.findOne": [],
+  "api::team.team.find": stripWikiPopulate("api::team.team"),
+  "api::team.team.findOne": stripWikiPopulate("api::team.team"),
   "api::team.team.create": ADMIN_OR_EDITOR,
   "api::team.team.update": ["global::is-team-member-or-lead"],
   "api::team.team.delete": ADMIN_OR_EDITOR,
@@ -342,8 +345,6 @@ const ALLOWLIST: Record<string, string> = {
   "api::acknowledgement.acknowledgement.delete": "admin_role-only correction of read receipts",
   "api::classified.classified.find": "internal flea market, staff-readable (guest holds no grant)",
   "api::classified.classified.findOne": "internal flea market, staff-readable (guest holds no grant)",
-  "api::department.department.find": "org reference data (draft pin + populate: checked below)",
-  "api::department.department.findOne": "org reference data (draft pin + populate: checked below)",
   "api::event.event.find": "company calendar (draft pin: checked below)",
   "api::event.event.findOne": "company calendar (draft pin: checked below)",
   "api::event-rsvp.event-rsvp.delete": "admin_role-only correction",
@@ -351,8 +352,6 @@ const ALLOWLIST: Record<string, string> = {
   "api::kudos.kudos.findOne": "staff-public kudos wall (guest revoked)",
   "api::poll.poll.find": "company-wide polls (draft pin: checked below)",
   "api::poll.poll.findOne": "company-wide polls (draft pin: checked below)",
-  "api::team.team.find": "org reference data (draft pin + populate: checked below)",
-  "api::team.team.findOne": "org reference data (draft pin + populate: checked below)",
 };
 
 /**
@@ -422,11 +421,11 @@ const VISIBILITY_FILTER_POLICIES = new Set([
 
 const STRIP_POPULATE_POLICY = "global::strip-restricted-populate";
 
-/** `<source uid>.<relation>` paths that still leak (FX05). */
-const KNOWN_POPULATE_LEAKS = new Set([
-  "api::department.department.pages",
-  "api::team.team.pages",
-]);
+/**
+ * `<source uid>.<relation>` paths that still leak. Empty since FX05 put
+ * strip-restricted-populate on the department/team reads.
+ */
+const KNOWN_POPULATE_LEAKS = new Set<string>([]);
 
 describe("route → policy matrix (S01)", async () => {
   const { routes, controllerMethods, schemas } = await load();
@@ -571,8 +570,8 @@ describe("route → policy matrix (S01)", async () => {
     const filterDomain = (uid: string) =>
       new Set(policiesOf(`${uid}.find`).map(policyName).filter((n) => VISIBILITY_FILTER_POLICIES.has(n)));
 
-    /** `<source>.<relation>` → the target's filter policies. */
-    const sideChannels = new Map<string, string[]>();
+    /** `<source>.<relation>` → target uid + the target's filter policies. */
+    const sideChannels = new Map<string, { target: string; domain: string[] }>();
     for (const [source, schema] of schemas) {
       if (!routes.has(`${source}.find`)) continue;
       const sourceDomain = filterDomain(source);
@@ -583,7 +582,7 @@ describe("route → policy matrix (S01)", async () => {
         // family (e.g. wiki-space.pages under wiki-visibility): populate
         // cannot reach rows the root filter would hide.
         if (targetDomain.length === 0 || targetDomain.some((n) => sourceDomain.has(n))) continue;
-        sideChannels.set(`${source}.${attr}`, targetDomain);
+        sideChannels.set(`${source}.${attr}`, { target: def.target, domain: targetDomain });
       }
     }
 
@@ -593,15 +592,18 @@ describe("route → policy matrix (S01)", async () => {
       );
     });
 
-    for (const [path, targetDomain] of sideChannels) {
+    for (const [path, { target, domain }] of sideChannels) {
       const [source, attr] = splitAction(path);
       const test = KNOWN_POPULATE_LEAKS.has(path) ? it.fails : it;
-      test(`populate[${attr}] on ${source} cannot bypass ${targetDomain.join(", ")}`, () => {
+      test(`populate[${attr}] on ${source} cannot bypass ${domain.join(", ")}`, () => {
         for (const action of READ_ACTIONS.map((a) => `${source}.${a}`).filter((a) => routes.has(a))) {
+          // The guard walks the populate tree from config.uid, so that must
+          // be the route's own type; the nested paths (teams.pages,
+          // members.department.pages, ...) are pinned by the policy test.
           const strips = policiesOf(action).some((p) => {
             if (typeof p === "string" || p.name !== STRIP_POPULATE_POLICY) return false;
-            const relations = p.config?.relations;
-            return Array.isArray(relations) && relations.includes(attr);
+            const targets = p.config?.targets;
+            return p.config?.uid === source && Array.isArray(targets) && targets.includes(target);
           });
           expect(strips, action).toBe(true);
         }
