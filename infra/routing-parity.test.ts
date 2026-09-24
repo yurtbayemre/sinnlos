@@ -28,6 +28,10 @@
  *  6. security-header parity between the Traefik headers middleware and the
  *     Caddyfile header block, with the current gaps listed (FX33).
  *
+ * Both parsers fail closed: a Caddyfile directive, Traefik label style or
+ * router option they do not model throws instead of being skipped, so the
+ * models cannot silently miss a route.
+ *
  * Matching semantics differ between the proxies and are modelled here:
  *  - Traefik (v3 rule syntax): `PathPrefix(`/x`)` is a RAW, case-sensitive
  *    string prefix — `/email` matches `/emailXYZ` (verified against the live
@@ -408,26 +412,55 @@ interface TraefikLabel {
   value: string;
 }
 
-/** `- "traefik.<key>=<value>"` label lines, tagged with their compose service. */
+/**
+ * `- "traefik.<key>=<value>"` label lines inside a compose service's
+ * `labels:` block, tagged with that service.
+ *
+ * Fails closed like parseCaddy: Compose also accepts unquoted, single-quoted,
+ * map-style (`traefik.x: y`) and anchored labels. A label this parser
+ * skipped would be a router the model never sees, e.g. an unquoted
+ * higher-priority `/uploads` router to cms, which bypasses the session-gated
+ * web route (issue #21) while every probe stays green. So every non-comment
+ * line that mentions `traefik.` must be an accepted label, or the parse
+ * throws.
+ */
 function parseTraefikLabels(source: string): TraefikLabel[] {
   const labels: TraefikLabel[] = [];
   let section: string | undefined;
   let container: string | undefined;
-  for (const line of source.split(/\r?\n/)) {
+  let inLabels = false;
+  source.split(/\r?\n/).forEach((line, index) => {
+    if (/^\s*(#.*)?$/.test(line)) return;
     const top = line.match(/^([A-Za-z0-9_-]+):/);
     if (top) {
       section = top[1];
       container = undefined;
-      continue;
+      inLabels = false;
+      return;
     }
     const service = line.match(/^ {2}([A-Za-z0-9_-]+):\s*(#.*)?$/);
     if (service && section === "services") {
       container = service[1];
-      continue;
+      inLabels = false;
+      return;
+    }
+    // A service-level key opens (`labels:` with nothing after it) or closes
+    // the label block; an inline `labels: [...]` or alias is not accepted.
+    if (/^ {4}[A-Za-z0-9_-]+:/.test(line)) {
+      inLabels = container !== undefined && /^ {4}labels:\s*(#.*)?$/.test(line);
     }
     const label = line.match(/^\s*-\s*"traefik\.([^=]+)=(.*)"\s*$/);
-    if (label && container) labels.push({ container, key: label[1], value: label[2] });
-  }
+    if (label && inLabels && container) {
+      labels.push({ container, key: label[1], value: label[2] });
+      return;
+    }
+    if (/traefik\./i.test(line)) {
+      throw new Error(
+        `unmodelled traefik label on line ${index + 1}: ${line.trim()}` +
+          ` — only \`- "traefik.<key>=<value>"\` in a service's labels block is parsed`,
+      );
+    }
+  });
   return labels;
 }
 
@@ -455,8 +488,16 @@ interface TraefikModel {
   services: Map<string, string>;
 }
 
-function parseTraefik(): TraefikModel {
-  const labels = parseTraefikLabels(readInfraFile("docker-compose.traefik.yml"));
+/**
+ * Router options that do not change which router a request reaches. Any
+ * other unmodelled option throws: `ruleSyntax` would change the rule
+ * semantics modelled below, and a differently cased `Priority` (Traefik reads
+ * label keys case-insensitively) would silently fall back to the default.
+ */
+const IGNORED_ROUTER_OPTIONS = new Set(["tls.certresolver"]);
+
+function parseTraefik(source = readInfraFile("docker-compose.traefik.yml")): TraefikModel {
+  const labels = parseTraefikLabels(source);
   expect(labels.length, "traefik.* labels in docker-compose.traefik.yml").toBeGreaterThan(0);
 
   const partial = new Map<string, Partial<TraefikRouter> & { container: string }>();
@@ -464,6 +505,12 @@ function parseTraefik(): TraefikModel {
   const services = new Map<string, string>();
 
   for (const { container, key, value } of labels) {
+    if (key === "docker.network") continue;
+    if (key === "enable") {
+      // The model treats every labelled container's routers as live.
+      if (value !== "true") throw new Error(`unmodelled traefik.enable=${value} on ${container}`);
+      continue;
+    }
     const router = key.match(/^http\.routers\.([^.]+)\.(.+)$/);
     if (router) {
       const [, name, prop] = router;
@@ -473,6 +520,9 @@ function parseTraefik(): TraefikModel {
       else if (prop === "service") entry.service = value;
       else if (prop === "entrypoints") entry.entrypoints = value;
       else if (prop === "middlewares") entry.middlewares = value.split(",").map((m) => m.trim());
+      else if (!IGNORED_ROUTER_OPTIONS.has(prop)) {
+        throw new Error(`unmodelled option "${prop}" on Traefik router ${name}`);
+      }
       partial.set(name, entry);
       continue;
     }
@@ -486,7 +536,13 @@ function parseTraefik(): TraefikModel {
       continue;
     }
     const service = key.match(/^http\.services\.([^.]+)\./);
-    if (service) services.set(service[1], container);
+    if (service) {
+      services.set(service[1], container);
+      continue;
+    }
+    // e.g. a tcp/udp router or a differently cased namespace: traffic this
+    // model would never route.
+    throw new Error(`unmodelled traefik label: traefik.${key}`);
   }
 
   const routers = new Map<string, TraefikRouter>();
@@ -882,5 +938,85 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     it("only strips Caddy's own Server header", () => {
       expect(caddy.headerRemovals).toEqual(["server"]);
     });
+  });
+});
+
+describe("Traefik label parser fails closed (S10 review)", () => {
+  /** A compose source with the given lines in the cms service's labels block. */
+  const cmsLabels = (...lines: string[]): string =>
+    ["services:", "  cms:", "    labels:", ...lines.map((line) => `      ${line}`)].join("\n");
+  // The router a skipped label could hide: /uploads bytes straight to cms,
+  // around the session-gated web route (issue #21).
+  const bypassRule = "Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/uploads`)";
+
+  it("parses quoted list labels per service, also with `-` at the key's indent", () => {
+    const source = [
+      "services:",
+      "  web:",
+      "    labels:",
+      '    - "traefik.enable=true"',
+      "      # a comment mentioning traefik.http.routers is ignored",
+      "    networks:",
+      "      - frontend",
+      "  cms:",
+      "    labels:",
+      '      - "traefik.http.routers.sinnlos-cms.priority=50"',
+    ].join("\n");
+    expect(parseTraefikLabels(source)).toEqual([
+      { container: "web", key: "enable", value: "true" },
+      { container: "cms", key: "http.routers.sinnlos-cms.priority", value: "50" },
+    ]);
+  });
+
+  it.each([
+    ["unquoted", cmsLabels(`- traefik.http.routers.sinnlos-raw.rule=${bypassRule}`)],
+    ["single-quoted", cmsLabels("- 'traefik.http.routers.sinnlos-raw.priority=200'")],
+    ["map-style", cmsLabels("traefik.http.routers.sinnlos-raw.service: sinnlos-cms")],
+    ["trailing comment", cmsLabels('- "traefik.http.routers.sinnlos-raw.priority=200" # x')],
+    [
+      "inline flow list",
+      ["services:", "  cms:", '    labels: ["traefik.http.routers.sinnlos-raw.priority=200"]'].join(
+        "\n",
+      ),
+    ],
+    [
+      "anchor outside services",
+      [
+        "x-labels: &labels",
+        '  - "traefik.http.routers.sinnlos-raw.priority=200"',
+        "services:",
+        "  cms:",
+        "    labels: *labels",
+      ].join("\n"),
+    ],
+    [
+      "outside a labels block",
+      ["services:", "  cms:", "    environment:", '      - "traefik.enable=true"'].join("\n"),
+    ],
+  ])("rejects a %s traefik label", (_style, source) => {
+    expect(() => parseTraefikLabels(source)).toThrow(/unmodelled traefik label on line/);
+  });
+
+  it.each([
+    [
+      "a tcp router",
+      '- "traefik.tcp.routers.sinnlos-raw.rule=HostSNI(`*`)"',
+      /unmodelled traefik label: traefik\.tcp\./,
+    ],
+    [
+      "a differently cased option",
+      '- "traefik.http.routers.sinnlos-cms.Priority=200"',
+      /unmodelled option "Priority"/,
+    ],
+    [
+      "ruleSyntax",
+      '- "traefik.http.routers.sinnlos-cms.ruleSyntax=v2"',
+      /unmodelled option "ruleSyntax"/,
+    ],
+    ["a disabled container", '- "traefik.enable=false"', /unmodelled traefik\.enable=false/],
+  ])("rejects %s in the model", (_what, label, error) => {
+    const cmsRule = "Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api`)";
+    const source = cmsLabels(`- "traefik.http.routers.sinnlos-cms.rule=${cmsRule}"`, label);
+    expect(() => parseTraefik(source)).toThrow(error);
   });
 });
