@@ -41,8 +41,9 @@ const HEADER = "x-internal-upload-token";
 /**
  * Does the request target the upload BYTES path under ANY encoding? Tests the
  * raw and the once-decoded form, each posix-normalised, against `/uploads/`.
+ * Exported for uploads-auth.test.ts (S06).
  */
-function targetsUploads(rawPath: string): boolean {
+export function targetsUploads(rawPath: string): boolean {
   const forms = [rawPath];
   try {
     forms.push(decodeURIComponent(rawPath));
@@ -56,8 +57,8 @@ function targetsUploads(rawPath: string): boolean {
 }
 
 /** Constant-time compare with a length guard (crypto.timingSafeEqual throws on
- * unequal lengths). */
-function tokenMatches(provided: string, expected: string): boolean {
+ * unequal lengths). Exported for uploads-auth.test.ts (S06). */
+export function tokenMatches(provided: string, expected: string): boolean {
   if (!provided || !expected) return false;
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);

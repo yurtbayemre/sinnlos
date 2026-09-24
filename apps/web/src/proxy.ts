@@ -24,6 +24,33 @@ const PUBLIC_FILES = new Set([
 ]);
 
 /**
+ * The public allowlist: paths reachable without a session. Pure and exported
+ * for the boundary tests (proxy.test.ts, S06). /uploads and /live/* must
+ * never be listed — their bytes/streams are per-session.
+ */
+export function isPublicPath(pathname: string): boolean {
+  return (
+    pathname === "/sign-in" ||
+    // The register page gates itself on REGISTRATION_ENABLED and redirects
+    // to /sign-in when registration is off.
+    pathname === "/register" ||
+    pathname.startsWith("/api/auth") ||
+    pathname === "/api/revalidate" ||
+    // Internal CMS→web live-event ingest: session-less by design (secret-
+    // gated in the route, externally swallowed by Traefik's /api rule).
+    // Without this entry the CMS POST gets a 307 and live updates die
+    // silently (issue #17 plan, WP2).
+    pathname === "/api/live/emit" ||
+    pathname.startsWith("/_next") ||
+    pathname.startsWith("/favicon") ||
+    // Known static files served from /public. Exact allowlist (see
+    // PUBLIC_FILES) so an authed route ending in .png/.svg/.xml can't
+    // bypass the auth check.
+    PUBLIC_FILES.has(pathname)
+  );
+}
+
+/**
  * In production this guard redirects unauthenticated users to /sign-in.
  * When DEMO_MODE=1 we skip the check entirely so the UI is browsable
  * without Microsoft Entra ID configured.
@@ -34,24 +61,7 @@ export default async function proxy(req: NextRequest) {
   const { auth } = await import("@/auth");
   const session = await auth();
   const { nextUrl } = req;
-  const isPublic =
-    nextUrl.pathname === "/sign-in" ||
-    // The register page gates itself on REGISTRATION_ENABLED and redirects
-    // to /sign-in when registration is off.
-    nextUrl.pathname === "/register" ||
-    nextUrl.pathname.startsWith("/api/auth") ||
-    nextUrl.pathname === "/api/revalidate" ||
-    // Internal CMS→web live-event ingest: session-less by design (secret-
-    // gated in the route, externally swallowed by Traefik's /api rule).
-    // Without this entry the CMS POST gets a 307 and live updates die
-    // silently (issue #17 plan, WP2).
-    nextUrl.pathname === "/api/live/emit" ||
-    nextUrl.pathname.startsWith("/_next") ||
-    nextUrl.pathname.startsWith("/favicon") ||
-    // Known static files served from /public. Exact allowlist (see
-    // PUBLIC_FILES) so an authed route ending in .png/.svg/.xml can't
-    // bypass the auth check.
-    PUBLIC_FILES.has(nextUrl.pathname);
+  const isPublic = isPublicPath(nextUrl.pathname);
 
   if (!session && !isPublic) {
     const url = new URL("/sign-in", nextUrl);
