@@ -55,7 +55,7 @@ describe("emitLiveEvent batching", () => {
 
   it("warns on non-2xx instead of failing silently", async () => {
     // The proxy.ts-307 failure class: a misroute must be VISIBLE in the
-    // cms logs, unlike revalidate.ts which swallows non-2xx.
+    // cms logs instead of being swallowed.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     fetchMock.mockResolvedValue({ ok: false, status: 307 });
     emitLiveEvent({ kind: "announcements" });

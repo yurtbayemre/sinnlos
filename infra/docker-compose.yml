@@ -61,9 +61,9 @@ services:
       # passwords failing the admin policy (FX13, src/utils/admin-seed.ts).
       STRAPI_ADMIN_EMAIL: ${STRAPI_ADMIN_EMAIL:-}
       STRAPI_ADMIN_PASSWORD: ${STRAPI_ADMIN_PASSWORD:-}
-      # Revalidation webhook + live-event pings → Next.js. The secret
-      # guards BOTH internal endpoints (/api/revalidate, /api/live/emit) —
-      # rotation affects both.
+      # Live-event pings → Next.js: WEB_INTERNAL_URL is only the target of
+      # POST /api/live/emit and the secret guards only that ingest (the
+      # cache-revalidation webhook is gone, D-DC01; names kept).
       WEB_INTERNAL_URL: http://web:3000
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}
       # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
@@ -137,8 +137,8 @@ services:
       AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}
       AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}
       AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
-      # Shared secret for the /api/revalidate + /api/live/emit webhooks
-      # called from the CMS (rotation affects both).
+      # Shared secret for the /api/live/emit live-event ingest called from
+      # the CMS (its only use since D-DC01; the name is historical).
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}
       # Kill switch for the live SSE pipeline: 1 = /live/stream 404s and
       # the wrappers poll at the pre-SSE 10s/30s intervals.

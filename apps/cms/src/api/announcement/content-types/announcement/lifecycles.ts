@@ -1,11 +1,8 @@
 import { isAnnouncementVisible } from "../../../../utils/announcement-audience";
 import { resolveFanout } from "../../../../utils/notification-source";
-import { revalidate } from "../../../../utils/revalidate";
 
 export default {
   async afterCreate(event: any) {
-    await revalidate(["announcements"]);
-
     const { result } = event;
     if (!result?.publishedAt) return;
     await notifyForAnnouncement(result);
@@ -28,17 +25,10 @@ export default {
   // whichever hook runs first writes the anchored notifications and the other
   // one finds them and has nobody left to notify. Keeping this path costs one
   // findMany() and buys the safety net.
-  // The revalidate() below is required here regardless of notifications.
   async afterUpdate(event: any) {
-    await revalidate(["announcements"]);
-
     const { result } = event;
     if (!result?.publishedAt) return;
     await notifyForAnnouncement(result);
-  },
-
-  async afterDelete() {
-    await revalidate(["announcements"]);
   },
 };
 
