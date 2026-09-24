@@ -166,7 +166,12 @@ async function load(): Promise<Loaded> {
       if (captured.routers.length > before) {
         const { uid, options } = captured.routers[captured.routers.length - 1];
         for (const action of selectedCoreActions(options)) {
-          add({ action: `${uid}.${action}`, kind: "core", source, config: options.config?.[action] ?? {} });
+          add({
+            action: `${uid}.${action}`,
+            kind: "core",
+            source,
+            config: options.config?.[action] ?? {},
+          });
         }
       } else {
         for (const route of (mod.default as { routes: CustomRoute[] }).routes) {
@@ -203,8 +208,13 @@ function splitAction(action: string): [string, string] {
 const ADMIN_OR_EDITOR = ["global::is-admin-or-editor"];
 const wiki = (level: string) => [{ name: "global::wiki-visibility", config: { level } }];
 const training = (level: string) => [{ name: "global::training-visibility", config: { level } }];
-const stripWikiPopulate = (uid: string) => [
-  { name: "global::strip-restricted-populate", config: { uid, targets: ["api::wiki-page.wiki-page"] } },
+/** department/team reads: publication pin (FX06) + no populate into wiki pages (FX05). */
+const orgRead = (uid: string) => [
+  "global::published-only",
+  {
+    name: "global::strip-restricted-populate",
+    config: { uid, targets: ["api::wiki-page.wiki-page"] },
+  },
 ];
 
 const GOLDEN: Record<string, PolicySpec[]> = {
@@ -239,8 +249,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::course.course.find": training("course"),
   "api::course.course.findOne": training("course"),
 
-  "api::department.department.find": stripWikiPopulate("api::department.department"),
-  "api::department.department.findOne": stripWikiPopulate("api::department.department"),
+  "api::department.department.find": orgRead("api::department.department"),
+  "api::department.department.findOne": orgRead("api::department.department"),
   "api::department.department.create": ADMIN_OR_EDITOR,
   "api::department.department.update": ["global::is-department-head"],
   "api::department.department.delete": ADMIN_OR_EDITOR,
@@ -251,8 +261,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::document.document.update": ADMIN_OR_EDITOR,
   "api::document.document.delete": ADMIN_OR_EDITOR,
 
-  "api::event.event.find": [],
-  "api::event.event.findOne": [],
+  "api::event.event.find": ["global::published-only"],
+  "api::event.event.findOne": ["global::published-only"],
   "api::event.event.create": ADMIN_OR_EDITOR,
   "api::event.event.update": ADMIN_OR_EDITOR,
   "api::event.event.delete": ADMIN_OR_EDITOR,
@@ -283,8 +293,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::notification.notification.markRead": [],
   "api::notification.notification.markAllRead": [],
 
-  "api::poll.poll.find": [],
-  "api::poll.poll.findOne": [],
+  "api::poll.poll.find": ["global::published-only"],
+  "api::poll.poll.findOne": ["global::published-only"],
   "api::poll.poll.create": ADMIN_OR_EDITOR,
   "api::poll.poll.update": ADMIN_OR_EDITOR,
   "api::poll.poll.delete": ADMIN_OR_EDITOR,
@@ -309,8 +319,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::search-log.search-log.create": [],
   "api::search-log.search-log.summary": ADMIN_OR_EDITOR,
 
-  "api::team.team.find": stripWikiPopulate("api::team.team"),
-  "api::team.team.findOne": stripWikiPopulate("api::team.team"),
+  "api::team.team.find": orgRead("api::team.team"),
+  "api::team.team.findOne": orgRead("api::team.team"),
   "api::team.team.create": ADMIN_OR_EDITOR,
   "api::team.team.update": ["global::is-team-member-or-lead"],
   "api::team.team.delete": ADMIN_OR_EDITOR,
@@ -344,14 +354,11 @@ const ALLOWLIST: Record<string, string> = {
   "api::acknowledgement.acknowledgement.update": "admin_role-only correction of read receipts",
   "api::acknowledgement.acknowledgement.delete": "admin_role-only correction of read receipts",
   "api::classified.classified.find": "internal flea market, staff-readable (guest holds no grant)",
-  "api::classified.classified.findOne": "internal flea market, staff-readable (guest holds no grant)",
-  "api::event.event.find": "company calendar (draft pin: checked below)",
-  "api::event.event.findOne": "company calendar (draft pin: checked below)",
+  "api::classified.classified.findOne":
+    "internal flea market, staff-readable (guest holds no grant)",
   "api::event-rsvp.event-rsvp.delete": "admin_role-only correction",
   "api::kudos.kudos.find": "staff-public kudos wall (guest revoked)",
   "api::kudos.kudos.findOne": "staff-public kudos wall (guest revoked)",
-  "api::poll.poll.find": "company-wide polls (draft pin: checked below)",
-  "api::poll.poll.findOne": "company-wide polls (draft pin: checked below)",
 };
 
 /**
@@ -386,18 +393,17 @@ const FX01_REMOVED = [
 const PUBLISHED_PINNING_POLICIES = new Set([
   "global::announcement-visibility",
   "global::document-visibility",
+  "global::published-only",
   "global::quick-link-visibility",
   "global::training-visibility",
   "global::wiki-visibility",
 ]);
 
-/** D&P types whose reads still honour a client `?status=draft` (FX06). */
-const KNOWN_DRAFT_READS = new Set([
-  "api::department.department",
-  "api::event.event",
-  "api::poll.poll",
-  "api::team.team",
-]);
+/**
+ * D&P types whose reads still honour a client `?status=draft`. Empty since
+ * FX06 put global::published-only on event/poll/department/team.
+ */
+const KNOWN_DRAFT_READS = new Set<string>([]);
 
 // ---------------------------------------------------------------------------
 // Populate side channels. Filter policies act on the ROOT query of their own
@@ -436,6 +442,9 @@ describe("route → policy matrix (S01)", async () => {
     return controllerMethods.get(controller)?.includes(method) ?? false;
   };
   const isGated = (action: string) => policiesOf(action).length > 0 || isOverridden(action);
+  /** The find/findOne permission keys of `uid` that have a live route. */
+  const liveReads = (uid: string) =>
+    READ_ACTIONS.map((a) => `${uid}.${a}`).filter((a) => routes.has(a));
 
   /** action → roles holding it via PERMISSION_MATRIX. */
   const matrixGrants = new Map<string, string[]>();
@@ -471,7 +480,9 @@ describe("route → policy matrix (S01)", async () => {
   });
 
   it("(a) matches the golden action → policies table", () => {
-    const actual = Object.fromEntries([...routes].map(([action, e]) => [action, e.config.policies ?? []]));
+    const actual = Object.fromEntries(
+      [...routes].map(([action, e]) => [action, e.config.policies ?? []]),
+    );
     expect(actual).toEqual(GOLDEN);
   });
 
@@ -507,7 +518,9 @@ describe("route → policy matrix (S01)", async () => {
   });
 
   describe("(c) custom routes and CUSTOM_ACTION_GRANTS", () => {
-    const customActions = [...routes.values()].filter((e) => e.kind === "custom").map((e) => e.action);
+    const customActions = [...routes.values()]
+      .filter((e) => e.kind === "custom")
+      .map((e) => e.action);
 
     it("every custom handler resolves to a controller method", () => {
       expect(customActions.filter((a) => !isOverridden(a))).toEqual([]);
@@ -548,15 +561,17 @@ describe("route → policy matrix (S01)", async () => {
 
   describe("draft & publish reads pin status=published (§5.24)", () => {
     const draftTypes = [...schemas]
-      .filter(([uid, s]) => s.options?.draftAndPublish && READ_ACTIONS.some((a) => routes.has(`${uid}.${a}`)))
+      .filter(([uid, s]) => s.options?.draftAndPublish && liveReads(uid).length > 0)
       .map(([uid]) => uid);
 
     for (const uid of draftTypes) {
       const test = KNOWN_DRAFT_READS.has(uid) ? it.fails : it;
       test(`${uid} find/findOne carry a publish-pinning policy`, () => {
-        for (const action of READ_ACTIONS.map((a) => `${uid}.${a}`).filter((a) => routes.has(a))) {
-          const names = policiesOf(action).map(policyName);
-          expect(names.some((n) => PUBLISHED_PINNING_POLICIES.has(n)), action).toBe(true);
+        for (const action of liveReads(uid)) {
+          const pins = policiesOf(action).some((p) =>
+            PUBLISHED_PINNING_POLICIES.has(policyName(p)),
+          );
+          expect(pins, action).toBe(true);
         }
       });
     }
@@ -568,7 +583,11 @@ describe("route → policy matrix (S01)", async () => {
 
   describe("no populate path from an unfiltered type into a visibility-filtered one", () => {
     const filterDomain = (uid: string) =>
-      new Set(policiesOf(`${uid}.find`).map(policyName).filter((n) => VISIBILITY_FILTER_POLICIES.has(n)));
+      new Set(
+        policiesOf(`${uid}.find`)
+          .map(policyName)
+          .filter((n) => VISIBILITY_FILTER_POLICIES.has(n)),
+      );
 
     /** `<source>.<relation>` → target uid + the target's filter policies. */
     const sideChannels = new Map<string, { target: string; domain: string[] }>();
@@ -596,7 +615,7 @@ describe("route → policy matrix (S01)", async () => {
       const [source, attr] = splitAction(path);
       const test = KNOWN_POPULATE_LEAKS.has(path) ? it.fails : it;
       test(`populate[${attr}] on ${source} cannot bypass ${domain.join(", ")}`, () => {
-        for (const action of READ_ACTIONS.map((a) => `${source}.${a}`).filter((a) => routes.has(a))) {
+        for (const action of liveReads(source)) {
           // The guard walks the populate tree from config.uid, so that must
           // be the route's own type; the nested paths (teams.pages,
           // members.department.pages, ...) are pinned by the policy test.
@@ -617,7 +636,8 @@ describe("route → policy matrix (S01)", async () => {
 
   describe("fixed holes (regressions)", () => {
     it("FX01: POST/PUT/DELETE /api/poll-votes are gone or gated (forged votes)", () => {
-      for (const action of ["create", "update", "delete"].map((a) => `api::poll-vote.poll-vote.${a}`)) {
+      for (const write of ["create", "update", "delete"]) {
+        const action = `api::poll-vote.poll-vote.${write}`;
         expect(!routes.has(action) || isGated(action), action).toBe(true);
       }
     });
