@@ -1,0 +1,49 @@
+// Type-checks every Vitest file (S07). Both app tsconfigs exclude *.test.*
+// on purpose (Strapi builds and `next build` must never see test code), and
+// Vitest only strips types — so without this program a test can assert on a
+// property that no longer exists and still pass. Run via `pnpm typecheck`
+// (root), which CI executes.
+//
+// One program covers apps/cms, apps/web and infra. It is STRICT (from
+// tsconfig.base.json), stricter than apps/cms's own non-strict config, so the
+// cms modules a test imports are checked strictly as well.
+//
+// Tooling is borrowed from apps/web on purpose: its pinned TypeScript runs the
+// program (root package.json `typecheck:tests`) and its @types/node provides
+// Node globals. Adding typescript as a ROOT devDependency re-resolves the
+// @strapi/types peer graph in pnpm-lock.yaml — unrelated churn for a test gate.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    // `@strapi/strapi` is loaded as a type package for its (re-exported)
+    // @strapi/types `declare global { var strapi }`. In apps/cms's own program
+    // some source file always imports @strapi/strapi; the test program only
+    // reaches what the tests import, and e.g. classified lifecycles.ts uses
+    // the global without an import. A type directive (unlike a `files` entry)
+    // is resolved through the pnpm symlink, so its own deps resolve too.
+    "typeRoots": ["./apps/web/node_modules/@types", "./apps/cms/node_modules"],
+    "types": ["node", "@strapi/strapi"],
+    "paths": {
+      // Mirrors apps/web/tsconfig.json and the `@` alias in vitest.config.ts.
+      "@/*": ["./apps/web/src/*"],
+      // Same React 19 type pin as apps/web/tsconfig.json: without it Next's
+      // .d.ts files can resolve Strapi's @types/react@18 through pnpm's hoist
+      // directory.
+      "react": ["./apps/web/node_modules/@types/react"],
+      "react/*": ["./apps/web/node_modules/@types/react/*"],
+      "react-dom": ["./apps/web/node_modules/@types/react-dom"],
+      "react-dom/*": ["./apps/web/node_modules/@types/react-dom/*"]
+    }
+  },
+  "include": [
+    "apps/cms/src/**/*.test.ts",
+    "apps/cms/config/**/*.test.ts",
+    "apps/web/src/**/*.test.ts",
+    // next-auth Session/JWT module augmentation used by auth.ts and strapi.ts.
+    "apps/web/src/types/**/*.d.ts",
+    "infra/**/*.test.ts"
+  ],
+  "exclude": ["**/node_modules/**"]
+}

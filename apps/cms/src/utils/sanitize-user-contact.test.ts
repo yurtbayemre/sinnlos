@@ -98,8 +98,13 @@ const getModel = (uid: string): ModelSchema | undefined => models[uid];
 const strip = <T>(data: T, schema: ModelSchema | undefined): T =>
   stripSensitiveUserFields(data, schema, { getModel });
 
-/** A fully-populated directory user, as it reaches the output sanitizer. */
-const fullUser = (over: Record<string, unknown> = {}) => ({
+/**
+ * A fully-populated directory user, as it reaches the output sanitizer.
+ * Generic over the overrides so populated relations (manager, teams, …) stay
+ * typed on the result — a plain `Record<string, unknown>` parameter would be
+ * dropped from the inferred return type (S07: tests are type-checked).
+ */
+const fullUser = <O extends Record<string, unknown>>(over: O = {} as O) => ({
   id: 7,
   documentId: "usr_7",
   username: "ada",
