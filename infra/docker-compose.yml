@@ -79,8 +79,10 @@ services:
       SMTP_USER: ${SMTP_USER:-}
       SMTP_PASS: ${SMTP_PASS:-}
       # Sender and digest link base come from env only (FX13, no
-      # owner-domain defaults): without DIGEST_FROM the cron skips with a
-      # warning; PUBLIC_WEB_URL defaults to the web's public origin.
+      # owner-domain defaults): with SMTP_* set but DIGEST_FROM empty the
+      # cron skips every run (error log) and infra/deploy.sh refuses to
+      # deploy — set it, or DIGESTS_DISABLED=1. PUBLIC_WEB_URL defaults to
+      # the web's public origin.
       DIGEST_FROM: ${DIGEST_FROM:-}
       DIGEST_REPLY_TO: ${DIGEST_REPLY_TO:-}
       DIGESTS_DISABLED: ${DIGESTS_DISABLED:-0}

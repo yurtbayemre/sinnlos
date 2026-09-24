@@ -4,8 +4,9 @@
 #
 # What it does, in order:
 #   0. Preflight of infra/.env against the env contract (FX13): required
-#      keys set, no template placeholder in the secrets. Fails before
-#      anything is touched.
+#      keys set, no template placeholder in the secrets, digest sender set
+#      when SMTP is, JWT_SECRET rotated when the running web still exposed
+#      Strapi JWTs (D-SESSION-01). Fails before anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
@@ -67,6 +68,8 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # rendering folds long values across lines) and prints key names only, never
 # a value: "fatal KEY", "warn KEY" or "digest KEY" (SMTP set, but the digest
 # gate in apps/cms/src/digest/send-digests.ts would skip every run).
+# The key lists, the markers and the digest rule are pinned against
+# env-guard.ts and send-digests.ts by apps/cms/src/utils/deploy-preflight.test.ts.
 preflight_scan() {
   awk -v fatal_keys="${PREFLIGHT_FATAL_KEYS}" -v warn_keys="${PREFLIGHT_WARN_KEYS}" '
     function placeholder(v,    n, i, parts, p) {
@@ -106,6 +109,52 @@ preflight_scan() {
     }' | sort -u
 }
 
+# D-SESSION-01: up to that change the web handed every signed-in user their
+# own Strapi JWT on /api/auth/session. users-permissions JWTs are stateless
+# (7 days, config/plugins.ts), so those copies stay valid until JWT_SECRET
+# changes. A web image that keeps the JWT server-side says so with this label
+# (apps/web/Dockerfile). A web container WITHOUT it — the first deploy of
+# D-SESSION-01, or a roll-forward after rolling the web back to an older
+# image — means the tokens were exposed, and the deploy needs a JWT_SECRET
+# other than the one the running cms signs with.
+JWT_OFF_SESSION_LABEL="org.sinnlos.strapi-jwt"
+JWT_OFF_SESSION_VALUE="server-only"
+
+# Prints one environment value from `compose config --format json` on stdin
+# (first match). Only ever captured into a variable, never echoed.
+compose_env_value() {
+  awk -v want="$1" '
+    /^[ \t]*"[A-Z][A-Z0-9_]*": / {
+      line = $0; sub(/^[ \t]*"/, "", line)
+      key = line; sub(/".*$/, "", key)
+      if (key != want) next
+      val = line; sub(/^[A-Z0-9_]*":[ \t]*/, "", val); sub(/,[ \t]*$/, "", val)
+      if (val == "null") val = ""
+      else if (length(val) >= 2 && substr(val, 1, 1) == "\"" && substr(val, length(val), 1) == "\"")
+        val = substr(val, 2, length(val) - 2)
+      # Go JSON escapes <, > and &. An escape left over here can only make
+      # two equal secrets look different (no gate), never the reverse.
+      gsub(/\\u003[cC]/, "<", val); gsub(/\\u003[eE]/, ">", val); gsub(/\\u0026/, "\\&", val)
+      print val
+      exit
+    }'
+}
+
+# True (0) when the running web predates D-SESSION-01 and the JWT_SECRET about
+# to be deployed equals the running cms's. No running web or cms (first
+# install) = nothing was exposed = false.
+jwt_rotation_missing() {
+  local label running_secret new_secret
+  label="$(docker inspect --format "{{ index .Config.Labels \"${JWT_OFF_SESSION_LABEL}\" }}" \
+    "${PROJECT}-web-1" 2>/dev/null)" || return 1
+  [[ "${label}" != "${JWT_OFF_SESSION_VALUE}" ]] || return 1
+  running_secret="$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' \
+    "${PROJECT}-cms-1" 2>/dev/null | sed -n 's/^JWT_SECRET=//p' | head -n 1)" || return 1
+  [[ -n "${running_secret}" ]] || return 1
+  new_secret="$("${COMPOSE[@]}" config --format json 2>/dev/null | compose_env_value JWT_SECRET)"
+  [[ "${new_secret}" == "${running_secret}" ]]
+}
+
 log "Preflight: infra/.env against the env contract (FX13)"
 if ! "${COMPOSE[@]}" config -q; then
   echo "ERROR: docker compose rejected the config — most likely a required key in" >&2
@@ -123,19 +172,39 @@ if [[ -n "${warn_keys}" ]]; then
   echo "         Rotate it (ALTER ROLE ... PASSWORD in Postgres first, then infra/.env);" >&2
   echo "         the cms only warns about it." >&2
 fi
+preflight_failed=0
 if [[ -n "${digest_keys}" ]]; then
-  echo "WARNING: SMTP_* is set but these are empty: ${digest_keys}" >&2
-  echo "         Every e-mail digest run will be skipped (FX13 removed the built-in sender" >&2
-  echo "         and link defaults). Set them in infra/.env, e.g." >&2
-  echo "         DIGEST_FROM='Intranet <noreply@your-domain>', or set DIGESTS_DISABLED=1." >&2
+  # Fatal since the final review (C4): FX13 removed the compose sender default,
+  # so an env that relied on it would silently lose every digest (and Strapi's
+  # own mails their default sender) — also on a cms rollback under this
+  # compose file, which now hands the old image an empty DIGEST_FROM.
+  echo "ERROR: SMTP_* is set but these are empty: ${digest_keys}" >&2
+  echo "       Every e-mail digest run would be skipped (FX13 removed the built-in sender" >&2
+  echo "       and link defaults). Set them in infra/.env, e.g." >&2
+  echo "       DIGEST_FROM='Intranet <noreply@your-domain>', or set DIGESTS_DISABLED=1." >&2
+  preflight_failed=1
 fi
 if [[ -n "${fatal_keys}" ]]; then
   echo "ERROR: template placeholder in: ${fatal_keys}" >&2
   echo "       The cms refuses to start in production with a placeholder secret (and a" >&2
-  echo "       placeholder AUTH_SECRET makes web sessions forgeable). Nothing was changed." >&2
+  echo "       placeholder AUTH_SECRET makes web sessions forgeable)." >&2
   echo "       Generate real values (openssl rand -base64 32; -hex 32 for REVALIDATE_SECRET" >&2
   echo "       and INTERNAL_UPLOAD_TOKEN) and re-run. Rotating JWT_SECRET or AUTH_SECRET" >&2
   echo "       signs every user out once." >&2
+  preflight_failed=1
+fi
+if jwt_rotation_missing; then
+  echo "ERROR: JWT_SECRET must be rotated for this deploy (D-SESSION-01)." >&2
+  echo "       The running web (${PROJECT}-web-1, no ${JWT_OFF_SESSION_LABEL}=${JWT_OFF_SESSION_VALUE} label)" >&2
+  echo "       hands every signed-in user their Strapi JWT on /api/auth/session, and those" >&2
+  echo "       7-day tokens stay valid until JWT_SECRET changes. Put a fresh value in" >&2
+  echo "       infra/.env (openssl rand -base64 32) and re-run: everyone signs in once, open" >&2
+  echo "       tabs land on /sign-in?expired=1. Needed again after every roll-forward from" >&2
+  echo "       a web rollback to such an image." >&2
+  preflight_failed=1
+fi
+if ((preflight_failed)); then
+  echo "Preflight failed. Nothing was changed." >&2
   exit 1
 fi
 log "Preflight OK"

@@ -34,8 +34,11 @@ export const GUARDED_SECRET_KEYS = [
 /** Placeholder-checked, but never fatal (see header). */
 export const WARN_ONLY_SECRET_KEYS = ["DATABASE_PASSWORD"] as const;
 
-/** Lowercased fragments of the values the templates ship. */
-const PLACEHOLDER_MARKERS = [
+/**
+ * Lowercased fragments of the values the templates ship. infra/deploy.sh
+ * repeats them in its awk preflight (deploy-preflight.test.ts pins both).
+ */
+export const PLACEHOLDER_MARKERS = [
   "change-me",
   "changeme",
   "tobemodified",
