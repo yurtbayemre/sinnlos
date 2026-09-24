@@ -1,12 +1,12 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
 
 export async function getNotifications(): Promise<Notification[]> {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user?.id;
   if (!userId) return [];
   try {

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { PageHeader } from "@/components/page-header";
 import { ClassifiedForm } from "@/components/marketplace/classified-form";
 
@@ -12,7 +12,7 @@ export async function generateMetadata() {
 }
 
 export default async function NewClassifiedPage() {
-  const [t, session] = await Promise.all([getTranslations("marketplace"), auth()]);
+  const [t, session] = await Promise.all([getTranslations("marketplace"), getSession()]);
 
   // UI gate only — the CMS permission matrix denies guest the create and
   // upload permissions regardless of what reaches it.

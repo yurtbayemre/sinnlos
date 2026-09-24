@@ -1,7 +1,7 @@
 "use server";
 
-import { refresh, updateTag } from "next/cache";
-import { auth } from "@/auth";
+import { refresh } from "next/cache";
+import { getSession } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 
 export type CreatePollErrorCode = "missingQuestion" | "tooFewOptions" | "forbidden" | "failed";
@@ -24,7 +24,7 @@ export type CreatePollResult = { ok: true } | { ok: false; code: CreatePollError
 const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
 
 export async function createPoll(input: CreatePollInput): Promise<CreatePollResult> {
-  const session = await auth();
+  const session = await getSession();
   const role = session?.user?.role;
   if (!role || !POLL_CREATOR_ROLES.has(role)) return { ok: false, code: "forbidden" };
 
@@ -58,9 +58,8 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
     return { ok: false, code: "failed" };
   }
 
-  // The polls list is cached under this tag (revalidate 30) — updateTag
-  // gives read-your-own-writes, refresh() re-renders the current route.
-  updateTag("polls");
+  // polls.list is uncached (D-DC01), so re-rendering the current route with
+  // refresh() is all read-your-own-writes needs.
   refresh();
   return { ok: true };
 }

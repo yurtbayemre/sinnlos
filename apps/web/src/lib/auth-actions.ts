@@ -10,10 +10,11 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
-import { auth, signIn, signOut } from "@/auth";
+import { signIn, signOut } from "@/auth";
 import { REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { STRAPI_URL } from "@/lib/config";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
+import { getSession } from "@/lib/session";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function signInWithMicrosoft(formData: FormData) {
@@ -169,7 +170,7 @@ function entraEndSessionUrl(issuer: string, postLogoutRedirectUri: string): stri
  * Microsoft "signed out" page instead of /sign-in.
  */
 export async function signOutAction() {
-  const session = await auth();
+  const session = await getSession();
   const provider = session?.provider;
 
   await signOut({ redirect: false });

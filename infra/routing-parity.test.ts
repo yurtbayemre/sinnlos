@@ -143,6 +143,7 @@ const PROBES: Array<[Method, string, Backend]> = [
   // http://web:3000 path reaches the real handlers; these probes pin that
   // external unreachability.
   ["POST", "/api/live/emit", "cms"],
+  // The web handler is gone (D-DC01); the edge keeps sending any /api/* to cms.
   ["POST", "/api/revalidate", "cms"],
 ];
 

@@ -5,8 +5,8 @@ import { isPublicPath } from "./proxy";
  * The proxy.ts public allowlist (S06). Two failure modes are silent in
  * production, so both directions are pinned:
  *   - an internal webhook dropped from the list gets a 307 to /sign-in and
- *     the CMS→web pipeline dies without an error (/api/live/emit, and
- *     /api/revalidate while it exists);
+ *     the CMS→web pipeline dies without an error (/api/live/emit — the only
+ *     one left since D-DC01 removed /api/revalidate);
  *   - a per-session path added to it (/uploads bytes, /live/* SSE) becomes
  *     anonymously reachable. /uploads/* re-checks auth() in its route, but
  *     the bytes must never depend on a single layer.
@@ -34,12 +34,6 @@ describe("isPublicPath — public entries", () => {
 
   it("keeps the internal live-event ingest public (secret-gated in its route)", () => {
     expect(isPublicPath("/api/live/emit")).toBe(true);
-  });
-
-  it("keeps /api/revalidate public (current state)", () => {
-    // Pinned as-is: the CMS revalidate webhook posts here session-less. A
-    // later phase deletes the route; that change must update this assertion.
-    expect(isPublicPath("/api/revalidate")).toBe(true);
   });
 
   it("lets Next assets and the favicon through", () => {
@@ -73,6 +67,13 @@ describe("isPublicPath — guarded paths", () => {
     for (const path of ["/live", "/live/stream", "/live/subscribe"]) {
       expect(isPublicPath(path)).toBe(false);
     }
+  });
+
+  it("guards the removed /api/revalidate webhook like any other path (D-DC01)", () => {
+    // The Strapi fetch cache and its tag webhook are gone; /api/live/emit is
+    // the only session-less internal endpoint left. A stale CMS POST here
+    // just gets the sign-in redirect.
+    expect(isPublicPath("/api/revalidate")).toBe(false);
   });
 
   it("guards app pages and the ICS export", () => {

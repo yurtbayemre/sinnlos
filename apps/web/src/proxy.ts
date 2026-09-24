@@ -26,7 +26,9 @@ const PUBLIC_FILES = new Set([
 /**
  * The public allowlist: paths reachable without a session. Pure and exported
  * for the boundary tests (proxy.test.ts, S06). /uploads and /live/* must
- * never be listed — their bytes/streams are per-session.
+ * never be listed — their bytes/streams are per-session. /api/live/emit is
+ * the ONLY session-less internal endpoint; the /api/revalidate webhook was
+ * removed with the Strapi fetch cache (D-DC01) and is guarded like any path.
  */
 export function isPublicPath(pathname: string): boolean {
   return (
@@ -35,7 +37,6 @@ export function isPublicPath(pathname: string): boolean {
     // to /sign-in when registration is off.
     pathname === "/register" ||
     pathname.startsWith("/api/auth") ||
-    pathname === "/api/revalidate" ||
     // Internal CMS→web live-event ingest: session-less by design (secret-
     // gated in the route, externally swallowed by Traefik's /api rule).
     // Without this entry the CMS POST gets a 307 and live updates die

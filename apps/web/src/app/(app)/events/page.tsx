@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Event, EventRsvp, EventRsvpSummary } from "@/lib/types";
@@ -91,7 +91,11 @@ export default async function EventsPage({
   const { view, month } = await searchParams;
   const isMonthView = view === "month";
 
-  const [t, locale, session] = await Promise.all([getTranslations("events"), getLocale(), auth()]);
+  const [t, locale, session] = await Promise.all([
+    getTranslations("events"),
+    getLocale(),
+    getSession(),
+  ]);
 
   // Time-window fetches (see api.events): a global "first 50 by start asc"
   // list would show the 50 OLDEST events forever. The list view gets all

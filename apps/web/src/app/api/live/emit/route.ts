@@ -9,7 +9,10 @@
  *
  * NOTE: this path must stay in proxy.ts's isPublic allowlist — the CMS
  * POST carries no session cookie, and a 307 to /sign-in here would make
- * the whole live pipeline silently dead (fire-and-forget masks it).
+ * the whole live pipeline silently dead (fire-and-forget masks it). It is
+ * the only session-less web endpoint since D-DC01 removed /api/revalidate;
+ * REVALIDATE_SECRET / x-revalidate-secret keep their names but guard this
+ * route alone.
  */
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";

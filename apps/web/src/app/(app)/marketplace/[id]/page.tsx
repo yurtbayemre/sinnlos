@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarClock, Mail, MapPin, Pencil, TriangleAlert } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -33,7 +33,7 @@ export default async function ClassifiedDetailPage({
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
-    auth(),
+    getSession(),
   ]);
 
   const { data, failed } = await tryFetch(() => api.classifieds.one(id), "classified");

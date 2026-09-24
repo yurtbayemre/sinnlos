@@ -1,7 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import {
   anchorOf,
@@ -24,7 +24,7 @@ import type { Comment, EmojiType, Reaction } from "@/lib/types";
  * target key — the legacy targetId bridge was removed with #25.
  */
 export async function getCommentSection(target: CommentTarget): Promise<CommentSectionData> {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user?.id;
 
   const filters = targetFilterQuery(target);

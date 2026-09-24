@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
 import { reportCompleteness } from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
@@ -52,7 +52,7 @@ const ANNOUNCEMENT_READER_ROLES = new Set([
 ]);
 
 export default async function AcknowledgementReportPage() {
-  const session = await auth();
+  const session = await getSession();
   if (!isAdmin(session?.user?.role)) {
     redirect("/");
   }
@@ -67,7 +67,8 @@ export default async function AcknowledgementReportPage() {
   // announcement-visibility policy, so these return EVERY user's acks and
   // EVERY announcement — the target audience is recomputed below instead
   // of being handed to us by the API. Users come via the paginated
-  // directory helper. All but the teams fetch are per-user/noCache.
+  // directory helper. Like every strapi() read, all four are uncached
+  // (D-DC01).
   const [announcementsResult, acksResult, usersResult, teamsResult] = await Promise.all([
     tryFetch(
       () =>
@@ -102,7 +103,7 @@ export default async function AcknowledgementReportPage() {
     // team side (lead counts as a member for targeting). `api.teams.list()`
     // is a full page walk too since #26, but fetchAllTeams stays the right
     // fetch here: (a) it field-limits the user populates to username/ids —
-    // no contact payload in the tagged cache — and (b) its `truncated`
+    // no contact payload (data minimisation) — and (b) its `truncated`
     // signal is already wired into reportCompleteness below (fail-closed).
     tryFetch(() => fetchAllTeams(), "ack-report"),
   ]);

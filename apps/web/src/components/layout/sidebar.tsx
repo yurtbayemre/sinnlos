@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
 import type { Route } from "next";
 import { NavLink, type NavIconName } from "./nav-link";
@@ -9,7 +9,7 @@ export async function Sidebar({ className }: { className?: string }) {
   const t = await getTranslations("nav");
   const tCommon = await getTranslations("common");
 
-  const session = await auth();
+  const session = await getSession();
   const role = session?.user?.role;
   const showAdmin = isAdmin(role);
 

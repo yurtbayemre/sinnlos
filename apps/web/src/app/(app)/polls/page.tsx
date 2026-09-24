@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
@@ -19,7 +19,7 @@ const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
 
 export default async function PollsPage() {
   const t = await getTranslations("polls");
-  const session = await auth();
+  const session = await getSession();
   const canCreate = POLL_CREATOR_ROLES.has(session?.user?.role ?? "");
   const { data, failed } = await tryFetch(() => api.polls.list(), "polls");
   const polls = (data?.data ?? []) as Poll[];

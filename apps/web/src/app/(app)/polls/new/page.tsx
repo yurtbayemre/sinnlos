@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { PageHeader } from "@/components/page-header";
@@ -14,7 +14,7 @@ export async function generateMetadata() {
 }
 
 export default async function NewPollPage() {
-  const session = await auth();
+  const session = await getSession();
   const role = session?.user?.role;
   if (!role || !POLL_CREATOR_ROLES.has(role)) redirect("/polls");
 

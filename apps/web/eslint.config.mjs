@@ -27,4 +27,48 @@ export default tseslint.config(
       "@typescript-eslint/no-require-imports": "warn",
     },
   },
+  {
+    // D-DC01 (deep-dive decisions/03-caching.md §6/§9): the web keeps NO
+    // server-side copy of Strapi responses — every strapi() read is
+    // no-store, see src/lib/strapi.ts. These rules block the ways back in:
+    // the Next cache/invalidation APIs, per-fetch `next: { revalidate |
+    // tags }` and the 'use cache' directive. `refresh()` from next/cache
+    // stays allowed. Reintroducing a cache needs a new decision (re-entry
+    // rule, §10), not an eslint-disable.
+    files: ["**/*.{js,jsx,mjs,cjs,ts,tsx}"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "next/cache",
+              importNames: [
+                "unstable_cache",
+                "revalidateTag",
+                "updateTag",
+                "revalidatePath",
+                "cacheTag",
+                "cacheLife",
+              ],
+              message:
+                "No server-side Strapi cache (D-DC01): reads are no-store; use refresh() after a mutation.",
+            },
+          ],
+        },
+      ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "Property[key.name='next'] > ObjectExpression > Property[key.name=/^(revalidate|tags)$/]",
+          message: "No Next Data Cache options on fetch (D-DC01): Strapi reads are no-store.",
+        },
+        {
+          selector: "ExpressionStatement[directive=/^use cache/]",
+          message: "No 'use cache' (D-DC01): see the re-entry rule in the caching decision.",
+        },
+      ],
+    },
+  },
 );

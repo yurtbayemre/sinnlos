@@ -21,7 +21,7 @@
  * fetch the bytes. Before this route, ANYONE could.
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { STRAPI_URL } from "@/lib/config";
 // Segment regex, header allowlists, identity encoding and the internal token
 // header live in lib/upload-proxy.ts (unit-tested there, S06).
@@ -36,7 +36,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   // proxy.ts already redirects anonymous browsers to /sign-in (its matcher
   // covers /uploads); this 401 is the fallback in case that matcher is ever
   // narrowed — the bytes must never depend on the middleware alone.
-  const session = await auth();
+  const session = await getSession();
   if (!session) {
     return new NextResponse("Unauthorized", { status: 401 });
   }

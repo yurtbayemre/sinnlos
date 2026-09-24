@@ -11,7 +11,7 @@
  * Ownership: the connId from the stream's `hello` frame is bound to the
  * session userId in the bus; subscribing to a foreign connId fails.
  */
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 
 import { getLiveBus, liveEventsDisabled } from "@/lib/live-bus";
 
@@ -33,7 +33,7 @@ function parseChannels(value: unknown): string[] | null {
 }
 
 export async function POST(req: Request) {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user && "id" in session.user ? session.user.id : undefined;
   if (typeof userId !== "number") {
     return Response.json({ error: "unauthorized" }, { status: 401 });

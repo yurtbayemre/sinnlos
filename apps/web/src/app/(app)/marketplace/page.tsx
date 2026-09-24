@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ImageIcon, MapPin, Plus, ShoppingBag, Tag } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -58,7 +58,7 @@ export default async function MarketplacePage({
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
-    auth(),
+    getSession(),
   ]);
   const relative = (d: string | undefined) => relativeTime(d, tRel);
 

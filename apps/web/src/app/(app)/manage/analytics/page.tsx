@@ -15,7 +15,7 @@ import {
   SearchX,
 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
@@ -99,7 +99,7 @@ async function recentActivity() {
 }
 
 export default async function AnalyticsPage() {
-  const session = await auth();
+  const session = await getSession();
   if (!isAdmin(session?.user?.role)) {
     redirect("/");
   }

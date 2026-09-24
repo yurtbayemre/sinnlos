@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { isAdmin } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { walkAllPages } from "@/lib/paginate";
@@ -49,7 +49,7 @@ const TRAINING_ROLES = new Set([
  * truncated/failed input suppresses the numbers ("–"), never false-green.
  */
 export default async function TrainingReportPage() {
-  const session = await auth();
+  const session = await getSession();
   if (!isAdmin(session?.user?.role)) {
     redirect("/");
   }

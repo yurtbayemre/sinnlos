@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
@@ -31,7 +31,7 @@ export default async function SignInPage({
   // Already signed in? Skip the form — except when we were sent here
   // because the Strapi JWT expired (?expired=1): the Auth.js cookie may
   // still exist then, and redirecting away would loop right back here.
-  const session = await auth();
+  const session = await getSession();
   if (session && !expired) {
     // safeInternalPath guarantees an internal path — cast for typedRoutes.
     redirect(from as Route);
