@@ -10,7 +10,7 @@
     "start": "pnpm -r --parallel start",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck && pnpm typecheck:tests",
-    "typecheck:tests": "pnpm --filter @sinnlos/web exec tsc -p ../../tsconfig.test.json",
+    "typecheck:tests": "pnpm --filter @sinnlos/web exec tsc -p ../../tsconfig.test.json && pnpm --filter @sinnlos/cms exec tsc -p ../../tsconfig.test.cms.json",
     "test": "vitest run",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
