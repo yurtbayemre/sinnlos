@@ -22,7 +22,10 @@
  * No owner-domain fallbacks (FX13): the link base (PUBLIC_WEB_URL; compose
  * defaults it to WEB_PUBLIC_URL) and the sender (DIGEST_FROM) come from env
  * only. With SMTP configured but either of them unset the run is skipped
- * with a warning instead of mailing links to / from someone else's domain.
+ * instead of mailing links to / from someone else's domain. That skip is an
+ * ERROR log, repeated once at boot (FX13 review): a live env that relied on
+ * the removed DIGEST_FROM compose default would otherwise lose its digests
+ * with nothing louder than a daily warning.
  */
 
 import { isAnnouncementVisible } from "../utils/announcement-audience";
@@ -34,7 +37,7 @@ const USER_UID = "plugin::users-permissions.user";
 
 /**
  * `skip`: intentionally dark (kill switch / no SMTP) → info log.
- * `misconfigured`: SMTP is set but the link base or sender is missing → warn.
+ * `misconfigured`: SMTP is set but the link base or sender is missing → error.
  */
 export type DigestGate =
   | { kind: "send"; baseUrl: string }
@@ -60,6 +63,21 @@ export function digestsEnabled(env: Record<string, string | undefined> = process
     };
   }
   return { kind: "send", baseUrl };
+}
+
+/**
+ * Boot-time echo of the gate (called from bootstrap), so a misconfigured
+ * sender shows up right after a deploy rather than at the next 07:30 run.
+ * Env only — no DB or SMTP access.
+ */
+export function reportDigestConfig(
+  log: { error(message: string): void },
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const gate = digestsEnabled(env);
+  if (gate.kind === "misconfigured") {
+    log.error(`[digest] misconfigured, every digest run will be skipped: ${gate.reason}`);
+  }
 }
 
 async function collectContent(
@@ -133,7 +151,7 @@ async function collectContent(
 export async function sendDigests(strapi: any, now = new Date()): Promise<void> {
   const gate = digestsEnabled();
   if (gate.kind !== "send") {
-    if (gate.kind === "misconfigured") strapi.log.warn(`[digest] skipped: ${gate.reason}`);
+    if (gate.kind === "misconfigured") strapi.log.error(`[digest] skipped: ${gate.reason}`);
     else strapi.log.info(`[digest] skipped: ${gate.reason}`);
     return;
   }

@@ -24,6 +24,12 @@
  *     transaction (no check-then-create race across processes).
  *   - Runs ONLY while no admin exists. Rotating the env password later does
  *     NOT overwrite the existing admin — that happens in the admin panel.
+ *   - "Admin exists" is resolved before the env verdict is logged (FX13
+ *     review): with an admin in place the env is ignored, so refused values
+ *     only warn ("remove them") instead of an error claiming no admin was
+ *     created. And because the seed never touches an existing admin, one on
+ *     a documentation-reserved domain (the old admin@example.com template)
+ *     is flagged with an error on every boot until it is changed in /admin.
  *
  * Strapi Community Edition has no admin-panel SSO, so this is the
  * friction-free alternative to the registration form after wiping the DB.
@@ -32,6 +38,11 @@ import { isPlaceholderSecret } from "./env-guard";
 
 /** Documentation-reserved domains (RFC 2606) — a copied template, not a person. */
 const PLACEHOLDER_EMAIL_DOMAINS = ["example.com", "example.org", "example.net"];
+
+/** admin::user where-filter: an existing admin on a documentation-reserved domain. */
+export const TEMPLATE_ADMIN_WHERE = {
+  $or: PLACEHOLDER_EMAIL_DOMAINS.map((domain) => ({ email: { $endsWithi: `@${domain}` } })),
+};
 
 export interface AdminSeedInput {
   email: string;
@@ -101,12 +112,14 @@ export interface AdminSeedStrapi {
   service(uid: string): unknown;
   log: {
     info(message: string): void;
+    warn(message: string): void;
     error(message: string): void;
   };
 }
 
 interface AdminUserService {
-  exists(): Promise<boolean>;
+  /** `count({ where }) > 0` on admin::user (@strapi/admin 5.49 services/user.js). */
+  exists(where?: Record<string, unknown>): Promise<boolean>;
   createFirstAdmin(attributes: AdminSeedInput): Promise<unknown>;
 }
 
@@ -115,11 +128,56 @@ function isAdminUserService(value: unknown): value is AdminUserService {
   return typeof service?.exists === "function" && typeof service?.createFirstAdmin === "function";
 }
 
+/**
+ * The old templates seeded admin@example.com / change-me-please: a publicly
+ * known login on the publicly routed /admin that the seed never revisits.
+ * Diagnostic only — a failing lookup never fails the boot.
+ */
+async function flagTemplateAdmin(strapi: AdminSeedStrapi, users: AdminUserService): Promise<void> {
+  try {
+    if (await users.exists(TEMPLATE_ADMIN_WHERE)) {
+      strapi.log.error(
+        "[bootstrap] an admin user has an @example.com/.org/.net e-mail, most likely seeded from the " +
+          "old env template (admin@example.com / change-me-please, a publicly known /admin login). " +
+          "Change its e-mail and password in /admin (Settings → Users) now.",
+      );
+    }
+  } catch (err) {
+    strapi.log.warn(`[bootstrap] template-admin check failed: ${(err as Error).message}`);
+  }
+}
+
 export async function seedAdminUser(
   strapi: AdminSeedStrapi,
   env: Record<string, string | undefined> = process.env,
 ): Promise<void> {
   const decision = evaluateAdminSeed(env);
+
+  const users = strapi.service("admin::user");
+  if (!isAdminUserService(users)) {
+    if (decision.kind !== "skip") {
+      strapi.log.error(
+        "[bootstrap] admin seed skipped: admin::user.createFirstAdmin is not available in this Strapi version",
+      );
+    }
+    return;
+  }
+
+  // Existing admin first (FX13 review): the env is ignored then, so a
+  // refused env is a stale leftover (warn, "remove it"), not a failed seed.
+  if (await users.exists()) {
+    await flagTemplateAdmin(strapi, users);
+    if (decision.kind === "refuse") {
+      strapi.log.warn(
+        `[bootstrap] STRAPI_ADMIN_* ignored (an admin already exists) and it holds template or ` +
+          `invalid values: ${decision.reasons.join("; ")}. Remove STRAPI_ADMIN_EMAIL/` +
+          "STRAPI_ADMIN_PASSWORD from the env; if the existing admin was seeded from these values, " +
+          "change its password in /admin.",
+      );
+    }
+    return;
+  }
+
   if (decision.kind === "skip") return;
   if (decision.kind === "refuse") {
     strapi.log.error(
@@ -128,15 +186,6 @@ export async function seedAdminUser(
     );
     return;
   }
-
-  const users = strapi.service("admin::user");
-  if (!isAdminUserService(users)) {
-    strapi.log.error(
-      "[bootstrap] admin seed skipped: admin::user.createFirstAdmin is not available in this Strapi version",
-    );
-    return;
-  }
-  if (await users.exists()) return;
 
   try {
     await users.createFirstAdmin(decision.admin);

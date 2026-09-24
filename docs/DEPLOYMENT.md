@@ -566,7 +566,10 @@ In practice you don't run that by hand — use the wrapper:
 infra/deploy.sh
 ```
 
-`deploy.sh` does, in order: (1) pre-deploy Postgres + uploads backup, (2) tags the
+`deploy.sh` does, in order: (0) an env preflight that stops before anything is
+touched when a required key in `infra/.env` is empty or a secret still holds a
+template placeholder (`infra/deploy.sh --check` runs only this step, see
+[§3.8](#38-updates)), (1) pre-deploy Postgres + uploads backup, (2) tags the
 currently running `infra-web` / `infra-cms` images as `:rollback`, (3) rebuilds +
 restarts the stack with the Traefik override, (4) curl smoke-checks
 `https://sinnlos.yurtbay.dev` (override with `SMOKE_URL=`), (5) runs
@@ -609,6 +612,53 @@ docker compose up -d --build
 Either way this is a rolling restart — Postgres and existing volumes are
 untouched. For the manual production-safe sequence (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading an install from before the env contract (FX13)
+
+The env contract got stricter. Before the first deploy that includes it,
+validate the live `infra/.env` without deploying anything:
+
+```bash
+cd /opt/sinnlos && git pull
+infra/deploy.sh --check
+```
+
+It fails (and names the keys, never the values) when:
+
+- **a required key is empty.** Compose now refuses to start without
+  `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`,
+  `JWT_SECRET`, `ENCRYPTION_KEY`, `AUTH_SECRET`, `REVALIDATE_SECRET` and
+  `INTERNAL_UPLOAD_TOKEN` (the last two with the same value for cms and web)
+  as well as `DATABASE_PASSWORD`. Until they are set, the rollback commands
+  in §7.4 fail as well.
+- **a secret still holds a template placeholder** (`change-me…`,
+  `toBeModified…`, `generate-with-openssl…`, `placeholder`, or a `<…>`
+  stand-in). The new cms refuses to boot in production with one in any key
+  from the list above except `AUTH_SECRET`/`DATABASE_PASSWORD`, and it would
+  only do so after `up -d --build` has replaced the running container.
+  `AUTH_SECRET` is checked too, since a placeholder there makes web sessions
+  forgeable. Rotating `JWT_SECRET` or `AUTH_SECRET` signs every user out once.
+  A placeholder `DATABASE_PASSWORD` only warns, because the Postgres volume
+  keeps its password: run `ALTER ROLE … PASSWORD` first, then update the env.
+
+It warns without failing when `SMTP_*` is set and `DIGEST_FROM` (or the
+digest link base `PUBLIC_WEB_URL`) is empty. The compose default for
+`DIGEST_FROM` (`Sinnlos Intranet <noreply@yurtbay.dev>`, the live instance's
+sender) was removed, as was the `DIGEST_REPLY_TO` default
+(`noreply@yurtbay.dev`). A live env that relied on them must set both
+explicitly, or every digest run is skipped with an error log. Strapi's own
+admin mails (password reset) use `DIGEST_FROM` as their sender too.
+`PUBLIC_WEB_URL` now defaults to `WEB_PUBLIC_URL`.
+
+Also no longer read: `APP_NAME`, and the web container no longer receives
+`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_APP_NAME` or `STRAPI_ADMIN_*`. Nothing
+has to change for those.
+
+One manual check the preflight cannot make: if the Strapi super admin was
+ever seeded from the old template (`admin@example.com` /
+`change-me-please`), change its e-mail and password in `/admin` (Settings →
+Users) and clear `STRAPI_ADMIN_*` in `infra/.env`. The cms logs an error on
+every boot while an admin with an `@example.com/.org/.net` e-mail exists.
 
 ### 3.9 Production hardening
 

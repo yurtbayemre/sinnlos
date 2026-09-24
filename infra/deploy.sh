@@ -3,6 +3,9 @@
 # deploy.sh — direct deploy for the 'sinnlos' intranet (docker compose project 'infra').
 #
 # What it does, in order:
+#   0. Preflight of infra/.env against the env contract (FX13): required
+#      keys set, no template placeholder in the secrets. Fails before
+#      anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
@@ -12,9 +15,20 @@
 # Re-run safe. Stops on the first error (set -euo pipefail).
 #
 # Usage:
-#   infra/deploy.sh
+#   infra/deploy.sh           # preflight + full deploy
+#   infra/deploy.sh --check   # preflight only (validate infra/.env), deploys nothing
 #
 set -euo pipefail
+
+CHECK_ONLY=0
+case "${1:-}" in
+  "") ;;
+  --check) CHECK_ONLY=1 ;;
+  *)
+    echo "usage: infra/deploy.sh [--check]" >&2
+    exit 2
+    ;;
+esac
 
 # --- Resolve paths (script lives in infra/) ---------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +46,103 @@ COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}" -f "${COMPOSE_TRAEF
 SMOKE_URL="${SMOKE_URL:-https://sinnlos.yurtbay.dev}"
 
 log() { printf '\n\033[1;34m==>\033[0m %s\n' "$*"; }
+
+# --- 0. Preflight: env contract (FX13) --------------------------------------
+# A live infra/.env from before FX13 can break this deploy in two ways, and
+# both are caught here, before the backup and before any container changes:
+#   - compose `${VAR:?}` keys that are empty: `up` would refuse to start;
+#   - template placeholders in the cms secrets: the new cms image refuses to
+#     boot with NODE_ENV=production (apps/cms/src/utils/env-guard.ts), but
+#     only after `up -d --build` has replaced the running container, so the
+#     site would be down until a rollback.
+# The placeholder rule mirrors isPlaceholderSecret() in env-guard.ts (per
+# comma-separated entry: a <...> stand-in or a change-me / changeme /
+# toBeModified / generate-with-openssl / placeholder marker). AUTH_SECRET is
+# scanned as well: the web has no boot guard of its own, and a placeholder
+# there makes every session forgeable.
+PREFLIGHT_FATAL_KEYS="APP_KEYS API_TOKEN_SALT ADMIN_JWT_SECRET TRANSFER_TOKEN_SALT JWT_SECRET ENCRYPTION_KEY REVALIDATE_SECRET INTERNAL_UPLOAD_TOKEN AUTH_SECRET"
+PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
+
+# Reads `compose config --format json` on stdin (JSON, not YAML: the YAML
+# rendering folds long values across lines) and prints key names only, never
+# a value: "fatal KEY", "warn KEY" or "digest KEY" (SMTP set, but the digest
+# gate in apps/cms/src/digest/send-digests.ts would skip every run).
+preflight_scan() {
+  awk -v fatal_keys="${PREFLIGHT_FATAL_KEYS}" -v warn_keys="${PREFLIGHT_WARN_KEYS}" '
+    function placeholder(v,    n, i, parts, p) {
+      n = split(tolower(v), parts, ",")
+      for (i = 1; i <= n; i++) {
+        p = parts[i]
+        gsub(/^[ \t]+|[ \t]+$/, "", p)
+        if (p == "") continue
+        if (p ~ /^<.*>$/) return 1
+        if (p ~ /change-me|changeme|tobemodified|generate-with-openssl|placeholder/) return 1
+      }
+      return 0
+    }
+    BEGIN {
+      n = split(fatal_keys, k, " "); for (i = 1; i <= n; i++) fatal[k[i]] = 1
+      n = split(warn_keys, k, " "); for (i = 1; i <= n; i++) warn[k[i]] = 1
+    }
+    # Environment entries, one per line: "KEY": "value", (or null).
+    /^[ \t]*"[A-Z][A-Z0-9_]*": / {
+      line = $0; sub(/^[ \t]*"/, "", line)
+      key = line; sub(/".*$/, "", key)
+      val = line; sub(/^[A-Z0-9_]*":[ \t]*/, "", val); sub(/,[ \t]*$/, "", val)
+      if (val == "null") val = ""
+      else if (length(val) >= 2 && substr(val, 1, 1) == "\"" && substr(val, length(val), 1) == "\"")
+        val = substr(val, 2, length(val) - 2)
+      # Go JSON escapes < and > (so a <secret> stand-in arrives as <...>).
+      gsub(/\\u003[cC]/, "<", val); gsub(/\\u003[eE]/, ">", val)
+      env[key] = val
+      if ((key in fatal) && placeholder(val)) print "fatal " key
+      else if ((key in warn) && placeholder(val)) print "warn " key
+    }
+    END {
+      if (env["DIGESTS_DISABLED"] != "1" && env["SMTP_HOST"] != "" && env["SMTP_USER"] != "" && env["SMTP_PASS"] != "") {
+        if (env["PUBLIC_WEB_URL"] ~ /^[ \t]*$/) print "digest PUBLIC_WEB_URL"
+        if (env["DIGEST_FROM"] ~ /^[ \t]*$/) print "digest DIGEST_FROM"
+      }
+    }' | sort -u
+}
+
+log "Preflight: infra/.env against the env contract (FX13)"
+if ! "${COMPOSE[@]}" config -q; then
+  echo "ERROR: docker compose rejected the config — most likely a required key in" >&2
+  echo "       infra/.env is missing or empty (named above). Nothing was changed." >&2
+  echo "       Fill it in (infra/.env.example has the generation hints) and re-run." >&2
+  exit 1
+fi
+findings="$("${COMPOSE[@]}" config --format json 2>/dev/null | preflight_scan)"
+keys_of() { sed -n "s/^$1 //p" <<<"${findings}" | tr '\n' ' '; }
+fatal_keys="$(keys_of fatal)"
+warn_keys="$(keys_of warn)"
+digest_keys="$(keys_of digest)"
+if [[ -n "${warn_keys}" ]]; then
+  echo "WARNING: template placeholder in: ${warn_keys}" >&2
+  echo "         Rotate it (ALTER ROLE ... PASSWORD in Postgres first, then infra/.env);" >&2
+  echo "         the cms only warns about it." >&2
+fi
+if [[ -n "${digest_keys}" ]]; then
+  echo "WARNING: SMTP_* is set but these are empty: ${digest_keys}" >&2
+  echo "         Every e-mail digest run will be skipped (FX13 removed the built-in sender" >&2
+  echo "         and link defaults). Set them in infra/.env, e.g." >&2
+  echo "         DIGEST_FROM='Intranet <noreply@your-domain>', or set DIGESTS_DISABLED=1." >&2
+fi
+if [[ -n "${fatal_keys}" ]]; then
+  echo "ERROR: template placeholder in: ${fatal_keys}" >&2
+  echo "       The cms refuses to start in production with a placeholder secret (and a" >&2
+  echo "       placeholder AUTH_SECRET makes web sessions forgeable). Nothing was changed." >&2
+  echo "       Generate real values (openssl rand -base64 32; -hex 32 for REVALIDATE_SECRET" >&2
+  echo "       and INTERNAL_UPLOAD_TOKEN) and re-run. Rotating JWT_SECRET or AUTH_SECRET" >&2
+  echo "       signs every user out once." >&2
+  exit 1
+fi
+log "Preflight OK"
+if ((CHECK_ONLY)); then
+  echo "  --check: nothing deployed."
+  exit 0
+fi
 
 # --- 1. Pre-deploy database backup ------------------------------------------
 log "Pre-deploy database backup"

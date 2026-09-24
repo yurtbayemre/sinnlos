@@ -1,3 +1,4 @@
+import { reportDigestConfig } from "./digest/send-digests";
 import { seedAdminUser } from "./utils/admin-seed";
 import { hasAudienceBypass } from "./utils/announcement-audience";
 import { enforceSecretGuard } from "./utils/env-guard";
@@ -781,6 +782,9 @@ export default {
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
     await seedAdminUser(strapi);
+    // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
+    // defaults are gone) → say so at boot, not only at the 07:30 run.
+    reportDigestConfig(strapi.log);
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);

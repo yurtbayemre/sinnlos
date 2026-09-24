@@ -1,7 +1,9 @@
 /**
  * FX13 admin seed: placeholders and policy-failing passwords never create a
  * super admin; a valid pair goes through admin::user.createFirstAdmin, and
- * an existing admin means no create call at all. Stub admin service only.
+ * an existing admin means no create call at all. With an admin in place a
+ * refused env only warns, and a template-domain admin is flagged (FX13
+ * review). Stub admin service only.
  */
 import { describe, expect, it } from "vitest";
 
@@ -9,6 +11,7 @@ import {
   adminPasswordProblems,
   evaluateAdminSeed,
   seedAdminUser,
+  TEMPLATE_ADMIN_WHERE,
   type AdminSeedInput,
   type AdminSeedStrapi,
 } from "./admin-seed";
@@ -18,15 +21,31 @@ const VALID = {
   STRAPI_ADMIN_PASSWORD: "Str0ngPassw0rd",
 };
 
-function stubStrapi(opts: { hasAdmin?: boolean; createFails?: boolean; service?: unknown } = {}) {
+const TEMPLATE = {
+  STRAPI_ADMIN_EMAIL: "admin@example.com",
+  STRAPI_ADMIN_PASSWORD: "change-me-please",
+};
+
+function stubStrapi(
+  opts: {
+    hasAdmin?: boolean;
+    /** Result of the template-domain lookup (exists called with a where). */
+    templateAdmin?: boolean | Error;
+    createFails?: boolean;
+    service?: unknown;
+  } = {},
+) {
   const created: AdminSeedInput[] = [];
   const infos: string[] = [];
+  const warns: string[] = [];
   const errors: string[] = [];
-  let existsCalls = 0;
+  const existsWheres: (Record<string, unknown> | undefined)[] = [];
   const adminUserService = {
-    exists: async () => {
-      existsCalls++;
-      return opts.hasAdmin ?? false;
+    exists: async (where?: Record<string, unknown>) => {
+      existsWheres.push(where);
+      if (where === undefined) return opts.hasAdmin ?? false;
+      if (opts.templateAdmin instanceof Error) throw opts.templateAdmin;
+      return opts.templateAdmin ?? false;
     },
     createFirstAdmin: async (attributes: AdminSeedInput) => {
       if (opts.createFails) throw new Error("You cannot register a new super admin");
@@ -39,9 +58,20 @@ function stubStrapi(opts: { hasAdmin?: boolean; createFails?: boolean; service?:
       expect(uid).toBe("admin::user");
       return opts.service !== undefined ? opts.service : adminUserService;
     },
-    log: { info: (m) => infos.push(m), error: (m) => errors.push(m) },
+    log: {
+      info: (m) => infos.push(m),
+      warn: (m) => warns.push(m),
+      error: (m) => errors.push(m),
+    },
   };
-  return { strapi, created, infos, errors, existsCalls: () => existsCalls };
+  return {
+    strapi,
+    created,
+    infos,
+    warns,
+    errors,
+    existsWheres,
+  };
 }
 
 describe("adminPasswordProblems (Strapi admin policy mirror)", () => {
@@ -161,32 +191,73 @@ describe("seedAdminUser", () => {
     expect(s.errors).toEqual([]);
   });
 
-  it("rejects a placeholder with an error log and never touches the admin service", async () => {
+  it("rejects a placeholder on an empty admin table with an error log and no create", async () => {
     const s = stubStrapi();
-    await seedAdminUser(s.strapi, {
-      STRAPI_ADMIN_EMAIL: "admin@example.com",
-      STRAPI_ADMIN_PASSWORD: "change-me-please",
-    });
+    await seedAdminUser(s.strapi, TEMPLATE);
     expect(s.created).toEqual([]);
-    expect(s.existsCalls()).toBe(0);
+    expect(s.existsWheres).toEqual([undefined]);
+    expect(s.warns).toEqual([]);
     expect(s.errors).toHaveLength(1);
     expect(s.errors[0]).toContain("admin seed refused");
+    expect(s.errors[0]).toContain("No admin was created");
     expect(s.errors[0]).not.toContain("change-me-please");
+  });
+
+  it("only warns (remove the values) about a refused env once an admin exists", async () => {
+    const s = stubStrapi({ hasAdmin: true });
+    await seedAdminUser(s.strapi, TEMPLATE);
+    expect(s.created).toEqual([]);
+    expect(s.errors).toEqual([]);
+    expect(s.warns).toHaveLength(1);
+    expect(s.warns[0]).toContain("an admin already exists");
+    expect(s.warns[0]).toContain("Remove STRAPI_ADMIN_EMAIL/STRAPI_ADMIN_PASSWORD");
+    expect(s.warns[0]).not.toContain("No admin was created");
+    expect(s.warns[0]).not.toContain("change-me-please");
   });
 
   it("does not call createFirstAdmin when an admin already exists", async () => {
     const s = stubStrapi({ hasAdmin: true });
     await seedAdminUser(s.strapi, VALID);
-    expect(s.existsCalls()).toBe(1);
+    expect(s.existsWheres).toEqual([undefined, TEMPLATE_ADMIN_WHERE]);
     expect(s.created).toEqual([]);
+    expect(s.warns).toEqual([]);
     expect(s.errors).toEqual([]);
   });
 
-  it("does nothing at all when unconfigured", async () => {
+  it("flags an existing template-domain admin on every boot, configured or not", async () => {
+    for (const env of [{}, VALID, TEMPLATE]) {
+      const s = stubStrapi({ hasAdmin: true, templateAdmin: true });
+      await seedAdminUser(s.strapi, env);
+      expect(s.created).toEqual([]);
+      expect(s.errors).toHaveLength(1);
+      expect(s.errors[0]).toContain("most likely seeded from the old env template");
+    }
+  });
+
+  it("looks for the template admin case-insensitively on every reserved domain", () => {
+    expect(TEMPLATE_ADMIN_WHERE).toEqual({
+      $or: [
+        { email: { $endsWithi: "@example.com" } },
+        { email: { $endsWithi: "@example.org" } },
+        { email: { $endsWithi: "@example.net" } },
+      ],
+    });
+  });
+
+  it("never fails the boot when the template-admin lookup throws", async () => {
+    const s = stubStrapi({ hasAdmin: true, templateAdmin: new Error("db down") });
+    await expect(seedAdminUser(s.strapi, {})).resolves.toBeUndefined();
+    expect(s.errors).toEqual([]);
+    expect(s.warns).toEqual(["[bootstrap] template-admin check failed: db down"]);
+  });
+
+  it("does nothing beyond the existence check when unconfigured", async () => {
     const s = stubStrapi();
     await seedAdminUser(s.strapi, {});
-    expect(s.existsCalls()).toBe(0);
+    expect(s.existsWheres).toEqual([undefined]);
     expect(s.created).toEqual([]);
+    expect(s.infos).toEqual([]);
+    expect(s.warns).toEqual([]);
     expect(s.errors).toEqual([]);
   });
 
@@ -203,5 +274,9 @@ describe("seedAdminUser", () => {
     await seedAdminUser(s.strapi, VALID);
     expect(s.errors).toHaveLength(1);
     expect(s.errors[0]).toContain("createFirstAdmin is not available");
+
+    const unconfigured = stubStrapi({ service: { create: async () => ({}) } });
+    await seedAdminUser(unconfigured.strapi, {});
+    expect(unconfigured.errors).toEqual([]);
   });
 });
