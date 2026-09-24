@@ -126,6 +126,7 @@ describe("strapi() — always no-store", () => {
   it("strips cache/next forced past the StrapiInit type at runtime", async () => {
     const forced = {
       method: "POST",
+      // eslint-disable-next-line no-restricted-syntax -- the forbidden option IS the input under test
       cache: "force-cache",
       // eslint-disable-next-line no-restricted-syntax -- the forbidden option IS the input under test
       next: { revalidate: 60, tags: ["polls"] },

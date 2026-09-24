@@ -32,9 +32,15 @@ export default tseslint.config(
     // server-side copy of Strapi responses — every strapi() read is
     // no-store, see src/lib/strapi.ts. These rules block the ways back in:
     // the Next cache/invalidation APIs, per-fetch `next: { revalidate |
-    // tags }` and the 'use cache' directive. `refresh()` from next/cache
-    // stays allowed. Reintroducing a cache needs a new decision (re-entry
-    // rule, §10), not an eslint-disable.
+    // tags }`, a fetch `cache` mode other than no-store/no-cache, a
+    // route-segment `fetchCache` outside the *-no-store family and the
+    // 'use cache' directive. `fetchCache` matters because it wins inside
+    // Next's patched fetch: with "force-cache" an explicit cache: "no-store"
+    // (revalidate 0) becomes an INFINITE_CACHE entry per JWT (next 16.3.4
+    // server/lib/patch-fetch.js, `case 'force-cache'`), so strapi() cannot
+    // defend against it. `refresh()` from next/cache stays allowed.
+    // Reintroducing a cache needs a new decision (re-entry rule, §10), not
+    // an eslint-disable.
     files: ["**/*.{js,jsx,mjs,cjs,ts,tsx}"],
     rules: {
       "no-restricted-imports": [
@@ -60,9 +66,29 @@ export default tseslint.config(
       "no-restricted-syntax": [
         "error",
         {
+          // Identifier and quoted-string keys alike.
           selector:
-            "Property[key.name='next'] > ObjectExpression > Property[key.name=/^(revalidate|tags)$/]",
+            "Property:matches([key.name='next'], [key.value='next']) > ObjectExpression > Property:matches([key.name=/^(revalidate|tags)$/], [key.value=/^(revalidate|tags)$/])",
           message: "No Next Data Cache options on fetch (D-DC01): Strapi reads are no-store.",
+        },
+        {
+          // Allow-list rather than deny-list: besides "force-cache", the other
+          // literal modes ("only-if-cached", "reload", "default") fall through
+          // to Next's auto-cache path, which can still write a Data Cache
+          // entry (build-time prerender, a segment fetchCache default).
+          selector:
+            "Property:matches([key.name='cache'], [key.value='cache'])[value.type='Literal']:not([value.value=/^no-(store|cache)$/])",
+          message:
+            "Fetch cache mode must be no-store or no-cache (D-DC01): Strapi reads are no-store.",
+        },
+        {
+          // Segment config `export const fetchCache = ...` (pages, layouts,
+          // route handlers). Only force-/default-/only-no-store are allowed;
+          // a non-literal value is flagged too.
+          selector:
+            "VariableDeclarator[id.name='fetchCache']:not([init.value=/^(force|default|only)-no-store$/])",
+          message:
+            "Segment fetchCache must be a *-no-store value (D-DC01): 'force-cache' overrides strapi()'s no-store and caches per JWT.",
         },
         {
           selector: "ExpressionStatement[directive=/^use cache/]",

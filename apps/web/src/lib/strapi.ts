@@ -26,7 +26,11 @@
  *     webhook involved. While Strapi is down pages show the FetchErrorBanner
  *     (lib/safe-fetch.ts), never an old list.
  *   - Never wrap strapi() in React cache(): it also performs mutations.
- * Guarded by the StrapiInit type, the next/cache rules in
+ *   - No route-segment `export const fetchCache` outside the *-no-store
+ *     values: "force-cache" overrides this no-store inside Next's patched
+ *     fetch (revalidate 0 becomes an infinite entry per JWT), which no
+ *     argument handling here can prevent.
+ * Guarded by the StrapiInit type, the D-DC01 rules in
  * apps/web/eslint.config.mjs and strapi.test.ts. A server-side cache may
  * only come back under the decision's re-entry rule (§10).
  */
