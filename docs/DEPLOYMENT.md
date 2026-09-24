@@ -23,6 +23,11 @@ and set up [backup & restore](#backup--restore) for any production environment.
 All methods share the same [prerequisites](#prerequisites) and
 [Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first.
 
+> **Upgrading an instance that runs a release from before 2026-09-24?** Work
+> through [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
+> before you deploy: the env contract is stricter, `JWT_SECRET` must be
+> rotated once, and `infra/deploy.sh` refuses to deploy until both are done.
+
 ---
 
 ## Prerequisites
@@ -156,10 +161,11 @@ MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 MS_TENANT_ID=<your-tenant-id>
 
-# Optional — enables instant cache invalidation on content edits.
-# See "Revalidation webhook" below. Must match REVALIDATE_SECRET in
-# apps/web/.env.local. Skip for bare-metal dev if you don't mind
-# waiting for the ISR timer (30–60s).
+# Optional locally — authenticates the live-event pings the cms sends to
+# Next.js (POST /api/live/emit, see "Live-event ingest" below). Must match
+# REVALIDATE_SECRET in apps/web/.env.local; the name is historical (there
+# is no cache webhook any more). Leave both unset and live updates fall
+# back to polling.
 REVALIDATE_SECRET=<openssl rand -hex 32>
 WEB_INTERNAL_URL=http://localhost:3000
 
@@ -205,6 +211,8 @@ done
 STRAPI_URL=http://localhost:1337
 STRAPI_PUBLIC_URL=http://localhost:1337
 AUTH_SECRET=<openssl rand -base64 32>
+# Its scheme also names the session cookie (https → __Secure-authjs.session-token);
+# the server-side Strapi token reader derives the name the same way.
 AUTH_URL=http://localhost:3000
 AUTH_TRUST_HOST=true
 AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-id>
@@ -212,7 +220,7 @@ AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
 AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id>/v2.0
 
 # Must match REVALIDATE_SECRET in apps/cms/.env (or leave both unset
-# to disable webhook revalidation locally).
+# to disable the live-event pings locally).
 REVALIDATE_SECRET=<same-value-as-cms>
 
 # Must match INTERNAL_UPLOAD_TOKEN in apps/cms/.env when set there.
@@ -300,8 +308,9 @@ JWT_SECRET=<openssl rand -base64 32>
 ENCRYPTION_KEY=<openssl rand -base64 32>
 AUTH_SECRET=<openssl rand -base64 32>
 
-# Shared secret used by the Strapi → Next.js revalidation webhook and the
-# live-event pings (/api/revalidate + /api/live/emit). Both services read it.
+# Shared secret for the internal Strapi → Next.js live-event pings
+# (POST /api/live/emit — its only use; the name is historical). Both
+# services read it.
 REVALIDATE_SECRET=<openssl rand -hex 32>
 
 # Shared secret the web's session-gated /uploads proxy presents to the cms.
@@ -326,8 +335,9 @@ LIVE_EVENTS_DISABLED=0
 # E-mail digests (issue #18): authenticated SMTP submission. Without
 # SMTP_HOST/USER/PASS the digest cron is a logged no-op ("ships dark").
 # Use a mailbox app password (SMTP-only) — never a login password.
-# With SMTP set, DIGEST_FROM is required (the run is skipped with a
-# warning otherwise). Links use PUBLIC_WEB_URL, default WEB_PUBLIC_URL.
+# With SMTP set, DIGEST_FROM is required (otherwise every run is skipped
+# with an error log, and infra/deploy.sh refuses to deploy). Links use
+# PUBLIC_WEB_URL, default WEB_PUBLIC_URL.
 SMTP_HOST=<mail.example.com>
 SMTP_PORT=587
 SMTP_USER=<noreply@example.com>
@@ -478,7 +488,7 @@ ENCRYPTION_KEY=<secret>
 AUTH_SECRET=<secret>
 
 # Shared cms <-> web secrets. Generate with: openssl rand -hex 32
-# REVALIDATE_SECRET guards /api/revalidate + /api/live/emit;
+# REVALIDATE_SECRET guards only the internal /api/live/emit ingest;
 # INTERNAL_UPLOAD_TOKEN lets the web /uploads proxy fetch file bytes
 # (without it every uploaded file answers 404).
 REVALIDATE_SECRET=<secret>
@@ -497,7 +507,8 @@ STRAPI_ADMIN_PASSWORD=
 LIVE_EVENTS_DISABLED=0
 # E-mail digests: without SMTP_HOST/USER/PASS the 07:30 digest cron is a
 # logged no-op. Use a mailbox app password (SMTP-only). With SMTP set,
-# DIGEST_FROM is required; links use PUBLIC_WEB_URL (default WEB_PUBLIC_URL).
+# DIGEST_FROM is required (infra/deploy.sh refuses to deploy without it);
+# links use PUBLIC_WEB_URL (default WEB_PUBLIC_URL).
 SMTP_HOST=<mail.example.com>
 SMTP_PORT=587
 SMTP_USER=<noreply@example.com>
@@ -567,17 +578,38 @@ infra/deploy.sh
 ```
 
 `deploy.sh` does, in order: (0) an env preflight that stops before anything is
-touched when a required key in `infra/.env` is empty or a secret still holds a
-template placeholder (`infra/deploy.sh --check` runs only this step, see
-[§3.8](#38-updates)), (1) pre-deploy Postgres + uploads backup, (2) tags the
-currently running `infra-web` / `infra-cms` images as `:rollback`, (3) rebuilds +
-restarts the stack with the Traefik override, (4) curl smoke-checks
-`https://sinnlos.yurtbay.dev` (override with `SMOKE_URL=`), (5) runs
-`infra/live-smoke.sh` — the end-to-end SSE pipeline probe (comment posted via
-the cms → ping frame on a subscribed stream). Step 5 **fails the deploy**
-when the pipeline delivers no pings; it is skipped with
-`LIVE_EVENTS_DISABLED=1` or when the demo credentials file is absent. It is
-`set -euo pipefail` and re-run safe.
+touched (`infra/deploy.sh --check` runs only this step, see
+[§3.8](#upgrading-an-existing-instance-to-this-release)), (1) pre-deploy
+Postgres + uploads backup, (2) tags the currently running `infra-web` /
+`infra-cms` images as `:rollback`, (3) rebuilds + restarts the stack with the
+Traefik override, (4) curl smoke-checks `https://sinnlos.yurtbay.dev`
+(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh` — the end-to-end
+SSE pipeline probe (comment posted via the cms → ping frame on a subscribed
+stream). Step 5 **fails the deploy** when the pipeline delivers no pings; it
+is skipped with `LIVE_EVENTS_DISABLED=1` or when the demo credentials file is
+absent. It is `set -euo pipefail` and re-run safe.
+
+The preflight fails (naming keys, never values) when:
+
+- a required key in `infra/.env` is empty (`docker compose config` rejects it);
+- a secret still holds a template placeholder (`change-me…`, `changeme`,
+  `toBeModified…`, `generate-with-openssl…`, `placeholder`, or a `<…>`
+  stand-in) in `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`,
+  `TRANSFER_TOKEN_SALT`, `JWT_SECRET`, `ENCRYPTION_KEY`, `REVALIDATE_SECRET`,
+  `INTERNAL_UPLOAD_TOKEN` or `AUTH_SECRET` (a placeholder
+  `DATABASE_PASSWORD` only warns);
+- `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` are set, `DIGESTS_DISABLED` is not `1`,
+  and `DIGEST_FROM` or `PUBLIC_WEB_URL` is empty;
+- `JWT_SECRET` must be rotated: the running `infra-web-1` lacks the image
+  label `org.sinnlos.strapi-jwt=server-only` (i.e. it is a web from before
+  2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
+  be deployed equals the one the running cms uses. A fresh install (no
+  running web/cms) skips this check.
+
+`apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
+placeholder markers and digest rule to the cms guards (`env-guard.ts`,
+`send-digests.ts`), so the preflight cannot silently drift from what the new
+cms refuses at boot.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -591,8 +623,12 @@ systemctl start docker
 
 ### 3.8 Updates
 
-On the Traefik host (mode B), pull and re-run the wrapper — it backs up and
-rollback-tags before rebuilding:
+> **Upgrading from a release before 2026-09-24?** Follow
+> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
+> first: the deploy needs env changes and one `JWT_SECRET` rotation.
+
+On the Traefik host (mode B), pull and re-run the wrapper — it validates
+`infra/.env`, backs up and rollback-tags before rebuilding:
 
 ```bash
 cd /opt/sinnlos
@@ -609,56 +645,205 @@ cd infra
 docker compose up -d --build
 ```
 
-Either way this is a rolling restart — Postgres and existing volumes are
-untouched. For the manual production-safe sequence (and rollback), see the
+Either way Postgres and existing volumes are untouched. It is not a
+zero-downtime restart: compose recreates the changed containers, so the site
+is degraded while the new cms boots. For the manual production-safe sequence
+(and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
-#### Upgrading an install from before the env contract (FX13)
+#### Upgrading an existing instance to this release
 
-The env contract got stricter. Before the first deploy that includes it,
-validate the live `infra/.env` without deploying anything:
+"This release" is the hardening batch of 2026-09-24 (branch
+`feat/hardening-batch-1`). It has **no database schema change and no data
+migration**, but it tightens the env contract, needs one `JWT_SECRET`
+rotation, and signs every user out once. Work through the list in order. The
+"before" steps only edit `infra/.env`; nothing on the running stack changes
+until step 10.
 
-```bash
-cd /opt/sinnlos && git pull
-infra/deploy.sh --check
-```
+**Before the deploy**
 
-It fails (and names the keys, never the values) when:
+1. **Pull and validate the live env, deploying nothing:**
 
-- **a required key is empty.** Compose now refuses to start without
-  `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`,
-  `JWT_SECRET`, `ENCRYPTION_KEY`, `AUTH_SECRET`, `REVALIDATE_SECRET` and
-  `INTERNAL_UPLOAD_TOKEN` (the last two with the same value for cms and web)
-  as well as `DATABASE_PASSWORD`. Until they are set, the rollback commands
-  in §7.4 fail as well.
-- **a secret still holds a template placeholder** (`change-me…`,
-  `toBeModified…`, `generate-with-openssl…`, `placeholder`, or a `<…>`
-  stand-in). The new cms refuses to boot in production with one in any key
-  from the list above except `AUTH_SECRET`/`DATABASE_PASSWORD`, and it would
-  only do so after `up -d --build` has replaced the running container.
-  `AUTH_SECRET` is checked too, since a placeholder there makes web sessions
-  forgeable. Rotating `JWT_SECRET` or `AUTH_SECRET` signs every user out once.
-  A placeholder `DATABASE_PASSWORD` only warns, because the Postgres volume
-  keeps its password: run `ALTER ROLE … PASSWORD` first, then update the env.
+   ```bash
+   cd /opt/sinnlos && git pull      # your checkout on the host
+   infra/deploy.sh --check
+   ```
 
-It warns without failing when `SMTP_*` is set and `DIGEST_FROM` (or the
-digest link base `PUBLIC_WEB_URL`) is empty. The compose default for
-`DIGEST_FROM` (`Sinnlos Intranet <noreply@yurtbay.dev>`, the live instance's
-sender) was removed, as was the `DIGEST_REPLY_TO` default
-(`noreply@yurtbay.dev`). A live env that relied on them must set both
-explicitly, or every digest run is skipped with an error log. Strapi's own
-admin mails (password reset) use `DIGEST_FROM` as their sender too.
-`PUBLIC_WEB_URL` now defaults to `WEB_PUBLIC_URL`.
+   Repeat after each fix below until it prints `Preflight OK`. The rules are
+   listed in [§3.6](#36-deploy). `--check` only renders the compose config and
+   inspects the running containers, so it also validates the `infra/.env` of
+   a standalone Caddy box.
 
-Also no longer read: `APP_NAME`, and the web container no longer receives
-`NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_APP_NAME` or `STRAPI_ADMIN_*`. Nothing
-has to change for those.
+2. **Fill in the newly required keys.** Compose now refuses to start while
+   any of these is empty: `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`,
+   `TRANSFER_TOKEN_SALT`, `JWT_SECRET`, `ENCRYPTION_KEY` (cms), `AUTH_SECRET`
+   (web), `REVALIDATE_SECRET` and `INTERNAL_UPLOAD_TOKEN` (cms and web, one
+   value each), plus `DATABASE_PASSWORD` as before. Until they are set, the
+   rollback commands in [§7.4](#74-update-procedure-production-safe) fail as
+   well.
 
-One manual check the preflight cannot make: if the Strapi super admin was
-ever seeded from the old template (`admin@example.com` /
-`change-me-please`), change its e-mail and password in `/admin` (Settings →
-Users) and clear `STRAPI_ADMIN_*` in `infra/.env`. The cms logs an error on
-every boot while an admin with an `@example.com/.org/.net` e-mail exists.
+3. **Replace template placeholders.** With `NODE_ENV=production` the new cms
+   refuses to boot (`[env-guard] … Refusing to start in production`) while a
+   Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` holds a
+   placeholder, and it would only do so after `up -d --build` has replaced the
+   running container. The preflight also refuses a placeholder `AUTH_SECRET`,
+   which would make web sessions forgeable. A placeholder `DATABASE_PASSWORD`
+   only warns, because the Postgres volume keeps its password: run
+   `ALTER ROLE … PASSWORD` first, then update the env. Rotate only what the
+   preflight names (plus `JWT_SECRET`, step 4). New values have side effects:
+
+   | Secret | Effect of a new value |
+   |---|---|
+   | `JWT_SECRET` | every user signs in again once |
+   | `AUTH_SECRET` | every web session ends; users sign in again |
+   | `ADMIN_JWT_SECRET` | Strapi admin-panel sessions end |
+   | `APP_KEYS` | Strapi session cookies reset |
+   | `API_TOKEN_SALT` / `TRANSFER_TOKEN_SALT` | existing API / transfer tokens stop working |
+   | `ENCRYPTION_KEY` | encrypted admin data (e.g. viewable API-token keys) can no longer be decrypted |
+   | `REVALIDATE_SECRET` / `INTERNAL_UPLOAD_TOKEN` | none, as long as cms and web get the same value (compose passes one value to both) |
+
+4. **Rotate `JWT_SECRET` once. This step is mandatory.** Before this release
+   every signed-in user could read their own Strapi JWT from
+   `GET /api/auth/session`. Those JWTs are valid for 7 days, cannot be
+   revoked one by one, and work against the public `/api/*` until they expire
+   or `JWT_SECRET` changes. Put a fresh value in `infra/.env`
+   (`openssl rand -base64 32`). Effect: everyone signs in once. Open tabs land
+   on `/sign-in?expired=1` at their next page load, and signing in again
+   works. `AUTH_SECRET` does not need rotating: the Auth.js cookie itself was
+   never exposed. The preflight enforces this step. It fails while the
+   running web image lacks the label `org.sinnlos.strapi-jwt=server-only` and
+   `JWT_SECRET` is unchanged. The same holds after a web rollback to an older
+   image: rolling forward again needs another rotation (see
+   [Rolling back this release](#rolling-back-this-release)).
+
+5. **Set the digest sender.** The compose defaults
+   `DIGEST_FROM=Sinnlos Intranet <noreply@yurtbay.dev>` and
+   `DIGEST_REPLY_TO=noreply@yurtbay.dev` (the live instance's sender) are
+   gone, and the cms has no built-in sender any more. With `SMTP_*` set, the
+   preflight **fails** until `DIGEST_FROM` is set. Without it every digest
+   run would be skipped with an error log, and Strapi's own admin mails
+   (password reset) would have no default sender. To keep the previous
+   behaviour of the live instance, add:
+
+   ```dotenv
+   DIGEST_FROM='Sinnlos Intranet <noreply@yurtbay.dev>'
+   DIGEST_REPLY_TO=noreply@yurtbay.dev
+   ```
+
+   Or set `DIGESTS_DISABLED=1`. `PUBLIC_WEB_URL`, the digest link base, now
+   defaults to `WEB_PUBLIC_URL` (before: `https://sinnlos.yurtbay.dev`). Set it
+   only if digest links should point somewhere else.
+
+6. **Check that the host Traefik overwrites `X-Forwarded-For`.** The
+   preflight cannot check this. The cms now trusts `X-Forwarded-For`
+   (`server.proxy.koa`, `apps/cms/config/server.ts`), so its sign-in throttles
+   count per client IP: `POST /api/auth/local` (10 requests per minute,
+   before: one bucket for the whole instance) and `/admin/login` (5 attempts
+   per 5 minutes per e-mail and IP, before: one bucket per admin e-mail). That
+   is only sound while the edge **overwrites** a client-supplied
+   `X-Forwarded-For`. Caddy does by default. The host Traefik's static
+   configuration is not in this repo; it can come from a file, CLI arguments
+   or `TRAEFIK_*` environment variables, so check all three:
+
+   ```bash
+   docker inspect <traefik-container> | grep -i forwardedheaders     # CLI args + env
+   grep -rin forwardedheaders <directory of the traefik static config>
+   ```
+
+   Expected on the `websecure` entrypoint: no `forwardedHeaders.insecure`, and
+   `forwardedHeaders.trustedIPs` only for proxies in front of Traefik that
+   overwrite the header rather than append to it (usually none). Otherwise
+   every client can pick its own throttle bucket, and password guessing
+   against `/admin/login` is effectively unthrottled. Never publish
+   `cms:1337` on a host port either: a caller that reaches the cms directly
+   can set the header itself.
+
+7. **Keep `WEB_PUBLIC_URL` the real public `https://` URL.** Compose passes
+   it to the web as `AUTH_URL`. Its scheme names the session cookie
+   (`__Secure-authjs.session-token`), and the server-side reader of the Strapi
+   JWT derives the cookie name the same way.
+
+8. **Check for an admin seeded from the old template.** If the Strapi super
+   admin was ever created from the old template (`admin@example.com` /
+   `change-me-please`), change its e-mail and password in `/admin` (Settings →
+   Users) and clear `STRAPI_ADMIN_*` in `infra/.env`. The cms logs an error on
+   every boot while an admin with an `@example.com/.org/.net` e-mail exists.
+
+9. **Optional clean-up.** `APP_NAME` is no longer read, and the web container
+   no longer receives `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_APP_NAME` or
+   `STRAPI_ADMIN_*`. Leaving them in `infra/.env` is harmless. Remove
+   `STRAPI_ADMIN_*` once the admin exists.
+
+**Deploy**
+
+10. Run `infra/deploy.sh` on the Traefik host. On a standalone Caddy box, run
+    `docker compose up -d --build` from `infra/` once `infra/deploy.sh --check`
+    passes. Deploy web and cms together, as compose does. The web container is
+    recreated, which also discards the old Next.js fetch cache
+    (`.next/cache/fetch-cache`) in its writable layer. If the old web
+    container was kept for some reason, recreate it:
+    `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --force-recreate web`.
+    Mixed versions during the rollout are harmless: an old cms posting to the
+    removed `/api/revalidate` gets a redirect, which it ignores.
+
+**After the deploy**
+
+11. **cms log** (`docker logs infra-cms-1`): no
+    `[env-guard] … Refusing to start`; one
+    `[bootstrap] revoked N obsolete permission(s)` line with N > 0 on this
+    first boot (later boots log nothing); no `[digest] misconfigured` error
+    when SMTP is set. `[bootstrap] STRAPI_ADMIN_* ignored …` means the keys
+    can be removed (step 9).
+12. **Sessions:** every user signs in once. While signed in,
+    `curl -s -b '__Secure-authjs.session-token=<cookie value>' https://<host>/api/auth/session`
+    returns only `user` (name, email, image, id), `provider` and `expires`, with
+    no Strapi JWT, role or department.
+13. **Role gates** (sign in as each role): admin sees *Admin* and
+    `/manage*`; admin and editor see *New poll* and can create a poll; a guest
+    sees no RSVP controls and no *New ad* button, and `/marketplace/new`
+    redirects; a member can RSVP and post ads. This is a visible change:
+    before this release the web had no role for local non-admin users (and
+    for every Microsoft user), so editors never saw *New poll* and guests saw
+    RSVP and marketplace controls that then failed. The `authenticated`
+    fallback role no longer sees *New ad* either.
+14. **Probes:**
+    - `curl -i -X POST https://<host>/api/Auth/local` answers 404.
+    - `curl -i --path-as-is https://<host>/api/../uploads/<file>` answers 404.
+    - Uploaded images and documents under `/uploads` load for signed-in
+      users. Posting a marketplace ad with 1–4 photos works, and the stored
+      file URLs end in `.jpg`, `.png` or `.webp`.
+    - Sign-in throttling is per client IP: a burst of sign-ins from one
+      address does not block users at other addresses. When Strapi's own
+      throttle answers, the sign-in form says "Too many sign-in attempts —
+      please wait a minute…" instead of "Invalid email or password".
+15. **Strapi admin → Settings → Users & Permissions → Roles:** no role has any
+    poll-vote action; admin and editor have no notification create/update and
+    no comment/kudos/reaction update; admin has no lesson-progress
+    update/delete.
+16. **Live pipeline:** `infra/live-smoke.sh` passed (`deploy.sh` runs it when
+    the demo credentials file is present; otherwise run it by hand).
+17. **After a working day:**
+    `docker exec infra-web-1 sh -c 'ls /app/apps/web/.next/cache/fetch-cache 2>/dev/null | wc -l'`
+    prints `0`. If SMTP is configured, the 07:30 run logs
+    `[digest] run complete …`, not `[digest] skipped: DIGEST_FROM unset …`.
+
+**What users and editors notice** (worth a short release note):
+
+- Everyone signs in once after the deploy.
+- A session lasts at most 7 days from sign-in, the lifetime of its Strapi
+  JWT. Using the site does not extend it.
+- A role change in the Strapi admin applies at the user's next page load,
+  without signing in again.
+- Edits in the Strapi admin show on the next page load. There is no 30–60 s
+  cache delay any more. Pages make a few more internal requests to Strapi,
+  and while Strapi is down, lists show an error banner instead of stale data.
+- Kudos, comments, reactions, notifications and training receipts can no
+  longer be edited through the REST API. Corrections happen in the Strapi
+  admin panel.
+- Strapi's sign-in throttle counts per client IP. An office behind one NAT
+  address still shares one bucket.
+- Unpublished events, polls, departments and teams can no longer be read
+  through the API by anyone but admins and editors.
 
 ### 3.9 Production hardening
 
@@ -675,14 +860,36 @@ extra steps):
   `Permissions-Policy` (`camera=(), microphone=(), geolocation=(), payment=(),
   usb=()`), and HSTS (`max-age=31536000; includeSubDomains`).
 - **Rate limiting** guards brute-force / floods, again at Traefik
-  (rateLimit middleware, **not** an IP allowlist): a single `sinnlos-ratelimit`
-  middleware (avg 100 req/s per client IP, burst 100) applied to the auth
-  router (`/api/auth/*`) and the cms router (`/api`, `/admin`, `/uploads`, …).
-  The web catch-all router deliberately carries **no** rate limit.
+  (rateLimit middleware, **not** an IP allowlist): `sinnlos-ratelimit`
+  (avg 100 req/s per client IP, burst 100) on the auth router (`/api/auth/*`)
+  and the cms router (`/api`, `/admin`, `/upload`, … — not `/uploads`, which
+  goes to web), and `sinnlos-authlimit` (10 req/s, burst 20) on the
+  `sinnlos-signin` router (`POST /sign-in` and `POST /register`). The web
+  catch-all router deliberately carries **no** rate limit. The authoritative
+  login limiter lives in the app (`authorize()` in `apps/web/src/auth.ts`).
+- **Client IP trust.** The cms trusts `X-Forwarded-For`/`-Proto`
+  (`proxy: { koa: true }` in `apps/cms/config/server.ts`). Its sign-in
+  throttles therefore count per client IP (users-permissions
+  `/api/auth/local`: 10 requests per minute; `/admin/login`: 5 attempts per
+  5 minutes per e-mail and IP), and the admin refresh cookie is `Secure`
+  behind the TLS edge. This relies on the edge **overwriting** a
+  client-supplied `X-Forwarded-For`: Caddy does by default; the host
+  Traefik's `websecure` entrypoint must set no `forwardedHeaders.insecure`
+  and list in `forwardedHeaders.trustedIPs` only proxies that overwrite the
+  header. Never publish `cms:1337` on a host port. How to check: step 6 of
+  the [upgrade checklist](#upgrading-an-existing-instance-to-this-release).
+- **Auth-path guard.** Traefik's ``PathPrefix(`/api/auth`)`` is
+  case-sensitive, Strapi's router is not, so `/api/Auth/local` would reach
+  Strapi's own login past the web's login limiter. The cms middleware
+  `global::auth-path-guard` answers every spelling other than the literal
+  lowercase `/api/auth/…` (case variants, `%`-encoded, `//`, `..`) with 404.
 
-> For a standalone Caddy box (mode A) these headers/limits are **not** applied —
-> Caddy only does TLS + routing here. Add equivalent directives to the Caddyfile
-> or front the box with your own proxy if you need them.
+> For a standalone Caddy box (mode A) only part of this applies: the
+> Caddyfile sets `X-Content-Type-Options` and `Referrer-Policy` and removes
+> `Server`, but has no HSTS, no `X-Frame-Options`/`Permissions-Policy` and
+> no rate limit. Add equivalent directives or front the box with your own
+> proxy if you need them. The cms-side guards and the app's login limiter
+> apply either way.
 
 ---
 
@@ -1031,16 +1238,17 @@ az containerapp create \
 
 > The `SMTP_*` block is optional — without it the 07:30 digest cron is a
 > logged no-op. With it, `DIGEST_FROM` and `PUBLIC_WEB_URL` (the digest link
-> base, back-filled in §5.7) are required, or the run is skipped with a
-> warning. `LIVE_EVENTS_DISABLED` must be set to the SAME value on the
+> base, back-filled in §5.7) are required, or every run is skipped with an
+> error log. `LIVE_EVENTS_DISABLED` must be set to the SAME value on the
 > web container (the kill switch is read on both sides), and
 > `INTERNAL_UPLOAD_TOKEN` must be identical on both containers. Replace every
 > `<…>` stand-in: the cms refuses to start in production with a placeholder
 > secret.
 
-> **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to call the Next.js
-> revalidation webhook, but the web app's FQDN only exists after it's deployed.
-> We set it in a follow-up step at the end of section 5.7.
+> **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to send its
+> live-event pings to the Next.js `/api/live/emit` ingest, but the web app's
+> FQDN only exists after it's deployed. We set it in a follow-up step at the
+> end of section 5.7.
 
 **Attach the uploads volume** (must be done via YAML because the CLI create
 doesn't accept volume mounts directly):
@@ -1123,8 +1331,8 @@ az containerapp update \
   --set-env-vars \
       "AUTH_URL=https://$WEB_FQDN"
 
-# Back-fill WEB_INTERNAL_URL on the CMS so its lifecycle hooks can
-# reach the Next.js /api/revalidate webhook. Traffic between the two
+# Back-fill WEB_INTERNAL_URL on the CMS so its live-event pings can
+# reach the Next.js /api/live/emit ingest. Traffic between the two
 # Container Apps stays inside the environment's virtual network even
 # though we're using the public FQDN. PUBLIC_WEB_URL is the link base
 # of the digest e-mails (no default outside compose).
@@ -1162,54 +1370,31 @@ az containerapp update \
 
 ---
 
-## Revalidation Webhook
+## Live-event ingest (cms → web)
 
-Strapi content changes flow to the frontend immediately via a lightweight
-webhook instead of waiting for the Next.js ISR cache to expire (30–60s).
+The web keeps **no server-side cache** of Strapi responses: every Strapi read
+is sent with `cache: "no-store"`, so a content edit shows on the next page
+load and there is nothing to invalidate. The cache-revalidation webhook
+(`POST /api/revalidate`, `apps/cms/src/utils/revalidate.ts`) was removed on
+2026-09-24; that path now falls under the normal session guard.
 
-**Flow:**
-
-```
-┌──────────────┐  afterCreate /      ┌──────────────────────┐
-│   Strapi     │  afterUpdate /      │  Next.js             │
-│   (CMS)      │  afterDelete    →   │  POST /api/revalidate │
-│              │  lifecycle hooks    │  (revalidateTag)     │
-└──────────────┘                     └──────────────────────┘
-     `revalidate()` helper                 `x-revalidate-secret`
-     uses WEB_INTERNAL_URL                 header must match
-     + REVALIDATE_SECRET                   REVALIDATE_SECRET
-```
-
-**Env vars on both services:**
+The one internal cms → web call left is the live-update ping of the SSE
+pipeline: the cms posts content-free events to `POST /api/live/emit`, the only
+web endpoint that needs no session. It is guarded by a shared secret sent as
+the `x-revalidate-secret` header (the names are historical):
 
 | Var                  | On CMS | On Web | Purpose                                              |
 | -------------------- | :----: | :----: | ---------------------------------------------------- |
-| `REVALIDATE_SECRET`  |   ✓    |   ✓    | Shared bearer-style secret; must match on both sides |
+| `REVALIDATE_SECRET`  |   ✓    |   ✓    | Shared secret for `/api/live/emit`; must match on both sides |
 | `WEB_INTERNAL_URL`   |   ✓    |   —    | How the CMS reaches Next.js (e.g. `http://web:3000`) |
 
-**Generate the secret once:**
-
-```bash
-openssl rand -hex 32
-```
-
-Paste the same value into both services' env files.
-
-**Graceful fallback:** if either variable is unset, the CMS helper at
-`apps/cms/src/utils/revalidate.ts` silently skips the webhook call —
-the app still works, but edits take up to 60s to appear on the frontend
-(the normal ISR timer). The `/api/revalidate` endpoint also refuses
-requests whose header doesn't match, so a mismatched pair fails closed.
-
-**Affected content types:** announcement, department, team, wiki-space,
-wiki-page — each has a `lifecycles.ts` that calls `revalidate([...tags])`
-with the cache tags defined in `apps/web/src/lib/strapi.ts`.
-
-Wiki endpoints bypass the Next.js fetch cache entirely (`cache: 'no-store'`)
-because the `wiki-visibility` policy filters results per user; caching by
-URL alone would leak restricted pages across users. The webhook is
-therefore a no-op for those tags, but still invalidates the non-wiki
-content tags when wiki pages touch related data.
+Generate the secret once (`openssl rand -hex 32`) and paste the same value
+into both services' env. If either variable is unset on the cms, it sends no
+pings; if the secret is unset on the web, `/api/live/emit` answers 503 (and
+401 on a mismatch). The app keeps working either way: live updates stop, and
+open pages only refresh through the polling fallback. From outside, `/api/live/emit`
+is unreachable: the edge sends every `/api/*` path except `/api/auth/*` to
+the cms.
 
 ---
 
@@ -1256,11 +1441,34 @@ curl -I <URL>/admin
 2. Click **Sign in with Microsoft** → complete the OIDC flow.
 3. You should land on the dashboard with your display name in the top-right.
 4. In Strapi admin → **Content Manager → User** — confirm your account was
-   auto-created with `microsoftOid`, `displayName`, and an assigned role.
+   auto-created (e-mail = your lowercased user principal name, role
+   `member`).
+
+> **Current state (verified 2026-09-24):** on Strapi 5.49 the Graph
+> enrichment and group → role mapping do not run (the users-permissions
+> extension is inert, see the README note under step 4), so `microsoftOid`
+> and `displayName` stay empty and roles are assigned in the Strapi admin.
+> A new user's first Microsoft sign-in also needs `LOCAL_REGISTRATION=1` on
+> the cms, and the Microsoft provider must be enabled in the Strapi admin
+> (**Settings → Providers**); the `MS_*` env alone does not enable it.
 
 ### 6.4 Role enforcement (optional)
 
-As a non-admin user, try to edit a wiki page you don't own via the Strapi API:
+As a non-admin user, try to edit a wiki page you don't own via the Strapi API.
+You need that user's Strapi JWT. The web no longer hands it out
+(`/api/auth/session` has not carried it since 2026-09-24), and the edge sends
+`/api/auth/*` to Auth.js, so get one for a local test account from inside the
+stack:
+
+```bash
+docker exec infra-web-1 wget -qO- \
+  --header 'Content-Type: application/json' \
+  --post-data '{"identifier":"<test-user-email>","password":"<password>"}' \
+  http://cms:1337/api/auth/local
+# → {"jwt":"<your-strapi-jwt>","user":{…}}
+```
+
+Then:
 
 ```bash
 curl -X PUT <URL>/api/wiki-pages/1 \
@@ -1277,8 +1485,15 @@ curl -X PUT <URL>/api/wiki-pages/1 \
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| MS login succeeds but lands on a Strapi error page | Strapi users-permissions Microsoft provider not enabled or `MS_*` env vars not set |
+| MS login succeeds but lands on a Strapi error page | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
+| cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
+| `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
+| Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
+| Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |
+| Sign-in form says "Too many sign-in attempts" for everyone | Strapi's throttle sees one client IP for all users: the edge does not pass the client's `X-Forwarded-For` (see [§3.9](#39-production-hardening)) |
+| Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back and the user has not signed in again ([Rolling back this release](#rolling-back-this-release)) |
+| `[digest] misconfigured` / `[digest] skipped: DIGEST_FROM unset` in the cms log | SMTP is set without `DIGEST_FROM` or `PUBLIC_WEB_URL` |
 
 ---
 
@@ -1383,10 +1598,11 @@ The manual equivalent (e.g. on a standalone Caddy box):
 # 1. Always back up first
 /opt/sinnlos/infra/backup/pg-backup.sh
 
-# 2. Pull latest code
+# 2. Pull latest code and validate infra/.env (deploys nothing)
 cd /opt/sinnlos && git pull
+infra/deploy.sh --check
 
-# 3. Rebuild and restart (rolling, no data loss)
+# 3. Rebuild and restart (no data loss)
 cd infra && docker compose up -d --build
 
 # 4. Watch the logs until both containers report healthy
@@ -1420,6 +1636,39 @@ GPG artifact first with the off-box private key):
 docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
   < sinnlos-db-<timestamp>.dump
 ```
+
+#### Rolling back this release
+
+Rolling back the 2026-09-24 hardening release to the previous images is
+database-safe: it has no schema change and no migration, so no restore is
+needed. The rollback commands above run with the **new** compose file, so the
+newly required keys must stay set. Expect these side effects until the new
+images are deployed again:
+
+- **Web rollback — roles disappear until users sign in again.** The new web
+  writes no role or department into the session cookie; the old web reads
+  them from there. Every session created by the new web therefore has no
+  role in the old web: an admin loses the *Admin* link and `/manage` until
+  they sign out and in again.
+- **Web rollback — the Strapi JWT is exposed again.** The old web serves each
+  user's Strapi JWT on `/api/auth/session`. When you roll forward, the
+  preflight demands another `JWT_SECRET` rotation (the running web lacks the
+  `org.sinnlos.strapi-jwt=server-only` label), and everyone signs in once
+  more.
+- **Web rollback — the per-user Next.js data cache comes back** (one entry
+  per JWT on disk, possibly stale until its timer expires); the
+  new web discards it again when its container is recreated.
+- **cms rollback — the removed routes and grants come back.** The old
+  bootstrap only adds permissions, so the generic `/api/poll-votes` routes
+  (forged and duplicate votes), notification create/update, comment, kudos
+  and reaction update and lesson-progress update/delete are live again until
+  the new cms is redeployed; its first boot revokes them again. The global
+  relation guard, the root query-key allowlist, the upload body allowlist,
+  `published-only` and the `/api/auth` case guard are gone for that time, too.
+- **cms rollback — the digest sender.** Under the new compose file the old
+  cms receives the `DIGEST_FROM` value from `infra/.env` and no longer its old
+  built-in default. Keep `DIGEST_FROM` set (the preflight requires it with
+  SMTP), or set `DIGESTS_DISABLED=1`.
 
 ---
 
