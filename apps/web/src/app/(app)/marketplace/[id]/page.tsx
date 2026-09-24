@@ -30,15 +30,17 @@ export default async function ClassifiedDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [t, tRel, locale, session, viewer] = await Promise.all([
+  // The ad read needs no role (canManage below is display-only), so it runs
+  // alongside getViewer()'s /api/me read instead of behind it.
+  const [t, tRel, locale, session, viewer, { data, failed }] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
     getViewer(),
+    tryFetch(() => api.classifieds.one(id), "classified"),
   ]);
 
-  const { data, failed } = await tryFetch(() => api.classifieds.one(id), "classified");
   const ad = (data?.data?.[0] ?? null) as Classified | null;
   if (!ad && !failed) notFound();
   if (!ad) {

@@ -56,12 +56,17 @@ export default async function MarketplacePage({
   const { category: rawCategory } = await searchParams;
   const category = rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
 
-  const [t, tRel, locale, session, viewer] = await Promise.all([
+  const today = localDateString(new Date());
+
+  // The ad list needs no role, so it runs alongside getViewer()'s
+  // /api/me read; only the "mine" fetch waits for the role gate.
+  const [t, tRel, locale, session, viewer, listResult] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
     getViewer(),
+    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
   ]);
   const relative = (d: string | undefined) => relativeTime(d, tRel);
 
@@ -69,14 +74,10 @@ export default async function MarketplacePage({
   // Fail-closed allowlist (lib/roles.ts): guest, the `authenticated`
   // fallback and an unreadable role get no create button and no "mine" fetch.
   const canCreate = typeof userId === "number" && canPostAds(viewer.role);
-  const today = localDateString(new Date());
 
-  const [listResult, mineResult] = await Promise.all([
-    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
-    canCreate
-      ? tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
-      : Promise.resolve({ data: null, failed: false }),
-  ]);
+  const mineResult = canCreate
+    ? await tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
+    : { data: null, failed: false };
 
   const ads = (listResult.data?.data ?? []) as Classified[];
   const myAds = (mineResult.data?.data ?? []) as Classified[];

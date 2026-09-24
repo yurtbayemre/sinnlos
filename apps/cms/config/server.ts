@@ -29,9 +29,21 @@ export default ({ env }: { env: Env }) => ({
   // Now the client IP the web forwards as X-Forwarded-For keys the bucket.
   // Spoofing needs direct network access: Traefik and Caddy overwrite a
   // client-supplied X-Forwarded-For, and only containers on the shared
-  // frontend network reach the cms without them (IN04). Side effect,
-  // intended: ctx.request.secure follows X-Forwarded-Proto, so the admin
-  // refresh cookie is Secure behind the TLS edge in production.
+  // frontend network reach the cms without them (IN04). Operator invariant:
+  // that holds for the host Traefik only while its entrypoint trusts no
+  // client X-Forwarded-* (no forwardedHeaders.insecure; trustedIPs only for
+  // proxies that overwrite the header) — Koa takes the LEFTMOST entry and
+  // Strapi sets no maxIpsCount (noted in infra/.env.example and
+  // docker-compose.traefik.yml).
+  // Side effects:
+  //  - intended: ctx.request.secure follows X-Forwarded-Proto, so the admin
+  //    refresh cookie is Secure behind the TLS edge in production.
+  //  - accepted: the admin-panel throttle on POST /admin/login and
+  //    /admin/register-admin (@strapi/admin middlewares/rateLimit.js, key
+  //    `${email}:${path}:${ip}`, 5 per 5 minutes) is now per e-mail AND
+  //    client IP. Before, one global bucket per admin e-mail let anyone lock
+  //    that admin out; now guessing scales with the attacker's IPs, and a
+  //    spoofable X-Forwarded-For would leave it unthrottled.
   proxy: { koa: true },
   // Strapi-native cron (node-schedule via @strapi/core, no extra dep).
   cron: {

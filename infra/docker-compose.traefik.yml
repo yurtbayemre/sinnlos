@@ -2,6 +2,13 @@
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 # Routing spiegelt das Caddyfile: /api/auth/* -> web, Strapi-Pfade -> cms,
 # Rest -> web. TLS via Host-Traefik (certresolver lehttp).
+# Voraussetzung (FX11): der websecure-Entrypoint des Host-Traefik darf
+# client-gesetzte X-Forwarded-* NICHT übernehmen — kein
+# forwardedHeaders.insecure, trustedIPs nur für Proxys, die den Header
+# überschreiben (nicht anhängen). Das CMS vertraut X-Forwarded-For
+# (apps/cms/config/server.ts) und zählt seine Login-Throttles
+# (/api/auth/local, /admin/login) pro Client-IP; ein fälschbarer Header
+# hebelt sie aus.
 services:
   caddy:
     profiles: ["manual"]   # auf diesem Host übernimmt Traefik
