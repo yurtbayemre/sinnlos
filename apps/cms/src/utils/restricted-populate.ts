@@ -75,11 +75,13 @@ function isRestricted(attr: Attribute | undefined, options: RestrictedPopulateOp
   return !attr.target || options.restrictedTargets.has(attr.target);
 }
 
+/** The model a populate below `attr` walks into (undefined = unknown). */
 function nestedModel(attr: Attribute, options: RestrictedPopulateOptions): ModelSchema | undefined {
-  if (attr.type === "relation") return attr.target ? options.getModel(attr.target) : undefined;
-  if (attr.type === "media") return options.getModel(UPLOAD_FILE_UID);
-  if (attr.type === "component") return attr.component ? options.getModel(attr.component) : undefined;
-  return undefined;
+  let uid: string | undefined;
+  if (attr.type === "relation") uid = attr.target;
+  else if (attr.type === "media") uid = UPLOAD_FILE_UID;
+  else if (attr.type === "component") uid = attr.component;
+  return uid ? options.getModel(uid) : undefined;
 }
 
 function ownsRestricted(model: ModelSchema | undefined, options: RestrictedPopulateOptions) {

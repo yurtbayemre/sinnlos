@@ -79,7 +79,12 @@ beforeEach(() => {
 
 describe("comment create payload (FX04)", () => {
   const expected = {
-    data: { body: "hi", targetType: "announcement", targetDocumentId: KNOWN_DOC, author: MEMBER.id },
+    data: {
+      body: "hi",
+      targetType: "announcement",
+      targetDocumentId: KNOWN_DOC,
+      author: MEMBER.id,
+    },
   };
 
   it.each([

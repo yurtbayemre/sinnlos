@@ -37,7 +37,15 @@ const MODELS: Record<string, ModelSchema> = {
   [WIKI_PAGE]: apiSchema("wiki-page"),
   "api::wiki-space.wiki-space": apiSchema("wiki-space"),
   "plugin::users-permissions.user": readSchema(
-    join(__dirname, "..", "extensions", "users-permissions", "content-types", "user", "schema.json"),
+    join(
+      __dirname,
+      "..",
+      "extensions",
+      "users-permissions",
+      "content-types",
+      "user",
+      "schema.json",
+    ),
   ),
   // @strapi/upload 5.49 content-types/file.js (relations only).
   "plugin::upload.file": {
@@ -186,7 +194,9 @@ describe("strip-restricted-populate policy", () => {
     });
 
     it("expands a nested populate=* (the core resets the depth there)", () => {
-      expect(run({ teams: { populate: "*" } })).toEqual({ teams: { populate: TEAM_WITHOUT_PAGES } });
+      expect(run({ teams: { populate: "*" } })).toEqual({
+        teams: { populate: TEAM_WITHOUT_PAGES },
+      });
       expect(run({ teams: { populate: ["*"] } })).toEqual({
         teams: { populate: TEAM_WITHOUT_PAGES },
       });
