@@ -231,7 +231,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::comment.comment.find": ["global::comment-target-visibility"],
   "api::comment.comment.findOne": ["global::comment-target-visibility"],
   "api::comment.comment.create": [],
-  "api::comment.comment.update": [],
   "api::comment.comment.delete": [],
 
   "api::course.course.find": training("course"),
@@ -265,7 +264,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::kudos.kudos.find": [],
   "api::kudos.kudos.findOne": [],
   "api::kudos.kudos.create": [],
-  "api::kudos.kudos.update": [],
   "api::kudos.kudos.delete": ADMIN_OR_EDITOR,
   "api::kudos.kudos.celebrations": [],
 
@@ -275,13 +273,9 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::lesson-progress.lesson-progress.find": ["global::lesson-progress-visibility"],
   "api::lesson-progress.lesson-progress.findOne": ["global::lesson-progress-visibility"],
   "api::lesson-progress.lesson-progress.create": [],
-  "api::lesson-progress.lesson-progress.update": [],
-  "api::lesson-progress.lesson-progress.delete": [],
 
   "api::notification.notification.find": ["global::notification-visibility"],
   "api::notification.notification.findOne": ["global::notification-visibility"],
-  "api::notification.notification.create": ADMIN_OR_EDITOR,
-  "api::notification.notification.update": [],
   "api::notification.notification.delete": ["global::is-notification-recipient"],
   "api::notification.notification.markRead": [],
   "api::notification.notification.markAllRead": [],
@@ -292,11 +286,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::poll.poll.update": ADMIN_OR_EDITOR,
   "api::poll.poll.delete": ADMIN_OR_EDITOR,
 
-  "api::poll-vote.poll-vote.find": ["global::poll-vote-visibility"],
-  "api::poll-vote.poll-vote.findOne": ["global::poll-vote-visibility"],
-  "api::poll-vote.poll-vote.create": [],
-  "api::poll-vote.poll-vote.update": [],
-  "api::poll-vote.poll-vote.delete": [],
   "api::poll-vote.poll-vote.vote": [],
   "api::poll-vote.poll-vote.results": [],
 
@@ -312,7 +301,6 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::reaction.reaction.find": ["global::comment-target-visibility"],
   "api::reaction.reaction.findOne": ["global::comment-target-visibility"],
   "api::reaction.reaction.create": [],
-  "api::reaction.reaction.update": [],
   "api::reaction.reaction.delete": ["global::is-reaction-author"],
 
   "api::search-log.search-log.create": [],
@@ -354,7 +342,6 @@ const ALLOWLIST: Record<string, string> = {
   "api::acknowledgement.acknowledgement.delete": "admin_role-only correction of read receipts",
   "api::classified.classified.find": "internal flea market, staff-readable (guest holds no grant)",
   "api::classified.classified.findOne": "internal flea market, staff-readable (guest holds no grant)",
-  "api::comment.comment.update": "admin_role/editor moderation grant only",
   "api::department.department.find": "org reference data (draft pin + populate: checked below)",
   "api::department.department.findOne": "org reference data (draft pin + populate: checked below)",
   "api::event.event.find": "company calendar (draft pin: checked below)",
@@ -362,26 +349,33 @@ const ALLOWLIST: Record<string, string> = {
   "api::event-rsvp.event-rsvp.delete": "admin_role-only correction",
   "api::kudos.kudos.find": "staff-public kudos wall (guest revoked)",
   "api::kudos.kudos.findOne": "staff-public kudos wall (guest revoked)",
-  "api::kudos.kudos.update": "admin_role/editor moderation grant only",
-  "api::lesson-progress.lesson-progress.update": "admin_role-only correction of receipts",
-  "api::lesson-progress.lesson-progress.delete": "admin_role-only correction of receipts",
   "api::poll.poll.find": "company-wide polls (draft pin: checked below)",
   "api::poll.poll.findOne": "company-wide polls (draft pin: checked below)",
-  "api::reaction.reaction.update": "admin_role/editor moderation grant only",
   "api::team.team.find": "org reference data (draft pin + populate: checked below)",
   "api::team.team.findOne": "org reference data (draft pin + populate: checked below)",
 };
 
-/** Granted, unpoliced, not overridden — and NOT acceptable. */
-const KNOWN_UNGATED = new Set([
-  // FX01: core create/update/delete bypass voter identity, one vote per
-  // user, closesAt and option bounds of the custom /polls/:id/vote.
-  "api::poll-vote.poll-vote.create",
-  "api::poll-vote.poll-vote.update",
-  "api::poll-vote.poll-vote.delete",
-  // FX01: an editor (ALL_ACTIONS) can rewrite any user's notification.
+/**
+ * Granted, unpoliced, not overridden — and NOT acceptable. Empty since FX01
+ * removed the generic poll-vote writes and notification.update.
+ */
+const KNOWN_UNGATED = new Set<string>([]);
+
+/**
+ * Core actions FX01 removed with `only:` — the web never called them. Their
+ * permission rows must be revoked for every role (a removed route leaves its
+ * row behind on existing databases).
+ */
+const FX01_REMOVED = [
+  ...CORE_ACTIONS.map((a) => `api::poll-vote.poll-vote.${a}`),
+  "api::notification.notification.create",
   "api::notification.notification.update",
-]);
+  "api::comment.comment.update",
+  "api::kudos.kudos.update",
+  "api::reaction.reaction.update",
+  "api::lesson-progress.lesson-progress.update",
+  "api::lesson-progress.lesson-progress.delete",
+];
 
 // ---------------------------------------------------------------------------
 // Draft & publish (§5.24). Ids from strapi.db.query span draft AND published
@@ -421,7 +415,6 @@ const VISIBILITY_FILTER_POLICIES = new Set([
   "global::document-visibility",
   "global::lesson-progress-visibility",
   "global::notification-visibility",
-  "global::poll-vote-visibility",
   "global::quick-link-visibility",
   "global::training-visibility",
   "global::wiki-visibility",
@@ -473,7 +466,7 @@ describe("route → policy matrix (S01)", async () => {
   it("loads every router, controller and schema under src/api", () => {
     // Sanity floor: an import or discovery bug must not make the whole
     // matrix pass vacuously.
-    expect(routes.size).toBeGreaterThanOrEqual(100);
+    expect(routes.size).toBeGreaterThanOrEqual(90);
     expect(schemas.size).toBeGreaterThanOrEqual(22);
     expect(controllerMethods.get("api::poll-vote.poll-vote")).toContain("vote");
   });
@@ -620,10 +613,27 @@ describe("route → policy matrix (S01)", async () => {
     });
   });
 
-  describe("known holes (flip to `it` when fixed)", () => {
-    it.fails("FX01: POST/PUT/DELETE /api/poll-votes are gone or gated (forged votes)", () => {
+  describe("fixed holes (regressions)", () => {
+    it("FX01: POST/PUT/DELETE /api/poll-votes are gone or gated (forged votes)", () => {
       for (const action of ["create", "update", "delete"].map((a) => `api::poll-vote.poll-vote.${a}`)) {
         expect(!routes.has(action) || isGated(action), action).toBe(true);
+      }
+    });
+
+    it("FX01: the generic poll-vote router exposes no route at all (decisions/02)", () => {
+      expect([...routes.keys()].filter((a) => a.startsWith("api::poll-vote.poll-vote."))).toEqual([
+        "api::poll-vote.poll-vote.vote",
+        "api::poll-vote.poll-vote.results",
+      ]);
+    });
+
+    it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {
+      for (const action of FX01_REMOVED) {
+        expect(routes.has(action), action).toBe(false);
+        expect(matrixGrants.has(action), action).toBe(false);
+        for (const role of matrixRoles) {
+          expect(REVOKED_PERMISSIONS[role] ?? [], `${role}: ${action}`).toContain(action);
+        }
       }
     });
   });

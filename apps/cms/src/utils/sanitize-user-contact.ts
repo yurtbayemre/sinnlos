@@ -14,7 +14,7 @@
  *     option: Strapi runs validateQuery → throwRestrictedRelations BEFORE
  *     sanitizeQuery, so every guest read that POPULATES or FILTERS a user
  *     relation (author, uploadedBy, organizer, actor, manager, the
- *     notification/poll-vote visibility filters …) would 400. Guest keeps
+ *     notification visibility filter …) would 400. Guest keeps
  *     user.find; the fix is purely on the OUTPUT.
  *   - Marking the fields schema-`private` is NOT an option either: `private`
  *     is absolute and role-independent — it would also hide email/phone/

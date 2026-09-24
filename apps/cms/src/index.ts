@@ -116,23 +116,28 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     // only (the write routes do not even exist, see the routers).
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
-    "api::lesson-progress.lesson-progress": ALL_ACTIONS,
+    // No update/delete (FX01): the routes are gone (`only:`), receipts
+    // are corrected in the Strapi admin. Same for the other trimmed
+    // routers below — see REMOVED_CORE_ACTIONS.
+    "api::lesson-progress.lesson-progress": ["find", "findOne", "create"],
     "api::announcement.announcement": ALL_ACTIONS,
     "api::classified.classified": ALL_ACTIONS,
-    "api::comment.comment": ALL_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": ALL_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // delete deliberately admin-only across ALL roles: removing someone
     // else's RSVP is an admin correction, not a user action.
     "api::event-rsvp.event-rsvp": ALL_ACTIONS,
-    "api::kudos.kudos": ALL_ACTIONS,
-    "api::notification.notification": ALL_ACTIONS,
+    "api::kudos.kudos": [...READ_ACTIONS, "create", "delete"],
+    "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
-    "api::poll-vote.poll-vote": ALL_ACTIONS,
+    // NO poll-vote grants for any role (FX01): votes are cast and counted
+    // only through the custom /polls/:id/vote and /results actions
+    // (CUSTOM_ACTION_GRANTS); the generic /api/poll-votes routes are gone.
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::search-log.search-log": ["create"],
-    "api::reaction.reaction": ALL_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -146,23 +151,25 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     // Full CRUD = moderation: editors may take down any employee ad
     // (is-classified-author passes admin_role/editor unconditionally).
     "api::classified.classified": ALL_ACTIONS,
-    "api::comment.comment": ALL_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // No delete (admin-only); update is ownership-gated by
     // is-event-rsvp-owner — editors change only their OWN answer.
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
-    "api::kudos.kudos": ALL_ACTIONS,
-    "api::notification.notification": ALL_ACTIONS,
+    "api::kudos.kudos": [...READ_ACTIONS, "create", "delete"],
+    // create/update are gone (FX01): notifications are written by the
+    // CMS lifecycles only — the unpoliced core PUT let an editor rewrite
+    // any user's notification.
+    "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
-    "api::poll-vote.poll-vote": ALL_ACTIONS,
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
     "api::lesson-progress.lesson-progress": ["find", "findOne", "create"],
     "api::search-log.search-log": ["create"],
-    "api::reaction.reaction": ALL_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -180,7 +187,6 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -204,7 +210,6 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -230,7 +235,6 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -253,8 +257,8 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
    * controllers run validateQuery (→ throwRestrictedRelations) BEFORE
    * sanitizeQuery, so ANY populate of a user relation (wiki-page.author,
    * comment.author, document.uploadedBy, department.head, team.lead, ...)
-   * — and even the notification/poll-vote visibility filters, which
-   * reference the `recipient`/`voter` user relations — throw a 400 for a
+   * — and even the notification visibility filter, which references the
+   * `recipient` user relation — throw a 400 for a
    * role lacking `user.find`. "Silently stripped" only applies to the
    * later sanitize pass. So guest keeps user.find; the email/phone/hireDate
    * it could therefore read from the directory are now removed OUTPUT-side by
@@ -285,7 +289,6 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::event.event": READ_ACTIONS,
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": READ_ACTIONS,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": READ_ACTIONS,
@@ -317,7 +320,6 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -430,7 +432,7 @@ async function ensurePermission(
  *
  * This applies to `guest` too: revoking it (as an earlier audit attempt
  * did) turned every guest read that populates a user relation — and the
- * notification/poll-vote visibility filters — into a 400. See the OPEN
+ * notification visibility filter — into a 400. See the OPEN
  * ISSUE note on the `guest` matrix above. No role is excluded.
  *
  * `me` is equally required for every role: the web app's sign-in flow
@@ -446,17 +448,46 @@ const USER_UID = "plugin::users-permissions.user";
 const USER_READ_EXCLUDED_ROLES: string[] = [];
 
 /**
+ * Core actions whose routes were removed with `only:` in the routers
+ * (FX01): nothing in the web calls them, and each was either an unpoliced
+ * write or dead attack surface —
+ *   - poll-vote: core create/update/delete bypassed voter identity, one
+ *     vote per user, closesAt and the option bounds of the custom
+ *     /polls/:id/vote (forged and duplicate votes); the generic reads went
+ *     with them (decisions/02-poll-targeting: votes are only ever read
+ *     through the aggregated /polls/:id/results),
+ *   - notification create/update: rows are written by the CMS lifecycles
+ *     only, and the core PUT had no policy at all,
+ *   - comment/kudos/reaction update, lesson-progress update/delete.
+ * Their permission rows are revoked for EVERY role below: a removed route
+ * leaves its row behind (users-permissions only prunes rows of vanished
+ * controller actions), and deleteMany is a no-op where none exists.
+ */
+const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
+  "api::poll-vote.poll-vote": ALL_ACTIONS,
+  "api::notification.notification": ["create", "update"],
+  "api::comment.comment": ["update"],
+  "api::kudos.kudos": ["update"],
+  "api::reaction.reaction": ["update"],
+  "api::lesson-progress.lesson-progress": ["update", "delete"],
+};
+
+/**
  * Permissions granted by earlier versions of this bootstrap that must be
  * removed again. `ensurePermission` only ever ADDS rows, so deleting an
  * entry from the matrix above does not revoke anything on an existing
  * database — list the obsolete (role → action) pairs here instead.
+ *
+ * Must stay disjoint from PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS and the
+ * user reads (otherwise every boot re-adds and deletes the same row) —
+ * pinned by routes.matrix.test.ts.
  */
-export const REVOKED_PERMISSIONS: Record<string, string[]> = {
+const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
   guest: [
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
-    // notification/poll-vote visibility filters). See the guest matrix
-    // OPEN ISSUE note above.
+    // notification visibility filter). See the guest matrix OPEN ISSUE
+    // note above.
     "api::kudos.kudos.find",
     "api::kudos.kudos.findOne",
     "api::kudos.kudos.celebrations",
@@ -471,6 +502,18 @@ export const REVOKED_PERMISSIONS: Record<string, string[]> = {
     "api::classified.classified.findOne",
   ],
 };
+
+export const REVOKED_PERMISSIONS: Record<string, string[]> = Object.fromEntries(
+  Object.keys(PERMISSION_MATRIX).map((roleType) => [
+    roleType,
+    [
+      ...(LEGACY_REVOKED_PERMISSIONS[roleType] ?? []),
+      ...Object.entries(REMOVED_CORE_ACTIONS).flatMap(([uid, actions]) =>
+        (actions ?? []).map((action) => `${uid}.${action}`),
+      ),
+    ],
+  ]),
+);
 
 async function syncRolePermissions(strapi: any) {
   let granted = 0;
