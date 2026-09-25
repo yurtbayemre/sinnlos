@@ -111,11 +111,12 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  * `department_head` and `team_lead` need update on the types they
  * manage; the `can-edit-department`, `can-edit-team` and
  * `can-edit-wiki` policies still scope those updates to their own
- * department/team/authored pages. Department and team updates are also
- * limited to the fields in utils/write-allowlist.ts (FX07).
+ * department/team/authored pages, and to the fields in
+ * utils/write-allowlist.ts (FX07).
  *
  * `member` can update wiki pages they authored (gated by
- * `can-edit-wiki`). `guest` is strict read-only on wiki content.
+ * `can-edit-wiki`, which also keeps them to pages in spaces they can
+ * read). `guest` is strict read-only on wiki content.
  *
  * Exported (with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS) only for
  * the route/grant cross-check in `routes.matrix.test.ts` (roadmap S01).

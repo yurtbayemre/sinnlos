@@ -79,8 +79,23 @@ export type RestrictedRelationRules = Readonly<Record<string, readonly string[]>
  * The trusted sources must share the target's filter domain: their own reads
  * are narrowed by the same policy family, so a path from a visible root
  * never reaches a row that policy would hide (routes.matrix.test.ts pins
- * this). Known gap: wiki-page.parent/children trust that a parent lives in
- * the same space, which the write side does not enforce yet (FX07).
+ * this).
+ *
+ * That also needs the trusted relations to stay inside one wiki space, which
+ * the write side enforces (FX07) for every caller without the admin_role/
+ * editor bypass:
+ *   - wiki-page `space` is create-only and must be a space the caller can
+ *     read; `parent` must be a readable page of the same space, and never
+ *     the page itself or a descendant (can-edit-wiki → utils/write-allowlist.ts,
+ *     utils/wiki-write-targets.ts),
+ *   - `children` and `revisions` (the inverse sides) are not writable at all,
+ *     and neither are department/team `pages`,
+ *   - an existing page is only editable while it sits in a space the caller
+ *     can read, so a write response cannot walk space.pages/parent/children
+ *     of a hidden space,
+ *   - wiki-space and wiki-revision writes are admin/editor-only.
+ * admin/editor writes (content API and admin panel) are trusted to keep a
+ * page's parent in its own space.
  */
 export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   "api::wiki-page.wiki-page": [

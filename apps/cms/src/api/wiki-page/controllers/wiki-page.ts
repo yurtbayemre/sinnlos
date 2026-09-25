@@ -6,6 +6,9 @@ export default factories.createCoreController("api::wiki-page.wiki-page", () => 
     const user = ctx.state.user;
     const data = (ctx.request.body as any)?.data;
 
+    // For callers without the admin_role/editor bypass, can-edit-wiki has
+    // already reduced the payload to the FX07 write allowlist, which admits
+    // revisionSummary as controller input (utils/write-allowlist.ts).
     let revisionSummary: string | undefined;
     if (data && typeof data === "object") {
       // `revisionSummary` is not a schema attribute — the core input
