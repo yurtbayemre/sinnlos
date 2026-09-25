@@ -39,6 +39,8 @@ const stub = vi.hoisted(() => ({
   localJwt: "",
   exchangeExp: 0,
   exchangeJwt: "",
+  /** HTTP status of the Microsoft callback exchange (400 = Strapi 5.51+). */
+  exchangeStatus: 200,
 }));
 
 vi.mock("next/headers", () => ({
@@ -78,6 +80,22 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
     });
   }
   if (url.startsWith(`${STRAPI}/api/auth/microsoft/callback?access_token=`)) {
+    if (stub.exchangeStatus === 400) {
+      // What @strapi/plugin-users-permissions 5.51+ answers a callback that
+      // did not come through its own OAuth (grant) session.
+      return json(
+        {
+          data: null,
+          error: {
+            status: 400,
+            name: "ApplicationError",
+            message: "OAuth authentication requires a completed provider session",
+            details: {},
+          },
+        },
+        400,
+      );
+    }
     return json({
       jwt: stub.exchangeJwt,
       user: {
@@ -178,6 +196,7 @@ beforeEach(() => {
   stub.localJwt = fakeStrapiJwt(stub.localExp);
   stub.exchangeExp = nowSec() + 7 * DAY - 5;
   stub.exchangeJwt = fakeStrapiJwt(stub.exchangeExp, 42);
+  stub.exchangeStatus = 200;
   fetchMock.mockClear();
 });
 
@@ -219,6 +238,10 @@ describe("GET /api/auth/session never exposes the Strapi JWT", () => {
     expect(token).not.toHaveProperty("strapiDepartment");
   });
 
+  // Contract of the jwt callback for a SUCCESSFUL exchange. The CMS no longer
+  // produces one (Strapi 5.51+ answers 400, pinned in the Microsoft describe
+  // below); this stays as the D-SESSION-01 pin for the Microsoft branch until
+  // the Entra exchange (D-ENTRA-01) replaces it.
   it("Microsoft sign-in: the jwt callback stores JWT + exp, and the session omits them", async () => {
     const mod = await load();
     const token = await mod.callbacks.jwt({
@@ -231,7 +254,7 @@ describe("GET /api/auth/session never exposes the Strapi JWT", () => {
         access_token: "graph-access-token",
       },
     });
-    // The current exchange path is unchanged (D-ENTRA-01 replaces it later).
+    // The current exchange path (D-ENTRA-01 replaces it).
     expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
       `${STRAPI}/api/auth/microsoft/callback?access_token=graph-access-token`,
     );
@@ -280,6 +303,61 @@ describe("GET /api/auth/session never exposes the Strapi JWT", () => {
     const body = (await sRes.json()) as Record<string, unknown>;
     expect(body).toMatchObject({ provider: "local", user: { id: 7 } });
     expectNoStrapiSecrets(body, stub.localJwt);
+  });
+});
+
+describe("Microsoft sign-in against Strapi 5.51+ (the exchange is rejected)", () => {
+  const microsoftAccount = {
+    token: { name: "Entra Name", email: "entra@example.test", sub: "entra-oid" },
+    user: { id: "entra-oid", name: "Entra Name", email: "entra@example.test" },
+    account: {
+      provider: "microsoft-entra-id",
+      type: "oidc" as const,
+      providerAccountId: "entra-oid",
+      access_token: "graph-access-token",
+    },
+  };
+
+  it("the 400 fails the sign-in closed, after one attempt and without a session", async () => {
+    const mod = await load();
+    stub.exchangeStatus = 400;
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await expect(mod.callbacks.jwt(microsoftAccount)).rejects.toThrow(
+        /Could not exchange Microsoft access token.*Strapi 5\.51\+ rejects this exchange/,
+      );
+      // A 4xx is not retried: one call, to the users-permissions callback.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
+        `${STRAPI}/api/auth/microsoft/callback?access_token=graph-access-token`,
+      );
+      // Strapi's reason reaches the log for the operator.
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("Strapi JWT exchange failed (attempt 1/3)"),
+        400,
+        expect.stringContaining("OAuth authentication requires a completed provider session"),
+      );
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it("a configured Microsoft sign-in logs an error at boot; none without it", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      await load({
+        AUTH_MICROSOFT_ENTRA_ID_ID: "entra-client-id",
+        AUTH_MICROSOFT_ENTRA_ID_SECRET: "entra-client-secret",
+      });
+      expect(consoleError).toHaveBeenCalledWith(
+        expect.stringContaining("[auth] Microsoft sign-in is configured but cannot complete"),
+      );
+      consoleError.mockClear();
+      await load();
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 
