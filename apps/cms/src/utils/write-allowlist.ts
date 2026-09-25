@@ -254,6 +254,22 @@ const TEAM_EDIT: WriteRule = {
   fields: { description: value(valueChecks.nullableText) },
 };
 
+/*
+ * v2 follow-ups (frontend authoring through the content API), kept OUT of
+ * the table on purpose until each has its own check:
+ *   - media: department `headerImage` and team `avatar` (the admin panel
+ *     sets them today). A media field needs an ownership check first, like
+ *     the classified images (provider_metadata.uploadedBy must be the
+ *     caller), plus a mime check; a bare file id is not enough.
+ *   - team `members` / `lead`: stay admin-managed. Lead-managed membership
+ *     belongs on a dedicated route with its own rules, not in this table.
+ *   - wiki `space` on update (moving a page) stays admin/editor-only; a v2
+ *     move would need the page's whole subtree to follow it.
+ *   - wiki `slug` stays server-derived (uniqueSlugFrom); editable slugs
+ *     need uniqueness that is scoped to what the caller can read.
+ *   - drafts for authors: lift the status pin only together with dropping
+ *     `populate` on draft writes (see the header).
+ */
 export const WRITE_ALLOWLIST = {
   [DEPARTMENT_UID]: {
     update: {
