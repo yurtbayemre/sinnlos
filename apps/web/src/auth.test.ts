@@ -16,6 +16,8 @@ import { decode, encode, type JWT } from "next-auth/jwt";
  *      under the cookie name/salt Auth.js actually used: plain
  *      `authjs.session-token` over http, `__Secure-authjs.session-token`
  *      behind an https AUTH_URL or x-forwarded-proto (lib/strapi-token.ts).
+ *   4. Server-side auth() yields null (fails closed) when Auth.js answers the
+ *      session read with a configuration error.
  */
 const SECRET = "vitest-auth-secret-0123456789-abcdefghijklmnop";
 const STRAPI = "http://strapi.test";
@@ -359,6 +361,33 @@ describe("the Auth.js session ends with the Strapi JWT", () => {
       user: { id: "7", strapiJwt: expired, strapiUserId: 7 },
     });
     expect(result).toBeNull();
+  });
+});
+
+describe("server-side auth() fails closed on an Auth.js configuration error", () => {
+  // proxy.ts and the /uploads route gate on `if (!session)`. On a server
+  // configuration error Auth.js answers the session read with a non-OK
+  // response whose body is an error object; next-auth >= 5.0.0-beta.32
+  // (GHSA-8fpg-xm3f-6cx3) maps that to null instead of returning the truthy
+  // error object as the session.
+  it("a missing AUTH_SECRET yields no session, even with a session cookie", async () => {
+    const valid = await encode({
+      token: { strapiJwt: stub.localJwt, strapiUserId: 7, strapiJwtExp: stub.localExp },
+      secret: SECRET,
+      salt: "authjs.session-token",
+    });
+    const mod = await load({ AUTH_SECRET: undefined });
+    stub.headers = new Headers({
+      cookie: `authjs.session-token=${valid}`,
+      "x-forwarded-proto": "http",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      expect(await mod.auth()).toBeNull();
+      expect(await mod.getStrapiToken()).toBeNull();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
 
