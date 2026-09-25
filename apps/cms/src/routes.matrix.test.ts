@@ -246,7 +246,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::department.department.find": ["global::published-only"],
   "api::department.department.findOne": ["global::published-only"],
   "api::department.department.create": ADMIN_OR_EDITOR,
-  "api::department.department.update": ["global::is-department-head"],
+  "api::department.department.update": ["global::can-edit-department"],
   "api::department.department.delete": ADMIN_OR_EDITOR,
 
   "api::document.document.find": ["global::document-visibility"],
@@ -316,7 +316,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::team.team.find": ["global::published-only"],
   "api::team.team.findOne": ["global::published-only"],
   "api::team.team.create": ADMIN_OR_EDITOR,
-  "api::team.team.update": ["global::is-team-member-or-lead"],
+  "api::team.team.update": ["global::can-edit-team"],
   "api::team.team.delete": ADMIN_OR_EDITOR,
 
   "api::wiki-page.wiki-page.find": wiki("page"),

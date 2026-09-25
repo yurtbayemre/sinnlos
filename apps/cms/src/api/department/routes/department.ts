@@ -13,7 +13,7 @@ export default factories.createCoreRouter("api::department.department", {
     find: { policies: ["global::published-only"] },
     findOne: { policies: ["global::published-only"] },
     create: { policies: ["global::is-admin-or-editor"] },
-    update: { policies: ["global::is-department-head"] },
+    update: { policies: ["global::can-edit-department"] },
     delete: { policies: ["global::is-admin-or-editor"] },
   },
 });

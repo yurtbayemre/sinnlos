@@ -109,9 +109,10 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  * restricts writes to these two roles in practice.
  *
  * `department_head` and `team_lead` need update on the types they
- * manage; the `is-department-head`, `is-team-member-or-lead` and
+ * manage; the `can-edit-department`, `can-edit-team` and
  * `can-edit-wiki` policies still scope those updates to their own
- * department/team/authored pages.
+ * department/team/authored pages. Department and team updates are also
+ * limited to the fields in utils/write-allowlist.ts (FX07).
  *
  * `member` can update wiki pages they authored (gated by
  * `can-edit-wiki`). `guest` is strict read-only on wiki content.

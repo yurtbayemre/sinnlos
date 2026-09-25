@@ -10,7 +10,7 @@ export default factories.createCoreRouter("api::team.team", {
     find: { policies: ["global::published-only"] },
     findOne: { policies: ["global::published-only"] },
     create: { policies: ["global::is-admin-or-editor"] },
-    update: { policies: ["global::is-team-member-or-lead"] },
+    update: { policies: ["global::can-edit-team"] },
     delete: { policies: ["global::is-admin-or-editor"] },
   },
 });

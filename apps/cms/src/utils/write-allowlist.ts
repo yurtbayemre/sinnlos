@@ -500,6 +500,24 @@ export async function enforceWriteAllowlist(
   return true;
 }
 
+// ---------------------------------------------------------------------------
+// What the write policies share
+// ---------------------------------------------------------------------------
+
+export const USER_UID = "plugin::users-permissions.user";
+
+/** The authenticated caller as users-permissions puts it on ctx.state. */
+export interface WriteCaller {
+  id: number;
+  role?: { type?: string } | null;
+}
+
+/** The slice of the Strapi policy context a write policy reads and writes. */
+export interface WritePolicy extends WritePolicyContext {
+  state?: { user?: WriteCaller | null };
+  params?: { id?: unknown };
+}
+
 /** The slice of `strapi` the write policies and their checks use. */
 export interface StrapiDbQuery {
   findOne(params: object): Promise<unknown>;
@@ -508,4 +526,15 @@ export interface StrapiDbQuery {
 
 export interface StrapiDb {
   db: { query(uid: string): StrapiDbQuery };
+}
+
+/**
+ * The `where` for the row a write route targets. v5 routes carry a
+ * documentId; a numeric id is accepted too so direct API consumers keep
+ * working (same gotcha as in the comment controller). null = no target.
+ */
+export function targetRowWhere(idParam: unknown): { id: number } | { documentId: string } | null {
+  if (idParam === undefined || idParam === null || idParam === "") return null;
+  const value = String(idParam);
+  return /^\d+$/.test(value) ? { id: Number(value) } : { documentId: value };
 }
