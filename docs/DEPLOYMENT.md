@@ -187,6 +187,17 @@ STRAPI_ADMIN_PASSWORD=
 > `INTERNAL_UPLOAD_TOKEN` still holds a template placeholder (`change-me…`,
 > `toBeModified…`, `<secret>`).
 
+> **Keep the dev server off the network.** `apps/cms/.env.example` sets
+> `HOST=0.0.0.0`, so `pnpm cms:dev` (`strapi develop`) listens on every
+> interface, and in develop mode Strapi serves its admin panel through the
+> Vite dev server on that same port. Strapi 5.49 and 5.55.1 pin Vite 5.4.21,
+> which has open advisories for its dev server (GHSA-fx2h-pf6j-xcff,
+> GHSA-v6wh-96g9-6wx3, GHSA-4w7w-66w2-5vf9; see
+> [architecture.md §7b P1.7](./architecture.md)). On a machine in a shared
+> network, especially on Windows, set `HOST=127.0.0.1` in `apps/cms/.env`;
+> the `localhost` URLs above keep working. Production (`strapi start`, the
+> Docker image) does not load Vite.
+
 > **Prefer Postgres locally?** Run one with Docker in a single command, set
 > `DATABASE_CLIENT=postgres` and uncomment the Postgres block in `apps/cms/.env`:
 > ```bash
@@ -830,6 +841,12 @@ until step 10.
 **What users and editors notice** (worth a short release note):
 
 - Everyone signs in once after the deploy.
+- A Microsoft sign-in that was already in progress when the web container
+  was replaced may fail once: next-auth 5.0.0-beta.32 (@auth/core 0.41.3)
+  binds the OAuth state/nonce/PKCE check cookies (15-minute lifetime) to the
+  provider, and cookies issued by the old build fail that check. The user
+  lands on the Auth.js error page and the web log shows `InvalidCheck`.
+  Signing in again works. E-mail/password sign-ins are not affected.
 - A session lasts at most 7 days from sign-in, the lifetime of its Strapi
   JWT. Using the site does not extend it.
 - A role change in the Strapi admin applies at the user's next page load,
