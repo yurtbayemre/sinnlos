@@ -48,6 +48,22 @@ describe("forcePublishedStatus", () => {
     expect("publicationState" in query).toBe(false);
   });
 
+  it("deletes the publicationFilter and hasPublishedVersion params", () => {
+    // Both are content-api keys the document service turns into a
+    // publication-cohort filter; non-bypass readers must not steer it.
+    const query: Record<string, unknown> = {
+      status: "draft",
+      publicationFilter: "modified",
+      hasPublishedVersion: "true",
+      filters: { id: { $in: [1] } },
+    };
+    forcePublishedStatus(query);
+    expect(query.status).toBe("published");
+    expect("publicationFilter" in query).toBe(false);
+    expect("hasPublishedVersion" in query).toBe(false);
+    expect(query.filters).toEqual({ id: { $in: [1] } });
+  });
+
   it("mutates in place — the controller reads the SAME object", () => {
     // Returning a copy would be the policyContext.query no-op all over
     // again: sanitizeQuery/validateQuery read `ctx.request.query`.

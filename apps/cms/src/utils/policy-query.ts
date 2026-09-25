@@ -103,10 +103,23 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
  * back-compat shim (or a plugin honouring the legacy name) from
  * re-opening the hole should that pick ever change.
  *
+ * `publicationFilter` (and its deprecated boolean form `hasPublishedVersion`)
+ * are live content-api keys (`SHARED_QUERY_PARAM_KEYS`, @strapi/utils
+ * `content-api-constants.js`, in 5.49 and 5.55.1), so the rest-query-params
+ * pick keeps them. The document service parses
+ * them (`transform/query.js`) and merges a publication-cohort condition
+ * into `filters` under the current status, nested populate sub-queries
+ * included. Rows stay published, but the cohort reveals which published
+ * documents have pending unpublished edits, which is editorial state that
+ * only admin_role / editor should see. Both keys are therefore dropped
+ * here, after the bypass, just like `status` is pinned.
+ *
  * Only for draftAndPublish types — on the others `status` is ignored by
  * the document service anyway, but setting it would be misleading.
  */
 export function forcePublishedStatus(query: Record<string, any>): void {
   query.status = "published";
   delete query.publicationState;
+  delete query.publicationFilter;
+  delete query.hasPublishedVersion;
 }
