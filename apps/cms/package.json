@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "strapi develop",
     "start": "strapi start",
-    "build": "strapi build",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && strapi build",
     "strapi": "strapi",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
