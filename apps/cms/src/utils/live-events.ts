@@ -119,7 +119,7 @@ const WATCHED_UIDS = new Set([
 function relationId(value: unknown): number | null {
   // Relation values arrive in several shapes depending on the write path:
   // a scalar id, { id }, or the { set: [{ id }] } form (see wiki-page
-  // lifecycle fix 4cfb429).
+  // lifecycle fix a195dca).
   if (typeof value === "number") return value;
   if (value && typeof value === "object") {
     const v = value as any;

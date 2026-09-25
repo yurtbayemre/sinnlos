@@ -6,7 +6,7 @@
  * the Caddyfile is the fallback/standalone profile. §1 of
  * docs/architecture.md declares the two synchronized — but nothing enforced
  * it, and the drift was real: /upload + /email were added to the Traefik
- * labels only (commit 91a305a), so a Caddy deploy would have re-triggered
+ * labels only (commit ad7644f), so a Caddy deploy would have re-triggered
  * the media-library crash of 2026-08-15 (admin XHRs answered with a
  * sign-in redirect instead of JSON).
  *
