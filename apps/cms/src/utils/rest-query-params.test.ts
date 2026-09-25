@@ -60,7 +60,7 @@ describe("pickContentApiQueryParams", () => {
   });
 });
 
-describe("why: the core sanitizer keeps raw DB keys without strictParams (@strapi/utils 5.49)", () => {
+describe("why: the core sanitizer keeps raw DB keys without strictParams (@strapi/utils 5.55.1)", () => {
   // isPrivateAttribute reads `strapi.config` for api.responses.privateAttributes.
   afterEach(() => {
     vi.unstubAllGlobals();

@@ -17,8 +17,10 @@ import { errors } from "@strapi/utils";
  *     `filters[pages][body][$startsWith]=Conf`, `sort=pages.title:asc`,
  *     `populate[teams][filters][pages][title][$lt]=M` join on the hidden
  *     rows, so the result depends on their content.
- * validateQuery's throwRestrictedRelations only checks `<target>.find`, which
- * every role holds on wiki-page, so the core lets all of them through.
+ * The core only checks `<target>.find` (validateQuery's
+ * throwRestrictedRelations on filters and sort; in 5.55.1 sanitizePopulate's
+ * removeRestrictedRelations on populate, where 5.49 threw a 400 instead),
+ * which every role holds on wiki-page, so the core lets all of them through.
  *
  * The rule is per RELATION, not per route. `RESTRICTED_RELATION_TARGETS`
  * lists each filtered target with the only source types that may point at
