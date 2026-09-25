@@ -1,4 +1,5 @@
-import { errors } from "@strapi/utils";
+import { randomBytes } from "node:crypto";
+import { errors, strings } from "@strapi/utils";
 import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 
 /**
@@ -45,6 +46,12 @@ import { forcePublishedStatus, getMutableQuery } from "./policy-query";
  *     documentId, never by row id (publish is delete + recreate).
  *   - `callerFields` are set to the caller's user id after the check; the
  *     payload itself may not name them.
+ *   - `derivedFields` are computed by the server from the accepted payload;
+ *     the payload may not name them either. That is how a UNIQUE attribute
+ *     is written: Strapi checks uniqueness on publish against every
+ *     published row of the type, hidden ones included, so a client-chosen
+ *     value would answer "does a hidden row use this value?" (wiki `slug`:
+ *     title + random suffix, see uniqueSlugFrom).
  *   - the write always PUBLISHES: enforceWriteAllowlist pins the query's
  *     `status` to "published", the REST default. A client `?status=draft`
  *     would otherwise save a draft and answer with the DRAFT row, whose
@@ -113,7 +120,12 @@ export interface WriteRule {
   fields: Readonly<Record<string, FieldSpec>>;
   /** Attributes set to the caller's user id; the payload may not name them. */
   callerFields?: readonly string[];
+  /** Attributes the server computes from the accepted payload; the payload may not name them. */
+  derivedFields?: Readonly<Record<string, DerivedField>>;
 }
+
+/** Computes an attribute from the accepted (already checked) payload. */
+export type DerivedField = (accepted: Readonly<Record<string, unknown>>) => unknown;
 
 export type WriteAllowlist = Readonly<
   Record<string, Partial<Record<WriteAction, Readonly<Record<string, WriteRule>>>>>
@@ -123,7 +135,7 @@ export type WriteAllowlist = Readonly<
 // Value checks
 // ---------------------------------------------------------------------------
 
-/** Strapi `string` and `uid` attributes are varchar(255) columns on Postgres. */
+/** Strapi `string` attributes are varchar(255) columns on Postgres. */
 const MAX_STRING_LENGTH = 255;
 const INT32_MIN = -2147483648;
 const INT32_MAX = 2147483647;
@@ -136,12 +148,6 @@ export const valueChecks = {
   /** A non-blank `string` attribute. */
   requiredString: (value: unknown) =>
     isString(value) && value.trim().length > 0 && value.length <= MAX_STRING_LENGTH,
-  /**
-   * A `uid` attribute: the character set Strapi's own uid validator enforces,
-   * which it skips for drafts (content-API writes create drafts).
-   */
-  uid: (value: unknown) =>
-    isString(value) && value.length <= MAX_STRING_LENGTH && /^[A-Za-z0-9\-_.~]+$/.test(value),
   /** `text` / `richtext`: any string, or null to clear. */
   nullableText: (value: unknown) => value === null || isString(value),
   boolean: (value: unknown) => typeof value === "boolean",
@@ -175,13 +181,45 @@ const toOne = (check: RelationCheckName, options: { required?: boolean } = {}): 
 });
 
 // ---------------------------------------------------------------------------
+// Derived fields
+// ---------------------------------------------------------------------------
+
+/** Longest slugified title kept in front of the random suffix. */
+export const SLUG_BASE_MAX_LENGTH = 60;
+/** The base for a title that slugifies to nothing ("写真", "🙂", "---"). */
+export const SLUG_FALLBACK_BASE = "page";
+
+/**
+ * A `uid` value `<slug of accepted[source]>-<8 random hex>`, e.g.
+ * "ueber-uns-3f9a2c1b". The base uses Strapi's own slugify (the admin
+ * panel's uid generator, German transliteration included); the suffix is
+ * random, so whether the value is taken says nothing about any other page,
+ * and two pages with one title still get distinct slugs (32 random bits).
+ * The web resolves a page by space slug + page slug, so any unique value
+ * works as a URL.
+ */
+export function uniqueSlugFrom(source: string): DerivedField {
+  return (accepted) => {
+    const text = accepted[source];
+    const base = (isString(text) ? strings.nameToSlug(text) : "")
+      .slice(0, SLUG_BASE_MAX_LENGTH)
+      .replace(/-+$/, "");
+    const safeBase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(base) ? base : SLUG_FALLBACK_BASE;
+    return `${safeBase}-${randomBytes(4).toString("hex")}`;
+  };
+}
+
+// ---------------------------------------------------------------------------
 // The allowlist
 // ---------------------------------------------------------------------------
 
-/** Wiki page content a non-privileged author may write. */
+/**
+ * Wiki page content a non-privileged author may write. Not `slug`: it is a
+ * globally unique uid, so the server derives it on create (uniqueSlugFrom)
+ * and it stays fixed afterwards (admins and editors may still change it).
+ */
 const WIKI_PAGE_CONTENT = {
   title: value(valueChecks.requiredString),
-  slug: value(valueChecks.uid),
   body: value(valueChecks.nullableText),
   summary: value(valueChecks.nullableText),
   tags: value(valueChecks.tags),
@@ -252,6 +290,7 @@ export const WRITE_ALLOWLIST = {
           parent: toOne("wikiParent"),
         },
         callerFields: ["author", "lastEditor"],
+        derivedFields: { slug: uniqueSlugFrom("title") },
       },
     },
     update: {
@@ -433,7 +472,8 @@ export interface WriteRuleEnvironment {
 
 /**
  * Checks `data` against `rule` and returns the payload to hand to the core:
- * the accepted values, the rewritten relations and the caller fields.
+ * the accepted values, the rewritten relations, the derived fields and the
+ * caller fields.
  * Throws a ValidationError (400) naming every refused key. Keys and plain
  * values are checked before any relation is looked up, so a refused key
  * never costs (or reveals) a database lookup.
@@ -484,6 +524,10 @@ export async function applyWriteRule(
     if (payload !== OMIT) out[key] = payload;
   }
 
+  const accepted = { ...out };
+  for (const [field, derive] of Object.entries(rule.derivedFields ?? {})) {
+    out[field] = derive(accepted);
+  }
   for (const field of rule.callerFields ?? []) out[field] = env.callerId;
   return out;
 }

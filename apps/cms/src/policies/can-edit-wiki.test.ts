@@ -341,8 +341,7 @@ describe("can-edit-wiki policy", () => {
 
   describe("create (department_head / team_lead hold the create grant)", () => {
     const content = {
-      title: "Onboarding",
-      slug: "onboarding",
+      title: "Über uns",
       body: "# Willkommen",
       summary: null,
       tags: ["hr"],
@@ -350,15 +349,37 @@ describe("can-edit-wiki policy", () => {
       order: 3,
     };
 
-    it("accepts content in a readable space and forces author and lastEditor", async () => {
+    it("accepts content in a readable space, forces author and lastEditor, derives the slug", async () => {
       const ctx = context(caller(HEAD), undefined, { ...content, space: "space-handbook" });
       await expect(run(ctx)).resolves.toBe(true);
       expect(dataOf(ctx)).toEqual({
         ...content,
         space: { set: [{ documentId: "space-handbook" }] },
+        slug: expect.stringMatching(/^ueber-uns-[0-9a-f]{8}$/),
         author: HEAD,
         lastEditor: HEAD,
       });
+    });
+
+    it("review: a client slug is refused, so a unique-slug clash cannot probe hidden spaces", async () => {
+      // POST {title, slug: "salaries", space: <public>} answered Strapi's
+      // "This attribute must be unique" when a HIDDEN space used that slug.
+      const ctx = context(caller(LEAD), undefined, {
+        title: "x",
+        slug: "salaries",
+        space: "space-handbook",
+      });
+      await expect(refusal(run(ctx))).resolves.toEqual(refusedAs(["slug"]));
+    });
+
+    it("gives two pages with the same title different slugs", async () => {
+      const slugs = new Set<unknown>();
+      for (let i = 0; i < 5; i++) {
+        const ctx = context(caller(HEAD), undefined, { title: "FAQ", space: "space-handbook" });
+        await expect(run(ctx)).resolves.toBe(true);
+        slugs.add(dataOf(ctx).slug);
+      }
+      expect(slugs.size).toBe(5);
     });
 
     it.each<[string, unknown]>([
@@ -452,7 +473,6 @@ describe("can-edit-wiki policy", () => {
     it("accepts page content and revisionSummary unchanged", async () => {
       const data = {
         title: "Neu",
-        slug: "neu",
         body: "Text",
         summary: "Kurz",
         tags: null,
@@ -535,6 +555,7 @@ describe("can-edit-wiki policy", () => {
       ["team", { team: FRONTEND_TEAM }],
       ["documentId", { documentId: "page-secret" }],
       ["locale", { locale: "en" }],
+      ["slug (fixed after create; a new one would probe hidden slugs)", { slug: "salaries" }],
     ])("refuses %s", async (_label, data) => {
       await expect(refusal(run(update({ title: "T", ...data })))).resolves.toEqual(
         refusedAs(Object.keys(data)),

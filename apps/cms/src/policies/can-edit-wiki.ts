@@ -34,7 +34,9 @@ type PageEditorClass = "author" | "departmentHead" | "teamLead";
  * held by department_head and team_lead only). Role class "author": page
  * content, a required `space` the caller can read and an optional `parent`
  * that is a readable page of that space. author and lastEditor are set to
- * the caller.
+ * the caller, and `slug` is derived from the title plus a random suffix:
+ * Strapi checks slug uniqueness across every published page, hidden spaces
+ * included, so a client-chosen slug would reveal which slugs exist there.
  *
  * Update: the page's author, the head of the page's department or the lead
  * of the page's team (classes "author", "departmentHead", "teamLead", first
@@ -45,7 +47,7 @@ type PageEditorClass = "author" | "departmentHead" | "teamLead";
  * controller still sets lastEditor.
  *
  * Everything else a non-bypass payload carries answers the allowlist's
- * generic 400: `space` on update, `children`, `revisions`, `author`,
+ * generic 400: `slug`, `space` on update, `children`, `revisions`, `author`,
  * `lastEditor`, `department`, `team`, Strapi's own keys. The fields and
  * checks live in utils/write-allowlist.ts and utils/wiki-write-targets.ts.
  * The allowlist also pins `status=published` for these callers, so a

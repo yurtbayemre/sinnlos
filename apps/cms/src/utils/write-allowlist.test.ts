@@ -7,6 +7,7 @@ import {
   MAX_TAG_LENGTH,
   MAX_TAGS,
   MISSING_DATA_MESSAGE,
+  SLUG_BASE_MAX_LENGTH,
   TEAM_UID,
   WIKI_PAGE_UID,
   WRITE_ALLOWLIST,
@@ -14,6 +15,7 @@ import {
   enforceWriteAllowlist,
   isWriteBypassRole,
   parseToOneRelation,
+  uniqueSlugFrom,
   valueChecks,
   writeAllowlistMessage,
   writeRuleFor,
@@ -37,6 +39,7 @@ interface AttributeSchema {
   relation?: string;
   target?: string;
   mappedBy?: string;
+  unique?: boolean;
 }
 
 const API_DIR = join(__dirname, "..", "api");
@@ -179,15 +182,6 @@ describe("valueChecks", () => {
     expect(valueChecks.requiredString(5)).toBe(false);
   });
 
-  it("uid uses Strapi's uid character set", () => {
-    expect(valueChecks.uid("onboarding-2026_v1.0~a")).toBe(true);
-    expect(valueChecks.uid("with space")).toBe(false);
-    expect(valueChecks.uid("slash/es")).toBe(false);
-    expect(valueChecks.uid("")).toBe(false);
-    expect(valueChecks.uid("a".repeat(256))).toBe(false);
-    expect(valueChecks.uid(null)).toBe(false);
-  });
-
   it("nullableText takes a string or null", () => {
     expect(valueChecks.nullableText("")).toBe(true);
     expect(valueChecks.nullableText("# Heading")).toBe(true);
@@ -220,6 +214,39 @@ describe("valueChecks", () => {
     expect(valueChecks.tags([1])).toBe(false);
     expect(valueChecks.tags({ a: 1 })).toBe(false);
     expect(valueChecks.tags("hr")).toBe(false);
+  });
+});
+
+describe("uniqueSlugFrom", () => {
+  const slugOf = (title: unknown) => uniqueSlugFrom("title")({ title }) as string;
+  /** Strapi's uid character set, and at most 255 characters. */
+  const UID = /^[A-Za-z0-9\-_.~]{1,255}$/;
+
+  it("slugifies the title like the admin panel and appends 8 random hex digits", () => {
+    expect(slugOf("Über uns: Größe & Maß")).toMatch(/^ueber-uns-groesse-and-mass-[0-9a-f]{8}$/);
+    expect(slugOf("Onboarding 2026")).toMatch(/^onboarding-2026-[0-9a-f]{8}$/);
+  });
+
+  it("falls back to 'page' for a title that slugifies to nothing, or no title", () => {
+    for (const title of ["写真", "🙂", "---", "", undefined, null, 42]) {
+      expect(slugOf(title), String(title)).toMatch(/^page-[0-9a-f]{8}$/);
+    }
+  });
+
+  it("caps the title part without leaving a dangling separator", () => {
+    const slug = slugOf(`${"a".repeat(SLUG_BASE_MAX_LENGTH - 1)} b c`);
+    expect(slug).toMatch(new RegExp(`^a{${SLUG_BASE_MAX_LENGTH - 1}}-[0-9a-f]{8}$`));
+    expect(slugOf("x".repeat(255)).length).toBe(SLUG_BASE_MAX_LENGTH + 9);
+  });
+
+  it("always yields a valid uid, and a fresh suffix every time", () => {
+    const slugs = new Set<string>();
+    for (let i = 0; i < 50; i++) {
+      const slug = slugOf("FAQ");
+      expect(slug).toMatch(UID);
+      slugs.add(slug);
+    }
+    expect(slugs.size).toBe(50);
   });
 });
 
@@ -413,6 +440,29 @@ describe("applyWriteRule", () => {
     });
   });
 
+  it("computes derived fields from the accepted payload and refuses them from the client", async () => {
+    const seen: Record<string, unknown>[] = [];
+    const derived: WriteRule = {
+      ...RULE,
+      derivedFields: {
+        slug: (accepted) => {
+          seen.push(accepted);
+          return `slug-of-${String(accepted.title)}`;
+        },
+      },
+    };
+    const { checks } = acceptingChecks();
+    const env = { callerId: CALLER, relationChecks: checks };
+    const out = await applyWriteRule({ title: "T", space: "s1" }, derived, env);
+    expect(out.slug).toBe("slug-of-T");
+    expect(seen).toEqual([{ title: "T", space: { set: [{ documentId: "doc-s1" }] } }]);
+
+    const error = await refusal(
+      applyWriteRule({ title: "T", space: "s1", slug: "x" }, derived, env),
+    );
+    expect(error.details).toEqual({ keys: ["slug"] });
+  });
+
   it("fails the request (not a 400) when the policy did not supply a check", async () => {
     const error = await applyWriteRule({ space: "s1" }, RULE, { callerId: CALLER }).catch(
       (e: unknown) => e,
@@ -529,7 +579,7 @@ describe("WRITE_ALLOWLIST", () => {
     expect(fieldsOf(DEPARTMENT_UID, "update", "head")).toEqual(["color", "description"]);
     expect(fieldsOf(TEAM_UID, "update", "lead")).toEqual(["description"]);
     expect(fieldsOf(TEAM_UID, "update", "departmentHead")).toEqual(["description"]);
-    const content = ["body", "order", "slug", "summary", "tags", "title", "tocEnabled"];
+    const content = ["body", "order", "summary", "tags", "title", "tocEnabled"];
     expect(fieldsOf(WIKI_PAGE_UID, "create", "author")).toEqual(
       [...content, "parent", "space"].sort(),
     );
@@ -537,11 +587,15 @@ describe("WRITE_ALLOWLIST", () => {
       expect(fieldsOf(WIKI_PAGE_UID, "update", roleClass), roleClass).toEqual(
         [...content, "parent", "revisionSummary"].sort(),
       );
+      expect(writeRuleFor(WIKI_PAGE_UID, "update", roleClass)?.derivedFields).toBeUndefined();
     }
     expect(writeRuleFor(WIKI_PAGE_UID, "create", "author")?.callerFields).toEqual([
       "author",
       "lastEditor",
     ]);
+    expect(
+      Object.keys(writeRuleFor(WIKI_PAGE_UID, "create", "author")?.derivedFields ?? {}),
+    ).toEqual(["slug"]);
     expect(Object.keys(table).sort()).toEqual([DEPARTMENT_UID, TEAM_UID, WIKI_PAGE_UID].sort());
   });
 
@@ -585,6 +639,24 @@ describe("WRITE_ALLOWLIST", () => {
               expect(attributes[name]?.target, name).toBe("plugin::users-permissions.user");
               expect(Object.keys(rule.fields), name).not.toContain(name);
             }
+          });
+
+          it("derived fields are schema attributes the payload itself may not name", () => {
+            for (const name of Object.keys(rule.derivedFields ?? {})) {
+              expect(attributes[name], name).toBeDefined();
+              expect(Object.keys(rule.fields), name).not.toContain(name);
+              expect(rule.callerFields ?? [], name).not.toContain(name);
+            }
+          });
+
+          it("no client-written field is unique (a clash would reveal hidden rows)", () => {
+            // Strapi checks uid/unique attributes on publish against every
+            // published row of the type, including rows the caller cannot
+            // read. Such attributes belong in derivedFields.
+            const unique = Object.keys(rule.fields).filter(
+              (name) => attributes[name]?.type === "uid" || attributes[name]?.unique === true,
+            );
+            expect(unique).toEqual([]);
           });
         });
       }
