@@ -1,6 +1,9 @@
 # syntax=docker/dockerfile:1
 FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS base
-RUN apk add --no-cache libc6-compat vips-dev build-base python3
+# build-base + python3: node-gyp fallback for better-sqlite3 when its prebuilt
+# binary cannot be fetched. No system libvips: sharp 0.35 has no install
+# script and always loads its bundled @img/sharp-libvips-linuxmusl-x64.
+RUN apk add --no-cache libc6-compat build-base python3
 WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 
@@ -20,7 +23,7 @@ RUN pnpm build
 # NOTE: keep the full node_modules tree in the runtime image — Strapi's
 # admin/runtime resolves packages that a --prod re-install would strip.
 FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
-RUN apk add --no-cache vips-dev && corepack enable && corepack prepare pnpm@9.12.0 --activate
+RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder --chown=node:node /app /app
