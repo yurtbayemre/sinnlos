@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { CUSTOM_ACTION_GRANTS, PERMISSION_MATRIX, REVOKED_PERMISSIONS } from "./index";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
+import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
 
 /**
  * Route → policy golden matrix and grant cross-check (roadmap S01).
@@ -33,7 +34,10 @@ import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restr
  * plus two structural read-side invariants derived from the schemas: every
  * draft & publish type pins `status=published` on its reads (§5.24), and
  * every relation from outside a visibility-filtered type's policy domain
- * into that type is cut by the global relation guard (FX05).
+ * into that type is cut by the global relation guard (FX05); and one on the
+ * write side: a role without the admin_role/editor bypass can write the
+ * relations the guard trusts (and the department/team pages it cuts) only
+ * through a route that enforces the field allowlist (FX07).
  *
  * Known holes start as `it.fails` (the KNOWN_* sets). vitest reports an
  * `it.fails` that starts passing as a failure, so every fix has to flip its
@@ -442,6 +446,26 @@ const USER_SCHEMA_FILE = join(
  */
 const KNOWN_RELATION_LEAKS = new Set<string>([]);
 
+// ---------------------------------------------------------------------------
+// Write allowlists (FX07). The relation guard TRUSTS wiki-page.parent/
+// children, wiki-space.pages and wiki-revision.page to stay inside one wiki
+// space; that only holds while no role without the admin_role/editor bypass
+// can write them freely. The same goes for department.pages and team.pages
+// (they move pages between owners, which feeds can-edit-wiki). So every
+// relation that touches the wiki filter domain is checked per write route:
+// either only bypass roles hold the grant, or the route's policy enforces
+// utils/write-allowlist.ts and no role class may write the relation except
+// through a named relation check.
+// ---------------------------------------------------------------------------
+
+/** The policy that calls enforceWriteAllowlist() for each allowlist entry. */
+const WRITE_ALLOWLIST_ENFORCERS: Record<string, string> = {
+  "api::department.department.update": "global::can-edit-department",
+  "api::team.team.update": "global::can-edit-team",
+  "api::wiki-page.wiki-page.create": "global::can-edit-wiki",
+  "api::wiki-page.wiki-page.update": "global::can-edit-wiki",
+};
+
 describe("route → policy matrix (S01)", async () => {
   const { routes, controllerMethods, schemas } = await load();
 
@@ -651,6 +675,98 @@ describe("route → policy matrix (S01)", async () => {
     it("KNOWN_RELATION_LEAKS only lists detected side channels", () => {
       expect([...KNOWN_RELATION_LEAKS].filter((p) => !sideChannels.has(p))).toEqual([]);
     });
+  });
+
+  describe("write allowlists (FX07)", () => {
+    const allowlist: WriteAllowlist = WRITE_ALLOWLIST;
+    const WRITE_ACTIONS = ["create", "update"] as const;
+    /** Roles without the bypass that hold the grant for `action`. */
+    const restrictedHolders = (action: string) =>
+      (matrixGrants.get(action) ?? []).filter((role) => !isWriteBypassRole(role));
+    const enforcedBy = (action: string) =>
+      policiesOf(action)
+        .map(policyName)
+        .includes(WRITE_ALLOWLIST_ENFORCERS[action] ?? "");
+
+    it("every allowlist entry has a live route whose policy enforces it", () => {
+      const entries = Object.entries(allowlist).flatMap(([uid, actions]) =>
+        Object.keys(actions ?? {}).map((write) => `${uid}.${write}`),
+      );
+      expect(entries.sort()).toEqual(Object.keys(WRITE_ALLOWLIST_ENFORCERS).sort());
+      for (const action of entries) {
+        expect(routes.get(action)?.kind, action).toBe("core");
+        expect(enforcedBy(action), action).toBe(true);
+      }
+    });
+
+    it("every write a restricted role holds on an allowlisted type is enforced", () => {
+      for (const uid of Object.keys(allowlist)) {
+        for (const write of WRITE_ACTIONS) {
+          const action = `${uid}.${write}`;
+          if (!routes.has(action) || restrictedHolders(action).length === 0) continue;
+          expect(enforcedBy(action), action).toBe(true);
+        }
+      }
+    });
+
+    /** Every model a trusted or restricted wiki relation starts or ends at. */
+    const wikiDomain = new Set([
+      ...Object.keys(RESTRICTED_RELATION_TARGETS),
+      ...Object.values(RESTRICTED_RELATION_TARGETS).flat(),
+    ]);
+    /** `<uid>.<relation> <write>` for every write route a restricted role holds. */
+    const guardedWrites = [...schemas].flatMap(([uid, schema]) =>
+      Object.entries(schema.attributes)
+        .filter(
+          ([, def]) =>
+            def.type === "relation" &&
+            def.target !== undefined &&
+            (wikiDomain.has(uid) || wikiDomain.has(def.target)),
+        )
+        .flatMap(([attr]) =>
+          WRITE_ACTIONS.filter((write) => {
+            const action = `${uid}.${write}`;
+            return routes.has(action) && restrictedHolders(action).length > 0;
+          }).map((write) => ({ uid, attr, write })),
+        ),
+    );
+
+    it("sees the wiki-page relations and the department/team pages (rule sanity)", () => {
+      expect(guardedWrites.map(({ uid, attr, write }) => `${uid}.${attr} ${write}`)).toEqual(
+        expect.arrayContaining([
+          "api::wiki-page.wiki-page.space create",
+          "api::wiki-page.wiki-page.space update",
+          "api::wiki-page.wiki-page.parent update",
+          "api::wiki-page.wiki-page.children update",
+          "api::wiki-page.wiki-page.revisions update",
+          "api::department.department.pages update",
+          "api::team.team.pages update",
+        ]),
+      );
+    });
+
+    it("wiki-space and wiki-revision writes stay with admin_role/editor", () => {
+      const writes = ["api::wiki-space.wiki-space", "api::wiki-revision.wiki-revision"].flatMap(
+        (uid) => [...WRITE_ACTIONS, "delete"].map((write) => `${uid}.${write}`),
+      );
+      expect(writes.filter((action) => restrictedHolders(action).length > 0)).toEqual([]);
+    });
+
+    for (const { uid, attr, write } of guardedWrites) {
+      const action = `${uid}.${write}`;
+      const holders = restrictedHolders(action).join(", ");
+      it(`${uid}.${attr} has no unchecked ${write} path [${holders}]`, () => {
+        expect(enforcedBy(action), `${action} policy`).toBe(true);
+        const classes = allowlist[uid]?.[write];
+        expect(classes, `${action} allowlist entry`).toBeDefined();
+        for (const [roleClass, rule] of Object.entries(classes ?? {})) {
+          const spec = Object.prototype.hasOwnProperty.call(rule.fields, attr)
+            ? rule.fields[attr]
+            : undefined;
+          expect(spec === undefined || spec.kind === "relation", `${roleClass}.${attr}`).toBe(true);
+        }
+      });
+    }
   });
 
   describe("fixed holes (regressions)", () => {

@@ -95,7 +95,9 @@ export type RestrictedRelationRules = Readonly<Record<string, readonly string[]>
  *     of a hidden space,
  *   - wiki-space and wiki-revision writes are admin/editor-only.
  * admin/editor writes (content API and admin panel) are trusted to keep a
- * page's parent in its own space.
+ * page's parent in its own space. routes.matrix.test.ts fails when a role
+ * without the bypass gains a write route that could set one of these
+ * relations outside the allowlist.
  */
 export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   "api::wiki-page.wiki-page": [

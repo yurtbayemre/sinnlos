@@ -20,7 +20,9 @@ import { errors } from "@strapi/utils";
  * of this department, "lead" of this team, "author" of this page, ...).
  * The route's write policy decides the row gate and the class, then calls
  * enforceWriteAllowlist() once. That is the only place the payload is
- * checked for that route.
+ * checked for that route. routes.matrix.test.ts pins which policy enforces
+ * which entry, and that every write route a non-bypass role holds on these
+ * types (or on any relation into the wiki) goes through one.
  *
  * For callers WITHOUT a bypass role (admin_role/editor are unchanged):
  *   - every payload key must be listed for the caller's class, otherwise the
