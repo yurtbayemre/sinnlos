@@ -559,6 +559,60 @@ describe("can-edit-wiki policy", () => {
     });
   });
 
+  describe("publication status (review: drafts through the write response)", () => {
+    // PUT /api/wiki-pages/<own>?status=draft&populate[space][populate][pages]
+    // answered with the DRAFT page row, whose space links the space's draft
+    // row, whose pages are every draft of the space: never-published pages
+    // and unpublished edits the read routes pin away. POST did the same for
+    // a department head or team lead without owning any page.
+    const drafty = (ctx: Ctx) => {
+      ctx.request.query = {
+        status: "draft",
+        publicationState: "preview",
+        populate: { space: { populate: { pages: true } } },
+      };
+      return ctx;
+    };
+    const pinned = { status: "published", populate: { space: { populate: { pages: true } } } };
+
+    it("pins an update by the author, a head and a lead to status=published", async () => {
+      for (const ctx of [
+        context(caller(AUTHOR), "page-own", { title: "A" }),
+        context(caller(HEAD), "page-dept", { title: "A" }),
+        context(caller(LEAD), "page-team", { title: "A" }),
+      ]) {
+        await expect(run(drafty(ctx))).resolves.toBe(true);
+        expect(ctx.request.query).toEqual(pinned);
+      }
+    });
+
+    it("pins a create by a department head or team lead to status=published", async () => {
+      for (const who of [HEAD, LEAD]) {
+        const ctx = drafty(
+          context(caller(who), undefined, { title: "T", space: "space-handbook" }),
+        );
+        await expect(run(ctx)).resolves.toBe(true);
+        expect(ctx.request.query).toEqual(pinned);
+      }
+    });
+
+    it("pins the status on a refused payload too", async () => {
+      const ctx = drafty(context(caller(AUTHOR), "page-own", { children: [221] }));
+      await expect(refusal(run(ctx))).resolves.toEqual(refusedAs(["children"]));
+      expect(ctx.request.query.status).toBe("published");
+    });
+
+    it("keeps ?status=draft for admin_role and editor (they author drafts)", async () => {
+      for (const type of ["admin_role", "editor"]) {
+        for (const id of [undefined, "page-own"]) {
+          const ctx = drafty(context({ id: 9, role: { type } }, id, { title: "T" }));
+          await expect(run(ctx)).resolves.toBe(true);
+          expect(ctx.request.query.status, `${type} ${id}`).toBe("draft");
+        }
+      }
+    });
+  });
+
   describe("update (department head / team lead classes)", () => {
     it("applies the same rules to the head of the page's department", async () => {
       const ok = context(caller(HEAD), "page-dept", { body: "x", parent: "page-sibling" });

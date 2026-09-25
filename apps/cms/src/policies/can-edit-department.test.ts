@@ -229,4 +229,27 @@ describe("can-edit-department policy", () => {
       expect((error as Error).message).toBe(MISSING_DATA_MESSAGE);
     });
   });
+
+  describe("publication status (review: drafts through the write response)", () => {
+    // PUT /api/departments/:id?status=draft&populate[teams] answered with the
+    // department's draft row and the DRAFT teams it links.
+    const drafty = (ctx: Ctx) => {
+      ctx.request.query = { status: "draft", populate: { teams: true } };
+      return ctx;
+    };
+
+    it("pins the head's update to status=published", async () => {
+      const ctx = drafty(context(head, DEPARTMENT.documentId, { description: "x" }));
+      await expect(run(ctx, ownDepartment)).resolves.toBe(true);
+      expect(ctx.request.query).toEqual({ status: "published", populate: { teams: true } });
+    });
+
+    it("keeps ?status=draft for admin_role and editor", async () => {
+      for (const type of ["admin_role", "editor"]) {
+        const ctx = drafty(context({ id: 9, role: { type } }, DEPARTMENT.documentId, {}));
+        await expect(run(ctx)).resolves.toBe(true);
+        expect(ctx.request.query.status, type).toBe("draft");
+      }
+    });
+  });
 });

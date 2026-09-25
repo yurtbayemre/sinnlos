@@ -27,7 +27,7 @@ interface CallerRow {
  *     role class "departmentHead".
  *   Both classes may write only what utils/write-allowlist.ts allows
  *   (description). `members`, `lead`, `department`, `pages`, `name` and
- *   media answer 400.
+ *   media answer 400. The write is pinned to `status=published`.
  *   - everyone else: false (403). That now includes plain MEMBERS of the
  *     team (this policy was is-team-member-or-lead): membership and
  *     leadership decide wiki team-space visibility and page edit rights,

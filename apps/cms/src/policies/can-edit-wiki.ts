@@ -48,6 +48,9 @@ type PageEditorClass = "author" | "departmentHead" | "teamLead";
  * generic 400: `space` on update, `children`, `revisions`, `author`,
  * `lastEditor`, `department`, `team`, Strapi's own keys. The fields and
  * checks live in utils/write-allowlist.ts and utils/wiki-write-targets.ts.
+ * The allowlist also pins `status=published` for these callers, so a
+ * `?status=draft` write cannot answer with draft rows through
+ * `populate[space][populate][pages]`, `parent` or `children`.
  *
  * A row the caller may not write is `false` (403), the same for a missing
  * page, a page they do not own and a page in a space they cannot read; the

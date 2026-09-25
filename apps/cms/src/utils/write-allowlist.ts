@@ -1,4 +1,5 @@
 import { errors } from "@strapi/utils";
+import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 
 /**
  * Field-level write allowlists for content-API writes (FX07).
@@ -44,6 +45,17 @@ import { errors } from "@strapi/utils";
  *     documentId, never by row id (publish is delete + recreate).
  *   - `callerFields` are set to the caller's user id after the check; the
  *     payload itself may not name them.
+ *   - the write always PUBLISHES: enforceWriteAllowlist pins the query's
+ *     `status` to "published", the REST default. A client `?status=draft`
+ *     would otherwise save a draft and answer with the DRAFT row, whose
+ *     relations lead to draft rows (a draft links to its targets' drafts),
+ *     so `?populate[space][populate][pages]` or `?populate[teams]` on the
+ *     write response would hand out unpublished content that every read
+ *     route pins away (§5.24, forcePublishedStatus). All three entries are
+ *     draft & publish types; on a type without it `status` only narrows
+ *     populated draft & publish relations to published rows, which is what
+ *     a non-bypass caller reads anyway. Should v2 authoring need drafts,
+ *     drop `populate` on draft writes instead of lifting the pin.
  *
  * Pure: no Strapi runtime. The relation checks come in from the enforcing
  * policy, so this module is unit testable on its own
@@ -478,16 +490,18 @@ export async function applyWriteRule(
 
 /** The slice of the Strapi policy context the enforcement reads and writes. */
 export interface WritePolicyContext {
-  request?: { body?: unknown };
+  /** Koa's ctx.request, shared with the controller (policy-query.ts). */
+  request?: { body?: unknown; query?: Record<string, unknown> };
 }
 
 /**
  * The single enforcement point for a write route: looks up the rule for
- * the caller's class, checks `request.body.data` and replaces it with the
- * sanitized payload. Resolves false when the class has no rule (the policy
- * returns that, i.e. 403); throws a ValidationError (400) on a refused
- * payload; resolves true otherwise. Call it only AFTER the row gate and
- * never for bypass roles.
+ * the caller's class, pins the write to `status=published` (see the header),
+ * checks `request.body.data` and replaces it with the sanitized payload.
+ * Resolves false when the class has no rule (the policy returns that, i.e.
+ * 403); throws a ValidationError (400) on a refused payload; resolves true
+ * otherwise. Call it only AFTER the row gate and never for bypass roles
+ * (admin_role/editor keep `?status=draft`: they author drafts).
  */
 export async function enforceWriteAllowlist(
   policyContext: WritePolicyContext,
@@ -496,6 +510,8 @@ export async function enforceWriteAllowlist(
 ): Promise<boolean> {
   const rule = writeRuleFor(target.uid, target.action, target.roleClass);
   if (!rule) return false;
+  // The REAL query the controller reads, not a policy-context copy (§5.14).
+  forcePublishedStatus(getMutableQuery(policyContext));
   const body = policyContext.request?.body;
   if (!isPlainObject(body)) throw new errors.ValidationError(MISSING_DATA_MESSAGE);
   body.data = await applyWriteRule(body.data, rule, env);

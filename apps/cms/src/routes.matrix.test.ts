@@ -37,7 +37,9 @@ import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils
  * into that type is cut by the global relation guard (FX05); and one on the
  * write side: a role without the admin_role/editor bypass can write the
  * relations the guard trusts (and the department/team pages it cuts) only
- * through a route that enforces the field allowlist (FX07).
+ * through a route that enforces the field allowlist (FX07), and every
+ * draft & publish write such a role holds goes through that allowlist,
+ * which pins `status=published` like the reads.
  *
  * Known holes start as `it.fails` (the KNOWN_* sets). vitest reports an
  * `it.fails` that starts passing as a failure, so every fix has to flip its
@@ -698,6 +700,34 @@ describe("route → policy matrix (S01)", async () => {
         expect(enforcedBy(action), action).toBe(true);
       }
     });
+
+    // The write-side twin of §5.24: enforceWriteAllowlist pins
+    // status=published (write-allowlist.test.ts and each enforcing policy's
+    // test pin that). A draft & publish write route a restricted role holds
+    // outside the allowlist would still honour ?status=draft and answer with
+    // draft rows through populate.
+    const draftWrites = [...schemas]
+      .filter(([, schema]) => schema.options?.draftAndPublish)
+      .flatMap(([uid]) => WRITE_ACTIONS.map((write) => `${uid}.${write}`))
+      .filter((action) => routes.has(action) && restrictedHolders(action).length > 0);
+
+    it("sees the department, team and wiki-page writes (rule sanity)", () => {
+      expect(draftWrites).toEqual(
+        expect.arrayContaining([
+          "api::department.department.update",
+          "api::team.team.update",
+          "api::wiki-page.wiki-page.create",
+          "api::wiki-page.wiki-page.update",
+        ]),
+      );
+    });
+
+    for (const action of draftWrites) {
+      it(`${action} publishes for [${restrictedHolders(action).join(", ")}] (status pinned)`, () => {
+        expect(action in WRITE_ALLOWLIST_ENFORCERS, `${action} allowlist entry`).toBe(true);
+        expect(enforcedBy(action), `${action} policy`).toBe(true);
+      });
+    }
 
     it("every write a restricted role holds on an allowlisted type is enforced", () => {
       for (const uid of Object.keys(allowlist)) {

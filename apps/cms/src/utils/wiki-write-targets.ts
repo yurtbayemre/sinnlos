@@ -26,9 +26,13 @@ import {
  * it sits in, and these callers read published rows only. Draft & publish
  * makes that per DOCUMENT, not per row: every space and page has a draft row
  * and maybe a published one, and the two can differ (an editor's move that
- * is not published yet). A write links DRAFT rows (the document service
- * connects a draft to the target's draft), and the write response populates
- * from there. So:
+ * is not published yet). A write stores the relation on the page's DRAFT row
+ * (the document service connects a draft to the target's draft) and then
+ * publishes, which links the new published row to the target's published
+ * row. These callers always publish (the allowlist pins `status`), so the
+ * write response populates from published rows, but the draft link stays
+ * and becomes the published one when an editor publishes the target's
+ * pending state. So:
  *   - a space is usable when it has a published row and EVERY row of it is
  *     in the caller's visible set,
  *   - a page is a readable parent when it has a published row and EVERY row

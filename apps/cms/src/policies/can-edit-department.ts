@@ -24,6 +24,8 @@ interface CallerRow {
  *     role class "head", limited to the fields utils/write-allowlist.ts
  *     allows it (description, colour). Any other key, e.g. a `pages`,
  *     `members` or `teams` connect, `head`, `name` or media, answers 400.
+ *     The write is pinned to `status=published` (no draft rows through
+ *     `?status=draft&populate[teams]`).
  *   - everyone else, a missing target or an unknown row: false (403).
  *
  * The row gate runs before the payload is looked at, so a caller who may

@@ -452,6 +452,46 @@ describe("enforceWriteAllowlist", () => {
     expect(error.message).toBe(MISSING_DATA_MESSAGE);
   });
 
+  it("pins the write to status=published on the request query the controller reads", async () => {
+    // ?status=draft&populate[...] would answer with draft rows (FX07 review).
+    const query: Record<string, unknown> = {
+      status: "draft",
+      publicationState: "preview",
+      populate: { teams: { fields: ["description"] } },
+    };
+    const request = { body: { data: { description: "x" } }, query };
+    await expect(
+      enforceWriteAllowlist({ request }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+    ).resolves.toBe(true);
+    expect(request.query).toBe(query);
+    expect(query).toEqual({
+      status: "published",
+      populate: { teams: { fields: ["description"] } },
+    });
+  });
+
+  it("pins the status before looking at the payload, and even without a client query", async () => {
+    const refused = { body: { data: { members: [1] } }, query: { status: "draft" } };
+    await refusal(
+      enforceWriteAllowlist({ request: refused }, { ...TEAM, roleClass: "lead" }, { callerId: 1 }),
+    );
+    expect(refused.query).toEqual({ status: "published" });
+
+    const bare: { body: unknown; query?: Record<string, unknown> } = {
+      body: { data: { description: "x" } },
+    };
+    await enforceWriteAllowlist({ request: bare }, { ...TEAM, roleClass: "lead" }, { callerId: 1 });
+    expect(bare.query).toEqual({ status: "published" });
+  });
+
+  it("leaves the query alone for a class without a rule (the policy answers 403)", async () => {
+    const request = { body: { data: {} }, query: { status: "draft" } };
+    await expect(
+      enforceWriteAllowlist({ request }, { ...TEAM, roleClass: "member" }, { callerId: 1 }),
+    ).resolves.toBe(false);
+    expect(request.query).toEqual({ status: "draft" });
+  });
+
   it("does not resolve inherited property names as classes", () => {
     for (const name of ["constructor", "__proto__", "toString", "hasOwnProperty"]) {
       expect(writeRuleFor(TEAM_UID, "update", name), name).toBeUndefined();

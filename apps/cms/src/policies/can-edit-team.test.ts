@@ -223,4 +223,33 @@ describe("can-edit-team policy", () => {
       ).resolves.toBe(false);
     });
   });
+
+  describe("publication status (review: drafts through the write response)", () => {
+    const drafty = (ctx: Ctx) => {
+      ctx.request.query = { status: "draft", populate: { department: true } };
+      return ctx;
+    };
+
+    it("pins the lead's and the department head's update to status=published", async () => {
+      for (const [caller, records] of [
+        [lead, []],
+        [deptHead, headOfEngineering],
+      ] as const) {
+        const ctx = drafty(context(caller, TEAM.documentId));
+        await expect(run(ctx, [...records])).resolves.toBe(true);
+        expect(ctx.request.query, caller.role.type).toEqual({
+          status: "published",
+          populate: { department: true },
+        });
+      }
+    });
+
+    it("keeps ?status=draft for admin_role and editor", async () => {
+      for (const type of ["admin_role", "editor"]) {
+        const ctx = drafty(context({ id: 9, role: { type } }, TEAM.documentId));
+        await expect(run(ctx)).resolves.toBe(true);
+        expect(ctx.request.query.status, type).toBe("draft");
+      }
+    });
+  });
 });

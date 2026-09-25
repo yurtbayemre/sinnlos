@@ -93,6 +93,9 @@ export type RestrictedRelationRules = Readonly<Record<string, readonly string[]>
  *   - an existing page is only editable while it sits in a space the caller
  *     can read, so a write response cannot walk space.pages/parent/children
  *     of a hidden space,
+ *   - those writes always publish (enforceWriteAllowlist pins `status`, as
+ *     the read policies do), so a write response populates published rows
+ *     only and never the drafts the read routes hide,
  *   - wiki-space and wiki-revision writes are admin/editor-only.
  * admin/editor writes (content API and admin panel) are trusted to keep a
  * page's parent in its own space. routes.matrix.test.ts fails when a role
