@@ -33,6 +33,15 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > stored on the session: `getViewer()` reads them per request. The generic
 > `/api/poll-votes` routes no longer exist; votes go only through the custom
 > `vote`/`results` routes.
+>
+> **Status update (2026-09-25):** hardening batch 2 moves the cms to Strapi
+> 5.55.1. **Microsoft sign-in is unavailable** on that release (Strapi's
+> users-permissions 5.51+ rejects the web's access-token exchange) until the
+> planned Entra redesign ships; local sign-in is the supported path. Content-API
+> writes on wiki pages, departments and teams by non-admin roles are limited to
+> per-role field allowlists (hardening item FX07, done):
+> `apps/cms/src/utils/write-allowlist.ts` is the one place to extend for any
+> frontend authoring, such as a web wiki editor (docs/architecture.md §5.34).
 
 ## Why this is cheaper than it looks
 
@@ -53,8 +62,9 @@ Three architectural decisions already made carry most of the weight:
    was meant to sync profile data from Microsoft Graph at sign-in, so the
    directory and celebrations features could extend it instead of building
    a sync job. (Verified 2026-09-24: on Strapi 5.49 this extension is inert —
-   it patches the controller factory, not the controller. A redesign of the
-   Entra sign-in replaces it.)
+   it patches the controller factory, not the controller. Since the Strapi
+   5.55.1 upgrade Microsoft sign-in does not complete at all. A redesign of
+   the Entra sign-in replaces it.)
 
 Every new content type follows the same recipe:
 schema in `apps/cms/src/api/<name>/`, permissions added to the
