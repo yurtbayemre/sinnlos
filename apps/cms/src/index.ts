@@ -454,9 +454,9 @@ async function ensurePermission(
  * fallback in `apps/web/src/auth.ts` left sessions without a role — which
  * in turn hid all role-gated UI (e.g. the admin "/manage" nav entry).
  */
-const USER_READ_ACTIONS: (CrudAction | "me")[] = ["find", "findOne", "me"];
-const USER_UID = "plugin::users-permissions.user";
-const USER_READ_EXCLUDED_ROLES: string[] = [];
+export const USER_READ_ACTIONS: (CrudAction | "me")[] = ["find", "findOne", "me"];
+export const USER_UID = "plugin::users-permissions.user";
+export const USER_READ_EXCLUDED_ROLES: string[] = [];
 
 /**
  * Core actions whose routes were removed with `only:` in the routers
