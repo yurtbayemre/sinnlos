@@ -6,7 +6,8 @@
 #   0. Preflight of infra/.env against the env contract (FX13): required
 #      keys set, no template placeholder in the secrets, digest sender set
 #      when SMTP is, JWT_SECRET rotated when the running web still exposed
-#      Strapi JWTs (D-SESSION-01). Fails before anything is touched.
+#      Strapi JWTs (D-SESSION-01), no Microsoft sign-in configured (it
+#      cannot complete on Strapi 5.51+). Fails before anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
@@ -66,10 +67,14 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 
 # Reads `compose config --format json` on stdin (JSON, not YAML: the YAML
 # rendering folds long values across lines) and prints key names only, never
-# a value: "fatal KEY", "warn KEY" or "digest KEY" (SMTP set, but the digest
-# gate in apps/cms/src/digest/send-digests.ts would skip every run).
-# The key lists, the markers and the digest rule are pinned against
-# env-guard.ts and send-digests.ts by apps/cms/src/utils/deploy-preflight.test.ts.
+# a value: "fatal KEY", "warn KEY", "digest KEY" (SMTP set, but the digest
+# gate in apps/cms/src/digest/send-digests.ts would skip every run),
+# "entra MS_CLIENT_ID" (the web offers Microsoft sign-in with a real app
+# registration, a GUID client id) or "entra-template MS_CLIENT_ID" (the same
+# with a non-GUID value, e.g. the .env.example text).
+# The key lists, the markers, the digest rule and the Microsoft rule are
+# pinned against env-guard.ts, send-digests.ts and the web's auth-config.ts
+# by apps/cms/src/utils/deploy-preflight.test.ts.
 preflight_scan() {
   awk -v fatal_keys="${PREFLIGHT_FATAL_KEYS}" -v warn_keys="${PREFLIGHT_WARN_KEYS}" '
     function placeholder(v,    n, i, parts, p) {
@@ -82,6 +87,12 @@ preflight_scan() {
         if (p ~ /change-me|changeme|tobemodified|generate-with-openssl|placeholder/) return 1
       }
       return 0
+    }
+    # 8-4-4-4-12 hex digits (no regex intervals: older mawk lacks them).
+    function guid(v,    parts) {
+      v = tolower(v)
+      if (length(v) != 36 || v !~ /^[0-9a-f-]+$/ || split(v, parts, "-") != 5) return 0
+      return length(parts[1]) == 8 && length(parts[2]) == 4 && length(parts[3]) == 4 && length(parts[4]) == 4 && length(parts[5]) == 12
     }
     BEGIN {
       n = split(fatal_keys, k, " "); for (i = 1; i <= n; i++) fatal[k[i]] = 1
@@ -105,6 +116,13 @@ preflight_scan() {
       if (env["DIGESTS_DISABLED"] != "1" && env["SMTP_HOST"] != "" && env["SMTP_USER"] != "" && env["SMTP_PASS"] != "") {
         if (env["PUBLIC_WEB_URL"] ~ /^[ \t]*$/) print "digest PUBLIC_WEB_URL"
         if (env["DIGEST_FROM"] ~ /^[ \t]*$/) print "digest DIGEST_FROM"
+      }
+      # The web offers Microsoft sign-in whenever both of its Entra keys are
+      # non-empty (MICROSOFT_ENABLED in apps/web/src/lib/auth-config.ts;
+      # compose fills them from MS_CLIENT_ID / MS_CLIENT_SECRET).
+      if (env["AUTH_MICROSOFT_ENTRA_ID_ID"] != "" && env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
+        if (guid(env["AUTH_MICROSOFT_ENTRA_ID_ID"])) print "entra MS_CLIENT_ID"
+        else print "entra-template MS_CLIENT_ID"
       }
     }' | sort -u
 }
@@ -167,6 +185,13 @@ keys_of() { sed -n "s/^$1 //p" <<<"${findings}" | tr '\n' ' '; }
 fatal_keys="$(keys_of fatal)"
 warn_keys="$(keys_of warn)"
 digest_keys="$(keys_of digest)"
+entra_keys="$(keys_of entra)"
+entra_template_keys="$(keys_of entra-template)"
+if [[ -n "${entra_template_keys}" ]]; then
+  echo "WARNING: MS_CLIENT_ID/MS_CLIENT_SECRET are set, but MS_CLIENT_ID is no GUID (template text?)." >&2
+  echo "         The sign-in page offers a Microsoft button that cannot work, and local sign-in" >&2
+  echo "         is off unless AUTH_LOCAL_ENABLED=1. Clear both in infra/.env for local sign-in." >&2
+fi
 if [[ -n "${warn_keys}" ]]; then
   echo "WARNING: template placeholder in: ${warn_keys}" >&2
   echo "         Rotate it (ALTER ROLE ... PASSWORD in Postgres first, then infra/.env);" >&2
@@ -191,6 +216,20 @@ if [[ -n "${fatal_keys}" ]]; then
   echo "       Generate real values (openssl rand -base64 32; -hex 32 for REVALIDATE_SECRET" >&2
   echo "       and INTERNAL_UPLOAD_TOKEN) and re-run. Rotating JWT_SECRET or AUTH_SECRET" >&2
   echo "       signs every user out once." >&2
+  preflight_failed=1
+fi
+# Strapi 5.51+ completes /api/auth/:provider/callback only from its own OAuth
+# session, so it answers the web's server-side access-token exchange
+# (apps/web/src/auth.ts) with a 400: every Microsoft sign-in fails, and an
+# install without AUTH_LOCAL_ENABLED=1 has no working sign-in at all.
+# Remove this gate together with that exchange (D-ENTRA-01).
+if [[ -n "${entra_keys}" ]]; then
+  echo "ERROR: Microsoft sign-in is configured (MS_CLIENT_ID/MS_CLIENT_SECRET), but it cannot" >&2
+  echo "       work with this release: Strapi 5.51+ no longer accepts the web's access-token" >&2
+  echo "       exchange, so every Microsoft sign-in fails (and with AUTH_LOCAL_ENABLED=0 nobody" >&2
+  echo "       can sign in). Keep the running release until the Entra exchange ships, or clear" >&2
+  echo "       MS_CLIENT_ID and MS_CLIENT_SECRET in infra/.env to run with local sign-in only" >&2
+  echo "       (accounts created through Microsoft sign-in have no local password)." >&2
   preflight_failed=1
 fi
 if jwt_rotation_missing; then

@@ -24,7 +24,10 @@ import {
  *      where an `awk` binary exists: CI, Git Bash; skipped otherwise),
  *   3. the D-SESSION-01 JWT rotation gate (final review C3) reads the label
  *      apps/web/Dockerfile sets, and its env extraction undoes Go's JSON
- *      escaping, so equal secrets compare equal.
+ *      escaping, so equal secrets compare equal,
+ *   4. the Microsoft sign-in gate (Strapi 5.51+ rejects the web's token
+ *      exchange) fires exactly when the web would offer Microsoft sign-in
+ *      with a real (GUID) client id, and is fatal.
  *
  * Lives with the cms tests because it imports cms code
  * (tsconfig.test.json: no infra test imports cms code).
@@ -35,6 +38,8 @@ const read = (...parts: string[]) =>
   readFileSync(join(REPO_ROOT, ...parts), "utf8").replace(/\r\n/g, "\n");
 const DEPLOY = read("infra", "deploy.sh");
 const WEB_DOCKERFILE = read("apps", "web", "Dockerfile");
+const WEB_AUTH_CONFIG = read("apps", "web", "src", "lib", "auth-config.ts");
+const COMPOSE = read("infra", "docker-compose.yml");
 
 /** `NAME="value"` at the start of a deploy.sh line. */
 function shellAssignment(name: string): string {
@@ -204,6 +209,58 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
     const block = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${digest_keys}" ]]; then'));
     expect(block.slice(0, block.indexOf("\nfi\n"))).toContain("preflight_failed=1");
     expect(DEPLOY).toMatch(/if \(\(preflight_failed\)\); then\n[^\n]*\n\s+exit 1/);
+  });
+});
+
+describe("Microsoft sign-in gate (Strapi 5.51+)", () => {
+  const GUID = "0b9d6c3e-4a1f-4c2b-9e8d-7f6a5b4c3d2e";
+
+  it("keys on the same pair the web enables Microsoft sign-in with", () => {
+    expect(WEB_AUTH_CONFIG).toContain(
+      "process.env.AUTH_MICROSOFT_ENTRA_ID_ID && process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET",
+    );
+    expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}");
+    expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}");
+  });
+
+  it.skipIf(!HAS_AWK)("flags a real app registration and only warns about template text", () => {
+    const cases: [string, string, string[]][] = [
+      [GUID, "client-secret-value", ["entra MS_CLIENT_ID"]],
+      [GUID.toUpperCase(), "client-secret-value", ["entra MS_CLIENT_ID"]],
+      ["your-app-client-id", "your-app-client-secret", ["entra-template MS_CLIENT_ID"]],
+      [`${GUID}0`, "client-secret-value", ["entra-template MS_CLIENT_ID"]],
+      [GUID.replace(/-/g, ""), "client-secret-value", ["entra-template MS_CLIENT_ID"]],
+      ["0b9d6c3e4-a1f-4c2b-9e8d-7f6a5b4c3d2e", "client-secret-value", ["entra-template MS_CLIENT_ID"]],
+      ["0b9d6c3e-4a1f-4c2b-9e8d-7f6a5b4c3d2g", "client-secret-value", ["entra-template MS_CLIENT_ID"]],
+      // The web needs both keys; with either one empty it offers no Microsoft sign-in.
+      [GUID, "", []],
+      ["", "client-secret-value", []],
+      ["", "", []],
+    ];
+    for (const [id, secret, expected] of cases) {
+      const findings = runAwk(
+        PREFLIGHT_AWK,
+        { fatal_keys: "", warn_keys: "" },
+        composeJson({
+          MS_CLIENT_ID: id,
+          MS_CLIENT_SECRET: secret,
+          AUTH_MICROSOFT_ENTRA_ID_ID: id,
+          AUTH_MICROSOFT_ENTRA_ID_SECRET: secret,
+        }),
+      );
+      expect(findings, JSON.stringify([id, secret])).toEqual(expected);
+    }
+  });
+
+  it("makes a real app registration fatal and template text a warning", () => {
+    const fatal = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${entra_keys}" ]]; then'));
+    expect(fatal.slice(0, fatal.indexOf("\nfi\n"))).toContain("preflight_failed=1");
+    const warning = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${entra_template_keys}" ]]; then'));
+    expect(warning.slice(0, warning.indexOf("\nfi\n"))).not.toContain("preflight_failed");
+    // Both run in the preflight, before anything is touched.
+    expect(DEPLOY.indexOf('if [[ -n "${entra_keys}" ]]; then')).toBeLessThan(
+      DEPLOY.indexOf('log "Preflight OK"'),
+    );
   });
 });
 
