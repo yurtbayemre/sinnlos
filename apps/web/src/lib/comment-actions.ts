@@ -1,7 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import {
   anchorOf,
@@ -24,7 +24,7 @@ import type { Comment, EmojiType, Reaction } from "@/lib/types";
  * target key — the legacy targetId bridge was removed with #25.
  */
 export async function getCommentSection(target: CommentTarget): Promise<CommentSectionData> {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user?.id;
 
   const filters = targetFilterQuery(target);
@@ -45,7 +45,6 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
   const [commentsRes, reactionsRes] = await Promise.all([
     strapi<StrapiListResponse<Comment>>(
       `/api/comments?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=100`,
-      { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
       return { data: [] as Comment[] };
@@ -57,7 +56,6 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
     // display only; toggleReaction writes server-side and stays correct.
     strapi<StrapiListResponse<Reaction>>(
       `/api/reactions?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=500`,
-      { noCache: true },
     ).catch((e) => {
       unstable_rethrow(e);
       return { data: [] as Reaction[] };
@@ -99,14 +97,12 @@ export async function addComment(target: CommentTarget, body: string) {
     body: JSON.stringify({
       data: { body, targetType: target.type, targetDocumentId },
     }),
-    noCache: true,
   });
 }
 
 export async function deleteComment(commentId: number) {
   await strapi(`/api/comments/${commentId}`, {
     method: "DELETE",
-    noCache: true,
   });
 }
 
@@ -117,6 +113,5 @@ export async function toggleReaction(target: CommentTarget, emoji: EmojiType) {
     body: JSON.stringify({
       data: { emoji, targetType: target.type, targetDocumentId },
     }),
-    noCache: true,
   });
 }

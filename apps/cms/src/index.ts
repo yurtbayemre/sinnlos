@@ -1,4 +1,15 @@
+import { reportDigestConfig } from "./digest/send-digests";
+import { seedAdminUser } from "./utils/admin-seed";
+import { hasAudienceBypass } from "./utils/announcement-audience";
+import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
+import {
+  RESTRICTED_RELATION_TARGETS,
+  guardRestrictedRelations,
+  stripRestrictedRelationsFromOutput,
+  type RelationModel,
+} from "./utils/restricted-relations";
+import { pickContentApiQueryParams, type RouteWithQuerySchema } from "./utils/rest-query-params";
 import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitize-user-contact";
 
 /**
@@ -104,8 +115,11 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  *
  * `member` can update wiki pages they authored (gated by
  * `can-edit-wiki`). `guest` is strict read-only on wiki content.
+ *
+ * Exported (with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS) only for
+ * the route/grant cross-check in `routes.matrix.test.ts` (roadmap S01).
  */
-const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
+export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
   admin_role: {
     "api::acknowledgement.acknowledgement": ALL_ACTIONS,
     // Training (issue #29, admin-authoring variant): course/lesson are
@@ -113,23 +127,28 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     // only (the write routes do not even exist, see the routers).
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
-    "api::lesson-progress.lesson-progress": ALL_ACTIONS,
+    // No update/delete (FX01): the routes are gone (`only:`), receipts
+    // are corrected in the Strapi admin. Same for the other trimmed
+    // routers below — see REMOVED_CORE_ACTIONS.
+    "api::lesson-progress.lesson-progress": ["find", "findOne", "create"],
     "api::announcement.announcement": ALL_ACTIONS,
     "api::classified.classified": ALL_ACTIONS,
-    "api::comment.comment": ALL_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": ALL_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // delete deliberately admin-only across ALL roles: removing someone
     // else's RSVP is an admin correction, not a user action.
     "api::event-rsvp.event-rsvp": ALL_ACTIONS,
-    "api::kudos.kudos": ALL_ACTIONS,
-    "api::notification.notification": ALL_ACTIONS,
+    "api::kudos.kudos": [...READ_ACTIONS, "create", "delete"],
+    "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
-    "api::poll-vote.poll-vote": ALL_ACTIONS,
+    // NO poll-vote grants for any role (FX01): votes are cast and counted
+    // only through the custom /polls/:id/vote and /results actions
+    // (CUSTOM_ACTION_GRANTS); the generic /api/poll-votes routes are gone.
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::search-log.search-log": ["create"],
-    "api::reaction.reaction": ALL_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -143,23 +162,25 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     // Full CRUD = moderation: editors may take down any employee ad
     // (is-classified-author passes admin_role/editor unconditionally).
     "api::classified.classified": ALL_ACTIONS,
-    "api::comment.comment": ALL_ACTIONS,
+    "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
     "api::document.document": ALL_ACTIONS,
     "api::event.event": ALL_ACTIONS,
     // No delete (admin-only); update is ownership-gated by
     // is-event-rsvp-owner — editors change only their OWN answer.
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
-    "api::kudos.kudos": ALL_ACTIONS,
-    "api::notification.notification": ALL_ACTIONS,
+    "api::kudos.kudos": [...READ_ACTIONS, "create", "delete"],
+    // create/update are gone (FX01): notifications are written by the
+    // CMS lifecycles only — the unpoliced core PUT let an editor rewrite
+    // any user's notification.
+    "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": ALL_ACTIONS,
-    "api::poll-vote.poll-vote": ALL_ACTIONS,
     "api::quick-link.quick-link": ALL_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
     "api::lesson-progress.lesson-progress": ["find", "findOne", "create"],
     "api::search-log.search-log": ["create"],
-    "api::reaction.reaction": ALL_ACTIONS,
+    "api::reaction.reaction": [...READ_ACTIONS, "create", "delete"],
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
@@ -177,7 +198,6 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -201,7 +221,6 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -227,7 +246,6 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -250,8 +268,8 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
    * controllers run validateQuery (→ throwRestrictedRelations) BEFORE
    * sanitizeQuery, so ANY populate of a user relation (wiki-page.author,
    * comment.author, document.uploadedBy, department.head, team.lead, ...)
-   * — and even the notification/poll-vote visibility filters, which
-   * reference the `recipient`/`voter` user relations — throw a 400 for a
+   * — and even the notification visibility filter, which references the
+   * `recipient` user relation — throw a 400 for a
    * role lacking `user.find`. "Silently stripped" only applies to the
    * later sanitize pass. So guest keeps user.find; the email/phone/hireDate
    * it could therefore read from the directory are now removed OUTPUT-side by
@@ -282,7 +300,6 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::event.event": READ_ACTIONS,
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": READ_ACTIONS,
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::search-log.search-log": ["create"],
     "api::reaction.reaction": READ_ACTIONS,
@@ -314,7 +331,6 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": READ_ACTIONS,
     "api::poll.poll": READ_ACTIONS,
-    "api::poll-vote.poll-vote": ["find", "findOne", "create"],
     "api::quick-link.quick-link": READ_ACTIONS,
     "api::course.course": READ_ACTIONS,
     "api::lesson.lesson": READ_ACTIONS,
@@ -335,7 +351,7 @@ const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudActio
  * Each entry lists the roles that may call the action. `*` = every role
  * in PERMISSION_MATRIX (including `authenticated`).
  */
-const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
+export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::event.event.ics": "*",
   // guest and the `authenticated` fallback are excluded: even with email
   // dropped from the payload, years + daysUntil still reconstruct every
@@ -427,7 +443,7 @@ async function ensurePermission(
  *
  * This applies to `guest` too: revoking it (as an earlier audit attempt
  * did) turned every guest read that populates a user relation — and the
- * notification/poll-vote visibility filters — into a 400. See the OPEN
+ * notification visibility filter — into a 400. See the OPEN
  * ISSUE note on the `guest` matrix above. No role is excluded.
  *
  * `me` is equally required for every role: the web app's sign-in flow
@@ -443,17 +459,46 @@ const USER_UID = "plugin::users-permissions.user";
 const USER_READ_EXCLUDED_ROLES: string[] = [];
 
 /**
+ * Core actions whose routes were removed with `only:` in the routers
+ * (FX01): nothing in the web calls them, and each was either an unpoliced
+ * write or dead attack surface —
+ *   - poll-vote: core create/update/delete bypassed voter identity, one
+ *     vote per user, closesAt and the option bounds of the custom
+ *     /polls/:id/vote (forged and duplicate votes); the generic reads went
+ *     with them (decisions/02-poll-targeting: votes are only ever read
+ *     through the aggregated /polls/:id/results),
+ *   - notification create/update: rows are written by the CMS lifecycles
+ *     only, and the core PUT had no policy at all,
+ *   - comment/kudos/reaction update, lesson-progress update/delete.
+ * Their permission rows are revoked for EVERY role below: a removed route
+ * leaves its row behind (users-permissions only prunes rows of vanished
+ * controller actions), and deleteMany is a no-op where none exists.
+ */
+const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
+  "api::poll-vote.poll-vote": ALL_ACTIONS,
+  "api::notification.notification": ["create", "update"],
+  "api::comment.comment": ["update"],
+  "api::kudos.kudos": ["update"],
+  "api::reaction.reaction": ["update"],
+  "api::lesson-progress.lesson-progress": ["update", "delete"],
+};
+
+/**
  * Permissions granted by earlier versions of this bootstrap that must be
  * removed again. `ensurePermission` only ever ADDS rows, so deleting an
  * entry from the matrix above does not revoke anything on an existing
  * database — list the obsolete (role → action) pairs here instead.
+ *
+ * Must stay disjoint from PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS and the
+ * user reads (otherwise every boot re-adds and deletes the same row) —
+ * pinned by routes.matrix.test.ts.
  */
-const REVOKED_PERMISSIONS: Record<string, string[]> = {
+const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
   guest: [
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
-    // notification/poll-vote visibility filters). See the guest matrix
-    // OPEN ISSUE note above.
+    // notification visibility filter). See the guest matrix OPEN ISSUE
+    // note above.
     "api::kudos.kudos.find",
     "api::kudos.kudos.findOne",
     "api::kudos.kudos.celebrations",
@@ -468,6 +513,18 @@ const REVOKED_PERMISSIONS: Record<string, string[]> = {
     "api::classified.classified.findOne",
   ],
 };
+
+export const REVOKED_PERMISSIONS: Record<string, string[]> = Object.fromEntries(
+  Object.keys(PERMISSION_MATRIX).map((roleType) => [
+    roleType,
+    [
+      ...(LEGACY_REVOKED_PERMISSIONS[roleType] ?? []),
+      ...Object.entries(REMOVED_CORE_ACTIONS).flatMap(([uid, actions]) =>
+        (actions ?? []).map((action) => `${uid}.${action}`),
+      ),
+    ],
+  ]),
+);
 
 async function syncRolePermissions(strapi: any) {
   let granted = 0;
@@ -569,60 +626,6 @@ async function syncAdvancedSettings(strapi: any) {
 }
 
 /**
- * Seed a first Strapi admin user from environment variables if the
- * admin_users table is empty. This lets a fresh clone of the repo
- * boot straight into a usable admin panel without the interactive
- * registration form.
- *
- * Env vars (all required together):
- *   STRAPI_ADMIN_EMAIL     — login email for the Super Admin
- *   STRAPI_ADMIN_PASSWORD  — plaintext password, hashed by Strapi on insert
- *   STRAPI_ADMIN_FIRSTNAME — optional, defaults to "Admin"
- *   STRAPI_ADMIN_LASTNAME  — optional, defaults to "User"
- *
- * Safety: runs ONLY when the admin_users table is empty. On every
- * subsequent boot this is a no-op, so rotating the env password does
- * NOT overwrite the existing admin — that has to be done from the
- * admin panel itself.
- *
- * Strapi Community Edition has no admin-panel SSO, so this is the
- * friction-free alternative to clicking through the registration
- * form every time you wipe the SQLite database.
- */
-async function seedAdminUser(strapi: any) {
-  const email = process.env.STRAPI_ADMIN_EMAIL;
-  const password = process.env.STRAPI_ADMIN_PASSWORD;
-  if (!email || !password) return;
-
-  const existingCount = await strapi.db.query("admin::user").count({});
-  if (existingCount > 0) return;
-
-  const superAdminRole = await strapi.db
-    .query("admin::role")
-    .findOne({ where: { code: "strapi-super-admin" } });
-  if (!superAdminRole) {
-    strapi.log.warn("[bootstrap] strapi-super-admin role not found; skipping admin seed");
-    return;
-  }
-
-  try {
-    await strapi.service("admin::user").create({
-      firstname: process.env.STRAPI_ADMIN_FIRSTNAME || "Admin",
-      lastname: process.env.STRAPI_ADMIN_LASTNAME || "User",
-      email,
-      password,
-      isActive: true,
-      blocked: false,
-      registrationToken: null,
-      roles: [superAdminRole.id],
-    });
-    strapi.log.info(`[bootstrap] created initial Super Admin ${email}`);
-  } catch (err) {
-    strapi.log.error(`[bootstrap] failed to create initial admin user: ${(err as Error).message}`);
-  }
-}
-
-/**
  * Register a role-aware `content-api.output` sanitizer that removes employee
  * contact fields (email/phone/hireDate/officeLocation/microsoftOid) from
  * every response served to a non-privileged caller — the directory itself
@@ -669,9 +672,106 @@ export function registerUserContactSanitizer(strapi: any) {
   strapi.sanitizers.set("content-api.output", [...current, factory]);
 }
 
+type SanitizeQuery = (
+  query: Record<string, unknown>,
+  schema: RelationModel,
+  options?: { route?: RouteWithQuerySchema | null; [option: string]: unknown },
+) => Promise<Record<string, unknown>>;
+
+/** The slice of the Strapi instance registerRestrictedRelationGuard touches. */
+export interface RestrictedRelationGuardHost {
+  getModel: (uid: string) => RelationModel | undefined;
+  requestContext: {
+    get: () => { state?: { user?: { role?: { type?: string } | null } | null } } | undefined;
+  };
+  sanitizers: {
+    get: (path: string) => unknown[];
+    set: (path: string, value: unknown[]) => unknown;
+  };
+  contentAPI?: { sanitize?: { query?: SanitizeQuery } };
+}
+
+/**
+ * Cuts relation side channels into visibility-filtered types (FX05, rules
+ * and walk in utils/restricted-relations.ts) on EVERY content-api route:
+ * core, users-permissions (/api/users, /api/users/me) and upload alike, and
+ * writes as well as reads, since an update's `?populate` shapes its response.
+ *
+ * Query side — WHY a wrapper around `strapi.contentAPI.sanitize.query` and
+ * not a sanitizer registry entry or a route policy: the 5.49 registry only
+ * has `content-api.input` and `content-api.output` hooks (@strapi/core
+ * services/content-api/index.js), and a route policy misses every route it
+ * is not attached to. The first FX05 cut, a policy on department/team reads,
+ * left /api/users?populate[department][populate][pages] and PUT
+ * /api/teams/:id?populate[pages] open. Every content-api controller resolves
+ * `strapi.contentAPI.sanitize.query` at call time (core-api controller,
+ * users-permissions user controller, upload content-api) and hands its
+ * RESULT to the service, so one wrapper covers them all. It runs on the
+ * sanitized query, after validateQuery: a rewritten populate can no longer
+ * turn into a validation 400 (the wildcard expansion 400'd on the private
+ * createdBy/updatedBy before), and a rejected filter/sort path throws the
+ * core's own `Invalid key` 400.
+ *
+ * Output side — a `content-api.output` sanitizer that deletes restricted
+ * relations from every response entity: the backstop for a controller that
+ * populates without going through sanitize.query. Appended via get()+set(),
+ * never `.add` (silent no-op, see registerUserContactSanitizer).
+ *
+ * Root keys (final review C1-RAW-WHERE) — the same wrapper first drops
+ * every root key outside the content-api allowlist
+ * (utils/rest-query-params.ts). The core sanitizer keeps unknown keys, and
+ * users-permissions and upload hand them to `strapi.db.query`, so a raw
+ * `?where[department][pages][body]…` or `?orderBy`/`?select` skipped every
+ * check above. This pick applies to EVERY caller, admin_role and editor
+ * included: `where` also reaches private fields (password hash, reset
+ * token) that no role may probe.
+ *
+ * admin_role / editor bypass the relation cut on both sides. They see every
+ * wiki page anyway (wiki-visibility bypass). The role comes from the request
+ * AsyncLocalStorage, as in registerUserContactSanitizer. Without a request
+ * context the guard APPLIES (fail closed): nothing internal reads through
+ * the content API.
+ *
+ * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query`, boot
+ * throws instead of silently re-opening the side channel.
+ */
+export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardHost) {
+  const sanitize = strapi.contentAPI?.sanitize;
+  const sanitizeQuery = sanitize?.query;
+  if (!sanitize || typeof sanitizeQuery !== "function") {
+    throw new Error(
+      "[restricted-relations] strapi.contentAPI.sanitize.query not found — refusing to boot without the FX05 guard",
+    );
+  }
+
+  const options = {
+    getModel: (uid: string) => strapi.getModel(uid),
+    rules: RESTRICTED_RELATION_TARGETS,
+  };
+  const bypass = () => hasAudienceBypass(strapi.requestContext.get()?.state?.user?.role?.type);
+
+  sanitize.query = async (query, schema, sanitizeOptions) => {
+    const sanitized = pickContentApiQueryParams(
+      await sanitizeQuery.call(sanitize, query, schema, sanitizeOptions),
+      sanitizeOptions?.route,
+    );
+    if (bypass()) return sanitized;
+    return guardRestrictedRelations(sanitized, schema, options);
+  };
+
+  const factory = (schema: RelationModel) => (data: unknown) =>
+    bypass() ? data : stripRestrictedRelationsFromOutput(data, schema, options);
+  const current = strapi.sanitizers.get("content-api.output");
+  strapi.sanitizers.set("content-api.output", [...current, factory]);
+}
+
 export default {
   register({ strapi }: { strapi: any }) {
+    // FX13: refuse to boot in production with template placeholder secrets
+    // (change-me / toBeModified / <secret>); outside production it only warns.
+    enforceSecretGuard(process.env, strapi.log);
     registerUserContactSanitizer(strapi);
+    registerRestrictedRelationGuard(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
@@ -695,6 +795,9 @@ export default {
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
     await seedAdminUser(strapi);
+    // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
+    // defaults are gone) → say so at boot, not only at the 07:30 run.
+    reportDigestConfig(strapi.log);
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);

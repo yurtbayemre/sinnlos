@@ -57,6 +57,12 @@ export default ({ env }: { env: Env }) => {
     // otherwise resolve `/api/../uploads/x` back into public/uploads and serve
     // the bytes without a session. See src/middlewares/uploads-auth.ts.
     "global::uploads-auth",
+    // Case-variant / encoded spellings of Strapi's own /api/auth/* routes get
+    // a 404 (D-EDGE-01): Traefik's PathPrefix(`/api/auth`) is case-sensitive,
+    // Strapi's router is not, so `/api/Auth/local` would otherwise reach the
+    // local login past the web rate limiter. See
+    // src/middlewares/auth-path-guard.ts. Global, like uploads-auth.
+    "global::auth-path-guard",
     "strapi::public",
   ];
 };

@@ -2,7 +2,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { canPostAds } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { PageHeader } from "@/components/page-header";
 import { ClassifiedForm } from "@/components/marketplace/classified-form";
 
@@ -12,11 +13,12 @@ export async function generateMetadata() {
 }
 
 export default async function NewClassifiedPage() {
-  const [t, session] = await Promise.all([getTranslations("marketplace"), auth()]);
+  const [t, viewer] = await Promise.all([getTranslations("marketplace"), getViewer()]);
 
-  // UI gate only — the CMS permission matrix denies guest the create and
-  // upload permissions regardless of what reaches it.
-  if (session?.user?.role === "guest") redirect("/marketplace");
+  // UI gate only — the CMS permission matrix denies guest (and the
+  // `authenticated` fallback) the create and upload permissions regardless
+  // of what reaches it. Fail-closed: an unreadable role is no poster.
+  if (!canPostAds(viewer.role)) redirect("/marketplace");
 
   return (
     <div className="space-y-8">

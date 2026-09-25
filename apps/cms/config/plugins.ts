@@ -89,6 +89,8 @@ export default ({ env }: { env: Env }) => ({
   // mailcow-internal Docker network (that attachment is a documented
   // mailcow-update landmine). Sender identity = a mailbox app password
   // (SMTP-only) in infra/.env; without SMTP_* the digest cron no-ops.
+  // Sender/reply-to come from env only (FX13, no owner-domain defaults);
+  // without DIGEST_FROM the digest cron skips with a warning.
   email: {
     config: {
       provider: "nodemailer",
@@ -102,8 +104,8 @@ export default ({ env }: { env: Env }) => ({
         requireTLS: true,
       },
       settings: {
-        defaultFrom: env("DIGEST_FROM", "Sinnlos Intranet <noreply@yurtbay.dev>"),
-        defaultReplyTo: env("DIGEST_REPLY_TO", "noreply@yurtbay.dev"),
+        defaultFrom: env("DIGEST_FROM", "") || undefined,
+        defaultReplyTo: env("DIGEST_REPLY_TO", "") || undefined,
       },
     },
   },

@@ -12,9 +12,8 @@ export async function acknowledgeAnnouncement(announcementDocumentId: string) {
     body: JSON.stringify({
       data: { targetType: "announcement", targetDocumentId: announcementDocumentId },
     }),
-    noCache: true,
   });
-  // Acknowledgement state is fetched with noCache — refresh so the
+  // Acknowledgement state is read uncached (D-DC01) — refresh so the
   // announcements page and the dashboard banner reflect the new ack
   // without a manual reload.
   refresh();

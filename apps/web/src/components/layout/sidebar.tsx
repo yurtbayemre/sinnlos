@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils";
-import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import type { Route } from "next";
 import { NavLink, type NavIconName } from "./nav-link";
 import { getTranslations } from "next-intl/server";
@@ -9,9 +9,8 @@ export async function Sidebar({ className }: { className?: string }) {
   const t = await getTranslations("nav");
   const tCommon = await getTranslations("common");
 
-  const session = await auth();
-  const role = session?.user?.role;
-  const showAdmin = isAdmin(role);
+  // Role per request from the CMS (D-SESSION-01) — never from the session.
+  const showAdmin = isAdmin((await getViewer()).role);
 
   const nav: { href: Route; label: string; icon: NavIconName }[] = [
     { href: "/", label: t("dashboard"), icon: "Home" },

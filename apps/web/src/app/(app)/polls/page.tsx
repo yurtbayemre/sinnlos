@@ -1,8 +1,9 @@
 import Link from "next/link";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { canCreatePolls } from "@/lib/roles";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
@@ -15,13 +16,16 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-const POLL_CREATOR_ROLES = new Set(["admin_role", "editor"]);
-
 export default async function PollsPage() {
-  const t = await getTranslations("polls");
-  const session = await auth();
-  const canCreate = POLL_CREATOR_ROLES.has(session?.user?.role ?? "");
-  const { data, failed } = await tryFetch(() => api.polls.list(), "polls");
+  // Every role may read the list and canCreate only toggles a button, so the
+  // list fetch runs alongside getViewer()'s /api/me read instead of behind
+  // it. Pages that gate their content (/polls/new, /manage/*) stay gate-first.
+  const [t, viewer, { data, failed }] = await Promise.all([
+    getTranslations("polls"),
+    getViewer(),
+    tryFetch(() => api.polls.list(), "polls"),
+  ]);
+  const canCreate = canCreatePolls(viewer.role);
   const polls = (data?.data ?? []) as Poll[];
 
   const resultsArr = await Promise.all(polls.map((p) => api.polls.results(p.id).catch(() => null)));

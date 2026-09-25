@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { auth } from "@/auth";
 import { STRAPI_URL } from "@/lib/config";
+import { getStrapiToken } from "@/lib/session";
 
 /**
  * Authenticated proxy for the Strapi ICS endpoint. The events page
@@ -18,8 +18,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return new NextResponse("Invalid event id", { status: 400 });
   }
 
-  const session = await auth();
-  const jwt = session?.strapiJwt;
+  const jwt = await getStrapiToken();
   if (!jwt) {
     return new NextResponse("Unauthorized", { status: 401 });
   }

@@ -46,7 +46,6 @@ export interface Team {
   department?: Department | null;
   lead?: UserLite | null;
   members?: UserLite[];
-  pages?: WikiPage[];
 }
 
 export interface WikiSpace {
@@ -114,8 +113,6 @@ export interface Comment {
   targetDocumentId?: string | null;
   createdAt?: string;
   author?: UserLite | null;
-  parent?: { id: number } | null;
-  replies?: Comment[];
 }
 
 export type EmojiType = "thumbsup" | "heart" | "celebrate" | "lightbulb" | "laugh";

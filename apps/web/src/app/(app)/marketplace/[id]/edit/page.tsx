@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { isAdmin } from "@/lib/roles";
@@ -20,7 +21,11 @@ export async function generateMetadata() {
 
 export default async function EditClassifiedPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [t, session] = await Promise.all([getTranslations("marketplace"), auth()]);
+  const [t, session, viewer] = await Promise.all([
+    getTranslations("marketplace"),
+    getSession(),
+    getViewer(),
+  ]);
 
   const { data, failed } = await tryFetch(() => api.classifieds.one(id), "classified-edit");
   const ad = (data?.data?.[0] ?? null) as Classified | null;
@@ -36,9 +41,8 @@ export default async function EditClassifiedPage({ params }: { params: Promise<{
   // UI gate mirroring the CMS is-classified-author policy (owner, or
   // admin bypass; editors may only delete, not edit) — the CMS enforces it
   // authoritatively via the update-route policy config.
-  const role = session?.user?.role;
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
-  if (!isOwner && !isAdmin(role)) {
+  if (!isOwner && !isAdmin(viewer.role)) {
     redirect(`/marketplace/${ad.id}`);
   }
 

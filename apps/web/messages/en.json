@@ -71,7 +71,8 @@
     "creatingAccount": "Creating account…",
     "demoMode": "Demo mode",
     "registrationDisabled": "Registration is currently disabled.",
-    "sessionExpired": "Your session has expired — please sign in again."
+    "sessionExpired": "Your session has expired — please sign in again.",
+    "rateLimited": "Too many sign-in attempts — please wait a minute and try again."
   },
   "dashboard": {
     "welcomeBack": "Welcome back",
@@ -360,6 +361,7 @@
     "confirmPassword": "Confirm new password",
     "changePassword": "Change password",
     "profileUpdated": "Profile updated.",
+    "passwordRateLimited": "Too many password change attempts — please wait a minute and try again.",
     "digestSection": "E-mail digests",
     "digestHint": "Get a morning e-mail summary — daily or weekly (Mondays). Nothing is sent unless you opt in.",
     "digestAnnouncements": "News & announcements",

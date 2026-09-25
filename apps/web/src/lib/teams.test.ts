@@ -81,7 +81,7 @@ describe("fetchAllTeams", () => {
     expect(strapiMock).toHaveBeenCalledTimes(1);
   });
 
-  it("field-limits the user populates so member e-mails stay out of the cache", async () => {
+  it("field-limits the user populates so member e-mails stay out of the payload", async () => {
     strapiMock.mockResolvedValueOnce(page([1], 1, 1));
     await fetchAllTeams();
     expect(urls()[0]).toContain("populate[lead][fields][0]=username");

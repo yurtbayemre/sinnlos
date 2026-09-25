@@ -24,11 +24,8 @@ import type { TeamMembership } from "@/lib/audience";
  * The user populates are field-limited: only the ids are needed, and `id`
  * is returned regardless of `fields` (same pattern as the report's
  * `audienceRoles` populate). That also keeps member e-mail addresses out
- * of the Next.js fetch cache.
- *
- * Caching matches `api.teams.list()` (tag + 60 s): no visibility policy
- * runs on `api::team.team`, so the response is identical for every caller
- * and safe to share across users.
+ * of the payload (data minimisation). Uncached like every strapi() read
+ * (D-DC01, see lib/strapi.ts).
  */
 const PAGE_SIZE = 100;
 /**
@@ -52,7 +49,6 @@ export async function fetchAllTeams(): Promise<AllTeamsResult> {
         // sort=id:asc keeps the page walk stable (Postgres returns rows in
         // an undefined order without ORDER BY, so pages could skip rows).
         `/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-        { tag: "teams", revalidate: 60 },
       ),
     { maxPages: MAX_PAGES, label: "team roster" },
   );

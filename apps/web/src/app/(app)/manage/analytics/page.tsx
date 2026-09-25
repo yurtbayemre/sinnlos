@@ -15,8 +15,8 @@ import {
   SearchX,
 } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { Card, CardContent } from "@/components/ui/card";
@@ -28,9 +28,7 @@ export async function generateMetadata() {
 
 async function count(path: string): Promise<number> {
   try {
-    const res = await strapi<StrapiListResponse<any>>(`${path}&pagination[pageSize]=1`, {
-      noCache: true,
-    });
+    const res = await strapi<StrapiListResponse<any>>(`${path}&pagination[pageSize]=1`);
     return (res as any).meta?.pagination?.total ?? (res as any).data?.length ?? 0;
   } catch (e) {
     unstable_rethrow(e);
@@ -65,7 +63,7 @@ type SearchSummary = {
 /** Aggregated search telemetry (issue #19) — admin-only custom route. */
 async function searchSummary(): Promise<SearchSummary | null> {
   try {
-    return await strapi<SearchSummary>("/api/search-logs/summary?days=30", { noCache: true });
+    return await strapi<SearchSummary>("/api/search-logs/summary?days=30");
   } catch (e) {
     unstable_rethrow(e);
     return null;
@@ -77,14 +75,10 @@ async function recentActivity() {
     const [comments, reactions, notifications] = await Promise.all([
       strapi<StrapiListResponse<any>>(
         "/api/comments?sort=createdAt:desc&pagination[pageSize]=5&populate[author]=true",
-        { noCache: true },
       ),
-      strapi<StrapiListResponse<any>>("/api/reactions?sort=createdAt:desc&pagination[pageSize]=1", {
-        noCache: true,
-      }),
+      strapi<StrapiListResponse<any>>("/api/reactions?sort=createdAt:desc&pagination[pageSize]=1"),
       strapi<StrapiListResponse<any>>(
         "/api/notifications?sort=createdAt:desc&pagination[pageSize]=1&filters[readAt][$null]=true",
-        { noCache: true },
       ),
     ]);
     return {
@@ -99,8 +93,7 @@ async function recentActivity() {
 }
 
 export default async function AnalyticsPage() {
-  const session = await auth();
-  if (!isAdmin(session?.user?.role)) {
+  if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 

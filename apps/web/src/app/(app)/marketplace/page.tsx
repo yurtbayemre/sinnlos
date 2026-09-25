@@ -2,8 +2,10 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ImageIcon, MapPin, Plus, ShoppingBag, Tag } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { canPostAds } from "@/lib/roles";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
@@ -54,24 +56,28 @@ export default async function MarketplacePage({
   const { category: rawCategory } = await searchParams;
   const category = rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
 
-  const [t, tRel, locale, session] = await Promise.all([
+  const today = localDateString(new Date());
+
+  // The ad list needs no role, so it runs alongside getViewer()'s
+  // /api/me read; only the "mine" fetch waits for the role gate.
+  const [t, tRel, locale, session, viewer, listResult] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
-    auth(),
+    getSession(),
+    getViewer(),
+    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
   ]);
   const relative = (d: string | undefined) => relativeTime(d, tRel);
 
   const userId = session?.user?.id;
-  const canCreate = typeof userId === "number" && session?.user?.role !== "guest";
-  const today = localDateString(new Date());
+  // Fail-closed allowlist (lib/roles.ts): guest, the `authenticated`
+  // fallback and an unreadable role get no create button and no "mine" fetch.
+  const canCreate = typeof userId === "number" && canPostAds(viewer.role);
 
-  const [listResult, mineResult] = await Promise.all([
-    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
-    canCreate
-      ? tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
-      : Promise.resolve({ data: null, failed: false }),
-  ]);
+  const mineResult = canCreate
+    ? await tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
+    : { data: null, failed: false };
 
   const ads = (listResult.data?.data ?? []) as Classified[];
   const myAds = (mineResult.data?.data ?? []) as Classified[];

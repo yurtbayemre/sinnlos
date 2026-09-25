@@ -1,4 +1,4 @@
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { getCommentSection } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
 import { LiveCommentSection } from "./live-comment-section";
@@ -12,7 +12,7 @@ import { LiveCommentSection } from "./live-comment-section";
  * of a published entry changes on every publish and would orphan the thread.
  */
 export async function CommentSection({ target }: { target: CommentTarget }) {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user?.id;
   const initial = await getCommentSection(target);
 

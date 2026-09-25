@@ -1,0 +1,31 @@
+// Type-checks the apps/cms Vitest files (S07). The apps/web + infra tests are
+// checked by tsconfig.test.json; see there for why tests need their own
+// programs at all.
+//
+// Extends apps/cms/tsconfig.json on purpose, so the cms modules a test pulls
+// in are checked under the SAME contract as `pnpm --filter @sinnlos/cms
+// typecheck`: Strapi's server config (non-strict, CommonJS, node10
+// resolution). A single strict program would silently hold only the
+// test-imported subset of cms to strict rules, and a cms change that passes
+// its own typecheck could then fail the root one (S07 review).
+//
+// Run with apps/cms's pinned tsc (root package.json `typecheck:tests`).
+{
+  "extends": "./apps/cms/tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The Strapi base enables incremental builds with a tsBuildInfoFile inside
+    // node_modules; a throwaway check writes no build info.
+    "incremental": false,
+    // `@strapi/strapi` is loaded as a type package for its (re-exported)
+    // @strapi/types `declare global { var strapi }`. In apps/cms's own program
+    // some source file always imports @strapi/strapi; this program only
+    // reaches what the tests import, and e.g. classified lifecycles.ts uses
+    // the global without an import. A type directive (unlike a `files` entry)
+    // is resolved through the pnpm symlink, so its own deps resolve too.
+    "typeRoots": ["./apps/cms/node_modules/@types", "./apps/cms/node_modules"],
+    "types": ["node", "@strapi/strapi"]
+  },
+  "include": ["apps/cms/src/**/*.test.ts", "apps/cms/config/**/*.test.ts"],
+  "exclude": ["**/node_modules/**"]
+}

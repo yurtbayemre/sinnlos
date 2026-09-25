@@ -16,7 +16,7 @@
  * Frames are content-free pings; all data flows through the existing
  * session-authenticated server actions on refetch.
  */
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 
 import { getLiveBus, liveEventsDisabled, type LiveFrame } from "@/lib/live-bus";
 
@@ -38,7 +38,7 @@ const SESSION_CLOSE_CAP_MS = 4 * 60 * 60_000;
 const encoder = new TextEncoder();
 
 export async function GET(req: Request) {
-  const session = await auth();
+  const session = await getSession();
   const userId = session?.user && "id" in session.user ? session.user.id : undefined;
   if (typeof userId !== "number") {
     return Response.json({ error: "unauthorized" }, { status: 401 });

@@ -538,7 +538,6 @@ const demoComments: AnyEntry[] = [
     targetDocumentId: "demo-ann-1",
     author: users.grace,
     createdAt: iso(-1, 9),
-    replies: [],
   },
   {
     id: 2,
@@ -547,7 +546,6 @@ const demoComments: AnyEntry[] = [
     targetDocumentId: "demo-ann-1",
     author: users.maria,
     createdAt: iso(-1, 11),
-    replies: [],
   },
   {
     id: 3,
@@ -556,7 +554,6 @@ const demoComments: AnyEntry[] = [
     targetDocumentId: "demo-ann-2",
     author: users.jonas,
     createdAt: iso(0, 7),
-    replies: [],
   },
 ];
 

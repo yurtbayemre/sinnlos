@@ -18,6 +18,14 @@
  * Off switch: without SMTP_HOST/SMTP_USER/SMTP_PASS (or with
  * DIGESTS_DISABLED=1) the run is a logged no-op — the feature ships
  * dark until the mailbox app-password lands in infra/.env.
+ *
+ * No owner-domain fallbacks (FX13): the link base (PUBLIC_WEB_URL; compose
+ * defaults it to WEB_PUBLIC_URL) and the sender (DIGEST_FROM) come from env
+ * only. With SMTP configured but either of them unset the run is skipped
+ * instead of mailing links to / from someone else's domain. That skip is an
+ * ERROR log, repeated once at boot (FX13 review): a live env that relied on
+ * the removed DIGEST_FROM compose default would otherwise lose its digests
+ * with nothing louder than a daily warning.
  */
 
 import { isAnnouncementVisible } from "../utils/announcement-audience";
@@ -27,12 +35,49 @@ import { renderDigest, totalItems, type DigestContent } from "./render-digest";
 
 const USER_UID = "plugin::users-permissions.user";
 
-function digestsEnabled(): { enabled: boolean; reason?: string } {
-  if (process.env.DIGESTS_DISABLED === "1") return { enabled: false, reason: "DIGESTS_DISABLED=1" };
-  if (!process.env.SMTP_HOST || !process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    return { enabled: false, reason: "SMTP env incomplete (SMTP_HOST/USER/PASS)" };
+/**
+ * `skip`: intentionally dark (kill switch / no SMTP) → info log.
+ * `misconfigured`: SMTP is set but the link base or sender is missing → error.
+ */
+export type DigestGate =
+  | { kind: "send"; baseUrl: string }
+  | { kind: "skip" | "misconfigured"; reason: string };
+
+export function digestsEnabled(env: Record<string, string | undefined> = process.env): DigestGate {
+  if (env.DIGESTS_DISABLED === "1") return { kind: "skip", reason: "DIGESTS_DISABLED=1" };
+  if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
+    return { kind: "skip", reason: "SMTP env incomplete (SMTP_HOST/USER/PASS)" };
   }
-  return { enabled: true };
+  const baseUrl = (env.PUBLIC_WEB_URL ?? "").trim();
+  if (!baseUrl) {
+    return {
+      kind: "misconfigured",
+      reason:
+        "PUBLIC_WEB_URL unset — digest links need the web origin (e.g. https://intranet.example.com)",
+    };
+  }
+  if (!(env.DIGEST_FROM ?? "").trim()) {
+    return {
+      kind: "misconfigured",
+      reason: 'DIGEST_FROM unset — set the sender, e.g. "Intranet <noreply@example.com>"',
+    };
+  }
+  return { kind: "send", baseUrl };
+}
+
+/**
+ * Boot-time echo of the gate (called from bootstrap), so a misconfigured
+ * sender shows up right after a deploy rather than at the next 07:30 run.
+ * Env only — no DB or SMTP access.
+ */
+export function reportDigestConfig(
+  log: { error(message: string): void },
+  env: Record<string, string | undefined> = process.env,
+): void {
+  const gate = digestsEnabled(env);
+  if (gate.kind === "misconfigured") {
+    log.error(`[digest] misconfigured, every digest run will be skipped: ${gate.reason}`);
+  }
 }
 
 async function collectContent(
@@ -105,8 +150,9 @@ async function collectContent(
 
 export async function sendDigests(strapi: any, now = new Date()): Promise<void> {
   const gate = digestsEnabled();
-  if (!gate.enabled) {
-    strapi.log.info(`[digest] skipped: ${gate.reason}`);
+  if (gate.kind !== "send") {
+    if (gate.kind === "misconfigured") strapi.log.error(`[digest] skipped: ${gate.reason}`);
+    else strapi.log.info(`[digest] skipped: ${gate.reason}`);
     return;
   }
 
@@ -134,7 +180,7 @@ export async function sendDigests(strapi: any, now = new Date()): Promise<void> 
     ],
   });
 
-  const baseUrl = process.env.PUBLIC_WEB_URL || "https://sinnlos.yurtbay.dev";
+  const baseUrl = gate.baseUrl;
   let sent = 0;
   let empty = 0;
   let failed = 0;

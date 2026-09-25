@@ -42,9 +42,7 @@ export async function fetchAllUsers<T = any>(params = ""): Promise<AllUsersResul
   let truncated = false;
   for (let start = 0; start < MAX_USERS; start += PAGE_SIZE) {
     const limit = Math.min(PAGE_SIZE, MAX_USERS - start);
-    const batch = await strapi<T[]>(`/api/users?${query}&start=${start}&limit=${limit}`, {
-      noCache: true,
-    });
+    const batch = await strapi<T[]>(`/api/users?${query}&start=${start}&limit=${limit}`);
     // DEMO_MODE answers unknown paths with a `{ data, meta }` object —
     // treat anything that isn't a plain array as an empty page.
     if (!Array.isArray(batch) || batch.length === 0) break;

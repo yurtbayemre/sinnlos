@@ -12,16 +12,19 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
    * Only the documentId anchor is accepted (#25 removed the targetId
    * migration bridge): a payload carrying nothing but the legacy `targetId`
    * is answered with 400 "targetDocumentId required".
+   *
+   * The payload is BUILT from `body` plus the resolved anchor, never
+   * forwarded (FX04). The schema still carries `parent`/`replies` (removing
+   * them leaves orphan columns anyway with forceMigration=false, §5.27), and
+   * both accept raw ids: a member could point a new comment's `parent` at a
+   * hidden comment and read it back via `populate[parent]`, bypassing the
+   * #28 read filter. Any other client key (author, legacy targetId, ...) is
+   * dropped the same way.
    */
   async create(ctx) {
     ctx.request.body = ctx.request.body ?? {};
     const body = ctx.request.body as any;
     const data = body.data ?? body;
-
-    // `targetId` is stripped here on purpose: it is no longer a schema
-    // attribute, and forwarding an old client's extra key to the core create
-    // would risk an "Invalid key" rejection.
-    const { targetType: _t, targetDocumentId: _d, targetId: _i, ...rest } = data ?? {};
 
     const target = await resolveWriteTarget(strapi, data);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
@@ -39,7 +42,7 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
 
     ctx.request.body = {
       data: {
-        ...rest,
+        body: data?.body,
         targetType: target.targetType,
         targetDocumentId: target.targetDocumentId,
         author: ctx.state.user?.id,

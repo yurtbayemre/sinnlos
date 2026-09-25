@@ -3,7 +3,7 @@ import type { Route } from "next";
 import { Suspense } from "react";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -14,14 +14,14 @@ import { TrainingBanner } from "@/components/training/training-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 
-/** Local start of today — date-based, so the events cache key changes daily. */
+/** Local start of today — events that began earlier today still count as upcoming. */
 function startOfToday(): Date {
   const now = new Date();
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
 export default async function DashboardPage() {
-  const session = await auth();
+  const session = await getSession();
 
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user

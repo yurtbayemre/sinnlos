@@ -5,11 +5,12 @@
  * so every visibility policy applies by construction — these events
  * carry no content, only "something on channel X changed".
  *
- * Shares WEB_INTERNAL_URL + REVALIDATE_SECRET with utils/revalidate.ts
- * (the secret guards both internal endpoints; rotation affects both).
- * Unlike revalidate.ts this logs non-2xx responses: the whole pipeline
- * is fire-and-forget, so a silently failing emit would present as a
- * perfectly healthy app that just never updates (see issue #17 plan).
+ * WEB_INTERNAL_URL + REVALIDATE_SECRET (sent as x-revalidate-secret) now
+ * serve only this ingest: D-DC01 removed the cache-revalidation webhook
+ * that once shared them, and the names are kept for compatibility.
+ * Non-2xx responses are logged: the whole pipeline is fire-and-forget, so
+ * a silently failing emit would present as a perfectly healthy app that
+ * just never updates (see issue #17 plan).
  *
  * Events are micro-batched (100ms) and deduped per channel: a single
  * announcement publish fans out to N notification rows, and the seed /
@@ -118,7 +119,7 @@ const WATCHED_UIDS = new Set([
 function relationId(value: unknown): number | null {
   // Relation values arrive in several shapes depending on the write path:
   // a scalar id, { id }, or the { set: [{ id }] } form (see wiki-page
-  // lifecycle fix 4cfb429).
+  // lifecycle fix a195dca).
   if (typeof value === "number") return value;
   if (value && typeof value === "object") {
     const v = value as any;

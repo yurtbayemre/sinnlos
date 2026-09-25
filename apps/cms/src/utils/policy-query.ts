@@ -93,11 +93,12 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
  *
  * `publicationState` is the Strapi v4 spelling of the same switch. It is
  * inert in v5 (no occurrence anywhere in @strapi/core, @strapi/utils or
- * @strapi/database 5.49), but it is NOT stripped either: this CMS sets no
- * `api.rest.strictParams`, so `sanitizeQuery` keeps unknown keys and the
- * document service passes them on. Deleting it keeps a future
+ * @strapi/database 5.49), and the core does not strip it: this CMS sets no
+ * `api.rest.strictParams`, so `sanitizeQuery` keeps unknown keys. The
+ * sanitize.query wrapper in src/index.ts now drops every non-REST root key
+ * (utils/rest-query-params.ts); deleting it here as well keeps a future
  * back-compat shim (or a plugin honouring the legacy name) from
- * re-opening the hole.
+ * re-opening the hole should that pick ever change.
  *
  * Only for draftAndPublish types — on the others `status` is ignored by
  * the document service anyway, but setting it would be misleading.

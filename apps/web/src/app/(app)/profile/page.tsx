@@ -1,5 +1,5 @@
 import { getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { initials } from "@/lib/utils";
@@ -18,13 +18,10 @@ export async function generateMetadata() {
 
 export default async function ProfilePage() {
   const [t, tCommon] = await Promise.all([getTranslations("profile"), getTranslations("common")]);
-  const session = await auth();
+  const session = await getSession();
   const isLocal = session?.provider === "local";
 
-  const { data, failed } = await tryFetch(
-    () => strapi<{ data: any }>("/api/me", { noCache: true }),
-    "profile",
-  );
+  const { data, failed } = await tryFetch(() => strapi<{ data: any }>("/api/me"), "profile");
   const me = data?.data ?? null;
 
   const name = me?.displayName ?? me?.username ?? session?.user?.name ?? tCommon("unknown");

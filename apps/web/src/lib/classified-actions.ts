@@ -25,8 +25,8 @@
  */
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
-import { auth } from "@/auth";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
+import { getStrapiToken } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 import {
   AD_DEFAULT_DURATION_DAYS,
@@ -144,8 +144,7 @@ function parseAdForm(formData: FormData): { error: ClassifiedErrorCode } | Parse
 /** Multipart upload to Strapi — strapi() always sends JSON, hence raw fetch. */
 async function uploadAdImages(files: File[]): Promise<number[]> {
   if (files.length === 0 || DEMO_MODE) return [];
-  const session = await auth();
-  const token = session?.strapiJwt;
+  const token = await getStrapiToken();
   if (!token) throw new Error("Not authenticated");
 
   const body = new FormData();
@@ -177,7 +176,6 @@ async function cleanupOrphanedUploads(imageIds: number[]): Promise<void> {
     await strapi("/api/classifieds/cleanup-uploads", {
       method: "POST",
       body: JSON.stringify({ imageIds }),
-      noCache: true,
     });
   } catch (e) {
     unstable_rethrow(e);
@@ -190,7 +188,6 @@ async function currentImageIds(id: number): Promise<number[]> {
   try {
     const res = await strapi<{ data: Array<{ images?: Array<{ id: number }> }> }>(
       `/api/classifieds?filters[id][$eq]=${id}&populate[images][fields][0]=id`,
-      { noCache: true },
     );
     return (res.data?.[0]?.images ?? []).map((img) => img.id);
   } catch (e) {
@@ -225,7 +222,6 @@ export async function createClassified(
           expiresAt: dateInDays(parsed.days ?? AD_DEFAULT_DURATION_DAYS),
         },
       }),
-      noCache: true,
     });
   } catch (e) {
     // strapi()'s 401 → sign-in redirect (NEXT_REDIRECT) must propagate.
@@ -266,7 +262,6 @@ export async function updateClassified(
     await strapi(`/api/classifieds/${id}`, {
       method: "PUT",
       body: JSON.stringify({ data }),
-      noCache: true,
     });
   } catch (e) {
     unstable_rethrow(e);
@@ -287,7 +282,7 @@ export async function updateClassified(
 
 export async function deleteClassified(id: number): Promise<{ error?: "failed" }> {
   try {
-    await strapi(`/api/classifieds/${id}`, { method: "DELETE", noCache: true });
+    await strapi(`/api/classifieds/${id}`, { method: "DELETE" });
   } catch (e) {
     unstable_rethrow(e);
     console.error("[classifieds] delete failed", e);
@@ -305,7 +300,6 @@ export async function renewClassified(id: number): Promise<{ error?: "failed" }>
       body: JSON.stringify({
         data: { expiresAt: dateInDays(AD_DEFAULT_DURATION_DAYS) },
       }),
-      noCache: true,
     });
   } catch (e) {
     unstable_rethrow(e);

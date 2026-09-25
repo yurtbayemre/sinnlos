@@ -2,8 +2,11 @@ import { factories } from "@strapi/strapi";
 
 export default factories.createCoreController("api::event.event", ({ strapi }) => ({
   async ics(ctx) {
+    // Published rows only (FX06): db.query spans draft AND published rows,
+    // and the action is granted to every role — a draft row id must answer
+    // the same 404 as a missing one.
     const entry = await strapi.db.query("api::event.event").findOne({
-      where: { id: ctx.params.id },
+      where: { id: ctx.params.id, publishedAt: { $notNull: true } },
     });
     if (!entry) return ctx.notFound();
 

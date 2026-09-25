@@ -1,0 +1,42 @@
+// Type-checks the apps/web and infra Vitest files (S07). Both app tsconfigs
+// exclude *.test.* on purpose (Strapi builds and `next build` must never see
+// test code), and Vitest only strips types — so without these programs a test
+// can assert on a property that no longer exists and still pass. Run via
+// `pnpm typecheck` (root), which CI executes.
+//
+// Two programs, one per compiler contract: this one is STRICT like
+// apps/web/tsconfig.json (both extend tsconfig.base.json); the apps/cms tests
+// run under apps/cms's own non-strict Strapi settings in
+// tsconfig.test.cms.json. No web or infra test imports cms code.
+//
+// Tooling is borrowed from apps/web on purpose: its pinned TypeScript runs the
+// program (root package.json `typecheck:tests`) and its @types/node provides
+// Node globals. Adding typescript as a ROOT devDependency re-resolves the
+// @strapi/types peer graph in pnpm-lock.yaml — unrelated churn for a test gate.
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["dom", "dom.iterable", "ES2022"],
+    "typeRoots": ["./apps/web/node_modules/@types"],
+    "types": ["node"],
+    "paths": {
+      // Mirrors apps/web/tsconfig.json and the `@` alias in vitest.config.ts.
+      "@/*": ["./apps/web/src/*"],
+      // Same React 19 type pin as apps/web/tsconfig.json: without it Next's
+      // .d.ts files can resolve Strapi's @types/react@18 through pnpm's hoist
+      // directory.
+      "react": ["./apps/web/node_modules/@types/react"],
+      "react/*": ["./apps/web/node_modules/@types/react/*"],
+      "react-dom": ["./apps/web/node_modules/@types/react-dom"],
+      "react-dom/*": ["./apps/web/node_modules/@types/react-dom/*"]
+    }
+  },
+  "include": [
+    "apps/web/src/**/*.test.ts",
+    // next-auth Session/JWT module augmentation used by auth.ts and strapi.ts.
+    "apps/web/src/types/**/*.d.ts",
+    "infra/**/*.test.ts"
+  ],
+  "exclude": ["**/node_modules/**"]
+}

@@ -2,8 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, CalendarClock, Mail, MapPin, Pencil, TriangleAlert } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
+import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
@@ -29,14 +30,17 @@ export default async function ClassifiedDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [t, tRel, locale, session] = await Promise.all([
+  // The ad read needs no role (canManage below is display-only), so it runs
+  // alongside getViewer()'s /api/me read instead of behind it.
+  const [t, tRel, locale, session, viewer, { data, failed }] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
-    auth(),
+    getSession(),
+    getViewer(),
+    tryFetch(() => api.classifieds.one(id), "classified"),
   ]);
 
-  const { data, failed } = await tryFetch(() => api.classifieds.one(id), "classified");
   const ad = (data?.data?.[0] ?? null) as Classified | null;
   if (!ad && !failed) notFound();
   if (!ad) {
@@ -47,11 +51,10 @@ export default async function ClassifiedDetailPage({
     );
   }
 
-  const role = session?.user?.role;
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
   // Editing is owner/admin only (editors keep only the delete takedown,
   // enforced CMS-side) — mirrors the update-route policy config.
-  const canManage = isOwner || isAdmin(role);
+  const canManage = isOwner || isAdmin(viewer.role);
   const expired = isClassifiedExpired(ad.expiresAt);
   const images = (ad.images ?? [])
     .map((img) => {

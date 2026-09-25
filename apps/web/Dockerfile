@@ -18,6 +18,10 @@ WORKDIR /app/apps/web
 RUN pnpm build && mkdir -p public
 
 FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
+# D-SESSION-01: this web keeps the Strapi JWT server-side (never on
+# /api/auth/session). infra/deploy.sh demands a JWT_SECRET rotation when the
+# running web lacks this label, i.e. when it still exposed the JWTs.
+LABEL org.sinnlos.strapi-jwt="server-only"
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone /app

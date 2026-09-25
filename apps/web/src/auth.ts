@@ -9,15 +9,21 @@
  *  - Local credentials: email+password are verified directly against
  *    Strapi's /api/auth/local endpoint, which returns the Strapi JWT.
  *
- * Either way the Strapi JWT is stashed on the session and every
- * server-side Strapi fetch uses it.
+ * Either way the Strapi JWT is stored ONLY on the encrypted Auth.js JWT
+ * (HttpOnly session cookie), never on the Session object: the session
+ * callback's output is what GET /api/auth/session serves to the browser
+ * (D-SESSION-01, investigations.md #2). Server code reads the token through
+ * getStrapiToken() (lib/session.ts → lib/strapi-token.ts); role and
+ * department come per request from getViewer() (lib/viewer.ts).
  */
-import NextAuth, { type Session } from "next-auth";
+import NextAuth, { type NextAuthConfig, type Session } from "next-auth";
 import MicrosoftEntraID from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
 import { STRAPI_URL } from "@/lib/config";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED } from "@/lib/auth-config";
+import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
+import { strapiJwtExp, strapiSessionExpired } from "@/lib/strapi-jwt";
 
 const DEMO_MODE = process.env.DEMO_MODE === "1";
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
@@ -41,6 +47,8 @@ if (
 
 // Session / User / JWT augmentation lives in @/types/next-auth.d.ts.
 
+// Only the identity fields are read: role and department are resolved per
+// request by getViewer(), never taken from a sign-in payload.
 type StrapiExchangeResponse = {
   jwt: string;
   user: {
@@ -48,8 +56,6 @@ type StrapiExchangeResponse = {
     email: string;
     username: string;
     displayName?: string;
-    role?: { id: number; type: string; name: string };
-    department?: { id: number; name: string; slug: string };
   };
 };
 
@@ -159,9 +165,10 @@ if (LOCAL_ENABLED) {
             headers: {
               "Content-Type": "application/json",
               // Forward the real client IP: Strapi's users-permissions
-              // throttle counts per ctx.ip and the CMS runs proxy:true.
-              // Without this header every user shares the web container's
-              // IP as ONE bucket — 10 failures/min would lock everyone out.
+              // throttle keys /auth/local on ctx.request.ip, which honours
+              // this header only since server.proxy.koa (FX11). Without it
+              // every user shares the web container's IP as ONE bucket —
+              // 10 requests/min would lock everyone out.
               "X-Forwarded-For": clientIp,
             },
             body: JSON.stringify({ identifier, password }),
@@ -186,20 +193,22 @@ if (LOCAL_ENABLED) {
                 );
               }
             }
+            // Strapi's own throttle: a distinct error so the form says "too
+            // many attempts" instead of "invalid email or password" (FX11).
+            if (res.status === 429) throw new StrapiRateLimitedSignIn();
             return null;
           }
           loginRateLimiter.recordSuccess(identifier);
           const data = (await res.json()) as StrapiExchangeResponse;
-          // Strapi's /api/auth/local doesn't populate role/department —
-          // fetch the full user with the fresh JWT.
-          const meRes = await fetch(
-            `${STRAPI_URL}/api/users/me?populate[role]=true&populate[department]=true`,
-            {
-              headers: { Authorization: `Bearer ${data.jwt}` },
-              cache: "no-store",
-              signal: AbortSignal.timeout(5000),
-            },
-          );
+          // Display name and id of the fresh user. Role and department are
+          // NOT taken here (D-SESSION-01): getViewer() reads them per request
+          // from /api/me — /users/me strips `role` for every non-admin caller
+          // anyway (see lib/viewer.ts).
+          const meRes = await fetch(`${STRAPI_URL}/api/users/me`, {
+            headers: { Authorization: `Bearer ${data.jwt}` },
+            cache: "no-store",
+            signal: AbortSignal.timeout(5000),
+          });
           const me = meRes.ok ? await meRes.json() : data.user;
           return {
             id: String(me.id),
@@ -215,12 +224,9 @@ if (LOCAL_ENABLED) {
             email: data.user.email ?? me.email,
             strapiJwt: data.jwt,
             strapiUserId: me.id,
-            strapiRole: me.role?.type,
-            strapiDepartment: me.department
-              ? { id: me.department.id, name: me.department.name, slug: me.department.slug }
-              : null,
           };
-        } catch {
+        } catch (e) {
+          if (e instanceof StrapiRateLimitedSignIn) throw e;
           return null;
         }
       },
@@ -228,73 +234,78 @@ if (LOCAL_ENABLED) {
   );
 }
 
+/**
+ * Auth.js callbacks, exported only so auth.test.ts can drive the Microsoft
+ * branch directly (the D-SESSION-01 regression pins); NextAuth() below is
+ * the runtime consumer.
+ */
+export const callbacks = {
+  async jwt({ token, account, user }) {
+    if (user && user.strapiJwt) {
+      // Local credentials path: authorize() already returned the Strapi JWT.
+      token.strapiJwt = user.strapiJwt;
+      token.strapiUserId = user.strapiUserId;
+      token.strapiJwtExp = strapiJwtExp(user.strapiJwt);
+      token.provider = "local";
+    } else if (account?.access_token) {
+      // Microsoft path: exchange the access token for a Strapi JWT.
+      const strapi = await exchangeForStrapiJwt(account.access_token);
+      if (!strapi) {
+        // Abort sign-in instead of creating a partial session with no
+        // Strapi JWT — every subsequent page load would silently fail
+        // to fetch data, leaving the user stuck on an empty UI.
+        throw new Error(
+          "Could not exchange Microsoft access token for a Strapi session. " +
+            "Check that the CMS is reachable and the users-permissions Microsoft provider is configured.",
+        );
+      }
+      token.strapiJwt = strapi.jwt;
+      token.strapiUserId = strapi.user.id;
+      token.strapiJwtExp = strapiJwtExp(strapi.jwt);
+      token.name = strapi.user.displayName ?? token.name;
+      token.email = strapi.user.email ?? token.email;
+      token.provider = "microsoft-entra-id";
+    }
+    // Runs on sign-in AND on every later session read (auth(), proxy,
+    // /api/auth/session): the Auth.js session ends with the Strapi JWT it
+    // carries (D-SESSION-01). The cookie itself slides, so maxAge alone
+    // cannot do this; a null return makes Auth.js clear the cookie
+    // (@auth/core lib/actions/session.js) and auth() yield null.
+    if (strapiSessionExpired(token)) return null;
+    return token;
+  },
+  async session({ session, token }) {
+    // The session/jwt callbacks are typed against @auth/core's Session/JWT
+    // (NextAuthConfig.callbacks = AuthConfig["callbacks"]), which don't carry
+    // our module augmentation — and @auth/core's JWT exposes an index
+    // signature returning `unknown`. Our augmentation in
+    // @/types/next-auth.d.ts types these fields on the `next-auth` Session
+    // that auth() returns, so every call site is fully typed. Here at the
+    // write site we narrow the raw token fields and the augmented session
+    // explicitly (typed assertions, not `as any`).
+    //
+    // SECURITY (D-SESSION-01, investigations.md #2): this return value is
+    // what GET /api/auth/session sends to the browser. Never copy the Strapi
+    // JWT (or anything derived from the token beyond id/provider) onto it —
+    // a JWT here is a 7-day bearer token for Strapi's public /api/*.
+    // Role/department are not session data either: use getViewer().
+    const s = session as Session;
+    s.provider = token.provider as string | undefined;
+    s.user.id = token.strapiUserId as number | undefined;
+    return session;
+  },
+} satisfies NonNullable<NextAuthConfig["callbacks"]>;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
-  // maxAge matches the Strapi JWT's expiresIn (7 days, see
-  // apps/cms/config/plugins.ts). Otherwise the Auth.js session outlives
-  // the Strapi JWT and users silently hit 401s on every API fetch.
+  // Upper bound only: 7 days = the Strapi JWT's expiresIn
+  // (apps/cms/config/plugins.ts). The session actually ends when the
+  // embedded Strapi JWT expires — the jwt callback above returns null then.
+  // No `useSecureCookies` / `cookies` override here: lib/strapi-token.ts
+  // reads the session cookie under Auth.js's default name and must mirror
+  // any change (pinned by auth.test.ts).
   session: { strategy: "jwt", maxAge: 7 * 24 * 60 * 60 },
   pages: { signIn: "/sign-in" },
   providers,
-  callbacks: {
-    async jwt({ token, account, user }) {
-      // Local credentials path: authorize() already returned the Strapi JWT.
-      if (user && user.strapiJwt) {
-        token.strapiJwt = user.strapiJwt;
-        token.strapiUserId = user.strapiUserId;
-        token.strapiRole = user.strapiRole;
-        token.strapiDepartment = user.strapiDepartment ?? null;
-        token.provider = "local";
-        return token;
-      }
-      // Microsoft path: exchange the access token for a Strapi JWT.
-      if (account?.access_token) {
-        const strapi = await exchangeForStrapiJwt(account.access_token);
-        if (!strapi) {
-          // Abort sign-in instead of creating a partial session with no
-          // Strapi JWT — every subsequent page load would silently fail
-          // to fetch data, leaving the user stuck on an empty UI.
-          throw new Error(
-            "Could not exchange Microsoft access token for a Strapi session. " +
-              "Check that the CMS is reachable and the users-permissions Microsoft provider is configured.",
-          );
-        }
-        token.strapiJwt = strapi.jwt;
-        token.strapiUserId = strapi.user.id;
-        token.strapiRole = strapi.user.role?.type;
-        token.strapiDepartment = strapi.user.department
-          ? {
-              id: strapi.user.department.id,
-              name: strapi.user.department.name,
-              slug: strapi.user.department.slug,
-            }
-          : null;
-        token.name = strapi.user.displayName ?? token.name;
-        token.email = strapi.user.email ?? token.email;
-        token.provider = "microsoft-entra-id";
-      }
-      return token;
-    },
-    async session({ session, token }) {
-      // The session/jwt callbacks are typed against @auth/core's Session/JWT
-      // (NextAuthConfig.callbacks = AuthConfig["callbacks"]), which don't carry
-      // our module augmentation — and @auth/core's JWT exposes an index
-      // signature returning `unknown`. Our augmentation in
-      // @/types/next-auth.d.ts types these fields on the `next-auth` Session
-      // that auth() returns, so every call site is fully typed. Here at the
-      // write site we narrow the raw token fields and the augmented session
-      // explicitly (typed assertions, not `as any`).
-      const s = session as Session;
-      s.strapiJwt = token.strapiJwt as string | undefined;
-      s.provider = token.provider as string | undefined;
-      s.user.id = token.strapiUserId as number | undefined;
-      s.user.role = token.strapiRole as string | undefined;
-      s.user.department = token.strapiDepartment as {
-        id: number;
-        name: string;
-        slug: string;
-      } | null;
-      return session;
-    },
-  },
+  callbacks,
 });

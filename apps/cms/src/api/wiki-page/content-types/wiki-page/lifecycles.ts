@@ -1,11 +1,7 @@
 /**
- * Two responsibilities:
- * 1. On update, snapshot the PREVIOUS body into a wiki-revision so the
- *    revision log always points at a diff the user can restore.
- * 2. On any change, notify the Next.js frontend to invalidate cached
- *    page lookups — see apps/cms/src/utils/revalidate.ts.
+ * On update, snapshot the PREVIOUS body into a wiki-revision so the
+ * revision log always points at a diff the user can restore.
  */
-import { revalidate } from "../../../../utils/revalidate";
 import { wikiEditContext } from "../../../../utils/wiki-edit-context";
 
 /**
@@ -21,28 +17,6 @@ function relationId(raw: any): number | undefined {
       : raw;
   const id = Number(entry && typeof entry === "object" ? entry.id : entry);
   return Number.isFinite(id) ? id : undefined;
-}
-
-async function tagsFor(event: any): Promise<string[]> {
-  const result = event?.result;
-  const pageSlug: string | undefined = result?.slug;
-  const tags = ["wiki-pages"];
-
-  // Relations aren't populated on lifecycle events — query the space by id
-  // to resolve its slug for the specific per-space and per-page tags.
-  const spaceId: number | undefined = relationId(
-    result?.space?.id ?? event?.params?.data?.space,
-  );
-  if (spaceId) {
-    const space = await strapi.db
-      .query("api::wiki-space.wiki-space")
-      .findOne({ where: { id: spaceId }, select: ["slug"] });
-    if (space?.slug) {
-      tags.push(`wiki-space:${space.slug}`);
-      if (pageSlug) tags.push(`wiki-page:${space.slug}:${pageSlug}`);
-    }
-  }
-  return tags;
 }
 
 export default {
@@ -77,15 +51,5 @@ export default {
         publishedAt: new Date(),
       },
     });
-  },
-
-  async afterCreate(event: any) {
-    await revalidate(await tagsFor(event));
-  },
-  async afterUpdate(event: any) {
-    await revalidate(await tagsFor(event));
-  },
-  async afterDelete(event: any) {
-    await revalidate(await tagsFor(event));
   },
 };

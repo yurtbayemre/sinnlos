@@ -9,20 +9,16 @@
  *   - authorize()  → User
  *   - jwt()        → JWT
  *   - session()    → Session
+ *
+ * The Session is PUBLIC: GET /api/auth/session serves it to the browser.
+ * It carries no Strapi JWT, role or department (D-SESSION-01) — the JWT
+ * stays on the encrypted JWT (read server-side by lib/strapi-token.ts),
+ * role and department come per request from getViewer() (lib/viewer.ts).
  */
 import type { DefaultSession } from "next-auth";
 
-/** Department shape carried on the session/token (a subset of the Strapi entity). */
-interface SessionDepartment {
-  id: number;
-  name: string;
-  slug: string;
-}
-
 declare module "next-auth" {
   interface Session {
-    /** Strapi JWT used to authenticate every server-side Strapi fetch. */
-    strapiJwt?: string;
     /** Which sign-in provider issued this session ("local" | "microsoft-entra-id"). */
     provider?: string;
     // `id` is omitted from the default user before intersecting: the default
@@ -31,21 +27,16 @@ declare module "next-auth" {
     user: {
       /** Strapi user id (numeric primary key). */
       id?: number;
-      /** Strapi role type (e.g. "authenticated", "admin"). */
-      role?: string;
-      department?: SessionDepartment | null;
     } & Omit<NonNullable<DefaultSession["user"]>, "id">;
   }
 
   /**
    * Shape returned by the Credentials `authorize()` callback and threaded
-   * into the first `jwt()` call as `user`.
+   * into the first `jwt()` call as `user` (server-side only).
    */
   interface User {
     strapiJwt?: string;
     strapiUserId?: number;
-    strapiRole?: string;
-    strapiDepartment?: SessionDepartment | null;
   }
 }
 
@@ -53,8 +44,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     strapiJwt?: string;
     strapiUserId?: number;
-    strapiRole?: string;
-    strapiDepartment?: SessionDepartment | null;
+    /** `exp` (epoch seconds) of strapiJwt; the session ends then (lib/strapi-jwt.ts). */
+    strapiJwtExp?: number;
     provider?: string;
   }
 }

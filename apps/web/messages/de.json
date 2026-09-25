@@ -71,7 +71,8 @@
     "creatingAccount": "Konto wird erstellt…",
     "demoMode": "Demo-Modus",
     "registrationDisabled": "Die Registrierung ist derzeit deaktiviert.",
-    "sessionExpired": "Ihre Sitzung ist abgelaufen – bitte melden Sie sich erneut an."
+    "sessionExpired": "Ihre Sitzung ist abgelaufen – bitte melden Sie sich erneut an.",
+    "rateLimited": "Zu viele Anmeldeversuche – bitte warten Sie eine Minute und versuchen Sie es erneut."
   },
   "dashboard": {
     "welcomeBack": "Willkommen zurück",
@@ -360,6 +361,7 @@
     "confirmPassword": "Neues Passwort bestätigen",
     "changePassword": "Passwort ändern",
     "profileUpdated": "Profil aktualisiert.",
+    "passwordRateLimited": "Zu viele Versuche, das Passwort zu ändern – bitte warten Sie eine Minute und versuchen Sie es erneut.",
     "digestSection": "E-Mail-Zusammenfassungen",
     "digestHint": "Erhalte morgens eine Zusammenfassung per E-Mail — täglich oder wöchentlich (montags). Ohne Auswahl wird nichts versendet.",
     "digestAnnouncements": "Neuigkeiten & Ankündigungen",

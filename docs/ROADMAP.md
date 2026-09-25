@@ -23,22 +23,38 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > confirmation** (acknowledgements), an employee **marketplace**
 > (classifieds with hardened photo upload) and **event RSVPs** with month
 > view. See the README feature list and content-model table.
+>
+> **Status update (2026-09-24):** a security hardening batch changed some
+> patterns the implementation sketches below still mention. The web keeps
+> **no server-side cache** of Strapi responses any more: every read is
+> `no-store`, and `noCache`, `revalidateTag`, `utils/revalidate.ts` and
+> `/api/revalidate` are gone (read those mentions below as history; the
+> rules are in docs/architecture.md §3). Role and department are no longer
+> stored on the session: `getViewer()` reads them per request. The generic
+> `/api/poll-votes` routes no longer exist; votes go only through the custom
+> `vote`/`results` routes.
 
 ## Why this is cheaper than it looks
 
 Three architectural decisions already made carry most of the weight:
 
 1. **Per-user Strapi JWT on every request** — `apps/web/src/lib/strapi.ts`
-   injects the session's Strapi JWT into all fetches. Authenticated *writes*
-   (comments, votes, kudos) need zero new auth plumbing: a Server Action
-   calling `strapi()` with `method: "POST"` just works, and Strapi knows who
-   the author is.
-2. **Session knows role + department** — `apps/web/src/auth.ts` puts
-   `user.role` and `user.department` on the session, so content targeting and
-   personalization are filter expressions, not new infrastructure.
+   injects the caller's Strapi JWT into all fetches (read server-side from
+   the encrypted session cookie; it is never exposed to the browser).
+   Authenticated *writes* (comments, votes, kudos) need zero new auth
+   plumbing: a Server Action calling `strapi()` with `method: "POST"` just
+   works, and Strapi knows who the author is.
+2. **The viewer's role + department are known per request** —
+   `getViewer()` (`apps/web/src/lib/viewer.ts`) reads them from `GET /api/me`
+   (until 2026-09-24 they were frozen onto the session at sign-in), so content
+   targeting and personalization are filter expressions, not new
+   infrastructure.
 3. **Graph enrichment hook** — `apps/cms/src/extensions/users-permissions/strapi-server.ts`
-   already syncs profile data from Microsoft Graph at sign-in. The directory
-   and celebrations features extend this hook instead of building a sync job.
+   was meant to sync profile data from Microsoft Graph at sign-in, so the
+   directory and celebrations features could extend it instead of building
+   a sync job. (Verified 2026-09-24: on Strapi 5.49 this extension is inert —
+   it patches the controller factory, not the controller. A redesign of the
+   Entra sign-in replaces it.)
 
 Every new content type follows the same recipe:
 schema in `apps/cms/src/api/<name>/`, permissions added to the
@@ -436,8 +452,17 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
       forgetting this is the #1 cause of frontend 403s in this project.
 - [ ] Never trust client-supplied author/voter/sender — force from
       `ctx.state.user` in a controller or lifecycle hook.
-- [ ] Per-user responses must use `noCache: true` (Next fetch cache keys by
-      URL, not Authorization header).
+- [ ] No server-side caching of Strapi responses: `strapi()` is always
+      `no-store`, and the `StrapiInit` type plus ESLint rules enforce it. A
+      cache may only come back under the re-entry rule in
+      docs/architecture.md §3.
+- [ ] New content-API routes need a policy entry in the golden table of
+      `apps/cms/src/routes.matrix.test.ts`; read routes of draft & publish
+      types must pin `status=published`. Expose only the core routes the web
+      uses (`only:` in the router).
+- [ ] Web role gates read `getViewer().role` and use the fail-closed
+      allowlist helpers in `apps/web/src/lib/roles.ts`; never
+      `role !== "guest"`.
 - [ ] Demo mode: extend `apps/web/src/lib/demo.ts` fixtures so `DEMO_MODE=1`
       keeps working.
 - [ ] Types in `lib/types.ts`, skeleton + `loading.tsx`, `EmptyState`,

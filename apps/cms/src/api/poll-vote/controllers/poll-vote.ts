@@ -9,8 +9,10 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     const { optionIndex } = ctx.request.body as { optionIndex?: number };
     if (optionIndex == null || optionIndex < 0) return ctx.badRequest("optionIndex required");
 
+    // Published rows only (FX06): db.query spans draft AND published rows;
+    // a draft poll id answers the same 404 as a missing one.
     const poll = await strapi.db.query("api::poll.poll").findOne({
-      where: { id: pollId },
+      where: { id: pollId, publishedAt: { $notNull: true } },
     });
     if (!poll) return ctx.notFound();
 
@@ -34,8 +36,10 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
 
   async results(ctx) {
     const pollId = Number(ctx.params.id);
+    // Granted to every role incl. guest: without the pin a draft poll id
+    // returned the unpublished question and options (FX06).
     const poll = await strapi.db.query("api::poll.poll").findOne({
-      where: { id: pollId },
+      where: { id: pollId, publishedAt: { $notNull: true } },
     });
     if (!poll) return ctx.notFound();
 

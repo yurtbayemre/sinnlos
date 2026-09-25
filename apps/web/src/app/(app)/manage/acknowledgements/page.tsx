@@ -2,10 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { auth } from "@/auth";
 import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
 import { reportCompleteness } from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { walkAllPages } from "@/lib/paginate";
 import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
@@ -52,8 +52,7 @@ const ANNOUNCEMENT_READER_ROLES = new Set([
 ]);
 
 export default async function AcknowledgementReportPage() {
-  const session = await auth();
-  if (!isAdmin(session?.user?.role)) {
+  if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 
@@ -67,7 +66,8 @@ export default async function AcknowledgementReportPage() {
   // announcement-visibility policy, so these return EVERY user's acks and
   // EVERY announcement — the target audience is recomputed below instead
   // of being handed to us by the API. Users come via the paginated
-  // directory helper. All but the teams fetch are per-user/noCache.
+  // directory helper. Like every strapi() read, all four are uncached
+  // (D-DC01).
   const [announcementsResult, acksResult, usersResult, teamsResult] = await Promise.all([
     tryFetch(
       () =>
@@ -81,7 +81,6 @@ export default async function AcknowledgementReportPage() {
           (page) =>
             strapi<StrapiListResponse<Announcement>>(
               `/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
-              { noCache: true },
             ),
           { maxPages: 50, label: "ack-report announcements" },
         ),
@@ -102,7 +101,7 @@ export default async function AcknowledgementReportPage() {
     // team side (lead counts as a member for targeting). `api.teams.list()`
     // is a full page walk too since #26, but fetchAllTeams stays the right
     // fetch here: (a) it field-limits the user populates to username/ids —
-    // no contact payload in the tagged cache — and (b) its `truncated`
+    // no contact payload (data minimisation) — and (b) its `truncated`
     // signal is already wired into reportCompleteness below (fail-closed).
     tryFetch(() => fetchAllTeams(), "ack-report"),
   ]);

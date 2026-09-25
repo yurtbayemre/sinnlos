@@ -7,6 +7,7 @@ import { LocaleSwitcher } from "@/components/locale-switcher";
 import { SearchCommand } from "@/components/search-command";
 import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
+import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
 import { LiveNotificationBell } from "@/components/notifications/live-notification-bell";
@@ -21,21 +22,20 @@ export async function Topbar() {
 
   const session = DEMO_MODE
     ? { user: { name: "Ada Lovelace", email: "ada@sinnlos.local", image: null } }
-    : await (await import("@/auth")).auth();
+    : await getSession();
   const name = session?.user?.name ?? tCommon("signedOut");
   const email = session?.user?.email ?? "";
 
   let notifications: Notification[] = [];
   if (session?.user && !DEMO_MODE) {
     try {
-      // `session` here is the real auth() session (the DEMO_MODE literal,
+      // `session` here is the real getSession() one (the DEMO_MODE literal,
       // which lacks `id`, is excluded by `!DEMO_MODE`). The `in` guard
       // narrows the union so we read the numeric Strapi id type-safely.
       const userId = "id" in session.user ? session.user.id : undefined;
       if (userId) {
         const res = await strapi<StrapiListResponse<Notification>>(
           `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
-          { noCache: true },
         );
         notifications = (res as any).data ?? [];
       }
