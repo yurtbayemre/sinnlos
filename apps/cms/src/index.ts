@@ -794,7 +794,8 @@ export default {
     await assertNoOrgDrafts(strapi);
     // Datetime contract (database/ensure-timestamptz.ts): log the zones,
     // verify the DB session runs in UTC, refuse a non-UTC process on a fresh
-    // database or before the one-time repair, and convert every naive
+    // database, before the one-time repair or (beforeSync hook) on a boot
+    // that migrates or changes the schema, and convert every naive
     // timestamp column right after schema sync (afterSync hook).
     await prepareDatetimeContract(strapi);
     registerTimestamptzGuard(strapi);

@@ -4,6 +4,7 @@ import {
   assertTimestamptzContract,
   convertNaiveColumns,
   prepareDatetimeContract,
+  refuseNonUtcSchemaSync,
   registerTimestamptzGuard,
   type GuardHost,
 } from "./ensure-timestamptz";
@@ -22,6 +23,10 @@ interface FakeDbState {
   schemaMarker: string;
   /** ALTERs on these tables fail (e.g. a lock timeout). */
   failingTables: Set<string>;
+  /** Strapi's own view before schema sync: pending migrations, stored and current schema hash. */
+  migrationsPending: boolean;
+  storedHash: string | null;
+  modelHash: string;
 }
 
 function fakeStrapi(overrides: Partial<FakeDbState> = {}, client = "postgres") {
@@ -33,6 +38,9 @@ function fakeStrapi(overrides: Partial<FakeDbState> = {}, client = "postgres") {
     tablesWithData: new Set(),
     schemaMarker: "1:abc",
     failingTables: new Set(),
+    migrationsPending: false,
+    storedHash: "abc",
+    modelHash: "abc",
     ...overrides,
   };
   const statements: string[] = [];
@@ -80,12 +88,39 @@ function fakeStrapi(overrides: Partial<FakeDbState> = {}, client = "postgres") {
   };
   const handlers: Array<(context: unknown) => Promise<void>> = [];
   const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+  const hooked: string[] = [];
+  const syncCalls: string[] = [];
   const strapi: GuardHost = {
-    db: { connection, dialect: { client }, getSchemaName: () => "public" },
+    db: {
+      connection,
+      dialect: { client },
+      getSchemaName: () => "public",
+      migrations: {
+        shouldRun: async () => {
+          syncCalls.push("shouldRun");
+          return state.migrationsPending;
+        },
+      },
+      schema: {
+        schema: { tables: [] },
+        schemaStorage: {
+          read: async () => {
+            syncCalls.push("read");
+            return state.storedHash === null ? null : { hash: state.storedHash };
+          },
+          hashSchema: () => state.modelHash,
+        },
+      },
+    },
     log,
-    hook: () => ({ register: (handler: (context: unknown) => Promise<void>) => handlers.push(handler) }),
+    hook: (name: string) => ({
+      register: (handler: (context: unknown) => Promise<void>) => {
+        hooked.push(name);
+        handlers.push(handler);
+      },
+    }),
   };
-  return { strapi, state, statements, transactions, handlers, log };
+  return { strapi, state, statements, transactions, handlers, hooked, syncCalls, log };
 }
 
 const UTC = { processZone: "UTC", env: {} };
@@ -210,6 +245,43 @@ describe("convertNaiveColumns (afterSync)", () => {
   });
 });
 
+describe("refuseNonUtcSchemaSync (beforeSync)", () => {
+  it("lets a non-UTC process through when schema sync has nothing to do", async () => {
+    const { strapi, statements } = fakeStrapi();
+    await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).resolves.toBeUndefined();
+    expect(statements).toEqual([]);
+  });
+
+  it("refuses a non-UTC process before pending migrations run", async () => {
+    const { strapi } = fakeStrapi({ migrationsPending: true });
+    await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(
+      /runs database migrations and needs a UTC process, but this one runs in Europe\/Berlin.*before Strapi's migrations/,
+    );
+  });
+
+  it("refuses a non-UTC process before a schema change or a first schema", async () => {
+    const changed = fakeStrapi({ modelHash: "def" });
+    await expect(refuseNonUtcSchemaSync(changed.strapi, BERLIN)).rejects.toThrow(/changes the database schema/);
+    const first = fakeStrapi({ storedHash: null });
+    await expect(refuseNonUtcSchemaSync(first.strapi, BERLIN)).rejects.toThrow(/creates the database schema/);
+  });
+
+  it("does not look in a UTC process or on SQLite", async () => {
+    const utc = fakeStrapi({ migrationsPending: true, modelHash: "def" });
+    await expect(refuseNonUtcSchemaSync(utc.strapi, UTC)).resolves.toBeUndefined();
+    expect(utc.syncCalls).toEqual([]);
+    const sqlite = fakeStrapi({ migrationsPending: true }, "sqlite");
+    await expect(refuseNonUtcSchemaSync(sqlite.strapi, BERLIN)).resolves.toBeUndefined();
+    expect(sqlite.syncCalls).toEqual([]);
+  });
+
+  it("fails closed when Strapi's migration or schema service is gone", async () => {
+    const { strapi } = fakeStrapi();
+    const bare: GuardHost = { ...strapi, db: { ...strapi.db, migrations: undefined } };
+    await expect(refuseNonUtcSchemaSync(bare, BERLIN)).rejects.toThrow(/Cannot tell whether this boot changes/);
+  });
+});
+
 describe("assertTimestamptzContract (bootstrap)", () => {
   it("retries what afterSync left and passes once nothing is naive", async () => {
     const { strapi, state } = fakeStrapi({ naive: [{ table: "events", column: "start" }] });
@@ -231,11 +303,18 @@ describe("assertTimestamptzContract (bootstrap)", () => {
 });
 
 describe("registerTimestamptzGuard", () => {
-  it("hooks the conversion into afterSync", async () => {
-    const { strapi, handlers, state } = fakeStrapi({ naive: [{ table: "events", column: "start" }] });
+  it("hooks the schema-change check into beforeSync and the conversion into afterSync", async () => {
+    const { strapi, handlers, hooked, state } = fakeStrapi({ naive: [{ table: "events", column: "start" }] });
     registerTimestamptzGuard(strapi, UTC);
-    expect(handlers).toHaveLength(1);
+    expect(hooked).toEqual(["strapi::content-types.beforeSync", "strapi::content-types.afterSync"]);
     await handlers[0]({});
+    await handlers[1]({});
     expect(state.naive).toEqual([]);
+  });
+
+  it("the beforeSync handler refuses a non-UTC schema change", async () => {
+    const { strapi, handlers } = fakeStrapi({ modelHash: "def" });
+    registerTimestamptzGuard(strapi, BERLIN);
+    await expect(handlers[0]({})).rejects.toThrow(/changes the database schema/);
   });
 });

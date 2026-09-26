@@ -1689,8 +1689,13 @@ the cms and the database, phase 2 the web):
   in UTC while there is something to convert, when a boot creates or changes
   the schema in a non-UTC process, when the database session is not in UTC,
   or when a naive app column holds data before the one-time repair has run.
-  An ordinary restart in a non-UTC process only warns. On SQLite (local
-  development) all of this is skipped.
+  The schema check runs in Strapi's `beforeSync` hook, before any migration,
+  DDL or schema-sync write (`[datetime] This boot runs database migrations /
+  changes the database schema and needs a UTC process …`); a check after
+  the sync stays as a backstop. A boot refused by that backstop may already
+  have applied DDL; a start with `TZ=UTC` finishes it. An ordinary restart
+  in a non-UTC process only warns. On SQLite (local development) all of
+  this is skipped.
 - **The one-time repair** (`apps/cms/database/migrations/`, logic in
   `apps/cms/src/database/datetime-legacy.ts`) runs on the first boot of a
   database written before the contract. It needs `DATETIME_LEGACY_ZONE`

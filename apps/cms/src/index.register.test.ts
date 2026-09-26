@@ -407,7 +407,7 @@ describe("org draft guard in register() (decision 05)", () => {
  * zone log line.
  */
 describe("timestamptz guard in register() (datetime contract)", () => {
-  it("registers exactly one afterSync handler and logs the zones", async () => {
+  it("registers exactly one beforeSync and one afterSync handler and logs the zones", async () => {
     const stub = datetimeHost();
     const strapi = {
       ...stub,
@@ -417,11 +417,13 @@ describe("timestamptz guard in register() (datetime contract)", () => {
       contentAPI: { sanitize: { query: vi.fn(async (query: unknown) => query) } },
     };
     await lifecycle.register({ strapi });
+    expect(stub.hooks.get("strapi::content-types.beforeSync")).toHaveLength(1);
     expect(stub.hooks.get("strapi::content-types.afterSync")).toHaveLength(1);
     expect(stub.log.info).toHaveBeenCalledWith(
       expect.stringMatching(/^\[datetime\] process time zone .+, APP_TIME_ZONE /),
     );
-    // The handler is a no-op off Postgres.
+    // Both handlers are no-ops off Postgres.
+    await stub.hooks.get("strapi::content-types.beforeSync")?.[0]({});
     await stub.hooks.get("strapi::content-types.afterSync")?.[0]({});
   });
 });

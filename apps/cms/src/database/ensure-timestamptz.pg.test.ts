@@ -1,3 +1,7 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LEGACY_MIGRATION_NAME } from "./datetime-catalog";
@@ -5,7 +9,9 @@ import {
   assertTimestamptzContract,
   convertNaiveColumns,
   prepareDatetimeContract,
+  refuseNonUtcSchemaSync,
   type GuardHost,
+  type SchemaSyncState,
 } from "./ensure-timestamptz";
 import { PG_URL, columnType, createTestKnex, isoOf, rows, uniqueSchema } from "./pg-test-db.test.helper";
 import { type RawKnex } from "./strapi-knex.test.helper";
@@ -178,6 +184,59 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     await expect(assertTimestamptzContract(strapi, UTC)).resolves.toBeUndefined();
     expect(await columnType(knex, schema, "events", "start")).toBe("timestamp with time zone");
   }, 30000);
+
+  it("the beforeSync refusal reads Strapi's own migration and schema state", async () => {
+    // A real @strapi/database 5.55.1 instance on the test schema, no models.
+    const requireFromCms = createRequire(join(__dirname, "..", "..", "package.json"));
+    const requireFromStrapi = createRequire(requireFromCms.resolve("@strapi/strapi/package.json"));
+    const { Database } = requireFromStrapi("@strapi/database") as {
+      Database: new (config: Record<string, unknown>) => SchemaSyncState & {
+        connection: RawKnex;
+        dialect: { client: string };
+        init(options: { models: unknown[] }): Promise<unknown>;
+        schema: NonNullable<SchemaSyncState["schema"]> & { sync(): Promise<string> };
+        destroy(): Promise<void>;
+      };
+    };
+    const dir = mkdtempSync(join(tmpdir(), "sinnlos-no-migrations-"));
+    const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
+    const db = new Database({
+      connection: {
+        client: "postgres",
+        connection: { connectionString: PG_URL, options: "-c TimeZone=UTC", schema },
+        pool: { min: 0, max: 2 },
+      },
+      settings: { migrations: { dir }, forceMigration: false },
+      logger: quiet,
+    });
+    const strapi: GuardHost = {
+      db: {
+        connection: db.connection as unknown as GuardHost["db"]["connection"],
+        dialect: db.dialect,
+        getSchemaName: () => schema,
+        migrations: db.migrations,
+        schema: db.schema,
+      },
+      log: quiet,
+      hook: () => ({ register: () => undefined }),
+    };
+    const BERLIN = { processZone: "Europe/Berlin", env: {} };
+    try {
+      await db.init({ models: [] });
+      // Strapi's internal migrations have never run on this schema.
+      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(/runs database migrations/);
+      // After a UTC boot's sync nothing is pending and the stored hash matches.
+      await db.schema.sync();
+      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).resolves.toBeUndefined();
+      // Models that differ from the stored schema: a schema change.
+      await knex.raw(`UPDATE "${schema}".strapi_database_schema SET hash = 'stale'`);
+      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(/changes the database schema/);
+      await expect(refuseNonUtcSchemaSync(strapi, UTC)).resolves.toBeUndefined();
+    } finally {
+      await db.destroy();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it("refuses to read unrepaired data as UTC when the legacy repair is not recorded", async () => {
     await knex.raw(`DELETE FROM "${schema}".strapi_migrations`);
