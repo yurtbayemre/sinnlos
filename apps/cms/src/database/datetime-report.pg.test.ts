@@ -16,6 +16,10 @@ const OWNER = readLegacySettings({
   DATETIME_LEGACY_ZONE: "Europe/Berlin",
   DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42+02:00",
 });
+const LATE_THETA = readLegacySettings({
+  DATETIME_LEGACY_ZONE: "Europe/Berlin",
+  DATETIME_LEGACY_UTC_UNTIL: "2027-08-15T21:46:42+02:00",
+});
 
 describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", () => {
   let knex: RawKnex;
@@ -31,13 +35,15 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
     });
   }
 
-  async function report(options: { all?: boolean; around?: string; baseline?: boolean } = {}) {
+  async function report(
+    options: { all?: boolean; around?: string; baseline?: boolean; settings?: typeof OWNER } = {},
+  ) {
     const lines: string[] = [];
     await runReport(
       knexSqlClient(knex),
       {
         schema,
-        settings: OWNER,
+        settings: options.settings ?? OWNER,
         appTimeZone: "Europe/Berlin",
         now: new Date("2026-09-26T10:00:00Z"),
         all: options.all,
@@ -83,6 +89,13 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
       `"${schema}".datetime_migration_audit`,
     ]);
     expect(audit.found).toBe(false);
+  });
+
+  it("says why the gap check fails when θ cannot be tested", async () => {
+    const text = await report({ settings: LATE_THETA });
+    expect(text).toContain("Gap check: FAILS (the migration would abort). No stamps on one side of θ");
+    expect(text).toMatch(/ {2}- θ \(2027-08-15T19:46:42\.000Z\) lies in the future/);
+    expect(text).toMatch(/ {2}- no write-time stamp lies at or after θ/);
   });
 
   it("--around lists the stamps near the pre-deploy backup and marks the switch gap", async () => {

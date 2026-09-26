@@ -4,6 +4,7 @@ import {
   checkGap,
   classifyCell,
   columnKind,
+  gapFailureMessage,
   naiveUtcOf,
   readLegacySettings,
   repairColumns,
@@ -170,26 +171,58 @@ describe("classifyCell", () => {
 
 describe("checkGap", () => {
   const stamps = (values: string[]) => values.map((naive, index) => ({ naive, where: `t.c#${index}` }));
+  const NOW = new Date("2026-09-26T10:00:00Z");
+  // Last UTC write 18:40, first Berlin write 20:50 (real 18:50 UTC).
+  const SWITCH = ["2026-08-15T10:00:00.000000", "2026-08-15T18:40:00.000000", "2026-08-15T20:50:00.000000"];
 
   it("accepts θ inside the empty stretch the switch left (>= 120 min in August)", () => {
-    // Last UTC write 18:40, first Berlin write 20:50 (real 18:50 UTC).
-    const gap = checkGap(
-      stamps(["2026-08-15T10:00:00.000000", "2026-08-15T18:40:00.000000", "2026-08-15T20:50:00.000000"]),
-      OWNER,
-    );
-    expect(gap).toMatchObject({ ok: true, requiredMinutes: 120, gapMinutes: 130 });
+    const gap = checkGap(stamps(SWITCH), OWNER, NOW);
+    expect(gap).toMatchObject({ ok: true, failures: [], requiredMinutes: 120, gapMinutes: 130 });
     expect(gap?.before?.naive).toBe("2026-08-15T18:40:00.000000");
     expect(gap?.after?.naive).toBe("2026-08-15T20:50:00.000000");
   });
 
   it("rejects θ in a stretch shorter than the zone offset (a wrong θ)", () => {
-    const gap = checkGap(stamps(["2026-08-15T19:30:00.000000", "2026-08-15T20:00:00.000000"]), OWNER);
-    expect(gap).toMatchObject({ ok: false, gapMinutes: 30 });
+    const gap = checkGap(stamps(["2026-08-15T19:30:00.000000", "2026-08-15T20:00:00.000000"]), OWNER, NOW);
+    expect(gap).toMatchObject({ ok: false, failures: ["too-short"], gapMinutes: 30 });
+    expect(gapFailureMessage(gap!)).toMatch(/not inside an empty stretch .* 30\.0 minutes apart.*Nothing was changed/);
   });
 
-  it("passes when all stamps lie on one side of θ, and is skipped without θ", () => {
-    expect(checkGap(stamps(["2026-06-01T00:00:00.000000"]), OWNER)?.ok).toBe(true);
-    expect(checkGap(stamps(["2026-06-01T00:00:00.000000"]), WHOLE_DB_LEGACY)).toBeNull();
+  it("fails when one side of θ holds no write stamp instead of passing untested", () => {
+    // Everything before θ: a θ typed a year too late would read every stamp as UTC.
+    const onlyBefore = checkGap(stamps(["2026-06-01T00:00:00.000000"]), OWNER, NOW);
+    expect(onlyBefore).toMatchObject({ ok: false, failures: ["no-stamp-after"], gapMinutes: null });
+    expect(gapFailureMessage(onlyBefore!)).toMatch(/DATETIME_LEGACY_ZONE=UTC and unset DATETIME_LEGACY_UTC_UNTIL/);
+    const onlyAfter = checkGap(stamps(["2026-09-01T12:00:00.000000"]), OWNER, NOW);
+    expect(onlyAfter).toMatchObject({ ok: false, failures: ["no-stamp-before"] });
+    expect(gapFailureMessage(onlyAfter!)).toMatch(/written in Europe\/Berlin, unset DATETIME_LEGACY_UTC_UNTIL/);
+    expect(checkGap([], OWNER, NOW)?.failures).toEqual(["no-stamp-before", "no-stamp-after"]);
+  });
+
+  it("fails for a θ in the future", () => {
+    const early = readLegacySettings({
+      DATETIME_LEGACY_ZONE: "Europe/Berlin",
+      DATETIME_LEGACY_UTC_UNTIL: "2027-08-15T21:46:42+02:00",
+    });
+    const gap = checkGap(stamps([...SWITCH, "2027-09-01T12:00:00.000000"]), early, NOW);
+    expect(gap?.failures).toContain("theta-future");
+    expect(gapFailureMessage(gap!)).toMatch(/lies in the future/);
+  });
+
+  it("fails for a legacy zone at or behind UTC: a switch from UTC cannot be separated by value", () => {
+    for (const zone of ["UTC", "America/New_York"]) {
+      const settings = readLegacySettings({
+        DATETIME_LEGACY_ZONE: zone,
+        DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T19:46:42Z",
+      });
+      const gap = checkGap(stamps(SWITCH), settings, NOW);
+      expect(gap?.failures, zone).toEqual(["zone-not-ahead"]);
+      expect(gap?.ok, zone).toBe(false);
+    }
+  });
+
+  it("is skipped without θ", () => {
+    expect(checkGap(stamps(["2026-06-01T00:00:00.000000"]), WHOLE_DB_LEGACY, NOW)).toBeNull();
   });
 });
 

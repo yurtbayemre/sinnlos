@@ -847,8 +847,10 @@ the report lists them).
      stamps at least as long as the zone offset (120 minutes in August). The
      `--around` list shows the stamps near B with the switch gap marked
      (`----- gap 2h10m -----` or so) and suggests a θ inside it. A
-     `Gap check: FAILS` means θ is wrong: pick one inside the marked gap. The
-     migration runs the same check and aborts (changing nothing) otherwise.
+     `Gap check: FAILS` means θ is wrong; the lines below it say why (the
+     stretch around θ is too short, θ lies in the future, or no write stamp
+     lies on one side of θ). Pick a θ inside the marked gap. The migration
+     runs the same check and aborts (changing nothing) otherwise.
    - The class counts per table and column (`write-utc`, `write-legacy`,
      `A`, `B`, `C`, `C-allday`, …; see the
      [rules](#310-datetime-contract)).
@@ -1703,7 +1705,11 @@ the cms and the database, phase 2 the web):
   last saved before θ (UTC), **C** otherwise (ambiguous; UTC, except an
   all-day event stored as a legacy-zone midnight). A gap check requires θ to
   sit in an empty stretch of write stamps at least as long as the zone
-  offset; old values stay in `datetime_migration_audit` (as text). Strapi's
+  offset, and fails (instead of passing untested) when θ lies in the
+  future, when the legacy zone is not ahead of UTC at θ, or when no write
+  stamp lies on one side of θ: a database written in one zone only leaves
+  `DATETIME_LEGACY_UTC_UNTIL` empty (with `DATETIME_LEGACY_ZONE=UTC` if that
+  zone was UTC). Old values stay in `datetime_migration_audit` (as text). Strapi's
   bookkeeping tables are left to the guard. The runbook is
   [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release).
 - **Report CLI** (read-only): `node dist/scripts/datetime-migration-report.js`

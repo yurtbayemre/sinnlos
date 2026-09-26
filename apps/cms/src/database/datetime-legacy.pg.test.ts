@@ -169,6 +169,20 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     expect(audit.found).toBe(false);
   });
 
+  it("gap check: a θ with no write stamp on one side, or in the future, aborts instead of passing untested", async () => {
+    await seed();
+    // Before every stamp (a year typo): the old check passed and read everything as legacy.
+    await expect(
+      migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2025-08-15T21:46:42+02:00" }),
+    ).rejects.toThrow(/no write-time stamp lies before θ/);
+    // In the future (the run's now is 2026-09-26): every stamp would count as UTC.
+    await expect(
+      migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2027-08-15T21:46:42+02:00" }),
+    ).rejects.toThrow(/lies in the future.*no write-time stamp lies at or after θ/);
+    expect(await columnType(knex, schema, "events", "start")).toBe("timestamp without time zone");
+    expect(await iso("search_logs", "created_at", "term = 'after'")).toBe("2026-09-01T12:00:00Z");
+  });
+
   it("refuses to guess when data exists and DATETIME_LEGACY_ZONE is unset", async () => {
     await seed();
     await expect(migrate({})).rejects.toThrow(MISSING_LEGACY_ZONE_MESSAGE);

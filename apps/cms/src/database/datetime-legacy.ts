@@ -38,8 +38,9 @@
  *    Strapi's bookkeeping tables are left to the guard.
  *
  * Safety: a gap check proves θ sits in the empty stretch the switch left in
- * the write stamps (see checkGap), an audit table keeps every old value as
- * text, and the whole repair runs in the migration's single transaction.
+ * the write stamps and fails whenever it cannot test that (see checkGap), an
+ * audit table keeps every old value as text, and the whole repair runs in
+ * the migration's single transaction.
  */
 import { canonicalTimeZone } from "../utils/plain-date";
 import {
@@ -211,14 +212,30 @@ export interface WriteStamp {
   where: string;
 }
 
+/**
+ * Why a θ cannot be trusted:
+ *  - theta-future: θ lies after the run's now (a typo in the year?);
+ *  - zone-not-ahead: the legacy zone is not ahead of UTC at θ, so a UTC
+ *    stamp and a legacy-zone stamp cannot be told apart by their value;
+ *  - no-stamp-before / no-stamp-after: one side of θ holds no write stamp,
+ *    so nothing proves where the switch was;
+ *  - too-short: the empty stretch around θ is shorter than the offset.
+ */
+export type GapFailure = "theta-future" | "zone-not-ahead" | "no-stamp-before" | "no-stamp-after" | "too-short";
+
 export interface GapCheck {
+  /** θ as a naive UTC wall clock (NAIVE format) and as ISO-Z. */
   theta: string;
+  thetaIso: string;
+  zone: string;
   /** The last write stamp before θ and the first at or after it (naive). */
   before: WriteStamp | null;
   after: WriteStamp | null;
   gapMinutes: number | null;
   /** The legacy zone's UTC offset at θ: the minimum empty stretch around θ. */
   requiredMinutes: number;
+  /** Every reason the check fails, empty when it passes. */
+  failures: GapFailure[];
   ok: boolean;
 }
 
@@ -232,8 +249,13 @@ export interface GapCheck {
  * around θ is shorter than the offset (unless activity paused for longer,
  * which is why θ comes from the pre-deploy backup time and the report
  * shows the neighbourhood).
+ *
+ * The check can only prove that much when there is something to test: θ in
+ * the past, a legacy zone ahead of UTC (only then does the switch leave a
+ * stretch at all) and write stamps on both sides of θ. Otherwise it fails
+ * instead of passing untested (see GapFailure).
  */
-export function checkGap(stamps: readonly WriteStamp[], settings: LegacySettings): GapCheck | null {
+export function checkGap(stamps: readonly WriteStamp[], settings: LegacySettings, now: Date): GapCheck | null {
   if (!settings.theta || !settings.zone) return null;
   const theta = settings.theta.naive;
   let before: WriteStamp | null = null;
@@ -248,14 +270,57 @@ export function checkGap(stamps: readonly WriteStamp[], settings: LegacySettings
   }
   const requiredMinutes = offsetMinutesAt(settings.theta.iso, settings.zone);
   const gapMinutes = before && after ? (naiveMs(after.naive) - naiveMs(before.naive)) / 60000 : null;
+  const failures: GapFailure[] = [];
+  if (Date.parse(settings.theta.iso) > now.getTime()) failures.push("theta-future");
+  if (requiredMinutes <= 0) failures.push("zone-not-ahead");
+  if (!before) failures.push("no-stamp-before");
+  if (!after) failures.push("no-stamp-after");
+  if (gapMinutes !== null && requiredMinutes > 0 && gapMinutes < requiredMinutes) failures.push("too-short");
   return {
     theta,
+    thetaIso: settings.theta.iso,
+    zone: settings.zone,
     before,
     after,
     gapMinutes,
     requiredMinutes,
-    ok: gapMinutes === null || gapMinutes >= requiredMinutes,
+    failures,
+    ok: failures.length === 0,
   };
+}
+
+/** One sentence per failure of the gap check, for the migration and the report. */
+export function gapFailureReasons(gap: GapCheck): string[] {
+  return gap.failures.map((failure) => {
+    switch (failure) {
+      case "theta-future":
+        return `θ (${gap.thetaIso}) lies in the future: it must be the past instant the old cms switched from UTC to ${gap.zone}`;
+      case "zone-not-ahead":
+        return (
+          `${gap.zone} is ${gap.requiredMinutes} minutes from UTC at θ, not ahead of it, so a UTC stamp and a ` +
+          `${gap.zone} stamp cannot be told apart by their value. For a database written in one zone only, ` +
+          "unset DATETIME_LEGACY_UTC_UNTIL (and set DATETIME_LEGACY_ZONE=UTC if that zone was UTC)"
+        );
+      case "no-stamp-before":
+        return (
+          "no write-time stamp lies before θ, so nothing shows a UTC-era cms. If the whole database " +
+          `was written in ${gap.zone}, unset DATETIME_LEGACY_UTC_UNTIL`
+        );
+      case "no-stamp-after":
+        return (
+          `no write-time stamp lies at or after θ, so nothing shows a ${gap.zone}-era cms. If the whole ` +
+          "database was written in UTC, set DATETIME_LEGACY_ZONE=UTC and unset DATETIME_LEGACY_UTC_UNTIL; " +
+          "otherwise θ is too late"
+        );
+      case "too-short":
+        return (
+          `θ is not inside an empty stretch of write-time stamps of at least ${gap.requiredMinutes} minutes: ` +
+          `the last stamp before θ is ${gap.before?.naive ?? "none"} (${gap.before?.where ?? "-"}), the first at ` +
+          `or after it is ${gap.after?.naive ?? "none"} (${gap.after?.where ?? "-"}), ` +
+          `${gap.gapMinutes?.toFixed(1) ?? "-"} minutes apart, so a θ there would misclassify stamps`
+        );
+    }
+  });
 }
 
 export interface CellPlan {
@@ -320,7 +385,7 @@ export async function buildLegacyPlan(
   sql: SqlClient,
   schema: string,
   settings: LegacySettings,
-  options: { lock?: boolean } = {},
+  options: { lock?: boolean; now?: Date } = {},
 ): Promise<LegacyPlan> {
   const byTable = groupByTable(repairColumns(await listNaiveColumns(sql, schema)));
   const tables: TablePlan[] = [];
@@ -413,7 +478,8 @@ export async function buildLegacyPlan(
     tables.push({ table, columns, kinds, keyColumn, cells });
   }
 
-  return { schema, settings, tables, emptyTables, gap: checkGap(writeStamps, settings), writeStamps };
+  const gap = checkGap(writeStamps, settings, options.now ?? new Date());
+  return { schema, settings, tables, emptyTables, gap, writeStamps };
 }
 
 export interface ApplySummary {
@@ -534,12 +600,9 @@ export function classCounts(plan: LegacyPlan): Map<string, number> {
 
 export function gapFailureMessage(gap: GapCheck): string {
   return (
-    `[datetime] DATETIME_LEGACY_UTC_UNTIL (θ = ${gap.theta} UTC) is not inside an empty stretch of ` +
-    `write-time stamps of at least ${gap.requiredMinutes} minutes: the last stamp before θ is ` +
-    `${gap.before?.naive ?? "none"} (${gap.before?.where ?? "-"}), the first at or after it is ` +
-    `${gap.after?.naive ?? "none"} (${gap.after?.where ?? "-"}), ${gap.gapMinutes?.toFixed(1) ?? "-"} minutes ` +
-    "apart. A θ there would misclassify stamps. Locate the switch with the report CLI " +
-    "(--around <pre-deploy backup time>) and pick θ inside the gap. Nothing was changed."
+    `[datetime] DATETIME_LEGACY_UTC_UNTIL (θ = ${gap.theta} UTC) fails the gap check: ` +
+    `${gapFailureReasons(gap).join("; ")}. Locate the switch with the report CLI ` +
+    "(--around <pre-deploy backup time>) and pick θ inside the gap it marks. Nothing was changed."
   );
 }
 
@@ -610,7 +673,8 @@ export async function runLegacyDatetimeMigration(
     }
   }
 
-  const runId = toIsoZ(options.now ?? new Date());
+  const now = options.now ?? new Date();
+  const runId = toIsoZ(now);
   if (!holdsData) {
     // Fresh or empty database: nothing to interpret, convert as is.
     for (const [table, tableColumns] of byTable) {
@@ -623,7 +687,7 @@ export async function runLegacyDatetimeMigration(
   const settings = readLegacySettings(options.env ?? process.env);
   if (!settings.zone) throw new Error(MISSING_LEGACY_ZONE_MESSAGE);
 
-  const plan = await buildLegacyPlan(sql, schema, settings, { lock: true });
+  const plan = await buildLegacyPlan(sql, schema, settings, { lock: true, now });
   if (plan.gap && !plan.gap.ok) throw new Error(gapFailureMessage(plan.gap));
 
   const ambiguous = plan.tables.flatMap((tablePlan) => tablePlan.cells.filter((cell) => cell.ambiguous));

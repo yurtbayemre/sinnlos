@@ -45,6 +45,7 @@ import {
 import {
   buildLegacyPlan,
   classCounts,
+  gapFailureReasons,
   readLegacySettings,
   repairColumns,
   type CellPlan,
@@ -246,7 +247,7 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
       `${allNaive.filter(({ table }) => BOOKKEEPING_TABLES.includes(table)).length})`,
   );
 
-  const plan = await buildLegacyPlan(sql, schema, settings);
+  const plan = await buildLegacyPlan(sql, schema, settings, { now });
   if (repair.length === 0) {
     print();
     print("Nothing to repair: every app column is already timestamptz.");
@@ -272,6 +273,7 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
         `${gap.before ? `${naiveShort(gap.before.naive)} (${gap.before.where})` : "-"} and ` +
         `${gap.after ? `${naiveShort(gap.after.naive)} (${gap.after.where})` : "-"}; needs >= ${gap.requiredMinutes} min.`,
     );
+    for (const reason of gapFailureReasons(gap)) print(`  - ${reason}.`);
   } else {
     print("Gap check: skipped (θ unset).");
   }
