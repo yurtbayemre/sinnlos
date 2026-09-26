@@ -130,10 +130,10 @@ services:
     environment:
       NODE_ENV: production
       # The web still renders dates in its process zone (events list/month
-      # grid, ad expiry). It stays on Europe/Berlin until the web's datetime
-      # port (phase 2) makes every date explicit in APP_TIME_ZONE; only then
-      # may it switch to UTC like the cms.
-      TZ: Europe/Berlin
+      # grid, ad expiry), so until its datetime port (phase 2) makes every
+      # date explicit, the process zone IS the business zone. Only after that
+      # port may it switch to UTC like the cms.
+      TZ: ${APP_TIME_ZONE:-Europe/Berlin}
       # Business zone, already used for the poll deadline ("closes on D" =
       # D 23:59:59 there); validated at server start.
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
