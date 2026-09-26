@@ -17,7 +17,7 @@ echo "### Log window (docker logs only cover the CURRENT container; deploy.sh re
 docker inspect -f 'infra-cms-1 started {{.State.StartedAt}}' infra-cms-1
 
 echo "### [digest] lines (skipped = dark; run complete = live)"
-docker logs infra-cms-1 2>&1 | grep -F '[digest]' | tail -n 20
+docker logs infra-cms-1 2>&1 | grep -F '[digest]' | tail -n 20 || true
 echo "### [notifications] failed lines"
-docker logs infra-cms-1 2>&1 | grep -cF '[notifications] failed'
-docker logs infra-cms-1 2>&1 | grep -F '[notifications] failed' | tail -n 20
+docker logs infra-cms-1 2>&1 | grep -cF '[notifications] failed' || true
+docker logs infra-cms-1 2>&1 | grep -F '[notifications] failed' | tail -n 20 || true
