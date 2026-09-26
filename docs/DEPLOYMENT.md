@@ -1723,7 +1723,12 @@ the cms and the database, phase 2 the web):
   [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release).
 - **Report CLI** (read-only): `node dist/scripts/datetime-migration-report.js`
   in the cms container (`--help` for the options). Before the repair it shows
-  what the repair would do; after it, the ambiguous values it recorded.
+  what the repair would do; after it, the ambiguous values it recorded. With
+  `--baseline`, a dump of an older schema is answered per value: `no table …`
+  or `no column … in the baseline dump's schema`, `not in the baseline dump
+  (created later)`, or `LOOKUP FAILED (…)` for an unexpected error, after
+  which the CLI exits with status 1. Each lookup runs in a savepoint, so one
+  failure does not abort the read-only transaction for the rest.
 - **Connection rules.** `DATABASE_URL` must not carry its own `options`
   parameter (it would replace the UTC pin; the cms refuses it unless it sets
   `TimeZone=UTC` itself). A pooler that drops startup options (PgBouncer in

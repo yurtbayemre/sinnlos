@@ -4,7 +4,10 @@
  * database/migrations/2026.10.05T00.00.00.datetime-timestamptz.js would do,
  * with the same rules (src/database/datetime-legacy.ts), and changes nothing:
  * the session runs with default_transaction_read_only=on inside a
- * READ ONLY transaction that is rolled back.
+ * READ ONLY transaction that is rolled back. Lookups that may fail (a
+ * baseline dump with an older schema) run in a savepoint, so one failure
+ * cannot abort that transaction for every later query; a failed lookup is
+ * reported and makes the CLI exit with status 1.
  *
  * Built with the cms (`strapi build` compiles it to dist/scripts/). Run from
  * apps/cms, e.g. inside the cms container:
@@ -38,6 +41,7 @@ import {
   pgSqlClient,
   qualifiedTable,
   quoteIdent,
+  tableColumnTypes,
   tableExists,
   type PgQueryable,
   type SqlClient,
@@ -64,7 +68,47 @@ export interface ReportOptions {
   baseline?: { sql: SqlClient; schema: string };
 }
 
+export interface ReportResult {
+  plan: LegacyPlan;
+  /** Lookups that failed with an unexpected SQL error (the CLI exits 1). */
+  lookupErrors: number;
+}
+
 type Print = (line?: string) => void;
+
+/**
+ * Runs one lookup inside a savepoint of the report's READ ONLY transaction:
+ * a statement that fails rolls back to the savepoint instead of aborting the
+ * transaction, so every later query still runs. Needs a transaction block
+ * (the CLI's BEGIN READ ONLY, openReadOnlySession).
+ */
+async function inSavepoint<T>(sql: SqlClient, run: () => Promise<T>): Promise<T> {
+  await sql.query("SAVEPOINT report_lookup");
+  try {
+    const result = await run();
+    await sql.query("RELEASE SAVEPOINT report_lookup");
+    return result;
+  } catch (error) {
+    await sql.query("ROLLBACK TO SAVEPOINT report_lookup");
+    await sql.query("RELEASE SAVEPOINT report_lookup");
+    throw error;
+  }
+}
+
+/** Column name -> type of a table on one side, read once per table (an absent table has none). */
+type SchemaCache = (table: string) => Promise<Map<string, string>>;
+
+function schemaCache(sql: SqlClient, schema: string): SchemaCache {
+  const tables = new Map<string, Promise<Map<string, string>>>();
+  return (table) => {
+    let found = tables.get(table);
+    if (!found) {
+      found = tableColumnTypes(sql, schema, table);
+      tables.set(table, found);
+    }
+    return found;
+  };
+}
 
 const AROUND_BEFORE_MS = 6 * 3600000;
 const AROUND_AFTER_MS = 8 * 3600000;
@@ -134,43 +178,92 @@ async function printAround(print: Print, plan: LegacyPlan, around: string): Prom
   print(suggestion ? `First gap >= 1h55m ending after it: ${suggestion}` : "No gap >= 1h55m ends after it.");
 }
 
+/** What the baseline dump says about a cell. */
+type BaselineLookup =
+  | { kind: "value"; value: string | null }
+  | { kind: "no-table" }
+  | { kind: "no-column" }
+  | { kind: "no-row" }
+  | { kind: "error"; message: string };
+
+/**
+ * The cell's value in the baseline dump: by document and draft/published
+ * state where both sides have them (row ids change with every publish), else
+ * by row id. An absent table or column is read from the catalog first; any
+ * other failure is an error, never a silent "not in the baseline".
+ */
 async function baselineValue(
   baseline: NonNullable<ReportOptions["baseline"]>,
+  baselineSchema: SchemaCache,
   cell: CellPlan,
   draft: boolean | null,
-): Promise<string | null | undefined> {
-  const table = qualifiedTable(baseline.schema, cell.table);
-  const value = `to_char(${quoteIdent(cell.column)}, 'YYYY-MM-DD"T"HH24:MI:SS.US') AS v`;
-  try {
-    if (cell.documentId !== null && draft !== null) {
-      const found = await baseline.sql.query<{ v: string | null }>(
-        `SELECT ${value} FROM ${table} WHERE document_id = ? AND (published_at IS NULL) = ? LIMIT 1`,
-        [cell.documentId, draft],
-      );
-      return found.length === 0 ? undefined : found[0].v;
+): Promise<BaselineLookup> {
+  const columns = await baselineSchema(cell.table);
+  if (columns.size === 0) return { kind: "no-table" };
+  if (!columns.has(cell.column)) return { kind: "no-column" };
+  let where: string;
+  let bindings: unknown[];
+  if (cell.documentId !== null && columns.has("document_id")) {
+    if (draft !== null && columns.has("published_at")) {
+      where = "document_id = ? AND (published_at IS NULL) = ?";
+      bindings = [cell.documentId, draft];
+    } else {
+      where = "document_id = ?";
+      bindings = [cell.documentId];
     }
-    if (cell.rowId !== null) {
-      const found = await baseline.sql.query<{ v: string | null }>(`SELECT ${value} FROM ${table} WHERE id = ?`, [
-        cell.rowId,
-      ]);
-      return found.length === 0 ? undefined : found[0].v;
-    }
-  } catch {
-    // Older schema without this table or column.
+  } else if (cell.rowId !== null && columns.has("id")) {
+    where = "id = ?";
+    bindings = [cell.rowId];
+  } else {
+    return { kind: "no-row" };
   }
-  return undefined;
+  const value = `to_char(${quoteIdent(cell.column)}, 'YYYY-MM-DD"T"HH24:MI:SS.US') AS v`;
+  const order = columns.has("id") ? ` ORDER BY ${quoteIdent("id")}` : "";
+  try {
+    const found = await inSavepoint(baseline.sql, () =>
+      baseline.sql.query<{ v: string | null }>(
+        `SELECT ${value} FROM ${qualifiedTable(baseline.schema, cell.table)} WHERE ${where}${order} LIMIT 1`,
+        bindings,
+      ),
+    );
+    return found.length === 0 ? { kind: "no-row" } : { kind: "value", value: found[0].v };
+  } catch (error) {
+    return { kind: "error", message: (error as Error).message };
+  }
 }
 
-async function isDraftRow(sql: SqlClient, schema: string, cell: CellPlan): Promise<boolean | null> {
-  if (cell.rowId === null) return null;
-  try {
-    const [row] = await sql.query<{ draft: boolean }>(
+/**
+ * Whether the cell's row is a draft: null only for a table without
+ * published_at (no draft & publish) or a row without an id. A lookup that
+ * fails throws (reported by the caller).
+ */
+async function isDraftRow(sql: SqlClient, mainSchema: SchemaCache, schema: string, cell: CellPlan): Promise<boolean | null> {
+  const columns = await mainSchema(cell.table);
+  if (!columns.has("published_at") || !columns.has("id") || cell.rowId === null) return null;
+  const [row] = await inSavepoint(sql, () =>
+    sql.query<{ draft: boolean }>(
       `SELECT published_at IS NULL AS draft FROM ${qualifiedTable(schema, cell.table)} WHERE id = ?`,
       [cell.rowId],
-    );
-    return row ? row.draft : null;
-  } catch {
-    return null;
+    ),
+  );
+  if (!row) throw new Error(`${cell.table}#${cell.rowId} is gone (deleted while the report ran?)`);
+  return row.draft;
+}
+
+function describeBaseline(lookup: BaselineLookup, cell: CellPlan): string {
+  switch (lookup.kind) {
+    case "no-table":
+      return `      baseline: no table ${cell.table} in the baseline dump's schema: review`;
+    case "no-column":
+      return `      baseline: no column ${cell.table}.${cell.column} in the baseline dump's schema: review`;
+    case "no-row":
+      return "      baseline: not in the baseline dump (created later): review";
+    case "error":
+      return `      baseline: LOOKUP FAILED (${lookup.message}): review`;
+    case "value":
+      return lookup.value === cell.naive
+        ? "      baseline: unchanged since the baseline dump: the UTC reading holds"
+        : `      baseline: was ${lookup.value === null ? "empty" : naiveShort(lookup.value)}: changed since, review`;
   }
 }
 
@@ -227,9 +320,10 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
   }
 }
 
-/** Prints the report. Only runs SELECTs on `sql`. */
-export async function runReport(sql: SqlClient, options: ReportOptions, print: Print): Promise<LegacyPlan> {
+/** Prints the report. Only runs SELECTs (and savepoints) on `sql`, inside its READ ONLY transaction. */
+export async function runReport(sql: SqlClient, options: ReportOptions, print: Print): Promise<ReportResult> {
   const { schema, settings, now } = options;
+  let lookupErrors = 0;
   const allNaive = await listNaiveColumns(sql, schema);
   const repair = repairColumns(allNaive);
   const recorded = await legacyMigrationRecorded(sql, schema);
@@ -252,12 +346,12 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
     print();
     print("Nothing to repair: every app column is already timestamptz.");
     if (auditExists) await printRecordedAmbiguous(sql, options, print);
-    return plan;
+    return { plan, lookupErrors };
   }
   if (plan.tables.length === 0) {
     print();
     print("The naive columns hold no data: the migration converts them without a rewrite (no env needed).");
-    return plan;
+    return { plan, lookupErrors };
   }
   if (!settings.zone) {
     print();
@@ -294,8 +388,9 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
     `Ambiguous values (class C: created before θ, saved again after it): ${ambiguous.length}, ` +
       `${options.all ? "all listed" : `${listed.length} still open or upcoming listed (--all for every one)`}:`,
   );
+  const mainSchema = schemaCache(sql, schema);
+  const baselineSchema = options.baseline ? schemaCache(options.baseline.sql, options.baseline.schema) : null;
   for (const cell of listed) {
-    const draft = options.baseline ? await isDraftRow(sql, schema, cell) : null;
     const chosen = cell.legacy ? `read as ${settings.zone}` : "read as UTC";
     print(
       `  ${cell.table}#${cell.key}${cell.documentId ? ` doc ${cell.documentId}` : ""}` +
@@ -305,16 +400,21 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
     if (settings.zone) {
       print(`      read as ${settings.zone.padEnd(16)} ${reading(cell.naive, settings.zone, options.appTimeZone)} ${options.appTimeZone}`);
     }
-    if (options.baseline) {
-      const before = await baselineValue(options.baseline, cell, draft);
-      print(
-        before === undefined
-          ? "      baseline: not in the baseline dump (created later): review"
-          : before === cell.naive
-            ? "      baseline: unchanged since the baseline dump: the UTC reading holds"
-            : `      baseline: was ${before === null ? "empty" : naiveShort(before)}: changed since, review`,
-      );
+    if (options.baseline && baselineSchema) {
+      let lookup: BaselineLookup;
+      try {
+        const draft = await isDraftRow(sql, mainSchema, schema, cell);
+        lookup = await baselineValue(options.baseline, baselineSchema, cell, draft);
+      } catch (error) {
+        lookup = { kind: "error", message: (error as Error).message };
+      }
+      if (lookup.kind === "error") lookupErrors += 1;
+      print(describeBaseline(lookup, cell));
     }
+  }
+  if (lookupErrors > 0) {
+    print();
+    print(`${lookupErrors} baseline lookup(s) FAILED (see LOOKUP FAILED above): those values are not compared.`);
   }
 
   const folds = plan.tables.flatMap((table) => table.cells).filter((cell) => cell.ambiguous);
@@ -325,7 +425,7 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   }
 
   if (options.around) await printAround(print, plan, options.around);
-  return plan;
+  return { plan, lookupErrors };
 }
 
 interface CliArgs {
@@ -355,7 +455,32 @@ interface PgClient extends PgQueryable {
   end(): Promise<void>;
 }
 
-type PgClientCtor = new (config: Record<string, unknown>) => PgClient;
+export type PgClientCtor = new (config: Record<string, unknown>) => PgClient;
+
+export interface ReadOnlySession {
+  sql: SqlClient;
+  /** Rolls the transaction back and disconnects. */
+  close(): Promise<void>;
+}
+
+/** Connects and opens the READ ONLY transaction every report query runs in. */
+export async function openReadOnlySession(Client: PgClientCtor, config: Record<string, unknown>): Promise<ReadOnlySession> {
+  const client = new Client(config);
+  await client.connect();
+  try {
+    await client.query("BEGIN READ ONLY");
+  } catch (error) {
+    await client.end();
+    throw error;
+  }
+  return {
+    sql: pgSqlClient(client),
+    async close() {
+      await client.query("ROLLBACK").catch(() => undefined);
+      await client.end();
+    },
+  };
+}
 
 /** Read-only pg connection settings for the cms database or a given URL. */
 export function connectionConfig(env: Record<string, string | undefined>, url?: string): Record<string, unknown> {
@@ -396,13 +521,11 @@ async function main(): Promise<void> {
   if (nowMs === null) throw new Error(`--now needs an ISO instant with an offset, got "${nowArg}"`);
 
   const { Client } = pgModule as unknown as { Client: PgClientCtor };
-  const clients: PgClient[] = [];
+  const sessions: ReadOnlySession[] = [];
   const open = async (config: Record<string, unknown>): Promise<SqlClient> => {
-    const client = new Client(config);
-    await client.connect();
-    clients.push(client);
-    await client.query("BEGIN READ ONLY");
-    return pgSqlClient(client);
+    const session = await openReadOnlySession(Client, config);
+    sessions.push(session);
+    return session.sql;
   };
   try {
     const sql = await open(connectionConfig(env, str("url")));
@@ -410,7 +533,7 @@ async function main(): Promise<void> {
     const baseline = baselineUrl
       ? { sql: await open(connectionConfig(env, baselineUrl)), schema: str("baseline-schema") ?? "public" }
       : undefined;
-    await runReport(
+    const { lookupErrors } = await runReport(
       sql,
       {
         schema: str("schema") ?? env.DATABASE_SCHEMA ?? "public",
@@ -423,11 +546,12 @@ async function main(): Promise<void> {
       },
       (line = "") => process.stdout.write(`${line}\n`),
     );
-  } finally {
-    for (const client of clients) {
-      await client.query("ROLLBACK").catch(() => undefined);
-      await client.end();
+    if (lookupErrors > 0) {
+      process.stderr.write(`datetime-migration-report: ${lookupErrors} lookup(s) failed, see LOOKUP FAILED above\n`);
+      process.exitCode = 1;
     }
+  } finally {
+    for (const session of sessions) await session.close();
   }
 }
 

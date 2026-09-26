@@ -1,17 +1,23 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { connectionConfig, runReport } from "../../scripts/datetime-migration-report";
-import { knexSqlClient } from "./datetime-catalog";
+import {
+  connectionConfig,
+  openReadOnlySession,
+  runReport,
+  type PgClientCtor,
+} from "../../scripts/datetime-migration-report";
 import { readLegacySettings, runLegacyDatetimeMigration } from "./datetime-legacy";
 import { FIXTURE_ROWS, FIXTURE_TABLES } from "./legacy-fixture.test.helper";
 import { PG_URL, columnType, createTestKnex, rows, uniqueSchema } from "./pg-test-db.test.helper";
-import { type RawKnex } from "./strapi-knex.test.helper";
+import { requireCmsDependency, type RawKnex } from "./strapi-knex.test.helper";
 
 /**
  * The read-only report CLI on the owner fixture (runs only with
- * SINNLOS_TEST_PG_URL set). A second schema stands in for the restored
- * pre-switch dump of 2026-06-24.
+ * SINNLOS_TEST_PG_URL set), through the CLI's own session: a read-only
+ * connection and a BEGIN READ ONLY transaction per side, as in production.
+ * A second schema stands in for the restored pre-switch dump of 2026-06-24.
  */
+const { Client } = requireCmsDependency<{ Client: PgClientCtor }>("pg");
 const OWNER = readLegacySettings({
   DATETIME_LEGACY_ZONE: "Europe/Berlin",
   DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42+02:00",
@@ -35,25 +41,34 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
     });
   }
 
-  async function report(
-    options: { all?: boolean; around?: string; baseline?: boolean; settings?: typeof OWNER } = {},
-  ) {
+  type ReportRun = { all?: boolean; around?: string; baseline?: boolean; settings?: typeof OWNER };
+
+  async function reportResult(options: ReportRun = {}) {
     const lines: string[] = [];
-    await runReport(
-      knexSqlClient(knex),
-      {
-        schema,
-        settings: options.settings ?? OWNER,
-        appTimeZone: "Europe/Berlin",
-        now: new Date("2026-09-26T10:00:00Z"),
-        all: options.all,
-        around: options.around,
-        baseline: options.baseline ? { sql: knexSqlClient(knex), schema: baselineSchema } : undefined,
-      },
-      (line = "") => lines.push(line),
-    );
-    return lines.join("\n");
+    const main = await openReadOnlySession(Client, connectionConfig({}, PG_URL));
+    const base = options.baseline ? await openReadOnlySession(Client, connectionConfig({}, PG_URL)) : null;
+    try {
+      const { lookupErrors } = await runReport(
+        main.sql,
+        {
+          schema,
+          settings: options.settings ?? OWNER,
+          appTimeZone: "Europe/Berlin",
+          now: new Date("2026-09-26T10:00:00Z"),
+          all: options.all,
+          around: options.around,
+          baseline: base ? { sql: base.sql, schema: baselineSchema } : undefined,
+        },
+        (line = "") => lines.push(line),
+      );
+      return { text: lines.join("\n"), lookupErrors };
+    } finally {
+      await main.close();
+      await base?.close();
+    }
   }
+
+  const report = async (options: ReportRun = {}) => (await reportResult(options)).text;
 
   beforeAll(() => {
     knex = createTestKnex({ pool: { min: 1, max: 2 } });
@@ -138,6 +153,41 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
     expect(text).toMatch(/events#2 doc e2[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: unchanged since the baseline dump/);
     expect(text).toMatch(/events#6 doc e5[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: was 2026-09-30 20:00:00: changed since, review/);
     expect(text).toMatch(/events#5 doc e4[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: not in the baseline dump/);
+  });
+
+  it("--baseline: a lookup that fails or cannot be made is named, and later lookups still answer", async () => {
+    // Two more class C values in the live data.
+    await knex.raw(`
+      INSERT INTO "${schema}".announcements (document_id, title, expires_at, created_at, updated_at, published_at)
+        VALUES ('a2', 'Winter notice', '2026-12-20 00:00', '2026-07-01 09:00', '2026-09-01 12:00', '2026-09-01 12:00');
+      INSERT INTO "${schema}".polls (document_id, question, closes_at, created_at, updated_at, published_at)
+        VALUES ('p2', 'Offsite date?', '2026-12-01 23:59:59', '2026-07-01 09:00', '2026-09-01 12:00', '2026-09-01 12:00');
+    `);
+    // A baseline of an older shape: announcements.expires_at is text (the
+    // lookup's to_char fails inside the READ ONLY transaction) and there is
+    // no polls table at all.
+    await seed(
+      baselineSchema,
+      `INSERT INTO events (document_id, title, start, all_day, created_at, updated_at, published_at) VALUES
+         ('e2', 'Town hall', '2026-10-10 08:00', false, '2026-07-01 09:00', '2026-07-01 09:00', NULL),
+         ('e2', 'Town hall', '2026-10-10 08:00', false, '2026-07-01 09:00', '2026-07-01 09:00', '2026-07-01 09:00'),
+         ('e5', 'Offsite (kept)', '2026-09-30 20:00', true, '2026-07-01 09:00', '2026-07-01 09:00', '2026-07-01 09:00');`,
+    );
+    await knex.raw(`
+      ALTER TABLE "${baselineSchema}".announcements ALTER COLUMN expires_at TYPE text;
+      INSERT INTO "${baselineSchema}".announcements (document_id, title, expires_at, published_at)
+        VALUES ('a2', 'Winter notice', '20.12.2026', '2026-07-01 09:00');
+      DROP TABLE "${baselineSchema}".polls;
+    `);
+    const { text, lookupErrors } = await reportResult({ all: true, baseline: true });
+    expect(text).toMatch(/announcements#2 doc a2[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: LOOKUP FAILED \(.*to_char/);
+    // The failure did not abort the transaction: the next lookups still answer.
+    expect(text).toMatch(/events#2 doc e2[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: unchanged since the baseline dump/);
+    expect(text).toMatch(/events#6 doc e5[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: was 2026-09-30 20:00:00: changed since/);
+    expect(text).toMatch(/events#5 doc e4[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: not in the baseline dump \(created later\)/);
+    expect(text).toMatch(/polls#2 doc p2[^\n]*\n[^\n]*\n[^\n]*\n\s+baseline: no table polls in the baseline dump's schema/);
+    expect(text).toContain("1 baseline lookup(s) FAILED");
+    expect(lookupErrors).toBe(1);
   });
 });
 
