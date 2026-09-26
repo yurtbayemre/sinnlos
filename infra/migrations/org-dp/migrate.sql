@@ -19,22 +19,28 @@
 -- Idempotent: a second run finds no drafts and changes nothing.
 -- Non-default DATABASE_SCHEMA: add  -v schema=<name>  to the psql call.
 --
--- Resolution rules:
---   - never-published documents are PROMOTED (their draft row becomes the
+-- Resolution rules (preflight P1/P2 list what each one does to the data):
+--   - draft-only documents (never published, or unpublished in the admin,
+--     which deletes the live row) are PROMOTED (their draft row becomes the
 --     live row: published_at = updated_at);
---   - scalars (name, slug, description, color) and the to-one relations
---     the org row owns (department.head, team.lead, team.department) and
---     its media (department.headerImage, team.avatar): the PUBLISHED row
---     wins; the draft value is adopted only where the published row has
---     none;
---   - team.members: UNION of both rows (nobody loses access they have
---     today; draft-only removals are not applied);
+--   - scalars (name, slug, description, color): the PUBLISHED row wins,
+--     always; pending draft edits are discarded;
+--   - the to-one relations the org row owns (department.head, team.lead,
+--     team.department) and its media (department.headerImage,
+--     team.avatar): the PUBLISHED row wins; where it has none, the draft
+--     value is ADOPTED and goes live;
+--   - team.members: UNION of both rows (draft-only additions go live;
+--     draft-only removals are not applied, so nobody loses access they
+--     have today);
 --   - every link INTO a department or team (users, teams, and both rows of
 --     announcement, document, event, poll, quick-link, wiki-page and
 --     wiki-space) is re-pointed from the draft row to the published row of
 --     the same document_id (union);
 --   - then the draft rows are deleted (FK ON DELETE CASCADE removes their
---     remaining link rows; their media rows are removed explicitly).
+--     remaining link rows; their media rows are removed explicitly);
+--   - media rows that already pointed at no department/team row before
+--     the migration (preflight P10) are deleted; the files stay.
+-- Links that are already gone (preflight P11) cannot be restored here.
 --
 -- The tables below are every table that references a department or team
 -- row in the Strapi 5.55.1 schema of this app (derived from the models:
@@ -89,7 +95,7 @@ BEGIN
 
   IF EXISTS (SELECT 1 FROM departments WHERE document_id IS NULL OR locale IS NOT NULL)
   OR EXISTS (SELECT 1 FROM teams WHERE document_id IS NULL OR locale IS NOT NULL) THEN
-    RAISE EXCEPTION 'org-dp: rows without document_id or with a locale - this script assumes non-localized Strapi 5 rows';
+    RAISE EXCEPTION 'org-dp: rows without document_id or with a locale (preflight P9) - this script assumes non-localized Strapi 5 rows';
   END IF;
 
   IF EXISTS (SELECT 1 FROM departments GROUP BY document_id
@@ -144,6 +150,12 @@ CREATE TEMP TABLE team_map ON COMMIT DROP AS
    WHERE d.published_at IS NULL;
 
 -- ---------- M4 what a department owns: head (to-one) + headerImage. Published wins. ----------
+-- Media rows that already point at no department row (preflight P10): no
+-- Strapi read can reach them, so they go; the file stays. Draft ids still
+-- exist here, so this never touches a draft's media.
+DELETE FROM files_related_mph f
+ WHERE f.related_type = 'api::department.department'
+   AND NOT EXISTS (SELECT 1 FROM departments d WHERE d.id = f.related_id);
 INSERT INTO departments_head_lnk (department_id, user_id)
   SELECT m.pub_id, l.user_id FROM departments_head_lnk l JOIN dept_map m ON m.draft_id = l.department_id
    WHERE NOT EXISTS (SELECT 1 FROM departments_head_lnk x WHERE x.department_id = m.pub_id)
@@ -156,6 +168,10 @@ DELETE FROM files_related_mph f USING dept_map m
  WHERE f.related_type = 'api::department.department' AND f.related_id = m.draft_id;
 
 -- ---------- M5 what a team owns: department + lead (to-one, published wins), members (union), avatar ----------
+-- Orphaned team media rows (preflight P10), as in M4.
+DELETE FROM files_related_mph f
+ WHERE f.related_type = 'api::team.team'
+   AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = f.related_id);
 INSERT INTO teams_department_lnk (team_id, department_id, team_ord)
   SELECT m.pub_id, l.department_id, l.team_ord FROM teams_department_lnk l JOIN team_map m ON m.draft_id = l.team_id
    WHERE NOT EXISTS (SELECT 1 FROM teams_department_lnk x WHERE x.team_id = m.pub_id)
@@ -261,13 +277,13 @@ BEGIN
   IF EXISTS (SELECT 1 FROM departments_head_lnk GROUP BY department_id HAVING count(*) > 1)
   OR EXISTS (SELECT 1 FROM teams_lead_lnk GROUP BY team_id HAVING count(*) > 1)
   OR EXISTS (SELECT 1 FROM teams_department_lnk GROUP BY team_id HAVING count(*) > 1) THEN
-    RAISE EXCEPTION 'org-dp: a to-one relation (department.head, team.lead, team.department) would have more than one target';
+    RAISE EXCEPTION 'org-dp: a to-one relation (department.head, team.lead, team.department) would have more than one target (preflight P9)';
   END IF;
   IF EXISTS (SELECT 1 FROM files_related_mph f WHERE f.related_type = 'api::department.department'
                AND NOT EXISTS (SELECT 1 FROM departments d WHERE d.id = f.related_id))
   OR EXISTS (SELECT 1 FROM files_related_mph f WHERE f.related_type = 'api::team.team'
                AND NOT EXISTS (SELECT 1 FROM teams t WHERE t.id = f.related_id)) THEN
-    RAISE EXCEPTION 'org-dp: media rows (files_related_mph) point at a missing department/team';
+    RAISE EXCEPTION 'org-dp: media rows (files_related_mph) left on a deleted department/team row';
   END IF;
   -- Strapi checks unique/uid attributes against every published row with an
   -- exact match (entity-validator validators.js), so a duplicate here would

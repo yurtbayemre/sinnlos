@@ -16,26 +16,47 @@ contains this change.
 
 | File | What it does |
 |---|---|
-| `preflight.sql` | Read only (`BEGIN TRANSACTION READ ONLY ... ROLLBACK`). P0 twin census (fast path when `draft_rows` is 0 for both types), P1 units that will be promoted, P2 pending draft edits that will be discarded, P3 link rows by target state, P4 users in more than one department, P5 users linked to a draft row, P6 media on draft rows, P7 duplicate names/slugs, P8 unknown tables referencing departments/teams. P0 anomalies, P4, P7 and P8 must be 0. |
+| `preflight.sql` | Read only (`BEGIN TRANSACTION READ ONLY ... ROLLBACK`). P0 twin census (fast path when `draft_rows` is 0 for both types), P1 draft-only units that will be promoted, P2 pending draft edits field by field (`discarded`, or `ADOPTED` where the live row has no value), P3 link rows by target state, P4 users in more than one department, P5 users linked to a draft row, P6 media on draft rows, P7 duplicate names/slugs, P8 unknown tables referencing departments/teams, P9 rows the migration refuses (no `document_id`, a locale, or two targets on a to-one relation after the merge), P10 orphaned media rows the migration deletes, P11 empty org relations (users without a department; departments without a head, users or teams; teams without a department or lead). P0 anomalies, P4, P7, P8 and P9 must be 0. |
 | `migrate.sql` | Must run as ONE transaction (`psql -v ON_ERROR_STOP=1 --single-transaction`; it refuses to run otherwise) with cms and web stopped (it refuses while other sessions are connected). `lock_timeout` 10s. Idempotent. Checks its own post-conditions and ends with `NOTICE:  org-dp: OK - departments=N, teams=M`; any `RAISE` rolls everything back. |
 
 ## Resolution rules (migrate.sql)
 
-- Never-published documents are promoted: their draft row becomes the live
-  row (`published_at = updated_at`). Delete unwanted ones in the admin
-  afterwards.
-- Scalars (`name`, `slug`, `description`, `color`) and what the org row owns
-  as a single value (`department.head`, `department.headerImage`,
-  `team.department`, `team.lead`, `team.avatar`): the published row wins. The
-  draft value is adopted only where the published row has none. P2 lists the
-  discarded edits for re-entry.
-- `team.members`: union of both rows. Nobody loses access they have today;
-  a member removed only in the draft stays a member.
+- Draft-only documents are promoted: their draft row becomes the live row
+  (`published_at = updated_at`). That covers units that were never
+  published and units that were unpublished in the admin to hide them
+  (Strapi's unpublish deletes the live row). Delete unwanted ones in the
+  admin afterwards.
+- Scalars (`name`, `slug`, `description`, `color`): the published row wins,
+  always. P2 lists the discarded edits for re-entry.
+- What the org row owns as a single value (`department.head`,
+  `department.headerImage`, `team.department`, `team.lead`, `team.avatar`):
+  the published row wins. Where the published row has none, the draft value
+  is adopted and goes live; P2 marks these `ADOPTED (goes live)`. An adopted
+  head or lead gets the unit's edit rights (FX07) with the deploy.
+- `team.members`: union of both rows. P2 names the draft-only members, who
+  go live, and the members removed only in the draft, who stay. Nobody
+  loses access they have today.
 - Every link into a department or team is re-pointed from the draft row to
   the published row of the same `document_id` (union).
 - Then the draft rows are deleted. FK `ON DELETE CASCADE` removes their
   remaining link rows; their media rows are removed explicitly, because
-  `files_related_mph` has no foreign key on `related_id`.
+  `files_related_mph` has no foreign key on `related_id`. Media rows that
+  already pointed at no department or team row before the migration (P10)
+  are deleted as well, so the post-check finds no orphan; the files stay in
+  the media library.
+
+The migration keeps every link it finds, but it cannot bring back links
+that are already gone. On the old release, editing and publishing a
+department or team that had no draft yet (every demo-seed unit before its
+first publish) in the admin dropped the unit's head or lead, its
+department, and the users and teams linked to it: the content manager
+saves such a document as a new draft built from the request data only
+(content-manager 5.55.1 `controllers/collection-types.js` `updateDocument`,
+core `document-service/repository.js` `update`), and the publish replaces
+the live row with it. P11 lists every empty org relation. Compare it with
+the demo org chart in `apps/cms/src/seed-demo.ts` or an older backup and
+re-link in the admin after the migration, when a save is live and keeps
+every link.
 
 `document_id` never changes, so everything that references org units by
 documentId (release actions, history versions) stays valid.
@@ -95,3 +116,12 @@ rollback with roll-forward, a fresh install, and the negative cases (outside a
 transaction, other sessions connected, duplicate name or slug, a user in two
 departments, two published rows for one document, an unknown referencing
 table): each one RAISEs and leaves the database unchanged.
+
+The P9 to P11 checks were verified on the same state (Postgres 16): P9
+lists exactly the rows that make `migrate.sql` RAISE (a locale, a missing
+`document_id`, two heads on the live row, two heads on a draft whose live
+row has none, a team in two departments) and none of the ones it merges
+cleanly (a draft with an extra head next to a live head, a team linked to
+both twins of one department); orphaned media rows (P10) are removed while
+everything else ends identical to a run without them; and P11 before the
+migration equals P11 after it.
