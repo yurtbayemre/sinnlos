@@ -40,9 +40,11 @@
  * type goes first (planDraftTwinTypes). Everything else lands in any order:
  *   - bidirectional relations (course↔lesson, wiki-space↔wiki-page): the side
  *     cloned second carries the link through its own deep populate, which
- *     includes the inverse (mappedBy) side (utils/populate.js:15-24), and the
- *     link-table cleanup keeps the rows of the other twin
- *     (@strapi/database entity-manager/regular-relations.js:34-49);
+ *     includes the inverse (mappedBy) side (utils/populate.js:15-24). The
+ *     published rows keep their links: the link-table cleanup spares the
+ *     rows of the document's other twin (@strapi/database entity-manager/
+ *     regular-relations.js:34-43). The target's DRAFT is a different matter
+ *     (PENDING MOVES below);
  *   - self relations (wiki-page parent/children): remapped to whichever twin
  *     exists when either end is cloned (utils/self-referential-relations.js);
  *   - relations to types without draft & publish (users, departments, teams,
@@ -50,6 +52,21 @@
  *   - relations FROM types without draft & publish (poll-vote.poll) are
  *     copied onto the new draft as well (utils/unidirectional-relations.js:
  *     69-98), the state Strapi keeps for such links anyway (dp.js:43-48).
+ *
+ * PENDING MOVES. Cloning the "one" side of a bidirectional one-to-many
+ * relation (course.lessons, wiki-space.pages, wiki-page.children; the same
+ * holds for a bidirectional one-to-one, which the schemas do not have)
+ * attaches the targets' DRAFT rows (dp.js:20-24) and first deletes each of
+ * those drafts' link to any other document (entity-manager/index.js:563-577,
+ * regular-relations.js:34-43). A pending, unpublished admin edit that moved a
+ * lesson to another course, or a page to another space or under another
+ * parent, would be moved back. So before the clone, createDraftTwin reads
+ * the targets the published row links and refuses the document when one of
+ * their drafts links ANOTHER document back: the error names that draft, the
+ * transaction rolls back, and the next boot retries once the admin has
+ * published or discarded it. A draft without that link is no conflict:
+ * re-attaching restores a link that a form-only save (repository.js:373-389)
+ * dropped.
  *
  * SKIPPED: api::wiki-revision.wiki-revision. Revisions are append-only
  * snapshots that the wiki-page lifecycle writes as published rows
@@ -64,8 +81,11 @@
  * draft revision to point at), and its next publish leaves those revisions
  * without a page link, as an admin publish without this repair does too.
  *
- * SIDE EFFECTS: none of consequence. Only `create` runs for the new draft
- * row, with `publishedAt` null; join-table rows are written raw. So the
+ * SIDE EFFECTS: none of consequence. The only lifecycle that runs is
+ * `create` for the new draft row, with `publishedAt` null. Every other write
+ * is a raw join-table row: the new draft's own links and, on the "one" side
+ * of a one-to-many relation, the link of each target draft to the new draft
+ * (PENDING MOVES: only drafts that link no other document). So the
  * announcement and event notification fan-outs (afterCreate/afterUpdate
  * return on a row without publishedAt), the live-events subscriber (reacts to
  * a PUBLISHED announcement create only, utils/live-events.ts) and the wiki
@@ -182,8 +202,12 @@ export interface DraftTwinRow {
   locale?: string | null;
 }
 
+/** A row as `db.query` returns it, with any populated relations. */
+export type DraftTwinRecord = DraftTwinRow & Record<string, unknown>;
+
 interface DraftTwinQuery {
-  findMany(params: Record<string, unknown>): Promise<DraftTwinRow[]>;
+  findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  findMany(params: Record<string, unknown>): Promise<DraftTwinRecord[]>;
   count(params: Record<string, unknown>): Promise<number>;
 }
 
@@ -265,13 +289,92 @@ export async function findPublishedOnlyRows(
   return { page, missing };
 }
 
+/** A bidirectional one-to-many/-one relation to a draft & publish type. */
+interface OneToAnyDraftRelation {
+  name: string;
+  target: string;
+  /** The attribute on the target that links back (its mappedBy/inversedBy). */
+  backLink: string;
+}
+
+/**
+ * The relations of `uid` whose clone re-points the targets' drafts (header,
+ * PENDING MOVES): bidirectional one-to-many and one-to-one relations to a
+ * draft & publish type, the kind Strapi unlinks from other documents when it
+ * attaches them (regular-relations.js:34-43; relations.js isOneToAny).
+ */
+function oneToAnyDraftRelations(
+  contentTypes: DraftTwinsHost["contentTypes"],
+  uid: string,
+): OneToAnyDraftRelation[] {
+  const relations: OneToAnyDraftRelation[] = [];
+  for (const [name, attribute] of Object.entries(contentTypes[uid]?.attributes ?? {})) {
+    if (attribute?.type !== "relation") continue;
+    if (attribute.relation !== "oneToMany" && attribute.relation !== "oneToOne") continue;
+    const target = attribute.target;
+    const backLink = attribute.mappedBy ?? attribute.inversedBy;
+    if (!target || !backLink) continue;
+    if (contentTypes[target]?.options?.draftAndPublish !== true) continue;
+    relations.push({ name, target, backLink });
+  }
+  return relations;
+}
+
+/** documentIds of a populated relation value (one row, a list, or none). */
+function linkedDocumentIds(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : value == null ? [] : [value];
+  const ids: string[] = [];
+  for (const item of list) {
+    const documentId = (item as { documentId?: unknown } | null)?.documentId;
+    if (typeof documentId === "string") ids.push(documentId);
+  }
+  return ids;
+}
+
+/**
+ * Throws when a target the published row links through such a relation has
+ * a draft that links ANOTHER document back (a pending move the clone would
+ * revert, header PENDING MOVES). Runs inside the document's transaction.
+ */
+async function assertNoPendingMoves(
+  strapi: Pick<DraftTwinsHost, "contentTypes" | "db">,
+  uid: string,
+  row: DraftTwinRow,
+): Promise<void> {
+  const relations = oneToAnyDraftRelations(strapi.contentTypes, uid);
+  if (relations.length === 0) return;
+  const published = await strapi.db.query(uid).findOne({
+    where: { id: row.id },
+    populate: Object.fromEntries(relations.map(({ name }) => [name, { select: ["documentId"] }])),
+  });
+  for (const { name, target, backLink } of relations) {
+    const documentIds = [...new Set(linkedDocumentIds(published?.[name]))];
+    if (documentIds.length === 0) continue;
+    const drafts = await strapi.db.query(target).findMany({
+      select: ["id", "documentId"],
+      where: { documentId: { $in: documentIds }, publishedAt: { $null: true } },
+      populate: { [backLink]: { select: ["documentId"] } },
+    });
+    for (const draft of drafts) {
+      const other = linkedDocumentIds(draft[backLink]).find((id) => id !== row.documentId);
+      if (other !== undefined) {
+        throw new Error(
+          `the pending draft of ${target} ${draft.documentId} links another ${backLink} (${other}); ` +
+            "publish or discard that draft",
+        );
+      }
+    }
+  }
+}
+
 /**
  * Clones one published row into its draft twin, in its own transaction. The
  * draft count is re-checked in that transaction first: discardDraft REPLACES
- * an existing draft, and it must never touch one.
+ * an existing draft, and it must never touch one. Nor may the clone move
+ * another document's pending draft (assertNoPendingMoves).
  */
 export async function createDraftTwin(
-  strapi: Pick<DraftTwinsHost, "db" | "documents">,
+  strapi: Pick<DraftTwinsHost, "contentTypes" | "db" | "documents">,
   uid: string,
   row: DraftTwinRow,
 ): Promise<boolean> {
@@ -288,6 +391,7 @@ export async function createDraftTwin(
       },
     });
     if (drafts > 0) return false;
+    await assertNoPendingMoves(strapi, uid, row);
     await discardDraft({
       documentId: row.documentId,
       ...(row.locale ? { locale: row.locale } : {}),

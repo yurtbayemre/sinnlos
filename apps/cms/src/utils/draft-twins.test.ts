@@ -142,8 +142,17 @@ describe("planDraftTwinTypes", () => {
 
 // --- fake Strapi ---------------------------------------------------------------
 
-interface FakeRow extends DraftTwinRow {
+interface FakeFields {
+  documentId: string;
+  locale?: string | null;
   publishedAt: string | null;
+  /** Other fields, e.g. a relation stored as it comes back populated. */
+  [field: string]: unknown;
+}
+
+/** A stored row: a draft-twin row plus its other fields. */
+interface FakeRow extends FakeFields, DraftTwinRow {
+  id: number;
 }
 
 type Where = Record<string, unknown>;
@@ -165,7 +174,8 @@ function matches(row: FakeRow, where: Where): boolean {
 
 interface FakeOptions {
   contentTypes?: Record<string, DraftTwinModel>;
-  rows?: Record<string, Array<Omit<FakeRow, "id"> & { id?: number }>>;
+  /** Rows without an id get one from 1000 up. */
+  rows?: Record<string, Array<FakeFields & { id?: number }>>;
   /** documentIds whose discardDraft throws. */
   failing?: string[];
   /** uid whose findMany throws. */
@@ -190,6 +200,7 @@ function fakeStrapi(options: FakeOptions = {}) {
     return tables.get(uid) as FakeRow[];
   };
   const calls = {
+    findOne: [] as Array<{ uid: string; params: Record<string, unknown> }>,
     findMany: [] as Array<{ uid: string; params: Record<string, unknown> }>,
     discardDraft: [] as Array<{ uid: string; params: { documentId: string; locale?: string } }>,
     transactions: 0,
@@ -201,6 +212,12 @@ function fakeStrapi(options: FakeOptions = {}) {
     contentTypes: options.contentTypes ?? { [ANNOUNCEMENT]: dp() },
     db: {
       query: (uid) => ({
+        // Relations are stored on the fake rows as they come back populated.
+        findOne: async (params) => {
+          calls.findOne.push({ uid, params });
+          const row = table(uid).find((candidate) => matches(candidate, params.where as Where));
+          return row ? { ...row } : null;
+        },
         findMany: async (params) => {
           calls.findMany.push({ uid, params });
           if (options.brokenQuery === uid) throw new Error("relation does not exist");
@@ -566,5 +583,190 @@ describe("ensureDraftTwins", () => {
     expect(calls.transactions).toBe(2);
     await ensureDraftTwins(strapi);
     expect(calls.transactions).toBe(2);
+  });
+});
+
+// --- pending moves --------------------------------------------------------------
+
+describe("ensureDraftTwins and pending drafts of linked documents", () => {
+  // course.lessons is the "one" side of course ↔ lesson; wiki-page.children
+  // the "one" side of the parent/children self relation.
+  const courseLesson = {
+    [COURSE]: dp({
+      title: { type: "string" },
+      lessons: { type: "relation", relation: "oneToMany", target: LESSON, mappedBy: "course" },
+    }),
+    [LESSON]: dp({
+      course: { type: "relation", relation: "manyToOne", target: COURSE, inversedBy: "lessons" },
+    }),
+  };
+  const linkTo = (documentId: string) => ({ documentId });
+
+  it("refuses a document whose clone would move another document's pending draft", async () => {
+    const { strapi, calls, logs, drafts, tables } = fakeStrapi({
+      contentTypes: courseLesson,
+      rows: {
+        [COURSE]: [
+          published("seeded", { id: 1, lessons: [linkTo("moved"), linkTo("stays")] }),
+          published("admin", { id: 2 }),
+          draft("admin", { id: 3 }),
+          published("seeded-2", { id: 4, lessons: [linkTo("stays-2")] }),
+        ],
+        [LESSON]: [
+          published("moved", { id: 10, course: linkTo("seeded") }),
+          // The admin saved (did not publish) a move to the admin course.
+          draft("moved", { id: 11, course: linkTo("admin") }),
+          published("stays", { id: 12, course: linkTo("seeded") }),
+          published("stays-2", { id: 13, course: linkTo("seeded-2") }),
+        ],
+      },
+    });
+    const reports = await ensureDraftTwins(strapi);
+    expect(reports).toEqual([
+      { uid: COURSE, created: 1, failed: 1, capped: false },
+      { uid: LESSON, created: 2, failed: 0, capped: false },
+    ]);
+    // "seeded" got no draft; the other course and the lessons without a
+    // pending draft were repaired.
+    expect(calls.discardDraft.map((call) => `${call.uid} ${call.params.documentId}`)).toEqual([
+      `${COURSE} seeded-2`,
+      `${LESSON} stays`,
+      `${LESSON} stays-2`,
+    ]);
+    expect(drafts(COURSE)).toEqual(["admin", "seeded-2"]);
+    expect(drafts(LESSON)).toEqual(["moved", "stays", "stays-2"]);
+    const pending = tables.get(LESSON)?.find((row) => row.id === 11);
+    expect(pending?.course).toEqual(linkTo("admin"));
+    expect(logs.error).toEqual([
+      `[draft-twins] ${COURSE} seeded: could not create the draft (the pending draft of ${LESSON} moved ` +
+        "links another course (admin); publish or discard that draft); the next boot retries",
+    ]);
+  });
+
+  it("reads the published row's links and the targets' drafts with their back link", async () => {
+    const { strapi, calls } = fakeStrapi({
+      contentTypes: courseLesson,
+      rows: {
+        [COURSE]: [
+          published("seeded", { id: 1, lessons: [linkTo("a"), linkTo("b"), linkTo("a")] }),
+        ],
+        [LESSON]: [],
+      },
+    });
+    await ensureDraftTwins(strapi);
+    expect(calls.findOne).toEqual([
+      {
+        uid: COURSE,
+        params: { where: { id: 1 }, populate: { lessons: { select: ["documentId"] } } },
+      },
+    ]);
+    expect(calls.findMany.filter((call) => "populate" in call.params)).toEqual([
+      {
+        uid: LESSON,
+        params: {
+          select: ["id", "documentId"],
+          where: { documentId: { $in: ["a", "b"] }, publishedAt: { $null: true } },
+          populate: { course: { select: ["documentId"] } },
+        },
+      },
+    ]);
+  });
+
+  it("re-links drafts that link no document or this one, and ignores published-only targets", async () => {
+    const { strapi, calls, logs } = fakeStrapi({
+      contentTypes: courseLesson,
+      rows: {
+        [COURSE]: [
+          published("seeded", {
+            id: 1,
+            lessons: [linkTo("unlinked"), linkTo("same"), linkTo("published-only")],
+          }),
+        ],
+        [LESSON]: [
+          published("unlinked", { course: linkTo("seeded") }),
+          // A form-only save dropped the link: re-attaching restores it.
+          draft("unlinked", { course: null }),
+          published("same", { course: linkTo("seeded") }),
+          draft("same", { course: linkTo("seeded") }),
+          published("published-only", { course: linkTo("seeded") }),
+        ],
+      },
+    });
+    await ensureDraftTwins(strapi);
+    expect(calls.discardDraft.map((call) => `${call.uid} ${call.params.documentId}`)).toEqual([
+      `${COURSE} seeded`,
+      `${LESSON} published-only`,
+    ]);
+    expect(logs.error).toEqual([]);
+  });
+
+  it("covers self relations (wiki-page children) and leaves types without such a relation alone", async () => {
+    const PAGE = "api::wiki-page.wiki-page";
+    const { strapi, calls, logs } = fakeStrapi({
+      contentTypes: {
+        [ANNOUNCEMENT]: dp({
+          author: {
+            type: "relation",
+            relation: "oneToOne",
+            target: "plugin::users-permissions.user",
+          },
+        }),
+        [PAGE]: dp({
+          parent: { type: "relation", relation: "manyToOne", target: PAGE, inversedBy: "children" },
+          children: { type: "relation", relation: "oneToMany", target: PAGE, mappedBy: "parent" },
+          revisions: {
+            type: "relation",
+            relation: "oneToMany",
+            target: REVISION,
+            mappedBy: "page",
+          },
+        }),
+        [REVISION]: dp({
+          page: { type: "relation", relation: "manyToOne", target: PAGE, inversedBy: "revisions" },
+        }),
+      },
+      rows: {
+        [ANNOUNCEMENT]: [published("news")],
+        [PAGE]: [
+          published("root", { id: 1, children: [linkTo("child")], revisions: [linkTo("r1")] }),
+          published("child", { id: 2, parent: linkTo("root") }),
+          draft("child", { id: 3, parent: linkTo("elsewhere") }),
+          published("elsewhere", { id: 4 }),
+          draft("elsewhere", { id: 5 }),
+        ],
+        [REVISION]: [published("r1", { page: linkTo("root") })],
+      },
+    });
+    await ensureDraftTwins(strapi);
+    expect(calls.findOne.map((call) => call.uid)).toEqual([PAGE]);
+    expect(calls.discardDraft.map((call) => `${call.uid} ${call.params.documentId}`)).toEqual([
+      `${ANNOUNCEMENT} news`,
+    ]);
+    expect(logs.error).toEqual([
+      `[draft-twins] ${PAGE} root: could not create the draft (the pending draft of ${PAGE} child ` +
+        "links another parent (elsewhere); publish or discard that draft); the next boot retries",
+    ]);
+  });
+
+  it("repairs the document on the next boot once the pending draft is gone", async () => {
+    const { strapi, calls, tables } = fakeStrapi({
+      contentTypes: courseLesson,
+      rows: {
+        [COURSE]: [published("seeded", { id: 1, lessons: [linkTo("moved")] })],
+        [LESSON]: [
+          published("moved", { id: 10, course: linkTo("seeded") }),
+          draft("moved", { id: 11, course: linkTo("admin") }),
+        ],
+      },
+    });
+    await ensureDraftTwins(strapi);
+    expect(calls.discardDraft).toEqual([]);
+    // The admin discards the pending move.
+    tables.set(
+      LESSON,
+      (tables.get(LESSON) ?? []).filter((row) => row.id !== 11),
+    );
+    const reports = await ensureDraftTwins(strapi);
+    expect(reports[0]).toEqual({ uid: COURSE, created: 1, failed: 0, capped: false });
   });
 });
