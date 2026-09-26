@@ -3,6 +3,7 @@ import { seedAdminUser } from "./utils/admin-seed";
 import { hasAudienceBypass } from "./utils/announcement-audience";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
+import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import {
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
@@ -780,7 +781,12 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
 }
 
 export default {
-  register({ strapi }: { strapi: any }) {
+  async register({ strapi }: { strapi: any }) {
+    // Decision 05: refuse to boot while department/team hold draft rows.
+    // Strapi would delete them in the beforeSync hook right after register()
+    // (draftAndPublish true -> false). FIRST, so nothing in register() runs
+    // on such a database; see utils/org-dp-guard.ts.
+    await assertNoOrgDrafts(strapi);
     // FX13: refuse to boot in production with template placeholder secrets
     // (change-me / toBeModified / <secret>); outside production it only warns.
     enforceSecretGuard(process.env, strapi.log);

@@ -58,8 +58,9 @@ import { forcePublishedStatus, getMutableQuery } from "./policy-query";
  *     relations lead to draft rows (a draft links to its targets' drafts),
  *     so `?populate[space][populate][pages]` or `?populate[teams]` on the
  *     write response would hand out unpublished content that every read
- *     route pins away (§5.24, forcePublishedStatus). All three entries are
- *     draft & publish types; on a type without it `status` only narrows
+ *     route pins away (§5.24, forcePublishedStatus). Of the three entries
+ *     only wiki-page is a draft & publish type; department and team are
+ *     single-row since decision 05, and there `status` only narrows
  *     populated draft & publish relations to published rows, which is what
  *     a non-bypass caller reads anyway. Should v2 authoring need drafts,
  *     drop `populate` on draft writes instead of lifting the pin.

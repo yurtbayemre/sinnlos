@@ -711,15 +711,25 @@ describe("route → policy matrix (S01)", async () => {
       .flatMap(([uid]) => WRITE_ACTIONS.map((write) => `${uid}.${write}`))
       .filter((action) => routes.has(action) && restrictedHolders(action).length > 0);
 
-    it("sees the department, team and wiki-page writes (rule sanity)", () => {
+    it("sees the wiki-page writes (rule sanity)", () => {
       expect(draftWrites).toEqual(
         expect.arrayContaining([
-          "api::department.department.update",
-          "api::team.team.update",
           "api::wiki-page.wiki-page.create",
           "api::wiki-page.wiki-page.update",
         ]),
       );
+    });
+
+    // department and team are single-row since decision 05 (draftAndPublish
+    // off, content-type-flags.test.ts), so they left the draft & publish
+    // set. Their update routes stay allowlisted (FX07): the next test and
+    // this one keep them enforced.
+    it("keeps the department and team updates enforced outside the draft & publish set", () => {
+      for (const action of ["api::department.department.update", "api::team.team.update"]) {
+        expect(draftWrites, action).not.toContain(action);
+        expect(restrictedHolders(action).length, action).toBeGreaterThan(0);
+        expect(enforcedBy(action), action).toBe(true);
+      }
     });
 
     for (const action of draftWrites) {

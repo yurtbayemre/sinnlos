@@ -21,14 +21,26 @@
  *   non-relational `{ id: { $in: [...] } }` filter into the REST query —
  *   which validates for every role and traverses nothing.
  *
- * Draft & publish note: `strapi.db.query` returns ALL rows (draft AND
- * published) regardless of publication state. That is intentional here —
- * the injected `id $in` list is a superset covering both the draft and
- * published rows of every visible space, and the core controller still
- * applies its own status filter on top. Extra ids in the list never widen
- * what the controller returns.
+ * Draft & publish note (wiki spaces): `strapi.db.query` returns ALL rows
+ * (draft AND published) regardless of publication state. That is
+ * intentional here — the injected `id $in` list is a superset covering both
+ * the draft and published rows of every visible space, and the policy pins
+ * `status=published` on top. Extra ids in the list never widen what the
+ * controller returns.
+ *
+ * Org scope is compared by numeric row id, which is valid because
+ * department and team are single-row (draftAndPublish off since decision
+ * 05, invariant I-ORG, pinned by content-type-flags.test.ts and the boot
+ * guard utils/org-dp-guard.ts): every relation into them, from users,
+ * teams and both rows of a space, links the one row, and its id never
+ * changes (no publish cycle).
  */
 
+/**
+ * Row ids. department and team are single-row with stable ids (I-ORG, see
+ * the header), so these compare directly against the department/team ids
+ * that content links to.
+ */
 export interface UserScope {
   roleId?: number;
   departmentId?: number;
@@ -60,8 +72,8 @@ interface SpaceRow {
  *
  * Led teams need a second query: `team.lead` is a oneToOne relation
  * declared on the team with no inverse field on the user, so it cannot be
- * populated from the user side. The team table is small (one row per team
- * plus its draft), so loading it and matching the lead in JS is cheaper
+ * populated from the user side. The team table is small (one row per team),
+ * so loading it and matching the lead in JS is cheaper
  * and less brittle than a relational `where` clause — same reasoning as
  * the id resolution above.
  */

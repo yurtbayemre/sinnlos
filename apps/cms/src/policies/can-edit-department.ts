@@ -24,9 +24,15 @@ interface CallerRow {
  *     role class "head", limited to the fields utils/write-allowlist.ts
  *     allows it (description, colour). Any other key, e.g. a `pages`,
  *     `members` or `teams` connect, `head`, `name` or media, answers 400.
- *     The write is pinned to `status=published` (no draft rows through
- *     `?status=draft&populate[teams]`).
+ *     The write is pinned to `status=published`: the department row has no
+ *     draft since decision 05, but `status` still narrows populated draft
+ *     & publish relations in the response (utils/policy-query.ts).
  *   - everyone else, a missing target or an unknown row: false (403).
+ *
+ * "Own department" compares row ids (caller's user.department vs the
+ * target row). That holds because department is single-row with a stable
+ * id (draftAndPublish off, I-ORG): the target lookup by documentId and the
+ * user's link resolve to the same row.
  *
  * The row gate runs before the payload is looked at, so a caller who may
  * not write the row never learns anything about its payload rules.

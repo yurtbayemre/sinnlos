@@ -314,9 +314,69 @@ describe("relation side-channel guard registration (FX05)", () => {
     ).toThrow(/FX05/);
   });
 
-  it("register() installs the guard next to the contact sanitizer", () => {
+  it("register() installs the guard next to the contact sanitizer", async () => {
     const { strapi, coreSanitizeQuery } = host("member");
-    lifecycle.register({ strapi });
+    await lifecycle.register({ strapi });
+    expect(strapi.sanitizers.get("content-api.output")).toHaveLength(2);
+    expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
+  });
+});
+
+/**
+ * Wiring test for the department/team draft guard (decision 05). The guard
+ * itself is pinned in utils/org-dp-guard.test.ts; this pins that register()
+ * awaits it FIRST: Strapi deletes org draft rows in the beforeSync hook right
+ * after register(), so a rejection has to stop the boot before anything else
+ * in register() runs.
+ */
+describe("org draft guard in register() (decision 05)", () => {
+  const ORG_MODELS: Record<
+    string,
+    { collectionName: string; options: { draftAndPublish: boolean } }
+  > = {
+    "api::department.department": {
+      collectionName: "departments",
+      options: { draftAndPublish: false },
+    },
+    "api::team.team": { collectionName: "teams", options: { draftAndPublish: false } },
+  };
+
+  function orgHost(drafts: Record<string, number>) {
+    const counted: string[] = [];
+    const coreSanitizeQuery = vi.fn(async (query: Record<string, unknown>) => query);
+    const strapi = {
+      getModel: (uid: string) => ORG_MODELS[uid],
+      requestContext: { get: () => undefined },
+      sanitizers: makeSanitizers(),
+      contentAPI: { sanitize: { query: coreSanitizeQuery } },
+      db: {
+        getSchemaConnection: () => ({ hasTable: async () => true }),
+        getConnection: (table: string) => ({
+          whereNull: () => ({
+            count: async () => {
+              counted.push(table);
+              return [{ n: String(drafts[table] ?? 0) }];
+            },
+          }),
+        }),
+      },
+    };
+    return { strapi, counted, coreSanitizeQuery };
+  }
+
+  it("rejects before registering anything while draft rows exist", async () => {
+    const { strapi, coreSanitizeQuery } = orgHost({ teams: 2 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(
+      /^\[org-dp\] teams still holds 2 draft row\(s\)/,
+    );
+    expect(strapi.sanitizers.store.has("content-api.output")).toBe(false);
+    expect(strapi.contentAPI.sanitize.query).toBe(coreSanitizeQuery);
+  });
+
+  it("checks both tables, then registers each output sanitizer exactly once", async () => {
+    const { strapi, counted, coreSanitizeQuery } = orgHost({});
+    await lifecycle.register({ strapi });
+    expect(counted).toEqual(["departments", "teams"]);
     expect(strapi.sanitizers.get("content-api.output")).toHaveLength(2);
     expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
   });

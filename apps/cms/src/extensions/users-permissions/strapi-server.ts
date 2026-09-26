@@ -116,7 +116,8 @@ export default (plugin: AnyPlugin) => {
         strapi.log.warn(`[ms-auth] role '${roleType}' not found — keeping current role`);
       }
 
-      // Look up department by name (if Graph exposed one)
+      // Look up department by name (if Graph exposed one). Deterministic:
+      // department is single-row since decision 05 (no draft twin).
       let departmentId: number | undefined;
       if (me?.department) {
         const dept = await strapi.db.query("api::department.department").findOne({

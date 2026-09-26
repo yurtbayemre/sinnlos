@@ -8,7 +8,7 @@
     "description": "A team inside a department"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "attributes": {
     "name": { "type": "string", "required": true },
