@@ -45,12 +45,39 @@ function loadStrapiCronService(): () => CronService {
   return requireFromStrapi(join(coreDir, "dist", "services", "cron.js")) as () => CronService;
 }
 
-const berlinClock = new Intl.DateTimeFormat("en-GB", {
-  timeZone: "Europe/Berlin",
-  hour: "2-digit",
-  minute: "2-digit",
-  hourCycle: "h23",
-});
+/** HH:mm of an instant on the wall clock of a zone. */
+const wallClock = (timeZone: string) =>
+  new Intl.DateTimeFormat("en-GB", { timeZone, hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+
+/**
+ * Registers the tasks in Strapi's real cron service and asserts each next
+ * run falls on its rule's wall-clock time in the given zone.
+ */
+function expectScheduledAt(tasks: ReturnType<typeof serverConfig>["cron"]["tasks"], timeZone: string) {
+  const errors: unknown[] = [];
+  const scope = globalThis as unknown as { strapi?: unknown };
+  const previous = scope.strapi;
+  // The service reports an unparseable schedule through the global logger.
+  scope.strapi = { log: { error: (...args: unknown[]) => errors.push(args) } };
+  const cron = loadStrapiCronService()();
+  try {
+    cron.add(tasks);
+    expect(errors).toEqual([]);
+    expect(cron.jobs.map(({ name }) => name).sort()).toEqual(Object.keys(tasks).sort());
+    for (const [name, { options }] of Object.entries(tasks)) {
+      expect(options.tz, name).toBe(timeZone);
+      const [minute, hour] = options.rule.split(" ");
+      const next = cron.jobs.find((spec) => spec.name === name)?.job.nextInvocation();
+      expect(next, name).toBeInstanceOf(Date);
+      expect(wallClock(timeZone).format(next as Date), name).toBe(
+        `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`,
+      );
+    }
+  } finally {
+    cron.destroy();
+    scope.strapi = previous;
+  }
+}
 
 describe("config/server", () => {
   it("trusts the proxy headers under the key Strapi 5 reads (server.proxy.koa)", () => {
@@ -58,29 +85,17 @@ describe("config/server", () => {
     expect(config.proxy).toEqual({ koa: true });
   });
 
-  it("schedules every cron task in Strapi's cron service at its Europe/Berlin wall-clock time", () => {
-    const { tasks } = serverConfig({ env: makeEnv() }).cron;
-    const errors: unknown[] = [];
-    const scope = globalThis as unknown as { strapi?: unknown };
-    const previous = scope.strapi;
-    // The service reports an unparseable schedule through the global logger.
-    scope.strapi = { log: { error: (...args: unknown[]) => errors.push(args) } };
-    const cron = loadStrapiCronService()();
-    try {
-      cron.add(tasks);
-      expect(errors).toEqual([]);
-      expect(cron.jobs.map(({ name }) => name).sort()).toEqual(Object.keys(tasks).sort());
-      for (const [name, { options }] of Object.entries(tasks)) {
-        const [minute, hour] = options.rule.split(" ");
-        const next = cron.jobs.find((spec) => spec.name === name)?.job.nextInvocation();
-        expect(next, name).toBeInstanceOf(Date);
-        expect(berlinClock.format(next as Date), name).toBe(
-          `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`,
-        );
-      }
-    } finally {
-      cron.destroy();
-      scope.strapi = previous;
-    }
+  it("schedules every cron task at its wall-clock time in the default zone, Europe/Berlin", () => {
+    expectScheduledAt(serverConfig({ env: makeEnv() }).cron.tasks, "Europe/Berlin");
+  });
+
+  it("schedules every cron task in APP_TIME_ZONE (datetime contract)", () => {
+    const { tasks } = serverConfig({ env: makeEnv({ APP_TIME_ZONE: "America/New_York" }) }).cron;
+    expectScheduledAt(tasks, "America/New_York");
+  });
+
+  it("refuses an empty or unknown APP_TIME_ZONE at config load", () => {
+    expect(() => serverConfig({ env: makeEnv({ APP_TIME_ZONE: "" }) })).toThrow(/APP_TIME_ZONE/);
+    expect(() => serverConfig({ env: makeEnv({ APP_TIME_ZONE: "Berlin" }) })).toThrow(/IANA/);
   });
 });

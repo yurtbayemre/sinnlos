@@ -4,6 +4,7 @@ import { getTranslations } from "next-intl/server";
 import { canCreatePolls } from "@/lib/roles";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
+import { isPollClosed } from "@/lib/poll-close";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
@@ -30,8 +31,10 @@ export default async function PollsPage() {
 
   const resultsArr = await Promise.all(polls.map((p) => api.polls.results(p.id).catch(() => null)));
 
-  const active = polls.filter((p) => !p.closesAt || new Date(p.closesAt) > new Date());
-  const closed = polls.filter((p) => p.closesAt && new Date(p.closesAt) <= new Date());
+  // Closed iff now >= closesAt: the rule the cms vote handler and the card use.
+  const now = new Date();
+  const active = polls.filter((p) => !isPollClosed(p.closesAt, now));
+  const closed = polls.filter((p) => isPollClosed(p.closesAt, now));
 
   const resultsMap = new Map<number, any>();
   polls.forEach((p, i) => {

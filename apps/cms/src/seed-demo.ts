@@ -23,6 +23,8 @@
  * users-permissions service for users), as before.
  */
 
+import { addCalendarDays, nowInstant, toIsoZ, todayIn } from "./utils/time";
+
 const DEPARTMENTS = [
   { name: "Engineering", color: "#6366f1", description: "Software development, infrastructure, and technical architecture." },
   { name: "Design", color: "#ec4899", description: "Product design, UX research, and brand identity." },
@@ -94,10 +96,9 @@ export interface SeedDemoHost {
   log: { info(message: string): void };
 }
 
+/** The same wall time n calendar days from now in APP_TIME_ZONE, as ISO-Z. */
 function daysFromNow(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return d.toISOString();
+  return toIsoZ(addCalendarDays(nowInstant(), n));
 }
 
 function daysAgo(n: number): string {
@@ -168,9 +169,11 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   for (let i = 0; i < USERS.length; i++) {
     const u = USERS[i];
     const role = i === 0 ? adminRole : i < 5 ? editorRole : memberRole;
-    const hireDate = new Date();
-    hireDate.setFullYear(hireDate.getFullYear() - (USERS.length - i));
-    hireDate.setMonth(i % 12);
+    // A calendar date (Postgres `date`): today in APP_TIME_ZONE, some years
+    // back, in month i + 1 (a day past the month's end is constrained).
+    const hireDate = todayIn()
+      .subtract({ years: USERS.length - i })
+      .with({ month: (i % 12) + 1 }, { overflow: "constrain" });
 
     userMap[u.username] = await strapi
       .plugin("users-permissions")
@@ -188,7 +191,7 @@ export async function seedDemoData(strapi: SeedDemoHost) {
         confirmed: true,
         blocked: false,
         role: role?.id,
-        hireDate: hireDate.toISOString().slice(0, 10),
+        hireDate: hireDate.toString(),
       });
   }
 

@@ -6,6 +6,12 @@ services:
       POSTGRES_DB: ${DATABASE_NAME:-sinnlos}
       POSTGRES_USER: ${DATABASE_USERNAME:-sinnlos}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
+      # psql sessions in this container (docker exec infra-db-1 psql ...) run
+      # in UTC: they show timestamptz values in UTC, and any manual DDL or
+      # cast on a datetime column (ALTER ... TYPE timestamp, ::timestamp)
+      # must run in a UTC session, because the cms guard reads a naive
+      # column as UTC wall clock. The cms pins its own sessions to UTC.
+      PGTZ: UTC
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,9 +35,17 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      # Users' local timezone — date math (RSVP capacity days, classified
-      # expiry, month grid) must not drift a day around UTC midnight.
-      TZ: Europe/Berlin
+      # Datetime contract (docs/DEPLOYMENT.md): the cms process runs in UTC
+      # (the image sets it too; a schema-changing boot refuses any other
+      # zone). Business dates (today, day/week windows, anniversaries, cron
+      # times, all-day events) use APP_TIME_ZONE, never the process zone.
+      TZ: UTC
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
+      # Only for a database written by a cms before the datetime contract:
+      # the one-time repair reads them (see infra/.env.example). Fresh
+      # installs leave both empty.
+      DATETIME_LEGACY_ZONE: ${DATETIME_LEGACY_ZONE:-}
+      DATETIME_LEGACY_UTC_UNTIL: ${DATETIME_LEGACY_UTC_UNTIL:-}
       HOST: 0.0.0.0
       PORT: 1337
       # Secrets fail fast when unset/empty (FX13); the cms additionally
@@ -117,9 +131,16 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      # Users' local timezone — server-rendered dates (events list/month
-      # grid, ad expiry) must match what employees see on their clock.
-      TZ: Europe/Berlin
+      # The web still renders dates in its process zone (events list/month
+      # grid, ad expiry), so until its datetime port (phase 2) makes every
+      # date explicit, the process zone IS the business zone. Only after that
+      # port may it switch to UTC like the cms. The web refuses to serve when
+      # Node does not run in APP_TIME_ZONE (src/instrumentation.ts): Node only
+      # knows the exact tz database spelling (Europe/Berlin, not europe/berlin).
+      TZ: ${APP_TIME_ZONE:-Europe/Berlin}
+      # Business zone, already used for the poll deadline ("closes on D" =
+      # D 23:59:59 there); validated at server start.
+      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
       HOSTNAME: 0.0.0.0
       PORT: 3000
       STRAPI_URL: http://cms:1337

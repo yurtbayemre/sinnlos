@@ -17,6 +17,10 @@
 #   3. Assert a `ping` frame for that channel arrives on the stream
 #      within ASSERT_SECONDS.
 #
+# Before that, a datetime-contract check (docs/DEPLOYMENT.md): no column of
+# the app schema may still be `timestamp without time zone`, and the cms
+# boot log must report the process zone UTC.
+#
 # Usage:
 #   SMOKE_EMAIL=casey.jones@sinnlos.local SMOKE_PASSWORD=… \
 #   SMOKE_AUTHOR_EMAIL=sam.chen@sinnlos.local SMOKE_AUTHOR_PASSWORD=… \
@@ -42,6 +46,29 @@ PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-
 
 SMOKE_EMAIL="${SMOKE_EMAIL:-casey.jones@sinnlos.local}"
 SMOKE_AUTHOR_EMAIL="${SMOKE_AUTHOR_EMAIL:-sam.chen@sinnlos.local}"
+
+# --- 0. Datetime contract -----------------------------------------------------
+# The cms guard converts every naive timestamp column at boot and refuses to
+# start while one remains; this catches a guard that stopped working and a
+# cms container that is not in UTC.
+DB_CONTAINER="${DB_CONTAINER:-infra-db-1}"
+DB_SCHEMA="${DB_SCHEMA:-public}"
+NAIVE_COLUMNS="$(docker exec -i "${DB_CONTAINER}" sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<SQL
+SELECT coalesce(string_agg(table_name || '.' || column_name, ', ' ORDER BY table_name, column_name), '')
+  FROM information_schema.columns
+ WHERE table_schema = '${DB_SCHEMA}' AND data_type = 'timestamp without time zone';
+SQL
+)" || { echo "live-smoke: FAIL — could not query ${DB_CONTAINER} for naive timestamp columns" >&2; exit 1; }
+if [[ -n "${NAIVE_COLUMNS}" ]]; then
+  echo "live-smoke: FAIL — timestamp without time zone columns remain (datetime contract): ${NAIVE_COLUMNS}" >&2
+  exit 1
+fi
+CMS_ZONE_LINE="$(docker logs "${CMS_CONTAINER}" 2>&1 | grep -F '[datetime] process time zone' | tail -n 1 || true)"
+if [[ "${CMS_ZONE_LINE}" != *"process time zone UTC,"* && "${CMS_ZONE_LINE}" != *"process time zone Etc/UTC,"* ]]; then
+  echo "live-smoke: FAIL — the cms does not report the process zone UTC: ${CMS_ZONE_LINE:-no [datetime] boot line in docker logs ${CMS_CONTAINER}}" >&2
+  exit 1
+fi
+echo "live-smoke: datetime contract OK (${CMS_ZONE_LINE##*\[datetime\] })"
 
 lookup_password() {
   local email="$1"

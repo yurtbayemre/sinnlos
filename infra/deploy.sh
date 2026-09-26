@@ -7,11 +7,15 @@
 #      keys set, no template placeholder in the secrets, digest sender set
 #      when SMTP is, JWT_SECRET rotated when the running web still exposed
 #      Strapi JWTs (D-SESSION-01), no Microsoft sign-in configured (it
-#      cannot complete on Strapi 5.51+). Fails before anything is touched.
+#      cannot complete on Strapi 5.51+), DATETIME_LEGACY_ZONE set while the
+#      running database still holds pre-contract datetime columns (the new
+#      cms would refuse to start). Fails before anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
-#   3. Rebuild + restart the stack with the Traefik override.
+#   3. Rebuild + restart the stack with the Traefik override. If compose
+#      fails here (usually the new cms did not become healthy, so the web
+#      that waits for it never starts), it prints the rollback commands.
 #   4. Curl smoke-check of the live site.
 #
 # Re-run safe. Stops on the first error (set -euo pipefail).
@@ -38,6 +42,8 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 COMPOSE_BASE="${SCRIPT_DIR}/docker-compose.yml"
 COMPOSE_TRAEFIK="${SCRIPT_DIR}/docker-compose.traefik.yml"
+# Rollback only: runs a pre-datetime-contract cms image in its old zone.
+COMPOSE_LEGACY_TZ="${SCRIPT_DIR}/docker-compose.cms-legacy-tz.yml"
 BACKUP_SCRIPT="${SCRIPT_DIR}/backup/pg-backup.sh"
 
 # Compose project name — must stay 'infra' so container/image names are stable
@@ -173,6 +179,50 @@ jwt_rotation_missing() {
   [[ "${new_secret}" == "${running_secret}" ]]
 }
 
+# Datetime contract: the first boot of a cms with it repairs the times a
+# pre-contract cms stored as naive wall clocks and converts the columns to
+# timestamptz (apps/cms/database/migrations/). With naive app columns in the
+# running database and DATETIME_LEGACY_ZONE unset it refuses to start, so
+# the deploy is refused here, before the backup and before any container
+# changes. No running db container (first install) = nothing to repair.
+# Strapi's bookkeeping tables do not count (the cms guard converts them).
+# Prints the number of naive timestamp columns of the running database's
+# app tables (bookkeeping excluded), or nothing when there is no db
+# container to ask.
+naive_app_columns() {
+  docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SELECT count(*) FROM information_schema.columns
+ WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+   AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
+SQL
+}
+
+datetime_repair_env_missing() {
+  local zone naive
+  zone="$("${COMPOSE[@]}" config --format json 2>/dev/null | compose_env_value DATETIME_LEGACY_ZONE)"
+  [[ -z "${zone}" ]] || return 1
+  naive="$(naive_app_columns)" || return 1
+  [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
+}
+
+# The rollback commands for a failed deploy. While the datetime repair has
+# not run (naive app columns left), the previous cms image predates the
+# datetime contract and must run in its old zone, never in the UTC this
+# compose file sets (docs/DEPLOYMENT.md, "Rolling back this release").
+print_rollback_hint() {
+  local rollback=("${COMPOSE[@]}") naive
+  naive="$(naive_app_columns || true)"
+  echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
+  if [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]; then
+    rollback+=(-f "${COMPOSE_LEGACY_TZ}")
+    echo "       (the datetime repair has NOT run: the previous cms must run in DATETIME_LEGACY_ZONE," >&2
+    echo "       hence the extra override file)" >&2
+  fi
+  echo "                      ${rollback[*]} up -d --no-build web cms" >&2
+  echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
+  echo "       A re-run of this script tags whatever runs then as :rollback; see docs/DEPLOYMENT.md." >&2
+}
+
 log "Preflight: infra/.env against the env contract (FX13)"
 if ! "${COMPOSE[@]}" config -q; then
   echo "ERROR: docker compose rejected the config — most likely a required key in" >&2
@@ -244,6 +294,15 @@ if jwt_rotation_missing; then
   echo "       a web rollback to such an image." >&2
   preflight_failed=1
 fi
+if datetime_repair_env_missing; then
+  echo "ERROR: the running database still stores datetimes in the pre-contract format (naive" >&2
+  echo "       timestamp columns), and DATETIME_LEGACY_ZONE is not set in infra/.env. The new cms" >&2
+  echo "       repairs those values once on its first boot and refuses to start without it." >&2
+  echo "       Follow docs/DEPLOYMENT.md, \"Upgrading an existing instance to this release\"" >&2
+  echo "       (read-only report, rehearsal on a copy), set DATETIME_LEGACY_ZONE (and, if the old cms" >&2
+  echo "       ran in UTC first, DATETIME_LEGACY_UTC_UNTIL) and re-run." >&2
+  preflight_failed=1
+fi
 if ((preflight_failed)); then
   echo "Preflight failed. Nothing was changed." >&2
   exit 1
@@ -286,7 +345,14 @@ done
 
 # --- 3. Build + restart -----------------------------------------------------
 log "Building and starting the stack"
-"${COMPOSE[@]}" up -d --build
+if ! "${COMPOSE[@]}" up -d --build; then
+  echo "ERROR: docker compose up failed. Usually the new cms did not become healthy (a boot guard" >&2
+  echo "       refused to start; the new web waits for it and never starts), so the site is down." >&2
+  echo "       Inspect logs:  docker logs --tail=100 ${PROJECT}-cms-1" >&2
+  echo "       Fix the cause and re-run, or roll back:" >&2
+  print_rollback_hint
+  exit 1
+fi
 
 # --- 4. Smoke check ---------------------------------------------------------
 log "Smoke-checking ${SMOKE_URL}"
@@ -324,7 +390,5 @@ done
 
 echo "ERROR: smoke check failed — ${SMOKE_URL} returned HTTP ${code}" >&2
 echo "       Inspect logs:  ${COMPOSE[*]} logs --tail=100 web cms" >&2
-echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
-echo "                      ${COMPOSE[*]} up -d --no-build web cms" >&2
-echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
+print_rollback_hint
 exit 1

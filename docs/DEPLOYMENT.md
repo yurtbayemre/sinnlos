@@ -27,18 +27,23 @@ cannot offer; see the note there).
 
 > **Upgrading an existing instance?** Work through
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> before you deploy: the cms moves to Strapi 5.55.1 (additive database
-> changes, the pre-deploy backup is mandatory), and **Microsoft sign-in stops
-> working**, so an instance that uses it must stay on its current release. An
-> instance that runs a release from before 2026-09-24 also needs
-> [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
-> the env contract is stricter, `JWT_SECRET` must be rotated once, and
-> `infra/deploy.sh` refuses to deploy until both are done. The release of
-> 2026-09-26 turns draft & publish off for departments and teams: run the
-> read-only preflight of
-> [One-time: org draft/publish off](#one-time-org-draftpublish-off) first; a
-> database with department or team drafts needs a one-time migration, and the
-> new cms refuses to boot until it has run.
+> before you deploy: this release introduces the
+> [datetime contract](#310-datetime-contract): the cms runs in UTC, every
+> stored instant becomes `timestamptz`, and the **first boot repairs the times
+> the old cms stored**, once. An existing database needs
+> `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`) in
+> `infra/.env`; the new cms refuses to start without it, and `infra/deploy.sh`
+> refuses to deploy. Coming from a release before 2026-09-26, also work through
+> the older notes, newest first:
+> [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38)
+> (a normal deploy; the first boot creates the missing draft rows),
+> [One-time: org draft/publish off](#one-time-org-draftpublish-off) (a
+> database with department or team drafts needs a one-time migration first),
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
+> (additive database changes; **Microsoft sign-in stops working**, so an
+> instance that uses it must stay on its current release) and
+> [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24)
+> (stricter env contract, one `JWT_SECRET` rotation).
 
 ---
 
@@ -86,7 +91,7 @@ app registration and you'll reference it in every deployment method.
 > sign-in ([README → standalone mode](../README.md#running-without-microsoft-standalone-mode)).
 > With a real app registration configured, the web logs an `[auth]` error at
 > boot and `infra/deploy.sh` refuses to deploy (see
-> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)).
 > The steps below stay for reference.
 
 ### Step 1 — Create the app registration
@@ -413,10 +418,12 @@ DIGESTS_DISABLED=0
 > **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
 > needed). Redirect URIs in Entra should use `http://localhost/...`.
 
-> **Timezone:** both app containers run with `TZ=Europe/Berlin` — set directly
-> in `docker-compose.yml` (cms + web), not via `.env`. Date-only logic (events
-> month grid, classified-ad expiry, RSVP/birthday date math) must not drift a
-> day around UTC midnight. Edit the compose file if your company is elsewhere.
+> **Time zone:** set `APP_TIME_ZONE` in `.env` if your company is not in
+> `Europe/Berlin` (the default). It is the zone of every business date: "today",
+> ad expiry, birthdays, digest days, the cron times, all-day events and poll
+> deadlines. Do not set the containers' `TZ`: compose runs the cms in UTC
+> (required, see the [datetime contract](#310-datetime-contract)) and the web
+> in `APP_TIME_ZONE` until its own datetime port.
 
 ### 2.2 Build and start
 
@@ -559,6 +566,14 @@ MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 
 # --- Optional features (safe to leave unset) --------------------------
+# Business time zone (IANA): "today", expiry, birthdays, digests, cron
+# times, all-day events, poll deadlines. Unset/empty = Europe/Berlin.
+APP_TIME_ZONE=Europe/Berlin
+# Only for a database written by a cms before the datetime contract
+# (§3.8, "Upgrading an existing instance to this release"). Empty on a
+# fresh install.
+DATETIME_LEGACY_ZONE=
+DATETIME_LEGACY_UTC_UNTIL=
 # First Strapi super-admin on an empty database (else: register at /admin).
 # Refused for placeholders and passwords failing the admin policy.
 STRAPI_ADMIN_EMAIL=
@@ -644,11 +659,14 @@ touched (`infra/deploy.sh --check` runs only this step, see
 Postgres + uploads backup, (2) tags the currently running `infra-web` /
 `infra-cms` images as `:rollback`, (3) rebuilds + restarts the stack with the
 Traefik override, (4) curl smoke-checks `https://sinnlos.yurtbay.dev`
-(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh` — the end-to-end
-SSE pipeline probe (comment posted via the cms → ping frame on a subscribed
-stream). Step 5 **fails the deploy** when the pipeline delivers no pings; it
-is skipped with `LIVE_EVENTS_DISABLED=1` or when the demo credentials file is
-absent. It is `set -euo pipefail` and re-run safe.
+(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh`: first the
+[datetime contract](#310-datetime-contract) check (no
+`timestamp without time zone` column left, the cms boot log reports the
+process zone UTC), then the end-to-end SSE pipeline probe (comment posted via
+the cms → ping frame on a subscribed stream). Step 5 **fails the deploy** when
+either check fails; it is skipped with `LIVE_EVENTS_DISABLED=1` or when the
+demo credentials file is absent (then run `infra/live-smoke.sh` by hand). It
+is `set -euo pipefail` and re-run safe.
 
 The preflight fails (naming keys, never values) when:
 
@@ -671,7 +689,12 @@ The preflight fails (naming keys, never values) when:
   5.51+ rejects the web's access-token exchange, so every Microsoft sign-in
   would fail, and with `AUTH_LOCAL_ENABLED=0` nobody could sign in. A
   non-GUID client id (template text) only warns. The rule goes away with the
-  Entra exchange.
+  Entra exchange;
+- the running database still holds datetime columns in the pre-contract
+  format (`timestamp without time zone` outside Strapi's bookkeeping tables)
+  and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
+  ([Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+  No running database (a fresh install) skips this check.
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
@@ -691,9 +714,15 @@ systemctl start docker
 
 ### 3.8 Updates
 
-> **Upgrading to this release (Strapi 5.55.1)?** Follow
+> **Upgrading to this release (datetime contract)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> first: take the pre-deploy backup, and do not deploy an instance that
+> first: an existing database needs `DATETIME_LEGACY_ZONE` in `infra/.env`,
+> and its first boot repairs the stored times once. Ship it before the DST
+> change of **2026-10-25**.
+>
+> **Upgrading from before 2026-09-25 (Strapi 5.55.1)?** Follow
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
+> as well: take the pre-deploy backup, and do not deploy an instance that
 > signs users in with Microsoft. Coming from a release before 2026-09-24,
 > also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > that deploy needs env changes and one `JWT_SECRET` rotation.
@@ -733,224 +762,6 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
-
-#### One-time: org draft/publish off
-
-The release of 2026-09-26 (branch `feat/org-dp-off`, decision 05) turns
-draft & publish **off for departments and teams**. Each department and team
-is then one row with a stable id, and the department and team checks rely on
-that: department heads can update their own department and its teams
-(FX07), and members see the announcements, wiki spaces, documents and quick
-links targeted at their department or team. Before, a user was often linked
-to a department's draft row while content was linked to its published row,
-so these checks failed closed (403 for department heads, targeted content
-hidden from its own audience).
-
-What admins notice: the Department and Team edit views have **Save** only.
-A save is live immediately; there is no Publish, Unpublish or Discard, and
-hiding a unit means deleting it. What users notice: department members,
-heads and team leads now see the content targeted at their department or
-team, and they now count in acknowledgement reports, digests and new
-notification fan-outs. Nothing is sent retroactively.
-
-A database used by an earlier release can still hold **draft rows** for
-departments or teams: a unit created in the admin panel and never
-published, or one edited after its last publish. Strapi deletes those rows
-when the new cms boots, and their links with them (users lose their
-department, draft content loses its targeting, never-published units are
-gone). The new cms therefore **refuses to boot while any exist**: the log
-shows `[org-dp] departments still holds N draft row(s)` (or `teams`), compose
-restarts it in a loop, and the data stays untouched. The one-time SQL in
-`infra/migrations/org-dp/` (see the README there) merges the drafts first.
-**A fresh install needs nothing**, and neither does a database that only
-holds demo-seed departments and teams (the seed writes one published row
-per unit).
-
-Set these on the host, in your checkout (e.g. `/opt/sinnlos`):
-
-```bash
-cd /opt/sinnlos
-COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
-psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
-```
-
-**0. Preflight** (read only; run it any time while the current release is
-live):
-
-```bash
-git pull
-psql_db < infra/migrations/org-dp/preflight.sql
-```
-
-- **FAST PATH:** if P0 shows `draft_rows` = 0 for both `departments` and
-  `teams`, there is nothing to migrate. Deploy as usual with
-  `infra/deploy.sh` and stop here (a look at P11 below does no harm). The
-  guard passes and Strapi's own switch deletes nothing;
-  `"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'` prints nothing.
-- These must be 0 before you continue: P0 `anomalies`, P4 (a user linked to
-  more than one department), P7 (a duplicate department name or slug, or a
-  duplicate team slug), P8 (a table the script does not handle) and P9 (a
-  row the script refuses). Fix P4, P7 and a P9 "more than one head, lead or
-  department" in the admin panel and rerun the preflight. P0 anomalies, P8
-  and the other P9 rows need a closer look; do not continue.
-- P1 lists draft-only units: never published, or unpublished in the admin
-  to hide them (an unpublish deletes the live row). The migration
-  **promotes** them, so they go live. Delete unwanted ones in the admin
-  afterwards.
-- P2 lists pending draft edits, one row per field. `discarded`: the
-  **published value wins**; write the edit down and re-enter it afterwards.
-  `ADOPTED (goes live)`: the live unit has no head, lead, department or
-  image there, so the draft value goes live. An adopted head or lead can
-  edit that department or team right after the deploy; if that is not
-  wanted, change it in the admin afterwards. Team membership is merged
-  (union): the draft-only members P2 names go live, and nobody loses access
-  they have today.
-- P10 lists media rows that point at a department or team that no longer
-  exists. The migration deletes them; the files stay in the media library.
-- P11 lists empty org relations: users without a department, departments
-  without a head, users or teams, teams without a department or lead. On
-  the old release, editing and publishing a department or team that had no
-  draft yet (every demo-seed unit, until its first publish) in the admin
-  silently dropped the unit's head or lead, its department, and the users
-  and teams linked to it. The migration cannot bring those back. Compare
-  P11 with the demo org chart in `apps/cms/src/seed-demo.ts` (every
-  department has a head, users and teams; every team a department; every
-  team except Recruiting and Payroll a lead; every demo user a department)
-  or with an older backup, and note what is missing. Re-link it after the
-  migration (step 9), not before: on the old release the next publish can
-  drop it again.
-
-**1. Rehearsal** (strongly recommended), on a throwaway copy of the live
-database. Both `migrate.sql` runs must end with
-`NOTICE:  org-dp: OK - departments=N, teams=M` (the second changes
-nothing), and the final preflight must show `draft_rows` 0 and
-`draft_links` 0 everywhere. A `RAISE` names what to fix in the live data
-first.
-
-```bash
-(
-  umask 077; D=$(mktemp -d)
-  trap 'docker rm -f -v orgdp-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
-  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
-  docker run -d --name orgdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
-  until docker exec orgdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
-  docker exec -i orgdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
-  for run in 1 2; do
-    docker exec -i orgdp-rehearsal psql -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/org-dp/migrate.sql
-  done
-  docker exec -i orgdp-rehearsal psql -U sinnlos -d sinnlos < infra/migrations/org-dp/preflight.sql
-)
-```
-
-The subshell keeps `umask 077` out of your shell, and the trap removes the
-container and the dump even when a step fails.
-
-**2. Pre-build** the new images; the running site keeps serving:
-
-```bash
-"${COMPOSE[@]}" build cms web
-```
-
-**3. Stop the apps.** No writes after this point; the site is down until
-step 7.
-
-```bash
-"${COMPOSE[@]}" stop web cms
-```
-
-**4. Back up**, the same way `infra/deploy.sh` does, and keep a plain copy
-on the host so a rollback does not need the off-box GPG key. This dump is
-the rollback point.
-
-```bash
-infra/backup/pg-backup.sh
-(umask 077; mkdir -p ~/orgdp-backup &&
-  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > ~/orgdp-backup/pre-migration.dump)
-docker exec -i infra-db-1 pg_restore --list < ~/orgdp-backup/pre-migration.dump > /dev/null && echo "dump OK"
-```
-
-**5. Migrate.** One transaction: any `RAISE` rolls everything back. The
-script also refuses to run outside one transaction or while another session
-is connected.
-
-```bash
-psql_db --single-transaction < infra/migrations/org-dp/migrate.sql
-```
-
-It must end with `NOTICE:  org-dp: OK - departments=N, teams=M`. After a
-`RAISE` nothing has changed: fix what it names and rerun (the script is
-idempotent), or give up and bring the old containers back with
-`"${COMPOSE[@]}" start cms web` (`start`, not `up`: step 2 already tagged
-the new images as `latest`).
-
-**6. Verify:**
-
-```bash
-psql_db -c "SELECT 'departments' AS t, count(*) AS rows, count(DISTINCT document_id) AS documents, count(*) FILTER (WHERE published_at IS NULL) AS drafts FROM departments UNION ALL SELECT 'teams', count(*), count(DISTINCT document_id), count(*) FILTER (WHERE published_at IS NULL) FROM teams"
-psql_db -c "SELECT user_id FROM up_users_department_lnk GROUP BY user_id HAVING count(*) > 1"
-psql_db < infra/migrations/org-dp/preflight.sql    # optional
-```
-
-For both types `rows` must equal `documents` and `drafts` must be 0; the
-second query must return no rows. In the optional preflight, P0
-`draft_rows` and every P3 `draft_links` are 0, and P10 lists nothing.
-
-**7. Deploy** with the unchanged wrapper, then check the cms log:
-
-```bash
-infra/deploy.sh
-"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'    # must print nothing
-```
-
-`deploy.sh` takes a second (post-migration) backup, tags the stopped
-containers' images as `:rollback` (`docker inspect` works on stopped
-containers), starts the new images from the warm build cache and runs its
-smoke checks. Strapi's own draft & publish switch runs once on this first
-boot and finds nothing to delete.
-
-**8. Smoke:**
-
-- Signed in as a plain member of a department, you see the announcements,
-  wiki spaces, documents and quick links targeted at that department.
-- In the admin panel, the Department and Team edit views show **Save**
-  only.
-- Optional: the department-head probe in
-  [§6.4](#64-role-enforcement-optional).
-
-**9. Afterwards:** in the admin (a save is live now and keeps every link),
-re-enter the P2 edits marked `discarded`, re-link what you noted from P11,
-and delete unwanted P1 units. Once you are satisfied with the release,
-delete the plain dump: `rm -rf ~/orgdp-backup`.
-
-**Rollback.** There is no reverse script: the rollback is a `pg_restore` of
-the step-4 dump, together with the previous images. Org edits made after the
-migration are lost.
-
-- `migrate.sql` failed: nothing changed. `"${COMPOSE[@]}" start cms web`.
-- Anything later:
-
-  ```bash
-  "${COMPOSE[@]}" stop web cms
-  docker exec -i infra-db-1 sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < ~/orgdp-backup/pre-migration.dump
-  docker tag infra-web:rollback infra-web:latest
-  docker tag infra-cms:rollback infra-cms:latest
-  "${COMPOSE[@]}" up -d --no-build web cms
-  ```
-
-  Without the plain copy, use the encrypted step-4 artifact of
-  `pg-backup.sh` (decrypt it with the off-box key and gunzip it first).
-- Rolling forward later means step 0 and steps 3 to 7 again. The same
-  holds whenever a pre-migration dump (an older nightly backup, say) is
-  restored under the new release, and after an image-only rollback: the old
-  cms clones a draft of every department and team on its first boot. In
-  each case the new cms refuses to boot until `migrate.sql` has run on that
-  data. Step 0 matters here: draft-only edits made in the admin while the
-  old image was running follow the P2 rules, so the ones marked
-  `discarded` need re-entering afterwards.
-
-**Local SQLite dev:** the guard also blocks a dev database that holds
-department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
-with `SEED_DEMO_DATA=1`.
 
 #### Upgrading to the draft-twin repair (FX38)
 
@@ -1271,7 +1082,536 @@ published rows from the seed.
 
 #### Upgrading an existing instance to this release
 
-"This release" is hardening batch 2 of 2026-09-25 (branch
+"This release" is phase 1 of the [datetime contract](#310-datetime-contract)
+(branch `feat/datetime-phase1`, deep-dive decision 04). It changes how the
+cms stores and computes times:
+
+- Every stored instant becomes `timestamptz(6)`. Until now the columns were
+  `timestamp without time zone` and held the wall clock of whichever process
+  wrote them: UTC before 2026-08-15 (commit `aadb2ea` pinned
+  `TZ=Europe/Berlin`), Berlin time after it.
+- The cms process runs in **UTC** and so does every database session.
+  Business dates ("today", day and week windows, birthdays and anniversaries,
+  classified expiry, digest days, the 03:30 / 03:35 / 07:30 cron times, all-day
+  events in the ICS export) are computed in the new setting `APP_TIME_ZONE`
+  (default `Europe/Berlin`), no longer in the process zone.
+- The cms's **first boot repairs the stored values once** (a Strapi user
+  migration, before the schema sync) and converts the columns. From then on
+  a startup guard keeps every datetime column `timestamptz`, also for new
+  fields and plugins, and refuses to start while one is left.
+- The web changes only the poll close rule (below) and reads
+  `APP_TIME_ZONE`; its container keeps rendering in `APP_TIME_ZONE`
+  (compose sets its `TZ` from it) until the web's own port (phase 2).
+
+No change to secrets, no `JWT_SECRET` rotation, nobody is signed out.
+
+> **Revised 2026-09-26 after review** (read this if you rehearsed with an
+> earlier build of this branch): pin the running images as
+> `:pre-datetime` before deploying (step 7); a rollback to the previous cms
+> now always uses `infra/docker-compose.cms-legacy-tz.yml`, and before the
+> repair it is mandatory ([Rolling back this release](#rolling-back-this-release));
+> the gap check also fails for a θ in the future, a legacy zone not ahead of
+> UTC, or a θ with no write stamp on one side (step 3); `APP_TIME_ZONE` and
+> `DATETIME_LEGACY_ZONE` refuse UTC offsets, and the web refuses to serve if
+> its container's `TZ` is a name Node cannot find (spell zones as the tz
+> database does, step 5); event, poll and announcement times in the DST
+> change hour are listed for review (deadline note, steps 3 and 10); the
+> audit table records each value's document id and title (a rehearsal copy
+> gets the two columns added on its next repair). Nothing else changes for
+> an instance.
+
+**What an instance needs.** The repair must know which zone the old cms
+wrote in:
+
+| Instance | `infra/.env` |
+|---|---|
+| Fresh install, or a SQLite-only setup | nothing (leave both `DATETIME_LEGACY_*` empty) |
+| Existing instance first deployed on or after 2026-08-15 (compose with `TZ=Europe/Berlin`) | `DATETIME_LEGACY_ZONE=Europe/Berlin` |
+| Existing instance that ran before 2026-08-15 (its cms ran in UTC) and took the `aadb2ea` deploy | `DATETIME_LEGACY_ZONE=Europe/Berlin` and `DATETIME_LEGACY_UTC_UNTIL=θ`, the switch instant (step 2) |
+| The owner instance | `DATETIME_LEGACY_ZONE=Europe/Berlin`, `DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00` (confirmed by the report in step 3) |
+
+Without `DATETIME_LEGACY_ZONE` on a database with data, the new cms stops at
+its first boot with `[datetime] This database holds datetime values written
+before the datetime contract …`, changing nothing, and `infra/deploy.sh`
+refuses to deploy.
+
+**Deadline: deploy before 2026-10-25, 01:00 UTC** (the Berlin clocks go back
+that night). Until the deploy the old cms keeps writing Berlin wall clocks;
+values written during the repeated hour 02:00–03:00 cannot be told apart
+afterwards (the repair reads them as the later, standard-time instant, and
+the report lists them). The same holds, whatever the deploy date, for
+**event, poll and announcement times entered for that hour** (2026-10-25
+02:00–03:00 Berlin time, or the repeated hour of an earlier year): the old
+storage cannot say whether 02:30 meant the first (summer time) or the
+second 02:30. The repair takes the second one, so a time meant as the first
+becomes an hour late. The report lists each such time with both readings
+(step 3 before the repair, step 10 after it); check them and correct the
+ones that need it in the admin panel.
+
+**Before the deploy**
+
+1. **Pull and run the preflight**, deploying nothing:
+
+   ```bash
+   cd /opt/sinnlos && git pull      # your checkout on the host
+   infra/deploy.sh --check
+   ```
+
+   On an existing instance it fails with
+   `ERROR: the running database still stores datetimes in the pre-contract
+   format …` until step 5 is done. Carry on with steps 2 to 5.
+
+2. **Find θ** (only for an instance that ran in UTC first). θ is any instant
+   between the last write of the UTC-era cms and the first write of the
+   Berlin-era one. The pre-deploy backup of the switch deploy gives its lower
+   bound B: `pg-backup.sh` logs each run with `date -Is` (with offset) in the
+   off-site `backup.log`, for example
+
+   ```bash
+   grep '^2026-08-15' <offsite-dir>/sinnlos/backup.log
+   ```
+
+   θ = B + 1 h works whenever that deploy took less than an hour. The owner's
+   B is `2026-08-15T20:46:42+02:00`, so θ = `2026-08-15T21:46:42+02:00`.
+
+3. **Read-only report against the live database**, with the new image. It
+   applies the repair's own rules and changes nothing (read-only session,
+   read-only transaction). `build` only builds the image; the running
+   containers keep serving:
+
+   ```bash
+   cd /opt/sinnlos/infra
+   COMPOSE="docker compose -p infra -f docker-compose.yml -f docker-compose.traefik.yml"
+   $COMPOSE build cms
+   $COMPOSE run --rm --no-deps \
+     -e DATETIME_LEGACY_ZONE=Europe/Berlin \
+     -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00 \
+     cms node dist/scripts/datetime-migration-report.js --around 2026-08-15T20:46:42+02:00
+   ```
+
+   (Standalone Caddy box: drop the Traefik file from `COMPOSE`.) Check:
+   - `Gap check: OK` — θ lies in an empty stretch of the stored write
+     stamps at least as long as the zone offset (120 minutes in August). The
+     `--around` list shows the stamps near B with the switch gap marked
+     (`----- gap 2h10m -----` or so) and suggests a θ inside it. A
+     `Gap check: FAILS` means θ is wrong; the lines below it say why (the
+     stretch around θ is too short, θ lies in the future, or no write stamp
+     lies on one side of θ). Pick a θ inside the marked gap. The migration
+     runs the same check and aborts (changing nothing) otherwise.
+   - The class counts per table and column (`write-utc`, `write-legacy`,
+     `A`, `B`, `C`, `C-allday`, …; see the
+     [rules](#310-datetime-contract)).
+   - **Ambiguous values**: event, poll and announcement times created before
+     θ and saved again after it (class C). The repair reads them as UTC,
+     which is right unless someone corrected the time by hand after
+     2026-08-15; each open or upcoming one is listed with both readings.
+     Note the ones whose "read as Europe/Berlin" line is the intended time:
+     you fix those in step 10.
+   - **Legacy-zone values in a DST change hour**: the event, poll and
+     announcement times among them come first, with document, title and
+     both readings (`repeated hour; repaired as … (…Z), the other reading
+     is … (…Z)`). Note the ones meant as the other reading: you fix those in
+     step 10. Write stamps in that hour follow (nobody can fix those, and
+     nothing depends on the hour).
+
+4. **Rehearse on a copy** (strongly recommended): restore a fresh dump into a
+   throwaway Postgres 16, run the report there, optionally against the
+   pre-switch dump of 2026-06-24 (`--baseline` says which ambiguous values are
+   unchanged since then, so the UTC reading holds), and boot the new cms once
+   against the copy:
+
+   ```bash
+   (
+     umask 077; D=$(mktemp -d)
+     trap 'docker rm -f -v dt-copy dt-june dt-cms >/dev/null 2>&1; docker network rm dt-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+     docker network create dt-rehearsal
+     docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+     for db in dt-copy dt-june; do
+       docker run -d --name "$db" --network dt-rehearsal -e POSTGRES_USER=sinnlos \
+         -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+       until docker exec "$db" pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+     done
+     docker exec -i dt-copy pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+     docker exec -i dt-june pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges \
+       < /home/bigemo/backups/sinnlos/sinnlos-db-2026-06-24-143319.dump
+     LEGACY="-e DATETIME_LEGACY_ZONE=Europe/Berlin -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00"
+     DB="-e DATABASE_CLIENT=postgres -e DATABASE_HOST=dt-copy -e DATABASE_NAME=sinnlos -e DATABASE_USERNAME=sinnlos -e DATABASE_PASSWORD=rehearsal"
+     docker run --rm --network dt-rehearsal $LEGACY $DB infra-cms \
+       node dist/scripts/datetime-migration-report.js --all \
+       --baseline postgres://sinnlos:rehearsal@dt-june:5432/sinnlos
+     S() { openssl rand -hex 16; }
+     docker run -d --name dt-cms --network dt-rehearsal $LEGACY $DB \
+       -e APP_KEYS="$(S),$(S)" -e API_TOKEN_SALT="$(S)" -e ADMIN_JWT_SECRET="$(S)" \
+       -e TRANSFER_TOKEN_SALT="$(S)" -e JWT_SECRET="$(S)" -e ENCRYPTION_KEY="$(S)" \
+       -e REVALIDATE_SECRET="$(S)" -e INTERNAL_UPLOAD_TOKEN="$(S)" \
+       -e DIGESTS_DISABLED=1 -e LIVE_EVENTS_DISABLED=1 infra-cms
+     until docker logs dt-cms 2>&1 | grep -qE 'Strapi started successfully|failed|Error:'; do sleep 2; done
+     docker logs dt-cms 2>&1 | grep -E '\[datetime\]|failed|Error:|started successfully'
+     docker exec dt-copy psql -U sinnlos -d sinnlos -c \
+       "SELECT count(*) AS naive_left FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'timestamp without time zone';" \
+       -c "SELECT class, zone, count(*) FROM datetime_migration_audit GROUP BY 1, 2 ORDER BY 1;" \
+       -c "SELECT id, title, start AT TIME ZONE 'Europe/Berlin' AS start_berlin, all_day FROM events WHERE published_at IS NOT NULL ORDER BY start;"
+   )
+   ```
+
+   The cms log must show `[datetime] legacy repair (run …): N value(s)
+   rewritten …`, `[datetime] converted 3 column(s) to timestamptz:
+   strapi_database_schema.time, strapi_migrations.time,
+   strapi_migrations_internal.time` and `Strapi started successfully`;
+   `naive_left` must be 0, and the event times in Berlin time must match what
+   the events mean. Without the June dump drop `dt-june` and `--baseline`.
+   The trap removes both containers, the network and the dump.
+
+5. **Set the variables in `infra/.env`**, permanently (they only matter
+   again if a pre-repair dump is ever restored, and then they must be right):
+
+   ```dotenv
+   DATETIME_LEGACY_ZONE=Europe/Berlin
+   DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00
+   ```
+
+   Leave `APP_TIME_ZONE` unset (or `Europe/Berlin`) unless the company is
+   elsewhere. Spell zones exactly as the tz database does (`Europe/Berlin`,
+   not `europe/berlin`; never an offset such as `+02:00`): the cms refuses an
+   offset, and compose passes `APP_TIME_ZONE` to the web as `TZ`, which Node
+   only resolves in the exact spelling (the web then answers 500). Then
+   `infra/deploy.sh --check` prints `Preflight OK`.
+
+6. **Host backup time.** The nightly `pg-backup.sh` runs from the host
+   crontab at 03:00 **host time**; the uploads and search-log janitors run at
+   03:30 and 03:35 **`APP_TIME_ZONE`**, and must run after the backup. On a
+   host in `Europe/Berlin` (the owner's) nothing changes. On a host in UTC
+   with `APP_TIME_ZONE=Europe/Berlin`, 03:00 UTC is 04:00 or 05:00 Berlin:
+   move the crontab line to `0 1 * * *` UTC, or set the host zone
+   (`timedatectl set-timezone Europe/Berlin`).
+
+**Deploy**
+
+7. **Pin the running images** under a tag no later run overwrites, for a
+   rollback ([Rolling back this release](#rolling-back-this-release)):
+
+   ```bash
+   docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:pre-datetime
+   docker tag "$(docker inspect -f '{{.Image}}' infra-web-1)" infra-web:pre-datetime
+   ```
+
+   (`deploy.sh` tags the running images `:rollback` on every run; after a
+   failed first attempt a second run would tag the new images.) Then run
+   `infra/deploy.sh` (it takes the mandatory pre-deploy backup first; keep
+   that dump until step 10 is done). On a standalone Caddy box: take the
+   backup, then `docker compose up -d --build` from `infra/`.
+
+**What the first boot does** (`docker logs infra-cms-1`):
+
+```
+[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin
+[internal migration]: migrating 2026.10.05T00.00.00.datetime-timestamptz.js
+[datetime] legacy repair (run …, legacy zone Europe/Berlin, θ 2026-08-15T19:46:42.000Z): N value(s) rewritten, M column(s) converted to timestamptz, K old value(s) kept in datetime_migration_audit. Classes: …
+[datetime] gap check: … min between … and … (needs 120)
+[internal migration]: migrated 2026.10.05T00.00.00.datetime-timestamptz.js (…s)
+[datetime] converted 3 column(s) to timestamptz: strapi_database_schema.time, strapi_migrations.time, strapi_migrations_internal.time
+Strapi started successfully
+```
+
+(Strapi labels user migrations `[internal migration]` too.) The repair runs
+in one transaction and is recorded in `strapi_migrations`; it never runs
+again on this database.
+
+**If the first boot fails** (missing variable, gap check, a lock held for
+30 s): the repair changed nothing, the cms exits and compose restarts it in
+a loop. The new web container waits for a healthy cms and never starts, so
+the site is down. `docker compose up` stops with `dependency failed to
+start: container infra-cms-1 …` (exited or unhealthy), and `deploy.sh` stops
+right there with `ERROR: docker compose up failed …` and the rollback
+commands; the smoke check never runs. The cause is in `docker logs
+infra-cms-1`. Either fix it and run `infra/deploy.sh` again (it tags the
+now-running new images `:rollback`; the `:pre-datetime` tags from step 7
+stay), or roll back **with the legacy-zone override**: the database still
+holds naive columns, and the previous cms must not run in UTC on them
+([Rolling back this release](#rolling-back-this-release), "before the
+repair").
+
+**After the deploy**
+
+8. **Checks.** `infra/deploy.sh` step 5 runs `infra/live-smoke.sh`, which now
+   starts with `live-smoke: datetime contract OK (process time zone UTC,
+   APP_TIME_ZONE Europe/Berlin)`. By hand:
+
+   ```bash
+   docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_schema = '\''public'\'' AND data_type = '\''timestamp without time zone'\''"'
+   ```
+
+   must print `0`. In the web, an event created in July for 18:00 (which the
+   old cms showed at 16:00 since 2026-08-15) shows 18:00 again.
+9. **Poll check:** a poll created with "closes on D" closes at the end of D
+   (23:59:59 `APP_TIME_ZONE`); the vote button and the vote endpoint now agree
+   at that second.
+10. **Review the ambiguous values.** The report now lists what the repair
+    recorded (open or upcoming ones; `--all` for every one):
+
+    ```bash
+    $COMPOSE exec cms node dist/scripts/datetime-migration-report.js
+    ```
+
+    Each value is named by table, row, document id and title (`events#43
+    doc k3x… "Town hall" start = …`), followed by both readings and a `now in
+    Europe/Berlin:` line with the document's current draft and published
+    values (a publish since the repair re-creates the published row, so look
+    the document up by its title or id, not by the row number). For each
+    value where the `read as Europe/Berlin` line is the intended time
+    (someone corrected it by hand after 2026-08-15), correct the time in the
+    Strapi admin panel (it now shows the `read as UTC` time).
+
+    The same run ends with `Event, poll and announcement times the repair
+    read in a DST change hour` (all of them, with document, title, both
+    readings and the current value). For each one meant as the other
+    reading (usually the first, summer-time occurrence), set the time again
+    in the admin panel.
+11. **Later:** after 90 days, and once step 10 is done, drop the audit table:
+    `DROP TABLE datetime_migration_audit;` (psql as above). Keep the two
+    `DATETIME_LEGACY_*` variables (a rollback override and a restored
+    pre-repair dump read them). Once you will not roll back any more, drop
+    the pinned images: `docker rmi infra-cms:pre-datetime infra-web:pre-datetime`.
+
+**What users and editors notice** (worth a short release note):
+
+- Event, poll and announcement times entered before 2026-08-15 show their
+  intended time again (since that date they showed two hours early, one
+  hour for winter dates). A time corrected by hand since then is the
+  exception (step 10).
+- Downloaded calendar entries (`.ics`) of all-day events are all-day
+  entries, no longer a zero-length appointment at 22:00 or 23:00 the day
+  before.
+- A poll closes exactly at the end of its closing day in both the page and
+  the vote endpoint (the endpoint accepted votes in the very last second).
+- Upcoming birthdays and anniversaries, classified expiry and digest days are
+  the same as before on a Berlin deployment; anniversaries now need one full
+  year, a Feb 29 birthday is shown on Feb 28 in other years, and blocked
+  accounts get no card.
+- The Strapi admin panel shows and takes times in the admin's **browser**
+  zone, as before; the stored instant is correct either way.
+
+#### One-time: org draft/publish off
+
+The release of 2026-09-26 (branch `feat/org-dp-off`, decision 05) turns
+draft & publish **off for departments and teams**. Each department and team
+is then one row with a stable id, and the department and team checks rely on
+that: department heads can update their own department and its teams
+(FX07), and members see the announcements, wiki spaces, documents and quick
+links targeted at their department or team. Before, a user was often linked
+to a department's draft row while content was linked to its published row,
+so these checks failed closed (403 for department heads, targeted content
+hidden from its own audience).
+
+What admins notice: the Department and Team edit views have **Save** only.
+A save is live immediately; there is no Publish, Unpublish or Discard, and
+hiding a unit means deleting it. What users notice: department members,
+heads and team leads now see the content targeted at their department or
+team, and they now count in acknowledgement reports, digests and new
+notification fan-outs. Nothing is sent retroactively.
+
+A database used by an earlier release can still hold **draft rows** for
+departments or teams: a unit created in the admin panel and never
+published, or one edited after its last publish. Strapi deletes those rows
+when the new cms boots, and their links with them (users lose their
+department, draft content loses its targeting, never-published units are
+gone). The new cms therefore **refuses to boot while any exist**: the log
+shows `[org-dp] departments still holds N draft row(s)` (or `teams`), compose
+restarts it in a loop, and the data stays untouched. The one-time SQL in
+`infra/migrations/org-dp/` (see the README there) merges the drafts first.
+**A fresh install needs nothing**, and neither does a database that only
+holds demo-seed departments and teams (the seed writes one published row
+per unit).
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**0. Preflight** (read only; run it any time while the current release is
+live):
+
+```bash
+git pull
+psql_db < infra/migrations/org-dp/preflight.sql
+```
+
+- **FAST PATH:** if P0 shows `draft_rows` = 0 for both `departments` and
+  `teams`, there is nothing to migrate. Deploy as usual with
+  `infra/deploy.sh` and stop here (a look at P11 below does no harm). The
+  guard passes and Strapi's own switch deletes nothing;
+  `"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'` prints nothing.
+- These must be 0 before you continue: P0 `anomalies`, P4 (a user linked to
+  more than one department), P7 (a duplicate department name or slug, or a
+  duplicate team slug), P8 (a table the script does not handle) and P9 (a
+  row the script refuses). Fix P4, P7 and a P9 "more than one head, lead or
+  department" in the admin panel and rerun the preflight. P0 anomalies, P8
+  and the other P9 rows need a closer look; do not continue.
+- P1 lists draft-only units: never published, or unpublished in the admin
+  to hide them (an unpublish deletes the live row). The migration
+  **promotes** them, so they go live. Delete unwanted ones in the admin
+  afterwards.
+- P2 lists pending draft edits, one row per field. `discarded`: the
+  **published value wins**; write the edit down and re-enter it afterwards.
+  `ADOPTED (goes live)`: the live unit has no head, lead, department or
+  image there, so the draft value goes live. An adopted head or lead can
+  edit that department or team right after the deploy; if that is not
+  wanted, change it in the admin afterwards. Team membership is merged
+  (union): the draft-only members P2 names go live, and nobody loses access
+  they have today.
+- P10 lists media rows that point at a department or team that no longer
+  exists. The migration deletes them; the files stay in the media library.
+- P11 lists empty org relations: users without a department, departments
+  without a head, users or teams, teams without a department or lead. On
+  the old release, editing and publishing a department or team that had no
+  draft yet (every demo-seed unit, until its first publish) in the admin
+  silently dropped the unit's head or lead, its department, and the users
+  and teams linked to it. The migration cannot bring those back. Compare
+  P11 with the demo org chart in `apps/cms/src/seed-demo.ts` (every
+  department has a head, users and teams; every team a department; every
+  team except Recruiting and Payroll a lead; every demo user a department)
+  or with an older backup, and note what is missing. Re-link it after the
+  migration (step 9), not before: on the old release the next publish can
+  drop it again.
+
+**1. Rehearsal** (strongly recommended), on a throwaway copy of the live
+database. Both `migrate.sql` runs must end with
+`NOTICE:  org-dp: OK - departments=N, teams=M` (the second changes
+nothing), and the final preflight must show `draft_rows` 0 and
+`draft_links` 0 everywhere. A `RAISE` names what to fix in the live data
+first.
+
+```bash
+(
+  umask 077; D=$(mktemp -d)
+  trap 'docker rm -f -v orgdp-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+  docker run -d --name orgdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+  until docker exec orgdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+  docker exec -i orgdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+  for run in 1 2; do
+    docker exec -i orgdp-rehearsal psql -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/org-dp/migrate.sql
+  done
+  docker exec -i orgdp-rehearsal psql -U sinnlos -d sinnlos < infra/migrations/org-dp/preflight.sql
+)
+```
+
+The subshell keeps `umask 077` out of your shell, and the trap removes the
+container and the dump even when a step fails.
+
+**2. Pre-build** the new images; the running site keeps serving:
+
+```bash
+"${COMPOSE[@]}" build cms web
+```
+
+**3. Stop the apps.** No writes after this point; the site is down until
+step 7.
+
+```bash
+"${COMPOSE[@]}" stop web cms
+```
+
+**4. Back up**, the same way `infra/deploy.sh` does, and keep a plain copy
+on the host so a rollback does not need the off-box GPG key. This dump is
+the rollback point.
+
+```bash
+infra/backup/pg-backup.sh
+(umask 077; mkdir -p ~/orgdp-backup &&
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > ~/orgdp-backup/pre-migration.dump)
+docker exec -i infra-db-1 pg_restore --list < ~/orgdp-backup/pre-migration.dump > /dev/null && echo "dump OK"
+```
+
+**5. Migrate.** One transaction: any `RAISE` rolls everything back. The
+script also refuses to run outside one transaction or while another session
+is connected.
+
+```bash
+psql_db --single-transaction < infra/migrations/org-dp/migrate.sql
+```
+
+It must end with `NOTICE:  org-dp: OK - departments=N, teams=M`. After a
+`RAISE` nothing has changed: fix what it names and rerun (the script is
+idempotent), or give up and bring the old containers back with
+`"${COMPOSE[@]}" start cms web` (`start`, not `up`: step 2 already tagged
+the new images as `latest`).
+
+**6. Verify:**
+
+```bash
+psql_db -c "SELECT 'departments' AS t, count(*) AS rows, count(DISTINCT document_id) AS documents, count(*) FILTER (WHERE published_at IS NULL) AS drafts FROM departments UNION ALL SELECT 'teams', count(*), count(DISTINCT document_id), count(*) FILTER (WHERE published_at IS NULL) FROM teams"
+psql_db -c "SELECT user_id FROM up_users_department_lnk GROUP BY user_id HAVING count(*) > 1"
+psql_db < infra/migrations/org-dp/preflight.sql    # optional
+```
+
+For both types `rows` must equal `documents` and `drafts` must be 0; the
+second query must return no rows. In the optional preflight, P0
+`draft_rows` and every P3 `draft_links` are 0, and P10 lists nothing.
+
+**7. Deploy** with the unchanged wrapper, then check the cms log:
+
+```bash
+infra/deploy.sh
+"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'    # must print nothing
+```
+
+`deploy.sh` takes a second (post-migration) backup, tags the stopped
+containers' images as `:rollback` (`docker inspect` works on stopped
+containers), starts the new images from the warm build cache and runs its
+smoke checks. Strapi's own draft & publish switch runs once on this first
+boot and finds nothing to delete.
+
+**8. Smoke:**
+
+- Signed in as a plain member of a department, you see the announcements,
+  wiki spaces, documents and quick links targeted at that department.
+- In the admin panel, the Department and Team edit views show **Save**
+  only.
+- Optional: the department-head probe in
+  [§6.4](#64-role-enforcement-optional).
+
+**9. Afterwards:** in the admin (a save is live now and keeps every link),
+re-enter the P2 edits marked `discarded`, re-link what you noted from P11,
+and delete unwanted P1 units. Once you are satisfied with the release,
+delete the plain dump: `rm -rf ~/orgdp-backup`.
+
+**Rollback.** There is no reverse script: the rollback is a `pg_restore` of
+the step-4 dump, together with the previous images. Org edits made after the
+migration are lost.
+
+- `migrate.sql` failed: nothing changed. `"${COMPOSE[@]}" start cms web`.
+- Anything later:
+
+  ```bash
+  "${COMPOSE[@]}" stop web cms
+  docker exec -i infra-db-1 sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < ~/orgdp-backup/pre-migration.dump
+  docker tag infra-web:rollback infra-web:latest
+  docker tag infra-cms:rollback infra-cms:latest
+  "${COMPOSE[@]}" up -d --no-build web cms
+  ```
+
+  Without the plain copy, use the encrypted step-4 artifact of
+  `pg-backup.sh` (decrypt it with the off-box key and gunzip it first).
+- Rolling forward later means step 0 and steps 3 to 7 again. The same
+  holds whenever a pre-migration dump (an older nightly backup, say) is
+  restored under the new release, and after an image-only rollback: the old
+  cms clones a draft of every department and team on its first boot. In
+  each case the new cms refuses to boot until `migrate.sql` has run on that
+  data. Step 0 matters here: draft-only edits made in the admin while the
+  old image was running follow the P2 rules, so the ones marked
+  `discarded` need re-entering afterwards.
+
+**Local SQLite dev:** the guard also blocks a dev database that holds
+department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
+with `SEED_DEMO_DATA=1`.
+
+#### Upgrading to the Strapi 5.55.1 release (2026-09-25)
+
+This is hardening batch 2 of 2026-09-25 (branch
 `feat/hardening-batch-2`). It moves the cms from Strapi 5.49.0 to **5.55.1**
 (with sharp 0.35.4), limits content-API writes on wiki pages, departments and
 teams to per-role field allowlists (FX07), and upgrades the test tooling to
@@ -1338,7 +1678,7 @@ with the ones below; both releases then go out in one deploy.
      finds its users by provider, so a converted account's Microsoft sign-in
      fails there (the cms answers "Email is already taken"). Before
      re-enabling the `MS_*` keys on a rollback, set those accounts back to
-     `microsoft` ([Rolling back this release](#rolling-back-this-release)).
+     `microsoft` ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)).
 
    An instance that already signs in locally only passes unchanged.
 
@@ -1347,7 +1687,7 @@ with the ones below; both releases then go out in one deploy.
    container. On a standalone Caddy box, run it (or the manual dump in
    [§7.1](#71-manual-postgres-backup)) yourself before
    `docker compose up -d --build`. It is the fallback should a rollback ever
-   need a restore ([Rolling back this release](#rolling-back-this-release)).
+   need a restore ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)).
 
 4. **Nothing else to change.** `JWT_SECRET` stays: users-permissions now pins
    the verification of its legacy-mode JWTs to HS256, the algorithm these
@@ -1699,6 +2039,129 @@ extra steps):
 > proxy if you need them. The cms-side guards and the app's login limiter
 > apply either way.
 
+### 3.10 Datetime contract
+
+How times are stored and computed (deep-dive decision 04; phase 1 covers
+the cms and the database, phase 2 the web):
+
+- **Instants** (a point on the timeline: `createdAt`, event `start`/`end`,
+  poll `closesAt`, …) are Strapi `datetime` fields, stored as Postgres
+  `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. Clients must send
+  instants with `Z` or an offset. The cms's own code reads instants only
+  through its time module, which rejects an offset-less value (a vote
+  against such a `closesAt` counts the poll as open), while Strapi's generic
+  content API and admin panel read one in the process zone, i.e. as UTC.
+  The web and the admin panel always send `Z`.
+- **Calendar dates** (classified `expiresAt`, announcement `ackDeadline`,
+  `birthday`, `hireDate`) are Strapi `date` fields: `YYYY-MM-DD`, no zone,
+  never turned into a midnight instant.
+- **Zones.** The cms process runs in UTC (`TZ=UTC` in the image and in
+  compose), and every database session runs in UTC (`-c TimeZone=UTC`, sent
+  by `apps/cms/config/database.ts`). The business zone is `APP_TIME_ZONE`
+  (IANA name, default `Europe/Berlin`, one per deployment): "today", day and
+  week windows (weeks start on Monday), anniversaries (Feb 29 falls on Feb 28
+  in other years), classified expiry, digest days, the cron times, all-day
+  event days and poll deadlines ("closes on D" = D 23:59:59 there). Spell
+  it as the tz database does (`Europe/Berlin`, not `europe/berlin`); a UTC
+  offset such as `+02:00` is refused, because Postgres reads it with the
+  opposite sign. With an unknown value or an offset the cms does not
+  start, and the web answers every request with an error (Next.js logs `An
+  error occurred while loading instrumentation hook: APP_TIME_ZONE must be
+  …`). Changing it later moves those boundaries, not stored instants. Until
+  the web's phase 2 the web container runs in `APP_TIME_ZONE` (compose
+  passes the value on as its `TZ`) and renders dates in its process zone;
+  when `TZ` is set, the web also refuses to serve if Node does not run in
+  `APP_TIME_ZONE`, e.g. with a wrong-case name Node cannot find (`The web
+  process runs in …, not in APP_TIME_ZONE …`). `DATETIME_LEGACY_ZONE`
+  follows the same rules.
+- **The guard.** Strapi creates every new `datetime` column as
+  `timestamp without time zone`. At each boot the cms converts every such
+  column of the app schema (`DATABASE_SCHEMA`, default `public`) to
+  `timestamptz` right after Strapi's schema sync, one short transaction per
+  table (lock timeout 5 s, statement timeout 60 s), reads the stored wall
+  clock as UTC, and logs `[datetime] converted N column(s) …`. It **refuses to
+  start** when a column is still naive after a retry, when the process is not
+  in UTC while there is something to convert, when a boot creates or changes
+  the schema in a non-UTC process, when the database session is not in UTC,
+  or when a naive app column holds data before the one-time repair has run.
+  The schema check runs in Strapi's `beforeSync` hook, before any migration,
+  DDL or schema-sync write (`[datetime] This boot runs database migrations /
+  changes the database schema and needs a UTC process …`); a check after
+  the sync stays as a backstop. A boot refused by that backstop may already
+  have applied DDL; a start with `TZ=UTC` finishes it. An ordinary restart
+  in a non-UTC process only warns. On SQLite (local development) all of
+  this is skipped.
+- **The one-time repair** (`apps/cms/database/migrations/`, logic in
+  `apps/cms/src/database/datetime-legacy.ts`) runs on the first boot of a
+  database written before the contract. It needs `DATETIME_LEGACY_ZONE`
+  (the zone the old cms ran in) and, if that cms ran in UTC first,
+  `DATETIME_LEGACY_UTC_UNTIL` (θ, the switch instant). Rules per value:
+  write-time stamps (`created_at`, `updated_at`, `published_at`, `read_at`,
+  …) by their own value (before θ: UTC wall clock, after: legacy zone);
+  session and token expiries by their row's `created_at`; user-entered
+  instants (`events.start`/`end`, `polls.closes_at`,
+  `announcements.expires_at`, `strapi_releases.scheduled_at`) by provenance:
+  **A** the document was created after θ (legacy zone), **B** the row was
+  last saved before θ (UTC), **C** otherwise (ambiguous; UTC, except an
+  all-day event stored as a legacy-zone midnight). A gap check requires θ to
+  sit in an empty stretch of write stamps at least as long as the zone
+  offset, and fails (instead of passing untested) when θ lies in the
+  future, when the legacy zone is not ahead of UTC at θ, or when no write
+  stamp lies on one side of θ: a database written in one zone only leaves
+  `DATETIME_LEGACY_UTC_UNTIL` empty (with `DATETIME_LEGACY_ZONE=UTC` if that
+  zone was UTC). Old values stay in `datetime_migration_audit` (as text, with
+  the row's document id and title). Strapi's
+  bookkeeping tables are left to the guard. Two cms processes booting at
+  once (two replicas, a restart overlapping a slow first boot) repair only
+  once: the migration holds a transaction-level advisory lock, so the
+  second waits (up to the 30 s lock timeout, else its boot fails and the
+  restart finds the work done) and then finds no naive column left. The runbook is
+  [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release).
+- **Report CLI** (read-only): `node dist/scripts/datetime-migration-report.js`
+  in the cms container (`--help` for the options). Before the repair it shows
+  what the repair would do; after it, the ambiguous values it recorded. With
+  `--baseline`, a dump of an older schema is answered per value: `no table …`
+  or `no column … in the baseline dump's schema`, `not in the baseline dump
+  (created later)`, or `LOOKUP FAILED (…)` for an unexpected error, after
+  which the CLI exits with status 1. Each lookup runs in a savepoint, so one
+  failure does not abort the read-only transaction for the rest.
+- **Manual SQL.** The guard reads every naive column as a UTC wall clock.
+  A cast or `ALTER … TYPE timestamp` on a datetime column in a session of
+  another zone stores that zone's wall clock, and the next boot converts
+  it with every value shifted (the guard then warns `… is timestamp without
+  time zone again and holds values in N row(s)`; it cannot tell a manual
+  ALTER from a column Strapi re-created). Run manual DDL on datetime
+  columns only in a UTC session: `psql` inside the db container is one
+  (compose sets `PGTZ=UTC` there); elsewhere run `SET TimeZone = 'UTC';`
+  first.
+- **Connection rules.** `DATABASE_URL` must not carry its own `options`
+  parameter (it would replace the UTC pin; the cms refuses it unless it sets
+  `TimeZone=UTC` itself). A pooler that drops startup options (PgBouncer in
+  transaction mode, Azure's built-in PgBouncer on port 6432) breaks the pin:
+  connect the cms directly (port 5432).
+- **Admin panel.** Strapi's admin panel shows and takes times in the
+  admin's **browser** zone; the stored instant is right either way. Admins
+  outside `APP_TIME_ZONE` see their own local times there.
+- **Cron and backups.** The janitors run at 03:30 / 03:35 and the digest at
+  07:30 `APP_TIME_ZONE`; the host crontab's 03:00 backup runs in the host's
+  zone and must come first (keep the host in `APP_TIME_ZONE`, or shift the
+  crontab line).
+- **Local development.** SQLite needs nothing. With a local Postgres, set
+  `TZ=UTC` in `apps/cms/.env` (a boot that creates or changes the schema
+  refuses any other zone).
+- **Tests.** `pnpm test:tz` runs the suite under `TZ=UTC`, `Europe/Berlin`
+  and `Pacific/Auckland`. The Postgres 16 integration suites
+  (`apps/cms/src/database/*.pg.test.ts`) run when `SINNLOS_TEST_PG_URL` points
+  at a database they may create schemas in, e.g. a throwaway
+  `docker run --rm -d -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`
+  with `SINNLOS_TEST_PG_URL=postgres://postgres:test@127.0.0.1:55432/postgres`.
+  CI's `datetime` job runs both; rerun it for every Strapi, knex or pg upgrade.
+- **New fields.** Instants are `"type": "datetime"`, calendar days
+  `"type": "date"`, durations numbers with the unit in the name. Never put a
+  `column` or `columnType` override on a `datetime` attribute: Strapi then
+  re-creates the column naive through an `ALTER` (the guard converts it back
+  at the same boot, but it is avoidable DDL).
+
 ---
 
 ## 4. Azure VM Deployment
@@ -2037,6 +2500,7 @@ az containerapp create \
       "MS_CLIENT_SECRET=<client-secret>" \
       "MS_TENANT_ID=<tenant-id>" \
       "LIVE_EVENTS_DISABLED=0" \
+      "APP_TIME_ZONE=Europe/Berlin" \
       "SMTP_HOST=<mail.example.com>" \
       "SMTP_PORT=587" \
       "SMTP_USER=<noreply@example.com>" \
@@ -2051,7 +2515,10 @@ az containerapp create \
 > web container (the kill switch is read on both sides), and
 > `INTERNAL_UPLOAD_TOKEN` must be identical on both containers. Replace every
 > `<…>` stand-in: the cms refuses to start in production with a placeholder
-> secret.
+> secret. The cms image runs in UTC by itself; `APP_TIME_ZONE` is the
+> business zone ([datetime contract](#310-datetime-contract)), and
+> `DATABASE_HOST` must be the server itself on port 5432, not Azure's built-in
+> PgBouncer (port 6432), which drops the cms's UTC session setting.
 
 > **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to send its
 > live-event pings to the Next.js `/api/live/emit` ingest, but the web app's
@@ -2124,7 +2591,12 @@ az containerapp create \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
-      "LIVE_EVENTS_DISABLED=0"
+      "LIVE_EVENTS_DISABLED=0" \
+      "APP_TIME_ZONE=Europe/Berlin" \
+      "TZ=Europe/Berlin"
+
+# TZ: the web still renders dates in its process zone until its datetime
+# port (phase 2), so it must equal APP_TIME_ZONE (compose does the same).
 
 # Now read the FQDN assigned to the web app
 WEB_FQDN=$(az containerapp show \
@@ -2232,6 +2704,13 @@ curl -I <URL>/api/departments
 # Strapi admin loads
 curl -I <URL>/admin
 # Expect: HTTP/1.1 200 OK
+
+# Datetime contract (Docker Compose): the cms runs in UTC and no column is
+# left as timestamp without time zone (infra/live-smoke.sh checks both).
+docker logs infra-cms-1 2>&1 | grep '\[datetime\] process time zone'
+# Expect: [datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin
+docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.columns WHERE data_type = '\''timestamp without time zone'\'' AND table_schema = '\''public'\''"'
+# Expect: 0
 ```
 
 ### 6.2 Content bootstrap
@@ -2335,9 +2814,9 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-an-existing-instance-to-this-release)), or roll back ([Rolling back this release](#rolling-back-this-release)) |
-| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
-| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
+| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)), or roll back ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)) |
+| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
+| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
@@ -2349,6 +2828,17 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | Sign-in form says "Too many sign-in attempts" for everyone | Strapi's throttle sees one client IP for all users: the edge does not pass the client's `X-Forwarded-For` (see [§3.9](#39-production-hardening)) |
 | Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back past 2026-09-24 and the user has not signed in again ([Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)) |
 | `[digest] misconfigured` / `[digest] skipped: DIGEST_FROM unset` in the cms log | SMTP is set without `DIGEST_FROM` or `PUBLIC_WEB_URL` |
+| cms restarts in a loop, log says `[datetime] This database holds datetime values written before the datetime contract …` | First boot on a pre-contract database without `DATETIME_LEGACY_ZONE`; nothing was changed. Follow [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release) |
+| cms restarts in a loop, log says `DATETIME_LEGACY_UTC_UNTIL (θ = …) is not inside an empty stretch of write-time stamps` | θ is wrong; nothing was changed. Run the report with `--around <pre-deploy backup time>` and pick θ inside the marked gap (upgrade step 3) |
+| `[datetime] … needs a UTC process` or `… only correct in a UTC process` | The cms runs with another `TZ` (a custom compose file or orchestrator). Set `TZ=UTC` ([§3.10](#310-datetime-contract)) |
+| `[datetime] The database session runs in "…", not UTC` | A pooler or proxy drops the startup options (PgBouncer in transaction mode, Azure's port 6432): connect the cms to Postgres directly |
+| cms refuses to start: `DATABASE_URL sets its own \`options\` query parameter …` | Remove `options` from `DATABASE_URL` (or include `-c TimeZone=UTC` in it) |
+| `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
+| cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (an IANA name such as `Europe/Berlin`, no UTC offset) or leave it empty |
+| every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | The web container's `TZ` is not the zone Node runs in: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`); with a custom orchestrator set `TZ` to the same name |
+| `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
+| `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
+| `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 
 ---
 
@@ -2437,6 +2927,13 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 > commands in §7.1–§7.2 on a cron instead, and push the output off-site with
 > `rsync`/`rclone`.
 
+> **Order matters:** the crontab runs in the **host's** zone, while the
+> uploads and search-log janitors run at 03:30 / 03:35 **`APP_TIME_ZONE`**
+> ([datetime contract](#310-datetime-contract)). The backup must come first,
+> so every swept file is still in the previous backup. With the host in
+> `APP_TIME_ZONE` the line above is right; on a UTC host with
+> `APP_TIME_ZONE=Europe/Berlin` use `0 1 * * *`.
+
 ### 7.4 Update procedure (production-safe)
 
 On the live Traefik host the wrapper handles backup, rollback-tagging, build and
@@ -2466,7 +2963,9 @@ docker compose -p infra logs -f --tail=50 cms web
 
 **Rollback.** `deploy.sh` tags the previously-running images `infra-web:rollback`
 and `infra-cms:rollback` before each build, so a bad deploy can be reverted
-**without** rebuilding — retag and re-up just the affected service:
+**without** rebuilding — retag and re-up just the affected service (rolling
+back the datetime release needs an extra override file, see
+[Rolling back this release](#rolling-back-this-release)):
 
 ```bash
 docker tag infra-web:rollback infra-web:latest
@@ -2499,6 +2998,88 @@ release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
 steps 3–7).
 
 #### Rolling back this release
+
+The previous cms image (the 2026-09-26 release, `7f75ae4`) has no `TZ` of
+its own: its compose file ran it in `Europe/Berlin`, and it wrote naive
+columns as Berlin wall clocks. The current `infra/docker-compose.yml` runs
+the cms in UTC. **Always re-up the previous cms with the override
+`infra/docker-compose.cms-legacy-tz.yml`**, which sets the cms's `TZ` to
+`DATETIME_LEGACY_ZONE`, using the images pinned in step 7:
+
+```bash
+cd /opt/sinnlos
+docker tag infra-cms:pre-datetime infra-cms:latest
+docker tag infra-web:pre-datetime infra-web:latest
+docker compose -p infra \
+  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  -f infra/docker-compose.cms-legacy-tz.yml \
+  up -d --no-build web cms
+```
+
+(Standalone Caddy box: leave out the Traefik file. Without the step 7 tags,
+`:rollback` is only right if `deploy.sh` ran once for this release: every
+run tags whatever is running then.) `docker logs infra-cms-1` must not show
+`[datetime]` lines (those come from the new image only).
+
+Whether the repair has run on the database the previous cms will use:
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT count(*) AS repair_recorded FROM strapi_migrations
+ WHERE name = '2026.10.05T00.00.00.datetime-timestamptz.js';
+SELECT count(*) AS naive_app_columns FROM information_schema.columns
+ WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+   AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
+SQL
+```
+
+A first line `0` or a second line above `0` means it has not.
+
+- **Before the repair the override is mandatory**: after a failed first
+  boot, after restoring a pre-repair dump, and whenever the check above
+  says so. The columns still hold Berlin wall clocks. An old cms in UTC
+  reads every one written since 2026-08-15 two hours late (pg parses a
+  naive value in the process zone), and each `Date` it writes arrives with
+  `+00:00`, which a naive column drops: it stores UTC wall clocks among the
+  Berlin ones. The next roll forward (same θ) reads those as Berlin time
+  and moves them another one to two hours; the gap check cannot see them,
+  they lie far after θ.
+- **After the repair** the override is merely better. Re-upping the previous
+  image on a repaired database is safe **without** a `pg_restore` (rehearsed
+  on Postgres 16): it boots without any schema change (its schema sync finds
+  the same schema; the unknown `strapi_migrations` record is ignored), reads
+  every instant unchanged, and writes correct instants in any process zone
+  (pg sends a `Date` with its offset, and `timestamptz` keeps the instant).
+  With the override its date logic (birthday cards, digest days, classified
+  expiry) keeps Berlin days; without it those use UTC days, off by one
+  between midnight and 02:00 Berlin time. Its cron times are Berlin either
+  way (hard-coded there). Rolling forward again is a no-op: the repair is
+  recorded and never runs twice.
+- Roll forward with `infra/deploy.sh` as usual: it uses the live compose
+  files only, so the new cms runs in UTC again. Do not keep the override for
+  the new image.
+- If you want the previous compose file as a whole instead of the override,
+  write it **next to** the live one, because compose takes the directory of
+  the first `-f` file as the project directory and reads `.env` there:
+  `git show 7f75ae4:infra/docker-compose.yml > infra/docker-compose.prev.yml`,
+  then `-f infra/docker-compose.prev.yml -f infra/docker-compose.traefik.yml`
+  (a copy under `/tmp` fails with `required variable … is missing a
+  value`: compose then looks for `/tmp/.env`). Remove the file after the
+  roll forward.
+- Do **not** restore the pre-deploy dump just to roll back. If you restore it
+  anyway (it predates the repair), it is a pre-repair database: boot the
+  previous cms on it only with the override, and keep `DATETIME_LEGACY_ZONE`
+  / `DATETIME_LEGACY_UTC_UNTIL` set. The next boot of the new cms repairs it
+  again, correctly, **provided no previous cms ran in UTC on it in the
+  meantime** (see above: those values cannot be repaired by rule; restore
+  again, or correct them by hand). Values written between the deploy and
+  the restore are lost with the restore, as with any restore.
+- A web-only rollback brings back the old poll close rule (the card treats the
+  closing second as open) and nothing else. The web needs no override: both
+  compose files run it in `Europe/Berlin` (the new one through
+  `APP_TIME_ZONE`).
+
+#### Rolling back the Strapi 5.55.1 release (2026-09-25)
 
 Re-upping the previous (Strapi 5.49) cms image after 5.55.1 has migrated the
 database is safe **without** a `pg_restore`. This was verified on Postgres 16

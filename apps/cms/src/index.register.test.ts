@@ -66,6 +66,21 @@ const fullUser = () => ({
   microsoftOid: "oid-ada-123",
 });
 
+/** The Strapi slice the datetime guard touches in register(): log, hooks, dialect. */
+function datetimeHost() {
+  const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
+  return {
+    hooks,
+    log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    db: { dialect: { client: "sqlite" } },
+    hook: (name: string) => ({
+      register: (handler: (context: unknown) => Promise<void>) => {
+        hooks.set(name, [...(hooks.get(name) ?? []), handler]);
+      },
+    }),
+  };
+}
+
 describe("content-api.output sanitizer registration (issue #10 / F6)", () => {
   it("models the 5.49 registry contract: `.add` on an uninitialized path is a silent no-op", () => {
     const s = makeSanitizers();
@@ -184,6 +199,7 @@ describe("relation side-channel guard registration (FX05)", () => {
       requestContext: { get: () => holder.ctx },
       sanitizers: makeSanitizers(),
       contentAPI: { sanitize: { query: coreSanitizeQuery } },
+      ...datetimeHost(),
     };
     return { strapi, holder, coreSanitizeQuery };
   }
@@ -345,11 +361,13 @@ describe("org draft guard in register() (decision 05)", () => {
     const counted: string[] = [];
     const coreSanitizeQuery = vi.fn(async (query: Record<string, unknown>) => query);
     const strapi = {
+      ...datetimeHost(),
       getModel: (uid: string) => ORG_MODELS[uid],
       requestContext: { get: () => undefined },
       sanitizers: makeSanitizers(),
       contentAPI: { sanitize: { query: coreSanitizeQuery } },
       db: {
+        dialect: { client: "sqlite" },
         getSchemaConnection: () => ({ hasTable: async () => true }),
         getConnection: (table: string) => ({
           whereNull: () => ({
@@ -379,5 +397,33 @@ describe("org draft guard in register() (decision 05)", () => {
     expect(counted).toEqual(["departments", "teams"]);
     expect(strapi.sanitizers.get("content-api.output")).toHaveLength(2);
     expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
+  });
+});
+
+/**
+ * Wiring test for the datetime contract (database/ensure-timestamptz.ts):
+ * register() runs the boot checks and hooks the timestamptz guard into
+ * Strapi's afterSync. On SQLite (this stub) both are no-ops apart from the
+ * zone log line.
+ */
+describe("timestamptz guard in register() (datetime contract)", () => {
+  it("registers exactly one beforeSync and one afterSync handler and logs the zones", async () => {
+    const stub = datetimeHost();
+    const strapi = {
+      ...stub,
+      getModel: () => undefined,
+      requestContext: { get: () => undefined },
+      sanitizers: makeSanitizers(),
+      contentAPI: { sanitize: { query: vi.fn(async (query: unknown) => query) } },
+    };
+    await lifecycle.register({ strapi });
+    expect(stub.hooks.get("strapi::content-types.beforeSync")).toHaveLength(1);
+    expect(stub.hooks.get("strapi::content-types.afterSync")).toHaveLength(1);
+    expect(stub.log.info).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[datetime\] process time zone .+, APP_TIME_ZONE /),
+    );
+    // Both handlers are no-ops off Postgres.
+    await stub.hooks.get("strapi::content-types.beforeSync")?.[0]({});
+    await stub.hooks.get("strapi::content-types.afterSync")?.[0]({});
   });
 });

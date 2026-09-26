@@ -179,7 +179,24 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
 - **`MS_*`:** leave empty on the current release. `infra/deploy.sh` refuses
   to deploy while `MS_CLIENT_ID` (a real app registration) and
   `MS_CLIENT_SECRET` are set, because Microsoft sign-in cannot complete on
-  Strapi 5.51+ ([upgrade notes](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release)).
+  Strapi 5.51+ ([upgrade notes](./docs/DEPLOYMENT.md#upgrading-to-the-strapi-5551-release-2026-09-25)).
+- **Time zones** ([datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract)):
+  `APP_TIME_ZONE` (IANA name, default `Europe/Berlin`) is the business zone
+  of every date the apps compute: "today", classified expiry, birthdays and
+  anniversaries, digest days, the cron times, all-day events and poll
+  deadlines. Spell it as the tz database does (`Europe/Berlin`; no UTC
+  offset such as `+02:00`). With an unknown value or an offset the cms does
+  not start and the web answers every request with an error (both log why);
+  the web also does when its container's `TZ` (compose sets it from
+  `APP_TIME_ZONE`) is a name Node cannot find. The cms process
+  and its database sessions run in UTC and every instant is stored as
+  `timestamptz`; do not set `TZ` for the containers (compose does). With a
+  local Postgres, add `TZ=UTC` to `apps/cms/.env`; SQLite needs nothing.
+  `DATETIME_LEGACY_ZONE` / `DATETIME_LEGACY_UTC_UNTIL` are only for a
+  database written by a cms before this contract: its first boot repairs
+  the stored times once
+  ([runbook](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release));
+  a fresh install leaves them empty.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
   enable the e-mail digests (dark without them). Once SMTP is set,
@@ -714,9 +731,13 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 ```
 
 `infra/deploy.sh` wraps this end to end: env preflight (`infra/.env` against
-the env contract; `infra/deploy.sh --check` runs only this step) →
-pre-deploy DB backup → tag the running images `:rollback` → rebuild +
-restart → curl smoke-check → live-pipeline smoke. TLS, the security
+the env contract, and `DATETIME_LEGACY_ZONE` while the running database
+still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
+only this step) → pre-deploy DB backup → tag the running images `:rollback`
+→ rebuild + restart (a failed `up` prints the rollback commands) → curl
+smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
+from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
+on top (it runs that cms in `DATETIME_LEGACY_ZONE`). TLS, the security
 response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must
@@ -734,11 +755,23 @@ pnpm typecheck         # tsc for both apps + typecheck:tests (also run in CI)
 pnpm typecheck:tests   # type-check every *.test.ts: tsconfig.test.json (web + infra,
                        # strict) and tsconfig.test.cms.json (cms, Strapi's settings)
 pnpm test              # vitest 4 unit tests from the repo root (also run in CI)
+pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
+                       # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
-infra/live-smoke.sh    # prove the SSE live pipeline end to end (comment → ping frame)
+infra/live-smoke.sh    # datetime contract check, then the SSE live pipeline end to end
+# read-only report of the one-time datetime repair (in the cms container)
+node dist/scripts/datetime-migration-report.js [--around <ISO>] [--all] [--baseline <url>]
 ```
+
+The Postgres integration suites (`apps/cms/src/database/*.pg.test.ts`: the
+timestamptz guard, the one-time repair through Strapi's own migration
+runner, the report) run when `SINNLOS_TEST_PG_URL` points at a Postgres 16
+they may create schemas in, e.g. a throwaway
+`docker run --rm -d -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`
+with `SINNLOS_TEST_PG_URL=postgres://postgres:test@127.0.0.1:55432/postgres`;
+without it they are skipped.
 
 `strapi build` never cleans `apps/cms/dist` (only `strapi develop` does),
 and `strapi start` loads every compiled file there. The cms `build` script
@@ -793,3 +826,7 @@ trimming.
       (totals, zero-result rate, top terms)
 - [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
       logs `[digest] skipped` (dark mode)
+- [ ] On Postgres the cms log shows `[datetime] process time zone UTC,
+      APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
+      (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
+      is an all-day entry

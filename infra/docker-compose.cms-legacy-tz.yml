@@ -1,0 +1,23 @@
+# Rollback override for a cms image from BEFORE the datetime contract
+# (docs/DEPLOYMENT.md, "Rolling back this release"). Use it only together
+# with such an image, on top of the live files:
+#
+#   docker compose -p infra -f infra/docker-compose.yml \
+#     -f infra/docker-compose.traefik.yml \
+#     -f infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms
+#
+# That image has no TZ of its own and wrote naive timestamp columns as wall
+# clocks of its process zone; its compose file ran it in Europe/Berlin.
+# docker-compose.yml runs the cms in UTC. On a database the one-time repair
+# has not converted yet (or a restored pre-repair dump), an old cms in UTC
+# reads every value written since the switch to Berlin time two hours late
+# and writes UTC wall clocks among the Berlin ones, which the repair later
+# shifts once more. This override runs it in DATETIME_LEGACY_ZONE instead:
+# mandatory before the repair, better after it (Berlin day logic).
+#
+# Never keep it for the current cms image: that one must run in UTC (it
+# refuses a schema-changing boot in any other zone).
+services:
+  cms:
+    environment:
+      TZ: "${DATETIME_LEGACY_ZONE:?set DATETIME_LEGACY_ZONE in infra/.env to the zone the previous cms ran in (Europe/Berlin)}"

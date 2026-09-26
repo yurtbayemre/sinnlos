@@ -1,3 +1,8 @@
+import {
+  assertTimestamptzContract,
+  prepareDatetimeContract,
+  registerTimestamptzGuard,
+} from "./database/ensure-timestamptz";
 import { reportDigestConfig } from "./digest/send-digests";
 import { seedAdminUser } from "./utils/admin-seed";
 import { hasAudienceBypass } from "./utils/announcement-audience";
@@ -788,6 +793,13 @@ export default {
     // (draftAndPublish true -> false). FIRST, so nothing in register() runs
     // on such a database; see utils/org-dp-guard.ts.
     await assertNoOrgDrafts(strapi);
+    // Datetime contract (database/ensure-timestamptz.ts): log the zones,
+    // verify the DB session runs in UTC, refuse a non-UTC process on a fresh
+    // database, before the one-time repair or (beforeSync hook) on a boot
+    // that migrates or changes the schema, and convert every naive
+    // timestamp column right after schema sync (afterSync hook).
+    await prepareDatetimeContract(strapi);
+    registerTimestamptzGuard(strapi);
     // FX13: refuse to boot in production with template placeholder secrets
     // (change-me / toBeModified / <secret>); outside production it only warns.
     enforceSecretGuard(process.env, strapi.log);
@@ -796,6 +808,10 @@ export default {
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
+    // Datetime contract: no start while any column is still timestamp
+    // without time zone (retries what afterSync could not convert).
+    await assertTimestamptzContract(strapi);
+
     // Live-update pings for the web SSE bus (issue #17/#27). Registered
     // before any seeding so bulk writes exercise the batching path; the
     // emitter itself no-ops unless WEB_INTERNAL_URL is set.

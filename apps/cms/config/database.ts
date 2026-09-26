@@ -1,5 +1,9 @@
 import path from "path";
 
+// Cross-boundary import into src/ (same pattern as config/server.ts); the
+// module runs no code at load time.
+import { DB_SESSION_OPTIONS, assertDatabaseUrlKeepsUtcSession } from "../src/database/session-zone";
+
 type Env = ((key: string, def?: unknown) => any) & {
   int: (key: string, def?: number) => number;
   bool: (key: string, def?: boolean) => boolean;
@@ -8,11 +12,17 @@ type Env = ((key: string, def?: unknown) => any) & {
 
 export default ({ env }: { env: Env }) => {
   const client = env("DATABASE_CLIENT", "postgres");
+  const databaseUrl = env("DATABASE_URL");
+  if (client === "postgres") assertDatabaseUrlKeepsUtcSession(databaseUrl);
 
   const connections = {
     postgres: {
       connection: {
-        connectionString: env("DATABASE_URL"),
+        connectionString: databaseUrl,
+        // Datetime contract (src/database/session-zone.ts): every session
+        // runs in UTC, set in the startup packet. Not configurable; a
+        // DATABASE_URL with its own `options` is refused above.
+        options: DB_SESSION_OPTIONS,
         host: env("DATABASE_HOST", "localhost"),
         port: env.int("DATABASE_PORT", 5432),
         database: env("DATABASE_NAME", "sinnlos"),

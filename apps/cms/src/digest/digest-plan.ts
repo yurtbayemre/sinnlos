@@ -14,7 +14,14 @@
  *    per affected user and never skips anyone silently.
  *  - The content window starts at `lastDigestAt`, capped at 14 days so
  *    a long-disabled account's first digest doesn't dump months.
+ *  - Days and weeks are calendar days of APP_TIME_ZONE (datetime contract,
+ *    utils/time.ts), weeks start on Monday, and "start of day" is the first
+ *    instant of that day in the zone (a 23- or 25-hour DST day included).
+ *    The process zone plays no part; the content window and its fallbacks
+ *    are elapsed durations.
  */
+
+import { instantMsOrNull, startOfDayInstant, startOfIsoWeek, todayIn } from "../utils/time";
 
 export type DigestFrequency = "daily" | "weekly";
 
@@ -37,38 +44,32 @@ export function wantsAnyDigest(user: DigestUserFlags): boolean {
   return !!(user.digestAnnouncements || user.digestMentions || user.digestKudos);
 }
 
-/** Local (container TZ = Europe/Berlin) start of the given day. */
-function startOfDay(now: Date): Date {
-  const d = new Date(now);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-/** Local start of the ISO week (Monday) containing `now`. */
-function startOfWeek(now: Date): Date {
-  const d = startOfDay(now);
-  const weekday = (d.getDay() + 6) % 7; // Mon=0 … Sun=6
-  d.setDate(d.getDate() - weekday);
-  return d;
-}
-
-export function isDigestDue(user: DigestUserFlags, now: Date): boolean {
+/**
+ * `daily`: due iff the last digest is before the start of today.
+ * `weekly`: due iff today is a Monday and the last digest is before the
+ * start of this week (a Monday missed by a failed run is not caught up on
+ * Tuesday; the weekly catch-up is roadmap FX48).
+ * "Today" and "this week" are calendar days of `timeZone` (APP_TIME_ZONE).
+ * A missing or unparseable lastDigestAt counts as "never sent".
+ */
+export function isDigestDue(user: DigestUserFlags, now: Date, timeZone?: string): boolean {
   if (!wantsAnyDigest(user)) return false;
   const frequency: DigestFrequency = user.digestFrequency === "daily" ? "daily" : "weekly";
-  const last = user.lastDigestAt ? new Date(user.lastDigestAt).getTime() : 0;
+  const last = instantMsOrNull(user.lastDigestAt) ?? 0;
+  const today = todayIn(timeZone, now);
 
-  if (frequency === "daily") return last < startOfDay(now).getTime();
+  if (frequency === "daily") return last < startOfDayInstant(today, timeZone).getTime();
 
   // weekly: only on Mondays, once per week.
-  if (now.getDay() !== 1) return false;
-  return last < startOfWeek(now).getTime();
+  if (today.dayOfWeek !== 1) return false;
+  return last < startOfDayInstant(startOfIsoWeek(today), timeZone).getTime();
 }
 
 /** Content window start: since the last digest, capped, never in the future. */
 export function digestWindowStart(user: DigestUserFlags, now: Date): Date {
   const frequency: DigestFrequency = user.digestFrequency === "daily" ? "daily" : "weekly";
   const fallbackMs = frequency === "daily" ? 86400000 : 7 * 86400000;
-  const last = user.lastDigestAt ? new Date(user.lastDigestAt).getTime() : NaN;
-  const start = Number.isFinite(last) ? last : now.getTime() - fallbackMs;
+  const last = instantMsOrNull(user.lastDigestAt);
+  const start = last ?? now.getTime() - fallbackMs;
   return new Date(Math.max(start, now.getTime() - WINDOW_CAP_MS));
 }

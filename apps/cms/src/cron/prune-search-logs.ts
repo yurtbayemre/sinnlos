@@ -10,7 +10,11 @@ const RETENTION_DAYS = 90;
 
 export async function pruneSearchLogs(strapi: any): Promise<void> {
   try {
-    const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000).toISOString();
+    // A Date binding, never an ISO string (FX25, datetime contract C8):
+    // knex binds a Date as epoch ms on SQLite, where created_at holds epoch
+    // ms (an ISO string compared as TEXT deleted every row there), and as an
+    // absolute instant on Postgres.
+    const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400000);
     const deleted = await strapi.db
       .connection("search_logs")
       .where("created_at", "<", cutoff)
