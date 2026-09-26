@@ -799,7 +799,14 @@ refuses to deploy.
 that night). Until the deploy the old cms keeps writing Berlin wall clocks;
 values written during the repeated hour 02:00–03:00 cannot be told apart
 afterwards (the repair reads them as the later, standard-time instant, and
-the report lists them).
+the report lists them). The same holds, whatever the deploy date, for
+**event, poll and announcement times entered for that hour** (2026-10-25
+02:00–03:00 Berlin time, or the repeated hour of an earlier year): the old
+storage cannot say whether 02:30 meant the first (summer time) or the
+second 02:30. The repair takes the second one, so a time meant as the first
+becomes an hour late. The report lists each such time with both readings
+(step 3 before the repair, step 10 after it); check them and correct the
+ones that need it in the admin panel.
 
 **Before the deploy**
 
@@ -860,6 +867,12 @@ the report lists them).
      2026-08-15; each open or upcoming one is listed with both readings.
      Note the ones whose "read as Europe/Berlin" line is the intended time:
      you fix those in step 10.
+   - **Legacy-zone values in a DST change hour**: the event, poll and
+     announcement times among them come first, with document, title and
+     both readings (`repeated hour; repaired as … (…Z), the other reading
+     is … (…Z)`). Note the ones meant as the other reading: you fix those in
+     step 10. Write stamps in that hour follow (nobody can fix those, and
+     nothing depends on the hour).
 
 4. **Rehearse on a copy** (strongly recommended): restore a fresh dump into a
    throwaway Postgres 16, run the report there, optionally against the
@@ -983,6 +996,12 @@ recorded in `strapi_migrations` and never runs again on this database.
     value where the `read as Europe/Berlin` line is the intended time
     (someone corrected it by hand after 2026-08-15), correct the time in the
     Strapi admin panel (it now shows the `read as UTC` time).
+
+    The same run ends with `Event, poll and announcement times the repair
+    read in a DST change hour` (all of them, with document, title, both
+    readings and the current value). For each one meant as the other
+    reading (usually the first, summer-time occurrence), set the time again
+    in the admin panel.
 11. **Later:** after 90 days, and once step 10 is done, drop the audit table:
     `DROP TABLE datetime_migration_audit;` (psql as above). Keep the two
     `DATETIME_LEGACY_*` variables.

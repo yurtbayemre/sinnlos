@@ -726,10 +726,13 @@ export async function runLegacyDatetimeMigration(
 
   const ambiguous = plan.tables.flatMap((tablePlan) => tablePlan.cells.filter((cell) => cell.ambiguous));
   if (ambiguous.length > 0) {
+    // User-entered times first: those are the ones to check by hand.
+    const entered = ambiguous.filter((cell) => cell.kind === "user");
     log.warn(
       `[datetime] legacy repair: ${ambiguous.length} legacy-zone value(s) fall in a DST change hour of ` +
-        `${settings.zone} and are read as standard time (Postgres AT TIME ZONE); first: ` +
-        ambiguous
+        `${settings.zone} and are read as standard time (Postgres AT TIME ZONE), ${entered.length} of them ` +
+        "event, poll or announcement times (the report lists them for review); first: " +
+        [...entered, ...ambiguous.filter((cell) => cell.kind !== "user")]
           .slice(0, 5)
           .map((cell) => `${cell.table}.${cell.column}#${cell.key}=${cell.naive}`)
           .join(", "),

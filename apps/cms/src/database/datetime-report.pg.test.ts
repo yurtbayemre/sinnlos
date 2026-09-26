@@ -8,7 +8,7 @@ import {
 } from "../../scripts/datetime-migration-report";
 import { readLegacySettings, runLegacyDatetimeMigration } from "./datetime-legacy";
 import { FIXTURE_ROWS, FIXTURE_TABLES } from "./legacy-fixture.test.helper";
-import { PG_URL, columnType, createTestKnex, rows, uniqueSchema } from "./pg-test-db.test.helper";
+import { PG_URL, columnType, createTestKnex, isoOf, rows, uniqueSchema } from "./pg-test-db.test.helper";
 import { requireCmsDependency, type RawKnex } from "./strapi-knex.test.helper";
 
 /**
@@ -104,6 +104,38 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
       `"${schema}".datetime_migration_audit`,
     ]);
     expect(audit.found).toBe(false);
+  });
+
+  it("names the event times in a DST change hour, with both readings, before and after the repair", async () => {
+    // Entered after the switch for 02:30 on 2026-10-25: the Berlin clock
+    // shows 02:30 twice that night.
+    await knex.raw(`
+      INSERT INTO "${schema}".events (document_id, title, start, all_day, created_at, updated_at, published_at)
+        VALUES ('e6', 'Night shift', '2026-10-25 02:30', false, '2026-09-10 14:00', '2026-09-10 14:00', '2026-09-10 14:00');
+    `);
+    const before = await report();
+    expect(before).toMatch(/DST change hour \(read as standard time\): 1, 1 of them event, poll or announcement times/);
+    expect(before).toMatch(/events#7 doc e6 "Night shift" start = 2026-10-25 02:30:00 \[A\]/);
+    expect(before).toContain(
+      "repeated hour; repaired as 2026-10-25 02:30:00 Europe/Berlin (2026-10-25T01:30:00.000Z), " +
+        "the other reading is 2026-10-25 02:30:00 Europe/Berlin (2026-10-25T00:30:00.000Z)",
+    );
+
+    await knex.transaction((trx) =>
+      runLegacyDatetimeMigration(trx, { dialect: { client: "postgres" }, getSchemaName: () => schema }, {
+        env: { DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42+02:00" },
+        log: { info: () => undefined, warn: () => undefined },
+        processZone: "UTC",
+        now: new Date("2026-09-26T10:00:00Z"),
+      }),
+    );
+    const after = await report();
+    expect(after).toMatch(/times the repair read in a DST change hour: 1/);
+    expect(after).toMatch(/events#7 doc e6 "Night shift" start = 2026-10-25 02:30:00 Europe\/Berlin \[A, run [^\]]+\]/);
+    expect(after).toContain("the other reading is 2026-10-25 02:30:00 Europe/Berlin (2026-10-25T00:30:00.000Z)");
+    expect(after).toMatch(/now in Europe\/Berlin: published #7 2026-10-25 02:30:00/);
+    // The stored instant is the second (CET) 02:30, 01:30Z.
+    expect(await isoOf(knex, schema, "events", "start", "document_id = 'e6'")).toBe("2026-10-25T01:30:00Z");
   });
 
   it("says why the gap check fails when θ cannot be tested", async () => {

@@ -47,6 +47,7 @@ import {
   type SqlClient,
 } from "../src/database/datetime-catalog";
 import {
+  USER_ENTERED_COLUMNS,
   buildLegacyPlan,
   classCounts,
   gapFailureReasons,
@@ -56,7 +57,14 @@ import {
   type LegacyPlan,
   type LegacySettings,
 } from "../src/database/datetime-legacy";
-import { appTimeZone, formatInstant, instantMsOrNull, plainDateTimeToInstant, toIsoZ } from "../src/utils/time";
+import {
+  appTimeZone,
+  formatInstant,
+  instantMsOrNull,
+  plainDateTimeToInstant,
+  toIsoZ,
+  wallTimeOccurrence,
+} from "../src/utils/time";
 
 export interface ReportOptions {
   schema: string;
@@ -123,14 +131,31 @@ function naiveShort(naive: string): string {
   return naive.slice(0, 19).replace("T", " ");
 }
 
-function reading(naive: string, zone: string, appZone: string): string {
-  const instant = plainDateTimeToInstant(naive, zone);
+function reading(naive: string, zone: string, appZone: string, disambiguation: "later" | "earlier" = "later"): string {
+  const instant = plainDateTimeToInstant(naive, zone, disambiguation);
   return formatInstant(
     "sv-SE",
     instant,
     { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" },
     appZone,
   );
+}
+
+/**
+ * The two readings of a legacy-zone wall time in a DST change hour: the one
+ * the repair takes (Postgres AT TIME ZONE: the later, standard-time instant
+ * of a repeated hour) and the other one. Only a person knows which was meant.
+ */
+function foldReadings(naive: string, zone: string, appZone: string): string {
+  const kind = wallTimeOccurrence(naive, zone) === "repeated" ? "repeated hour" : "skipped hour";
+  const one = (disambiguation: "later" | "earlier") =>
+    `${reading(naive, zone, appZone, disambiguation)} ${appZone} ` +
+    `(${toIsoZ(plainDateTimeToInstant(naive, zone, disambiguation))})`;
+  return `${kind}; repaired as ${one("later")}, the other reading is ${one("earlier")}`;
+}
+
+function isUserEntered(table: string, column: string): boolean {
+  return USER_ENTERED_COLUMNS[table]?.includes(column) ?? false;
 }
 
 function minutes(value: number): string {
@@ -363,6 +388,14 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
   );
   const mainSchema = schemaCache(sql, options.schema);
   let lookupErrors = 0;
+  const printNow = async (row: AuditRow) => {
+    try {
+      print(await currentValues(sql, mainSchema, options, row));
+    } catch (error) {
+      lookupErrors += 1;
+      print(`      now: LOOKUP FAILED (${(error as Error).message})`);
+    }
+  };
   for (const row of listed) {
     const naive = auditNaive(row.old_naive);
     print(
@@ -374,11 +407,40 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
     if (zone) {
       print(`      read as ${zone.padEnd(16)} ${reading(naive, zone, options.appTimeZone)} ${options.appTimeZone}`);
     }
-    try {
-      print(await currentValues(sql, mainSchema, options, row));
-    } catch (error) {
-      lookupErrors += 1;
-      print(`      now: LOOKUP FAILED (${(error as Error).message})`);
+    await printNow(row);
+  }
+
+  // Event, poll, announcement and release times the repair read in the
+  // legacy zone although they fall in a DST change hour: the repair took the
+  // standard-time instant; one meant as the first (summer time) occurrence is
+  // an hour late now. Listed in full, each needs a look.
+  const folds = await sql.query<AuditRow>(
+    `SELECT run_id, table_name, row_id::text AS row_id, ${optional("document_id")}, ${optional("label")},
+            column_name, old_naive, zone, class
+       FROM ${audit}
+      WHERE zone <> 'UTC'
+      ORDER BY run_id, table_name, row_id, column_name`,
+  );
+  const enteredFolds = folds.filter(
+    (row) =>
+      isUserEntered(row.table_name, row.column_name) &&
+      wallTimeOccurrence(auditNaive(row.old_naive), row.zone) !== "unique",
+  );
+  if (enteredFolds.length > 0) {
+    print();
+    print(
+      `Event, poll and announcement times the repair read in a DST change hour: ${enteredFolds.length} ` +
+        "(check each in the admin panel; fix the ones meant as the other reading):",
+    );
+    for (const row of enteredFolds) {
+      const naive = auditNaive(row.old_naive);
+      print(
+        `  ${row.table_name}#${row.row_id ?? "?"}${row.document_id ? ` doc ${row.document_id}` : ""}` +
+          `${row.label ? ` "${row.label}"` : ""} ${row.column_name} = ${naiveShort(naive)} ${row.zone} ` +
+          `[${row.class}, run ${row.run_id}]`,
+      );
+      print(`      ${foldReadings(naive, row.zone, options.appTimeZone)}`);
+      await printNow(row);
     }
   }
   return lookupErrors;
@@ -482,10 +544,23 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   }
 
   const folds = plan.tables.flatMap((table) => table.cells).filter((cell) => cell.ambiguous);
-  if (folds.length > 0) {
+  if (folds.length > 0 && settings.zone) {
+    const entered = folds.filter((cell) => cell.kind === "user");
+    const stamps = folds.filter((cell) => cell.kind !== "user");
     print();
-    print(`Legacy-zone values in a DST change hour (read as standard time): ${folds.length}`);
-    for (const cell of folds.slice(0, 50)) print(`  ${cell.table}.${cell.column}#${cell.key} = ${naiveShort(cell.naive)}`);
+    print(
+      `Legacy-zone values in a DST change hour (read as standard time): ${folds.length}, ` +
+        `${entered.length} of them event, poll or announcement times (check each after the repair):`,
+    );
+    for (const cell of entered) {
+      print(
+        `  ${cell.table}#${cell.key}${cell.documentId ? ` doc ${cell.documentId}` : ""}` +
+          `${cell.label ? ` "${cell.label}"` : ""} ${cell.column} = ${naiveShort(cell.naive)} [${cell.cls}]`,
+      );
+      print(`      ${foldReadings(cell.naive, settings.zone, options.appTimeZone)}`);
+    }
+    for (const cell of stamps.slice(0, 50)) print(`  ${cell.table}.${cell.column}#${cell.key} = ${naiveShort(cell.naive)}`);
+    if (stamps.length > 50) print(`  … and ${stamps.length - 50} more write stamps`);
   }
 
   if (options.around) await printAround(print, plan, options.around);
