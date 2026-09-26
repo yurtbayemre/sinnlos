@@ -88,6 +88,17 @@ const LABEL_COLUMNS = ["title", "question", "name"];
 /** 'YYYY-MM-DDTHH:MM:SS.ffffff', the one naive format the repair compares. */
 const NAIVE_FORMAT = `'YYYY-MM-DD"T"HH24:MI:SS.US'`;
 const NAIVE_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}$/;
+/** A naive timestamp as format_type() prints it ('timestamp(6) without time zone'). */
+const NAIVE_TYPE_RE = /^timestamp(?:\(\d+\))? without time zone$/;
+
+/**
+ * Key of the transaction-level advisory lock that serialises the repair:
+ * two cms processes booting against one pre-contract database (two
+ * replicas, a restart overlapping a slow first boot) would otherwise both
+ * list the naive columns, and the second would shift the first one's
+ * converted values once more.
+ */
+export const LEGACY_REPAIR_LOCK_KEY = "sinnlos:datetime-legacy";
 
 export type ColumnKind = "write" | "expiry" | "user";
 
@@ -379,7 +390,9 @@ interface SnapshotRow {
 /**
  * Reads every table with naive columns and classifies each non-null cell.
  * Read-only unless `lock` is set (the migration locks each table against
- * writers first, so the rows it classifies are the rows it rewrites).
+ * writers first, so the rows it classifies are the rows it rewrites). The
+ * column types are read again per table, after its lock: a column another
+ * process converted in the meantime is no longer naive and is left out.
  */
 export async function buildLegacyPlan(
   sql: SqlClient,
@@ -392,15 +405,17 @@ export async function buildLegacyPlan(
   const emptyTables: LegacyPlan["emptyTables"] = [];
   const writeStamps: WriteStamp[] = [];
 
-  for (const [table, columns] of byTable) {
+  for (const [table, listed] of byTable) {
     if (options.lock) {
       await sql.query(`LOCK TABLE ${qualifiedTable(schema, table)} IN SHARE ROW EXCLUSIVE MODE`);
     }
+    const types = await tableColumnTypes(sql, schema, table);
+    const columns = listed.filter((column) => NAIVE_TYPE_RE.test(types.get(column) ?? ""));
+    if (columns.length === 0) continue;
     if (!(await columnsHoldValues(sql, schema, table, columns))) {
       emptyTables.push({ table, columns });
       continue;
     }
-    const types = await tableColumnTypes(sql, schema, table);
     const has = (column: string) => types.has(column);
     const keyColumn: TablePlan["keyColumn"] = /^(integer|bigint|smallint)$/.test(types.get("id") ?? "")
       ? "id"
@@ -657,6 +672,11 @@ export async function runLegacyDatetimeMigration(
   // retries) instead of hanging it.
   await sql.query("SET LOCAL lock_timeout = '30s'");
   await sql.query("SET LOCAL statement_timeout = '15min'");
+  // One repair at a time (see LEGACY_REPAIR_LOCK_KEY): a second process
+  // waits here until the first commits and then finds nothing naive. Strapi's
+  // runner takes no lock of its own and records the migration only after
+  // the commit. Held until this transaction ends.
+  await sql.query("SELECT pg_advisory_xact_lock(hashtext(?))", [LEGACY_REPAIR_LOCK_KEY]);
 
   const columns = repairColumns(await listNaiveColumns(sql, schema));
   if (columns.length === 0) {

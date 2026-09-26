@@ -1710,7 +1710,11 @@ the cms and the database, phase 2 the web):
   stamp lies on one side of θ: a database written in one zone only leaves
   `DATETIME_LEGACY_UTC_UNTIL` empty (with `DATETIME_LEGACY_ZONE=UTC` if that
   zone was UTC). Old values stay in `datetime_migration_audit` (as text). Strapi's
-  bookkeeping tables are left to the guard. The runbook is
+  bookkeeping tables are left to the guard. Two cms processes booting at
+  once (two replicas, a restart overlapping a slow first boot) repair only
+  once: the migration holds a transaction-level advisory lock, so the
+  second waits (up to the 30 s lock timeout, else its boot fails and the
+  restart finds the work done) and then finds no naive column left. The runbook is
   [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release).
 - **Report CLI** (read-only): `node dist/scripts/datetime-migration-report.js`
   in the cms container (`--help` for the options). Before the repair it shows

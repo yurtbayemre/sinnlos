@@ -4,8 +4,13 @@ import { dirname, join } from "node:path";
 import { createRequire } from "node:module";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
-import { LEGACY_MIGRATION_NAME } from "./datetime-catalog";
-import { MISSING_LEGACY_ZONE_MESSAGE, runLegacyDatetimeMigration } from "./datetime-legacy";
+import { LEGACY_MIGRATION_NAME, alterToTimestamptzSql, knexSqlClient } from "./datetime-catalog";
+import {
+  MISSING_LEGACY_ZONE_MESSAGE,
+  buildLegacyPlan,
+  readLegacySettings,
+  runLegacyDatetimeMigration,
+} from "./datetime-legacy";
 import { convertNaiveColumns } from "./ensure-timestamptz";
 import { PG_URL, columnType, createTestKnex, isoOf, rows, uniqueSchema } from "./pg-test-db.test.helper";
 import { FIXTURE_ROWS, FIXTURE_TABLES } from "./legacy-fixture.test.helper";
@@ -27,6 +32,15 @@ const OWNER_ENV = {
 };
 
 const quietLog = { info: () => undefined, warn: () => undefined, error: () => undefined };
+
+/** A promise plus the function that resolves it (a gate a test opens). */
+function gate(): { opened: Promise<void>; open: () => void } {
+  let open: () => void = () => undefined;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  return { opened, open };
+}
 
 describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
   let knex: RawKnex;
@@ -182,6 +196,110 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     expect(await columnType(knex, schema, "events", "start")).toBe("timestamp without time zone");
     expect(await iso("search_logs", "created_at", "term = 'after'")).toBe("2026-09-01T12:00:00Z");
   });
+
+  /** The backend pid of a one-connection knex (its pool reuses that connection). */
+  async function backendPid(single: RawKnex): Promise<number> {
+    const [row] = await rows<{ pid: number }>(single, "SELECT pg_backend_pid() AS pid");
+    return row.pid;
+  }
+
+  /** Resolves once the given backend waits for a lock of the given type. */
+  async function waitForBlockedLock(pid: number, locktype: "advisory" | "relation"): Promise<void> {
+    for (let attempt = 0; attempt < 400; attempt += 1) {
+      const [row] = await rows<{ waiting: string }>(
+        knex,
+        "SELECT count(*)::text AS waiting FROM pg_locks WHERE pid = ? AND NOT granted AND locktype = ?",
+        [pid, locktype],
+      );
+      if (Number(row.waiting) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`backend ${pid} never waited for a ${locktype} lock`);
+  }
+
+  it("two processes repairing at once: the second waits, then finds nothing to shift", async () => {
+    await seed();
+    const first = createTestKnex({ pool: { min: 1, max: 1 } });
+    const second = createTestKnex({ pool: { min: 1, max: 1 } });
+    const hold = gate();
+    const repaired = gate();
+    try {
+      // Process 1 repairs and keeps its transaction open until the test lets go.
+      const one = first.transaction(async (trx) => {
+        const summary = await runLegacyDatetimeMigration(trx, migrationDb(), {
+          env: OWNER_ENV,
+          log: quietLog,
+          processZone: "UTC",
+          now: new Date("2026-09-26T10:00:00Z"),
+        });
+        repaired.open();
+        await hold.opened;
+        return summary;
+      });
+      await repaired.opened;
+      const secondPid = await backendPid(second);
+      // Process 2 boots meanwhile: it must wait for process 1, not read the
+      // column list of the uncommitted state.
+      const two = second.transaction((trx) =>
+        runLegacyDatetimeMigration(trx, migrationDb(), {
+          env: OWNER_ENV,
+          log: quietLog,
+          processZone: "UTC",
+          now: new Date("2026-09-26T10:00:05Z"),
+        }),
+      );
+      await waitForBlockedLock(secondPid, "advisory");
+      hold.open();
+      expect(await one).toMatchObject({ convertedColumns: 22 });
+      await expect(two).resolves.toBeNull();
+    } finally {
+      hold.open();
+      await first.destroy();
+      await second.destroy();
+    }
+    // The instants of a single run, and one run in the audit.
+    expect(await iso("events", "start", "document_id = 'e3'")).toBe("2026-11-05T17:00:00Z");
+    expect(await iso("search_logs", "created_at", "term = 'after'")).toBe("2026-09-01T10:00:00Z");
+    expect(await iso("events", "start", "document_id = 'e1'")).toBe("2026-06-20T16:00:00Z");
+    const runs = await rows<{ run_id: string }>(
+      knex,
+      `SELECT DISTINCT run_id FROM "${schema}".datetime_migration_audit`,
+    );
+    expect(runs).toEqual([{ run_id: "2026-09-26T10:00:00.000Z" }]);
+  }, 30000);
+
+  it("a table converted while the plan waited for its lock is left out of the plan", async () => {
+    await seed();
+    const converter = createTestKnex({ pool: { min: 1, max: 1 } });
+    const planner = createTestKnex({ pool: { min: 1, max: 1 } });
+    const hold = gate();
+    const altered = gate();
+    try {
+      // Another process has converted events (uncommitted, holding the table).
+      const conversion = converter.transaction(async (trx) => {
+        await trx.raw(alterToTimestamptzSql(schema, "events", ["start", "end", "created_at", "updated_at", "published_at"]));
+        altered.open();
+        await hold.opened;
+      });
+      await altered.opened;
+      const plannerPid = await backendPid(planner);
+      const settings = readLegacySettings(OWNER_ENV);
+      const planned = planner.transaction((trx) =>
+        buildLegacyPlan(knexSqlClient(trx), schema, settings, { lock: true, now: new Date("2026-09-26T10:00:00Z") }),
+      );
+      await waitForBlockedLock(plannerPid, "relation");
+      hold.open();
+      await conversion;
+      const plan = await planned;
+      const plannedTables = [...plan.tables.map(({ table }) => table), ...plan.emptyTables.map(({ table }) => table)];
+      expect(plannedTables).not.toContain("events");
+      expect(plannedTables).toContain("polls");
+    } finally {
+      hold.open();
+      await converter.destroy();
+      await planner.destroy();
+    }
+  }, 30000);
 
   it("refuses to guess when data exists and DATETIME_LEGACY_ZONE is unset", async () => {
     await seed();
