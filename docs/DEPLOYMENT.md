@@ -800,17 +800,22 @@ nothing), and the final preflight must show `draft_rows` 0 and
 first.
 
 ```bash
-umask 077; D=$(mktemp -d)
-docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
-docker run -d --name orgdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
-until docker exec orgdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
-docker exec -i orgdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
-for run in 1 2; do
-  docker exec -i orgdp-rehearsal psql -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/org-dp/migrate.sql
-done
-docker exec -i orgdp-rehearsal psql -U sinnlos -d sinnlos < infra/migrations/org-dp/preflight.sql
-docker rm -f -v orgdp-rehearsal; rm -rf "$D"
+(
+  umask 077; D=$(mktemp -d)
+  trap 'docker rm -f -v orgdp-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+  docker run -d --name orgdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+  until docker exec orgdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+  docker exec -i orgdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+  for run in 1 2; do
+    docker exec -i orgdp-rehearsal psql -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/org-dp/migrate.sql
+  done
+  docker exec -i orgdp-rehearsal psql -U sinnlos -d sinnlos < infra/migrations/org-dp/preflight.sql
+)
 ```
+
+The subshell keeps `umask 077` out of your shell, and the trap removes the
+container and the dump even when a step fails.
 
 **2. Pre-build** the new images; the running site keeps serving:
 
@@ -831,8 +836,8 @@ the rollback point.
 
 ```bash
 infra/backup/pg-backup.sh
-umask 077; mkdir -p ~/orgdp-backup
-docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > ~/orgdp-backup/pre-migration.dump
+(umask 077; mkdir -p ~/orgdp-backup &&
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > ~/orgdp-backup/pre-migration.dump)
 docker exec -i infra-db-1 pg_restore --list < ~/orgdp-backup/pre-migration.dump > /dev/null && echo "dump OK"
 ```
 
