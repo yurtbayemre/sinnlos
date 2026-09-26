@@ -1665,7 +1665,9 @@ the cms and the database, phase 2 the web):
   week windows (weeks start on Monday), anniversaries (Feb 29 falls on Feb 28
   in other years), classified expiry, digest days, the cron times, all-day
   event days and poll deadlines ("closes on D" = D 23:59:59 there). An
-  unknown value stops cms and web at startup. Changing it later moves those
+  unknown value the cms does not start, and the web answers every request
+  with an error (Next.js logs `An error occurred while loading instrumentation
+  hook: APP_TIME_ZONE must be …`). Changing it later moves those
   boundaries, not stored instants. Until the web's phase 2 the web container
   runs in `APP_TIME_ZONE` and renders dates in its process zone.
 - **The guard.** Strapi creates every new `datetime` column as
@@ -2399,7 +2401,7 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | `[datetime] The database session runs in "…", not UTC` | A pooler or proxy drops the startup options (PgBouncer in transaction mode, Azure's port 6432): connect the cms to Postgres directly |
 | cms refuses to start: `DATABASE_URL sets its own \`options\` query parameter …` | Remove `options` from `DATABASE_URL` (or include `-c TimeZone=UTC` in it) |
 | `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
-| cms or web refuses to start: `APP_TIME_ZONE must be an IANA time zone name …` | Fix `APP_TIME_ZONE` in `infra/.env` (e.g. `Europe/Berlin`) or leave it empty |
+| cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (e.g. `Europe/Berlin`) or leave it empty |
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 

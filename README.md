@@ -182,7 +182,8 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   `APP_TIME_ZONE` (IANA name, default `Europe/Berlin`) is the business zone
   of every date the apps compute: "today", classified expiry, birthdays and
   anniversaries, digest days, the cron times, all-day events and poll
-  deadlines. An unknown value stops cms and web at startup. The cms process
+  deadlines. With an unknown value the cms does not start and the web
+  answers every request with an error (both log why). The cms process
   and its database sessions run in UTC and every instant is stored as
   `timestamptz`; do not set `TZ` for the containers (compose does). With a
   local Postgres, add `TZ=UTC` to `apps/cms/.env`; SQLite needs nothing.
