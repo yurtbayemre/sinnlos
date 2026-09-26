@@ -1,6 +1,7 @@
 import { reportDigestConfig } from "./digest/send-digests";
 import { seedAdminUser } from "./utils/admin-seed";
 import { hasAudienceBypass } from "./utils/announcement-audience";
+import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
@@ -821,5 +822,13 @@ export default {
 
     const { seedDemoData } = await import("./seed-demo");
     await seedDemoData(strapi);
+
+    // Last: give published-only documents of draft & publish types (written
+    // by the demo seed before 2026-09-26) their draft twin, so the admin
+    // lists them and editing + publishing there keeps their relations. A
+    // no-op once every document has one; logs "[draft-twins] created N
+    // draft(s) for <uid>" per repaired type and never fails the boot (see
+    // utils/draft-twins.ts).
+    await ensureDraftTwins(strapi);
   },
 };
