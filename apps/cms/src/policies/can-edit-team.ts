@@ -35,8 +35,10 @@ interface CallerRow {
  *     change who is in it.
  *
  * The row gate runs before the payload is looked at. A head without a
- * department never matches a team without one. Strict boolean result:
- * Strapi treats `undefined` as a pass.
+ * department never matches a team without one. Lead and department are
+ * compared by row id, which holds because team and department are
+ * single-row with stable ids (draftAndPublish off since decision 05,
+ * I-ORG). Strict boolean result: Strapi treats `undefined` as a pass.
  */
 export default async (
   policyContext: WritePolicy,

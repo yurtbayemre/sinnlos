@@ -38,9 +38,14 @@
  * be shared by import; both files carry the same tests.
  */
 
-/** The caller's organisational scope, resolved from the database. */
+/**
+ * The caller's organisational scope, resolved from the database. All row
+ * ids: roles, departments and teams are not draft & publish (department
+ * and team since decision 05, single-row with stable ids), so they match
+ * the ids an announcement row links to, whichever of its rows is checked.
+ */
 export interface AudienceScope {
-  /** users-permissions role id (roles are not draft & publish). */
+  /** users-permissions role id. */
   roleId?: number | null;
   departmentId?: number | null;
   /** Ids of every team the user belongs to — as a MEMBER or as the LEAD. */

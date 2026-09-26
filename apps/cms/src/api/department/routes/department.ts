@@ -1,7 +1,10 @@
 import { factories } from "@strapi/strapi";
 
 /**
- * Reads are pinned to published rows (FX06, §5.24). No populate guard here:
+ * Reads are pinned to `status=published` (FX06, §5.24). department is
+ * single-row since decision 05 (draftAndPublish off), so the pin only
+ * narrows populated draft & publish relations (see published-only.ts).
+ * No populate guard here:
  * `pages` (inverse of wiki-page.department) is cut for non-admin/editor
  * callers on EVERY content-api route — populate, filters and sort — by the
  * global relation guard (FX05, registerRestrictedRelationGuard in

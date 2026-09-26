@@ -34,7 +34,12 @@
  * is not counted toward a department-scoped announcement.
  */
 
-/** A user's organisational scope, as far as targeting cares about it. */
+/**
+ * A user's organisational scope, as far as targeting cares about it. All row
+ * ids: roles, departments and teams are not draft & publish (department and
+ * team since decision 05, single-row with stable ids), so they match the ids
+ * an announcement links to.
+ */
 export interface AudienceScope {
   /** users-permissions role id. */
   roleId?: number | null;

@@ -77,6 +77,10 @@ export async function seedDemoData(strapi: any) {
     .findOne({ where: { type: "admin_role" } });
 
   // --- Departments ---
+  // department and team have no draft & publish (decision 05): one row each.
+  // publishedAt is set explicitly, like Strapi's own non-D&P write path
+  // (document-service draft-and-publish.js statusToData), so the org-dp boot
+  // guard (utils/org-dp-guard.ts) never sees a seeded draft row.
   const deptMap: Record<string, any> = {};
   for (const d of DEPARTMENTS) {
     deptMap[d.name] = await strapi.db.query("api::department.department").create({

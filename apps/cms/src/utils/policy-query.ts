@@ -114,8 +114,16 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
  * only admin_role / editor should see. Both keys are therefore dropped
  * here, after the bypass, just like `status` is pinned.
  *
- * Only for draftAndPublish types — on the others `status` is ignored by
- * the document service anyway, but setting it would be misleading.
+ * Where it matters: on a draftAndPublish type the pin selects the ROOT
+ * rows. On a type without draft & publish (department and team since
+ * decision 05, both single-row) the document service ignores `status` for
+ * the root rows (`statusToLookup` returns early,
+ * `services/document-service/draft-and-publish.js:50-53`), but the REST
+ * query layer still applies it to every POPULATED draft & publish relation
+ * (@strapi/utils 5.55.1 `convert-query-params.js:515-528`, `convertStatusParams`
+ * filters each populated model that has draft & publish). So a client
+ * `?status=draft&populate[...]` reaches draft rows through a non-D&P root
+ * too; `published-only` keeps the pin on department/team for exactly that.
  */
 export function forcePublishedStatus(query: Record<string, any>): void {
   query.status = "published";
