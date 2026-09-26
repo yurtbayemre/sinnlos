@@ -304,7 +304,12 @@ boot, with Strapi's own "discard draft" copy of the published row
 (`apps/cms/src/utils/draft-twins.ts`; the first boot logs
 `[draft-twins] created N draft(s) for <type>`, later boots nothing). Wiki
 revisions are published snapshots written by a lifecycle and stay that way.
-Details: [Upgrading to the draft-twin repair](./docs/DEPLOYMENT.md#upgrading-to-the-draft-twin-repair-fx38).
+Drafts that already exist are never replaced: a course, wiki space or page
+whose lesson or child page has a saved, unpublished move elsewhere gets its
+draft once that move is published or discarded (the log names the draft),
+and a draft saved before the upgrade keeps any relations it already lacked,
+so publishing it still drops them. The runbook lists both kinds up front:
+[Upgrading to the draft-twin repair](./docs/DEPLOYMENT.md#upgrading-to-the-draft-twin-repair-fx38).
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart), `microsoftOid`, and the
