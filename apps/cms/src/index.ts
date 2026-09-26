@@ -520,6 +520,12 @@ const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
     "api::classified.classified.find",
     "api::classified.classified.findOne",
   ],
+  authenticated: [
+    // Excluded from the celebrations grant (see CUSTOM_ACTION_GRANTS), but
+    // an earlier bootstrap granted it, and the row survived on existing
+    // databases (found by infra/diagnostics/prod-perm-diff.sql).
+    "api::kudos.kudos.celebrations",
+  ],
 };
 
 export const REVOKED_PERMISSIONS: Record<string, string[]> = Object.fromEntries(

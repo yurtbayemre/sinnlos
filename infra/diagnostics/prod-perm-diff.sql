@@ -543,6 +543,7 @@ revoked(role_type, action) AS (VALUES
   ('admin_role', 'api::poll-vote.poll-vote.update'),
   ('admin_role', 'api::reaction.reaction.update'),
   ('authenticated', 'api::comment.comment.update'),
+  ('authenticated', 'api::kudos.kudos.celebrations'),
   ('authenticated', 'api::kudos.kudos.update'),
   ('authenticated', 'api::lesson-progress.lesson-progress.delete'),
   ('authenticated', 'api::lesson-progress.lesson-progress.update'),
