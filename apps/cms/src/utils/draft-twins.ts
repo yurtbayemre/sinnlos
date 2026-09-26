@@ -106,7 +106,15 @@
  * transaction), the other documents and types go on, and the next boot
  * retries whatever is still missing. Refusing to boot over it (like the
  * org-dp guard, which prevents data loss) would take the intranet down for an
- * admin-panel defect.
+ * admin-panel defect. Until the failed document has a draft, the drafts of
+ * the entries linked to it lack that link (the clone skips a target without
+ * a draft), and publishing one of them drops the link from its published row
+ * as well (publish rebuilds it from the draft; the old row's link rows
+ * cascade). In this app those are the course-lesson, space-page and
+ * parent-child page links. The error line says so; the runbook
+ * (docs/DEPLOYMENT.md) says to fix the named entry first. Rolling the whole
+ * group back instead would leave the other side published-only, where an
+ * admin publish drops every link.
  *
  * IDEMPOTENT and BOUNDED. Selection is "published row without a draft row of
  * the same documentId", re-checked inside each document's transaction right
@@ -436,7 +444,8 @@ async function repairType(
       } catch (err) {
         report.failed++;
         strapi.log.error(
-          `${DRAFT_TWINS_LOG} ${uid} ${row.documentId}: could not create the draft (${errorMessage(err)}); the next boot retries`,
+          `${DRAFT_TWINS_LOG} ${uid} ${row.documentId}: could not create the draft (${errorMessage(err)}); ` +
+            "the next boot retries, and until it has a draft, publishing an entry linked to it drops that link",
         );
       }
     }

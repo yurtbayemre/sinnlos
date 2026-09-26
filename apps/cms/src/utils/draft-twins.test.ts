@@ -544,7 +544,8 @@ describe("ensureDraftTwins", () => {
     // The half-written draft of "bad" was rolled back with its transaction.
     expect(drafts(ANNOUNCEMENT)).toEqual(["ok-1", "ok-2"]);
     expect(logs.error).toEqual([
-      `[draft-twins] ${ANNOUNCEMENT} bad: could not create the draft (validation failed); the next boot retries`,
+      `[draft-twins] ${ANNOUNCEMENT} bad: could not create the draft (validation failed); the next boot retries, ` +
+        "and until it has a draft, publishing an entry linked to it drops that link",
     ]);
     expect(logs.info).toEqual([`[draft-twins] created 2 draft(s) for ${ANNOUNCEMENT}, 1 failed`]);
   });
@@ -706,7 +707,8 @@ describe("ensureDraftTwins and pending drafts of linked documents", () => {
     expect(pending?.course).toEqual(linkTo("admin"));
     expect(logs.error).toEqual([
       `[draft-twins] ${COURSE} seeded: could not create the draft (the pending draft of ${LESSON} moved ` +
-        "links another course (admin); publish or discard that draft); the next boot retries",
+        "links another course (admin); publish or discard that draft); the next boot retries, " +
+        "and until it has a draft, publishing an entry linked to it drops that link",
     ]);
   });
 
@@ -811,7 +813,8 @@ describe("ensureDraftTwins and pending drafts of linked documents", () => {
     ]);
     expect(logs.error).toEqual([
       `[draft-twins] ${PAGE} root: could not create the draft (the pending draft of ${PAGE} child ` +
-        "links another parent (elsewhere); publish or discard that draft); the next boot retries",
+        "links another parent (elsewhere); publish or discard that draft); the next boot retries, " +
+        "and until it has a draft, publishing an entry linked to it drops that link",
     ]);
   });
 
