@@ -109,11 +109,16 @@
  * admin-panel defect.
  *
  * IDEMPOTENT and BOUNDED. Selection is "published row without a draft row of
- * the same documentId and locale", re-checked inside each document's
- * transaction right before discardDraft (which would otherwise replace an
- * existing draft). Published rows are read in id-ordered pages, and each boot
- * handles at most `maxPerType` documents per type. A steady-state boot costs
- * two small queries per type and page.
+ * the same documentId", re-checked inside each document's transaction right
+ * before discardDraft (which would otherwise replace an existing draft).
+ * The locale only counts for a localized type (pluginOptions.i18n.localized,
+ * Strapi's own test in i18n services/content-types.js): for any other type
+ * discardDraft ignores the locale and replaces EVERY draft of the document
+ * (document-service/internationalization.js:37-40, repository.js:511-521),
+ * so a draft in another locale must block the repair as well. No type of
+ * this app is localized. Published rows are read in id-ordered pages, and
+ * each boot handles at most `maxPerType` documents per type. A steady-state
+ * boot costs two small queries per type and page.
  */
 
 export const DRAFT_TWINS_LOG = "[draft-twins]";
@@ -135,7 +140,13 @@ export interface DraftTwinAttribute {
 
 export interface DraftTwinModel {
   options?: { draftAndPublish?: unknown };
+  pluginOptions?: { i18n?: { localized?: unknown } };
   attributes?: Record<string, DraftTwinAttribute | undefined>;
+}
+
+/** Strapi's test for a localized type (i18n isLocalizedContentType). */
+export function isLocalizedModel(model: DraftTwinModel | undefined): boolean {
+  return model?.pluginOptions?.i18n?.localized === true;
 }
 
 export interface DraftTwinPlan {
@@ -245,8 +256,9 @@ function localeWhere(locale: string | null | undefined) {
   return locale == null ? { $null: true } : locale;
 }
 
-function rowKey(row: Pick<DraftTwinRow, "documentId" | "locale">): string {
-  return `${row.documentId}\u0000${row.locale ?? ""}`;
+/** What a draft must share with a published row to be its twin. */
+function rowKey(row: Pick<DraftTwinRow, "documentId" | "locale">, localized: boolean): string {
+  return localized ? `${row.documentId}\u0000${row.locale ?? ""}` : row.documentId;
 }
 
 function errorMessage(err: unknown): string {
@@ -255,11 +267,12 @@ function errorMessage(err: unknown): string {
 
 /**
  * The next page of published rows after `afterId` (id order), and those of
- * them without a draft row of the same documentId and locale. A document
- * with two published rows (never produced by Strapi) is listed once.
+ * them without a draft row of the same documentId (and locale, for a
+ * localized type). A document with two published rows (never produced by
+ * Strapi) is listed once.
  */
 export async function findPublishedOnlyRows(
-  strapi: Pick<DraftTwinsHost, "db">,
+  strapi: Pick<DraftTwinsHost, "contentTypes" | "db">,
   uid: string,
   afterId: number,
   batchSize: number,
@@ -278,10 +291,11 @@ export async function findPublishedOnlyRows(
     select: ["id", "documentId", "locale"],
     where: { publishedAt: { $null: true }, documentId: { $in: documentIds } },
   });
-  const covered = new Set(drafts.map(rowKey));
+  const localized = isLocalizedModel(strapi.contentTypes[uid]);
+  const covered = new Set(drafts.map((draft) => rowKey(draft, localized)));
   const missing: DraftTwinRow[] = [];
   for (const row of page) {
-    const key = rowKey(row);
+    const key = rowKey(row, localized);
     if (covered.has(key)) continue;
     covered.add(key);
     missing.push(row);
@@ -382,19 +396,21 @@ export async function createDraftTwin(
   if (typeof discardDraft !== "function") {
     throw new Error(`${uid} has no discardDraft (draft & publish off?)`);
   }
+  const localized = isLocalizedModel(strapi.contentTypes[uid]);
   return strapi.db.transaction(async () => {
     const drafts = await strapi.db.query(uid).count({
       where: {
         documentId: row.documentId,
-        locale: localeWhere(row.locale),
+        ...(localized ? { locale: localeWhere(row.locale) } : {}),
         publishedAt: { $null: true },
       },
     });
     if (drafts > 0) return false;
     await assertNoPendingMoves(strapi, uid, row);
+    // A non-localized type has one draft per document, whatever its locale.
     await discardDraft({
       documentId: row.documentId,
-      ...(row.locale ? { locale: row.locale } : {}),
+      ...(localized && row.locale ? { locale: row.locale } : {}),
     });
     return true;
   });

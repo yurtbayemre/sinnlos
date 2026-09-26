@@ -14,6 +14,7 @@ import {
   DRAFT_TWINS_SKIPPED_UIDS,
   ensureDraftTwins,
   findPublishedOnlyRows,
+  isLocalizedModel,
   planDraftTwinTypes,
   type DraftTwinModel,
   type DraftTwinRow,
@@ -28,6 +29,10 @@ const REVISION = "api::wiki-revision.wiki-revision";
 const dp = (attributes: DraftTwinModel["attributes"] = {}): DraftTwinModel => ({
   options: { draftAndPublish: true },
   attributes,
+});
+const localizedDp = (): DraftTwinModel => ({
+  ...dp(),
+  pluginOptions: { i18n: { localized: true } },
 });
 
 // --- planDraftTwinTypes ------------------------------------------------------
@@ -310,8 +315,9 @@ const draft = (documentId: string, extra: Partial<FakeRow> = {}) => ({
 // --- selection -------------------------------------------------------------------
 
 describe("findPublishedOnlyRows", () => {
-  it("returns the published rows of the page that have no draft of the same document and locale", async () => {
+  it("returns the published rows of the page that have no draft of the same document and locale (localized type)", async () => {
     const { strapi } = fakeStrapi({
+      contentTypes: { [ANNOUNCEMENT]: localizedDp() },
       rows: {
         [ANNOUNCEMENT]: [
           published("a", { id: 1 }),
@@ -328,6 +334,32 @@ describe("findPublishedOnlyRows", () => {
     expect(page.map((row) => row.id)).toEqual([1, 3, 4, 5, 7]);
     // "a" twice (anomaly) is listed once; "c/en" has its draft, "c/de" not.
     expect(missing.map((row) => `${row.documentId}/${row.locale ?? "-"}`)).toEqual(["a/-", "c/de"]);
+  });
+
+  it("matches drafts by documentId alone for a non-localized type", async () => {
+    const { strapi } = fakeStrapi({
+      rows: {
+        [ANNOUNCEMENT]: [
+          published("a", { id: 1 }),
+          // A stray locale on either twin (only a direct DB write makes one).
+          published("b", { id: 2, locale: "en" }),
+          draft("b", { id: 3 }),
+          published("c", { id: 4 }),
+          draft("c", { id: 5, locale: "en" }),
+          published("d", { id: 6, locale: "en" }),
+          published("d", { id: 7, locale: "de" }),
+        ],
+      },
+    });
+    const { missing } = await findPublishedOnlyRows(strapi, ANNOUNCEMENT, 0, 100);
+    expect(missing.map((row) => row.id)).toEqual([1, 6]);
+  });
+
+  it("takes Strapi's i18n flag as the only sign of a localized type", () => {
+    expect(isLocalizedModel(localizedDp())).toBe(true);
+    expect(isLocalizedModel(dp())).toBe(false);
+    expect(isLocalizedModel({ pluginOptions: { i18n: { localized: "true" } } })).toBe(false);
+    expect(isLocalizedModel(undefined)).toBe(false);
   });
 
   it("reads published rows in id order after the given id, then drafts of those documents only", async () => {
@@ -418,21 +450,56 @@ describe("ensureDraftTwins", () => {
 
   it("passes the locale of a localized row and none for a non-localized one", async () => {
     const { strapi, calls, drafts } = fakeStrapi({
+      contentTypes: { [ANNOUNCEMENT]: dp(), [COURSE]: localizedDp() },
       rows: {
-        [ANNOUNCEMENT]: [
+        [COURSE]: [
           published("i18n", { locale: "en" }),
           published("i18n", { locale: "de" }),
           draft("i18n", { locale: "en" }),
-          published("plain"),
         ],
+        [ANNOUNCEMENT]: [published("plain"), published("stray", { locale: "en" })],
       },
     });
     await ensureDraftTwins(strapi);
-    expect(calls.discardDraft.map((call) => call.params)).toEqual([
-      { documentId: "i18n", locale: "de" },
-      { documentId: "plain" },
+    expect(calls.discardDraft).toEqual([
+      { uid: ANNOUNCEMENT, params: { documentId: "plain" } },
+      { uid: ANNOUNCEMENT, params: { documentId: "stray" } },
+      { uid: COURSE, params: { documentId: "i18n", locale: "de" } },
     ]);
-    expect(drafts(ANNOUNCEMENT)).toEqual(["i18n/de", "i18n/en", "plain"]);
+    expect(drafts(COURSE)).toEqual(["i18n/de", "i18n/en"]);
+    expect(drafts(ANNOUNCEMENT)).toEqual(["plain", "stray/en"]);
+  });
+
+  it("never replaces a draft of a non-localized type whose locale differs from the published row's", async () => {
+    const { strapi, calls, tables } = fakeStrapi({
+      rows: {
+        [ANNOUNCEMENT]: [
+          published("a", { id: 1, locale: "en" }),
+          draft("a", { id: 2, title: "pending edit" }),
+          published("b", { id: 3 }),
+          draft("b", { id: 4, locale: "en", title: "pending edit" }),
+        ],
+      },
+    });
+    const reports = await ensureDraftTwins(strapi);
+    expect(reports).toEqual([{ uid: ANNOUNCEMENT, created: 0, failed: 0, capped: false }]);
+    expect(calls.discardDraft).toEqual([]);
+    expect(tables.get(ANNOUNCEMENT)?.map((row) => row.id)).toEqual([1, 2, 3, 4]);
+  });
+
+  it("re-checks a non-localized draft without a locale filter inside the transaction", async () => {
+    let injected = false;
+    const { strapi, calls } = fakeStrapi({
+      rows: { [ANNOUNCEMENT]: [published("a", { locale: "en" })] },
+      onTransaction: (tables) => {
+        if (injected) return;
+        injected = true;
+        tables.get(ANNOUNCEMENT)?.push({ id: 1, documentId: "a", locale: null, publishedAt: null });
+      },
+    });
+    const [report] = await ensureDraftTwins(strapi);
+    expect(report.created).toBe(0);
+    expect(calls.discardDraft).toEqual([]);
   });
 
   it("walks every page of published rows", async () => {
