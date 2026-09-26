@@ -31,7 +31,11 @@ export default factories.createCoreController(UID, ({ strapi }) => ({
    */
   async summary(ctx) {
     const days = Math.min(365, Math.max(1, Number(ctx.query.days) || 30));
-    const since = new Date(Date.now() - days * 86400000).toISOString();
+    // A Date binding, never an ISO string (FX25, datetime contract C8): on
+    // SQLite created_at holds epoch ms and a TEXT comparison matched no row;
+    // on Postgres a Date is an absolute instant. The window is an elapsed
+    // duration, not calendar days.
+    const since = new Date(Date.now() - days * 86400000);
     const knex = strapi.db.connection;
 
     const base = () => knex("search_logs").where("created_at", ">=", since);
@@ -45,6 +49,7 @@ export default factories.createCoreController(UID, ({ strapi }) => ({
         .avg({ avgResults: "result_count" })
         .groupBy("term")
         .orderBy("n", "desc")
+        .orderBy("term")
         .limit(10),
       base()
         .where("result_count", 0)
@@ -52,6 +57,7 @@ export default factories.createCoreController(UID, ({ strapi }) => ({
         .count({ n: "*" })
         .groupBy("term")
         .orderBy("n", "desc")
+        .orderBy("term")
         .limit(10),
     ]);
 
