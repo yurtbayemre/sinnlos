@@ -221,6 +221,13 @@ pnpm --filter @sinnlos/web dev
 > block and set `DATABASE_HOST=localhost`. The hostname `db` that appears
 > in `infra/.env.example` is the Docker Compose service name and only
 > resolves inside the Compose network.
+>
+> A dev database from before departments and teams lost draft & publish
+> can still hold draft rows for them; Strapi refuses to boot with
+> `[org-dp] … still holds N draft row(s)`. Delete `apps/cms/.tmp/data.db`
+> and boot once with `SEED_DEMO_DATA=1` (the seed writes one live row per
+> unit), or run the one-time migration on a Postgres dev database
+> ([DEPLOYMENT.md](./docs/DEPLOYMENT.md#one-time-org-draftpublish-off)).
 
 On first sign-in, Strapi will:
 
@@ -255,8 +262,8 @@ Strapi ships 22 collection types plus one routes-only API
 
 | Type | Purpose |
 | --- | --- |
-| **department** | Top-level org unit with head, members, teams, pages |
-| **team** | Belongs to a department, has a lead and members |
+| **department** | Top-level org unit with head, members, teams, pages. Master data **without draft & publish**: one row per department with a stable id; saving in the admin is live immediately (no Publish/Unpublish), hiding a unit means deleting it |
+| **team** | Belongs to a department, has a lead and members. Like department: **no draft & publish**, one row per team, a save is live |
 | **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`) |
 | **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created |
 | **comment** | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28) |
@@ -353,9 +360,13 @@ authoring (v2, see [architecture.md §5.34](./docs/architecture.md)):
   allowlist.
 
 The web has no write path for wiki pages, departments or teams; these rules
-govern direct API calls. Department-head rights are compared by department
-row id and fail on departments created in the admin panel until FX29 lands
-(see [architecture.md §7b](./docs/architecture.md)).
+govern direct API calls. Department-head and team-lead rights compare
+department and team row ids. That is valid because departments and teams
+have no draft & publish (one row each, stable id; see
+[architecture.md §5.35](./docs/architecture.md)). An instance that ran an
+earlier release with org drafts runs the one-time migration first
+([One-time: org draft/publish off](./docs/DEPLOYMENT.md#one-time-org-draftpublish-off));
+the cms refuses to boot until then.
 
 Read-side filters:
 
@@ -367,11 +378,13 @@ Read-side filters:
 - `quick-link-visibility` — same `departments`-relation scheme as documents
 - `notification-visibility` — reads restricted to the caller's own rows
   (recipient = caller)
-- `published-only` — pins reads of draft & publish types without a row
-  filter (event, poll, department, team) to `status=published`, so
-  `?status=draft` no longer returns unpublished entries; admin/editor bypass
-  and keep draft reads. The custom ICS, vote and results actions read
-  published rows only as well
+- `published-only` — pins reads without a row filter (event, poll,
+  department, team) to `status=published`, so `?status=draft` no longer
+  returns unpublished entries; admin/editor bypass and keep draft reads.
+  department and team have no drafts of their own any more, but `status`
+  still decides which rows of their populated draft & publish relations
+  come back. The custom ICS, vote and results actions read published rows
+  only as well
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
 - `announcement-visibility` — server-side audience targeting (#9):
@@ -731,9 +744,10 @@ trimming.
 - [ ] Through the API, a team lead can change their team's description, and
       a payload with `members` (or any other field outside the write
       allowlist) answers 400 (probe in
-      [DEPLOYMENT.md §6.4](./docs/DEPLOYMENT.md#64-role-enforcement-optional);
-      do not rely on the department-head path until FX29, see
-      architecture.md §7b)
+      [DEPLOYMENT.md §6.4](./docs/DEPLOYMENT.md#64-role-enforcement-optional));
+      a department head can change their own department's description, and
+      a department member sees announcements and wiki spaces targeted at
+      their department
 - [ ] While signed in, `/api/auth/session` returns only `user`
       (name/email/image/id), `provider` and `expires` — no Strapi JWT, role
       or department

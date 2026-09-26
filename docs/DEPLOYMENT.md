@@ -33,7 +33,12 @@ cannot offer; see the note there).
 > instance that runs a release from before 2026-09-24 also needs
 > [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > the env contract is stricter, `JWT_SECRET` must be rotated once, and
-> `infra/deploy.sh` refuses to deploy until both are done.
+> `infra/deploy.sh` refuses to deploy until both are done. The release of
+> 2026-09-26 turns draft & publish off for departments and teams: run the
+> read-only preflight of
+> [One-time: org draft/publish off](#one-time-org-draftpublish-off) first; a
+> database with department or team drafts needs a one-time migration, and the
+> new cms refuses to boot until it has run.
 
 ---
 
@@ -692,6 +697,12 @@ systemctl start docker
 > signs users in with Microsoft. Coming from a release before 2026-09-24,
 > also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > that deploy needs env changes and one `JWT_SECRET` rotation.
+>
+> **Deploying the release that turns draft & publish off for departments
+> and teams (2026-09-26)?** Run the read-only preflight of
+> [One-time: org draft/publish off](#one-time-org-draftpublish-off) first. With
+> no department or team drafts it is a normal deploy; otherwise the database
+> needs a one-time migration while cms and web are stopped.
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, backs up and rollback-tags before rebuilding:
@@ -716,6 +727,193 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### One-time: org draft/publish off
+
+The release of 2026-09-26 (branch `feat/org-dp-off`, decision 05) turns
+draft & publish **off for departments and teams**. Each department and team
+is then one row with a stable id, and the department and team checks rely on
+that: department heads can update their own department and its teams
+(FX07), and members see the announcements, wiki spaces, documents and quick
+links targeted at their department or team. Before, a user was often linked
+to a department's draft row while content was linked to its published row,
+so these checks failed closed (403 for department heads, targeted content
+hidden from its own audience).
+
+What admins notice: the Department and Team edit views have **Save** only.
+A save is live immediately; there is no Publish, Unpublish or Discard, and
+hiding a unit means deleting it. What users notice: department members,
+heads and team leads now see the content targeted at their department or
+team, and they now count in acknowledgement reports, digests and new
+notification fan-outs. Nothing is sent retroactively.
+
+A database used by an earlier release can still hold **draft rows** for
+departments or teams: a unit created in the admin panel and never
+published, or one edited after its last publish. Strapi deletes those rows
+when the new cms boots, and their links with them (users lose their
+department, draft content loses its targeting, never-published units are
+gone). The new cms therefore **refuses to boot while any exist**: the log
+shows `[org-dp] departments still holds N draft row(s)` (or `teams`), compose
+restarts it in a loop, and the data stays untouched. The one-time SQL in
+`infra/migrations/org-dp/` (see the README there) merges the drafts first.
+**A fresh install needs nothing**, and neither does a database that only
+holds demo-seed departments and teams (the seed writes one published row
+per unit).
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**0. Preflight** (read only; run it any time while the current release is
+live):
+
+```bash
+git pull
+psql_db < infra/migrations/org-dp/preflight.sql
+```
+
+- **FAST PATH:** if P0 shows `draft_rows` = 0 for both `departments` and
+  `teams`, there is nothing to migrate. Deploy as usual with
+  `infra/deploy.sh` and stop here. The guard passes and Strapi's own switch
+  deletes nothing; `"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'` prints
+  nothing.
+- These must be 0 before you continue: P0 `anomalies`, P4 (a user linked to
+  more than one department), P7 (a duplicate department name or slug, or a
+  duplicate team slug) and P8 (a table the script does not handle). Fix P4
+  and P7 in the admin panel and rerun the preflight. P0 anomalies and P8
+  need a closer look; do not continue.
+- P1 lists units that were never published. The migration **promotes**
+  them, so they go live. Delete unwanted ones in the admin afterwards.
+- P2 lists pending draft edits. The **published values win**: write the
+  edits down and re-enter them afterwards. Team membership is merged
+  (union), so nobody loses access they have today.
+
+**1. Rehearsal** (strongly recommended), on a throwaway copy of the live
+database. Both `migrate.sql` runs must end with
+`NOTICE:  org-dp: OK - departments=N, teams=M` (the second changes
+nothing), and the final preflight must show `draft_rows` 0 and
+`draft_links` 0 everywhere. A `RAISE` names what to fix in the live data
+first.
+
+```bash
+umask 077; D=$(mktemp -d)
+docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+docker run -d --name orgdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+until docker exec orgdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+docker exec -i orgdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+for run in 1 2; do
+  docker exec -i orgdp-rehearsal psql -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/org-dp/migrate.sql
+done
+docker exec -i orgdp-rehearsal psql -U sinnlos -d sinnlos < infra/migrations/org-dp/preflight.sql
+docker rm -f -v orgdp-rehearsal; rm -rf "$D"
+```
+
+**2. Pre-build** the new images; the running site keeps serving:
+
+```bash
+"${COMPOSE[@]}" build cms web
+```
+
+**3. Stop the apps.** No writes after this point; the site is down until
+step 7.
+
+```bash
+"${COMPOSE[@]}" stop web cms
+```
+
+**4. Back up**, the same way `infra/deploy.sh` does, and keep a plain copy
+on the host so a rollback does not need the off-box GPG key. This dump is
+the rollback point.
+
+```bash
+infra/backup/pg-backup.sh
+umask 077; mkdir -p ~/orgdp-backup
+docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > ~/orgdp-backup/pre-migration.dump
+docker exec -i infra-db-1 pg_restore --list < ~/orgdp-backup/pre-migration.dump > /dev/null && echo "dump OK"
+```
+
+**5. Migrate.** One transaction: any `RAISE` rolls everything back. The
+script also refuses to run outside one transaction or while another session
+is connected.
+
+```bash
+psql_db --single-transaction < infra/migrations/org-dp/migrate.sql
+```
+
+It must end with `NOTICE:  org-dp: OK - departments=N, teams=M`. After a
+`RAISE` nothing has changed: fix what it names and rerun (the script is
+idempotent), or give up and bring the old containers back with
+`"${COMPOSE[@]}" start cms web` (`start`, not `up`: step 2 already tagged
+the new images as `latest`).
+
+**6. Verify:**
+
+```bash
+psql_db -c "SELECT 'departments' AS t, count(*) AS rows, count(DISTINCT document_id) AS documents, count(*) FILTER (WHERE published_at IS NULL) AS drafts FROM departments UNION ALL SELECT 'teams', count(*), count(DISTINCT document_id), count(*) FILTER (WHERE published_at IS NULL) FROM teams"
+psql_db -c "SELECT user_id FROM up_users_department_lnk GROUP BY user_id HAVING count(*) > 1"
+psql_db < infra/migrations/org-dp/preflight.sql    # optional
+```
+
+For both types `rows` must equal `documents` and `drafts` must be 0; the
+second query must return no rows. In the optional preflight, P0
+`draft_rows` and every P3 `draft_links` are 0.
+
+**7. Deploy** with the unchanged wrapper, then check the cms log:
+
+```bash
+infra/deploy.sh
+"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'    # must print nothing
+```
+
+`deploy.sh` takes a second (post-migration) backup, tags the stopped
+containers' images as `:rollback` (`docker inspect` works on stopped
+containers), starts the new images from the warm build cache and runs its
+smoke checks. Strapi's own draft & publish switch runs once on this first
+boot and finds nothing to delete.
+
+**8. Smoke:**
+
+- Signed in as a plain member of a department, you see the announcements,
+  wiki spaces, documents and quick links targeted at that department.
+- In the admin panel, the Department and Team edit views show **Save**
+  only.
+- Optional: the department-head probe in
+  [§6.4](#64-role-enforcement-optional).
+
+**9. Afterwards:** re-enter the P2 edits (a save is live now) and delete
+unwanted P1 units. Once you are satisfied with the release, delete the plain
+dump: `rm -rf ~/orgdp-backup`.
+
+**Rollback.** There is no reverse script: the rollback is a `pg_restore` of
+the step-4 dump, together with the previous images. Org edits made after the
+migration are lost.
+
+- `migrate.sql` failed: nothing changed. `"${COMPOSE[@]}" start cms web`.
+- Anything later:
+
+  ```bash
+  "${COMPOSE[@]}" stop web cms
+  docker exec -i infra-db-1 sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists --no-owner' < ~/orgdp-backup/pre-migration.dump
+  docker tag infra-web:rollback infra-web:latest
+  docker tag infra-cms:rollback infra-cms:latest
+  "${COMPOSE[@]}" up -d --no-build web cms
+  ```
+
+  Without the plain copy, use the encrypted step-4 artifact of
+  `pg-backup.sh` (decrypt it with the off-box key and gunzip it first).
+- Rolling forward later means steps 3 to 7 again. The same holds whenever a
+  pre-migration dump (an older nightly backup, say) is restored under the
+  new release, and after an image-only rollback: the old cms clones a draft
+  of every department and team on its first boot. In each case the new cms
+  refuses to boot until `migrate.sql` has run on that data.
+
+**Local SQLite dev:** the guard also blocks a dev database that holds
+department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
+with `SEED_DEMO_DATA=1`.
 
 #### Upgrading an existing instance to this release
 
@@ -888,10 +1086,11 @@ No data is rewritten, and there are no new tables or indexes.
   The policies were renamed from `global::is-department-head` /
   `global::is-team-member-or-lead` to `global::can-edit-department` /
   `global::can-edit-team`. No database state refers to them, but runbooks and
-  log searches that use the old names need updating. Until FX29 lands,
-  department heads should not rely on their write rights: department scope is
-  still compared by row id, so on departments created in the admin panel
-  they get a 403 (see [architecture.md §7b P1.7](./architecture.md)).
+  log searches that use the old names need updating. On this release
+  department heads should not rely on their write rights yet: department
+  scope is compared by row id, so on departments created in the admin panel
+  they get a 403. The release of 2026-09-26 fixes that
+  ([One-time: org draft/publish off](#one-time-org-draftpublish-off)).
 - Published reads through a read policy ignore `?publicationFilter=` and
   `?hasPublishedVersion=` for every role except `admin_role` / `editor`. The
   web sends neither.
@@ -1687,7 +1886,8 @@ curl -I <URL>/admin
 2. **Settings → Users & Permissions plugin → Roles** — confirm all six roles
    exist: `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
 3. **Content Manager → Department → Create new entry** — create a test
-   department (name: "Engineering", slug: "engineering"), publish.
+   department (name: "Engineering", slug: "engineering"), save. Departments
+   and teams have no Publish step: a save is live.
 4. Open `<URL>/departments` → the test department should render.
 
 ### 6.3 Microsoft sign-in flow
@@ -1759,9 +1959,20 @@ curl -X PUT <URL>/api/teams/<team-documentId> \
 # Expect: 400 "Invalid or disallowed data field(s): members"
 ```
 
-A plain member of the team gets 403 for both. Use a team created through the
-Strapi admin: rows from the demo seed have no draft, so document-service
-updates on them fail for every caller (FX38).
+A plain member of the team gets 403 for both. Demo-seed teams work as well:
+since departments and teams lost draft & publish (2026-09-26), an update
+changes the one row in place. Before that, REST updates of seed rows failed
+for every caller (FX38).
+
+A department head can change their own department, not another one:
+
+```bash
+curl -X PUT <URL>/api/departments/<own-department-documentId> \
+  -H "Authorization: Bearer <department-head-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"description":"Updated by the head"}}'
+# Expect: 200 OK (403 for any other department)
+```
 
 ### 6.5 Common failure signals
 
@@ -1776,6 +1987,7 @@ updates on them fail for every caller (FX38).
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
+| cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) from step 3 |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
 | Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |
@@ -1924,6 +2136,11 @@ GPG artifact first with the off-box private key):
 docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
   < sinnlos-db-<timestamp>.dump
 ```
+
+A dump taken before the org draft/publish migration, restored under a
+release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
+`migrate.sql` has run on it again
+([One-time: org draft/publish off](#one-time-org-draftpublish-off), steps 3–7).
 
 #### Rolling back this release
 
