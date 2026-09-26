@@ -58,7 +58,7 @@ export function pgSqlClient(client: PgQueryable): SqlClient {
 
 /**
  * Strapi's own bookkeeping tables. Their `time` columns are created naive
- * (@strapi/database 5.55.1 migrations/storage.js:105-112,
+ * (@strapi/database 5.55.1 migrations/storage.js:6-13,
  * schema/storage.js:12-21) and only order rows. The legacy repair leaves them
  * to the guard, so it never touches the migration runner's own table.
  */

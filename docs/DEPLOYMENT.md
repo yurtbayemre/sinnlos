@@ -27,18 +27,21 @@ cannot offer; see the note there).
 
 > **Upgrading an existing instance?** Work through
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> before you deploy: the cms moves to Strapi 5.55.1 (additive database
-> changes, the pre-deploy backup is mandatory), and **Microsoft sign-in stops
-> working**, so an instance that uses it must stay on its current release. An
-> instance that runs a release from before 2026-09-24 also needs
-> [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
-> the env contract is stricter, `JWT_SECRET` must be rotated once, and
-> `infra/deploy.sh` refuses to deploy until both are done. The release of
-> 2026-09-26 turns draft & publish off for departments and teams: run the
-> read-only preflight of
-> [One-time: org draft/publish off](#one-time-org-draftpublish-off) first; a
-> database with department or team drafts needs a one-time migration, and the
-> new cms refuses to boot until it has run.
+> before you deploy: this release introduces the
+> [datetime contract](#310-datetime-contract): the cms runs in UTC, every
+> stored instant becomes `timestamptz`, and the **first boot repairs the times
+> the old cms stored**, once. An existing database needs
+> `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`) in
+> `infra/.env`; the new cms refuses to start without it, and `infra/deploy.sh`
+> refuses to deploy. Coming from a release before 2026-09-26, also work through
+> the older notes, newest first:
+> [One-time: org draft/publish off](#one-time-org-draftpublish-off) (a
+> database with department or team drafts needs a one-time migration first),
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
+> (additive database changes; **Microsoft sign-in stops working**, so an
+> instance that uses it must stay on its current release) and
+> [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24)
+> (stricter env contract, one `JWT_SECRET` rotation).
 
 ---
 
@@ -86,7 +89,7 @@ app registration and you'll reference it in every deployment method.
 > sign-in ([README → standalone mode](../README.md#running-without-microsoft-standalone-mode)).
 > With a real app registration configured, the web logs an `[auth]` error at
 > boot and `infra/deploy.sh` refuses to deploy (see
-> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)).
 > The steps below stay for reference.
 
 ### Step 1 — Create the app registration
@@ -413,10 +416,12 @@ DIGESTS_DISABLED=0
 > **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
 > needed). Redirect URIs in Entra should use `http://localhost/...`.
 
-> **Timezone:** both app containers run with `TZ=Europe/Berlin` — set directly
-> in `docker-compose.yml` (cms + web), not via `.env`. Date-only logic (events
-> month grid, classified-ad expiry, RSVP/birthday date math) must not drift a
-> day around UTC midnight. Edit the compose file if your company is elsewhere.
+> **Time zone:** set `APP_TIME_ZONE` in `.env` if your company is not in
+> `Europe/Berlin` (the default). It is the zone of every business date: "today",
+> ad expiry, birthdays, digest days, the cron times, all-day events and poll
+> deadlines. Do not set the containers' `TZ`: compose runs the cms in UTC
+> (required, see the [datetime contract](#310-datetime-contract)) and the web
+> in `APP_TIME_ZONE` until its own datetime port.
 
 ### 2.2 Build and start
 
@@ -559,6 +564,14 @@ MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 
 # --- Optional features (safe to leave unset) --------------------------
+# Business time zone (IANA): "today", expiry, birthdays, digests, cron
+# times, all-day events, poll deadlines. Unset/empty = Europe/Berlin.
+APP_TIME_ZONE=Europe/Berlin
+# Only for a database written by a cms before the datetime contract
+# (§3.8, "Upgrading an existing instance to this release"). Empty on a
+# fresh install.
+DATETIME_LEGACY_ZONE=
+DATETIME_LEGACY_UTC_UNTIL=
 # First Strapi super-admin on an empty database (else: register at /admin).
 # Refused for placeholders and passwords failing the admin policy.
 STRAPI_ADMIN_EMAIL=
@@ -644,11 +657,14 @@ touched (`infra/deploy.sh --check` runs only this step, see
 Postgres + uploads backup, (2) tags the currently running `infra-web` /
 `infra-cms` images as `:rollback`, (3) rebuilds + restarts the stack with the
 Traefik override, (4) curl smoke-checks `https://sinnlos.yurtbay.dev`
-(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh` — the end-to-end
-SSE pipeline probe (comment posted via the cms → ping frame on a subscribed
-stream). Step 5 **fails the deploy** when the pipeline delivers no pings; it
-is skipped with `LIVE_EVENTS_DISABLED=1` or when the demo credentials file is
-absent. It is `set -euo pipefail` and re-run safe.
+(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh`: first the
+[datetime contract](#310-datetime-contract) check (no
+`timestamp without time zone` column left, the cms boot log reports the
+process zone UTC), then the end-to-end SSE pipeline probe (comment posted via
+the cms → ping frame on a subscribed stream). Step 5 **fails the deploy** when
+either check fails; it is skipped with `LIVE_EVENTS_DISABLED=1` or when the
+demo credentials file is absent (then run `infra/live-smoke.sh` by hand). It
+is `set -euo pipefail` and re-run safe.
 
 The preflight fails (naming keys, never values) when:
 
@@ -671,7 +687,12 @@ The preflight fails (naming keys, never values) when:
   5.51+ rejects the web's access-token exchange, so every Microsoft sign-in
   would fail, and with `AUTH_LOCAL_ENABLED=0` nobody could sign in. A
   non-GUID client id (template text) only warns. The rule goes away with the
-  Entra exchange.
+  Entra exchange;
+- the running database still holds datetime columns in the pre-contract
+  format (`timestamp without time zone` outside Strapi's bookkeeping tables)
+  and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
+  ([Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+  No running database (a fresh install) skips this check.
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
@@ -691,9 +712,15 @@ systemctl start docker
 
 ### 3.8 Updates
 
-> **Upgrading to this release (Strapi 5.55.1)?** Follow
+> **Upgrading to this release (datetime contract)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> first: take the pre-deploy backup, and do not deploy an instance that
+> first: an existing database needs `DATETIME_LEGACY_ZONE` in `infra/.env`,
+> and its first boot repairs the stored times once. Ship it before the DST
+> change of **2026-10-25**.
+>
+> **Upgrading from before 2026-09-25 (Strapi 5.55.1)?** Follow
+> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
+> as well: take the pre-deploy backup, and do not deploy an instance that
 > signs users in with Microsoft. Coming from a release before 2026-09-24,
 > also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > that deploy needs env changes and one `JWT_SECRET` rotation.
@@ -727,6 +754,249 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading an existing instance to this release
+
+"This release" is phase 1 of the [datetime contract](#310-datetime-contract)
+(branch `feat/datetime-phase1`, deep-dive decision 04). It changes how the
+cms stores and computes times:
+
+- Every stored instant becomes `timestamptz(6)`. Until now the columns were
+  `timestamp without time zone` and held the wall clock of whichever process
+  wrote them: UTC before 2026-08-15 (commit `aadb2ea` pinned
+  `TZ=Europe/Berlin`), Berlin time after it.
+- The cms process runs in **UTC** and so does every database session.
+  Business dates ("today", day and week windows, birthdays and anniversaries,
+  classified expiry, digest days, the 03:30 / 03:35 / 07:30 cron times, all-day
+  events in the ICS export) are computed in the new setting `APP_TIME_ZONE`
+  (default `Europe/Berlin`), no longer in the process zone.
+- The cms's **first boot repairs the stored values once** (a Strapi user
+  migration, before the schema sync) and converts the columns. From then on
+  a startup guard keeps every datetime column `timestamptz`, also for new
+  fields and plugins, and refuses to start while one is left.
+- The web changes only the poll close rule (below) and reads
+  `APP_TIME_ZONE`; its container keeps rendering in `APP_TIME_ZONE`
+  (compose sets its `TZ` from it) until the web's own port (phase 2).
+
+No change to secrets, no `JWT_SECRET` rotation, nobody is signed out.
+
+**What an instance needs.** The repair must know which zone the old cms
+wrote in:
+
+| Instance | `infra/.env` |
+|---|---|
+| Fresh install, or a SQLite-only setup | nothing (leave both `DATETIME_LEGACY_*` empty) |
+| Existing instance first deployed on or after 2026-08-15 (compose with `TZ=Europe/Berlin`) | `DATETIME_LEGACY_ZONE=Europe/Berlin` |
+| Existing instance that ran before 2026-08-15 (its cms ran in UTC) and took the `aadb2ea` deploy | `DATETIME_LEGACY_ZONE=Europe/Berlin` and `DATETIME_LEGACY_UTC_UNTIL=θ`, the switch instant (step 2) |
+| The owner instance | `DATETIME_LEGACY_ZONE=Europe/Berlin`, `DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00` (confirmed by the report in step 3) |
+
+Without `DATETIME_LEGACY_ZONE` on a database with data, the new cms stops at
+its first boot with `[datetime] This database holds datetime values written
+before the datetime contract …`, changing nothing, and `infra/deploy.sh`
+refuses to deploy.
+
+**Deadline: deploy before 2026-10-25, 01:00 UTC** (the Berlin clocks go back
+that night). Until the deploy the old cms keeps writing Berlin wall clocks;
+values written during the repeated hour 02:00–03:00 cannot be told apart
+afterwards (the repair reads them as the later, standard-time instant, and
+the report lists them).
+
+**Before the deploy**
+
+1. **Pull and run the preflight**, deploying nothing:
+
+   ```bash
+   cd /opt/sinnlos && git pull      # your checkout on the host
+   infra/deploy.sh --check
+   ```
+
+   On an existing instance it fails with
+   `ERROR: the running database still stores datetimes in the pre-contract
+   format …` until step 5 is done. Carry on with steps 2 to 5.
+
+2. **Find θ** (only for an instance that ran in UTC first). θ is any instant
+   between the last write of the UTC-era cms and the first write of the
+   Berlin-era one. The pre-deploy backup of the switch deploy gives its lower
+   bound B: `pg-backup.sh` logs each run with `date -Is` (with offset) in the
+   off-site `backup.log`, for example
+
+   ```bash
+   grep '^2026-08-15' <offsite-dir>/sinnlos/backup.log
+   ```
+
+   θ = B + 1 h works whenever that deploy took less than an hour. The owner's
+   B is `2026-08-15T20:46:42+02:00`, so θ = `2026-08-15T21:46:42+02:00`.
+
+3. **Read-only report against the live database**, with the new image. It
+   applies the repair's own rules and changes nothing (read-only session,
+   read-only transaction). `build` only builds the image; the running
+   containers keep serving:
+
+   ```bash
+   cd /opt/sinnlos/infra
+   COMPOSE="docker compose -p infra -f docker-compose.yml -f docker-compose.traefik.yml"
+   $COMPOSE build cms
+   $COMPOSE run --rm --no-deps \
+     -e DATETIME_LEGACY_ZONE=Europe/Berlin \
+     -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00 \
+     cms node dist/scripts/datetime-migration-report.js --around 2026-08-15T20:46:42+02:00
+   ```
+
+   (Standalone Caddy box: drop the Traefik file from `COMPOSE`.) Check:
+   - `Gap check: OK` — θ lies in an empty stretch of the stored write
+     stamps at least as long as the zone offset (120 minutes in August). The
+     `--around` list shows the stamps near B with the switch gap marked
+     (`----- gap 2h10m -----` or so) and suggests a θ inside it. A
+     `Gap check: FAILS` means θ is wrong: pick one inside the marked gap. The
+     migration runs the same check and aborts (changing nothing) otherwise.
+   - The class counts per table and column (`write-utc`, `write-legacy`,
+     `A`, `B`, `C`, `C-allday`, …; see the
+     [rules](#310-datetime-contract)).
+   - **Ambiguous values**: event, poll and announcement times created before
+     θ and saved again after it (class C). The repair reads them as UTC,
+     which is right unless someone corrected the time by hand after
+     2026-08-15; each open or upcoming one is listed with both readings.
+     Note the ones whose "read as Europe/Berlin" line is the intended time:
+     you fix those in step 10.
+
+4. **Rehearse on a copy** (strongly recommended): restore a fresh dump into a
+   throwaway Postgres 16, run the report there, optionally against the
+   pre-switch dump of 2026-06-24 (`--baseline` says which ambiguous values are
+   unchanged since then, so the UTC reading holds), and boot the new cms once
+   against the copy:
+
+   ```bash
+   (
+     umask 077; D=$(mktemp -d)
+     trap 'docker rm -f -v dt-copy dt-june dt-cms >/dev/null 2>&1; docker network rm dt-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+     docker network create dt-rehearsal
+     docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+     for db in dt-copy dt-june; do
+       docker run -d --name "$db" --network dt-rehearsal -e POSTGRES_USER=sinnlos \
+         -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+       until docker exec "$db" pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+     done
+     docker exec -i dt-copy pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+     docker exec -i dt-june pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges \
+       < /home/bigemo/backups/sinnlos/sinnlos-db-2026-06-24-143319.dump
+     LEGACY="-e DATETIME_LEGACY_ZONE=Europe/Berlin -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00"
+     DB="-e DATABASE_CLIENT=postgres -e DATABASE_HOST=dt-copy -e DATABASE_NAME=sinnlos -e DATABASE_USERNAME=sinnlos -e DATABASE_PASSWORD=rehearsal"
+     docker run --rm --network dt-rehearsal $LEGACY $DB infra-cms \
+       node dist/scripts/datetime-migration-report.js --all \
+       --baseline postgres://sinnlos:rehearsal@dt-june:5432/sinnlos
+     S() { openssl rand -hex 16; }
+     docker run -d --name dt-cms --network dt-rehearsal $LEGACY $DB \
+       -e APP_KEYS="$(S),$(S)" -e API_TOKEN_SALT="$(S)" -e ADMIN_JWT_SECRET="$(S)" \
+       -e TRANSFER_TOKEN_SALT="$(S)" -e JWT_SECRET="$(S)" -e ENCRYPTION_KEY="$(S)" \
+       -e REVALIDATE_SECRET="$(S)" -e INTERNAL_UPLOAD_TOKEN="$(S)" \
+       -e DIGESTS_DISABLED=1 -e LIVE_EVENTS_DISABLED=1 infra-cms
+     until docker logs dt-cms 2>&1 | grep -qE 'Strapi started successfully|failed|Error:'; do sleep 2; done
+     docker logs dt-cms 2>&1 | grep -E '\[datetime\]|failed|Error:|started successfully'
+     docker exec dt-copy psql -U sinnlos -d sinnlos -c \
+       "SELECT count(*) AS naive_left FROM information_schema.columns WHERE table_schema = 'public' AND data_type = 'timestamp without time zone';" \
+       -c "SELECT class, zone, count(*) FROM datetime_migration_audit GROUP BY 1, 2 ORDER BY 1;" \
+       -c "SELECT id, title, start AT TIME ZONE 'Europe/Berlin' AS start_berlin, all_day FROM events WHERE published_at IS NOT NULL ORDER BY start;"
+   )
+   ```
+
+   The cms log must show `[datetime] legacy repair (run …): N value(s)
+   rewritten …`, `[datetime] converted 3 column(s) to timestamptz:
+   strapi_database_schema.time, strapi_migrations.time,
+   strapi_migrations_internal.time` and `Strapi started successfully`;
+   `naive_left` must be 0, and the event times in Berlin time must match what
+   the events mean. Without the June dump drop `dt-june` and `--baseline`.
+   The trap removes both containers, the network and the dump.
+
+5. **Set the variables in `infra/.env`**, permanently (they only matter
+   again if a pre-repair dump is ever restored, and then they must be right):
+
+   ```dotenv
+   DATETIME_LEGACY_ZONE=Europe/Berlin
+   DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00
+   ```
+
+   Leave `APP_TIME_ZONE` unset (or `Europe/Berlin`) unless the company is
+   elsewhere. Then `infra/deploy.sh --check` prints `Preflight OK`.
+
+6. **Host backup time.** The nightly `pg-backup.sh` runs from the host
+   crontab at 03:00 **host time**; the uploads and search-log janitors run at
+   03:30 and 03:35 **`APP_TIME_ZONE`**, and must run after the backup. On a
+   host in `Europe/Berlin` (the owner's) nothing changes. On a host in UTC
+   with `APP_TIME_ZONE=Europe/Berlin`, 03:00 UTC is 04:00 or 05:00 Berlin:
+   move the crontab line to `0 1 * * *` UTC, or set the host zone
+   (`timedatectl set-timezone Europe/Berlin`).
+
+**Deploy**
+
+7. Run `infra/deploy.sh` (it takes the mandatory pre-deploy backup first;
+   keep that dump until step 10 is done). On a standalone Caddy box: take the
+   backup, then `docker compose up -d --build` from `infra/`.
+
+**What the first boot does** (`docker logs infra-cms-1`):
+
+```
+[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin
+[internal migration]: migrating 2026.10.05T00.00.00.datetime-timestamptz.js
+[datetime] legacy repair (run …, legacy zone Europe/Berlin, θ 2026-08-15T19:46:42.000Z): N value(s) rewritten, M column(s) converted to timestamptz, K old value(s) kept in datetime_migration_audit. Classes: …
+[datetime] gap check: … min between … and … (needs 120)
+[internal migration]: migrated 2026.10.05T00.00.00.datetime-timestamptz.js (…s)
+[datetime] converted 3 column(s) to timestamptz: strapi_database_schema.time, strapi_migrations.time, strapi_migrations_internal.time
+Strapi started successfully
+```
+
+(Strapi labels user migrations `[internal migration]` too.) The repair runs
+in one transaction: if it fails (missing variable, gap check, a lock held
+for 30 s), nothing is changed, the cms exits, compose restarts it in a loop,
+and `deploy.sh`'s smoke check fails. Fix the cause and deploy again, or roll
+back ([Rolling back this release](#rolling-back-this-release)). It is
+recorded in `strapi_migrations` and never runs again on this database.
+
+**After the deploy**
+
+8. **Checks.** `infra/deploy.sh` step 5 runs `infra/live-smoke.sh`, which now
+   starts with `live-smoke: datetime contract OK (process time zone UTC,
+   APP_TIME_ZONE Europe/Berlin)`. By hand:
+
+   ```bash
+   docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.columns WHERE table_schema = '\''public'\'' AND data_type = '\''timestamp without time zone'\''"'
+   ```
+
+   must print `0`. In the web, an event created in July for 18:00 (which the
+   old cms showed at 16:00 since 2026-08-15) shows 18:00 again.
+9. **Poll check:** a poll created with "closes on D" closes at the end of D
+   (23:59:59 `APP_TIME_ZONE`); the vote button and the vote endpoint now agree
+   at that second.
+10. **Review the ambiguous values.** The report now lists what the repair
+    recorded (open or upcoming ones; `--all` for every one):
+
+    ```bash
+    $COMPOSE exec cms node dist/scripts/datetime-migration-report.js
+    ```
+
+    For each value where the `read as Europe/Berlin` line is the intended
+    time (someone corrected it by hand after 2026-08-15), correct the time in
+    the Strapi admin panel (it now shows the `read as UTC` time).
+11. **Later:** after 90 days, and once step 10 is done, drop the audit table:
+    `DROP TABLE datetime_migration_audit;` (psql as above). Keep the two
+    `DATETIME_LEGACY_*` variables.
+
+**What users and editors notice** (worth a short release note):
+
+- Event, poll and announcement times entered before 2026-08-15 show their
+  intended time again (since that date they showed two hours early, one
+  hour for winter dates). A time corrected by hand since then is the
+  exception (step 10).
+- Downloaded calendar entries (`.ics`) of all-day events are all-day
+  entries, no longer a zero-length appointment at 22:00 or 23:00 the day
+  before.
+- A poll closes exactly at the end of its closing day in both the page and
+  the vote endpoint (the endpoint accepted votes in the very last second).
+- Upcoming birthdays and anniversaries, classified expiry and digest days are
+  the same as before on a Berlin deployment; anniversaries now need one full
+  year, a Feb 29 birthday is shown on Feb 28 in other years, and blocked
+  accounts get no card.
+- The Strapi admin panel shows and takes times in the admin's **browser**
+  zone, as before; the stored instant is correct either way.
 
 #### One-time: org draft/publish off
 
@@ -946,9 +1216,9 @@ migration are lost.
 department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
 with `SEED_DEMO_DATA=1`.
 
-#### Upgrading an existing instance to this release
+#### Upgrading to the Strapi 5.55.1 release (2026-09-25)
 
-"This release" is hardening batch 2 of 2026-09-25 (branch
+This is hardening batch 2 of 2026-09-25 (branch
 `feat/hardening-batch-2`). It moves the cms from Strapi 5.49.0 to **5.55.1**
 (with sharp 0.35.4), limits content-API writes on wiki pages, departments and
 teams to per-role field allowlists (FX07), and upgrades the test tooling to
@@ -1015,7 +1285,7 @@ with the ones below; both releases then go out in one deploy.
      finds its users by provider, so a converted account's Microsoft sign-in
      fails there (the cms answers "Email is already taken"). Before
      re-enabling the `MS_*` keys on a rollback, set those accounts back to
-     `microsoft` ([Rolling back this release](#rolling-back-this-release)).
+     `microsoft` ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)).
 
    An instance that already signs in locally only passes unchanged.
 
@@ -1024,7 +1294,7 @@ with the ones below; both releases then go out in one deploy.
    container. On a standalone Caddy box, run it (or the manual dump in
    [§7.1](#71-manual-postgres-backup)) yourself before
    `docker compose up -d --build`. It is the fallback should a rollback ever
-   need a restore ([Rolling back this release](#rolling-back-this-release)).
+   need a restore ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)).
 
 4. **Nothing else to change.** `JWT_SECRET` stays: users-permissions now pins
    the verification of its legacy-mode JWTs to HS256, the algorithm these
@@ -1376,6 +1646,88 @@ extra steps):
 > proxy if you need them. The cms-side guards and the app's login limiter
 > apply either way.
 
+### 3.10 Datetime contract
+
+How times are stored and computed (deep-dive decision 04; phase 1 covers
+the cms and the database, phase 2 the web):
+
+- **Instants** (a point on the timeline: `createdAt`, event `start`/`end`,
+  poll `closesAt`, …) are Strapi `datetime` fields, stored as Postgres
+  `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. The cms accepts an
+  instant only with `Z` or an offset.
+- **Calendar dates** (classified `expiresAt`, announcement `ackDeadline`,
+  `birthday`, `hireDate`) are Strapi `date` fields: `YYYY-MM-DD`, no zone,
+  never turned into a midnight instant.
+- **Zones.** The cms process runs in UTC (`TZ=UTC` in the image and in
+  compose), and every database session runs in UTC (`-c TimeZone=UTC`, sent
+  by `apps/cms/config/database.ts`). The business zone is `APP_TIME_ZONE`
+  (IANA name, default `Europe/Berlin`, one per deployment): "today", day and
+  week windows (weeks start on Monday), anniversaries (Feb 29 falls on Feb 28
+  in other years), classified expiry, digest days, the cron times, all-day
+  event days and poll deadlines ("closes on D" = D 23:59:59 there). An
+  unknown value stops cms and web at startup. Changing it later moves those
+  boundaries, not stored instants. Until the web's phase 2 the web container
+  runs in `APP_TIME_ZONE` and renders dates in its process zone.
+- **The guard.** Strapi creates every new `datetime` column as
+  `timestamp without time zone`. At each boot the cms converts every such
+  column of the app schema (`DATABASE_SCHEMA`, default `public`) to
+  `timestamptz` right after Strapi's schema sync, one short transaction per
+  table (lock timeout 5 s, statement timeout 60 s), reads the stored wall
+  clock as UTC, and logs `[datetime] converted N column(s) …`. It **refuses to
+  start** when a column is still naive after a retry, when the process is not
+  in UTC while there is something to convert, when a boot creates or changes
+  the schema in a non-UTC process, when the database session is not in UTC,
+  or when a naive app column holds data before the one-time repair has run.
+  An ordinary restart in a non-UTC process only warns. On SQLite (local
+  development) all of this is skipped.
+- **The one-time repair** (`apps/cms/database/migrations/`, logic in
+  `apps/cms/src/database/datetime-legacy.ts`) runs on the first boot of a
+  database written before the contract. It needs `DATETIME_LEGACY_ZONE`
+  (the zone the old cms ran in) and, if that cms ran in UTC first,
+  `DATETIME_LEGACY_UTC_UNTIL` (θ, the switch instant). Rules per value:
+  write-time stamps (`created_at`, `updated_at`, `published_at`, `read_at`,
+  …) by their own value (before θ: UTC wall clock, after: legacy zone);
+  session and token expiries by their row's `created_at`; user-entered
+  instants (`events.start`/`end`, `polls.closes_at`,
+  `announcements.expires_at`, `strapi_releases.scheduled_at`) by provenance:
+  **A** the document was created after θ (legacy zone), **B** the row was
+  last saved before θ (UTC), **C** otherwise (ambiguous; UTC, except an
+  all-day event stored as a legacy-zone midnight). A gap check requires θ to
+  sit in an empty stretch of write stamps at least as long as the zone
+  offset; old values stay in `datetime_migration_audit` (as text). Strapi's
+  bookkeeping tables are left to the guard. The runbook is
+  [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release).
+- **Report CLI** (read-only): `node dist/scripts/datetime-migration-report.js`
+  in the cms container (`--help` for the options). Before the repair it shows
+  what the repair would do; after it, the ambiguous values it recorded.
+- **Connection rules.** `DATABASE_URL` must not carry its own `options`
+  parameter (it would replace the UTC pin; the cms refuses it unless it sets
+  `TimeZone=UTC` itself). A pooler that drops startup options (PgBouncer in
+  transaction mode, Azure's built-in PgBouncer on port 6432) breaks the pin:
+  connect the cms directly (port 5432).
+- **Admin panel.** Strapi's admin panel shows and takes times in the
+  admin's **browser** zone; the stored instant is right either way. Admins
+  outside `APP_TIME_ZONE` see their own local times there.
+- **Cron and backups.** The janitors run at 03:30 / 03:35 and the digest at
+  07:30 `APP_TIME_ZONE`; the host crontab's 03:00 backup runs in the host's
+  zone and must come first (keep the host in `APP_TIME_ZONE`, or shift the
+  crontab line).
+- **Local development.** SQLite needs nothing. With a local Postgres, set
+  `TZ=UTC` in `apps/cms/.env` (a boot that creates or changes the schema
+  refuses any other zone).
+- **Tests.** `pnpm test:tz` runs the suite under `TZ=UTC`, `Europe/Berlin`
+  and `Pacific/Auckland`. The Postgres 16 integration suites
+  (`apps/cms/src/database/*.pg.test.ts`) run when `SINNLOS_TEST_PG_URL` points
+  at a database they may create schemas in, e.g. a throwaway
+  `docker run --rm -d -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`
+  with `SINNLOS_TEST_PG_URL=postgres://postgres:test@127.0.0.1:55432/postgres`.
+  CI's `datetime` job runs both; rerun it for every Strapi, knex or pg upgrade.
+- **New fields.** Instants are `"type": "datetime"`, calendar days
+  `"type": "date"`, durations numbers with the unit in the name. Never put a
+  `column` or `columnType` override on a `datetime` attribute: Strapi then
+  re-creates the column naive through an `ALTER` (the guard converts it back
+  at the same boot, but it is avoidable DDL).
+
 ---
 
 ## 4. Azure VM Deployment
@@ -1714,6 +2066,7 @@ az containerapp create \
       "MS_CLIENT_SECRET=<client-secret>" \
       "MS_TENANT_ID=<tenant-id>" \
       "LIVE_EVENTS_DISABLED=0" \
+      "APP_TIME_ZONE=Europe/Berlin" \
       "SMTP_HOST=<mail.example.com>" \
       "SMTP_PORT=587" \
       "SMTP_USER=<noreply@example.com>" \
@@ -1728,7 +2081,10 @@ az containerapp create \
 > web container (the kill switch is read on both sides), and
 > `INTERNAL_UPLOAD_TOKEN` must be identical on both containers. Replace every
 > `<…>` stand-in: the cms refuses to start in production with a placeholder
-> secret.
+> secret. The cms image runs in UTC by itself; `APP_TIME_ZONE` is the
+> business zone ([datetime contract](#310-datetime-contract)), and
+> `DATABASE_HOST` must be the server itself on port 5432, not Azure's built-in
+> PgBouncer (port 6432), which drops the cms's UTC session setting.
 
 > **Note on `WEB_INTERNAL_URL`:** the CMS also needs this to send its
 > live-event pings to the Next.js `/api/live/emit` ingest, but the web app's
@@ -1801,7 +2157,12 @@ az containerapp create \
       "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
       "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
-      "LIVE_EVENTS_DISABLED=0"
+      "LIVE_EVENTS_DISABLED=0" \
+      "APP_TIME_ZONE=Europe/Berlin" \
+      "TZ=Europe/Berlin"
+
+# TZ: the web still renders dates in its process zone until its datetime
+# port (phase 2), so it must equal APP_TIME_ZONE (compose does the same).
 
 # Now read the FQDN assigned to the web app
 WEB_FQDN=$(az containerapp show \
@@ -1909,6 +2270,13 @@ curl -I <URL>/api/departments
 # Strapi admin loads
 curl -I <URL>/admin
 # Expect: HTTP/1.1 200 OK
+
+# Datetime contract (Docker Compose): the cms runs in UTC and no column is
+# left as timestamp without time zone (infra/live-smoke.sh checks both).
+docker logs infra-cms-1 2>&1 | grep '\[datetime\] process time zone'
+# Expect: [datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin
+docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "SELECT count(*) FROM information_schema.columns WHERE data_type = '\''timestamp without time zone'\'' AND table_schema = '\''public'\''"'
+# Expect: 0
 ```
 
 ### 6.2 Content bootstrap
@@ -2012,9 +2380,9 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-an-existing-instance-to-this-release)), or roll back ([Rolling back this release](#rolling-back-this-release)) |
-| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
-| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
+| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)), or roll back ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)) |
+| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
+| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
@@ -2025,6 +2393,15 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | Sign-in form says "Too many sign-in attempts" for everyone | Strapi's throttle sees one client IP for all users: the edge does not pass the client's `X-Forwarded-For` (see [§3.9](#39-production-hardening)) |
 | Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back past 2026-09-24 and the user has not signed in again ([Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)) |
 | `[digest] misconfigured` / `[digest] skipped: DIGEST_FROM unset` in the cms log | SMTP is set without `DIGEST_FROM` or `PUBLIC_WEB_URL` |
+| cms restarts in a loop, log says `[datetime] This database holds datetime values written before the datetime contract …` | First boot on a pre-contract database without `DATETIME_LEGACY_ZONE`; nothing was changed. Follow [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release) |
+| cms restarts in a loop, log says `DATETIME_LEGACY_UTC_UNTIL (θ = …) is not inside an empty stretch of write-time stamps` | θ is wrong; nothing was changed. Run the report with `--around <pre-deploy backup time>` and pick θ inside the marked gap (upgrade step 3) |
+| `[datetime] … needs a UTC process` or `… only correct in a UTC process` | The cms runs with another `TZ` (a custom compose file or orchestrator). Set `TZ=UTC` ([§3.10](#310-datetime-contract)) |
+| `[datetime] The database session runs in "…", not UTC` | A pooler or proxy drops the startup options (PgBouncer in transaction mode, Azure's port 6432): connect the cms to Postgres directly |
+| cms refuses to start: `DATABASE_URL sets its own \`options\` query parameter …` | Remove `options` from `DATABASE_URL` (or include `-c TimeZone=UTC` in it) |
+| `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
+| cms or web refuses to start: `APP_TIME_ZONE must be an IANA time zone name …` | Fix `APP_TIME_ZONE` in `infra/.env` (e.g. `Europe/Berlin`) or leave it empty |
+| `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
+| `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 
 ---
 
@@ -2113,6 +2490,13 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 > commands in §7.1–§7.2 on a cron instead, and push the output off-site with
 > `rsync`/`rclone`.
 
+> **Order matters:** the crontab runs in the **host's** zone, while the
+> uploads and search-log janitors run at 03:30 / 03:35 **`APP_TIME_ZONE`**
+> ([datetime contract](#310-datetime-contract)). The backup must come first,
+> so every swept file is still in the previous backup. With the host in
+> `APP_TIME_ZONE` the line above is right; on a UTC host with
+> `APP_TIME_ZONE=Europe/Berlin` use `0 1 * * *`.
+
 ### 7.4 Update procedure (production-safe)
 
 On the live Traefik host the wrapper handles backup, rollback-tagging, build and
@@ -2175,6 +2559,32 @@ release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
 steps 3–7).
 
 #### Rolling back this release
+
+Re-upping the previous cms image (the 2026-09-26 release) after the datetime
+repair is safe **without** a `pg_restore`. Rehearsed on Postgres 16 with that
+image against a repaired database: it boots without any schema change (its
+schema sync finds the same schema; the unknown `strapi_migrations` record is
+ignored), reads every instant unchanged, and writes correct instants even in
+a Berlin process (pg sends a `Date` with its offset, and `timestamptz` keeps
+the instant). Rolling forward again is a no-op: the repair is recorded and
+never runs twice. Use the retag commands above.
+
+- The rollback commands run with the **new** compose file, so the old cms
+  then runs in UTC: until you roll forward, its date logic (birthday cards,
+  digest days, classified expiry) uses UTC days, off by one day between
+  midnight and 02:00 Berlin time. Its cron times stay Berlin (hard-coded
+  there). To avoid that, re-up it with the previous compose file:
+  `git show <previous-commit>:infra/docker-compose.yml > /tmp/compose-prev.yml`
+  and use `-f /tmp/compose-prev.yml` instead of `-f infra/docker-compose.yml`.
+- Do **not** restore the pre-deploy dump just to roll back. If you restore it
+  anyway (it predates the repair), keep `DATETIME_LEGACY_ZONE` /
+  `DATETIME_LEGACY_UTC_UNTIL` set: the next boot of the new cms then repairs
+  it again, correctly. Values written between the deploy and the restore are
+  lost with the restore, as with any restore.
+- A web-only rollback brings back the old poll close rule (the card treats the
+  closing second as open) and nothing else.
+
+#### Rolling back the Strapi 5.55.1 release (2026-09-25)
 
 Re-upping the previous (Strapi 5.49) cms image after 5.55.1 has migrated the
 database is safe **without** a `pg_restore`. This was verified on Postgres 16
