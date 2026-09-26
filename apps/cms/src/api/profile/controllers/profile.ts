@@ -33,6 +33,7 @@ import {
   USER_UID,
   shouldSanitizeForRole,
 } from "../../../utils/sanitize-user-contact";
+import { tryParsePlainDate } from "../../../utils/time";
 
 const EDITABLE_FIELDS = [
   "displayName",
@@ -238,17 +239,11 @@ export default {
         data.birthday = null;
       } else if (typeof data.birthday !== "string" || !ISO_DATE.test(data.birthday)) {
         return ctx.badRequest("birthday must be a YYYY-MM-DD date or null");
-      } else {
+      } else if (!tryParsePlainDate(data.birthday)) {
         // The regex alone accepts impossible calendar dates (2026-02-31),
-        // which Postgres rejects with a 500 at insert time. Roundtrip
-        // through Date: ISO date-only strings parse as UTC midnight, so a
-        // real date survives toISOString() unchanged, while an overflowing
-        // one normalizes to a different day (2026-02-31 → 2026-03-03) and
-        // an impossible month/day yields Invalid Date.
-        const parsed = new Date(data.birthday);
-        if (isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== data.birthday) {
-          return ctx.badRequest("birthday must be a valid calendar date");
-        }
+        // which Postgres rejects with a 500 at insert time. The birthday is
+        // a calendar date, parsed as one (utils/time.ts), never as an instant.
+        return ctx.badRequest("birthday must be a valid calendar date");
       }
     }
     if ("birthdayVisible" in data) {
