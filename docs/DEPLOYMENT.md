@@ -1039,8 +1039,10 @@ until step 10.
       address does not block users at other addresses. When Strapi's own
       throttle answers, the sign-in form says "Too many sign-in attempts —
       please wait a minute…" instead of "Invalid email or password".
-15. **Strapi admin → Settings → Users & Permissions → Roles:** no role has any
-    poll-vote action; admin and editor have no notification create/update and
+15. **Strapi admin → Settings → Users & Permissions → Roles:** no role has
+    poll-vote find/findOne/create/update/delete (only the custom `vote` and
+    `results` actions remain; guest has `results` only); admin and editor
+    have no notification create/update and
     no comment/kudos/reaction update; admin has no lesson-progress
     update/delete.
 16. **Live pipeline:** `infra/live-smoke.sh` passed (`deploy.sh` runs it when
