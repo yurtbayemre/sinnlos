@@ -1754,6 +1754,15 @@ the cms and the database, phase 2 the web):
   (created later)`, or `LOOKUP FAILED (…)` for an unexpected error, after
   which the CLI exits with status 1. Each lookup runs in a savepoint, so one
   failure does not abort the read-only transaction for the rest.
+- **Manual SQL.** The guard reads every naive column as a UTC wall clock.
+  A cast or `ALTER … TYPE timestamp` on a datetime column in a session of
+  another zone stores that zone's wall clock, and the next boot converts
+  it with every value shifted (the guard then warns `… is timestamp without
+  time zone again and holds values in N row(s)`; it cannot tell a manual
+  ALTER from a column Strapi re-created). Run manual DDL on datetime
+  columns only in a UTC session: `psql` inside the db container is one
+  (compose sets `PGTZ=UTC` there); elsewhere run `SET TimeZone = 'UTC';`
+  first.
 - **Connection rules.** `DATABASE_URL` must not carry its own `options`
   parameter (it would replace the UTC pin; the cms refuses it unless it sets
   `TimeZone=UTC` itself). A pooler that drops startup options (PgBouncer in

@@ -6,9 +6,11 @@ services:
       POSTGRES_DB: ${DATABASE_NAME:-sinnlos}
       POSTGRES_USER: ${DATABASE_USERNAME:-sinnlos}
       POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
-      # psql shells in this container show timestamptz values in UTC. Only
-      # display: the cms pins its own sessions to UTC, and stored instants
-      # carry no zone.
+      # psql sessions in this container (docker exec infra-db-1 psql ...) run
+      # in UTC: they show timestamptz values in UTC, and any manual DDL or
+      # cast on a datetime column (ALTER ... TYPE timestamp, ::timestamp)
+      # must run in a UTC session, because the cms guard reads a naive
+      # column as UTC wall clock. The cms pins its own sessions to UTC.
       PGTZ: UTC
     volumes:
       - pgdata:/var/lib/postgresql/data

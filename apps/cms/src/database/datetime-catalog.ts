@@ -156,6 +156,21 @@ export async function columnsHoldValues(
   return rows[0]?.found === true;
 }
 
+/** Number of the table's rows in which any of the given columns holds a value. */
+export async function countRowsWithValues(
+  sql: SqlClient,
+  schema: string,
+  table: string,
+  columns: readonly string[],
+): Promise<number> {
+  if (columns.length === 0) return 0;
+  const predicate = columns.map((column) => `${quoteIdent(column)} IS NOT NULL`).join(" OR ");
+  const rows = await sql.query<{ n: string }>(
+    `SELECT count(*)::text AS n FROM ${qualifiedTable(schema, table)} WHERE ${predicate}`,
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
 /** Groups columns by table, keeping order. */
 export function groupByTable(columns: readonly NaiveColumn[]): Map<string, string[]> {
   const byTable = new Map<string, string[]>();

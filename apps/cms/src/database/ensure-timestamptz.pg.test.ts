@@ -99,7 +99,7 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
   });
 
   it("re-converts a column that a later sync re-created naive, without moving the instant", async () => {
-    const { strapi } = host();
+    const { strapi, log } = host();
     await convertNaiveColumns(strapi, UTC);
     // What knex emits for Strapi's datetime .alter(): a naive type, cast in
     // the (UTC) session.
@@ -116,6 +116,10 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     ]);
     expect(await isoOf(knex, schema, "events", "start", "id = 1")).toBe("2026-10-25T01:30:00Z");
     expect(await columnType(knex, schema, "events", "created_at")).toBe("timestamp with time zone");
+    // Re-created with data after the repair: converted, and said so with the count.
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/^\[datetime\] events \(start, ends_at\) is timestamp without time zone again and holds values in 1 row\(s\)/),
+    );
   });
 
   it("round-trips Date bindings as instants whatever zone the process runs in", async () => {

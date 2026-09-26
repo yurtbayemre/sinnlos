@@ -47,6 +47,7 @@ import {
   LEGACY_MIGRATION_NAME,
   alterToTimestamptzSql,
   columnsHoldValues,
+  countRowsWithValues,
   groupByTable,
   knexSqlClient,
   legacyMigrationRecorded,
@@ -292,6 +293,24 @@ export async function convertNaiveColumns(strapi: GuardHost, options: GuardOptio
         `[datetime] Naive timestamp columns hold data (${withData.join(", ")}) but the one-time ` +
           `datetime repair (database/migrations/${LEGACY_MIGRATION_NAME}) has not run. Refusing to ` +
           "read them as UTC. Check that the migration file is deployed and see docs/DEPLOYMENT.md.",
+      );
+    }
+  } else {
+    // After the repair a naive app column with data was re-created: by
+    // Strapi (a `column` override or a type change, cast in its UTC session:
+    // reading it as UTC is right) or by hand. A manual ALTER ... TYPE
+    // timestamp in a non-UTC session (psql without PGTZ=UTC) stored that
+    // session's wall clock, and this conversion then shifts every value.
+    // Nothing here can tell the two apart, so say it with the row count.
+    for (const [table, columns] of byTable) {
+      if (BOOKKEEPING_TABLES.includes(table)) continue;
+      const rowsWithValues = await countRowsWithValues(sql, schema, table, columns);
+      if (rowsWithValues === 0) continue;
+      strapi.log.warn(
+        `[datetime] ${table} (${columns.join(", ")}) is timestamp without time zone again and holds values in ` +
+          `${rowsWithValues} row(s); converting them as UTC wall clocks. That is right when Strapi re-created ` +
+          "the column; after a manual ALTER in a non-UTC session the values move by that zone's offset " +
+          "(docs/DEPLOYMENT.md, datetime contract).",
       );
     }
   }

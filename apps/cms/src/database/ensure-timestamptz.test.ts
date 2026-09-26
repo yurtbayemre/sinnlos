@@ -63,6 +63,10 @@ function fakeStrapi(overrides: Partial<FakeDbState> = {}, client = "postgres") {
       const table = /FROM "public"\."([^"]+)"/.exec(sql)?.[1] ?? "";
       return [{ found: state.tablesWithData.has(table) }];
     }
+    if (sql.startsWith("SELECT count(*)::text AS n")) {
+      const table = /FROM "public"\."([^"]+)"/.exec(sql)?.[1] ?? "";
+      return [{ n: state.tablesWithData.has(table) ? "3" : "0" }];
+    }
     if (sql.startsWith("ALTER TABLE")) {
       const table = /ALTER TABLE "public"\."([^"]+)"/.exec(sql)?.[1] ?? "";
       if (state.failingTables.has(table)) throw new Error("canceling statement due to lock timeout");
@@ -222,6 +226,22 @@ describe("convertNaiveColumns (afterSync)", () => {
       tablesWithData: new Set(["strapi_migrations"]),
     });
     expect(await convertNaiveColumns(strapi, UTC)).toHaveLength(2);
+  });
+
+  it("after the repair, warns with the row count when it converts an app column that holds values", async () => {
+    const { strapi, log } = fakeStrapi({
+      naive: [
+        { table: "events", column: "start" },
+        { table: "polls", column: "closes_at" },
+        { table: "strapi_migrations", column: "time" },
+      ],
+      tablesWithData: new Set(["events", "strapi_migrations"]),
+    });
+    expect(await convertNaiveColumns(strapi, UTC)).toHaveLength(3);
+    expect(log.warn).toHaveBeenCalledTimes(1);
+    expect(log.warn).toHaveBeenCalledWith(
+      expect.stringMatching(/events \(start\) is timestamp without time zone again and holds values in 3 row\(s\).*manual ALTER in a non-UTC session/),
+    );
   });
 
   it("logs a table it cannot convert and carries on with the others", async () => {
