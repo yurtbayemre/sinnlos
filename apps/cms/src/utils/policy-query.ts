@@ -5,7 +5,8 @@
  * Why this exists — the policy-context no-op trap:
  *   Strapi builds the `policyContext` via
  *   `createPolicyContext('koa', ctx)` → `Object.assign({ is, type }, ctx)`
- *   (see @strapi/utils 5.49 `dist/policy.js`). `Object.assign` only copies
+ *   (see @strapi/utils `dist/policy.js`, same in 5.49 and 5.55.1).
+ *   `Object.assign` only copies
  *   OWN enumerable properties. Koa exposes `ctx.query` as a *prototype
  *   getter* (delegated to `request.query`), so it is NOT copied onto the
  *   plain object. Assigning `policyContext.query = {...}` therefore creates
@@ -25,7 +26,8 @@
  * Verified empirically against @strapi/utils 5.49 + koa 2.16 via node repro
  * (mutating `policyContext.query` → ctx.query.filters === undefined;
  * mutating `policyContext.request.query` → ctx.query.filters reflects it,
- * for both populated and empty querystrings).
+ * for both populated and empty querystrings); repeated on @strapi/utils
+ * 5.55.1 + koa 2.16.4 with the same result.
  */
 export function getMutableQuery(policyContext: any): Record<string, any> {
   const request = policyContext?.request;
@@ -43,14 +45,14 @@ export function getMutableQuery(policyContext: any): Record<string, any> {
  * inject for a resolved list of visible primary-key ids.
  *
  * Why the empty list needs special treatment — the sanitize fail-open trap:
- *   The core controllers run `sanitizeQuery` (@strapi/utils 5.49
+ *   The core controllers run `sanitizeQuery` (@strapi/utils
  *   `dist/sanitize/sanitizers.js`, `defaultSanitizeFilters`) over the
  *   request filters AFTER our policy injected them. Its last visitor
  *   removes "empty plain objects and empty arrays" as operands — so
  *   `{ id: { $in: [] } }` loses the `$in` key and degrades to `{ id: {} }`,
  *   which is no constraint at all. A user who may see NOTHING would
  *   suddenly see EVERYTHING (fail-open). Verified via node repro against
- *   the installed @strapi/utils 5.49:
+ *   @strapi/utils 5.49 and again 5.55.1:
  *     { id: { $in: [] } }  → sanitized to { id: {} }
  *     { id: { $eq: -1 } }  → survives unchanged
  *
@@ -74,31 +76,43 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
  *   publication states. Which of them the caller actually gets is decided
  *   by the `status` query param — and that param is client-supplied:
  *     - `validateQuery` accepts it (`status` is in
- *       `ALLOWED_QUERY_PARAM_KEYS`, @strapi/utils 5.49
+ *       `ALLOWED_QUERY_PARAM_KEYS`, @strapi/utils
  *       `content-api-constants.js`),
  *     - `sanitizeQuery` only rewrites `filters`/`sort`/`fields`/`populate`
  *       and passes `status` through untouched,
  *     - the core service merges it OVER its own default:
  *       `getFetchParams` = `{ status: 'published', ...params }`
- *       (@strapi/core 5.49 `core-api/service/core-service.js`), and
+ *       (@strapi/core `core-api/service/core-service.js`), and
  *     - the document service turns `status: 'draft'` into
  *       `lookup.publishedAt = { $null: true }`
  *       (`services/document-service/draft-and-publish.js`).
+ *   (All four files are unchanged from 5.49 to 5.55.1.)
  *   So EVERY role holding `<type>.find` could read unpublished drafts of
  *   the rows it may see by appending `?status=draft` — verified against
- *   the installed 5.49: validateQuery ACCEPTS the param and sanitizeQuery
- *   returns it verbatim. Writing the param server-side after the
+ *   5.49 and again 5.55.1: validateQuery ACCEPTS the param and
+ *   sanitizeQuery returns it verbatim. Writing the param server-side after the
  *   admin/editor bypass closes that: our value is what sanitizeQuery sees,
  *   and it overrides whatever the client sent.
  *
  * `publicationState` is the Strapi v4 spelling of the same switch. It is
  * inert in v5 (no occurrence anywhere in @strapi/core, @strapi/utils or
- * @strapi/database 5.49), and the core does not strip it: this CMS sets no
+ * @strapi/database 5.49 or 5.55.1), and the core does not strip it: this CMS sets no
  * `api.rest.strictParams`, so `sanitizeQuery` keeps unknown keys. The
  * sanitize.query wrapper in src/index.ts now drops every non-REST root key
  * (utils/rest-query-params.ts); deleting it here as well keeps a future
  * back-compat shim (or a plugin honouring the legacy name) from
  * re-opening the hole should that pick ever change.
+ *
+ * `publicationFilter` (and its deprecated boolean form `hasPublishedVersion`)
+ * are live content-api keys (`SHARED_QUERY_PARAM_KEYS`, @strapi/utils
+ * `content-api-constants.js`, in 5.49 and 5.55.1), so the rest-query-params
+ * pick keeps them. The document service parses
+ * them (`transform/query.js`) and merges a publication-cohort condition
+ * into `filters` under the current status, nested populate sub-queries
+ * included. Rows stay published, but the cohort reveals which published
+ * documents have pending unpublished edits, which is editorial state that
+ * only admin_role / editor should see. Both keys are therefore dropped
+ * here, after the bypass, just like `status` is pinned.
  *
  * Only for draftAndPublish types — on the others `status` is ignored by
  * the document service anyway, but setting it would be misleading.
@@ -106,4 +120,6 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
 export function forcePublishedStatus(query: Record<string, any>): void {
   query.status = "published";
   delete query.publicationState;
+  delete query.publicationFilter;
+  delete query.hasPublishedVersion;
 }

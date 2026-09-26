@@ -20,8 +20,10 @@ export default ({ env }: { env: Env }) => ({
     keys: env.array("APP_KEYS"),
   },
   url: env("PUBLIC_URL", "http://localhost:1337"),
-  // Trust X-Forwarded-* (FX11). Strapi 5 reads ONLY `server.proxy.koa`
-  // (@strapi/core dist/services/server/index.js:23); the v4 spelling
+  // Trust X-Forwarded-* (FX11). Strapi 5 decides trust ONLY from
+  // `server.proxy.koa` (@strapi/core dist/services/server/index.js:23; since
+  // 5.52 it also passes `server.proxy.ipHeader`/`maxIpsCount`, unset here, so
+  // Koa keeps its defaults); the v4 spelling
   // `proxy: true` was silently ignored, so ctx.request.ip was the web
   // container for every sign-in and the users-permissions throttle
   // (plugin rateLimit middleware: noIdentifier:<path>:<ip> for /auth/local,
@@ -45,7 +47,8 @@ export default ({ env }: { env: Env }) => ({
   //    that admin out; now guessing scales with the attacker's IPs, and a
   //    spoofable X-Forwarded-For would leave it unthrottled.
   proxy: { koa: true },
-  // Strapi-native cron (node-schedule via @strapi/core, no extra dep).
+  // Strapi-native cron (croner via @strapi/core since 5.54, node-schedule
+  // before; no extra dep). `rule` is a 5-field cron pattern, `tz` its zone.
   cron: {
     enabled: true,
     tasks: {

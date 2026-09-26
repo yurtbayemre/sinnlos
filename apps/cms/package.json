@@ -6,17 +6,17 @@
   "scripts": {
     "dev": "strapi develop",
     "start": "strapi start",
-    "build": "strapi build",
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && strapi build",
     "strapi": "strapi",
     "typecheck": "tsc --noEmit",
     "lint": "eslint ."
   },
   "dependencies": {
-    "@strapi/plugin-cloud": "5.49.0",
-    "@strapi/plugin-users-permissions": "5.49.0",
-    "@strapi/provider-email-nodemailer": "^5.52.2",
-    "@strapi/strapi": "5.49.0",
-    "@strapi/utils": "5.49.0",
+    "@strapi/plugin-cloud": "5.55.1",
+    "@strapi/plugin-users-permissions": "5.55.1",
+    "@strapi/provider-email-nodemailer": "5.55.1",
+    "@strapi/strapi": "5.55.1",
+    "@strapi/utils": "5.55.1",
     "better-sqlite3": "12.9.0",
     "pg": "8.13.1",
     "react": "18.3.1",
@@ -25,7 +25,7 @@
     "styled-components": "6.1.13"
   },
   "devDependencies": {
-    "@strapi/typescript-utils": "5.49.0",
+    "@strapi/typescript-utils": "5.55.1",
     "@types/node": "24.13.3",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",

@@ -21,12 +21,19 @@ After deploying, run the [post-deployment verification](#post-deployment-verific
 and set up [backup & restore](#backup--restore) for any production environment.
 
 All methods share the same [prerequisites](#prerequisites) and
-[Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first.
+[Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first
+(the Entra setup is only needed for Microsoft sign-in, which this release
+cannot offer; see the note there).
 
-> **Upgrading an instance that runs a release from before 2026-09-24?** Work
-> through [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> before you deploy: the env contract is stricter, `JWT_SECRET` must be
-> rotated once, and `infra/deploy.sh` refuses to deploy until both are done.
+> **Upgrading an existing instance?** Work through
+> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
+> before you deploy: the cms moves to Strapi 5.55.1 (additive database
+> changes, the pre-deploy backup is mandatory), and **Microsoft sign-in stops
+> working**, so an instance that uses it must stay on its current release. An
+> instance that runs a release from before 2026-09-24 also needs
+> [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
+> the env contract is stricter, `JWT_SECRET` must be rotated once, and
+> `infra/deploy.sh` refuses to deploy until both are done.
 
 ---
 
@@ -36,7 +43,7 @@ Install these on any machine you are deploying **from**:
 
 | Tool | Minimum version | Install |
 |---|---|---|
-| Node.js | 22 LTS or 24 LTS *(Node 20 is EOL — do not use)* | [nodejs.org](https://nodejs.org) |
+| Node.js | 22.13+ or 24 LTS *(root `engines`: `^22.13.0 \|\| ^24.0.0`; CI and the images use 24; Node 20 is EOL — do not use)* | [nodejs.org](https://nodejs.org) |
 | pnpm | 9.x | `corepack enable && corepack prepare pnpm@9.12.0 --activate` |
 | Git | any recent | system package manager |
 | openssl | any recent | preinstalled on macOS/Linux; on Windows use Git Bash or WSL |
@@ -47,7 +54,7 @@ Install these on any machine you are deploying **from**:
 Check versions:
 
 ```bash
-node -v          # v20.x.x, v22.x.x, or v24.x.x
+node -v          # v22.13.0 or later on the 22 line, or v24.x.x
 pnpm -v          # 9.x.x
 docker -v        # Docker version 24.x.x
 docker compose version  # Docker Compose version v2.x.x
@@ -64,6 +71,18 @@ openssl version  # OpenSSL 3.x.x
 
 Sinnlos uses **Microsoft Entra ID (formerly Azure AD)** for SSO. You need one
 app registration and you'll reference it in every deployment method.
+
+> **Microsoft sign-in is unavailable in this release.** Strapi's
+> users-permissions 5.51+ (this release runs Strapi 5.55.1) completes
+> `/api/auth/:provider/callback` only from its own OAuth session, so it
+> answers the web's server-side access-token exchange with a 400 and every
+> Microsoft sign-in fails. Until the planned Entra exchange ships, leave every
+> `MS_*` / `AUTH_MICROSOFT_*` value empty and use local e-mail + password
+> sign-in ([README → standalone mode](../README.md#running-without-microsoft-standalone-mode)).
+> With a real app registration configured, the web logs an `[auth]` error at
+> boot and `infra/deploy.sh` refuses to deploy (see
+> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+> The steps below stay for reference.
 
 ### Step 1 — Create the app registration
 
@@ -117,6 +136,11 @@ Click **Grant admin consent for \<tenant\>** → **Yes**.
 
 You can add all of them up front so a single registration covers every environment.
 
+The Strapi column (`/api/connect/microsoft/callback`) is not used by the
+current sign-in flow: the web exchanges the Entra access token server-side at
+`/api/auth/microsoft/callback` and never sends the browser through Strapi's
+own OAuth redirect. Registering it is harmless.
+
 ---
 
 ## 1. Bare-Metal Local Development
@@ -157,6 +181,8 @@ ENCRYPTION_KEY=               # openssl rand -base64 32
 
 PUBLIC_URL=http://localhost:1337
 
+# Microsoft sign-in cannot complete on this release (Strapi 5.51+, see the
+# Entra section above): leave these empty and use local sign-in.
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
 MS_TENANT_ID=<your-tenant-id>
@@ -190,13 +216,14 @@ STRAPI_ADMIN_PASSWORD=
 > **Keep the dev server off the network.** `apps/cms/.env.example` sets
 > `HOST=0.0.0.0`, so `pnpm cms:dev` (`strapi develop`) listens on every
 > interface, and in develop mode Strapi serves its admin panel through the
-> Vite dev server on that same port. Strapi 5.49 and 5.55.1 pin Vite 5.4.21,
-> which has open advisories for its dev server (GHSA-fx2h-pf6j-xcff,
-> GHSA-v6wh-96g9-6wx3, GHSA-4w7w-66w2-5vf9; see
+> Vite dev server on that same port. Strapi 5.55.1 (like 5.49 before it)
+> pins Vite 5.4.21, which has open advisories for its dev server
+> (GHSA-fx2h-pf6j-xcff, GHSA-v6wh-96g9-6wx3, GHSA-4w7w-66w2-5vf9; see
 > [architecture.md §7b P1.7](./architecture.md)). On a machine in a shared
 > network, especially on Windows, set `HOST=127.0.0.1` in `apps/cms/.env`;
 > the `localhost` URLs above keep working. Production (`strapi start`, the
-> Docker image) does not load Vite.
+> Docker image) does not load Vite. The root test tooling (vitest 4) uses its
+> own Vite 7.3.6, which has no known advisories.
 
 > **Prefer Postgres locally?** Run one with Docker in a single command, set
 > `DATABASE_CLIENT=postgres` and uncomment the Postgres block in `apps/cms/.env`:
@@ -226,6 +253,8 @@ AUTH_SECRET=<openssl rand -base64 32>
 # the server-side Strapi token reader derives the name the same way.
 AUTH_URL=http://localhost:3000
 AUTH_TRUST_HOST=true
+# Leave the three Entra values empty on this release (Microsoft sign-in
+# cannot complete on Strapi 5.51+); local sign-in then switches on by itself.
 AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-id>
 AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
 AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id>/v2.0
@@ -260,6 +289,15 @@ Or both at once (output interleaved):
 pnpm dev
 ```
 
+> **Built code from a checkout.** `pnpm --filter @sinnlos/cms build` deletes
+> `apps/cms/dist` before it runs `strapi build`. Strapi's build never cleans
+> `dist` (only `strapi develop` does), and `strapi start` loads every compiled
+> file there, so without this a later `strapi start` from the same checkout
+> kept loading code whose source had been removed. No manual `rm -rf dist` is
+> needed any more. Do not run the cms build while `strapi start` serves from
+> the same checkout: `dist` disappears at the start of the build. The Docker
+> build starts from a fresh tree and is unaffected.
+
 ### 1.4 First-time Strapi setup
 
 1. Open **http://localhost:1337/admin** → create your first admin account.
@@ -270,10 +308,12 @@ pnpm dev
 ### 1.5 Verify login
 
 1. Open **http://localhost:3000** → you are redirected to `/sign-in`.
-2. Click **Sign in with Microsoft** → complete the Microsoft OIDC flow.
-3. Strapi auto-creates your user, pulls display name + job title from Graph, and
-   maps your Entra group membership to a role.
-4. You land on the dashboard with your name in the top-right corner.
+2. Sign in with e-mail + password. Create the account first in the Strapi
+   admin (**Content Manager → User**: e-mail, password, confirmed = true), or
+   boot once with `SEED_DEMO_DATA=1` for demo users. Microsoft sign-in cannot
+   complete on this release (see the
+   [Entra section](#microsoft-entra-id-app-registration)).
+3. You land on the dashboard with your name in the top-right corner.
 
 ### 1.6 Demo mode (no Microsoft account needed)
 
@@ -328,6 +368,8 @@ REVALIDATE_SECRET=<openssl rand -hex 32>
 # Without it every uploaded file answers 404 (fail closed).
 INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>
 
+# Microsoft sign-in: leave empty on this release (it cannot complete on
+# Strapi 5.51+); both apps then offer local sign-in.
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
@@ -505,6 +547,8 @@ AUTH_SECRET=<secret>
 REVALIDATE_SECRET=<secret>
 INTERNAL_UPLOAD_TOKEN=<secret>
 
+# Microsoft sign-in: leave empty on this release. It cannot complete on
+# Strapi 5.51+, and infra/deploy.sh refuses a real app registration here.
 MS_TENANT_ID=<your-tenant-id>
 MS_CLIENT_ID=<your-client-id>
 MS_CLIENT_SECRET=<your-client-secret>
@@ -533,7 +577,8 @@ DIGESTS_DISABLED=0
 > Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a
 > template placeholder (`<…>`, `change-me…`, `toBeModified…`).
 
-Update Entra ID redirect URIs:
+Update Entra ID redirect URIs (only once Microsoft sign-in is usable again;
+the second one is not used by the current flow):
 
 ```
 https://intranet.example.com/api/auth/callback/microsoft-entra-id
@@ -615,12 +660,19 @@ The preflight fails (naming keys, never values) when:
   label `org.sinnlos.strapi-jwt=server-only` (i.e. it is a web from before
   2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
   be deployed equals the one the running cms uses. A fresh install (no
-  running web/cms) skips this check.
+  running web/cms) skips this check;
+- Microsoft sign-in is configured: `MS_CLIENT_ID` and `MS_CLIENT_SECRET` are
+  both set and the client id is a GUID (a real app registration). Strapi
+  5.51+ rejects the web's access-token exchange, so every Microsoft sign-in
+  would fail, and with `AUTH_LOCAL_ENABLED=0` nobody could sign in. A
+  non-GUID client id (template text) only warns. The rule goes away with the
+  Entra exchange.
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
-`send-digests.ts`), so the preflight cannot silently drift from what the new
-cms refuses at boot.
+`send-digests.ts`), and the Microsoft rule to the web's `MICROSOFT_ENABLED`
+and the compose mapping, so the preflight cannot silently drift from what
+the apps do at boot.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -634,9 +686,12 @@ systemctl start docker
 
 ### 3.8 Updates
 
-> **Upgrading from a release before 2026-09-24?** Follow
+> **Upgrading to this release (Strapi 5.55.1)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> first: the deploy needs env changes and one `JWT_SECRET` rotation.
+> first: take the pre-deploy backup, and do not deploy an instance that
+> signs users in with Microsoft. Coming from a release before 2026-09-24,
+> also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
+> that deploy needs env changes and one `JWT_SECRET` rotation.
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, backs up and rollback-tags before rebuilding:
@@ -664,8 +719,189 @@ is degraded while the new cms boots. For the manual production-safe sequence
 
 #### Upgrading an existing instance to this release
 
-"This release" is the hardening batch of 2026-09-24 (branch
-`feat/hardening-batch-1`). It has **no database schema change and no data
+"This release" is hardening batch 2 of 2026-09-25 (branch
+`feat/hardening-batch-2`). It moves the cms from Strapi 5.49.0 to **5.55.1**
+(with sharp 0.35.4), limits content-API writes on wiki pages, departments and
+teams to per-role field allowlists (FX07), and upgrades the test tooling to
+vitest 4.1.11. The vitest upgrade is dev and CI only: nothing in either
+production image changes, and developers run `pnpm install` after pulling.
+Strapi changes the database on first boot, but only additively, and the
+previous image still runs on the migrated database. **No env change and no
+`JWT_SECRET` rotation**; users stay signed in.
+
+An instance that still runs a release from before 2026-09-24 also needs
+[Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24)
+(env contract, one `JWT_SECRET` rotation). Do its "before" steps together
+with the ones below; both releases then go out in one deploy.
+
+> **Microsoft sign-in stops working with this release.** Strapi's
+> users-permissions 5.51+ completes `/api/auth/:provider/callback` only from
+> its own OAuth session, so it answers the web's server-side access-token
+> exchange with `400 OAuth authentication requires a completed provider
+> session`. Every Microsoft sign-in fails (closed); local e-mail + password
+> sign-in is unaffected. An instance whose users sign in with Microsoft must
+> stay on its current (Strapi 5.49) images until the planned Entra exchange
+> ships. `infra/deploy.sh` enforces this (step 2).
+
+**Before the deploy**
+
+1. **Pull and validate, deploying nothing:**
+
+   ```bash
+   cd /opt/sinnlos && git pull      # your checkout on the host
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+2. **Microsoft sign-in.** The preflight now fails while `MS_CLIENT_ID` and
+   `MS_CLIENT_SECRET` are both set and the client id is a real app
+   registration (a GUID); a non-GUID value such as the `.env.example` text
+   only warns, because that Microsoft button could never work either. Two
+   ways out:
+   - keep the running release, and do not deploy this one, until the Entra
+     exchange ships; or
+   - clear `MS_CLIENT_ID` and `MS_CLIENT_SECRET` in `infra/.env`, which
+     switches both apps to local sign-in. Accounts created through Microsoft
+     sign-in cannot sign in locally as they are: they have no password, and
+     they carry `provider = microsoft`, while Strapi's local login only
+     matches accounts with `provider = local`. A password alone is not
+     enough: the sign-in page still answers "Invalid email or password". For
+     each such account an admin opens it in the Strapi admin
+     (**Content Manager → User**), sets a password and changes **Provider**
+     from `microsoft` to `local`. To switch the provider of all of them at
+     once, run this right before the deploy (the passwords are still set per
+     account; the first query lists the accounts that need one, keep that
+     list):
+
+     ```bash
+     cd /opt/sinnlos/infra
+     docker compose exec -T db psql -U sinnlos -d sinnlos -c \
+       "SELECT id, email FROM up_users WHERE provider = 'microsoft';"
+     docker compose exec -T db psql -U sinnlos -d sinnlos -c \
+       "UPDATE up_users SET provider = 'local' WHERE provider = 'microsoft';"
+     ```
+
+     The switch is one-way for the old (Strapi 5.49) Microsoft flow: it
+     finds its users by provider, so a converted account's Microsoft sign-in
+     fails there (the cms answers "Email is already taken"). Before
+     re-enabling the `MS_*` keys on a rollback, set those accounts back to
+     `microsoft` ([Rolling back this release](#rolling-back-this-release)).
+
+   An instance that already signs in locally only passes unchanged.
+
+3. **Take the pre-deploy Postgres backup. This step is mandatory.**
+   `infra/deploy.sh` runs `infra/backup/pg-backup.sh` before it touches a
+   container. On a standalone Caddy box, run it (or the manual dump in
+   [§7.1](#71-manual-postgres-backup)) yourself before
+   `docker compose up -d --build`. It is the fallback should a rollback ever
+   need a restore ([Rolling back this release](#rolling-back-this-release)).
+
+4. **Nothing else to change.** `JWT_SECRET` stays: users-permissions now pins
+   the verification of its legacy-mode JWTs to HS256, the algorithm these
+   tokens already use, so tokens issued by 5.49 are accepted by 5.55.1 and
+   vice versa (verified). Nobody is signed out.
+
+**Deploy**
+
+5. Run `infra/deploy.sh` on the Traefik host. On a standalone Caddy box, run
+   `docker compose up -d --build` from `infra/` once `infra/deploy.sh --check`
+   passes. Deploy web and cms together, as compose does. The cms image no
+   longer installs the system libvips (`vips-dev`, about 240 MiB): sharp
+   0.35.4 loads its bundled libvips 8.18.6 through the prebuilt
+   `@img/sharp-linuxmusl-x64` binding (verified in the built `node:24-alpine`
+   image with a resize and a real `POST /api/upload` that generated every
+   format).
+
+**What the first boot changes in the database.** Strapi's schema sync applies
+it on its own; there is no migration script to run:
+
+- two new nullable columns, `admin_users.reset_password_token_expires_at` and
+  `strapi_sessions.metadata`;
+- one row in `strapi_migrations_internal`,
+  `upload::unsign-richtext-and-blocks-urls` (a no-op with the local upload
+  provider used here).
+
+No data is rewritten, and there are no new tables or indexes.
+
+**After the deploy**
+
+6. **cms log** (`docker logs infra-cms-1`): one
+   `[internal migration]: migrating upload::unsign-richtext-and-blocks-urls`
+   line on this first boot, and no errors. Strapi's notice "The Media Library
+   has been redesigned and is now the default…" does **not** appear:
+   `apps/cms/config/features.ts` sets `useLegacyMediaLibrary: true`, so
+   editors keep the Media Library they know (Strapi logs the notice only when
+   that flag is absent). Switching to the redesigned one is a separate
+   decision: set the flag to `false` or remove it, then rebuild the image.
+   The MCP server that ships with Strapi 5.55.1 stays off
+   (`server.mcp.enabled` defaults to `false`).
+7. **Sessions and uploads:** users who were signed in before the deploy still
+   are. Sign in with a local account, and post a marketplace ad with a photo.
+   An instance that left Microsoft sign-in in step 2 signs in with one of the
+   converted accounts at `/sign-in`.
+8. **Cron:** Strapi's cron now runs on croner instead of node-schedule. The
+   fire times are unchanged (uploads janitor 03:30, search-log janitor 03:35,
+   digest mailer 07:30, Europe/Berlin), checked across both DST switches,
+   including 2026-10-25. The next morning the 07:30 digest run logs as
+   before (`[digest] run complete …`, or `[digest] skipped` without SMTP).
+9. **Permissions (optional):** `infra/diagnostics/prod-perm-diff.sql` now lists
+   two informational `MISSING_IN_DB` rows for `authenticated`:
+   `plugin::users-permissions.auth.getSessions` and `…auth.revokeSession`.
+   users-permissions grants them only on a fresh database
+   (`plugin_default_first_boot`); on existing databases nobody holds them,
+   their routes (`GET /api/auth/sessions`, `DELETE /api/auth/sessions/:id`)
+   answer 404 in the legacy JWT mode used here, and the edge sends
+   `/api/auth/*` to the web anyway. Nothing to fix. FX07 changes no grant,
+   so nothing else in the snapshot moves.
+
+**What users and editors notice** (worth a short release note):
+
+- Nobody is signed out.
+- Microsoft sign-in is unavailable until the Entra exchange ships (see above).
+- A `%` or `_` in a search term now matches literally (Strapi escapes them in
+  `$contains`/`$containsi` filters, which the web search uses).
+- A text field longer than 255 characters is rejected with a 400 validation
+  error instead of a database error (Postgres `varchar(255)` limited it
+  before, too).
+- An ad without photos comes back with `images: []` instead of `null`; the
+  web handles both.
+- Page-based pagination above 100 entries per page is clamped consistently.
+- Strapi admin panel: the Media Library stays as it was (step 6). Admin
+  reset-password tokens now expire, there is a new active-devices (sessions)
+  view, and assets can no longer be edited or deleted on published entries.
+- Content-API writes on wiki pages, departments and teams by department
+  heads, team leads and members (Strapi JWT) are limited to allowlisted
+  fields (FX07): a department head may change the description and colour of
+  their own department, a team lead (or the head of the team's department)
+  the team's description, and plain team members can no longer edit their
+  team. The web has no write path for wiki pages, departments or teams, so
+  nothing changes in the web UI; the Strapi admin panel and `admin_role` /
+  `editor` API calls are unaffected. Direct API callers get:
+  - `400 Invalid or disallowed data field(s): <keys>` for a refused key or
+    value;
+  - `403` for plain team members updating a team;
+  - `403` for authors, department heads or team leads updating a page in a
+    space they cannot read, or whose draft and published rows sit in
+    different spaces.
+
+  The policies were renamed from `global::is-department-head` /
+  `global::is-team-member-or-lead` to `global::can-edit-department` /
+  `global::can-edit-team`. No database state refers to them, but runbooks and
+  log searches that use the old names need updating. Until FX29 lands,
+  department heads should not rely on their write rights: department scope is
+  still compared by row id, so on departments created in the admin panel
+  they get a 403 (see [architecture.md §7b P1.7](./architecture.md)).
+- Published reads through a read policy ignore `?publicationFilter=` and
+  `?hasPublishedVersion=` for every role except `admin_role` / `editor`. The
+  web sends neither.
+
+#### Upgrading from a release before 2026-09-24
+
+This checklist covers the hardening batch of 2026-09-24 (branch
+`feat/hardening-batch-1`). An instance that runs an older release works
+through it before (or together with) the steps above; the preflight enforces
+both. That release has **no database schema change and no data
 migration**, but it tightens the env contract, needs one `JWT_SECRET`
 rotation, and signs every user out once. Work through the list in order. The
 "before" steps only edit `infra/.env`; nothing on the running stack changes
@@ -725,7 +961,7 @@ until step 10.
    running web image lacks the label `org.sinnlos.strapi-jwt=server-only` and
    `JWT_SECRET` is unchanged. The same holds after a web rollback to an older
    image: rolling forward again needs another rotation (see
-   [Rolling back this release](#rolling-back-this-release)).
+   [Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)).
 
 5. **Set the digest sender.** The compose defaults
    `DIGEST_FROM=Sinnlos Intranet <noreply@yurtbay.dev>` and
@@ -827,8 +1063,10 @@ until step 10.
       address does not block users at other addresses. When Strapi's own
       throttle answers, the sign-in form says "Too many sign-in attempts —
       please wait a minute…" instead of "Invalid email or password".
-15. **Strapi admin → Settings → Users & Permissions → Roles:** no role has any
-    poll-vote action; admin and editor have no notification create/update and
+15. **Strapi admin → Settings → Users & Permissions → Roles:** no role has
+    poll-vote find/findOne/create/update/delete (only the custom `vote` and
+    `results` actions remain; guest has `results` only); admin and editor
+    have no notification create/update and
     no comment/kudos/reaction update; admin has no lesson-progress
     update/delete.
 16. **Live pipeline:** `infra/live-smoke.sh` passed (`deploy.sh` runs it when
@@ -894,7 +1132,7 @@ extra steps):
   Traefik's `websecure` entrypoint must set no `forwardedHeaders.insecure`
   and list in `forwardedHeaders.trustedIPs` only proxies that overwrite the
   header. Never publish `cms:1337` on a host port. How to check: step 6 of
-  the [upgrade checklist](#upgrading-an-existing-instance-to-this-release).
+  the [2026-09-24 upgrade checklist](#upgrading-from-a-release-before-2026-09-24).
 - **Auth-path guard.** Traefik's ``PathPrefix(`/api/auth`)`` is
   case-sensitive, Strapi's router is not, so `/api/Auth/local` would reach
   Strapi's own login past the web's login limiter. The cms middleware
@@ -1034,7 +1272,7 @@ On the VM:
 git clone https://github.com/yurtbayemre/sinnlos.git /opt/sinnlos
 cd /opt/sinnlos/infra
 cp .env.example .env
-# Edit .env with your domain, secrets and MS_ credentials (see §3.5)
+# Edit .env with your domain and secrets; leave MS_* empty on this release (see §3.5)
 docker compose up -d --build
 ```
 
@@ -1454,6 +1692,12 @@ curl -I <URL>/admin
 
 ### 6.3 Microsoft sign-in flow
 
+> **Skip this on the current release.** Microsoft sign-in cannot complete on
+> Strapi 5.51+ (see the [Entra section](#microsoft-entra-id-app-registration));
+> check local sign-in instead: `<URL>/` redirects to `/sign-in`, and e-mail +
+> password lands on the dashboard with your display name in the top-right.
+> The steps below apply once the Entra exchange ships.
+
 1. Open `<URL>/` → you should be redirected to `/sign-in`.
 2. Click **Sign in with Microsoft** → complete the OIDC flow.
 3. You should land on the dashboard with your display name in the top-right.
@@ -1461,13 +1705,16 @@ curl -I <URL>/admin
    auto-created (e-mail = your lowercased user principal name, role
    `member`).
 
-> **Current state (verified 2026-09-24):** on Strapi 5.49 the Graph
-> enrichment and group → role mapping do not run (the users-permissions
-> extension is inert, see the README note under step 4), so `microsoftOid`
-> and `displayName` stay empty and roles are assigned in the Strapi admin.
-> A new user's first Microsoft sign-in also needs `LOCAL_REGISTRATION=1` on
-> the cms, and the Microsoft provider must be enabled in the Strapi admin
-> (**Settings → Providers**); the `MS_*` env alone does not enable it.
+> **Current state (verified 2026-09-25):** on Strapi 5.55.1 step 2 already
+> fails: the cms answers the web's token exchange with a 400, and the web
+> shows the Auth.js error page. On Strapi 5.49 (the previous release) the
+> sign-in completed, but the Graph enrichment and group → role mapping did
+> not run (the users-permissions extension is inert, see the README note
+> under step 4), so `microsoftOid` and `displayName` stayed empty and roles
+> were assigned in the Strapi admin. A new user's first Microsoft sign-in
+> there also needs `LOCAL_REGISTRATION=1` on the cms, and the Microsoft
+> provider must be enabled in the Strapi admin (**Settings → Providers**);
+> the `MS_*` env alone does not enable it.
 
 ### 6.4 Role enforcement (optional)
 
@@ -1495,6 +1742,27 @@ curl -X PUT <URL>/api/wiki-pages/1 \
 # Expect: 403 Forbidden
 ```
 
+Field-level write allowlist (FX07): with the JWT of a team lead, change the
+description of their own team, then try to add members:
+
+```bash
+curl -X PUT <URL>/api/teams/<team-documentId> \
+  -H "Authorization: Bearer <team-lead-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"description":"Updated by the lead"}}'
+# Expect: 200 OK
+
+curl -X PUT <URL>/api/teams/<team-documentId> \
+  -H "Authorization: Bearer <team-lead-jwt>" \
+  -H "Content-Type: application/json" \
+  -d '{"data":{"members":[1]}}'
+# Expect: 400 "Invalid or disallowed data field(s): members"
+```
+
+A plain member of the team gets 403 for both. Use a team created through the
+Strapi admin: rows from the demo seed have no draft, so document-service
+updates on them fail for every caller (FX38).
+
 ### 6.5 Common failure signals
 
 | Symptom | Likely cause |
@@ -1502,14 +1770,17 @@ curl -X PUT <URL>/api/wiki-pages/1 \
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| MS login succeeds but lands on a Strapi error page | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
+| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-an-existing-instance-to-this-release)), or roll back ([Rolling back this release](#rolling-back-this-release)) |
+| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
+| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
+| MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
 | Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |
 | Sign-in form says "Too many sign-in attempts" for everyone | Strapi's throttle sees one client IP for all users: the edge does not pass the client's `X-Forwarded-For` (see [§3.9](#39-production-hardening)) |
-| Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back and the user has not signed in again ([Rolling back this release](#rolling-back-this-release)) |
+| Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back past 2026-09-24 and the user has not signed in again ([Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)) |
 | `[digest] misconfigured` / `[digest] skipped: DIGEST_FROM unset` in the cms log | SMTP is set without `DIGEST_FROM` or `PUBLIC_WEB_URL` |
 
 ---
@@ -1656,6 +1927,37 @@ docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
 
 #### Rolling back this release
 
+Re-upping the previous (Strapi 5.49) cms image after 5.55.1 has migrated the
+database is safe **without** a `pg_restore`. This was verified on Postgres 16
+(5.49, then 5.55.1, then 5.49, then the 5.55.1 image again): the old image
+boots without errors, `forceMigration: false` keeps the two new columns, the
+unknown `strapi_migrations_internal` record is ignored, and sign-ins, existing
+tokens and uploads work in both directions. Use the retag commands above;
+`pg_restore` of the pre-deploy dump stays the fallback.
+
+- Do **not** boot the old image with `DATABASE_FORCE_MIGRATION=true`. It
+  would drop the two new columns: harmless, but not intended.
+- JWTs stay valid across the rollback in both directions, so nobody is signed
+  out.
+- Until the new images are deployed again, the old cms runs sharp 0.33.5
+  (open advisories in the upload path), has no field-level write allowlist
+  (department heads, team leads and members can again write every field of
+  the rows their old policies let them edit), and honours
+  `?publicationFilter=` for every reader.
+- A web-only rollback changes nothing but the error text and boot log for
+  Microsoft sign-ins.
+- An instance that switched Microsoft-created accounts to `provider = local`
+  (upgrade step 2) and re-enables the `MS_*` keys on the old images sets
+  those accounts back to `microsoft` first (the ids from the step 2 list):
+  `UPDATE up_users SET provider = 'microsoft' WHERE id IN (…);`. Otherwise
+  their Microsoft sign-in fails (the cms answers "Email is already taken").
+- If the previous images predate 2026-09-24 (the instance took both releases
+  in one deploy), the caveats of
+  [Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)
+  apply as well.
+
+#### Rolling back the 2026-09-24 release
+
 Rolling back the 2026-09-24 hardening release to the previous images is
 database-safe: it has no schema change and no migration, so no restore is
 needed. The rollback commands above run with the **new** compose file, so the
@@ -1737,9 +2039,13 @@ automatically.
 **Microsoft sign-in returns "AADSTS50011: The redirect URI does not match"**
 
 The redirect URI in your Entra app registration must match exactly (including
-trailing slash) what Auth.js and Strapi send. Add both:
+trailing slash) what Auth.js sends:
 - `<WEB_URL>/api/auth/callback/microsoft-entra-id`
-- `<CMS_URL>/api/connect/microsoft/callback`
+- `<CMS_URL>/api/connect/microsoft/callback` (Strapi's own OAuth redirect;
+  not used by the current flow, harmless to keep)
+
+On this release Microsoft sign-in fails later anyway, at the token exchange
+(see the [Entra section](#microsoft-entra-id-app-registration)).
 
 **Strapi admin blank / 502 after first deploy**
 

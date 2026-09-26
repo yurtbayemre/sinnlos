@@ -17,8 +17,10 @@ import { errors } from "@strapi/utils";
  *     `filters[pages][body][$startsWith]=Conf`, `sort=pages.title:asc`,
  *     `populate[teams][filters][pages][title][$lt]=M` join on the hidden
  *     rows, so the result depends on their content.
- * validateQuery's throwRestrictedRelations only checks `<target>.find`, which
- * every role holds on wiki-page, so the core lets all of them through.
+ * The core only checks `<target>.find` (validateQuery's
+ * throwRestrictedRelations on filters and sort; in 5.55.1 sanitizePopulate's
+ * removeRestrictedRelations on populate, where 5.49 threw a 400 instead),
+ * which every role holds on wiki-page, so the core lets all of them through.
  *
  * The rule is per RELATION, not per route. `RESTRICTED_RELATION_TARGETS`
  * lists each filtered target with the only source types that may point at
@@ -77,8 +79,28 @@ export type RestrictedRelationRules = Readonly<Record<string, readonly string[]>
  * The trusted sources must share the target's filter domain: their own reads
  * are narrowed by the same policy family, so a path from a visible root
  * never reaches a row that policy would hide (routes.matrix.test.ts pins
- * this). Known gap: wiki-page.parent/children trust that a parent lives in
- * the same space, which the write side does not enforce yet (FX07).
+ * this).
+ *
+ * That also needs the trusted relations to stay inside one wiki space, which
+ * the write side enforces (FX07) for every caller without the admin_role/
+ * editor bypass:
+ *   - wiki-page `space` is create-only and must be a space the caller can
+ *     read; `parent` must be a readable page of the same space, and never
+ *     the page itself or a descendant (can-edit-wiki → utils/write-allowlist.ts,
+ *     utils/wiki-write-targets.ts),
+ *   - `children` and `revisions` (the inverse sides) are not writable at all,
+ *     and neither are department/team `pages`,
+ *   - an existing page is only editable while it sits in a space the caller
+ *     can read, so a write response cannot walk space.pages/parent/children
+ *     of a hidden space,
+ *   - those writes always publish (enforceWriteAllowlist pins `status`, as
+ *     the read policies do), so a write response populates published rows
+ *     only and never the drafts the read routes hide,
+ *   - wiki-space and wiki-revision writes are admin/editor-only.
+ * admin/editor writes (content API and admin panel) are trusted to keep a
+ * page's parent in its own space. routes.matrix.test.ts fails when a role
+ * without the bypass gains a write route that could set one of these
+ * relations outside the allowlist.
  */
 export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   "api::wiki-page.wiki-page": [

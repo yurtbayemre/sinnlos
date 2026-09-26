@@ -6,6 +6,8 @@
  *  - Microsoft Entra ID: after the user completes the OAuth dance
  *    against Microsoft, we exchange the access token for a Strapi JWT
  *    by calling Strapi's users-permissions Microsoft callback.
+ *    Strapi 5.51+ rejects that exchange (400), so this path currently
+ *    fails closed; the Entra exchange (D-ENTRA-01) replaces it.
  *  - Local credentials: email+password are verified directly against
  *    Strapi's /api/auth/local endpoint, which returns the Strapi JWT.
  *
@@ -45,6 +47,19 @@ if (
   );
 }
 
+// Strapi 5.51+ completes /api/auth/:provider/callback only from its own OAuth
+// session, so it answers exchangeForStrapiJwt() with a 400 and every
+// Microsoft sign-in fails (closed). Say so once at boot, not only per failed
+// sign-in; infra/deploy.sh refuses such a deploy. Goes away with D-ENTRA-01.
+if (!IS_BUILD && MICROSOFT_ENABLED) {
+  console.error(
+    "[auth] Microsoft sign-in is configured but cannot complete: the CMS (Strapi 5.51+) rejects " +
+      "the access-token exchange this web uses. Until the Entra exchange ships, clear " +
+      "AUTH_MICROSOFT_ENTRA_ID_ID / AUTH_MICROSOFT_ENTRA_ID_SECRET (MS_CLIENT_ID / " +
+      "MS_CLIENT_SECRET in infra/.env) to use local sign-in, or stay on the previous release.",
+  );
+}
+
 // Session / User / JWT augmentation lives in @/types/next-auth.d.ts.
 
 // Only the identity fields are read: role and department are resolved per
@@ -65,6 +80,10 @@ type StrapiExchangeResponse = {
  * backoff so a slow CMS cold-start (common during deploys) doesn't break
  * sign-in, and uses a short per-attempt timeout so we don't hang Auth.js
  * indefinitely if Strapi is unreachable.
+ *
+ * Strapi 5.51+ answers this call with 400 "OAuth authentication requires a
+ * completed provider session" (a server-side fetch never carries Strapi's
+ * grant session), so it returns null there: see the boot error above.
  */
 async function exchangeForStrapiJwt(accessToken: string): Promise<StrapiExchangeResponse | null> {
   const url = `${STRAPI_URL}/api/auth/microsoft/callback?access_token=${encodeURIComponent(accessToken)}`;
@@ -256,7 +275,8 @@ export const callbacks = {
         // to fetch data, leaving the user stuck on an empty UI.
         throw new Error(
           "Could not exchange Microsoft access token for a Strapi session. " +
-            "Check that the CMS is reachable and the users-permissions Microsoft provider is configured.",
+            "Strapi 5.51+ rejects this exchange with a 400 (see the [auth] error at boot); " +
+            "otherwise check that the CMS is reachable.",
         );
       }
       token.strapiJwt = strapi.jwt;

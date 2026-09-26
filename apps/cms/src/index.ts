@@ -109,12 +109,14 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  * restricts writes to these two roles in practice.
  *
  * `department_head` and `team_lead` need update on the types they
- * manage; the `is-department-head`, `is-team-member-or-lead` and
+ * manage; the `can-edit-department`, `can-edit-team` and
  * `can-edit-wiki` policies still scope those updates to their own
- * department/team/authored pages.
+ * department/team/authored pages, and to the fields in
+ * utils/write-allowlist.ts (FX07).
  *
  * `member` can update wiki pages they authored (gated by
- * `can-edit-wiki`). `guest` is strict read-only on wiki content.
+ * `can-edit-wiki`, which also keeps them to pages in spaces they can
+ * read). `guest` is strict read-only on wiki content.
  *
  * Exported (with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS) only for
  * the route/grant cross-check in `routes.matrix.test.ts` (roadmap S01).
@@ -266,12 +268,15 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
    * OPEN ISSUE — guest still sees employee contact data: user.find/findOne
    * cannot be revoked from guest without breaking the app. Strapi's core
    * controllers run validateQuery (→ throwRestrictedRelations) BEFORE
-   * sanitizeQuery, so ANY populate of a user relation (wiki-page.author,
-   * comment.author, document.uploadedBy, department.head, team.lead, ...)
-   * — and even the notification visibility filter, which references the
-   * `recipient` user relation — throw a 400 for a
-   * role lacking `user.find`. "Silently stripped" only applies to the
-   * later sanitize pass. So guest keeps user.find; the email/phone/hireDate
+   * sanitizeQuery, so every FILTER through a user relation — the
+   * notification visibility filter references the `recipient` user
+   * relation — throws a 400 for a role lacking `user.find`. Populates of a
+   * user relation (wiki-page.author, comment.author, document.uploadedBy,
+   * department.head, team.lead, ...) threw the same 400 on 5.49; in
+   * @strapi/utils 5.55.1 validatePopulate no longer checks the scope and
+   * sanitizePopulate silently drops the relation instead, so without
+   * user.find guest pages would lose every author/uploader name. So guest
+   * keeps user.find; the email/phone/hireDate
    * it could therefore read from the directory are now removed OUTPUT-side by
    * a role-aware content-api.output sanitizer (registerUserContactSanitizer
    * below → utils/sanitize-user-contact.ts, issue #10): it covers both direct
@@ -279,7 +284,8 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
    * validateQuery/sanitizeQuery (so it never trips throwRestrictedRelations),
    * and strips only for non-privileged callers (guest/authenticated/public/
    * unknown). Verified via node repro against @strapi/utils 5.49 (collection-
-   * type controller order + validateFilters/throwRestrictedRelations).
+   * type controller order + validateFilters/throwRestrictedRelations); the
+   * populate change above is from the 5.55.1 validate/sanitize sources.
    */
   guest: {
     // NO acknowledgement grants: guest has no announcement.find, so it can
@@ -383,10 +389,12 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   // Built-in auth action local users need to change their password
   "plugin::users-permissions.auth.changePassword": "*",
   // The admin ack report populates announcement.audienceRoles to restrict
-  // the target audience per announcement. validateQuery's
-  // throwRestrictedRelations verifies the scope `<relation target>.find`
-  // for every populated relation, so admin_role needs role.find or the
-  // populate 400s. admin only — no other role reads audienceRoles.
+  // the target audience per announcement. The core checks the scope
+  // `<relation target>.find` for every populated relation, so admin_role
+  // needs role.find. On Strapi 5.49 a missing grant 400'd the populate; on
+  // 5.55.1 sanitizePopulate drops the relation silently, and the report
+  // would count every role as audience (lib/audience.ts: no roles = no
+  // role restriction). admin only — no other role reads audienceRoles.
   "plugin::users-permissions.role.find": ["admin_role"],
   // Marketplace ad photos: employees may CREATE uploads via POST
   // /api/upload — deliberately NOT `find`/`findOne`/`destroy` on the
@@ -511,6 +519,12 @@ const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
     // an early version of this bootstrap granted guest read access.
     "api::classified.classified.find",
     "api::classified.classified.findOne",
+  ],
+  authenticated: [
+    // Excluded from the celebrations grant (see CUSTOM_ACTION_GRANTS), but
+    // an earlier bootstrap granted it, and the row survived on existing
+    // databases (found by infra/diagnostics/prod-perm-diff.sql).
+    "api::kudos.kudos.celebrations",
   ],
 };
 
@@ -643,7 +657,7 @@ async function syncAdvancedSettings(strapi: any) {
  * WHY `set`-append and NOT `strapi.sanitizers.add(...)`: the sanitizers
  * registry's `add(path, fn)` reads the target list with a FRESH `[]` default
  * when the path is uninitialized and pushes onto that throwaway array — it
- * does not persist (verified against @strapi/core 5.49
+ * does not persist (verified against @strapi/core 5.49 and 5.55.1
  * registries/sanitizers.js; `content-api.output` is never pre-`set`). A plain
  * `.add` here would be a silent no-op. We read the current list (default [])
  * and `set` it back with our factory appended, which also initializes the
@@ -698,9 +712,9 @@ export interface RestrictedRelationGuardHost {
  * writes as well as reads, since an update's `?populate` shapes its response.
  *
  * Query side — WHY a wrapper around `strapi.contentAPI.sanitize.query` and
- * not a sanitizer registry entry or a route policy: the 5.49 registry only
- * has `content-api.input` and `content-api.output` hooks (@strapi/core
- * services/content-api/index.js), and a route policy misses every route it
+ * not a sanitizer registry entry or a route policy: the registry only has
+ * `content-api.input` and `content-api.output` hooks (@strapi/core 5.49 and
+ * 5.55.1 services/content-api/index.js), and a route policy misses every route it
  * is not attached to. The first FX05 cut, a policy on department/team reads,
  * left /api/users?populate[department][populate][pages] and PUT
  * /api/teams/:id?populate[pages] open. Every content-api controller resolves
