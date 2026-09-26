@@ -123,8 +123,10 @@ Quick start:
 4. Optional shortcut: set `SEED_DEMO_DATA=1` in `apps/cms/.env` for the
    FIRST boot — the built-in seed (`apps/cms/src/seed-demo.ts`, idempotent,
    skips itself once data exists) populates departments, teams, demo users
-   and content for every module. Otherwise create users in the Strapi admin
-   under **Content Manager → User**
+   and content for every module. Its draft & publish content (announcements,
+   events, wiki, polls, documents) gets a draft and a published row per
+   entry, like entries created in the admin panel. Otherwise create users
+   in the Strapi admin under **Content Manager → User**
    (set email, password, and confirmed = true) — or let people register
    themselves if you enabled registration.
 5. Sign in at http://localhost:3000/sign-in with email + password.
@@ -306,6 +308,25 @@ Strapi ships 22 collection types plus one routes-only API
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
 | *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below) |
+
+**Draft & publish.** announcement, course, document, event, lesson, poll,
+quick-link, wiki-space, wiki-page and wiki-revision keep Strapi's draft &
+publish (pinned per type in `apps/cms/src/content-type-flags.test.ts`): each
+entry has a draft row, which the admin panel edits, and once published a
+published row, which readers get. An entry with a published row but no draft
+(the demo seed wrote its content that way until 2026-09-26) is hidden from
+the Content Manager's default list and loses relations when edited and
+published there. The cms therefore gives every such entry its draft twin at
+boot, with Strapi's own "discard draft" copy of the published row
+(`apps/cms/src/utils/draft-twins.ts`; the first boot logs
+`[draft-twins] created N draft(s) for <type>`, later boots nothing). Wiki
+revisions are published snapshots written by a lifecycle and stay that way.
+Drafts that already exist are never replaced: a course, wiki space or page
+whose lesson or child page has a saved, unpublished move elsewhere gets its
+draft once that move is published or discarded (the log names the draft),
+and a draft saved before the upgrade keeps any relations it already lacked,
+so publishing it still drops them. The runbook lists both kinds up front:
+[Upgrading to the draft-twin repair](./docs/DEPLOYMENT.md#upgrading-to-the-draft-twin-repair-fx38).
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart), `microsoftOid`, and the
@@ -773,6 +794,10 @@ trimming.
 - [ ] The six intranet roles visible under *Settings → Users & Permissions →
       Roles* (next to the built-in *Authenticated* and *Public*)
 - [ ] Create a department, a team, a wiki space + page via the admin
+- [ ] With `SEED_DEMO_DATA=1`, the seeded announcements, events, wiki pages
+      and the rest show in the Content Manager's default list as
+      *Published*, and editing and publishing one keeps its relations
+      (author, department, space, …)
 - [ ] Next.js dashboard at `:3000` shows stat cards and empty states
 - [ ] Local sign-in (e-mail + password) completes and returns to the
       dashboard with your display name in the topbar (Microsoft sign-in is

@@ -730,6 +730,12 @@ systemctl start docker
 > [One-time: org draft/publish off](#one-time-org-draftpublish-off) first. With
 > no department or team drafts it is a normal deploy; otherwise the database
 > needs a one-time migration while cms and web are stopped.
+>
+> **Deploying the draft-twin repair (FX38)?** A normal deploy: the first boot
+> gives every published entry that has no draft its draft twin, on its own.
+> See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38)
+> for the read-only checks to run first (steps 2 to 5), the log lines and
+> what editors notice.
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, backs up and rollback-tags before rebuilding:
@@ -754,6 +760,323 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the draft-twin repair (FX38)
+
+This release (branch `feat/seed-draft-twins`, after the department/team
+release of 2026-09-26) fixes entries of draft & publish types that have a
+published row but **no draft row**. Until now the demo seed
+(`SEED_DEMO_DATA=1`) wrote its announcements, events, wiki spaces and pages,
+polls and documents that way, so every instance that was ever seeded holds
+such entries; normally every entry has a draft row (what the admin panel
+edits) next to its published row (what readers get). Strapi 5.55.1
+mishandles entries without a draft in the admin panel:
+
+- The Content Manager's default list does not show them (it lists drafts;
+  only the **Published** filter finds them).
+- Editing one and publishing it silently drops every relation the edit form
+  did not touch: an announcement loses its author and department, a wiki
+  page its space, parent and author, a lesson its course.
+- New entries cannot link to them: a new wiki page in a seeded space, for
+  example, fails with `Document with id "…" not found`.
+
+What the release changes:
+
+- **On every boot the cms gives each such entry its draft twin**, with
+  Strapi's own "discard draft" operation: a copy of the published row with
+  the same fields, relations and media, exactly what Strapi does when draft &
+  publish is switched on for a type. It covers announcements, courses,
+  documents, events, lessons, polls, quick links, wiki pages and wiki spaces.
+  Wiki revisions stay as they are: they are published snapshots by design.
+- Published rows are not touched, so readers see no change, and nothing is
+  sent: no notifications, no live updates, no wiki revisions.
+- **Drafts that already exist are never replaced.** Two kinds matter here:
+  - A draft an admin saved without publishing that **moves** a lesson to
+    another course, or a wiki page to another space or under another parent
+    page. Copying the course, space or page it left would move the lesson or
+    page back (Strapi keeps a lesson in one course, a page in one space and
+    under one parent). So while such a draft exists, that course, space or
+    page gets no draft, and the log names the draft (steps 5 and 8).
+  - A draft saved before this release from the edit form alone, which may
+    lack relations its published version has (step 4). The repair leaves
+    it as it is; publishing it still drops those relations.
+- The demo seed now writes a draft and a published row per entry, like the
+  admin panel.
+
+**Nothing else is needed on an existing instance** beyond the read-only
+checks below and publishing or discarding the few drafts they may list: no
+env change, no migration script, no `JWT_SECRET` rotation, no downtime
+beyond the normal container restart. A fresh install needs nothing.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+read-only queries and the log check below (on a standalone Caddy box, drop
+the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+2. **Optional, read-only: count what the first boot will repair.**
+   `published_only` is the number of drafts the boot creates per type (types
+   without published entries are not listed):
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT t AS type, count(*) FILTER (WHERE NOT has_draft) AS published_only, count(*) AS published
+   FROM (
+     SELECT 'announcements' AS t, EXISTS (SELECT 1 FROM announcements d WHERE d.document_id = p.document_id AND d.published_at IS NULL) AS has_draft FROM announcements p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'courses', EXISTS (SELECT 1 FROM courses d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM courses p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'documents', EXISTS (SELECT 1 FROM documents d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM documents p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'events', EXISTS (SELECT 1 FROM events d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM events p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'lessons', EXISTS (SELECT 1 FROM lessons d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM lessons p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'polls', EXISTS (SELECT 1 FROM polls d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM polls p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'quick_links', EXISTS (SELECT 1 FROM quick_links d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM quick_links p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'wiki_pages', EXISTS (SELECT 1 FROM wiki_pages d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM wiki_pages p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'wiki_spaces', EXISTS (SELECT 1 FROM wiki_spaces d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM wiki_spaces p WHERE p.published_at IS NOT NULL
+   ) x
+   GROUP BY t ORDER BY t;
+   SQL
+   ```
+
+3. **Optional, read-only: list relations an earlier admin edit already
+   dropped.** The repair copies each published row as it is now, so a link
+   that an edit and publish in the admin removed before this release stays
+   removed. Every demo-seed entry has the relation checked here (see
+   `apps/cms/src/seed-demo.ts`); an entry created in the admin panel may
+   legitimately lack one. Two rows check departments the demo seed set: on
+   the announcement "Engineering: Sprint Retro moved to Thursday" and on the
+   wiki spaces Engineering and People & Culture. Without the department,
+   the announcement and the spaces lose their department targeting (the
+   announcement reaches more people).
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT 'announcement without author' AS problem, a.title AS entry FROM announcements a
+     WHERE a.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM announcements_author_lnk l WHERE l.announcement_id = a.id)
+   UNION ALL SELECT 'announcement without department', a.title FROM announcements a
+     WHERE a.published_at IS NOT NULL AND a.title = 'Engineering: Sprint Retro moved to Thursday'
+       AND NOT EXISTS (SELECT 1 FROM announcements_department_lnk l WHERE l.announcement_id = a.id)
+   UNION ALL SELECT 'event without organizer', e.title FROM events e
+     WHERE e.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events_organizer_lnk l WHERE l.event_id = e.id)
+   UNION ALL SELECT 'wiki page without space', w.title FROM wiki_pages w
+     WHERE w.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wiki_pages_space_lnk l WHERE l.wiki_page_id = w.id)
+   UNION ALL SELECT 'wiki page without author', w.title FROM wiki_pages w
+     WHERE w.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wiki_pages_author_lnk l WHERE l.wiki_page_id = w.id)
+   UNION ALL SELECT 'wiki space without department', s.name FROM wiki_spaces s
+     WHERE s.published_at IS NOT NULL AND s.slug IN ('engineering', 'people-culture')
+       AND NOT EXISTS (SELECT 1 FROM wiki_spaces_department_lnk l WHERE l.wiki_space_id = s.id)
+   UNION ALL SELECT 'poll without author', p.question FROM polls p
+     WHERE p.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM polls_author_lnk l WHERE l.poll_id = p.id)
+   UNION ALL SELECT 'document without uploader', d.title FROM documents d
+     WHERE d.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM documents_uploaded_by_lnk l WHERE l.document_id = d.id)
+   UNION ALL SELECT 'lesson without course', l2.title FROM lessons l2
+     WHERE l2.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lessons_course_lnk l WHERE l.lesson_id = l2.id)
+   ORDER BY 1, 2;
+   SQL
+   ```
+
+   Note what is missing and re-link it in the admin after the deploy
+   (step 9), when editing keeps relations. Other targeting (an
+   announcement's team or audience roles, the departments of events, polls,
+   documents and quick links) cannot be checked this way, because an entry
+   without it is company-wide by design: compare those entries with what
+   was intended.
+
+4. **Recommended, read-only: list drafts that lack a relation of their
+   published version.** Before this release, **Save** (not **Publish**) on
+   a seeded entry created its draft from the edit form alone, without the
+   relations the form did not touch. The repair does not replace existing
+   drafts, so publishing such a draft still drops those relations for
+   readers; for an announcement, a lost department or team widens its
+   audience and notifies more people.
+
+   ```bash
+   psql_db <<'SQL'
+   WITH
+     a AS (SELECT d.id AS draft, p.id AS pub, d.title AS entry FROM announcements d JOIN announcements p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     e AS (SELECT d.id AS draft, p.id AS pub, d.title AS entry FROM events d JOIN events p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     w AS (SELECT d.id AS draft, p.id AS pub, d.title AS entry FROM wiki_pages d JOIN wiki_pages p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     s AS (SELECT d.id AS draft, p.id AS pub, d.name AS entry FROM wiki_spaces d JOIN wiki_spaces p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     o AS (SELECT d.id AS draft, p.id AS pub, d.question AS entry FROM polls d JOIN polls p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     f AS (SELECT d.id AS draft, p.id AS pub, d.title AS entry FROM documents d JOIN documents p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     k AS (SELECT d.id AS draft, p.id AS pub, d.label AS entry FROM quick_links d JOIN quick_links p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL),
+     l AS (SELECT d.id AS draft, p.id AS pub, d.title AS entry FROM lessons d JOIN lessons p ON p.document_id = d.document_id AND p.published_at IS NOT NULL WHERE d.published_at IS NULL)
+   SELECT 'announcement' AS type, entry, 'author' AS missing_on_draft FROM a WHERE EXISTS (SELECT 1 FROM announcements_author_lnk x WHERE x.announcement_id = a.pub) AND NOT EXISTS (SELECT 1 FROM announcements_author_lnk x WHERE x.announcement_id = a.draft)
+   UNION ALL SELECT 'announcement', entry, 'department' FROM a WHERE EXISTS (SELECT 1 FROM announcements_department_lnk x WHERE x.announcement_id = a.pub) AND NOT EXISTS (SELECT 1 FROM announcements_department_lnk x WHERE x.announcement_id = a.draft)
+   UNION ALL SELECT 'announcement', entry, 'team' FROM a WHERE EXISTS (SELECT 1 FROM announcements_team_lnk x WHERE x.announcement_id = a.pub) AND NOT EXISTS (SELECT 1 FROM announcements_team_lnk x WHERE x.announcement_id = a.draft)
+   UNION ALL SELECT 'announcement', entry, 'audienceRoles' FROM a WHERE EXISTS (SELECT 1 FROM announcements_audience_roles_lnk x WHERE x.announcement_id = a.pub) AND NOT EXISTS (SELECT 1 FROM announcements_audience_roles_lnk x WHERE x.announcement_id = a.draft)
+   UNION ALL SELECT 'event', entry, 'organizer' FROM e WHERE EXISTS (SELECT 1 FROM events_organizer_lnk x WHERE x.event_id = e.pub) AND NOT EXISTS (SELECT 1 FROM events_organizer_lnk x WHERE x.event_id = e.draft)
+   UNION ALL SELECT 'event', entry, 'departments' FROM e WHERE EXISTS (SELECT 1 FROM events_departments_lnk x WHERE x.event_id = e.pub) AND NOT EXISTS (SELECT 1 FROM events_departments_lnk x WHERE x.event_id = e.draft)
+   UNION ALL SELECT 'wiki page', entry, 'author' FROM w WHERE EXISTS (SELECT 1 FROM wiki_pages_author_lnk x WHERE x.wiki_page_id = w.pub) AND NOT EXISTS (SELECT 1 FROM wiki_pages_author_lnk x WHERE x.wiki_page_id = w.draft)
+   UNION ALL SELECT 'wiki page', entry, 'space' FROM w WHERE EXISTS (SELECT 1 FROM wiki_pages_space_lnk x WHERE x.wiki_page_id = w.pub) AND NOT EXISTS (SELECT 1 FROM wiki_pages_space_lnk x WHERE x.wiki_page_id = w.draft)
+   UNION ALL SELECT 'wiki page', entry, 'parent' FROM w WHERE EXISTS (SELECT 1 FROM wiki_pages_parent_lnk x WHERE x.wiki_page_id = w.pub) AND NOT EXISTS (SELECT 1 FROM wiki_pages_parent_lnk x WHERE x.wiki_page_id = w.draft)
+   UNION ALL SELECT 'wiki page', entry, 'department' FROM w WHERE EXISTS (SELECT 1 FROM wiki_pages_department_lnk x WHERE x.wiki_page_id = w.pub) AND NOT EXISTS (SELECT 1 FROM wiki_pages_department_lnk x WHERE x.wiki_page_id = w.draft)
+   UNION ALL SELECT 'wiki page', entry, 'team' FROM w WHERE EXISTS (SELECT 1 FROM wiki_pages_team_lnk x WHERE x.wiki_page_id = w.pub) AND NOT EXISTS (SELECT 1 FROM wiki_pages_team_lnk x WHERE x.wiki_page_id = w.draft)
+   UNION ALL SELECT 'wiki space', entry, 'department' FROM s WHERE EXISTS (SELECT 1 FROM wiki_spaces_department_lnk x WHERE x.wiki_space_id = s.pub) AND NOT EXISTS (SELECT 1 FROM wiki_spaces_department_lnk x WHERE x.wiki_space_id = s.draft)
+   UNION ALL SELECT 'wiki space', entry, 'team' FROM s WHERE EXISTS (SELECT 1 FROM wiki_spaces_team_lnk x WHERE x.wiki_space_id = s.pub) AND NOT EXISTS (SELECT 1 FROM wiki_spaces_team_lnk x WHERE x.wiki_space_id = s.draft)
+   UNION ALL SELECT 'wiki space', entry, 'allowedRoles' FROM s WHERE EXISTS (SELECT 1 FROM wiki_spaces_allowed_roles_lnk x WHERE x.wiki_space_id = s.pub) AND NOT EXISTS (SELECT 1 FROM wiki_spaces_allowed_roles_lnk x WHERE x.wiki_space_id = s.draft)
+   UNION ALL SELECT 'poll', entry, 'author' FROM o WHERE EXISTS (SELECT 1 FROM polls_author_lnk x WHERE x.poll_id = o.pub) AND NOT EXISTS (SELECT 1 FROM polls_author_lnk x WHERE x.poll_id = o.draft)
+   UNION ALL SELECT 'poll', entry, 'departments' FROM o WHERE EXISTS (SELECT 1 FROM polls_departments_lnk x WHERE x.poll_id = o.pub) AND NOT EXISTS (SELECT 1 FROM polls_departments_lnk x WHERE x.poll_id = o.draft)
+   UNION ALL SELECT 'document', entry, 'uploadedBy' FROM f WHERE EXISTS (SELECT 1 FROM documents_uploaded_by_lnk x WHERE x.document_id = f.pub) AND NOT EXISTS (SELECT 1 FROM documents_uploaded_by_lnk x WHERE x.document_id = f.draft)
+   UNION ALL SELECT 'document', entry, 'departments' FROM f WHERE EXISTS (SELECT 1 FROM documents_departments_lnk x WHERE x.document_id = f.pub) AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk x WHERE x.document_id = f.draft)
+   UNION ALL SELECT 'quick link', entry, 'departments' FROM k WHERE EXISTS (SELECT 1 FROM quick_links_departments_lnk x WHERE x.quick_link_id = k.pub) AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk x WHERE x.quick_link_id = k.draft)
+   UNION ALL SELECT 'lesson', entry, 'course' FROM l WHERE EXISTS (SELECT 1 FROM lessons_course_lnk x WHERE x.lesson_id = l.pub) AND NOT EXISTS (SELECT 1 FROM lessons_course_lnk x WHERE x.lesson_id = l.draft)
+   ORDER BY 1, 2, 3;
+   SQL
+   ```
+
+   For each row, open the entry in the Content Manager and either select
+   the missing relation again before you publish, or use **Discard
+   changes**, which restores every relation from the published version but
+   also drops the draft's other unpublished edits. You can do this before or
+   after the deploy; after it, a row about a lesson's course or a wiki
+   page's space or parent may be gone because the repair re-linked that
+   draft (see "What the first boot changes" below).
+
+5. **Recommended, read-only: list saved moves the repair would refuse.**
+   A lesson or wiki page whose draft (saved, not published) sits in another
+   course, space or parent page than its published version, while that
+   course, space or page has no draft yet. Copying the course, space or
+   page would move the lesson or page back, so the repair skips it and logs
+   an error until the move is published or discarded.
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT 'lesson' AS type, d.title AS entry, dt.title AS saved_move_to, pt.title AS published_in
+   FROM lessons d
+   JOIN lessons p ON p.document_id = d.document_id AND p.published_at IS NOT NULL
+   JOIN lessons_course_lnk dl ON dl.lesson_id = d.id JOIN courses dt ON dt.id = dl.course_id
+   JOIN lessons_course_lnk pl ON pl.lesson_id = p.id JOIN courses pt ON pt.id = pl.course_id
+   WHERE d.published_at IS NULL AND dt.document_id <> pt.document_id
+     AND NOT EXISTS (SELECT 1 FROM courses x WHERE x.document_id = pt.document_id AND x.published_at IS NULL)
+   UNION ALL
+   SELECT 'wiki page (space)', d.title, dt.name, pt.name
+   FROM wiki_pages d
+   JOIN wiki_pages p ON p.document_id = d.document_id AND p.published_at IS NOT NULL
+   JOIN wiki_pages_space_lnk dl ON dl.wiki_page_id = d.id JOIN wiki_spaces dt ON dt.id = dl.wiki_space_id
+   JOIN wiki_pages_space_lnk pl ON pl.wiki_page_id = p.id JOIN wiki_spaces pt ON pt.id = pl.wiki_space_id
+   WHERE d.published_at IS NULL AND dt.document_id <> pt.document_id
+     AND NOT EXISTS (SELECT 1 FROM wiki_spaces x WHERE x.document_id = pt.document_id AND x.published_at IS NULL)
+   UNION ALL
+   SELECT 'wiki page (parent)', d.title, dt.title, pt.title
+   FROM wiki_pages d
+   JOIN wiki_pages p ON p.document_id = d.document_id AND p.published_at IS NOT NULL
+   JOIN wiki_pages_parent_lnk dl ON dl.wiki_page_id = d.id JOIN wiki_pages dt ON dt.id = dl.inv_wiki_page_id
+   JOIN wiki_pages_parent_lnk pl ON pl.wiki_page_id = p.id JOIN wiki_pages pt ON pt.id = pl.inv_wiki_page_id
+   WHERE d.published_at IS NULL AND dt.document_id <> pt.document_id
+     AND NOT EXISTS (SELECT 1 FROM wiki_pages x WHERE x.document_id = pt.document_id AND x.published_at IS NULL)
+   ORDER BY 1, 2;
+   SQL
+   ```
+
+   For each row, open the lesson or page in the Content Manager and
+   **Publish** it (the move goes live) or **Discard changes** (the move is
+   dropped), preferably before the deploy. If you skip this, the repair
+   leaves those courses, spaces or pages without a draft for now, and step
+   8 shows what to do then.
+
+6. **Backup:** `infra/deploy.sh` takes the mandatory pre-deploy Postgres
+   backup. On a standalone Caddy box, run `infra/backup/pg-backup.sh` (or
+   the manual dump in [§7.1](#71-manual-postgres-backup)) yourself first.
+
+**Deploy**
+
+7. Run `infra/deploy.sh` on the Traefik host; on a standalone Caddy box,
+   `docker compose up -d --build` from `infra/`. For a few dozen entries the
+   repair adds about a second to this one boot (measured on Postgres 16).
+
+**What the first boot changes in the database.** One new draft row per
+entry counted in step 2, with its link rows and media links; the rows the
+admin panel creates for any entry it edits. Existing drafts of lessons and
+wiki pages that have no course, space or parent page get linked to the new
+draft of the course, space or page their published version belongs to.
+Published rows, notifications and wiki revisions stay as they are. Each
+vote of a repaired poll is also linked to the poll's new draft row (Strapi
+links entries of a type without draft & publish, such as a vote, to both
+rows); results still count the votes of the published row. No schema
+change.
+
+**After the deploy**
+
+8. **cms log.** The first boot prints one line per repaired type, and later
+   boots print nothing:
+
+   ```bash
+   "${COMPOSE[@]}" logs cms | grep '\[draft-twins\]'
+   # [draft-twins] created 5 draft(s) for api::announcement.announcement
+   # [draft-twins] created 6 draft(s) for api::event.event
+   # ...
+   ```
+
+   The numbers match `published_only` from step 2, less the entries named
+   in error lines. An error line such as `[draft-twins] <type> <documentId>:
+   could not create the draft (<reason>); the next boot retries, and until
+   it has a draft, publishing an entry linked to it drops that link` names
+   an entry the repair could not copy. The boot continues, readers still see
+   the entry, and every boot tries again. By reason:
+
+   - `the pending draft of api::lesson.lesson <documentId> links another
+     course (<documentId>); publish or discard that draft` (or of a wiki
+     page that links another space or parent): a saved move from step 5.
+     Publish that lesson or page or use **Discard changes** on it, then run
+     `"${COMPOSE[@]}" restart cms`; that boot creates the missing draft.
+   - anything else, for example a lesson whose stored video link fails
+     today's validation: open the named entry in the Content Manager
+     (**Published** filter), correct the field the reason names, select its
+     relations again (they are not carried over for an entry without a
+     draft) and publish.
+
+   **Fix the named entry before you edit or publish the entries linked to
+   it** (a lesson's course, a course's lessons, a wiki space's pages, a wiki
+   page's space, parent and child pages). Until it has a draft, their drafts
+   lack the link to it, and publishing one drops that link for readers too,
+   e.g. the lesson disappears from its course. If that already happened,
+   fix the named entry, then open the entry you published, select the
+   relation again and publish. Optionally, rerun the step 2 query and the
+   step 5 query: every `published_only` is 0, and step 5 lists nothing.
+9. **Admin panel:** **Content Manager → Announcement** (and Event, Wiki
+   Page, …) lists the seeded entries in the default view, with the status
+   **Published**. Open one that step 4 did not list, change a word,
+   publish: its author, department, space and other relations stay.
+   Re-link what step 3 listed.
+
+**What users and editors notice** (worth a short release note):
+
+- Readers notice nothing.
+- Seeded entries appear in the Content Manager's default list, as
+  **Published**.
+- Editing and publishing a seeded entry in the admin keeps its relations,
+  unless it has a draft saved before the deploy that already lacks some
+  (step 4).
+- New entries can link to seeded ones, e.g. a wiki page in a seeded space.
+- A saved, unpublished move of a lesson or wiki page stays as it is; the
+  course, space or page it left gets its draft once the move is published
+  or discarded (steps 5 and 8).
+- Relations an earlier admin edit already dropped are not restored (step 3).
+
+**Rollback.** The previous images run on the repaired database without a
+restore: a draft row next to the published row is the state that every entry
+created in the admin panel already has, and nothing in the schema changed.
+The old cms simply creates no draft twins, and rolling forward again finds
+nothing to repair. The one difference: the old seed writes published-only
+rows again, but it only runs on an empty database.
+
+**Local dev (SQLite):** a dev database seeded before this release is
+repaired the same way on the next `pnpm cms:dev`; a new one gets draft and
+published rows from the seed.
 
 #### Upgrading an existing instance to this release
 
@@ -2495,6 +2818,7 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
+| cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
 | cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) step 0 (preflight), then steps 3 to 7 |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
