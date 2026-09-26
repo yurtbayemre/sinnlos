@@ -21,6 +21,12 @@ describe("isPollClosed (web)", () => {
     expect(isPollClosed("")).toBe(false);
     expect(isPollClosed("2026-09-30T21:59:59", new Date("2030-01-01T00:00:00Z"))).toBe(false);
   });
+
+  it("treats a bare calendar date as no instant (open), like the cms", () => {
+    // Its '-DD' is no offset; Date.parse alone would read UTC midnight.
+    expect(isPollClosed("2026-10-01", new Date("2030-01-01T00:00:00Z"))).toBe(false);
+    expect(isPollClosed("2026-10-01T00:00:00Z", new Date("2030-01-01T00:00:00Z"))).toBe(true);
+  });
 });
 
 describe("pollClosesAtForDay", () => {

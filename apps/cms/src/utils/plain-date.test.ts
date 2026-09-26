@@ -4,6 +4,7 @@ import {
   addDaysToKey,
   canonicalTimeZone,
   formatPlainDate,
+  instantEpochMs,
   isPlainDate,
   isValidTimeZone,
   zonedDateKey,
@@ -30,6 +31,15 @@ describe("plain-date", () => {
     expect(() => zonedDateKey("2026-09-24T10:00:00", "Europe/Berlin")).toThrow(/instant/);
     expect(() => zonedDateKey(new Date(Number.NaN), "Europe/Berlin")).toThrow();
     expect(zonedDateKey("2026-09-24T23:30:00+02:00", "Europe/Berlin")).toBe("2026-09-24");
+  });
+
+  it("a calendar date is no instant: its '-DD' is not an offset", () => {
+    // Date.parse would read it as UTC midnight (the previous suffix check let it through).
+    expect(() => zonedDateKey("2026-10-01", "Europe/Berlin")).toThrow(/instant/);
+    expect(instantEpochMs("2026-10-01")).toBeNull();
+    expect(instantEpochMs("2026-10-01T00:00Z")).toBe(Date.UTC(2026, 9, 1));
+    expect(instantEpochMs(" 2026-10-01T02:00:00+02:00 ")).toBe(Date.UTC(2026, 9, 1));
+    expect(instantEpochMs(new Date(Number.NaN))).toBeNull();
   });
 
   it("addDaysToKey crosses month, year and leap-day boundaries", () => {

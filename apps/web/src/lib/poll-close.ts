@@ -9,24 +9,18 @@
  *    stored as the instant D 23:59:59 there, whatever zone the web process
  *    or the browser runs in.
  */
-import { isPlainDate, zonedWallTimeToInstant } from "./plain-date";
+import { instantEpochMs, isPlainDate, zonedWallTimeToInstant } from "./plain-date";
 
 /** Wall-clock time a poll closes on its closing day, in APP_TIME_ZONE. */
 export const POLL_CLOSING_TIME = "23:59:59";
 
-const INSTANT_SUFFIX_RE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
-
-function instantMs(value: string | Date): number | null {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.getTime();
-  if (!INSTANT_SUFFIX_RE.test(value.trim())) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
-
-/** Closed iff now >= closesAt. No (or an unparseable) closesAt: open. */
+/**
+ * Closed iff now >= closesAt. No closesAt, or one that is no instant (an
+ * offset-less date-time, a bare calendar date, garbage): open, like the cms.
+ */
 export function isPollClosed(closesAt: string | Date | null | undefined, now: Date = new Date()): boolean {
   if (closesAt == null || closesAt === "") return false;
-  const closesAtMs = instantMs(closesAt);
+  const closesAtMs = instantEpochMs(closesAt);
   if (closesAtMs === null) return false;
   return now.getTime() >= closesAtMs;
 }

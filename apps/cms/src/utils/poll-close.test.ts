@@ -17,5 +17,7 @@ describe("isPollClosed (cms)", () => {
     expect(isPollClosed(undefined, new Date())).toBe(false);
     expect(isPollClosed("", new Date())).toBe(false);
     expect(isPollClosed("not a date", new Date())).toBe(false);
+    // A bare calendar date is no instant (the web rule agrees).
+    expect(isPollClosed("2026-10-01", new Date("2030-01-01T00:00:00Z"))).toBe(false);
   });
 });

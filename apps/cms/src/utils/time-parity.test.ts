@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { addDaysToKey, zonedDateKey, zonedWallTimeToInstant } from "./plain-date";
-import { parsePlainDate, wallTimeToInstant, zonedDateOf } from "./time";
+import { addDaysToKey, instantEpochMs, zonedDateKey, zonedWallTimeToInstant } from "./plain-date";
+import { instantMsOrNull, parsePlainDate, wallTimeToInstant, zonedDateOf } from "./time";
 
 /**
  * Parity between the two implementations of the datetime contract: time.ts
@@ -58,6 +58,23 @@ const DATES = [
 
 const WALL_TIMES = ["00:00", "00:30", "01:59:59", "02:00", "02:30", "03:00", "12:00", "23:59:59"];
 
+/** Strings an instant parser meets: instants, and look-alikes that are none. */
+const INSTANT_LIKE = [
+  "2026-10-01T12:00Z",
+  "2026-10-01T12:00:00Z",
+  "2026-10-01T12:00:00.123Z",
+  "2026-10-01T12:00:00+02:00",
+  "2026-10-01T12:00:00-05:30",
+  "2026-10-25T02:30:00+01:00",
+  " 2026-10-01T12:00:00Z ",
+  // No instants: a calendar date, offset-less date-times, garbage.
+  "2026-10-01",
+  "2026-10-01T12:00",
+  "2026-10-01T12:00:00",
+  "2026-10-01T12:00:00.000",
+  "01.10.2026",
+  "",
+];
 describe("time.ts and plain-date.ts agree", () => {
   it("on the calendar day of an instant (zonedDateOf vs zonedDateKey)", () => {
     for (const zone of ZONES) {
@@ -70,6 +87,13 @@ describe("time.ts and plain-date.ts agree", () => {
         );
       }
     }
+  });
+
+  it("on what counts as an instant (instantEpochMs vs instantMsOrNull)", () => {
+    for (const value of INSTANT_LIKE) {
+      expect(instantEpochMs(value), JSON.stringify(value)).toBe(instantMsOrNull(value));
+    }
+    expect(instantEpochMs("2026-10-01")).toBeNull();
   });
 
   it("on calendar-day arithmetic (addDaysToKey vs PlainDate.add)", () => {

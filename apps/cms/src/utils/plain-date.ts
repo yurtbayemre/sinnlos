@@ -9,15 +9,21 @@
  * Two value classes, never mixed:
  *  - a calendar date is the string 'YYYY-MM-DD' (Postgres `date`); it has no
  *    zone and is never turned into a midnight instant for logic;
- *  - an instant is a Date, or an ISO-8601 string with 'Z' or a numeric offset.
+ *  - an instant is a Date, or an ISO-8601 date-time with 'Z' or a numeric
+ *    offset ('2026-10-01' alone is a calendar date, never an instant).
  * Every zone is explicit (an IANA name, normally APP_TIME_ZONE); the process
  * zone is never used.
  */
 
 const PLAIN_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const WALL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
-/** An ISO date-time must end in Z or a numeric offset to be an instant. */
-const INSTANT_SUFFIX_RE = /(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+/**
+ * An ISO date-time is an instant only with a time of day followed by Z or a
+ * numeric offset. The time part is required: without it the '-DD' of a
+ * calendar date ('2026-10-01') would pass for an offset, and Date.parse reads
+ * that date as UTC midnight.
+ */
+const INSTANT_RE = /T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
 
 const DAY_MS = 86400000;
 
@@ -120,18 +126,29 @@ function offsetMsAt(epochMs: number, timeZone: string): number {
   return wallAsUtc - Math.floor(epochMs / 1000) * 1000;
 }
 
-function toEpochMs(instant: Date | string): number {
+/**
+ * Epoch ms of an instant: a valid Date, or an ISO-8601 date-time with a time
+ * of day and Z or a numeric offset. Anything else is null: an offset-less
+ * date-time, a calendar date, garbage. Mirrors time.ts instantMsOrNull() for
+ * Intl-only callers (time-parity.test.ts).
+ */
+export function instantEpochMs(instant: Date | string): number | null {
   if (instant instanceof Date) {
     const ms = instant.getTime();
-    if (Number.isNaN(ms)) throw new RangeError("Invalid Date");
-    return ms;
+    return Number.isNaN(ms) ? null : ms;
   }
-  if (typeof instant !== "string" || !INSTANT_SUFFIX_RE.test(instant.trim())) {
-    throw new RangeError(`Not an instant (ISO-8601 with Z or an offset): ${String(instant)}`);
-  }
-  const ms = Date.parse(instant);
-  if (Number.isNaN(ms)) throw new RangeError(`Not an instant: ${instant}`);
-  return ms;
+  if (typeof instant !== "string") return null;
+  const trimmed = instant.trim();
+  if (!INSTANT_RE.test(trimmed)) return null;
+  const ms = Date.parse(trimmed);
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function toEpochMs(instant: Date | string): number {
+  const ms = instantEpochMs(instant);
+  if (ms !== null) return ms;
+  if (instant instanceof Date) throw new RangeError("Invalid Date");
+  throw new RangeError(`Not an instant (ISO-8601 with a time and Z or an offset): ${String(instant)}`);
 }
 
 function pad(value: number, width = 2): string {
