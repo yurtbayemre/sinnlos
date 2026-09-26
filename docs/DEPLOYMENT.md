@@ -1679,8 +1679,12 @@ the cms and the database, phase 2 the web):
 
 - **Instants** (a point on the timeline: `createdAt`, event `start`/`end`,
   poll `closesAt`, …) are Strapi `datetime` fields, stored as Postgres
-  `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. The cms accepts an
-  instant only with `Z` or an offset.
+  `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. Clients must send
+  instants with `Z` or an offset. The cms's own code reads instants only
+  through its time module, which rejects an offset-less value (a vote
+  against such a `closesAt` counts the poll as open), while Strapi's generic
+  content API and admin panel read one in the process zone, i.e. as UTC.
+  The web and the admin panel always send `Z`.
 - **Calendar dates** (classified `expiresAt`, announcement `ackDeadline`,
   `birthday`, `hireDate`) are Strapi `date` fields: `YYYY-MM-DD`, no zone,
   never turned into a midnight instant.
