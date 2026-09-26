@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { BarChart3, Clock, Check } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { isPollClosed } from "@/lib/poll-close";
 import { votePoll } from "@/lib/poll-actions";
 import type { PollResults } from "@/lib/types";
 
@@ -28,7 +29,7 @@ export function PollCard({ results }: { results: PollResults }) {
   }));
   const { counts: localCounts, total: localTotal, myVoteIndex: voted } = optimistic;
 
-  const isClosed = poll.closesAt ? new Date(poll.closesAt) < new Date() : false;
+  const isClosed = isPollClosed(poll.closesAt);
   const hasVoted = voted !== null;
   const showResults = hasVoted || isClosed;
 

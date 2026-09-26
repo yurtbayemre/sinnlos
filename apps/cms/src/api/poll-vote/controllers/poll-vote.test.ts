@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import pollVoteController from "./poll-vote";
 
 /**
@@ -46,6 +46,13 @@ const PUBLISHED: PollRow = {
   question: "Pizza or sushi?",
   publishedAt: "2026-09-01T00:00:00.000Z",
 };
+/** Closes on 2026-09-30 ("closes on D" = 23:59:59 Europe/Berlin). */
+const CLOSING: PollRow = {
+  ...PUBLISHED,
+  id: 3,
+  question: "Offsite location?",
+  closesAt: "2026-09-30T21:59:59.000Z",
+};
 
 type Where = Record<string, unknown>;
 
@@ -65,7 +72,7 @@ type Handler = (ctx: unknown) => Promise<unknown>;
 function setup(id: number, body: unknown = { optionIndex: 0 }) {
   const pollFindOne = vi.fn(
     async ({ where }: { where: Where }) =>
-      [DRAFT, PUBLISHED].find((r) => matches(r, where)) ?? null,
+      [DRAFT, PUBLISHED, CLOSING].find((r) => matches(r, where)) ?? null,
   );
   const votes = {
     findOne: vi.fn(async () => null),
@@ -152,5 +159,27 @@ describe("poll results (FX06)", () => {
         total: 1,
       }),
     );
+  });
+});
+
+describe("poll vote: close rule (datetime contract)", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("accepts a vote until the instant before closesAt", async () => {
+    vi.useFakeTimers({ now: new Date("2026-09-30T21:59:58.999Z") });
+    const { controller, ctx, votes } = setup(CLOSING.id);
+    await controller.vote(ctx);
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(votes.create).toHaveBeenCalledOnce();
+  });
+
+  it("is closed at exactly closesAt (now >= closesAt), like the web", async () => {
+    vi.useFakeTimers({ now: new Date(CLOSING.closesAt as string) });
+    const { controller, ctx, votes } = setup(CLOSING.id);
+    await controller.vote(ctx);
+    expect(ctx.badRequest).toHaveBeenCalledWith("Poll is closed");
+    expect(votes.create).not.toHaveBeenCalled();
   });
 });

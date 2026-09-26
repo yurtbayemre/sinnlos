@@ -1,5 +1,7 @@
 import { factories } from "@strapi/strapi";
 
+import { isPollClosed } from "../../../utils/poll-close";
+
 export default factories.createCoreController("api::poll-vote.poll-vote", ({ strapi }) => ({
   async vote(ctx) {
     const user = ctx.state.user;
@@ -19,7 +21,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     const options = poll.options as string[];
     if (optionIndex >= options.length) return ctx.badRequest("Invalid optionIndex");
 
-    if (poll.closesAt && new Date(poll.closesAt) < new Date()) {
+    // Closed iff now >= closesAt, the same rule as the web (utils/poll-close.ts).
+    if (isPollClosed(poll.closesAt)) {
       return ctx.badRequest("Poll is closed");
     }
 

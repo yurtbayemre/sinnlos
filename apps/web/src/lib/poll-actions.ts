@@ -1,6 +1,8 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { appTimeZone } from "@/lib/app-time-zone";
+import { pollClosesAtForDay } from "@/lib/poll-close";
 import { canCreatePolls } from "@/lib/roles";
 import { strapi } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
@@ -34,7 +36,13 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
   const options = [...new Set(input.options.map((o) => o.trim()).filter(Boolean))];
   if (options.length < 2) return { ok: false, code: "tooFewOptions" };
 
-  const closesAt = input.closesAt ? new Date(`${input.closesAt}T23:59:59`).toISOString() : null;
+  // "Closes on D" = D 23:59:59 in APP_TIME_ZONE (datetime contract), not in
+  // the zone this process happens to run in.
+  let closesAt: string | null = null;
+  if (input.closesAt) {
+    closesAt = pollClosesAtForDay(input.closesAt, appTimeZone());
+    if (!closesAt) return { ok: false, code: "failed" };
+  }
 
   try {
     // Polls use draftAndPublish — without status=published the REST create

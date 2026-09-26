@@ -19,33 +19,17 @@
  */
 import { Temporal } from "temporal-polyfill";
 
-import { canonicalTimeZone, isPlainDate } from "./plain-date";
+import { DEFAULT_APP_TIME_ZONE, isPlainDate, resolveAppTimeZone } from "./plain-date";
 
 export type PlainDate = Temporal.PlainDate;
 export type Instant = Temporal.Instant;
 export type InstantInput = Date | string | Temporal.Instant;
 export type Disambiguation = "compatible" | "earlier" | "later" | "reject";
 
-export const DEFAULT_APP_TIME_ZONE = "Europe/Berlin";
+// One implementation for cms and web (plain-date.ts is mirrored).
+export { DEFAULT_APP_TIME_ZONE, resolveAppTimeZone };
 
 const WALL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;
-
-/**
- * Validates an APP_TIME_ZONE value. Unset means the default; an empty or
- * unknown name throws (config/server.ts calls this at boot, so a typo fails
- * the start instead of silently shifting every business day).
- */
-export function resolveAppTimeZone(raw: string | undefined): string {
-  if (raw === undefined) return DEFAULT_APP_TIME_ZONE;
-  const canonical = canonicalTimeZone(raw);
-  if (!canonical) {
-    throw new Error(
-      `APP_TIME_ZONE must be an IANA time zone name such as "Europe/Berlin" (got "${raw}"). ` +
-        "Leave it unset for the default Europe/Berlin.",
-    );
-  }
-  return canonical;
-}
 
 let cachedZone: { raw: string | undefined; zone: string } | null = null;
 
