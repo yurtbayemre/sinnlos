@@ -5,6 +5,22 @@
  * Idempotent — skips seeding if any departments OR users already exist
  * (guard against re-running on an already-populated database, and
  * against creating login-capable demo accounts next to real ones).
+ *
+ * Draft & publish content (announcements, events, wiki spaces and pages,
+ * polls, documents) goes through the Document Service: create with
+ * status "published" writes a draft row and publishes it, so every document
+ * gets the draft + published pair the Strapi admin expects, with the same
+ * relations on both rows (FX38). Relations are passed as documentIds, which
+ * link a draft to the target's draft and the published row to the target's
+ * published row. Until 2026-09-26 this seed wrote those types through
+ * `strapi.db.query(...).create({ publishedAt })` — published rows without a
+ * draft, which the admin hides from its default list and which lose
+ * relations when edited and published there; utils/draft-twins.ts repairs
+ * such databases at boot.
+ *
+ * Departments, teams, users, kudos, votes, comments and reactions have no
+ * draft & publish: one row each, written through `strapi.db.query` (and the
+ * users-permissions service for users), as before.
  */
 
 const DEPARTMENTS = [
@@ -41,6 +57,43 @@ const USERS = [
 
 const PASSWORD = "demo1234";
 
+const ANNOUNCEMENT_UID = "api::announcement.announcement";
+const EVENT_UID = "api::event.event";
+const WIKI_SPACE_UID = "api::wiki-space.wiki-space";
+const WIKI_PAGE_UID = "api::wiki-page.wiki-page";
+const POLL_UID = "api::poll.poll";
+const DOCUMENT_UID = "api::document.document";
+
+/** A written row: every Strapi 5 row carries its row id and its documentId. */
+export interface SeedRow {
+  id: number;
+  documentId: string;
+}
+
+type SeedData = Record<string, unknown>;
+
+interface SeedQuery {
+  count(params?: SeedData): Promise<number>;
+  findOne(params: SeedData): Promise<SeedRow | null>;
+  create(params: { data: SeedData }): Promise<SeedRow>;
+  update(params: { where: SeedData; data: SeedData }): Promise<unknown>;
+}
+
+/** The slice of the Strapi instance the seed uses. */
+export interface SeedDemoHost {
+  db: {
+    query(uid: string): SeedQuery;
+    queryBuilder(uid: string): {
+      update(data: SeedData): { where(where: SeedData): { execute(): Promise<unknown> } };
+    };
+  };
+  documents(uid: string): {
+    create(params: { data: SeedData; status: "published" }): Promise<SeedRow>;
+  };
+  plugin(name: string): { service(name: string): { add(values: SeedData): Promise<SeedRow> } };
+  log: { info(message: string): void };
+}
+
 function daysFromNow(n: number): string {
   const d = new Date();
   d.setDate(d.getDate() + n);
@@ -51,7 +104,16 @@ function daysAgo(n: number): string {
   return daysFromNow(-n);
 }
 
-export async function seedDemoData(strapi: any) {
+/**
+ * Draft & publish content: Document Service create + publish. Returns the
+ * PUBLISHED row (repository.js create → publish → entries[0]); its documentId
+ * is the document's, its id the published row's.
+ */
+function createPublished(strapi: SeedDemoHost, uid: string, data: SeedData): Promise<SeedRow> {
+  return strapi.documents(uid).create({ data, status: "published" });
+}
+
+export async function seedDemoData(strapi: SeedDemoHost) {
   if (process.env.SEED_DEMO_DATA !== "1") return;
 
   const existingDepts = await strapi.db.query("api::department.department").count({});
@@ -81,7 +143,7 @@ export async function seedDemoData(strapi: any) {
   // publishedAt is set explicitly, like Strapi's own non-D&P write path
   // (document-service draft-and-publish.js statusToData), so the org-dp boot
   // guard (utils/org-dp-guard.ts) never sees a seeded draft row.
-  const deptMap: Record<string, any> = {};
+  const deptMap: Record<string, SeedRow> = {};
   for (const d of DEPARTMENTS) {
     deptMap[d.name] = await strapi.db.query("api::department.department").create({
       data: { ...d, slug: slugify(d.name), publishedAt: new Date() },
@@ -89,7 +151,7 @@ export async function seedDemoData(strapi: any) {
   }
 
   // --- Teams ---
-  const teamMap: Record<string, any> = {};
+  const teamMap: Record<string, SeedRow> = {};
   for (const t of TEAMS) {
     teamMap[t.name] = await strapi.db.query("api::team.team").create({
       data: {
@@ -102,7 +164,7 @@ export async function seedDemoData(strapi: any) {
   }
 
   // --- Users ---
-  const userMap: Record<string, any> = {};
+  const userMap: Record<string, SeedRow> = {};
   for (let i = 0; i < USERS.length; i++) {
     const u = USERS[i];
     const role = i === 0 ? adminRole : i < 5 ? editorRole : memberRole;
@@ -160,63 +222,69 @@ export async function seedDemoData(strapi: any) {
 
   // --- Announcements ---
   const announcements = [
-    { title: "Welcome to Sinnlos Intranet!", body: "We're excited to launch our new intranet platform. Explore the sidebar to discover all features — from the people directory and org chart to polls, kudos, and our wiki. If you have questions, drop a comment below!", pinned: true, audience: "all" as const, author: userMap["dana.patel"].id },
-    { title: "Q3 All-Hands: Friday at 14:00", body: "Join us in the main conference room (or remotely) for the quarterly all-hands. Agenda: product roadmap update, hiring plan, and the new office kitchen reveal. Snacks provided!", pinned: false, audience: "all" as const, author: alex.id },
-    { title: "New Design System v2 is live", body: "The design team has shipped Design System v2 with updated tokens, component variants, and dark mode support. Check the wiki for migration guides. Reach out in #design-system on Slack for questions.", pinned: false, audience: "all" as const, author: userMap["riley.kim"].id },
-    { title: "Updated Travel & Expense Policy", body: "Please review the updated travel and expense policy in the Documents section. Key changes: meal per-diem increased to €50/day, economy-plus flights now approved for trips over 4 hours. Effective immediately.", pinned: false, audience: "all" as const, author: userMap["morgan.brooks"].id },
-    { title: "Engineering: Sprint Retro moved to Thursday", body: "This week's sprint retro is moved from Wednesday to Thursday 16:00 to accommodate the client demo. Same room, same agenda.", pinned: false, audience: "departments" as const, author: alex.id, department: deptMap["Engineering"].id },
+    { title: "Welcome to Sinnlos Intranet!", body: "We're excited to launch our new intranet platform. Explore the sidebar to discover all features — from the people directory and org chart to polls, kudos, and our wiki. If you have questions, drop a comment below!", pinned: true, audience: "all" as const, author: userMap["dana.patel"].documentId },
+    { title: "Q3 All-Hands: Friday at 14:00", body: "Join us in the main conference room (or remotely) for the quarterly all-hands. Agenda: product roadmap update, hiring plan, and the new office kitchen reveal. Snacks provided!", pinned: false, audience: "all" as const, author: alex.documentId },
+    { title: "New Design System v2 is live", body: "The design team has shipped Design System v2 with updated tokens, component variants, and dark mode support. Check the wiki for migration guides. Reach out in #design-system on Slack for questions.", pinned: false, audience: "all" as const, author: userMap["riley.kim"].documentId },
+    { title: "Updated Travel & Expense Policy", body: "Please review the updated travel and expense policy in the Documents section. Key changes: meal per-diem increased to €50/day, economy-plus flights now approved for trips over 4 hours. Effective immediately.", pinned: false, audience: "all" as const, author: userMap["morgan.brooks"].documentId },
+    { title: "Engineering: Sprint Retro moved to Thursday", body: "This week's sprint retro is moved from Wednesday to Thursday 16:00 to accommodate the client demo. Same room, same agenda.", pinned: false, audience: "departments" as const, author: alex.documentId, department: deptMap["Engineering"].documentId },
   ];
 
-  const announcementEntities: any[] = [];
-  for (const a of announcements) {
-    announcementEntities.push(
-      await strapi.db.query("api::announcement.announcement").create({
-        data: { ...a, publishedAt: new Date(daysAgo(announcements.indexOf(a) * 2)) },
-      }),
-    );
+  // Published through the Document Service, which fans out the announcement
+  // notifications once per published row, as the old db.query writes did
+  // (announcement/lifecycles.ts afterCreate).
+  const announcementEntities: SeedRow[] = [];
+  for (const [index, a] of announcements.entries()) {
+    const published = await createPublished(strapi, ANNOUNCEMENT_UID, a);
+    // Backdate the published row so the demo feed spans eight days. Publish
+    // always stamps "now" and the Document Service ignores a client
+    // publishedAt (draft-and-publish.js filterDataPublishedAt), so this is a
+    // plain column update on the published row only. The query builder runs
+    // no lifecycle: the fan-out already ran on publish.
+    await strapi.db
+      .queryBuilder(ANNOUNCEMENT_UID)
+      .update({ publishedAt: new Date(daysAgo(index * 2)) })
+      .where({ id: published.id })
+      .execute();
+    announcementEntities.push(published);
   }
 
   // --- Events ---
   const events = [
-    { title: "Q3 All-Hands Meeting", description: "Quarterly company all-hands with leadership updates, product demos, and Q&A.", start: daysFromNow(3), end: daysFromNow(3), location: "Main Conference Room / Zoom", organizer: alex.id },
-    { title: "Design System Workshop", description: "Hands-on workshop covering the new DS v2 tokens and component library. Bring your laptop!", start: daysFromNow(7), end: daysFromNow(7), location: "Design Lab, 3rd Floor", organizer: userMap["riley.kim"].id },
-    { title: "Summer Team Barbecue", description: "Annual summer barbecue on the rooftop terrace. Vegetarian and vegan options available. Families welcome!", start: daysFromNow(14), end: daysFromNow(14), allDay: true, location: "Rooftop Terrace", organizer: userMap["dana.patel"].id },
-    { title: "Frontend Guild: React 19 Deep Dive", description: "Monthly frontend guild session. This time: React 19 compiler, use() hook, and Server Components patterns.", start: daysFromNow(5), end: daysFromNow(5), location: "Room 42", organizer: userMap["sam.chen"].id },
-    { title: "Hiring Kickoff: Senior Backend Engineer", description: "Alignment meeting for the new Senior Backend role. We'll review the job description, interview loop, and sourcing strategy.", start: daysFromNow(2), end: daysFromNow(2), location: "HR Meeting Room", organizer: userMap["dana.patel"].id },
-    { title: "Finance: Month-End Close", description: "Monthly close process. All expense reports must be submitted by EOD the day before.", start: daysFromNow(18), end: daysFromNow(19), location: "Finance Office", organizer: userMap["morgan.brooks"].id },
+    { title: "Q3 All-Hands Meeting", description: "Quarterly company all-hands with leadership updates, product demos, and Q&A.", start: daysFromNow(3), end: daysFromNow(3), location: "Main Conference Room / Zoom", organizer: alex.documentId },
+    { title: "Design System Workshop", description: "Hands-on workshop covering the new DS v2 tokens and component library. Bring your laptop!", start: daysFromNow(7), end: daysFromNow(7), location: "Design Lab, 3rd Floor", organizer: userMap["riley.kim"].documentId },
+    { title: "Summer Team Barbecue", description: "Annual summer barbecue on the rooftop terrace. Vegetarian and vegan options available. Families welcome!", start: daysFromNow(14), end: daysFromNow(14), allDay: true, location: "Rooftop Terrace", organizer: userMap["dana.patel"].documentId },
+    { title: "Frontend Guild: React 19 Deep Dive", description: "Monthly frontend guild session. This time: React 19 compiler, use() hook, and Server Components patterns.", start: daysFromNow(5), end: daysFromNow(5), location: "Room 42", organizer: userMap["sam.chen"].documentId },
+    { title: "Hiring Kickoff: Senior Backend Engineer", description: "Alignment meeting for the new Senior Backend role. We'll review the job description, interview loop, and sourcing strategy.", start: daysFromNow(2), end: daysFromNow(2), location: "HR Meeting Room", organizer: userMap["dana.patel"].documentId },
+    { title: "Finance: Month-End Close", description: "Monthly close process. All expense reports must be submitted by EOD the day before.", start: daysFromNow(18), end: daysFromNow(19), location: "Finance Office", organizer: userMap["morgan.brooks"].documentId },
   ];
 
+  // Published through the Document Service; the event notification fan-out
+  // runs once per published row, as before (event/lifecycles.ts afterCreate).
   for (const e of events) {
-    await strapi.db.query("api::event.event").create({
-      data: { ...e, publishedAt: new Date() },
-    });
+    await createPublished(strapi, EVENT_UID, e);
   }
 
   // --- Wiki Spaces & Pages ---
-  const generalSpace = await strapi.db.query("api::wiki-space.wiki-space").create({
-    data: { name: "General", slug: "general", icon: "book", description: "Company-wide knowledge base", visibility: "public", publishedAt: new Date() },
-  });
+  // Spaces first: a page's draft links the space's draft and its published
+  // row the space's published row, so both have to exist.
+  const generalSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "General", slug: "general", icon: "book", description: "Company-wide knowledge base", visibility: "public" });
 
-  const engSpace = await strapi.db.query("api::wiki-space.wiki-space").create({
-    data: { name: "Engineering", slug: "engineering", icon: "code", description: "Technical documentation and architecture decisions", visibility: "public", department: deptMap["Engineering"].id, publishedAt: new Date() },
-  });
+  const engSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "Engineering", slug: "engineering", icon: "code", description: "Technical documentation and architecture decisions", visibility: "public", department: deptMap["Engineering"].documentId });
 
-  const hrSpace = await strapi.db.query("api::wiki-space.wiki-space").create({
-    data: { name: "People & Culture", slug: "people-culture", icon: "heart", description: "HR policies, onboarding guides, and culture handbook", visibility: "public", department: deptMap["Human Resources"].id, publishedAt: new Date() },
-  });
+  const hrSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "People & Culture", slug: "people-culture", icon: "heart", description: "HR policies, onboarding guides, and culture handbook", visibility: "public", department: deptMap["Human Resources"].documentId });
 
   const wikiPages = [
-    { title: "Getting Started", slug: "getting-started", space: generalSpace.id, author: userMap["dana.patel"].id, order: 0, body: "# Welcome to Sinnlos\n\nThis is your company intranet. Here's how to get the most out of it:\n\n## Key Features\n\n- **People Directory** — Find colleagues, view the org chart, and see who reports to whom\n- **Announcements** — Stay up to date with company news; comment and react\n- **Events** — Browse upcoming events and download calendar invites (.ics)\n- **Wiki** — Browse and contribute to our knowledge base\n- **Kudos** — Recognize colleagues for great work\n- **Polls** — Vote on company decisions\n- **Documents** — Access policies, forms, and templates\n\n## Need Help?\n\nReach out to the HR team or drop a comment on any announcement." },
-    { title: "Code Review Guidelines", slug: "code-review-guidelines", space: engSpace.id, author: userMap["sam.chen"].id, order: 0, body: "# Code Review Guidelines\n\n## Philosophy\n\nCode reviews are about **knowledge sharing** first and quality second. Every review is a learning opportunity.\n\n## Expectations\n\n- Respond to review requests within **4 business hours**\n- Keep PRs under **400 lines** when possible\n- Use conventional comments: `nit:`, `suggestion:`, `question:`, `blocker:`\n\n## What to Look For\n\n1. **Correctness** — Does it do what the ticket says?\n2. **Security** — Any injection vectors, leaked secrets, missing auth checks?\n3. **Performance** — N+1 queries, unbounded loops, missing indexes?\n4. **Readability** — Could a new team member understand this in 6 months?\n\n## Approval\n\nOne approval required; two for infrastructure or auth changes." },
-    { title: "Architecture Decision Records", slug: "architecture-decision-records", space: engSpace.id, author: alex.id, order: 1, body: "# Architecture Decision Records (ADRs)\n\n## ADR-001: Strapi v5 as Headless CMS\n\n**Status:** Accepted\n\n**Context:** We need a content management backend that supports custom content types, role-based access, and can be self-hosted.\n\n**Decision:** Use Strapi v5 with PostgreSQL. The Document Service API gives us the flexibility for custom business logic while the admin panel provides a no-code editing experience for non-developers.\n\n**Consequences:** Tied to Node.js runtime for the CMS. Custom controllers needed for complex permissions beyond Strapi's built-in RBAC.\n\n---\n\n## ADR-002: Next.js for the Frontend\n\n**Status:** Accepted\n\n**Context:** We want server-side rendering for SEO-irrelevant pages too, because SSR gives us server-side auth checks and reduces client bundle size.\n\n**Decision:** Next.js with App Router and React Server Components. Auth.js (NextAuth v5) for authentication.\n\n**Consequences:** Requires Node.js runtime (no static export). Server Components simplify data fetching but limit interactivity to client component islands." },
-    { title: "Onboarding Checklist", slug: "onboarding-checklist", space: hrSpace.id, author: userMap["dana.patel"].id, order: 0, body: "# New Employee Onboarding\n\n## Week 1\n\n- [ ] Sign into the intranet and update your profile\n- [ ] Meet your manager and set up 1:1 cadence\n- [ ] Read the Employee Handbook (see Documents)\n- [ ] Complete IT security training\n- [ ] Join relevant department and team channels\n\n## Week 2\n\n- [ ] Shadow a colleague on a real task\n- [ ] Attend your first team standup\n- [ ] Give your first Kudos to someone who helped you\n\n## Month 1\n\n- [ ] Complete your first project or contribution\n- [ ] Set Q-goals with your manager\n- [ ] Attend an all-hands meeting" },
-    { title: "Remote Work Policy", slug: "remote-work-policy", space: hrSpace.id, author: userMap["dana.patel"].id, order: 1, body: "# Remote Work Policy\n\n## Overview\n\nWe trust our team to work from wherever they're most productive. This policy sets expectations for remote work.\n\n## Guidelines\n\n- **Core hours:** 10:00–15:00 CET — be available for meetings and collaboration\n- **Office days:** Teams may agree on 1–2 anchor days per week; no company-wide mandate\n- **Equipment:** We provide a €1,000 home-office budget (one-time, reimbursed)\n- **Communication:** Default to async. Use meetings only when async would take 3x longer\n\n## Expectations\n\n- Keep your calendar up to date\n- Respond to messages within 4 hours during core hours\n- Use video for 1:1s and team ceremonies\n\n## Coworking\n\nNeed a change of scenery? We reimburse up to €200/month for coworking spaces. Submit receipts via the expense form in Documents." },
+    { title: "Getting Started", slug: "getting-started", space: generalSpace.documentId, author: userMap["dana.patel"].documentId, order: 0, body: "# Welcome to Sinnlos\n\nThis is your company intranet. Here's how to get the most out of it:\n\n## Key Features\n\n- **People Directory** — Find colleagues, view the org chart, and see who reports to whom\n- **Announcements** — Stay up to date with company news; comment and react\n- **Events** — Browse upcoming events and download calendar invites (.ics)\n- **Wiki** — Browse and contribute to our knowledge base\n- **Kudos** — Recognize colleagues for great work\n- **Polls** — Vote on company decisions\n- **Documents** — Access policies, forms, and templates\n\n## Need Help?\n\nReach out to the HR team or drop a comment on any announcement." },
+    { title: "Code Review Guidelines", slug: "code-review-guidelines", space: engSpace.documentId, author: userMap["sam.chen"].documentId, order: 0, body: "# Code Review Guidelines\n\n## Philosophy\n\nCode reviews are about **knowledge sharing** first and quality second. Every review is a learning opportunity.\n\n## Expectations\n\n- Respond to review requests within **4 business hours**\n- Keep PRs under **400 lines** when possible\n- Use conventional comments: `nit:`, `suggestion:`, `question:`, `blocker:`\n\n## What to Look For\n\n1. **Correctness** — Does it do what the ticket says?\n2. **Security** — Any injection vectors, leaked secrets, missing auth checks?\n3. **Performance** — N+1 queries, unbounded loops, missing indexes?\n4. **Readability** — Could a new team member understand this in 6 months?\n\n## Approval\n\nOne approval required; two for infrastructure or auth changes." },
+    { title: "Architecture Decision Records", slug: "architecture-decision-records", space: engSpace.documentId, author: alex.documentId, order: 1, body: "# Architecture Decision Records (ADRs)\n\n## ADR-001: Strapi v5 as Headless CMS\n\n**Status:** Accepted\n\n**Context:** We need a content management backend that supports custom content types, role-based access, and can be self-hosted.\n\n**Decision:** Use Strapi v5 with PostgreSQL. The Document Service API gives us the flexibility for custom business logic while the admin panel provides a no-code editing experience for non-developers.\n\n**Consequences:** Tied to Node.js runtime for the CMS. Custom controllers needed for complex permissions beyond Strapi's built-in RBAC.\n\n---\n\n## ADR-002: Next.js for the Frontend\n\n**Status:** Accepted\n\n**Context:** We want server-side rendering for SEO-irrelevant pages too, because SSR gives us server-side auth checks and reduces client bundle size.\n\n**Decision:** Next.js with App Router and React Server Components. Auth.js (NextAuth v5) for authentication.\n\n**Consequences:** Requires Node.js runtime (no static export). Server Components simplify data fetching but limit interactivity to client component islands." },
+    { title: "Onboarding Checklist", slug: "onboarding-checklist", space: hrSpace.documentId, author: userMap["dana.patel"].documentId, order: 0, body: "# New Employee Onboarding\n\n## Week 1\n\n- [ ] Sign into the intranet and update your profile\n- [ ] Meet your manager and set up 1:1 cadence\n- [ ] Read the Employee Handbook (see Documents)\n- [ ] Complete IT security training\n- [ ] Join relevant department and team channels\n\n## Week 2\n\n- [ ] Shadow a colleague on a real task\n- [ ] Attend your first team standup\n- [ ] Give your first Kudos to someone who helped you\n\n## Month 1\n\n- [ ] Complete your first project or contribution\n- [ ] Set Q-goals with your manager\n- [ ] Attend an all-hands meeting" },
+    { title: "Remote Work Policy", slug: "remote-work-policy", space: hrSpace.documentId, author: userMap["dana.patel"].documentId, order: 1, body: "# Remote Work Policy\n\n## Overview\n\nWe trust our team to work from wherever they're most productive. This policy sets expectations for remote work.\n\n## Guidelines\n\n- **Core hours:** 10:00–15:00 CET — be available for meetings and collaboration\n- **Office days:** Teams may agree on 1–2 anchor days per week; no company-wide mandate\n- **Equipment:** We provide a €1,000 home-office budget (one-time, reimbursed)\n- **Communication:** Default to async. Use meetings only when async would take 3x longer\n\n## Expectations\n\n- Keep your calendar up to date\n- Respond to messages within 4 hours during core hours\n- Use video for 1:1s and team ceremonies\n\n## Coworking\n\nNeed a change of scenery? We reimburse up to €200/month for coworking spaces. Submit receipts via the expense form in Documents." },
   ];
 
+  // Creates only (no page update), so the revision snapshot
+  // (wiki-page/lifecycles.ts beforeUpdate) stays out of the seed, as before.
   for (const p of wikiPages) {
-    await strapi.db.query("api::wiki-page.wiki-page").create({
-      data: { ...p, publishedAt: new Date() },
-    });
+    await createPublished(strapi, WIKI_PAGE_UID, p);
   }
 
   // --- Kudos ---
@@ -239,47 +307,43 @@ export async function seedDemoData(strapi: any) {
 
   // --- Polls ---
   const polls = [
-    { question: "Which day works best for weekly team lunch?", options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], author: userMap["dana.patel"].id, closesAt: daysFromNow(7) },
-    { question: "Should we adopt a 4-day work week trial?", options: ["Yes, let's try it for Q4", "Maybe, need more details first", "No, I prefer the current schedule"], author: alex.id, closesAt: daysFromNow(14) },
-    { question: "Preferred tech talk format?", options: ["30-min lightning talks", "60-min deep dives", "Mix of both", "Recorded async videos"], author: userMap["sam.chen"].id, anonymous: true, closesAt: daysFromNow(10) },
+    { question: "Which day works best for weekly team lunch?", options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], author: userMap["dana.patel"].documentId, closesAt: daysFromNow(7) },
+    { question: "Should we adopt a 4-day work week trial?", options: ["Yes, let's try it for Q4", "Maybe, need more details first", "No, I prefer the current schedule"], author: alex.documentId, closesAt: daysFromNow(14) },
+    { question: "Preferred tech talk format?", options: ["30-min lightning talks", "60-min deep dives", "Mix of both", "Recorded async videos"], author: userMap["sam.chen"].documentId, anonymous: true, closesAt: daysFromNow(10) },
   ];
 
-  const pollEntities: any[] = [];
+  const pollEntities: SeedRow[] = [];
   for (const p of polls) {
-    pollEntities.push(
-      await strapi.db.query("api::poll.poll").create({
-        data: { ...p, publishedAt: new Date() },
-      }),
-    );
+    pollEntities.push(await createPublished(strapi, POLL_UID, p));
   }
 
-  // Some sample votes
+  // Some sample votes, linked like the vote action links them: to the
+  // PUBLISHED poll row by its numeric id (poll-vote controller; a republish
+  // re-links them to the new published row).
   const voters = Object.values(userMap);
   for (let i = 0; i < voters.length && i < 7; i++) {
     await strapi.db.query("api::poll-vote.poll-vote").create({
-      data: { poll: pollEntities[0].id, optionIndex: i % 5, voter: (voters[i] as any).id },
+      data: { poll: pollEntities[0].id, optionIndex: i % 5, voter: voters[i].id },
     });
   }
   for (let i = 0; i < 5; i++) {
     await strapi.db.query("api::poll-vote.poll-vote").create({
-      data: { poll: pollEntities[1].id, optionIndex: i % 3, voter: (voters[i] as any).id },
+      data: { poll: pollEntities[1].id, optionIndex: i % 3, voter: voters[i].id },
     });
   }
 
   // --- Documents ---
   const documents = [
-    { title: "Employee Handbook 2024", description: "Comprehensive guide covering company policies, benefits, and expectations.", category: "policy", uploadedBy: userMap["dana.patel"].id },
-    { title: "Expense Report Template", description: "Standard template for submitting travel and business expenses.", category: "form", uploadedBy: userMap["morgan.brooks"].id },
-    { title: "Brand Guidelines", description: "Logo usage, color palette, typography, and tone of voice.", category: "guide", uploadedBy: userMap["jamie.garcia"].id },
-    { title: "Architecture Diagram Template", description: "Mermaid-based template for documenting system architecture.", category: "template", uploadedBy: alex.id },
-    { title: "Information Security Policy", description: "Data classification, access controls, incident response procedures.", category: "policy", uploadedBy: userMap["dana.patel"].id },
-    { title: "Meeting Notes Template", description: "Standard template for recording meeting agendas, decisions, and action items.", category: "template", uploadedBy: userMap["quinn.wilson"].id },
+    { title: "Employee Handbook 2024", description: "Comprehensive guide covering company policies, benefits, and expectations.", category: "policy", uploadedBy: userMap["dana.patel"].documentId },
+    { title: "Expense Report Template", description: "Standard template for submitting travel and business expenses.", category: "form", uploadedBy: userMap["morgan.brooks"].documentId },
+    { title: "Brand Guidelines", description: "Logo usage, color palette, typography, and tone of voice.", category: "guide", uploadedBy: userMap["jamie.garcia"].documentId },
+    { title: "Architecture Diagram Template", description: "Mermaid-based template for documenting system architecture.", category: "template", uploadedBy: alex.documentId },
+    { title: "Information Security Policy", description: "Data classification, access controls, incident response procedures.", category: "policy", uploadedBy: userMap["dana.patel"].documentId },
+    { title: "Meeting Notes Template", description: "Standard template for recording meeting agendas, decisions, and action items.", category: "template", uploadedBy: userMap["quinn.wilson"].documentId },
   ];
 
   for (const d of documents) {
-    await strapi.db.query("api::document.document").create({
-      data: { ...d, publishedAt: new Date() },
-    });
+    await createPublished(strapi, DOCUMENT_UID, d);
   }
 
   // --- Comments on announcements ---
