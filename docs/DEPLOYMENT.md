@@ -780,6 +780,21 @@ cms stores and computes times:
 
 No change to secrets, no `JWT_SECRET` rotation, nobody is signed out.
 
+> **Revised 2026-09-26 after review** (read this if you rehearsed with an
+> earlier build of this branch): pin the running images as
+> `:pre-datetime` before deploying (step 7); a rollback to the previous cms
+> now always uses `infra/docker-compose.cms-legacy-tz.yml`, and before the
+> repair it is mandatory ([Rolling back this release](#rolling-back-this-release));
+> the gap check also fails for a θ in the future, a legacy zone not ahead of
+> UTC, or a θ with no write stamp on one side (step 3); `APP_TIME_ZONE` and
+> `DATETIME_LEGACY_ZONE` refuse UTC offsets, and the web refuses to serve if
+> its container's `TZ` is a name Node cannot find (spell zones as the tz
+> database does, step 5); event, poll and announcement times in the DST
+> change hour are listed for review (deadline note, steps 3 and 10); the
+> audit table records each value's document id and title (a rehearsal copy
+> gets the two columns added on its next repair). Nothing else changes for
+> an instance.
+
 **What an instance needs.** The repair must know which zone the old cms
 wrote in:
 
@@ -931,7 +946,11 @@ ones that need it in the admin panel.
    ```
 
    Leave `APP_TIME_ZONE` unset (or `Europe/Berlin`) unless the company is
-   elsewhere. Then `infra/deploy.sh --check` prints `Preflight OK`.
+   elsewhere. Spell zones exactly as the tz database does (`Europe/Berlin`,
+   not `europe/berlin`; never an offset such as `+02:00`): the cms refuses an
+   offset, and compose passes `APP_TIME_ZONE` to the web as `TZ`, which Node
+   only resolves in the exact spelling (the web then answers 500). Then
+   `infra/deploy.sh --check` prints `Preflight OK`.
 
 6. **Host backup time.** The nightly `pg-backup.sh` runs from the host
    crontab at 03:00 **host time**; the uploads and search-log janitors run at
