@@ -975,9 +975,14 @@ recorded in `strapi_migrations` and never runs again on this database.
     $COMPOSE exec cms node dist/scripts/datetime-migration-report.js
     ```
 
-    For each value where the `read as Europe/Berlin` line is the intended
-    time (someone corrected it by hand after 2026-08-15), correct the time in
-    the Strapi admin panel (it now shows the `read as UTC` time).
+    Each value is named by table, row, document id and title (`events#43
+    doc k3x… "Town hall" start = …`), followed by both readings and a `now in
+    Europe/Berlin:` line with the document's current draft and published
+    values (a publish since the repair re-creates the published row, so look
+    the document up by its title or id, not by the row number). For each
+    value where the `read as Europe/Berlin` line is the intended time
+    (someone corrected it by hand after 2026-08-15), correct the time in the
+    Strapi admin panel (it now shows the `read as UTC` time).
 11. **Later:** after 90 days, and once step 10 is done, drop the audit table:
     `DROP TABLE datetime_migration_audit;` (psql as above). Keep the two
     `DATETIME_LEGACY_*` variables.
@@ -1714,7 +1719,8 @@ the cms and the database, phase 2 the web):
   future, when the legacy zone is not ahead of UTC at θ, or when no write
   stamp lies on one side of θ: a database written in one zone only leaves
   `DATETIME_LEGACY_UTC_UNTIL` empty (with `DATETIME_LEGACY_ZONE=UTC` if that
-  zone was UTC). Old values stay in `datetime_migration_audit` (as text). Strapi's
+  zone was UTC). Old values stay in `datetime_migration_audit` (as text, with
+  the row's document id and title). Strapi's
   bookkeeping tables are left to the guard. Two cms processes booting at
   once (two replicas, a restart overlapping a slow first boot) repair only
   once: the migration holds a transaction-level advisory lock, so the

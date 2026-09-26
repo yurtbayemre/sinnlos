@@ -119,7 +119,7 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
     expect(text).toContain("θ inside [2026-08-15 18:40:00, 2026-08-15 20:50:00) UTC, e.g. 2026-08-15T19:45:00.000Z");
   });
 
-  it("after the repair lists the ambiguous values it recorded, for the review", async () => {
+  it("after the repair lists the ambiguous values it recorded, by document, for the review", async () => {
     await knex.transaction((trx) =>
       runLegacyDatetimeMigration(trx, { dialect: { client: "postgres" }, getSchemaName: () => schema }, {
         env: {
@@ -131,13 +131,25 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
         now: new Date("2026-09-26T10:00:00Z"),
       }),
     );
-    const text = await report();
+    // Republished after the repair with a corrected time: Strapi deletes the
+    // published row and creates a new one, so the audited row id is gone.
+    await knex.raw(`
+      DELETE FROM "${schema}".events WHERE id = 3;
+      INSERT INTO "${schema}".events (id, document_id, title, start, all_day, created_at, updated_at, published_at)
+        VALUES (7, 'e2', 'Town hall', '2026-10-10 06:00+00', false, '2026-07-01 09:00+00', now(), now());
+    `);
+    const { text, lookupErrors } = await reportResult();
+    expect(lookupErrors).toBe(0);
     expect(text).toContain("Nothing to repair: every app column is already timestamptz.");
     expect(text).toContain("Ambiguous values the repair recorded in datetime_migration_audit: 4, 4 still open");
+    // Named by document and label, with the document's rows as they are now.
     expect(text).toMatch(
-      /events#5 start = 2026-10-01 00:00:00 \[C-allday, run 2026-09-26T10:00:00\.000Z, repaired as Europe\/Berlin\]/,
+      /events#5 doc e4 "Offsite \(corrected\)" start = 2026-10-01 00:00:00 \[C-allday, run 2026-09-26T10:00:00\.000Z, repaired as Europe\/Berlin\]\n.*\n.*\n {6}now in Europe\/Berlin: published #5 2026-10-01 00:00:00/,
     );
-    expect(text).toMatch(/events#6 start = 2026-09-30 22:00:00 \[C, run [^\]]+, repaired as UTC\]/);
+    expect(text).toMatch(/events#6 doc e5 "Offsite \(kept\)" start = 2026-09-30 22:00:00 \[C, run [^\]]+, repaired as UTC\]/);
+    expect(text).toMatch(
+      /events#3 doc e2 "Town hall" start = 2026-10-10 08:00:00 \[C, [^\]]+\]\n.*\n.*\n {6}now in Europe\/Berlin: draft #2 2026-10-10 10:00:00, published #7 2026-10-10 08:00:00/,
+    );
   });
 
   it("--baseline tells unchanged values from values edited since the dump", async () => {

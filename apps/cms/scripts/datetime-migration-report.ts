@@ -271,8 +271,11 @@ interface AuditRow {
   run_id: string;
   table_name: string;
   row_id: string | null;
+  document_id: string | null;
+  label: string | null;
   column_name: string;
   old_naive: string;
+  zone: string;
   class: string;
 }
 
@@ -282,15 +285,67 @@ function auditNaive(text: string): string {
 }
 
 /**
- * After the repair: the ambiguous values it recorded in the audit table,
- * with the reading it chose and the other one, for the review in the admin
- * panel (DEPLOYMENT.md, after the deploy).
+ * The current value of an audited cell, for every row of its document (the
+ * draft and the published row; Strapi re-creates the published row on each
+ * publish, so the audited row id may be gone), in APP_TIME_ZONE.
  */
-async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, print: Print): Promise<void> {
+async function currentValues(
+  sql: SqlClient,
+  mainSchema: SchemaCache,
+  options: ReportOptions,
+  row: AuditRow,
+): Promise<string> {
+  const columns = await mainSchema(row.table_name);
+  if (!/ with time zone$/.test(columns.get(row.column_name) ?? "")) {
+    return `      now: ${row.table_name}.${row.column_name} is not timestamptz, not read`;
+  }
+  let where: string;
+  let bindings: unknown[];
+  if (row.document_id !== null && columns.has("document_id")) {
+    where = "document_id = ?";
+    bindings = [row.document_id];
+  } else if (row.row_id !== null && columns.has("id")) {
+    where = "id = ?";
+    bindings = [Number(row.row_id)];
+  } else {
+    return "      now: no document id or row id to look the row up by";
+  }
+  const id = columns.has("id") ? `${quoteIdent("id")}::text` : "NULL::text";
+  const draft = columns.has("published_at") ? `${quoteIdent("published_at")} IS NULL` : "NULL::boolean";
+  const found = await inSavepoint(sql, () =>
+    sql.query<{ id: string | null; draft: boolean | null; v: string | null }>(
+      `SELECT ${id} AS id, ${draft} AS draft,
+              to_char(${quoteIdent(row.column_name)} AT TIME ZONE ?, 'YYYY-MM-DD HH24:MI:SS') AS v
+         FROM ${qualifiedTable(options.schema, row.table_name)}
+        WHERE ${where}
+        ORDER BY 2 DESC NULLS LAST, 1`,
+      [options.appTimeZone, ...bindings],
+    ),
+  );
+  if (found.length === 0) return "      now: gone (deleted since the repair)";
+  const state = (value: boolean | null) => (value === true ? "draft" : value === false ? "published" : "row");
+  return (
+    `      now in ${options.appTimeZone}: ` +
+    found.map((current) => `${state(current.draft)} #${current.id ?? "?"} ${current.v ?? "empty"}`).join(", ")
+  );
+}
+
+/**
+ * After the repair: the ambiguous values it recorded in the audit table,
+ * named by document and label, with the reading it chose, the other one and
+ * the document's current values, for the review in the admin panel
+ * (DEPLOYMENT.md, after the deploy). Returns the number of failed lookups.
+ */
+async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, print: Print): Promise<number> {
   const { settings, now } = options;
+  const audit = qualifiedTable(options.schema, AUDIT_TABLE);
+  const auditColumns = await tableColumnTypes(sql, options.schema, AUDIT_TABLE);
+  // An audit table from a rehearsal of an earlier build has no document_id/label.
+  const optional = (column: string) => (auditColumns.has(column) ? quoteIdent(column) : `NULL::text AS ${quoteIdent(column)}`);
   const rows = await sql.query<AuditRow>(
-    `SELECT run_id, table_name, row_id::text AS row_id, column_name, old_naive, class
-       FROM ${qualifiedTable(options.schema, AUDIT_TABLE)}
+    `SELECT run_id, table_name, row_id::text AS row_id, ${optional("document_id")}, ${optional("label")},
+            column_name, old_naive, zone, class
+       FROM ${audit}
       WHERE class IN ('C', 'C-allday')
       ORDER BY run_id, table_name, row_id, column_name`,
   );
@@ -306,18 +361,27 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
     `Ambiguous values the repair recorded in ${AUDIT_TABLE}: ${rows.length}, ` +
       `${options.all ? "all listed" : `${listed.length} still open or upcoming listed (--all for every one)`}:`,
   );
+  const mainSchema = schemaCache(sql, options.schema);
+  let lookupErrors = 0;
   for (const row of listed) {
     const naive = auditNaive(row.old_naive);
-    const chosen = row.class === "C-allday" ? (zone ?? "the legacy zone") : "UTC";
     print(
-      `  ${row.table_name}#${row.row_id ?? "?"} ${row.column_name} = ${naiveShort(naive)} [${row.class}, run ${row.run_id}, ` +
-        `repaired as ${chosen}]`,
+      `  ${row.table_name}#${row.row_id ?? "?"}${row.document_id ? ` doc ${row.document_id}` : ""}` +
+        `${row.label ? ` "${row.label}"` : ""} ${row.column_name} = ${naiveShort(naive)} ` +
+        `[${row.class}, run ${row.run_id}, repaired as ${row.zone}]`,
     );
     print(`      read as UTC:             ${reading(naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`);
     if (zone) {
       print(`      read as ${zone.padEnd(16)} ${reading(naive, zone, options.appTimeZone)} ${options.appTimeZone}`);
     }
+    try {
+      print(await currentValues(sql, mainSchema, options, row));
+    } catch (error) {
+      lookupErrors += 1;
+      print(`      now: LOOKUP FAILED (${(error as Error).message})`);
+    }
   }
+  return lookupErrors;
 }
 
 /** Prints the report. Only runs SELECTs (and savepoints) on `sql`, inside its READ ONLY transaction. */
@@ -345,7 +409,7 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   if (repair.length === 0) {
     print();
     print("Nothing to repair: every app column is already timestamptz.");
-    if (auditExists) await printRecordedAmbiguous(sql, options, print);
+    if (auditExists) lookupErrors += await printRecordedAmbiguous(sql, options, print);
     return { plan, lookupErrors };
   }
   if (plan.tables.length === 0) {

@@ -142,12 +142,18 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     );
     const byClass = Object.fromEntries(audit.map((row) => [row.class, Number(row.n)]));
     expect(byClass).toMatchObject({ A: 3, B: 2, C: 3, "C-allday": 1, "expiry-legacy": 2, "expiry-utc": 1 });
-    const [old] = await rows<{ old_naive: string; zone: string }>(
+    const [old] = await rows<{ old_naive: string; zone: string; document_id: string; label: string }>(
       knex,
-      `SELECT old_naive, zone FROM "${schema}".datetime_migration_audit
+      `SELECT old_naive, zone, document_id, label FROM "${schema}".datetime_migration_audit
         WHERE table_name = 'events' AND column_name = 'start' AND class = 'A'`,
     );
-    expect(old).toEqual({ old_naive: "2026-11-05 18:00:00", zone: "Europe/Berlin" });
+    // document_id and label name the row even after a republish replaced it.
+    expect(old).toEqual({
+      old_naive: "2026-11-05 18:00:00",
+      zone: "Europe/Berlin",
+      document_id: "e3",
+      label: "Winter fair",
+    });
   });
 
   it("accepts any θ inside the switch stretch (18:40 to 20:50 stored)", async () => {

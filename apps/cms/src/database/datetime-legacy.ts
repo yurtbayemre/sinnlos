@@ -506,20 +506,32 @@ export interface ApplySummary {
 
 const AUDIT_BATCH = 500;
 
+/**
+ * The audit table. document_id and label name the row for the review after
+ * the repair: Strapi 5 re-creates the published row on every publish, so a
+ * recorded row_id may point at a row that no longer exists.
+ */
 async function ensureAuditTable(sql: SqlClient, schema: string): Promise<void> {
+  const table = qualifiedTable(schema, AUDIT_TABLE);
   await sql.query(
-    `CREATE TABLE IF NOT EXISTS ${qualifiedTable(schema, AUDIT_TABLE)} (
+    `CREATE TABLE IF NOT EXISTS ${table} (
        id bigserial PRIMARY KEY,
        run_id text NOT NULL,
        table_name text NOT NULL,
        row_id bigint,
        row_key text NOT NULL,
+       document_id text,
+       label text,
        column_name text NOT NULL,
        old_naive text NOT NULL,
        zone text NOT NULL,
        class text NOT NULL,
        migrated_at timestamptz NOT NULL DEFAULT now()
      )`,
+  );
+  // An audit table left by a rehearsal of an earlier build lacks the two.
+  await sql.query(
+    `ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS document_id text, ADD COLUMN IF NOT EXISTS label text`,
   );
 }
 
@@ -542,12 +554,14 @@ export async function applyLegacyPlan(sql: SqlClient, plan: LegacyPlan, runId: s
 
     for (let start = 0; start < cells.length; start += AUDIT_BATCH) {
       const batch = cells.slice(start, start + AUDIT_BATCH);
-      const values = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
+      const values = batch.map(() => "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").join(", ");
       const bindings = batch.flatMap((cell) => [
         runId,
         table,
         cell.rowId,
         cell.key,
+        cell.documentId,
+        cell.label,
         cell.column,
         cell.text,
         cell.legacy ? (settings.zone ?? "UTC") : "UTC",
@@ -555,7 +569,7 @@ export async function applyLegacyPlan(sql: SqlClient, plan: LegacyPlan, runId: s
       ]);
       await sql.query(
         `INSERT INTO ${qualifiedTable(schema, AUDIT_TABLE)}
-           (run_id, table_name, row_id, row_key, column_name, old_naive, zone, class)
+           (run_id, table_name, row_id, row_key, document_id, label, column_name, old_naive, zone, class)
          VALUES ${values}`,
         bindings,
       );
