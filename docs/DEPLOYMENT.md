@@ -778,19 +778,41 @@ psql_db < infra/migrations/org-dp/preflight.sql
 
 - **FAST PATH:** if P0 shows `draft_rows` = 0 for both `departments` and
   `teams`, there is nothing to migrate. Deploy as usual with
-  `infra/deploy.sh` and stop here. The guard passes and Strapi's own switch
-  deletes nothing; `"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'` prints
-  nothing.
+  `infra/deploy.sh` and stop here (a look at P11 below does no harm). The
+  guard passes and Strapi's own switch deletes nothing;
+  `"${COMPOSE[@]}" logs cms | grep '\[org-dp\]'` prints nothing.
 - These must be 0 before you continue: P0 `anomalies`, P4 (a user linked to
   more than one department), P7 (a duplicate department name or slug, or a
-  duplicate team slug) and P8 (a table the script does not handle). Fix P4
-  and P7 in the admin panel and rerun the preflight. P0 anomalies and P8
-  need a closer look; do not continue.
-- P1 lists units that were never published. The migration **promotes**
-  them, so they go live. Delete unwanted ones in the admin afterwards.
-- P2 lists pending draft edits. The **published values win**: write the
-  edits down and re-enter them afterwards. Team membership is merged
-  (union), so nobody loses access they have today.
+  duplicate team slug), P8 (a table the script does not handle) and P9 (a
+  row the script refuses). Fix P4, P7 and a P9 "more than one head, lead or
+  department" in the admin panel and rerun the preflight. P0 anomalies, P8
+  and the other P9 rows need a closer look; do not continue.
+- P1 lists draft-only units: never published, or unpublished in the admin
+  to hide them (an unpublish deletes the live row). The migration
+  **promotes** them, so they go live. Delete unwanted ones in the admin
+  afterwards.
+- P2 lists pending draft edits, one row per field. `discarded`: the
+  **published value wins**; write the edit down and re-enter it afterwards.
+  `ADOPTED (goes live)`: the live unit has no head, lead, department or
+  image there, so the draft value goes live. An adopted head or lead can
+  edit that department or team right after the deploy; if that is not
+  wanted, change it in the admin afterwards. Team membership is merged
+  (union): the draft-only members P2 names go live, and nobody loses access
+  they have today.
+- P10 lists media rows that point at a department or team that no longer
+  exists. The migration deletes them; the files stay in the media library.
+- P11 lists empty org relations: users without a department, departments
+  without a head, users or teams, teams without a department or lead. On
+  the old release, editing and publishing a department or team that had no
+  draft yet (every demo-seed unit, until its first publish) in the admin
+  silently dropped the unit's head or lead, its department, and the users
+  and teams linked to it. The migration cannot bring those back. Compare
+  P11 with the demo org chart in `apps/cms/src/seed-demo.ts` (every
+  department has a head, users and teams; every team a department; every
+  team except Recruiting and Payroll a lead; every demo user a department)
+  or with an older backup, and note what is missing. Re-link it after the
+  migration (step 9), not before: on the old release the next publish can
+  drop it again.
 
 **1. Rehearsal** (strongly recommended), on a throwaway copy of the live
 database. Both `migrate.sql` runs must end with
@@ -865,7 +887,7 @@ psql_db < infra/migrations/org-dp/preflight.sql    # optional
 
 For both types `rows` must equal `documents` and `drafts` must be 0; the
 second query must return no rows. In the optional preflight, P0
-`draft_rows` and every P3 `draft_links` are 0.
+`draft_rows` and every P3 `draft_links` are 0, and P10 lists nothing.
 
 **7. Deploy** with the unchanged wrapper, then check the cms log:
 
@@ -889,9 +911,10 @@ boot and finds nothing to delete.
 - Optional: the department-head probe in
   [§6.4](#64-role-enforcement-optional).
 
-**9. Afterwards:** re-enter the P2 edits (a save is live now) and delete
-unwanted P1 units. Once you are satisfied with the release, delete the plain
-dump: `rm -rf ~/orgdp-backup`.
+**9. Afterwards:** in the admin (a save is live now and keeps every link),
+re-enter the P2 edits marked `discarded`, re-link what you noted from P11,
+and delete unwanted P1 units. Once you are satisfied with the release,
+delete the plain dump: `rm -rf ~/orgdp-backup`.
 
 **Rollback.** There is no reverse script: the rollback is a `pg_restore` of
 the step-4 dump, together with the previous images. Org edits made after the
@@ -910,11 +933,14 @@ migration are lost.
 
   Without the plain copy, use the encrypted step-4 artifact of
   `pg-backup.sh` (decrypt it with the off-box key and gunzip it first).
-- Rolling forward later means steps 3 to 7 again. The same holds whenever a
-  pre-migration dump (an older nightly backup, say) is restored under the
-  new release, and after an image-only rollback: the old cms clones a draft
-  of every department and team on its first boot. In each case the new cms
-  refuses to boot until `migrate.sql` has run on that data.
+- Rolling forward later means step 0 and steps 3 to 7 again. The same
+  holds whenever a pre-migration dump (an older nightly backup, say) is
+  restored under the new release, and after an image-only rollback: the old
+  cms clones a draft of every department and team on its first boot. In
+  each case the new cms refuses to boot until `migrate.sql` has run on that
+  data. Step 0 matters here: draft-only edits made in the admin while the
+  old image was running follow the P2 rules, so the ones marked
+  `discarded` need re-entering afterwards.
 
 **Local SQLite dev:** the guard also blocks a dev database that holds
 department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
@@ -1992,7 +2018,7 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
-| cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) from step 3 |
+| cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) step 0 (preflight), then steps 3 to 7 |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
 | Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |
@@ -2145,7 +2171,8 @@ docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
 A dump taken before the org draft/publish migration, restored under a
 release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
 `migrate.sql` has run on it again
-([One-time: org draft/publish off](#one-time-org-draftpublish-off), steps 3–7).
+([One-time: org draft/publish off](#one-time-org-draftpublish-off), step 0, then
+steps 3–7).
 
 #### Rolling back this release
 

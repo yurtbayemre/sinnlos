@@ -228,6 +228,10 @@ pnpm --filter @sinnlos/web dev
 > and boot once with `SEED_DEMO_DATA=1` (the seed writes one live row per
 > unit), or run the one-time migration on a Postgres dev database
 > ([DEPLOYMENT.md](./docs/DEPLOYMENT.md#one-time-org-draftpublish-off)).
+> That boot check runs in `register()`, so the Strapi CLI commands that
+> only register the app (`strapi ts:generate-types`, `strapi report`,
+> `strapi content-types:list` and the other `…:list` commands) now need the
+> configured database to be reachable as well.
 
 On first sign-in, Strapi will:
 

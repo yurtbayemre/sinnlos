@@ -36,6 +36,17 @@
  * counts. getSchemaConnection()/getConnection() apply DATABASE_SCHEMA
  * (@strapi/database dist/index.js:101-105, :128-131); plain knex(table)
  * would not.
+ *
+ * Side effect: register() now needs a reachable database. The Strapi CLI
+ * commands that run only register() and never load() used to work without
+ * one: `strapi ts:generate-types`, `strapi report` and the `…:list`
+ * commands except routes:list (content-types, components, controllers,
+ * hooks, middlewares, policies, services; @strapi/strapi 5.55.1
+ * dist/src/cli/commands/ts/generate-types.js:19, content-types/list.js:16).
+ * They now need the configured database up, or a SQLite .env
+ * (config/database.ts defaults to postgres). `strapi build` never calls
+ * register() and is unaffected; nothing in package.json, CI or the
+ * Dockerfile runs the others.
  */
 
 export const ORG_DP_UIDS = ["api::department.department", "api::team.team"] as const;
