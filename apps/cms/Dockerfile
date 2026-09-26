@@ -26,6 +26,9 @@ FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04
 RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /app
 ENV NODE_ENV=production
+# Datetime contract: the cms runs in UTC. Business dates use APP_TIME_ZONE;
+# a boot that creates or changes the schema refuses any other process zone.
+ENV TZ=UTC
 COPY --from=builder --chown=node:node /app /app
 WORKDIR /app/apps/cms
 USER node

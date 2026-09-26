@@ -7,7 +7,9 @@
 #      keys set, no template placeholder in the secrets, digest sender set
 #      when SMTP is, JWT_SECRET rotated when the running web still exposed
 #      Strapi JWTs (D-SESSION-01), no Microsoft sign-in configured (it
-#      cannot complete on Strapi 5.51+). Fails before anything is touched.
+#      cannot complete on Strapi 5.51+), DATETIME_LEGACY_ZONE set while the
+#      running database still holds pre-contract datetime columns (the new
+#      cms would refuse to start). Fails before anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
@@ -173,6 +175,26 @@ jwt_rotation_missing() {
   [[ "${new_secret}" == "${running_secret}" ]]
 }
 
+# Datetime contract: the first boot of a cms with it repairs the times a
+# pre-contract cms stored as naive wall clocks and converts the columns to
+# timestamptz (apps/cms/database/migrations/). With naive app columns in the
+# running database and DATETIME_LEGACY_ZONE unset it refuses to start, so
+# the deploy is refused here, before the backup and before any container
+# changes. No running db container (first install) = nothing to repair.
+# Strapi's bookkeeping tables do not count (the cms guard converts them).
+datetime_repair_env_missing() {
+  local zone naive
+  zone="$("${COMPOSE[@]}" config --format json 2>/dev/null | compose_env_value DATETIME_LEGACY_ZONE)"
+  [[ -z "${zone}" ]] || return 1
+  naive="$(docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SELECT count(*) FROM information_schema.columns
+ WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+   AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
+SQL
+)" || return 1
+  [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
+}
+
 log "Preflight: infra/.env against the env contract (FX13)"
 if ! "${COMPOSE[@]}" config -q; then
   echo "ERROR: docker compose rejected the config — most likely a required key in" >&2
@@ -242,6 +264,15 @@ if jwt_rotation_missing; then
   echo "       infra/.env (openssl rand -base64 32) and re-run: everyone signs in once, open" >&2
   echo "       tabs land on /sign-in?expired=1. Needed again after every roll-forward from" >&2
   echo "       a web rollback to such an image." >&2
+  preflight_failed=1
+fi
+if datetime_repair_env_missing; then
+  echo "ERROR: the running database still stores datetimes in the pre-contract format (naive" >&2
+  echo "       timestamp columns), and DATETIME_LEGACY_ZONE is not set in infra/.env. The new cms" >&2
+  echo "       repairs those values once on its first boot and refuses to start without it." >&2
+  echo "       Follow docs/DEPLOYMENT.md, \"Upgrading an existing instance to this release\"" >&2
+  echo "       (read-only report, rehearsal on a copy), set DATETIME_LEGACY_ZONE (and, if the old cms" >&2
+  echo "       ran in UTC first, DATETIME_LEGACY_UTC_UNTIL) and re-run." >&2
   preflight_failed=1
 fi
 if ((preflight_failed)); then
