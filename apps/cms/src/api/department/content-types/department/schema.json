@@ -8,7 +8,7 @@
     "description": "Top-level organisational unit"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "attributes": {
     "name": { "type": "string", "required": true, "unique": true },

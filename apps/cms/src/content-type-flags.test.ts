@@ -41,7 +41,11 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::classified.classified": false,
   "api::comment.comment": false,
   "api::course.course": true,
-  "api::department.department": true,
+  // Single-row org master data (invariant I-ORG): one row per document with
+  // a stable id, which the numeric org-scope comparisons rely on. Guarded at
+  // boot by utils/org-dp-guard.ts; existing databases migrate with
+  // infra/migrations/org-dp/migrate.sql.
+  "api::department.department": false,
   "api::document.document": true,
   "api::event.event": true,
   "api::event-rsvp.event-rsvp": false,
@@ -54,7 +58,8 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::quick-link.quick-link": true,
   "api::reaction.reaction": false,
   "api::search-log.search-log": false,
-  "api::team.team": true,
+  // Same as department (I-ORG).
+  "api::team.team": false,
   "api::wiki-page.wiki-page": true,
   "api::wiki-revision.wiki-revision": true,
   "api::wiki-space.wiki-space": true,
