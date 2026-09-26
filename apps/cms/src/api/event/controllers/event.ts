@@ -1,5 +1,7 @@
 import { factories } from "@strapi/strapi";
 
+import { icsEventDateLines } from "../../../utils/ics-dates";
+
 export default factories.createCoreController("api::event.event", ({ strapi }) => ({
   async ics(ctx) {
     // Published rows only (FX06): db.query spans draft AND published rows,
@@ -11,11 +13,6 @@ export default factories.createCoreController("api::event.event", ({ strapi }) =
     if (!entry) return ctx.notFound();
 
     const uid = `event-${entry.id}@sinnlos`;
-    const now = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    const dtstart = new Date(entry.start).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
-    const dtend = entry.end
-      ? new Date(entry.end).toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "")
-      : dtstart;
 
     const lines = [
       "BEGIN:VCALENDAR",
@@ -23,9 +20,8 @@ export default factories.createCoreController("api::event.event", ({ strapi }) =
       "PRODID:-//Sinnlos//Events//EN",
       "BEGIN:VEVENT",
       `UID:${uid}`,
-      `DTSTAMP:${now}`,
-      `DTSTART:${dtstart}`,
-      `DTEND:${dtend}`,
+      // Timed events in UTC; all-day events as calendar days of APP_TIME_ZONE.
+      ...icsEventDateLines(entry, new Date()),
       `SUMMARY:${(entry.title ?? "").replace(/[,;\\]/g, "\\$&")}`,
     ];
     if (entry.location) lines.push(`LOCATION:${entry.location.replace(/[,;\\]/g, "\\$&")}`);

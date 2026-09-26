@@ -99,5 +99,7 @@ describe("event ics (FX06)", () => {
     expect(ctx.notFound).not.toHaveBeenCalled();
     expect(String(ctx.body)).toContain("BEGIN:VCALENDAR");
     expect(String(ctx.body)).toContain("SUMMARY:Summer party");
+    // Timed event: UTC with Z (utils/ics-dates.ts).
+    expect(String(ctx.body)).toContain("\r\nDTSTART:20261001T100000Z\r\nDTEND:20261001T100000Z\r\n");
   });
 });
