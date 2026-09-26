@@ -129,7 +129,12 @@ export function readLegacySettings(env: Record<string, string | undefined>): Leg
   let zone: string | null = null;
   if (rawZone) {
     zone = canonicalTimeZone(rawZone);
-    if (!zone) throw new Error(`DATETIME_LEGACY_ZONE is not an IANA time zone name: "${rawZone}"`);
+    if (!zone) {
+      throw new Error(
+        "DATETIME_LEGACY_ZONE must be an IANA time zone name such as Europe/Berlin, not a UTC offset " +
+          `(Postgres reads '+02:00' as UTC-2): "${rawZone}"`,
+      );
+    }
   }
   let theta: LegacySettings["theta"] = null;
   if (rawUntil) {

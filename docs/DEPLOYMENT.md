@@ -1664,12 +1664,19 @@ the cms and the database, phase 2 the web):
   (IANA name, default `Europe/Berlin`, one per deployment): "today", day and
   week windows (weeks start on Monday), anniversaries (Feb 29 falls on Feb 28
   in other years), classified expiry, digest days, the cron times, all-day
-  event days and poll deadlines ("closes on D" = D 23:59:59 there). An
-  unknown value the cms does not start, and the web answers every request
-  with an error (Next.js logs `An error occurred while loading instrumentation
-  hook: APP_TIME_ZONE must be …`). Changing it later moves those
-  boundaries, not stored instants. Until the web's phase 2 the web container
-  runs in `APP_TIME_ZONE` and renders dates in its process zone.
+  event days and poll deadlines ("closes on D" = D 23:59:59 there). Spell
+  it as the tz database does (`Europe/Berlin`, not `europe/berlin`); a UTC
+  offset such as `+02:00` is refused, because Postgres reads it with the
+  opposite sign. With an unknown value or an offset the cms does not
+  start, and the web answers every request with an error (Next.js logs `An
+  error occurred while loading instrumentation hook: APP_TIME_ZONE must be
+  …`). Changing it later moves those boundaries, not stored instants. Until
+  the web's phase 2 the web container runs in `APP_TIME_ZONE` (compose
+  passes the value on as its `TZ`) and renders dates in its process zone;
+  when `TZ` is set, the web also refuses to serve if Node does not run in
+  `APP_TIME_ZONE`, e.g. with a wrong-case name Node cannot find (`The web
+  process runs in …, not in APP_TIME_ZONE …`). `DATETIME_LEGACY_ZONE`
+  follows the same rules.
 - **The guard.** Strapi creates every new `datetime` column as
   `timestamp without time zone`. At each boot the cms converts every such
   column of the app schema (`DATABASE_SCHEMA`, default `public`) to
@@ -2401,7 +2408,8 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | `[datetime] The database session runs in "…", not UTC` | A pooler or proxy drops the startup options (PgBouncer in transaction mode, Azure's port 6432): connect the cms to Postgres directly |
 | cms refuses to start: `DATABASE_URL sets its own \`options\` query parameter …` | Remove `options` from `DATABASE_URL` (or include `-c TimeZone=UTC` in it) |
 | `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
-| cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (e.g. `Europe/Berlin`) or leave it empty |
+| cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (an IANA name such as `Europe/Berlin`, no UTC offset) or leave it empty |
+| every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | The web container's `TZ` is not the zone Node runs in: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`); with a custom orchestrator set `TZ` to the same name |
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 

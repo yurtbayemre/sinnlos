@@ -43,11 +43,26 @@ export function isValidTimeZone(timeZone: string): boolean {
   return canonicalTimeZone(timeZone) !== null;
 }
 
-/** Intl's canonical spelling of a zone name ('europe/berlin' -> 'Europe/Berlin'), or null. */
+/**
+ * A UTC offset used as a zone ('+02:00', '-05', also with U+2212). Intl
+ * accepts these, but Postgres reads `AT TIME ZONE '+02:00'` the POSIX way,
+ * as UTC-2, so the same setting would mean opposite offsets in the app and
+ * in SQL. Only IANA names are zones here (Etc/GMT-2 means UTC+2 in both).
+ */
+const OFFSET_ZONE_RE = /^[+\u2212-]\d/;
+
+/**
+ * Intl's canonical spelling of an IANA zone name ('europe/berlin' ->
+ * 'Europe/Berlin', 'US/Eastern' -> 'America/New_York'), or null for an
+ * unknown name or a UTC offset. Pass the canonical name on (TZ, SQL): other
+ * consumers may not match names case-insensitively.
+ */
 export function canonicalTimeZone(timeZone: string): string | null {
-  if (typeof timeZone !== "string" || timeZone.trim() === "") return null;
+  if (typeof timeZone !== "string") return null;
+  const trimmed = timeZone.trim();
+  if (trimmed === "" || OFFSET_ZONE_RE.test(trimmed)) return null;
   try {
-    return new Intl.DateTimeFormat("en-US", { timeZone: timeZone.trim() }).resolvedOptions().timeZone;
+    return new Intl.DateTimeFormat("en-US", { timeZone: trimmed }).resolvedOptions().timeZone;
   } catch {
     return null;
   }
@@ -58,15 +73,16 @@ export const DEFAULT_APP_TIME_ZONE = "Europe/Berlin";
 
 /**
  * Validates an APP_TIME_ZONE value (the raw env string). Unset means the
- * default; an empty or unknown name throws, so a typo fails the start
- * instead of silently moving every business day. Returns the canonical name.
+ * default; an empty or unknown name or a UTC offset throws, so a typo fails
+ * the start instead of silently moving every business day. Returns the
+ * canonical name.
  */
 export function resolveAppTimeZone(raw: string | undefined): string {
   if (raw === undefined) return DEFAULT_APP_TIME_ZONE;
   const canonical = canonicalTimeZone(raw);
   if (!canonical) {
     throw new Error(
-      `APP_TIME_ZONE must be an IANA time zone name such as "Europe/Berlin" (got "${raw}"). ` +
+      `APP_TIME_ZONE must be an IANA time zone name such as "Europe/Berlin", not a UTC offset (got "${raw}"). ` +
         "Leave it unset for the default Europe/Berlin.",
     );
   }

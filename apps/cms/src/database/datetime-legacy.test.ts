@@ -52,6 +52,10 @@ describe("readLegacySettings", () => {
 
   it("refuses unknown zones, offset-less θ and θ without a zone", () => {
     expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "Berlin" })).toThrow(/DATETIME_LEGACY_ZONE/);
+    // Intl reads '+02:00' as UTC+2, Postgres' AT TIME ZONE as UTC-2: refused.
+    expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "+02:00" })).toThrow(/DATETIME_LEGACY_ZONE.*UTC offset/);
+    // A wrong-case name is passed on in its canonical spelling.
+    expect(readLegacySettings({ DATETIME_LEGACY_ZONE: "europe/berlin" }).zone).toBe("Europe/Berlin");
     expect(() =>
       readLegacySettings({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42" }),
     ).toThrow(/DATETIME_LEGACY_UTC_UNTIL/);

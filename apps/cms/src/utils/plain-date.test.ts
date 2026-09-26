@@ -7,6 +7,7 @@ import {
   instantEpochMs,
   isPlainDate,
   isValidTimeZone,
+  resolveAppTimeZone,
   zonedDateKey,
   zonedWallTimeToInstant,
 } from "./plain-date";
@@ -25,6 +26,19 @@ describe("plain-date", () => {
     expect(isValidTimeZone("Mars/Olympus")).toBe(false);
     expect(isValidTimeZone("")).toBe(false);
     expect(canonicalTimeZone("america/new_york")).toBe("America/New_York");
+    expect(canonicalTimeZone("US/Eastern")).toBe("America/New_York");
+    // Offsets are no zones: Intl takes '+02:00' as UTC+2, Postgres as UTC-2.
+    for (const offset of ["+02:00", "+0200", "-05", "\u221202:00", " +02:00"]) {
+      expect(canonicalTimeZone(offset), offset).toBeNull();
+    }
+    expect(canonicalTimeZone("Etc/GMT-2")).toBe("Etc/GMT-2");
+  });
+
+  it("resolveAppTimeZone returns the canonical name and refuses offsets", () => {
+    expect(resolveAppTimeZone(undefined)).toBe("Europe/Berlin");
+    expect(resolveAppTimeZone("europe/berlin")).toBe("Europe/Berlin");
+    expect(() => resolveAppTimeZone("+02:00")).toThrow(/APP_TIME_ZONE .*not a UTC offset/);
+    expect(() => resolveAppTimeZone("")).toThrow(/APP_TIME_ZONE/);
   });
 
   it("zonedDateKey requires a real instant", () => {

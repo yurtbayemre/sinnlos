@@ -132,7 +132,9 @@ services:
       # The web still renders dates in its process zone (events list/month
       # grid, ad expiry), so until its datetime port (phase 2) makes every
       # date explicit, the process zone IS the business zone. Only after that
-      # port may it switch to UTC like the cms.
+      # port may it switch to UTC like the cms. The web refuses to serve when
+      # Node does not run in APP_TIME_ZONE (src/instrumentation.ts): Node only
+      # knows the exact tz database spelling (Europe/Berlin, not europe/berlin).
       TZ: ${APP_TIME_ZONE:-Europe/Berlin}
       # Business zone, already used for the poll deadline ("closes on D" =
       # D 23:59:59 there); validated at server start.
