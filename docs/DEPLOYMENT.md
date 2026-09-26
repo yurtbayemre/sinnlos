@@ -703,6 +703,11 @@ systemctl start docker
 > [One-time: org draft/publish off](#one-time-org-draftpublish-off) first. With
 > no department or team drafts it is a normal deploy; otherwise the database
 > needs a one-time migration while cms and web are stopped.
+>
+> **Deploying the draft-twin repair (FX38)?** A normal deploy: the first boot
+> gives every published entry that has no draft its draft twin, on its own.
+> See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38)
+> for the log lines and what editors notice.
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, backs up and rollback-tags before rebuilding:
@@ -945,6 +950,180 @@ migration are lost.
 **Local SQLite dev:** the guard also blocks a dev database that holds
 department or team drafts. Delete `apps/cms/.tmp/data.db` and boot once
 with `SEED_DEMO_DATA=1`.
+
+#### Upgrading to the draft-twin repair (FX38)
+
+This release (branch `feat/seed-draft-twins`, after the department/team
+release of 2026-09-26) fixes entries of draft & publish types that have a
+published row but **no draft row**. Until now the demo seed
+(`SEED_DEMO_DATA=1`) wrote its announcements, events, wiki spaces and pages,
+polls and documents that way, so every instance that was ever seeded holds
+such entries; normally every entry has a draft row (what the admin panel
+edits) next to its published row (what readers get). Strapi 5.55.1
+mishandles entries without a draft in the admin panel:
+
+- The Content Manager's default list does not show them (it lists drafts;
+  only the **Published** filter finds them).
+- Editing one and publishing it silently drops every relation the edit form
+  did not touch: an announcement loses its author and department, a wiki
+  page its space, parent and author, a lesson its course.
+- New entries cannot link to them: a new wiki page in a seeded space, for
+  example, fails with `Document with id "…" not found`.
+
+What the release changes:
+
+- **On every boot the cms gives each such entry its draft twin**, with
+  Strapi's own "discard draft" operation: a copy of the published row with
+  the same fields, relations and media, exactly what Strapi does when draft &
+  publish is switched on for a type. It covers announcements, courses,
+  documents, events, lessons, polls, quick links, wiki pages and wiki spaces.
+  Wiki revisions stay as they are: they are published snapshots by design.
+- Published rows are not touched, so readers see no change, and nothing is
+  sent: no notifications, no live updates, no wiki revisions.
+- The demo seed now writes a draft and a published row per entry, like the
+  admin panel.
+
+**Nothing else is needed on an existing instance**: no env change, no
+migration script, no `JWT_SECRET` rotation, no downtime beyond the normal
+container restart. A fresh install needs nothing either.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+optional queries and the log check below (on a standalone Caddy box, drop
+the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+2. **Optional, read-only: count what the first boot will repair.**
+   `published_only` is the number of drafts the boot creates per type (types
+   without published entries are not listed):
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT t AS type, count(*) FILTER (WHERE NOT has_draft) AS published_only, count(*) AS published
+   FROM (
+     SELECT 'announcements' AS t, EXISTS (SELECT 1 FROM announcements d WHERE d.document_id = p.document_id AND d.published_at IS NULL) AS has_draft FROM announcements p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'courses', EXISTS (SELECT 1 FROM courses d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM courses p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'documents', EXISTS (SELECT 1 FROM documents d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM documents p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'events', EXISTS (SELECT 1 FROM events d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM events p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'lessons', EXISTS (SELECT 1 FROM lessons d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM lessons p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'polls', EXISTS (SELECT 1 FROM polls d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM polls p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'quick_links', EXISTS (SELECT 1 FROM quick_links d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM quick_links p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'wiki_pages', EXISTS (SELECT 1 FROM wiki_pages d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM wiki_pages p WHERE p.published_at IS NOT NULL
+     UNION ALL SELECT 'wiki_spaces', EXISTS (SELECT 1 FROM wiki_spaces d WHERE d.document_id = p.document_id AND d.published_at IS NULL) FROM wiki_spaces p WHERE p.published_at IS NOT NULL
+   ) x
+   GROUP BY t ORDER BY t;
+   SQL
+   ```
+
+3. **Optional, read-only: list relations an earlier admin edit already
+   dropped.** The repair copies each published row as it is now, so a link
+   that an edit and publish in the admin removed before this release stays
+   removed. Every demo-seed entry has the relation checked here (see
+   `apps/cms/src/seed-demo.ts`); an entry created in the admin panel may
+   legitimately lack one.
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT 'announcement without author' AS problem, a.title AS entry FROM announcements a
+     WHERE a.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM announcements_author_lnk l WHERE l.announcement_id = a.id)
+   UNION ALL SELECT 'event without organizer', e.title FROM events e
+     WHERE e.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM events_organizer_lnk l WHERE l.event_id = e.id)
+   UNION ALL SELECT 'wiki page without space', w.title FROM wiki_pages w
+     WHERE w.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wiki_pages_space_lnk l WHERE l.wiki_page_id = w.id)
+   UNION ALL SELECT 'wiki page without author', w.title FROM wiki_pages w
+     WHERE w.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM wiki_pages_author_lnk l WHERE l.wiki_page_id = w.id)
+   UNION ALL SELECT 'poll without author', p.question FROM polls p
+     WHERE p.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM polls_author_lnk l WHERE l.poll_id = p.id)
+   UNION ALL SELECT 'document without uploader', d.title FROM documents d
+     WHERE d.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM documents_uploaded_by_lnk l WHERE l.document_id = d.id)
+   UNION ALL SELECT 'lesson without course', l2.title FROM lessons l2
+     WHERE l2.published_at IS NOT NULL AND NOT EXISTS (SELECT 1 FROM lessons_course_lnk l WHERE l.lesson_id = l2.id)
+   ORDER BY 1, 2;
+   SQL
+   ```
+
+   Note what is missing and re-link it in the admin after the deploy
+   (step 6), when editing keeps relations.
+
+4. **Backup:** `infra/deploy.sh` takes the mandatory pre-deploy Postgres
+   backup. On a standalone Caddy box, run `infra/backup/pg-backup.sh` (or
+   the manual dump in [§7.1](#71-manual-postgres-backup)) yourself first.
+
+**Deploy**
+
+5. Run `infra/deploy.sh` on the Traefik host; on a standalone Caddy box,
+   `docker compose up -d --build` from `infra/`. For a few dozen entries the
+   repair adds about a second to this one boot (measured on Postgres 16).
+
+**What the first boot changes in the database.** One new draft row per
+entry counted in step 2, with its link rows and media links; the rows the
+admin panel creates for any entry it edits. Published rows, notifications and
+wiki revisions stay as they are. Each vote of a repaired poll is also linked
+to the poll's new draft row (Strapi links entries of a type without draft &
+publish, such as a vote, to both rows); results still count the votes of the
+published row. No schema change.
+
+**After the deploy**
+
+6. **cms log.** The first boot prints one line per repaired type, and later
+   boots print nothing:
+
+   ```bash
+   "${COMPOSE[@]}" logs cms | grep '\[draft-twins\]'
+   # [draft-twins] created 5 draft(s) for api::announcement.announcement
+   # [draft-twins] created 6 draft(s) for api::event.event
+   # ...
+   ```
+
+   The numbers match `published_only` from step 2. An error line such as
+   `[draft-twins] api::lesson.lesson <documentId>: could not create the draft
+   (<reason>); the next boot retries` names an entry the repair could not
+   copy, for example a lesson whose stored video link fails today's
+   validation. The boot continues, readers still see the entry, and every
+   boot tries again. To fix it, open the entry in the Content Manager
+   (**Published** filter), correct the field the reason names, select its
+   relations again (they are not carried over for an entry without a draft)
+   and publish. Optionally, rerun the step 2 query: every `published_only`
+   is 0.
+7. **Admin panel:** **Content Manager → Announcement** (and Event, Wiki
+   Page, …) lists the seeded entries in the default view, with the status
+   **Published**. Open one, change a word, publish: its author, department,
+   space and other relations stay. Re-link what step 3 listed.
+
+**What users and editors notice** (worth a short release note):
+
+- Readers notice nothing.
+- Seeded entries appear in the Content Manager's default list, as
+  **Published**.
+- Editing and publishing a seeded entry in the admin keeps its relations.
+- New entries can link to seeded ones, e.g. a wiki page in a seeded space.
+- Relations an earlier admin edit already dropped are not restored (step 3).
+
+**Rollback.** The previous images run on the repaired database without a
+restore: a draft row next to the published row is the state that every entry
+created in the admin panel already has, and nothing in the schema changed.
+The old cms simply creates no draft twins, and rolling forward again finds
+nothing to repair. The one difference: the old seed writes published-only
+rows again, but it only runs on an empty database.
+
+**Local dev (SQLite):** a dev database seeded before this release is
+repaired the same way on the next `pnpm cms:dev`; a new one gets draft and
+published rows from the seed.
 
 #### Upgrading an existing instance to this release
 
@@ -2018,6 +2197,7 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
+| cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses); the cms runs normally and retries on every boot. Fix the entry as in [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 6 |
 | cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) step 0 (preflight), then steps 3 to 7 |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
