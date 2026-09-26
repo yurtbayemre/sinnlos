@@ -1,5 +1,6 @@
 import { factories } from "@strapi/strapi";
 
+import { clampExpiresAt } from "../../../utils/classified-expiry";
 import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
 
 /**
@@ -11,6 +12,7 @@ import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/
  *  - `expiresAt` is clamped to [today, today + 90 days]; a missing/invalid
  *    value defaults to today + 30 days (auto-expire keeps the board clean
  *    without a cron: the web list simply filters expiresAt >= today).
+ *    Calendar dates of APP_TIME_ZONE, see utils/classified-expiry.ts.
  *  - `images` is limited to 4 ids that must exist in the media library and
  *    actually be images (the upload route itself is hardened separately in
  *    src/extensions/upload/strapi-server.ts).
@@ -23,42 +25,6 @@ import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/
  */
 
 const MAX_IMAGES = 4;
-const DEFAULT_LIFETIME_DAYS = 30;
-const MAX_LIFETIME_DAYS = 90;
-
-/** Format a Date as local YYYY-MM-DD (toISOString would shift across UTC). */
-function localDateString(d: Date): string {
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${month}-${day}`;
-}
-
-/** Calendar-safe day addition (no *86400000 math — DST-proof). */
-function addDays(base: Date, days: number): Date {
-  return new Date(base.getFullYear(), base.getMonth(), base.getDate() + days);
-}
-
-/**
- * Clamp a requested expiry date into [today, today + MAX_LIFETIME_DAYS].
- * Missing/invalid input falls back to today + DEFAULT_LIFETIME_DAYS.
- * "today" is a valid floor on purpose: an ad expiring today is still shown
- * for the rest of the day (web filter is expiresAt >= today).
- */
-function clampExpiresAt(value: unknown): string {
-  const today = new Date();
-  const min = addDays(today, 0);
-  const max = addDays(today, MAX_LIFETIME_DAYS);
-
-  let candidate: Date | null = null;
-  if (typeof value === "string" && value.trim()) {
-    const parsed = new Date(value);
-    if (!Number.isNaN(parsed.getTime())) candidate = parsed;
-  }
-  if (!candidate) candidate = addDays(today, DEFAULT_LIFETIME_DAYS);
-  if (candidate.getTime() > max.getTime()) candidate = max;
-  if (candidate.getTime() < min.getTime()) candidate = min;
-  return localDateString(candidate);
-}
 
 /**
  * Normalize + verify the images payload. Returns the deduplicated id list
