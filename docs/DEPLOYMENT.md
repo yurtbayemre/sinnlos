@@ -35,6 +35,8 @@ cannot offer; see the note there).
 > `infra/.env`; the new cms refuses to start without it, and `infra/deploy.sh`
 > refuses to deploy. Coming from a release before 2026-09-26, also work through
 > the older notes, newest first:
+> [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38)
+> (a normal deploy; the first boot creates the missing draft rows),
 > [One-time: org draft/publish off](#one-time-org-draftpublish-off) (a
 > database with department or team drafts needs a one-time migration first),
 > [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
