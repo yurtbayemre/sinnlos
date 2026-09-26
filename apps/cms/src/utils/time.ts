@@ -215,6 +215,35 @@ export function wallTimeToInstant(
   return new Date(zoned.epochMilliseconds);
 }
 
+/**
+ * The instant a zone-less wall-clock date-time ('YYYY-MM-DDTHH:mm:ss[.ffffff]',
+ * e.g. a value read from a `timestamp without time zone` column) denotes in
+ * `timeZone`. 'later' matches Postgres' `ts AT TIME ZONE zone`: a repeated
+ * wall time is read as the later (standard time) instant, a skipped one is
+ * moved forward by the gap.
+ */
+export function plainDateTimeToInstant(
+  dateTime: string,
+  timeZone: string,
+  disambiguation: Disambiguation = "later",
+): Date {
+  const zoned = Temporal.PlainDateTime.from(dateTime).toZonedDateTime(timeZone, { disambiguation });
+  return new Date(zoned.epochMilliseconds);
+}
+
+/**
+ * Whether a wall-clock date-time exists once in the zone, twice (the
+ * repeated hour when DST ends) or not at all (the hour skipped when DST
+ * starts). Only a unique wall time maps to exactly one instant.
+ */
+export function wallTimeOccurrence(dateTime: string, timeZone: string): "unique" | "repeated" | "skipped" {
+  const plain = Temporal.PlainDateTime.from(dateTime);
+  const earlier = plain.toZonedDateTime(timeZone, { disambiguation: "earlier" });
+  const later = plain.toZonedDateTime(timeZone, { disambiguation: "later" });
+  if (earlier.epochNanoseconds === later.epochNanoseconds) return "unique";
+  return earlier.toPlainDateTime().equals(plain) ? "repeated" : "skipped";
+}
+
 /** The same wall time `days` calendar days later in the zone (DST-safe). */
 export function addCalendarDays(instant: InstantInput, days: number, timeZone: string = appTimeZone()): Date {
   return new Date(toInstant(instant).toZonedDateTimeISO(timeZone).add({ days }).epochMilliseconds);

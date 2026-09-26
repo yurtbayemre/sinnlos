@@ -24,4 +24,13 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
     },
   },
+  {
+    // Strapi user migrations are plain CommonJS: @strapi/database require()s
+    // <app root>/database/migrations/*.js directly (no build step).
+    files: ["database/migrations/**/*.js"],
+    languageOptions: { sourceType: "commonjs" },
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
 );

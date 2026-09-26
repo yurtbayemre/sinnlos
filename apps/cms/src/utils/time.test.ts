@@ -11,6 +11,7 @@ import {
   nextAnnual,
   offsetMinutesAt,
   parsePlainDate,
+  plainDateTimeToInstant,
   resolveAppTimeZone,
   startOfDayInstant,
   startOfIsoWeek,
@@ -18,6 +19,7 @@ import {
   toIsoZ,
   todayIn,
   tryParsePlainDate,
+  wallTimeOccurrence,
   wallTimeToInstant,
   zonedDateOf,
   zonedHourOf,
@@ -174,6 +176,26 @@ describe("wallTimeToInstant", () => {
     for (const bad of ["24:00", "9:00", "23:60", "23:59:60", "noon"]) {
       expect(() => wallTimeToInstant(day, bad, BERLIN), bad).toThrow(/wall time/);
     }
+  });
+});
+
+describe("plainDateTimeToInstant / wallTimeOccurrence", () => {
+  it("reads a naive wall clock like Postgres' AT TIME ZONE (later instant in a fold)", () => {
+    expect(plainDateTimeToInstant("2026-08-16T10:00:00.000000", BERLIN).toISOString()).toBe(
+      "2026-08-16T08:00:00.000Z",
+    );
+    expect(plainDateTimeToInstant("2026-10-25T02:30:00", BERLIN).toISOString()).toBe("2026-10-25T01:30:00.000Z");
+    expect(plainDateTimeToInstant("2027-03-28T02:30:00", BERLIN).toISOString()).toBe("2027-03-28T01:30:00.000Z");
+    expect(plainDateTimeToInstant("2026-10-25T02:30:00", BERLIN, "earlier").toISOString()).toBe(
+      "2026-10-25T00:30:00.000Z",
+    );
+  });
+
+  it("tells unique, repeated and skipped wall times apart", () => {
+    expect(wallTimeOccurrence("2026-08-16T10:00:00", BERLIN)).toBe("unique");
+    expect(wallTimeOccurrence("2026-10-25T02:30:00.000000", BERLIN)).toBe("repeated");
+    expect(wallTimeOccurrence("2027-03-28T02:30:00", BERLIN)).toBe("skipped");
+    expect(wallTimeOccurrence("2026-10-25T02:30:00", "UTC")).toBe("unique");
   });
 });
 
