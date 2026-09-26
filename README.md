@@ -713,7 +713,10 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 the env contract, and `DATETIME_LEGACY_ZONE` while the running database
 still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
 only this step) → pre-deploy DB backup → tag the running images `:rollback`
-→ rebuild + restart → curl smoke-check → datetime and live-pipeline smoke. TLS, the security
+→ rebuild + restart (a failed `up` prints the rollback commands) → curl
+smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
+from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
+on top (it runs that cms in `DATETIME_LEGACY_ZONE`). TLS, the security
 response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must

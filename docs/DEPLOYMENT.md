@@ -943,8 +943,18 @@ ones that need it in the admin panel.
 
 **Deploy**
 
-7. Run `infra/deploy.sh` (it takes the mandatory pre-deploy backup first;
-   keep that dump until step 10 is done). On a standalone Caddy box: take the
+7. **Pin the running images** under a tag no later run overwrites, for a
+   rollback ([Rolling back this release](#rolling-back-this-release)):
+
+   ```bash
+   docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:pre-datetime
+   docker tag "$(docker inspect -f '{{.Image}}' infra-web-1)" infra-web:pre-datetime
+   ```
+
+   (`deploy.sh` tags the running images `:rollback` on every run; after a
+   failed first attempt a second run would tag the new images.) Then run
+   `infra/deploy.sh` (it takes the mandatory pre-deploy backup first; keep
+   that dump until step 10 is done). On a standalone Caddy box: take the
    backup, then `docker compose up -d --build` from `infra/`.
 
 **What the first boot does** (`docker logs infra-cms-1`):
@@ -960,11 +970,22 @@ Strapi started successfully
 ```
 
 (Strapi labels user migrations `[internal migration]` too.) The repair runs
-in one transaction: if it fails (missing variable, gap check, a lock held
-for 30 s), nothing is changed, the cms exits, compose restarts it in a loop,
-and `deploy.sh`'s smoke check fails. Fix the cause and deploy again, or roll
-back ([Rolling back this release](#rolling-back-this-release)). It is
-recorded in `strapi_migrations` and never runs again on this database.
+in one transaction and is recorded in `strapi_migrations`; it never runs
+again on this database.
+
+**If the first boot fails** (missing variable, gap check, a lock held for
+30 s): the repair changed nothing, the cms exits and compose restarts it in
+a loop. The new web container waits for a healthy cms and never starts, so
+the site is down. `docker compose up` stops with `dependency failed to
+start: container infra-cms-1 …` (exited or unhealthy), and `deploy.sh` stops
+right there with `ERROR: docker compose up failed …` and the rollback
+commands; the smoke check never runs. The cause is in `docker logs
+infra-cms-1`. Either fix it and run `infra/deploy.sh` again (it tags the
+now-running new images `:rollback`; the `:pre-datetime` tags from step 7
+stay), or roll back **with the legacy-zone override**: the database still
+holds naive columns, and the previous cms must not run in UTC on them
+([Rolling back this release](#rolling-back-this-release), "before the
+repair").
 
 **After the deploy**
 
@@ -1004,7 +1025,9 @@ recorded in `strapi_migrations` and never runs again on this database.
     in the admin panel.
 11. **Later:** after 90 days, and once step 10 is done, drop the audit table:
     `DROP TABLE datetime_migration_audit;` (psql as above). Keep the two
-    `DATETIME_LEGACY_*` variables.
+    `DATETIME_LEGACY_*` variables (a rollback override and a restored
+    pre-repair dump read them). Once you will not roll back any more, drop
+    the pinned images: `docker rmi infra-cms:pre-datetime infra-web:pre-datetime`.
 
 **What users and editors notice** (worth a short release note):
 
@@ -2469,6 +2492,7 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 | cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (an IANA name such as `Europe/Berlin`, no UTC offset) or leave it empty |
 | every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | The web container's `TZ` is not the zone Node runs in: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`); with a custom orchestrator set `TZ` to the same name |
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
+| `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
 
 ---
@@ -2594,7 +2618,9 @@ docker compose -p infra logs -f --tail=50 cms web
 
 **Rollback.** `deploy.sh` tags the previously-running images `infra-web:rollback`
 and `infra-cms:rollback` before each build, so a bad deploy can be reverted
-**without** rebuilding — retag and re-up just the affected service:
+**without** rebuilding — retag and re-up just the affected service (rolling
+back the datetime release needs an extra override file, see
+[Rolling back this release](#rolling-back-this-release)):
 
 ```bash
 docker tag infra-web:rollback infra-web:latest
@@ -2628,29 +2654,85 @@ steps 3–7).
 
 #### Rolling back this release
 
-Re-upping the previous cms image (the 2026-09-26 release) after the datetime
-repair is safe **without** a `pg_restore`. Rehearsed on Postgres 16 with that
-image against a repaired database: it boots without any schema change (its
-schema sync finds the same schema; the unknown `strapi_migrations` record is
-ignored), reads every instant unchanged, and writes correct instants even in
-a Berlin process (pg sends a `Date` with its offset, and `timestamptz` keeps
-the instant). Rolling forward again is a no-op: the repair is recorded and
-never runs twice. Use the retag commands above.
+The previous cms image (the 2026-09-26 release, `7f75ae4`) has no `TZ` of
+its own: its compose file ran it in `Europe/Berlin`, and it wrote naive
+columns as Berlin wall clocks. The current `infra/docker-compose.yml` runs
+the cms in UTC. **Always re-up the previous cms with the override
+`infra/docker-compose.cms-legacy-tz.yml`**, which sets the cms's `TZ` to
+`DATETIME_LEGACY_ZONE`, using the images pinned in step 7:
 
-- The rollback commands run with the **new** compose file, so the old cms
-  then runs in UTC: until you roll forward, its date logic (birthday cards,
-  digest days, classified expiry) uses UTC days, off by one day between
-  midnight and 02:00 Berlin time. Its cron times stay Berlin (hard-coded
-  there). To avoid that, re-up it with the previous compose file:
-  `git show <previous-commit>:infra/docker-compose.yml > /tmp/compose-prev.yml`
-  and use `-f /tmp/compose-prev.yml` instead of `-f infra/docker-compose.yml`.
+```bash
+cd /opt/sinnlos
+docker tag infra-cms:pre-datetime infra-cms:latest
+docker tag infra-web:pre-datetime infra-web:latest
+docker compose -p infra \
+  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  -f infra/docker-compose.cms-legacy-tz.yml \
+  up -d --no-build web cms
+```
+
+(Standalone Caddy box: leave out the Traefik file. Without the step 7 tags,
+`:rollback` is only right if `deploy.sh` ran once for this release: every
+run tags whatever is running then.) `docker logs infra-cms-1` must not show
+`[datetime]` lines (those come from the new image only).
+
+Whether the repair has run on the database the previous cms will use:
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT count(*) AS repair_recorded FROM strapi_migrations
+ WHERE name = '2026.10.05T00.00.00.datetime-timestamptz.js';
+SELECT count(*) AS naive_app_columns FROM information_schema.columns
+ WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
+   AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
+SQL
+```
+
+A first line `0` or a second line above `0` means it has not.
+
+- **Before the repair the override is mandatory**: after a failed first
+  boot, after restoring a pre-repair dump, and whenever the check above
+  says so. The columns still hold Berlin wall clocks. An old cms in UTC
+  reads every one written since 2026-08-15 two hours late (pg parses a
+  naive value in the process zone), and each `Date` it writes arrives with
+  `+00:00`, which a naive column drops: it stores UTC wall clocks among the
+  Berlin ones. The next roll forward (same θ) reads those as Berlin time
+  and moves them another one to two hours; the gap check cannot see them,
+  they lie far after θ.
+- **After the repair** the override is merely better. Re-upping the previous
+  image on a repaired database is safe **without** a `pg_restore` (rehearsed
+  on Postgres 16): it boots without any schema change (its schema sync finds
+  the same schema; the unknown `strapi_migrations` record is ignored), reads
+  every instant unchanged, and writes correct instants in any process zone
+  (pg sends a `Date` with its offset, and `timestamptz` keeps the instant).
+  With the override its date logic (birthday cards, digest days, classified
+  expiry) keeps Berlin days; without it those use UTC days, off by one
+  between midnight and 02:00 Berlin time. Its cron times are Berlin either
+  way (hard-coded there). Rolling forward again is a no-op: the repair is
+  recorded and never runs twice.
+- Roll forward with `infra/deploy.sh` as usual: it uses the live compose
+  files only, so the new cms runs in UTC again. Do not keep the override for
+  the new image.
+- If you want the previous compose file as a whole instead of the override,
+  write it **next to** the live one, because compose takes the directory of
+  the first `-f` file as the project directory and reads `.env` there:
+  `git show 7f75ae4:infra/docker-compose.yml > infra/docker-compose.prev.yml`,
+  then `-f infra/docker-compose.prev.yml -f infra/docker-compose.traefik.yml`
+  (a copy under `/tmp` fails with `required variable … is missing a
+  value`: compose then looks for `/tmp/.env`). Remove the file after the
+  roll forward.
 - Do **not** restore the pre-deploy dump just to roll back. If you restore it
-  anyway (it predates the repair), keep `DATETIME_LEGACY_ZONE` /
-  `DATETIME_LEGACY_UTC_UNTIL` set: the next boot of the new cms then repairs
-  it again, correctly. Values written between the deploy and the restore are
-  lost with the restore, as with any restore.
+  anyway (it predates the repair), it is a pre-repair database: boot the
+  previous cms on it only with the override, and keep `DATETIME_LEGACY_ZONE`
+  / `DATETIME_LEGACY_UTC_UNTIL` set. The next boot of the new cms repairs it
+  again, correctly, **provided no previous cms ran in UTC on it in the
+  meantime** (see above: those values cannot be repaired by rule; restore
+  again, or correct them by hand). Values written between the deploy and
+  the restore are lost with the restore, as with any restore.
 - A web-only rollback brings back the old poll close rule (the card treats the
-  closing second as open) and nothing else.
+  closing second as open) and nothing else. The web needs no override: both
+  compose files run it in `Europe/Berlin` (the new one through
+  `APP_TIME_ZONE`).
 
 #### Rolling back the Strapi 5.55.1 release (2026-09-25)
 
