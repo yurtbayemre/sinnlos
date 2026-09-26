@@ -173,6 +173,59 @@ async function isDraftRow(sql: SqlClient, schema: string, cell: CellPlan): Promi
   }
 }
 
+interface AuditRow {
+  run_id: string;
+  table_name: string;
+  row_id: string | null;
+  column_name: string;
+  old_naive: string;
+  class: string;
+}
+
+/** Postgres' text form of a naive timestamp -> 'YYYY-MM-DDTHH:MM:SS[.ffffff]'. */
+function auditNaive(text: string): string {
+  return text.replace(" ", "T");
+}
+
+/**
+ * After the repair: the ambiguous values it recorded in the audit table,
+ * with the reading it chose and the other one, for the review in the admin
+ * panel (DEPLOYMENT.md, after the deploy).
+ */
+async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, print: Print): Promise<void> {
+  const { settings, now } = options;
+  const rows = await sql.query<AuditRow>(
+    `SELECT run_id, table_name, row_id::text AS row_id, column_name, old_naive, class
+       FROM ${qualifiedTable(options.schema, AUDIT_TABLE)}
+      WHERE class IN ('C', 'C-allday')
+      ORDER BY run_id, table_name, row_id, column_name`,
+  );
+  const zone = settings.zone;
+  const listed = rows.filter((row) => {
+    if (options.all) return true;
+    const readings = [plainDateTimeToInstant(auditNaive(row.old_naive), "UTC")];
+    if (zone) readings.push(plainDateTimeToInstant(auditNaive(row.old_naive), zone));
+    return readings.some((instant) => instant.getTime() >= now.getTime());
+  });
+  print();
+  print(
+    `Ambiguous values the repair recorded in ${AUDIT_TABLE}: ${rows.length}, ` +
+      `${options.all ? "all listed" : `${listed.length} still open or upcoming listed (--all for every one)`}:`,
+  );
+  for (const row of listed) {
+    const naive = auditNaive(row.old_naive);
+    const chosen = row.class === "C-allday" ? (zone ?? "the legacy zone") : "UTC";
+    print(
+      `  ${row.table_name}#${row.row_id ?? "?"} ${row.column_name} = ${naiveShort(naive)} [${row.class}, run ${row.run_id}, ` +
+        `repaired as ${chosen}]`,
+    );
+    print(`      read as UTC:             ${reading(naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`);
+    if (zone) {
+      print(`      read as ${zone.padEnd(16)} ${reading(naive, zone, options.appTimeZone)} ${options.appTimeZone}`);
+    }
+  }
+}
+
 /** Prints the report. Only runs SELECTs on `sql`. */
 export async function runReport(sql: SqlClient, options: ReportOptions, print: Print): Promise<LegacyPlan> {
   const { schema, settings, now } = options;
@@ -197,6 +250,7 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   if (repair.length === 0) {
     print();
     print("Nothing to repair: every app column is already timestamptz.");
+    if (auditExists) await printRecordedAmbiguous(sql, options, print);
     return plan;
   }
   if (plan.tables.length === 0) {

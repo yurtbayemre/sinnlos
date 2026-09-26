@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 
 import { connectionConfig, runReport } from "../../scripts/datetime-migration-report";
 import { knexSqlClient } from "./datetime-catalog";
-import { readLegacySettings } from "./datetime-legacy";
+import { readLegacySettings, runLegacyDatetimeMigration } from "./datetime-legacy";
 import { FIXTURE_ROWS, FIXTURE_TABLES } from "./legacy-fixture.test.helper";
 import { PG_URL, columnType, createTestKnex, rows, uniqueSchema } from "./pg-test-db.test.helper";
 import { type RawKnex } from "./strapi-knex.test.helper";
@@ -89,6 +89,27 @@ describe.skipIf(!PG_URL)("datetime repair report (read-only) on Postgres 16", ()
     const text = await report({ around: "2026-08-15T20:46:42+02:00" });
     expect(text).toMatch(/2026-08-15 18:40:00 {2}search_logs\.created_at#2[\s\S]*----- gap 2h10m -----[\s\S]*2026-08-15 20:50:00/);
     expect(text).toContain("θ inside [2026-08-15 18:40:00, 2026-08-15 20:50:00) UTC, e.g. 2026-08-15T19:45:00.000Z");
+  });
+
+  it("after the repair lists the ambiguous values it recorded, for the review", async () => {
+    await knex.transaction((trx) =>
+      runLegacyDatetimeMigration(trx, { dialect: { client: "postgres" }, getSchemaName: () => schema }, {
+        env: {
+          DATETIME_LEGACY_ZONE: "Europe/Berlin",
+          DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42+02:00",
+        },
+        log: { info: () => undefined, warn: () => undefined },
+        processZone: "UTC",
+        now: new Date("2026-09-26T10:00:00Z"),
+      }),
+    );
+    const text = await report();
+    expect(text).toContain("Nothing to repair: every app column is already timestamptz.");
+    expect(text).toContain("Ambiguous values the repair recorded in datetime_migration_audit: 4, 4 still open");
+    expect(text).toMatch(
+      /events#5 start = 2026-10-01 00:00:00 \[C-allday, run 2026-09-26T10:00:00\.000Z, repaired as Europe\/Berlin\]/,
+    );
+    expect(text).toMatch(/events#6 start = 2026-09-30 22:00:00 \[C, run [^\]]+, repaired as UTC\]/);
   });
 
   it("--baseline tells unchanged values from values edited since the dump", async () => {
