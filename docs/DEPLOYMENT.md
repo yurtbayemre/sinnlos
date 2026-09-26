@@ -763,8 +763,30 @@ with the ones below; both releases then go out in one deploy.
      exchange ships; or
    - clear `MS_CLIENT_ID` and `MS_CLIENT_SECRET` in `infra/.env`, which
      switches both apps to local sign-in. Accounts created through Microsoft
-     sign-in have no local password: an admin sets one in the Strapi admin
-     (**Content Manager → User**) before those users can sign in.
+     sign-in cannot sign in locally as they are: they have no password, and
+     they carry `provider = microsoft`, while Strapi's local login only
+     matches accounts with `provider = local`. A password alone is not
+     enough: the sign-in page still answers "Invalid email or password". For
+     each such account an admin opens it in the Strapi admin
+     (**Content Manager → User**), sets a password and changes **Provider**
+     from `microsoft` to `local`. To switch the provider of all of them at
+     once, run this right before the deploy (the passwords are still set per
+     account; the first query lists the accounts that need one, keep that
+     list):
+
+     ```bash
+     cd /opt/sinnlos/infra
+     docker compose exec -T db psql -U sinnlos -d sinnlos -c \
+       "SELECT id, email FROM up_users WHERE provider = 'microsoft';"
+     docker compose exec -T db psql -U sinnlos -d sinnlos -c \
+       "UPDATE up_users SET provider = 'local' WHERE provider = 'microsoft';"
+     ```
+
+     The switch is one-way for the old (Strapi 5.49) Microsoft flow: it
+     finds its users by provider, so a converted account's Microsoft sign-in
+     fails there (the cms answers "Email is already taken"). Before
+     re-enabling the `MS_*` keys on a rollback, set those accounts back to
+     `microsoft` ([Rolling back this release](#rolling-back-this-release)).
 
    An instance that already signs in locally only passes unchanged.
 
@@ -816,6 +838,8 @@ No data is rewritten, and there are no new tables or indexes.
    (`server.mcp.enabled` defaults to `false`).
 7. **Sessions and uploads:** users who were signed in before the deploy still
    are. Sign in with a local account, and post a marketplace ad with a photo.
+   An instance that left Microsoft sign-in in step 2 signs in with one of the
+   converted accounts at `/sign-in`.
 8. **Cron:** Strapi's cron now runs on croner instead of node-schedule. The
    fire times are unchanged (uploads janitor 03:30, search-log janitor 03:35,
    digest mailer 07:30, Europe/Berlin), checked across both DST switches,
@@ -1746,8 +1770,9 @@ updates on them fail for every caller (FX38).
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in, or roll back ([Rolling back this release](#rolling-back-this-release)) |
-| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` |
+| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-an-existing-instance-to-this-release)), or roll back ([Rolling back this release](#rolling-back-this-release)) |
+| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
+| Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-an-existing-instance-to-this-release)) |
 | MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
@@ -1921,6 +1946,11 @@ tokens and uploads work in both directions. Use the retag commands above;
   `?publicationFilter=` for every reader.
 - A web-only rollback changes nothing but the error text and boot log for
   Microsoft sign-ins.
+- An instance that switched Microsoft-created accounts to `provider = local`
+  (upgrade step 2) and re-enables the `MS_*` keys on the old images sets
+  those accounts back to `microsoft` first (the ids from the step 2 list):
+  `UPDATE up_users SET provider = 'microsoft' WHERE id IN (…);`. Otherwise
+  their Microsoft sign-in fails (the cms answers "Email is already taken").
 - If the previous images predate 2026-09-24 (the instance took both releases
   in one deploy), the caveats of
   [Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)

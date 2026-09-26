@@ -228,8 +228,10 @@ if [[ -n "${entra_keys}" ]]; then
   echo "       work with this release: Strapi 5.51+ no longer accepts the web's access-token" >&2
   echo "       exchange, so every Microsoft sign-in fails (and with AUTH_LOCAL_ENABLED=0 nobody" >&2
   echo "       can sign in). Keep the running release until the Entra exchange ships, or clear" >&2
-  echo "       MS_CLIENT_ID and MS_CLIENT_SECRET in infra/.env to run with local sign-in only" >&2
-  echo "       (accounts created through Microsoft sign-in have no local password)." >&2
+  echo "       MS_CLIENT_ID and MS_CLIENT_SECRET in infra/.env to run with local sign-in only." >&2
+  echo "       Accounts created through Microsoft sign-in have no local password and" >&2
+  echo "       provider = microsoft: set a password and switch provider to local for each" >&2
+  echo "       (docs/DEPLOYMENT.md, upgrading an existing instance, step 2)." >&2
   preflight_failed=1
 fi
 if jwt_rotation_missing; then
