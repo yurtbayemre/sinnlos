@@ -801,10 +801,17 @@ went live on 2026-09-27) fixes what that deploy turned up:
 - **The same 500 in other endpoints.** Comment delete, classified update and
   delete, RSVP update, notification and reaction delete, the write checks of
   departments, teams and wiki pages, notification mark-read and the image ids
-  of classifieds passed a malformed or out-of-range id (for example `abc` or
-  `2147483648`) to a database lookup, and Postgres failed the same way. They
-  now answer like an unknown entry (404, or 403 from an ownership check) or,
-  for a malformed request body, 400, and write no error to the cms log.
+  of classifieds passed an all-digit id beyond the int4 range (for example
+  `2147483648`) to a numeric lookup. The ICS route and notification
+  mark-read also passed non-numeric values such as `abc`. Postgres failed
+  the same way. They now answer like an unknown entry (404, or 403 from an
+  ownership check) or, for a malformed request body, 400, and write no error
+  to the cms log. Unchanged: a notification or reaction delete by a role
+  that bypasses the ownership check (admin; for reactions also editor)
+  answers 204 for any id. Not in this release: poll vote and results
+  (`POST /api/polls/:id/vote`, `GET /api/polls/:id/results`) still answer a
+  malformed id with 500; the poll targeting release (`feat/poll-targeting`)
+  adds the same check there.
 - **The cms container starts without pnpm.** The image ran `pnpm start` as
   the `node` user, but pnpm was only set up for root, so **every start of the
   cms container downloaded pnpm from registry.npmjs.org**: a restart, a deploy
@@ -939,8 +946,10 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
   before).
 - A calendar that imported an event before this release has it under the old
   `UID`. Importing that event's file again adds a second entry (once); delete
-  the older one. After that, importing a re-published event updates the
-  entry instead of adding one, in calendar apps that match events by `UID`.
+  the older one. After that, importing a re-published event no longer adds
+  a second entry; whether the existing entry is updated depends on the
+  calendar app (the file carries no `SEQUENCE` or `LAST-MODIFIED` yet,
+  FX12).
 - Nothing else changes for readers or editors.
 
 **Rollback.** The previous images run unchanged on this database: nothing in
