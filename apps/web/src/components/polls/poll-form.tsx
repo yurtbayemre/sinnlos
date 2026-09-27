@@ -18,8 +18,19 @@ const MAX_OPTIONS = 10;
 /** Poll creation form. Options are plain text fields (one per answer) —
  * the JSON array the CMS stores is assembled by the server action. All
  * fields are controlled state, so nothing is lost when an action returns
- * an error (React 19 resets uncontrolled <form action> fields). */
-export function PollForm({ departments }: { departments: { id: number; name: string }[] }) {
+ * an error (React 19 resets uncontrolled <form action> fields).
+ *
+ * `departmentsUnavailable`: the department list could not be loaded. The
+ * form then says so and refuses to submit, because the only poll it could
+ * create would be company-wide, although the author may have meant to
+ * restrict it (decision 02: fail closed). */
+export function PollForm({
+  departments,
+  departmentsUnavailable = false,
+}: {
+  departments: { id: number; name: string }[];
+  departmentsUnavailable?: boolean;
+}) {
   const t = useTranslations("polls");
   const router = useRouter();
   const [question, setQuestion] = useState("");
@@ -51,6 +62,7 @@ export function PollForm({ departments }: { departments: { id: number; name: str
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (departmentsUnavailable) return;
     setError(null);
     startTransition(async () => {
       const result = await createPoll({
@@ -156,7 +168,13 @@ export function PollForm({ departments }: { departments: { id: number; name: str
         </span>
       </label>
 
-      {departments.length > 0 && (
+      {departmentsUnavailable && (
+        <p role="alert" className="text-sm text-destructive">
+          {t("departmentsUnavailable")}
+        </p>
+      )}
+
+      {!departmentsUnavailable && departments.length > 0 && (
         <fieldset className="space-y-2">
           <legend className="text-sm font-medium">{t("formDepartments")}</legend>
           <p className="text-xs text-muted-foreground">{t("formDepartmentsHint")}</p>
@@ -192,7 +210,7 @@ export function PollForm({ departments }: { departments: { id: number; name: str
       <div className="flex items-center gap-3">
         <button
           type="submit"
-          disabled={isPending}
+          disabled={isPending || departmentsUnavailable}
           className={cn(
             "rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50",
             focusRing,

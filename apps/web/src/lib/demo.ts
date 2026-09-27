@@ -312,6 +312,7 @@ const polls: AnyEntry[] = [
     closesAt: iso(5),
     anonymous: false,
     author: users.maria,
+    audience: "all",
     departments: [],
     createdAt: iso(-2),
   },
@@ -323,7 +324,10 @@ const polls: AnyEntry[] = [
     closesAt: iso(-1),
     anonymous: true,
     author: users.grace,
-    departments: [{ id: 1, name: "Engineering", slug: "engineering" }],
+    audience: "departments",
+    departments: [
+      { id: 1, documentId: "demo-department-1", name: "Engineering", slug: "engineering" },
+    ],
     createdAt: iso(-9),
   },
 ];
@@ -340,6 +344,8 @@ const pollResults: Record<number, unknown> = {
     counts: [9, 6, 4],
     total: 19,
     myVoteIndex: null,
+    canVote: true,
+    audience: { targeted: false, departments: [] },
   },
   2: {
     poll: {
@@ -352,6 +358,12 @@ const pollResults: Record<number, unknown> = {
     counts: [14, 5, 1],
     total: 20,
     myVoteIndex: 0,
+    // Targeted at the demo viewer's own department (DEMO_VIEWER, Engineering).
+    canVote: true,
+    audience: {
+      targeted: true,
+      departments: [{ documentId: "demo-department-1", name: "Engineering" }],
+    },
   },
 };
 
