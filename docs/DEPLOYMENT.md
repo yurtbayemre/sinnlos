@@ -1128,7 +1128,7 @@ wrote in:
 | Fresh install, or a SQLite-only setup | nothing (leave both `DATETIME_LEGACY_*` empty) |
 | Existing instance first deployed on or after 2026-08-15 (compose with `TZ=Europe/Berlin`) | `DATETIME_LEGACY_ZONE=Europe/Berlin` |
 | Existing instance that ran before 2026-08-15 (its cms ran in UTC) and took the `aadb2ea` deploy | `DATETIME_LEGACY_ZONE=Europe/Berlin` and `DATETIME_LEGACY_UTC_UNTIL=θ`, the switch instant (step 2) |
-| The owner instance | `DATETIME_LEGACY_ZONE=Europe/Berlin`, `DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00` (confirmed by the report in step 3) |
+| The owner instance | `DATETIME_LEGACY_ZONE=Europe/Berlin`, `DATETIME_LEGACY_UTC_UNTIL=2026-08-15T19:24:28+02:00` (from the report in step 3; the switch came before the `aadb2ea` deploy, see step 2) |
 
 Without `DATETIME_LEGACY_ZONE` on a database with data, the new cms stops at
 its first boot with `[datetime] This database holds datetime values written
@@ -1171,8 +1171,17 @@ ones that need it in the admin panel.
    grep '^2026-08-15' <offsite-dir>/sinnlos/backup.log
    ```
 
-   θ = B + 1 h works whenever that deploy took less than an hour. The owner's
-   B is `2026-08-15T20:46:42+02:00`, so θ = `2026-08-15T21:46:42+02:00`.
+   θ = B + 1 h works whenever that deploy took less than an hour and really
+   was the first start of the cms in the new zone. Confirm it with the report
+   in step 3 either way: the switch is not always the deploy that committed
+   it. On the owner instance the zone change ran from a restart with the
+   edited compose file about an hour before the deploy of `aadb2ea` (backup
+   `2026-08-15T20:46:42+02:00`), and θ = B + 1 h from that backup fails the
+   gap check. The report's `--around` list shows the switch gap in the owner's
+   stored stamps between `2026-08-15 17:04:23` and `19:44:33` (UTC wall
+   clock): the cms switched between 19:04 and 19:44 Berlin time, so the
+   owner's θ is `2026-08-15T19:24:28+02:00`, with `--around
+   2026-08-15T18:56:29+02:00` (the backup of the deploy before the switch).
 
 3. **Read-only report against the live database**, with the new image. It
    applies the repair's own rules and changes nothing (read-only session,
@@ -1185,15 +1194,15 @@ ones that need it in the admin panel.
    $COMPOSE build cms
    $COMPOSE run --rm --no-deps \
      -e DATETIME_LEGACY_ZONE=Europe/Berlin \
-     -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00 \
-     cms node dist/scripts/datetime-migration-report.js --around 2026-08-15T20:46:42+02:00
+     -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T19:24:28+02:00 \
+     cms node dist/scripts/datetime-migration-report.js --around 2026-08-15T18:56:29+02:00
    ```
 
    (Standalone Caddy box: drop the Traefik file from `COMPOSE`.) Check:
    - `Gap check: OK` — θ lies in an empty stretch of the stored write
      stamps at least as long as the zone offset (120 minutes in August). The
      `--around` list shows the stamps near B with the switch gap marked
-     (`----- gap 2h10m -----` or so) and suggests a θ inside it. A
+     (`----- gap 2h40m -----` on the owner instance) and suggests a θ inside it. A
      `Gap check: FAILS` means θ is wrong; the lines below it say why (the
      stretch around θ is too short, θ lies in the future, or no write stamp
      lies on one side of θ). Pick a θ inside the marked gap. The migration
@@ -1234,7 +1243,7 @@ ones that need it in the admin panel.
      docker exec -i dt-copy pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
      docker exec -i dt-june pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges \
        < /home/bigemo/backups/sinnlos/sinnlos-db-2026-06-24-143319.dump
-     LEGACY="-e DATETIME_LEGACY_ZONE=Europe/Berlin -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00"
+     LEGACY="-e DATETIME_LEGACY_ZONE=Europe/Berlin -e DATETIME_LEGACY_UTC_UNTIL=2026-08-15T19:24:28+02:00"
      DB="-e DATABASE_CLIENT=postgres -e DATABASE_HOST=dt-copy -e DATABASE_NAME=sinnlos -e DATABASE_USERNAME=sinnlos -e DATABASE_PASSWORD=rehearsal"
      docker run --rm --network dt-rehearsal $LEGACY $DB infra-cms \
        node dist/scripts/datetime-migration-report.js --all \
@@ -1267,7 +1276,7 @@ ones that need it in the admin panel.
 
    ```dotenv
    DATETIME_LEGACY_ZONE=Europe/Berlin
-   DATETIME_LEGACY_UTC_UNTIL=2026-08-15T21:46:42+02:00
+   DATETIME_LEGACY_UTC_UNTIL=2026-08-15T19:24:28+02:00
    ```
 
    Leave `APP_TIME_ZONE` unset (or `Europe/Berlin`) unless the company is
@@ -1306,7 +1315,7 @@ ones that need it in the admin panel.
 ```
 [datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin
 [internal migration]: migrating 2026.10.05T00.00.00.datetime-timestamptz.js
-[datetime] legacy repair (run …, legacy zone Europe/Berlin, θ 2026-08-15T19:46:42.000Z): N value(s) rewritten, M column(s) converted to timestamptz, K old value(s) kept in datetime_migration_audit. Classes: …
+[datetime] legacy repair (run …, legacy zone Europe/Berlin, θ 2026-08-15T17:24:28.000Z): N value(s) rewritten, M column(s) converted to timestamptz, K old value(s) kept in datetime_migration_audit. Classes: …
 [datetime] gap check: … min between … and … (needs 120)
 [internal migration]: migrated 2026.10.05T00.00.00.datetime-timestamptz.js (…s)
 [datetime] converted 3 column(s) to timestamptz: strapi_database_schema.time, strapi_migrations.time, strapi_migrations_internal.time
