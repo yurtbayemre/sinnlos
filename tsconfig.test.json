@@ -18,6 +18,10 @@
   "compilerOptions": {
     "noEmit": true,
     "lib": ["dom", "dom.iterable", "ES2022"],
+    // Component tests import apps/web .tsx modules (react-dom/server render,
+    // e.g. components/polls/poll-card.test.ts); the automatic runtime is
+    // what Next.js and the Vitest config (esbuild.jsx) use.
+    "jsx": "react-jsx",
     "typeRoots": ["./apps/web/node_modules/@types"],
     "types": ["node"],
     "paths": {

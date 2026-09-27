@@ -23,6 +23,12 @@ import { defineConfig } from "vitest/config";
  * Tests live next to the code under test as `*.test.ts`.
  */
 export default defineConfig({
+  // apps/web's tsconfig says `jsx: "preserve"` (Next.js compiles JSX
+  // itself), which would leave Vite's esbuild on the classic
+  // `React.createElement` transform. Tests that render a component
+  // (react-dom/server, e.g. components/polls/poll-card.test.ts) need the
+  // automatic runtime Next uses.
+  esbuild: { jsx: "automatic" },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./apps/web/src", import.meta.url)),
