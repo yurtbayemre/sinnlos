@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { failLikePostgres } from "./entry-id.test.helper";
 import {
   loadPollViewer,
   loadPublishedPoll,
   loadUserDepartmentDocumentId,
-  parsePollRowId,
   POLL_UID,
   USER_UID,
   type PollAccessHost,
@@ -12,8 +12,13 @@ import {
 /**
  * DB loaders of poll targeting (decision 02). The stubs record every
  * query, so the pins that matter are asserted on the query itself: the
- * published-only `where` and the documentId-based department lookup.
+ * published-only `where` and the documentId-based department lookup. They
+ * also fail like Postgres on an `id` an int4 column cannot hold, so a
+ * route id that slips past `parseRowId` fails here as it did in production.
  */
+
+/** A documentId in Strapi's shape: poll routes take row ids only. */
+const POLL_DOCUMENT_ID = "lj5n10lqpweysvb5m9hmiv8p";
 
 function host(rows: Partial<Record<string, unknown>>) {
   const queries: { uid: string; params: Record<string, unknown> }[] = [];
@@ -22,6 +27,7 @@ function host(rows: Partial<Record<string, unknown>>) {
       query: (uid: string) => ({
         findOne: async (params: Record<string, unknown>) => {
           queries.push({ uid, params });
+          failLikePostgres(params.where);
           return rows[uid] ?? null;
         },
       }),
@@ -78,14 +84,24 @@ describe("loadPollViewer", () => {
   });
 });
 
-describe("parsePollRowId", () => {
-  it("accepts plain positive decimal row ids", () => {
-    expect(parsePollRowId("1")).toBe(1);
-    expect(parsePollRowId("2147483647")).toBe(2147483647);
-    expect(parsePollRowId(42)).toBe(42);
+describe("loadPublishedPoll: the route id (parseRowId, utils/entry-id.ts)", () => {
+  it("looks up a plain positive decimal row id, as a string or a number", async () => {
+    const accepted: [unknown, number][] = [
+      ["1", 1],
+      ["2147483647", 2147483647],
+      [42, 42],
+    ];
+    for (const [raw, id] of accepted) {
+      const { strapi, queries } = host({});
+      await loadPublishedPoll(strapi, raw);
+      expect(
+        queries.map((query) => query.params.where),
+        String(raw),
+      ).toEqual([{ id, publishedAt: { $notNull: true } }]);
+    }
   });
 
-  it("refuses everything else, including ids beyond the integer column", () => {
+  it("answers null without a query for anything else, a documentId included", async () => {
     for (const raw of [
       "0",
       "-1",
@@ -98,13 +114,18 @@ describe("parsePollRowId", () => {
       "2147483648",
       "99999999999",
       "k3x9documentid",
+      POLL_DOCUMENT_ID,
       undefined,
       null,
+      0,
       1.5,
       -3,
+      2147483648,
       {},
     ]) {
-      expect(parsePollRowId(raw), String(raw)).toBeNull();
+      const { strapi, queries } = host({ [POLL_UID]: { id: 12 } });
+      await expect(loadPublishedPoll(strapi, raw), String(raw)).resolves.toBeNull();
+      expect(queries, String(raw)).toEqual([]);
     }
   });
 });
@@ -134,14 +155,6 @@ describe("loadPublishedPoll", () => {
         },
       },
     ]);
-  });
-
-  it("does not query for a malformed id", async () => {
-    for (const raw of ["abc", "0", "-1", "1.5", "2147483648", undefined]) {
-      const { strapi, queries } = host({ [POLL_UID]: row });
-      await expect(loadPublishedPoll(strapi, raw), String(raw)).resolves.toBeNull();
-      expect(queries).toEqual([]);
-    }
   });
 
   it("answers null when no published row matches (missing or draft id)", async () => {

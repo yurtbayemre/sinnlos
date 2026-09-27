@@ -495,8 +495,8 @@ the Strapi admin panel have no such context).
 
 Every custom handler and policy that looks an entry up by an id from the
 request (a route `:id`, or ids in a request body) checks it first with
-`apps/cms/src/utils/entry-id.ts` (except poll-vote vote/results:
-`feat/poll-targeting` adds that check): a positive row id within the int4
+`apps/cms/src/utils/entry-id.ts` (poll vote/results take the row id only,
+through `parseRowId`): a positive row id within the int4
 range, or a documentId in the shape Strapi generates (the FX07 write policies keep
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres

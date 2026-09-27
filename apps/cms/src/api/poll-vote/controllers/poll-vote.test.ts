@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
 import pollVoteController from "./poll-vote";
 
 /**
@@ -6,7 +7,10 @@ import pollVoteController from "./poll-vote";
  * polls up by the NUMERIC id of the published row through strapi.db.query,
  * which spans draft AND published rows, so:
  *   - a missing id, a malformed id, a draft row and a poll outside the
- *     caller's department audience answer the same 404,
+ *     caller's department audience answer the same 404; a malformed id
+ *     (anything `parseRowId` in utils/entry-id.ts refuses, a documentId
+ *     included) never reaches the poll query, which fails like Postgres
+ *     on an id an int4 column cannot hold,
  *   - admin_role/editor read every poll and its results but vote only in
  *     the audience (403 outside it),
  *   - the voter is always the caller, whatever the body says,
@@ -99,6 +103,12 @@ const ENG_ONLY: PollRow = {
 const CLOSED: PollRow = { ...OPEN, id: 5, documentId: "p-closed", closesAt: "2020-01-01T00:00:00.000Z" };
 const POLLS = [DRAFT, OPEN, CLOSING, ENG_ONLY, CLOSED];
 
+/**
+ * Route ids that name no poll row: the routes take the numeric id of the
+ * published row only, so a documentId in Strapi's shape is refused too.
+ */
+const MALFORMED_POLL_IDS = [...MALFORMED_ENTRY_IDS, "lj5n10lqpweysvb5m9hmiv8p"];
+
 /** Row 1 of the Engineering document: the poll links the same documentId. */
 const ENGINEER: UserRow = { id: 5, role: { type: "member" }, department: { id: 1, documentId: "d-eng" } };
 const DESIGNER: UserRow = { id: 6, role: { type: "member" }, department: { id: 7, documentId: "d-design" } };
@@ -150,9 +160,10 @@ function setup(options: {
   votes?: VoteRow[];
 }) {
   const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
-  const pollFindOne = vi.fn(async ({ where }: { where: Where }) =>
-    POLLS.find((row) => matches(row, where)) ?? null,
-  );
+  const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
+    failLikePostgres(where);
+    return POLLS.find((row) => matches(row, where)) ?? null;
+  });
   const votes = {
     findOne: vi.fn(async ({ where }: { where: Where }) =>
       votesTable.find((row) => matches(row, where)) ?? null,
@@ -237,6 +248,18 @@ describe("vote", () => {
       expect(ctx.forbidden).not.toHaveBeenCalled();
       expect(votes.create).not.toHaveBeenCalled();
       expect(ctx.send).not.toHaveBeenCalled();
+    }
+  });
+
+  it("answers a malformed id, a documentId included, with that 404 and no poll query", async () => {
+    for (const id of MALFORMED_POLL_IDS) {
+      const { controller, ctx, votes, pollFindOne } = setup({ id });
+      await controller.vote(ctx);
+      expect(ctx.notFound, id).toHaveBeenCalledWith();
+      expect(pollFindOne, id).not.toHaveBeenCalled();
+      expect(votes.findOne, id).not.toHaveBeenCalled();
+      expect(votes.create, id).not.toHaveBeenCalled();
+      expect(ctx.send, id).not.toHaveBeenCalled();
     }
   });
 
@@ -351,6 +374,18 @@ describe("results", () => {
       expect(ctx.notFound, `${String(id)} as ${user.id}`).toHaveBeenCalledWith();
       expect(votes.findMany).not.toHaveBeenCalled();
       expect(ctx.send).not.toHaveBeenCalled();
+    }
+  });
+
+  it("answers a malformed id, a documentId included, with that 404 and no poll query", async () => {
+    for (const id of MALFORMED_POLL_IDS) {
+      const { controller, ctx, votes, pollFindOne } = setup({ id });
+      await controller.results(ctx);
+      expect(ctx.notFound, id).toHaveBeenCalledWith();
+      expect(pollFindOne, id).not.toHaveBeenCalled();
+      expect(votes.findMany, id).not.toHaveBeenCalled();
+      expect(votes.findOne, id).not.toHaveBeenCalled();
+      expect(ctx.send, id).not.toHaveBeenCalled();
     }
   });
 

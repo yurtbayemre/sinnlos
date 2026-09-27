@@ -1,3 +1,4 @@
+import { parseRowId } from "./entry-id";
 import type { PollTargeting, PollViewer } from "./poll-audience";
 
 /**
@@ -12,9 +13,6 @@ import type { PollTargeting, PollViewer } from "./poll-audience";
 
 export const POLL_UID = "api::poll.poll";
 export const USER_UID = "plugin::users-permissions.user";
-
-/** Postgres `integer` primary keys; a larger id would fail the query (500). */
-const MAX_ROW_ID = 2147483647;
 
 interface FindOneQuery {
   findOne(params: Record<string, unknown>): Promise<unknown>;
@@ -87,26 +85,20 @@ export async function loadPollViewer(strapi: PollAccessHost, user: PollCaller): 
 }
 
 /**
- * The route's `:id` as a published poll row id, or null for anything that
- * is not a plain positive decimal integer inside the column range.
- */
-export function parsePollRowId(rawId: unknown): number | null {
-  const text = typeof rawId === "number" ? String(rawId) : rawId;
-  if (typeof text !== "string" || !/^[1-9][0-9]{0,9}$/.test(text)) return null;
-  const id = Number(text);
-  return id <= MAX_ROW_ID ? id : null;
-}
-
-/**
  * The PUBLISHED poll row with numeric id `rawId`, or null: a malformed
  * id, a missing row and a draft row all answer null, so the controllers
  * give the same 404 for each (no existence oracle).
+ *
+ * `rawId` (the route's `:id`) is read by `parseRowId` (utils/entry-id.ts):
+ * a positive integer within int4, as a number or a canonical decimal
+ * string. Anything else, a documentId included, answers null without a
+ * query: Postgres fails an int4 lookup on such a value (a 500).
  */
 export async function loadPublishedPoll(
   strapi: PollAccessHost,
   rawId: unknown,
 ): Promise<PublishedPoll | null> {
-  const id = parsePollRowId(rawId);
+  const id = parseRowId(rawId);
   if (id === null) return null;
   const row = await strapi.db.query(POLL_UID).findOne({
     where: { id, publishedAt: { $notNull: true } },
