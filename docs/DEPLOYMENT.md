@@ -722,8 +722,9 @@ systemctl start docker
 > **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
 > an instance that runs the datetime release: no env change, no migration.
 > The cms image no longer contains pnpm and starts without registry access;
-> cms images built before it still download pnpm at every start, which
-> matters for a rollback. See
+> cms images from before it (Cmd `["pnpm","start"]`, including the
+> `:rollback` image this deploy tags) still download pnpm at every start,
+> which matters for a rollback. See
 > [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
 > for the checks after the deploy and the rollback note.
 >
@@ -814,9 +815,10 @@ went live on 2026-09-27) fixes what that deploy turned up:
   down cleanly as before ("Shutting down Strapi", exit code 0; measured
   `docker stop`: 1.6 s before, 0.6 s now). **The cms container no longer
   needs registry access to start.** Building the image still downloads
-  packages. Cms images built before this release, including the
-  `infra-cms:rollback` and `infra-cms:pre-datetime` tags on the host, still
-  download pnpm at every start; see **Rollback** below.
+  packages. Cms images from before this release (their
+  `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`),
+  including the `infra-cms:rollback` and `infra-cms:pre-datetime` tags on
+  the host, still download pnpm at every start; see **Rollback** below.
 
 **Nothing else is needed on an existing instance: a normal deploy.** No env
 change, no migration, no `JWT_SECRET` rotation, no permission change; the
@@ -945,10 +947,23 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 the schema or the data changed. Roll back web and cms together (the new web
 links documentIds, which the previous cms answers with 500). Note:
 
-- **Every cms image built before this release starts with `pnpm start` and
+- **Every cms image from before this release starts with `pnpm start` and
   downloads pnpm at every start**, so re-upping it needs registry.npmjs.org
-  reachable from the host. If the registry is not reachable, start the
-  previous image directly with a one-off override file:
+  reachable from the host. Tell such an image by its command, not by its
+  build date (the `infra-cms:rollback` this deploy tags was built on
+  2026-09-27 too):
+
+  ```bash
+  docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback
+  # ["pnpm","start"]                      -> starts with pnpm, needs the registry
+  # ["node_modules/.bin/strapi","start"]  -> starts directly
+  ```
+
+  When a deploy fails, `infra/deploy.sh` runs this check itself and, for a
+  `["pnpm","start"]` image, prints the direct start below (the same override
+  file, written with `printf`) next to the rollback commands; without a
+  `:rollback` image it prints the check. If the registry is not reachable,
+  start the previous image directly with a one-off override file:
 
   ```bash
   cat > /tmp/cms-direct-start.yml <<'YAML'
@@ -3196,11 +3211,16 @@ docker compose -p infra \
   up -d --no-build web cms
 ```
 
-A cms image built before 2026-09-27 runs `pnpm start` and downloads pnpm
-from registry.npmjs.org at every start. If the registry is unreachable, start
+A cms image from before the ICS and cms start fixes, whose
+`docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
+(including `infra-cms:rollback` right after deploying that release), runs
+`pnpm start` and downloads pnpm from registry.npmjs.org at every start. Its
+build date does not tell: the image that release's first deploy tags
+`:rollback` was built on the same day. If the registry is unreachable, start
 it directly: see the rollback note of
 [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
-Current images start without registry access.
+Current images (`["node_modules/.bin/strapi","start"]`) start without
+registry access.
 
 If a code revert is needed instead, reset and rebuild:
 

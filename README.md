@@ -754,9 +754,12 @@ sets (its sign-in throttles count per client IP), so the host Traefik must
 not accept that header from clients. The web and cms containers run
 **non-root** with `no-new-privileges`. Neither needs pnpm or registry access
 to start: the web runs `node apps/web/server.js`, the cms Strapi's own
-`node_modules/.bin/strapi start` under docker-init (`init: true`). Cms
-images built before 2026-09-27 still ran `pnpm start` and downloaded pnpm at
-every start, which matters when rolling back to one. Full details — upgrading an existing
+`node_modules/.bin/strapi start` under docker-init (`init: true`). A cms
+image from before the ICS and cms start fixes, whose
+`docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
+(including `infra-cms:rollback` right after deploying that release), still
+runs `pnpm start` and downloads pnpm at every start, which matters when
+rolling back to one. Full details — upgrading an existing
 instance, backup/restore, rollback, hardening — are in
 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**.
 

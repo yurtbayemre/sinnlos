@@ -209,9 +209,14 @@ datetime_repair_env_missing() {
 # not run (naive app columns left), the previous cms image predates the
 # datetime contract and must run in its old zone, never in the UTC this
 # compose file sets (docs/DEPLOYMENT.md, "Rolling back this release").
+# A cms image from before the ICS and cms start fixes starts with
+# `pnpm start` and downloads pnpm at every start. Its Cmd tells, not its
+# build date: the :rollback image of this release's first deploy was built
+# on the same day as the fix.
 print_rollback_hint() {
-  local rollback=("${COMPOSE[@]}") naive
+  local rollback=("${COMPOSE[@]}") naive cms_cmd
   naive="$(naive_app_columns || true)"
+  cms_cmd="$(docker image inspect -f '{{json .Config.Cmd}}' "${PROJECT}-cms:rollback" 2>/dev/null || true)"
   echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
   if [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]; then
     rollback+=(-f "${COMPOSE_LEGACY_TZ}")
@@ -220,9 +225,20 @@ print_rollback_hint() {
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
-  echo "       A cms image built before 2026-09-27 downloads pnpm from registry.npmjs.org at every" >&2
-  echo "       start; without registry access, start it directly (docs/DEPLOYMENT.md, \"Upgrading to" >&2
-  echo "       the ICS and cms start fixes (2026-09-27)\", Rollback)." >&2
+  if [[ "${cms_cmd}" == *'"pnpm"'* ]]; then
+    echo "       ${PROJECT}-cms:rollback starts with pnpm (Cmd ${cms_cmd}) and downloads pnpm from" >&2
+    echo "       registry.npmjs.org at every start. Without registry access, start it directly instead:" >&2
+    # printf '%s\n': the \n of the printed command stay literal.
+    printf '%s\n' "                      printf 'services:\\n  cms:\\n    command: [\"node_modules/.bin/strapi\", \"start\"]\\n' > /tmp/cms-direct-start.yml" >&2
+    echo "                      ${rollback[*]} -f /tmp/cms-direct-start.yml up -d --no-build web cms" >&2
+    echo "       (docs/DEPLOYMENT.md, \"Upgrading to the ICS and cms start fixes (2026-09-27)\", Rollback)." >&2
+  elif [[ -z "${cms_cmd}" ]]; then
+    echo "       A cms image from before the ICS and cms start fixes starts with pnpm (Cmd [\"pnpm\",\"start\"])" >&2
+    echo "       and downloads pnpm from registry.npmjs.org at every start. Check the rollback image:" >&2
+    echo "                      docker image inspect -f '{{json .Config.Cmd}}' ${PROJECT}-cms:rollback" >&2
+    echo "       Without registry access, start it directly (docs/DEPLOYMENT.md, \"Upgrading to the ICS" >&2
+    echo "       and cms start fixes (2026-09-27)\", Rollback)." >&2
+  fi
   echo "       A re-run of this script tags whatever runs then as :rollback; see docs/DEPLOYMENT.md." >&2
 }
 
