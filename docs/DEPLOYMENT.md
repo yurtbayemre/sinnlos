@@ -25,6 +25,13 @@ All methods share the same [prerequisites](#prerequisites) and
 (the Entra setup is only needed for Microsoft sign-in, which this release
 cannot offer; see the note there).
 
+> **Upgrading from the 2026-09-27 release (datetime contract and draft
+> twins)?** Work through
+> [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting):
+> a normal deploy, with read-only checks first. Polls that have departments
+> become visible to those departments' members only (plus admins and
+> editors), and guests can vote.
+>
 > **Upgrading an existing instance?** Work through
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
 > before you deploy: this release introduces the
@@ -714,6 +721,12 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying poll department targeting?** A normal deploy (cms and web
+> together, as `infra/deploy.sh` does). Run the read-only checks of
+> [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
+> first: they list the polls that become restricted and the users who have
+> no department.
+>
 > **Upgrading to this release (datetime contract)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
 > first: an existing database needs `DATETIME_LEGACY_ZONE` in `infra/.env`,
@@ -762,6 +775,251 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to poll department targeting
+
+This release (branch `feat/poll-targeting`, after the datetime and
+draft-twin release of 2026-09-27) enforces the department targeting of
+polls. Until now a poll's departments were stored but checked nowhere:
+every signed-in user saw every published poll and its results, and every
+role but guest could vote on it.
+
+What the release changes:
+
+- **A poll without departments is company-wide:** every signed-in user
+  sees it, sees its results and can vote, **guests included** (they could
+  not vote before).
+- **A poll with departments is restricted** to the members of those
+  departments: users whose own department (the `department` of their user
+  record) is one of them. Everyone else gets "not found": the poll
+  disappears from their `/polls` page and from search, and its vote and
+  results endpoints answer 404. The role never adds membership: a guest
+  in the department is in, a department head of another department is out.
+- **Admins and editors** see every poll and its results, but vote only on
+  polls of their own department. Their card shows the results with the
+  buttons disabled and "Only members of these departments can vote."
+- **New poll field Audience** (`all` | `departments`). The web form sets
+  it (`departments` when departments are chosen). A poll is restricted when
+  Audience is `departments` **or** it has departments. Audience keeps a
+  poll restricted when its departments are deleted later: it is then
+  visible to admins and editors only, and its card says "The target
+  department no longer exists – nobody can vote. Re-select departments and
+  republish."
+- **The first boot sets Audience on every existing poll row:**
+  `departments` where the row has departments, `all` otherwise. Both rows
+  of a poll are set, the published one (what readers get) and the draft
+  (what the admin panel edits), each by its own departments.
+- **Guests get the poll vote permission** (one new permission row).
+- The poll form says "Restrict to departments (optional)" and explains the
+  effect; it refuses to create a poll while the department list cannot be
+  loaded, instead of silently offering company-wide only.
+- Votes already cast stay counted, also those of users outside the
+  departments. A department change of a user applies on their next page
+  load.
+
+**Nothing else is needed on an existing instance:** no env change, no
+migration script, no `JWT_SECRET` rotation. Deploy cms and web together,
+as `infra/deploy.sh` does (compose starts the new web only once the new
+cms is healthy): the new web sends Audience when it creates a poll, which
+the previous cms refuses with a 400. A fresh install needs nothing.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+read-only queries and the log check below (on a standalone Caddy box, drop
+the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+2. **Read-only: the published polls that become restricted.** Every poll
+   listed here is visible after the deploy only to the members of the
+   departments shown, plus admins and editors. An empty result means no
+   existing poll changes for its readers.
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT p.question AS poll, string_agg(d.name, ', ' ORDER BY d.name) AS departments
+   FROM polls p
+   JOIN polls_departments_lnk l ON l.poll_id = p.id
+   JOIN departments d ON d.id = l.department_id
+   WHERE p.published_at IS NOT NULL
+   GROUP BY p.id, p.question
+   ORDER BY p.question;
+   SQL
+   ```
+
+   If a listed poll was meant for everyone, open it in the Content Manager
+   after the deploy, remove its departments, set **Audience** to `all` and
+   publish.
+
+3. **Read-only: users without a department.** They see company-wide polls
+   only. Admins and editors without a department still see every poll and
+   its results, but vote on company-wide polls only.
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT coalesce(r.type, '(no role)') AS role, count(*) AS users_without_department
+   FROM up_users u
+   LEFT JOIN up_users_role_lnk rl ON rl.user_id = u.id
+   LEFT JOIN up_roles r ON r.id = rl.role_id
+   WHERE NOT EXISTS (SELECT 1 FROM up_users_department_lnk l WHERE l.user_id = u.id)
+   GROUP BY 1
+   ORDER BY 1;
+   SQL
+   ```
+
+   To give someone a department: Strapi admin → **Content Manager → User**
+   → the user → **department** → Save (before or after the deploy).
+
+4. **Read-only: saved, unpublished changes of a poll's departments.** The
+   first boot flags each row by its own departments, so publishing such a
+   draft applies what it says: a draft without departments makes the poll
+   company-wide when it is published.
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT p.question AS poll,
+          coalesce((SELECT string_agg(dd.name, ', ' ORDER BY dd.name) FROM polls_departments_lnk x JOIN departments dd ON dd.id = x.department_id WHERE x.poll_id = p.id), '(none)') AS published_departments,
+          coalesce((SELECT string_agg(dd.name, ', ' ORDER BY dd.name) FROM polls_departments_lnk x JOIN departments dd ON dd.id = x.department_id WHERE x.poll_id = d.id), '(none)') AS draft_departments
+   FROM polls p
+   JOIN polls d ON d.document_id = p.document_id AND d.published_at IS NULL
+   WHERE p.published_at IS NOT NULL
+     AND coalesce((SELECT array_agg(x.department_id ORDER BY x.department_id) FROM polls_departments_lnk x WHERE x.poll_id = p.id), '{}')
+      <> coalesce((SELECT array_agg(x.department_id ORDER BY x.department_id) FROM polls_departments_lnk x WHERE x.poll_id = d.id), '{}')
+   ORDER BY p.question;
+   SQL
+   ```
+
+   Usually empty. For a listed poll, decide in the Content Manager after the
+   deploy: **Publish** (the draft's departments go live) or **Discard
+   changes**.
+
+5. **Optional, read-only: permissions before.** After the `git pull` the
+   permission diff describes this release, so section 1 should list one
+   new row, `MISSING_IN_DB | guest | api::poll-vote.poll-vote.vote` (the
+   new cms adds it on its first boot), next to anything it listed before:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+6. **Backup:** `infra/deploy.sh` takes the mandatory pre-deploy Postgres
+   backup. On a standalone Caddy box, run `infra/backup/pg-backup.sh` (or
+   the manual dump in [§7.1](#71-manual-postgres-backup)) yourself first.
+
+**Deploy**
+
+7. Run `infra/deploy.sh` on the Traefik host; on a standalone Caddy box,
+   `docker compose up -d --build` from `infra/`.
+
+**What the first boot changes in the database.** Strapi adds the nullable
+column `polls.audience`; the cms sets it on every existing poll row; one
+permission row is added (guest → poll vote). Nothing else is written: no
+notification, no live update, and the polls keep their `updated_at`, so
+the admin panel shows them as **Published**, not **Modified**.
+
+**After the deploy**
+
+8. **cms log.** The first boot prints two lines, later boots neither:
+
+   ```bash
+   "${COMPOSE[@]}" logs cms | grep -E '\[poll-audience\]|\[bootstrap\] granted'
+   # [bootstrap] granted 1 permission(s) across intranet roles
+   # [poll-audience] set the audience of 10 existing poll row(s): 0 to 'departments' (they link a department), 10 to 'all'
+   ```
+
+   The row count is about twice the number of polls (draft and published
+   row); `to 'departments'` counts the rows of the polls from step 2. A
+   `[poll-audience] could not backfill the audience of existing polls (…)`
+   warning does not stop the cms: polls with departments stay restricted
+   by their departments, and `"${COMPOSE[@]}" restart cms` retries.
+9. **Read-only: every poll row has its Audience** (`without_audience` 0):
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT count(*) FILTER (WHERE audience IS NULL) AS without_audience,
+          count(*) FILTER (WHERE audience = 'departments') AS restricted_rows,
+          count(*) AS rows
+   FROM polls;
+   SQL
+   ```
+
+10. **Optional: permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+    no longer lists the guest vote row (on the Postgres 16 rehearsal,
+    section 1 was empty).
+11. **Pages** (`deploy.sh`'s smoke and live-smoke pass as before):
+    - as a member, `/polls` shows the polls without departments and those
+      of the member's department, with an "Only for: …" line on the
+      latter;
+    - as an admin or editor, a poll of another department shows its
+      results, disabled buttons and "Only members of these departments can
+      vote.";
+    - as a guest (if there is one), voting on a poll without departments
+      works;
+    - `/polls/new` (admin or editor) shows "Restrict to departments
+      (optional)" and creates a poll restricted to the chosen departments.
+
+**Authoring in the Strapi admin panel.** When you select departments for a
+poll in the admin panel, also set **Audience** to `departments`. The poll is
+restricted either way, but only Audience = `departments` keeps it
+restricted should all its departments be deleted later; with Audience
+`all` it would then become company-wide. To make a restricted poll
+company-wide, remove its departments **and** set Audience to `all`, then
+publish: removing only the departments leaves it visible to admins and
+editors alone (the card says so). Departments can no longer be unpublished
+(2026-09-26), only deleted; deleting one removes it from every poll.
+
+**What users and editors notice** (worth a short release note):
+
+- Polls: department targeting is now enforced. A poll with departments
+  selected can only be seen, voted on and have its results viewed by
+  members of those departments. Admins and editors can always see it and
+  its results, but can vote only if they belong to one of the departments.
+- Polls without departments are open to every signed-in user, and guests
+  can now vote.
+- Existing polls that had departments selected become restricted with
+  this update (step 2). Votes already cast stay counted.
+- If all target departments of a poll are deleted, the poll becomes
+  visible to admins and editors only. Re-select departments and republish
+  it.
+- In the Strapi admin panel, set Audience = `departments` when targeting a
+  poll.
+- The poll form's department picker is now called "Restrict to departments
+  (optional)" and explains who sees the poll.
+
+**Rollback.** The previous images run on the upgraded database without a
+restore (verified on Postgres 16): the previous cms ignores the
+`audience` column, and `forceMigration: false` keeps it. Until you roll
+forward again:
+
+- targeting is not enforced: every signed-in user sees every poll again;
+- guests keep the vote permission this release added (the previous cms
+  never removes it), so a guest can vote on every poll. If that matters for
+  the rollback window, remove it: Strapi admin → **Settings → Users &
+  Permissions plugin → Roles → Guest → Poll-vote → vote** → Save. Rolling
+  forward adds it again;
+- a poll created on the previous cms gets no Audience; the next boot of
+  this release sets it (step 8's log line);
+- a web-only rollback shows admins and editors vote buttons on polls of
+  other departments (the vote fails with "Your vote couldn't be saved"),
+  and its form creates polls without Audience (their departments still
+  restrict them).
+
+**Local dev (SQLite):** the next `pnpm cms:dev` adds the column and sets
+Audience the same way; a new demo seed writes Audience `all`.
 
 #### Upgrading to the draft-twin repair (FX38)
 
@@ -2816,6 +3074,21 @@ curl -X PUT <URL>/api/departments/<own-department-documentId> \
 # Expect: 200 OK (403 for any other department)
 ```
 
+Poll department targeting: take a published poll restricted to one
+department (its numeric id is the `id` in `GET <URL>/api/polls` for an
+admin JWT) and ask for its results as a member of another department and as
+an editor outside it:
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' <URL>/api/polls/<poll-id>/results \
+  -H "Authorization: Bearer <other-department-member-jwt>"
+# Expect: 404 (the same answer as for a poll that does not exist)
+
+curl -s <URL>/api/polls/<poll-id>/results \
+  -H "Authorization: Bearer <editor-jwt>"
+# Expect: 200 with "canVote":false and the poll's departments under "audience"
+```
+
 ### 6.5 Common failure signals
 
 | Symptom | Likely cause |
@@ -3005,6 +3278,15 @@ release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
 `migrate.sql` has run on it again
 ([One-time: org draft/publish off](#one-time-org-draftpublish-off), step 0, then
 steps 3–7).
+
+#### Rolling back poll department targeting
+
+The retag commands above are enough: the previous images (the 2026-09-27
+release) run on the upgraded database without a restore and need no
+override file. Until you roll forward, poll targeting is not enforced and
+guests keep the vote permission; the details, and how to take that
+permission away for the rollback window, are under **Rollback** in
+[Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
 
 #### Rolling back this release
 

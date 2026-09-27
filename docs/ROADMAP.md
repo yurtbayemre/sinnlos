@@ -352,7 +352,11 @@ nothing (builds on `LiveCommentSection` + the revalidate webhook pattern).
 ### 3.1 Polls & surveys
 
 **Status: ✅ implemented** — `poll` + `poll-vote` with custom `vote` /
-`results` routes, `/polls` page with `PollCard`.
+`results` routes, `/polls` page with `PollCard`. Since 2026-09-27 the
+`departments` targeting is enforced by the cms (the `poll-visibility` read
+policy plus the vote/results checks, an `audience` flag that keeps a poll
+restricted after its departments are deleted; guests vote on company-wide
+polls): see the README's content model section.
 
 **CMS**
 - `poll`: `question`, `options` (JSON array of strings), `closesAt`,
