@@ -389,7 +389,8 @@ the same rules module): polls are **hidden from guests** (role type exactly
   (the admin-panel descriptions say so).
 - Rolling back to a cms from before guest access: that cms ignores both
   fields and never removes the guest vote permission, so it goes first,
-  with the cms stopped and before the retag
+  with the cms stopped and before the retag, and once more after the
+  start, whatever the database shows at the time
   (`infra/rollback/revoke-guest-poll-vote.sql`; `infra/deploy.sh` prints
   the steps when a deploy fails; see
   [Upgrading to poll department targeting](./docs/DEPLOYMENT.md#upgrading-to-poll-department-targeting),

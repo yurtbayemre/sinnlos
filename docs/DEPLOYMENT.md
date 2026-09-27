@@ -734,9 +734,11 @@ systemctl start docker
 > no department and the guests, who see no poll after the deploy until an
 > admin or editor turns on "Visible to guests" for it. If the first boot
 > cannot set Audience on the existing polls, the new cms does not start and
-> `deploy.sh` stops (step 8 there). A rollback first stops the cms and
-> removes the guest vote permission this release adds, then retags
-> (`deploy.sh` prints both when a deploy fails; see **Rollback** there).
+> `deploy.sh` stops (step 8 there). A rollback to the previous cms first
+> stops the cms and removes the guest vote permission this release adds,
+> then retags and starts, then removes it once more (it must find nothing),
+> whatever the database or the admin panel shows at the time (`deploy.sh`
+> prints the whole sequence when a deploy fails; see **Rollback** there).
 > Never roll the cms back to `808e2e7` alone.
 >
 > **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
@@ -867,8 +869,9 @@ What the release changes:
 - **Guests get the poll vote permission** (one new permission row). It
   takes effect only on polls with **Guests can vote** on; on every other
   poll the cms refuses a guest's vote. The previous cms knows no guest
-  switches and never removes the row, so a rollback removes it **before**
-  the retag (**Rollback** below).
+  switches and never removes the row, so a rollback removes it with the
+  cms stopped, **before** the retag, and once more after the start
+  (**Rollback** below).
 - The poll form says "Restrict to departments (optional)" and explains the
   effect; it refuses to create a poll while the department list cannot be
   loaded, instead of silently offering company-wide only. Its new **Guest
@@ -1072,10 +1075,15 @@ description you change under **Configure the view** stays yours.
    session holds on `polls`) and start again with `"${COMPOSE[@]}" up -d`
    (compose also restarts the cms on its own; every start retries the
    whole backfill), or roll back as printed, in this order: stop the cms,
-   remove the guest vote permission, then retag (**Rollback** below; on
-   the Postgres 16 rehearsal a failing first boot had written the
-   permission, and `deploy.sh` printed the stop and the removal before the
-   retag commands).
+   remove the guest vote permission, retag and start, remove it again
+   (**Rollback** below). Do all of it even when the database holds no
+   guest vote row yet: a first boot slow enough to miss compose's health
+   deadline before its bootstrap got that far keeps starting (or
+   restarts) and writes the row afterwards. On the Postgres 16 rehearsal
+   a failing first boot had written the permission; `deploy.sh` prints the
+   stop and the removal before the retag commands and the second removal
+   after the start commands whenever the `:rollback` cms predates guest
+   access or cannot be checked, without asking the database.
 9. **Read-only: every poll row has its Audience** (`without_audience` 0),
    and no poll is open to guests yet (`visible_to_guests` 0 until an admin
    or editor turns it on):
@@ -1193,9 +1201,16 @@ the department targeting, and it never removes the guest vote permission
 this release added: while that row exists, **every guest can vote on every
 open published poll** there, also on polls hidden from guests and on polls
 of other departments (reproduced on the rehearsal). So the permission goes
-**before** the retag, with the cms stopped. In this order (with `COMPOSE`
-and `psql_db` from above; when a deploy fails, `deploy.sh` prints steps
-2–5):
+**before** the retag, with the cms stopped, and the removal runs once more
+after the start. Every rollback to a cms from before guest access runs all
+five steps, in this order, **whatever the database or the admin panel
+shows at the time**: a new cms that is still starting or restarting (a
+first boot that missed compose's health deadline carries on, and a failed
+one restarts) grants the permission afterwards, also after it was removed
+or unticked.
+With `COMPOSE` and `psql_db` from above; when a deploy fails, `deploy.sh`
+prints steps 2–5 whenever `infra-cms:rollback` predates guest access or
+cannot be checked, without asking the database:
 
 1. **Save the list of restricted polls**
    ([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)).
@@ -1207,21 +1222,25 @@ and `psql_db` from above; when a deploy fails, `deploy.sh` prints steps
    "${COMPOSE[@]}" stop cms
    ```
 
-3. **Remove the guest vote permission.** One transaction: it deletes the
-   guest role's link and the permission row (what unticking it in the
-   admin panel does), leaves the other roles' vote permissions alone and
-   ends with `guest_poll_vote_grants_left` 0. The first run prints
-   `DELETE 1` twice.
+3. **Remove the guest vote permission**, also when the database holds no
+   such row or the checkbox in the admin panel is already cleared. One
+   transaction: it deletes the guest role's links to the permission and,
+   of the permission rows it unlinked, those no role links any more (the
+   guest's own row; what unticking it in the admin panel removes). The
+   other roles' vote permissions and every other permission row stay,
+   orphans from before included. The first run after a deploy shows
+   `guest_links_removed` 1 and `permission_rows_removed` 1, then
+   `guest_poll_vote_grants_left` 0:
 
    ```bash
    psql_db -X < infra/rollback/revoke-guest-poll-vote.sql
    ```
 
-   Instead of steps 2 and 3, while the new cms is healthy: Strapi admin →
-   **Settings → Users & Permissions plugin → Roles → Guest → Poll-vote →
-   vote** → untick → Save, then stop the cms. Either removal takes effect
-   at once (users-permissions reads a role's permissions on every
-   request), no restart needed.
+   The removal takes effect at once (users-permissions reads a role's
+   permissions on every request), no restart needed. Unticking the
+   permission in the admin panel is no substitute for this step: that
+   needs the new cms running, and its next start grants the row again.
+   Use the admin panel only to look (step 5).
 4. **Retag and start the previous images**, web and cms together (see
    [the update procedure](#74-update-procedure-production-safe); deployed
    together with the ICS and cms start fixes, mind **Rolling back both**
@@ -1233,19 +1252,30 @@ and `psql_db` from above; when a deploy fails, `deploy.sh` prints steps
    "${COMPOSE[@]}" up -d --no-build web cms
    ```
 
-5. **Check** once the previous cms is up: run step 3 again. It must print
-   `DELETE 0` twice. `DELETE 1` means the new cms had started again before
-   the retag and granted the permission anew: the rerun removed it, and
-   the query in the list below shows any guest vote cast in between.
-   Optionally, `psql_db -X < infra/diagnostics/prod-perm-diff.sql` lists
+5. **Remove again and check** once the previous cms is up: run step 3
+   again. It must remove nothing (`guest_links_removed` 0,
+   `permission_rows_removed` 0). Anything else means a new cms had
+   started again after step 3 and granted the permission anew: the
+   rerun removed it, and the query in the list below shows any guest vote
+   cast in between. To look without writing: Strapi admin → **Settings →
+   Users & Permissions plugin → Roles → Guest → Poll-vote → vote** is
+   unticked; `psql_db -X < infra/diagnostics/prod-perm-diff.sql` lists
    `MISSING_IN_DB | guest | api::poll-vote.poll-vote.vote` in section 1
-   again, as in the permissions check before the deploy, and a guest's
+   again, as in the permissions check before the deploy; a guest's
    `POST /api/polls/<id>/vote` answers 403.
 
 On the Postgres 16 rehearsal (34c250c, this order): no guest vote went
 through on 34c250c, from its first request on, also after a failed first
-boot of this release; the step-5 rerun printed `DELETE 0` twice; a start
-of the new cms after step 3 granted the permission again (hence step 2).
+boot of this release; the step-5 rerun removed nothing; a start of the new
+cms after step 3 granted the permission again (hence step 2). The removal
+itself (Postgres 16, the users-permissions tables the built cms of this
+release created on its first boot): the guest's link and row went, the
+vote grants of the six other roles and an unrelated orphan vote row from
+before stayed; a row the guest shared with another role kept that role's
+link; a second run removed nothing; a failing statement left everything
+unchanged. `deploy.sh` printed steps 2–5 for a `:rollback` image with the
+34c250c poll schema while the database held no guest vote row; the printed
+sequence, run after a regrant in between, removed 1 and then nothing.
 
 **Never roll the cms back to `808e2e7` alone** (poll targeting without
 guest access, never deployed): that cms enforces the departments but knows
@@ -1259,13 +1289,13 @@ Until you roll forward again:
 - targeting is not enforced: every signed-in user sees every poll again,
   **guests included: on 34c250c guests see every poll and its results
   again**, whatever "Visible to guests" says;
-- guests cannot vote (rollback step 3), exactly as before this deploy.
-  Rolling forward adds the permission again (step 8's `granted 1` line);
-  a later rollback removes it again the same way;
+- guests cannot vote (rollback steps 3 and 5), exactly as before this
+  deploy. Rolling forward adds the permission again (step 8's `granted 1`
+  line); a later rollback removes it again the same way, all five steps;
 - **votes cast while the previous cms served with the permission stay
   counted** after rolling forward, also on polls the guest no longer sees.
   That happens only when the removal came late (after the retag, or
-  rollback step 5 printed `DELETE 1`); on the rehearsal, with the removal
+  rollback step 5 removed something); on the rehearsal, with the removal
   after the retag, a guest's votes on a poll hidden from guests and on a
   poll of another department answered 200 and were still counted after
   rolling forward. After rolling forward, this read-only query lists the guest
@@ -3941,20 +3971,23 @@ steps 3–7).
 
 #### Rolling back poll department targeting
 
-Revoke first, then retag. The previous images run on the upgraded
-database without a restore and need no override file, but the previous
-cms never removes the guest vote permission this release added and
-ignores the guest switches and the targeting: with that row, every guest
-can vote on every open poll there. So, **before** the retag commands
-above: save the list of restricted polls
+Stop, revoke, retag, revoke again. The previous images run on the
+upgraded database without a restore and need no override file, but the
+previous cms never removes the guest vote permission this release added
+and ignores the guest switches and the targeting: with that row, every
+guest can vote on every open poll there. So, **before** the retag
+commands above: save the list of restricted polls
 ([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)),
 stop the cms (`docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml stop cms`;
 every start of the new cms grants the permission again) and remove the
-permission with `infra/rollback/revoke-guest-poll-vote.sql`. Then retag,
-and once the previous cms is up, run the removal again: it must delete
-nothing. `deploy.sh` prints the stop and the removal before its retag
-commands when a deploy fails. The steps, the check and a query for guest
-votes cast in a late-removal window are under **Rollback** in
+permission with `infra/rollback/revoke-guest-poll-vote.sql`, also when
+the database or the admin panel shows none. Then retag and start, and
+once the previous cms is up, run the removal again: it must remove
+nothing. When a deploy fails, `deploy.sh` prints the stop and the removal
+before its retag commands and the second removal after them whenever
+`infra-cms:rollback` predates guest access or cannot be checked. The
+steps, the check and a query for guest votes cast in a late-removal
+window are under **Rollback** in
 [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
 Until you roll forward, poll targeting and guest access are not enforced
 (guests see every poll and its results again, but cannot vote). Never roll
