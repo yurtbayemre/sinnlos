@@ -10,6 +10,7 @@ import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
+import { backfillPollAudience } from "./utils/poll-audience-backfill";
 import {
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
@@ -829,6 +830,11 @@ export default {
 
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
+    // Decision 02: give existing polls their `audience` flag ('departments'
+    // when they link a department). A no-op once no row is NULL; logs and
+    // never throws. Before the draft-twin repair below, so a cloned draft
+    // copies the flag.
+    await backfillPollAudience(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.
