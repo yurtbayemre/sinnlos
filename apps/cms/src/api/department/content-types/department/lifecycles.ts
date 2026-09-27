@@ -12,6 +12,12 @@ import { flagPollsOfDeletedDepartments } from "../../../../utils/poll-department
  * runs beforeDelete before the row delete and before deleteRelations
  * (entity-manager/index.js delete). beforeDeleteMany covers a script's
  * db-level deleteMany, whose link rows the foreign key cascade removes.
+ *
+ * Defence in depth since 2026-09-27d: the write-time guard
+ * (utils/poll-audience-guard.ts) already flags every poll row a Document
+ * Service write links, in the same transaction, which also covers a poll
+ * linked concurrently with the delete. This hook catches rows linked
+ * outside the Document Service (a previous cms during a rollback, raw SQL).
  */
 
 interface DeleteEvent {
