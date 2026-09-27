@@ -8,18 +8,39 @@ import {
 /**
  * Boot backfill of the poll audience flag (decision 02): rows with a NULL
  * flag get 'departments' when they link a department and 'all' otherwise,
- * both rows of a document alike (per row); nothing happens once no row is
- * NULL; an error is logged, never thrown into the boot.
+ * both rows of a document alike (per row), except that a NULL row without
+ * links whose other row of the same poll already says 'departments' gets
+ * 'departments' too (a republish or discard on a previous cms); nothing
+ * happens once no row is NULL; an error is logged, never thrown into the
+ * boot.
  */
 
 interface Row {
   id: number;
+  documentId?: string;
   departments?: { id: number }[] | null;
 }
 
-function host(rows: Row[], options: { failOn?: "findMany" | "updateMany" } = {}) {
-  const findMany = vi.fn(async (_params: Record<string, unknown>) => {
+/** A row whose flag is already set (the stub's non-NULL side of the table). */
+interface FlaggedRow {
+  id: number;
+  documentId: string;
+  audience: string;
+}
+
+function host(
+  rows: Row[],
+  options: { failOn?: "findMany" | "updateMany"; flagged?: FlaggedRow[] } = {},
+) {
+  const findMany = vi.fn(async (params: Record<string, unknown>) => {
     if (options.failOn === "findMany") throw new Error("relation polls_departments_lnk does not exist");
+    const where = params.where as { audience?: unknown; documentId?: { $in?: string[] } };
+    if (typeof where.audience === "string") {
+      const documentIds = where.documentId?.$in ?? [];
+      return (options.flagged ?? [])
+        .filter((row) => row.audience === where.audience && documentIds.includes(row.documentId))
+        .map((row) => ({ documentId: row.documentId }));
+    }
     return rows as unknown[];
   });
   const updateMany = vi.fn(async (params: Record<string, unknown>) => {
@@ -42,9 +63,64 @@ describe("backfillPollAudience", () => {
     expect(strapi.db.query).toHaveBeenCalledWith("api::poll.poll");
     expect(findMany).toHaveBeenCalledWith({
       where: { audience: { $null: true } },
-      select: ["id"],
+      select: ["id", "documentId"],
       populate: { departments: { select: ["id"] } },
     });
+  });
+
+  it("keeps a flag-only restricted poll restricted when a previous cms republished or discarded it", async () => {
+    const { strapi, findMany, updateMany, log } = host(
+      [
+        // Republished on a cms without the flag: a new published row, no links.
+        { id: 21, documentId: "p-republished", departments: [] },
+        // "Discard changes" there: a new draft row, no links.
+        { id: 22, documentId: "p-discarded", departments: [] },
+        // A poll the previous cms created: both rows NULL, nothing to inherit.
+        { id: 23, documentId: "p-new", departments: [] },
+        { id: 24, documentId: "p-new", departments: [] },
+        // Its other row says 'all': stays company-wide.
+        { id: 25, documentId: "p-open", departments: [] },
+      ],
+      {
+        flagged: [
+          { id: 9, documentId: "p-republished", audience: "departments" },
+          { id: 12, documentId: "p-discarded", audience: "departments" },
+          { id: 13, documentId: "p-open", audience: "all" },
+        ],
+      },
+    );
+    await backfillPollAudience(strapi);
+    expect(findMany).toHaveBeenCalledWith({
+      where: { documentId: { $in: ["p-republished", "p-discarded", "p-new", "p-open"] }, audience: "departments" },
+      select: ["documentId"],
+    });
+    expect(updateMany.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: { $in: [21, 22] }, audience: { $null: true } }, data: { audience: "departments" } },
+      { where: { id: { $in: [23, 24, 25] }, audience: { $null: true } }, data: { audience: "all" } },
+    ]);
+    expect(log.info).toHaveBeenCalledWith(
+      "[poll-audience] set the audience of 5 existing poll row(s): 0 to 'departments' (they link a department), " +
+        "2 to 'departments' (the other row of their poll is restricted), 3 to 'all'",
+    );
+  });
+
+  it("decides a row with links by its links alone, and asks about siblings only for rows without", async () => {
+    const { strapi, findMany, updateMany } = host([
+      { id: 30, documentId: "p-a", departments: [{ id: 2 }] },
+      { id: 31, documentId: "p-a", departments: [] },
+    ]);
+    await backfillPollAudience(strapi);
+    // The first-boot case (every row NULL): the draft that dropped its
+    // departments is not pulled along by the published row flagged in the
+    // same run.
+    expect(findMany).toHaveBeenLastCalledWith({
+      where: { documentId: { $in: ["p-a"] }, audience: "departments" },
+      select: ["documentId"],
+    });
+    expect(updateMany.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: { $in: [30] }, audience: { $null: true } }, data: { audience: "departments" } },
+      { where: { id: { $in: [31] }, audience: { $null: true } }, data: { audience: "all" } },
+    ]);
   });
 
   it("sets 'departments' on rows with links and 'all' on the rest, draft and published rows alike", async () => {

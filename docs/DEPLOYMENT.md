@@ -1033,6 +1033,14 @@ forward again:
   forward adds it again;
 - a poll created on the previous cms gets no Audience; the next boot of
   this release sets it (step 8's log line);
+- publishing or discarding changes of a poll on the previous cms writes a
+  new row without Audience. Rolling forward gives that row Audience
+  `departments` when the poll's other row has it, so a restricted poll
+  keeps its restriction even with no department left (step 8's log line
+  then also says `N to 'departments' (the other row of their poll is
+  restricted)`). A poll you opened to everyone on the previous cms by
+  removing its departments therefore stays restricted after rolling
+  forward: set its Audience to `all` and publish it again;
 - the previous cms does not set Audience when a department is deleted:
   delete departments only after rolling forward, or a poll that had only
   that department and Audience `all` becomes company-wide;
