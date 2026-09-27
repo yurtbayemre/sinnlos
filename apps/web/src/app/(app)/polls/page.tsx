@@ -7,10 +7,10 @@ import { getViewer } from "@/lib/viewer";
 import { isPollClosed } from "@/lib/poll-close";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Poll } from "@/lib/types";
-import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { PollCard } from "@/components/polls/poll-card";
+import { PollsEmptyState } from "@/components/polls/polls-empty-state";
 
 export async function generateMetadata() {
   const t = await getTranslations("polls");
@@ -58,7 +58,7 @@ export default async function PollsPage() {
       {failed && <FetchErrorBanner />}
 
       {polls.length === 0 ? (
-        <EmptyState icon={BarChart3} title={t("emptyTitle")} hint={t("emptyHint")} />
+        <PollsEmptyState viewerRole={viewer.role} />
       ) : (
         <>
           {active.length > 0 && (

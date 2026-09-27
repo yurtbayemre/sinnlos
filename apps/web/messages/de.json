@@ -304,6 +304,8 @@
     "closed": "Beendet",
     "emptyTitle": "Noch keine Umfragen",
     "emptyHint": "Admins und Redakteure können Umfragen im Strapi-Admin-Panel erstellen.",
+    "emptyTitleGuest": "Noch keine Umfragen für Sie",
+    "emptyHintGuest": "Umfragen, an denen Sie teilnehmen können, erscheinen hier.",
     "voteFailed": "Ihre Stimme konnte nicht gespeichert werden – vielleicht haben Sie bereits abgestimmt.",
     "audienceDepartments": "Nur für: {departments}",
     "notInAudience": "Nur Mitglieder dieser Abteilungen können abstimmen.",
