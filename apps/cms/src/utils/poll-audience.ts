@@ -35,11 +35,14 @@ import { hasAudienceBypass } from "./announcement-audience";
  * Relation-only targeting would then turn a restricted poll into a
  * company-wide one. With the flag the poll stays restricted, and with no
  * department left nobody but admin_role/editor sees it (the web card tells
- * them to re-select departments). Deleting a department therefore first
- * sets the flag on every poll row that links it (department lifecycles,
- * poll-department-delete.ts), also on a poll whose flag was left at "all".
- * A set relation restricts even when the flag says "all" (e.g. an editor
- * picked departments in the admin panel and left the flag at its default),
+ * them to re-select departments). So every Document Service write of a
+ * poll sets the flag on each of its rows that links a department, in the
+ * write's own transaction (poll-audience-guard.ts, also when the admin
+ * panel form still says "all"), and deleting a department first sets it
+ * on every poll row that still links it (department lifecycles,
+ * poll-department-delete.ts: rows written outside the Document Service).
+ * A set relation restricts even when the flag says "all" (such a row can
+ * only come from outside the Document Service, e.g. a previous cms),
  * and any flag value other than null/"all" restricts too:
  * only the absence of both means company-wide. NULL is a row from before
  * the flag existed and counts as "all" (the boot backfill,

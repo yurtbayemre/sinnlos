@@ -11,6 +11,7 @@ import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
+import { registerPollAudienceGuard } from "./utils/poll-audience-guard";
 import {
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
@@ -804,6 +805,12 @@ export default {
     enforceSecretGuard(process.env, strapi.log);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
+    // Decision 02, fail closed: every Document Service write of a poll sets
+    // audience='departments' on each row of the poll that links a
+    // department, in the write's own transaction (utils/poll-audience-guard.ts).
+    // Here, before any plugin or bootstrap code writes a poll; throws when
+    // strapi.documents.use is gone.
+    registerPollAudienceGuard(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
