@@ -796,8 +796,9 @@ What the release changes:
   results endpoints answer 404. The role never adds membership: a guest
   in the department is in, a department head of another department is out.
 - **Admins and editors** see every poll and its results, but vote only on
-  polls of their own department. Their card shows the results with the
-  buttons disabled and "Only members of these departments can vote."
+  company-wide polls and on polls of their own department. On a poll of
+  another department their card shows the results with the buttons
+  disabled and "Only members of these departments can vote."
 - **New poll field Audience** (`all` | `departments`). The web form sets
   it (`departments` when departments are chosen). A poll is restricted when
   Audience is `departments` **or** it has departments. Audience keeps a
@@ -1046,8 +1047,9 @@ forward again:
   that department and Audience `all` becomes company-wide;
 - a web-only rollback shows admins and editors vote buttons on polls of
   other departments (the vote fails with "Your vote couldn't be saved"),
-  and its form creates polls without Audience (their departments still
-  restrict them).
+  and its form creates polls with Audience `all` (the new cms applies the
+  default; their departments still restrict them, and deleting a
+  department sets Audience = `departments` on them).
 
 **Local dev (SQLite):** the next `pnpm cms:dev` adds the column and sets
 Audience the same way; a new demo seed writes Audience `all`.
