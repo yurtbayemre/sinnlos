@@ -1,5 +1,6 @@
 import { factories } from "@strapi/strapi";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
+import { parseEntryRef } from "../../../utils/entry-id";
 import { isTargetVisible } from "../../../utils/target-visibility";
 
 export default factories.createCoreController("api::comment.comment", ({ strapi }) => ({
@@ -53,12 +54,13 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
 
   async delete(ctx) {
     // The web app addresses comments by numeric id; accept both that and a
-    // documentId so direct API consumers keep working.
-    const idParam = String(ctx.params.id);
+    // documentId so direct API consumers keep working. Anything else is an
+    // unknown comment and never reaches the query (utils/entry-id.ts: a
+    // malformed row id was a 500 on Postgres).
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
     const entity = await strapi.db.query("api::comment.comment").findOne({
-      where: /^\d+$/.test(idParam)
-        ? { id: Number(idParam) }
-        : { documentId: idParam },
+      where,
       populate: { author: true },
     });
     if (!entity) return ctx.notFound();

@@ -1,6 +1,7 @@
 import { factories } from "@strapi/strapi";
 
 import { clampExpiresAt } from "../../../utils/classified-expiry";
+import { isRowId, parseEntryRef } from "../../../utils/entry-id";
 import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
 
 /**
@@ -47,7 +48,8 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   for (const entry of value) {
     const id =
       typeof entry === "object" && entry !== null ? Number((entry as any).id) : Number(entry);
-    if (!Number.isInteger(id) || id <= 0) return null;
+    // Also refuses ids beyond the int4 id column (a 500 on Postgres).
+    if (!isRowId(id)) return null;
     if (!ids.includes(id)) ids.push(id);
   }
   if (ids.length === 0) return [];
@@ -122,11 +124,11 @@ export default factories.createCoreController("api::classified.classified", ({ s
     // admin/editor moderation bypass). Resolve the entity here anyway: the
     // web app addresses ads by numeric id, but the v5 core controller
     // resolves by documentId — an untranslated numeric id would 404
-    // (comment controller gotcha).
-    const idParam = String(ctx.params.id);
-    const entity = await strapi.db.query("api::classified.classified").findOne({
-      where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
-    });
+    // (comment controller gotcha). A malformed id is an unknown ad and
+    // never reaches the query (utils/entry-id.ts).
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
+    const entity = await strapi.db.query("api::classified.classified").findOne({ where });
     if (!entity) return ctx.notFound();
 
     const body = (ctx.request.body ?? {}) as any;
@@ -176,10 +178,9 @@ export default factories.createCoreController("api::classified.classified", ({ s
   async delete(ctx) {
     // Same numeric-id → documentId translation as update; the v5 core
     // delete would otherwise answer 204 while deleting nothing.
-    const idParam = String(ctx.params.id);
-    const entity = await strapi.db.query("api::classified.classified").findOne({
-      where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
-    });
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
+    const entity = await strapi.db.query("api::classified.classified").findOne({ where });
     if (!entity) return ctx.notFound();
     ctx.params.id = entity.documentId;
     return super.delete(ctx);
@@ -212,7 +213,7 @@ export default factories.createCoreController("api::classified.classified", ({ s
     const ids: number[] = [];
     for (const entry of raw) {
       const id = Number(entry);
-      if (!Number.isInteger(id) || id <= 0) return ctx.badRequest("Invalid file id");
+      if (!isRowId(id)) return ctx.badRequest("Invalid file id");
       if (!ids.includes(id)) ids.push(id);
     }
 

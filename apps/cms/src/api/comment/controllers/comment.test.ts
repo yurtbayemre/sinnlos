@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
 import commentController from "./comment";
 
 /**
@@ -11,16 +12,21 @@ import commentController from "./comment";
  * filter. These tests pin:
  *   1. the core create only ever sees body + resolved anchor + caller,
  *   2. the 400 answers for missing / unresolved / invisible targets stay
- *      byte-identical (no existence oracle, §5.17).
+ *      byte-identical (no existence oracle, §5.17),
+ *   3. delete takes a numeric id or a documentId; anything else is an
+ *      unknown comment (404) and never reaches the lookup, where Postgres
+ *      failed on a malformed row id with a 500 (EVT-ICS-ID class).
  *
- * `super.create` is a spy on the prototype, exactly where @strapi/core 5.49
- * createCoreController puts the base controller; `isTargetVisible` is mocked
- * (its rules are pinned in target-visibility.test.ts), `resolveWriteTarget`
- * runs for real against a db.query stub.
+ * `super.create`/`super.delete` are spies on the prototype, exactly where
+ * @strapi/core 5.49 createCoreController puts the base controller;
+ * `isTargetVisible` is mocked (its rules are pinned in
+ * target-visibility.test.ts), `resolveWriteTarget` runs for real against a
+ * db.query stub.
  */
 
 const mocks = vi.hoisted(() => ({
   superCreate: vi.fn(async (_ctx: unknown) => ({ data: { id: 1 } })),
+  superDelete: vi.fn(async (_ctx: unknown) => ({ data: null })),
   isTargetVisible: vi.fn(
     async (_strapi: unknown, _type: string, _documentId: string, _user: unknown) => true,
   ),
@@ -31,7 +37,10 @@ vi.mock("@strapi/strapi", () => ({
     createCoreController:
       (_uid: string, cfg: (deps: { strapi: unknown }) => object) =>
       ({ strapi }: { strapi: unknown }) =>
-        Object.setPrototypeOf(cfg({ strapi }), { create: mocks.superCreate }),
+        Object.setPrototypeOf(cfg({ strapi }), {
+          create: mocks.superCreate,
+          delete: mocks.superDelete,
+        }),
   },
 }));
 
@@ -163,5 +172,76 @@ describe("comment create rejections stay byte-identical (§5.17)", () => {
       await reject({ targetType: "announcement", targetDocumentId: KNOWN_DOC }, false),
     ];
     expect(messages).toEqual(Array(4).fill("targetDocumentId required"));
+  });
+});
+
+describe("comment delete: numeric id or documentId, nothing else", () => {
+  const COMMENT_DOC = "k3v9q2m8x7c4b1n6p5z0r2t8";
+  const COMMENT = { id: 7, documentId: COMMENT_DOC, author: { id: MEMBER.id } };
+
+  interface DeleteCtx {
+    params: { id: unknown };
+    state: { user?: { id: number; role: { type: string } } };
+    notFound: ReturnType<typeof vi.fn>;
+    forbidden: ReturnType<typeof vi.fn>;
+  }
+
+  function setupDelete(id: unknown, user: DeleteCtx["state"]["user"] = MEMBER) {
+    const findOne = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      failLikePostgres(where);
+      return where.id === COMMENT.id || where.documentId === COMMENT.documentId ? COMMENT : null;
+    });
+    const strapi = { db: { query: vi.fn(() => ({ findOne })) } };
+    const controller = (
+      commentController as unknown as (deps: { strapi: unknown }) => {
+        delete(ctx: DeleteCtx): Promise<unknown>;
+      }
+    )({ strapi });
+    const ctx: DeleteCtx = {
+      params: { id },
+      state: { user },
+      notFound: vi.fn(() => ({ status: 404 })),
+      forbidden: vi.fn(() => ({ status: 403 })),
+    };
+    return { controller, ctx, findOne };
+  }
+
+  beforeEach(() => {
+    mocks.superDelete.mockClear();
+  });
+
+  it("deletes the author's comment by numeric id or documentId, via its documentId", async () => {
+    for (const id of ["7", COMMENT_DOC]) {
+      mocks.superDelete.mockClear();
+      const { controller, ctx } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound).not.toHaveBeenCalled();
+      expect(mocks.superDelete).toHaveBeenCalledOnce();
+      expect(ctx.params.id).toBe(COMMENT_DOC);
+    }
+  });
+
+  it("answers 404 for an unknown comment", async () => {
+    const { controller, ctx } = setupDelete("8");
+    await controller.delete(ctx);
+    expect(ctx.notFound).toHaveBeenCalled();
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
+
+  it("answers a malformed or out-of-range id with the same 404, without a lookup", async () => {
+    for (const id of MALFORMED_ENTRY_IDS) {
+      const { controller, ctx, findOne } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound, id).toHaveBeenCalled();
+      expect(findOne, id).not.toHaveBeenCalled();
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
+
+  it("still refuses a stranger", async () => {
+    const { controller, ctx } = setupDelete("7", { id: 99, role: { type: "member" } });
+    await controller.delete(ctx);
+    expect(ctx.forbidden).toHaveBeenCalled();
+    expect(mocks.superDelete).not.toHaveBeenCalled();
   });
 });

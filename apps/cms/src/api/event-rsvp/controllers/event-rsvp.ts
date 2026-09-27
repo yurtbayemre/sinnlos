@@ -1,5 +1,7 @@
 import { factories } from "@strapi/strapi";
 
+import { parseEntryRef } from "../../../utils/entry-id";
+
 /**
  * Event RSVPs follow the acknowledgement pattern (server-authoritative
  * user, published-target check, documentId anchoring) with ONE deliberate
@@ -198,11 +200,11 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
 
     // The web app addresses records by numeric id, but the v5 core
     // controller resolves by documentId — translate before delegating
-    // (comment controller gotcha).
-    const idParam = String(ctx.params.id);
-    const entity = await strapi.db.query(RSVP_UID).findOne({
-      where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
-    });
+    // (comment controller gotcha). A malformed id is an unknown RSVP and
+    // never reaches the query (utils/entry-id.ts).
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
+    const entity = await strapi.db.query(RSVP_UID).findOne({ where });
     if (!entity) return ctx.notFound();
 
     const body = (ctx.request.body ?? {}) as any;

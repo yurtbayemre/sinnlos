@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { errors, strings } from "@strapi/utils";
+import { parseRowId } from "./entry-id";
 import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 
 /**
@@ -371,20 +372,12 @@ function hasOwn<T extends object>(object: T, key: string): boolean {
 /**
  * Strapi resolves a string by `parseInt` (map-relation.js isNumeric): "12"
  * and "12abc" both become row ids. Only canonical forms are accepted here:
- * a positive decimal id, or a documentId that parseInt cannot read as a
- * number (Strapi's generated documentIds start with a letter).
+ * a positive decimal id within the int4 range of the id columns (a larger
+ * one made the Postgres lookup fail with a 500, utils/entry-id.ts), or a
+ * documentId that parseInt cannot read as a number (Strapi's generated
+ * documentIds start with a letter).
  */
-const NUMERIC_ID = /^[1-9]\d{0,15}$/;
 const DOCUMENT_ID = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
-
-function parseId(value: unknown): number | null {
-  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
-  if (isString(value) && NUMERIC_ID.test(value)) {
-    const id = Number(value);
-    return Number.isSafeInteger(id) ? id : null;
-  }
-  return null;
-}
 
 function parseRef(value: unknown): RelationRef | null {
   if (isPlainObject(value)) {
@@ -393,7 +386,7 @@ function parseRef(value: unknown): RelationRef | null {
     // __type ... have no meaning on these relations and are refused.
     if (keys.length !== 1) return null;
     if (keys[0] === "id") {
-      const id = parseId(value.id);
+      const id = parseRowId(value.id);
       return id === null ? null : { id };
     }
     if (keys[0] === "documentId") {
@@ -403,7 +396,7 @@ function parseRef(value: unknown): RelationRef | null {
     }
     return null;
   }
-  const id = parseId(value);
+  const id = parseRowId(value);
   if (id !== null) return { id };
   return isString(value) && DOCUMENT_ID.test(value) ? { documentId: value } : null;
 }
@@ -607,13 +600,22 @@ export interface StrapiDb {
   db: { query(uid: string): StrapiDbQuery };
 }
 
+/** Whether a write route names a target row at all (update routes do, create routes do not). */
+export function hasTargetId(idParam: unknown): boolean {
+  return idParam !== undefined && idParam !== null && idParam !== "";
+}
+
 /**
  * The `where` for the row a write route targets. v5 routes carry a
  * documentId; a numeric id is accepted too so direct API consumers keep
- * working (same gotcha as in the comment controller). null = no target.
+ * working (same gotcha as in the comment controller). Both follow the
+ * relation refs above: a row id within the int4 range, or a documentId
+ * parseInt cannot read. null = no usable target: no id at all, or a
+ * malformed or out-of-range one. The policies refuse the latter like an
+ * unknown row, and it never reaches the query (a row id beyond int4 made
+ * the Postgres lookup fail with a 500, utils/entry-id.ts).
  */
-export function targetRowWhere(idParam: unknown): { id: number } | { documentId: string } | null {
-  if (idParam === undefined || idParam === null || idParam === "") return null;
-  const value = String(idParam);
-  return /^\d+$/.test(value) ? { id: Number(value) } : { documentId: value };
+export function targetRowWhere(idParam: unknown): RelationRef | null {
+  if (!hasTargetId(idParam)) return null;
+  return parseRef(String(idParam));
 }
