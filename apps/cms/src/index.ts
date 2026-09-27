@@ -838,9 +838,11 @@ export default {
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
     // Decision 02: give existing polls their `audience` flag ('departments'
-    // when they link a department). A no-op once no row is NULL; logs and
-    // never throws. Before the draft-twin repair below, so a cloned draft
-    // copies the flag.
+    // when they link a department). A no-op once no row is NULL. One
+    // transaction; on any error it rolls back and THROWS, so the cms does
+    // not start with a restricted poll left open (fail closed, see
+    // utils/poll-audience-backfill.ts). Before the draft-twin repair below,
+    // so a cloned draft copies the flag.
     await backfillPollAudience(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner

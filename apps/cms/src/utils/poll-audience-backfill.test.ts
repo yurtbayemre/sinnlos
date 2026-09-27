@@ -11,8 +11,8 @@ import {
  * both rows of a document alike (per row), except that a NULL row without
  * links whose other row of the same poll already says 'departments' gets
  * 'departments' too (a republish or discard on a previous cms); nothing
- * happens once no row is NULL; an error is logged, never thrown into the
- * boot.
+ * happens once no row is NULL. Everything runs in one transaction, and any
+ * error rolls it back and fails the boot (Codex review, findings 3 and 4).
  */
 
 interface Row {
@@ -49,11 +49,15 @@ function host(
     return { count: ids.length };
   });
   const log = { info: vi.fn(), warn: vi.fn() };
+  const transaction = vi.fn((callback: () => Promise<unknown>) => callback());
   const strapi: PollAudienceBackfillHost = {
-    db: { query: vi.fn(() => ({ findMany, updateMany })) },
+    db: {
+      query: vi.fn(() => ({ findMany, updateMany })),
+      transaction: <T>(callback: () => Promise<T>) => transaction(callback) as Promise<T>,
+    },
     log,
   };
-  return { strapi, findMany, updateMany, log };
+  return { strapi, findMany, updateMany, log, transaction };
 }
 
 describe("backfillPollAudience", () => {
@@ -170,12 +174,143 @@ describe("backfillPollAudience", () => {
     expect(sizes).toEqual([POLL_AUDIENCE_BACKFILL_CHUNK, 1]);
   });
 
-  it("logs a failure instead of failing the boot", async () => {
+  it("runs the whole backfill in one transaction", async () => {
+    const { strapi, transaction, findMany, updateMany } = host([{ id: 1, departments: [] }]);
+    await backfillPollAudience(strapi);
+    expect(transaction).toHaveBeenCalledOnce();
+    expect(findMany).toHaveBeenCalled();
+    expect(updateMany).toHaveBeenCalled();
+  });
+
+  it("fails the boot with a [poll-audience] error instead of logging on", async () => {
     for (const failOn of ["findMany", "updateMany"] as const) {
       const { strapi, log } = host([{ id: 1, departments: [{ id: 2 }] }], { failOn });
-      await expect(backfillPollAudience(strapi), failOn).resolves.toBeUndefined();
-      expect(log.warn, failOn).toHaveBeenCalledWith(expect.stringContaining("[poll-audience] could not backfill"));
+      await expect(backfillPollAudience(strapi), failOn).rejects.toThrow(
+        /^\[poll-audience\] could not backfill the audience of existing polls \((relation polls_departments_lnk does not exist|deadlock detected)\); nothing was changed/,
+      );
       expect(log.info, failOn).not.toHaveBeenCalled();
+      expect(log.warn, failOn).not.toHaveBeenCalled();
     }
+  });
+});
+
+/**
+ * Atomicity against a stateful table: the stub evaluates the where shapes
+ * the backfill sends and runs `transaction` like @strapi/database (the
+ * callback's writes are undone when it throws).
+ */
+describe("backfillPollAudience: atomic and fail closed", () => {
+  interface TableRow {
+    id: number;
+    documentId: string;
+    published: boolean;
+    audience: string | null;
+    departments: number[];
+  }
+
+  const INITIAL: TableRow[] = [
+    // First-boot case of finding 4: the draft links a department, the
+    // published row does not (a saved, unpublished change).
+    { id: 1, documentId: "p-a", published: false, audience: null, departments: [2] },
+    { id: 2, documentId: "p-a", published: true, audience: null, departments: [] },
+    // Republished on a previous cms: the draft still says 'departments'.
+    { id: 3, documentId: "p-b", published: false, audience: "departments", departments: [] },
+    { id: 4, documentId: "p-b", published: true, audience: null, departments: [] },
+    // Plain company-wide and targeted polls from before the flag.
+    { id: 5, documentId: "p-c", published: false, audience: null, departments: [] },
+    { id: 6, documentId: "p-c", published: true, audience: null, departments: [] },
+    { id: 7, documentId: "p-d", published: false, audience: null, departments: [3] },
+    { id: 8, documentId: "p-d", published: true, audience: null, departments: [3] },
+  ];
+
+  const copy = (rows: TableRow[]) => rows.map((row) => ({ ...row, departments: [...row.departments] }));
+
+  function tableHost(initial: TableRow[], fail: { updateCall?: number; findManyCall?: number } = {}) {
+    let table = copy(initial);
+    let updates = 0;
+    let finds = 0;
+    const query = {
+      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+        finds += 1;
+        if (finds === fail.findManyCall) throw new Error("canceling statement due to lock timeout");
+        if (where.audience === "departments") {
+          const documentIds = (where.documentId as { $in: string[] }).$in;
+          return table
+            .filter((row) => row.audience === "departments" && documentIds.includes(row.documentId))
+            .map((row) => ({ documentId: row.documentId }));
+        }
+        return table
+          .filter((row) => row.audience === null)
+          .map((row) => ({ id: row.id, documentId: row.documentId, departments: row.departments.map((id) => ({ id })) }));
+      }),
+      updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { audience: string } }) => {
+        updates += 1;
+        if (updates === fail.updateCall) throw new Error("deadlock detected");
+        const ids = (where.id as { $in: number[] }).$in;
+        const hits = table.filter((row) => ids.includes(row.id) && row.audience === null);
+        for (const row of hits) row.audience = data.audience;
+        return { count: hits.length };
+      }),
+    };
+    const transaction = async <T>(callback: () => Promise<T>): Promise<T> => {
+      const snapshot = copy(table);
+      try {
+        return await callback();
+      } catch (error) {
+        table = snapshot;
+        throw error;
+      }
+    };
+    const log = { info: vi.fn() };
+    const strapi: PollAudienceBackfillHost = { db: { query: () => query, transaction }, log };
+    return { strapi, table: () => table, log };
+  }
+
+  const flags = (rows: TableRow[]) => rows.map((row) => [row.id, row.audience]);
+
+  const CLEAN_RUN = [
+    [1, "departments"],
+    [2, "all"],
+    [3, "departments"],
+    [4, "departments"],
+    [5, "all"],
+    [6, "all"],
+    [7, "departments"],
+    [8, "departments"],
+  ];
+
+  it("a clean first run classifies per row, the sibling rule applying only to rows flagged before the run", async () => {
+    const { strapi, table } = tableHost(INITIAL);
+    await backfillPollAudience(strapi);
+    expect(flags(table())).toEqual(CLEAN_RUN);
+  });
+
+  it("an injected failure changes nothing and throws, at every step", async () => {
+    // findMany calls: 1 the NULL rows, 2 the sibling lookup; updateMany
+    // calls: 1 'departments' by links, 2 by sibling, 3 'all'.
+    for (const fail of [{ findManyCall: 1 }, { findManyCall: 2 }, { updateCall: 1 }, { updateCall: 2 }, { updateCall: 3 }]) {
+      const label = JSON.stringify(fail);
+      const { strapi, table, log } = tableHost(INITIAL, fail);
+      await expect(backfillPollAudience(strapi), label).rejects.toThrow(
+        /^\[poll-audience\] could not backfill .*nothing was changed .*the cms does not start/,
+      );
+      expect(table(), label).toEqual(INITIAL);
+      expect(log.info, label).not.toHaveBeenCalled();
+    }
+  });
+
+  it("a retry after a failure classifies exactly like a clean first run", async () => {
+    // Finding 4: before, a run that flagged the draft of p-a and then failed
+    // left it flagged; the retry took it as a restricted sibling and gave
+    // the published row of p-a 'departments' instead of 'all'.
+    const { strapi, table } = tableHost(INITIAL, { updateCall: 3 });
+    await expect(backfillPollAudience(strapi)).rejects.toThrow(/^\[poll-audience\]/);
+    const retry = tableHost(table());
+    await backfillPollAudience(retry.strapi);
+    expect(flags(retry.table())).toEqual(CLEAN_RUN);
+    expect(retry.log.info).toHaveBeenCalledWith(
+      "[poll-audience] set the audience of 7 existing poll row(s): 3 to 'departments' (they link a department), " +
+        "1 to 'departments' (the other row of their poll is restricted), 3 to 'all'",
+    );
   });
 });
