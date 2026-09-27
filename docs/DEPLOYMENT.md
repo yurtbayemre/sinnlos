@@ -32,7 +32,8 @@ cannot offer; see the note there).
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
-> guests can vote) and
+> **guests no longer see any poll** until an admin or editor turns on
+> "Visible to guests" for it) and
 > [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
 > (the checks after the deploy and the rollback note). Deploying both
 > together is one normal deploy plus the read-only pre-deploy queries of the
@@ -729,9 +730,12 @@ systemctl start docker
 > **Deploying poll department targeting?** A normal deploy (cms and web
 > together, as `infra/deploy.sh` does). Run the read-only checks of
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
-> first: they list the polls that become restricted and the users who have
-> no department. If the first boot cannot set Audience on the existing
-> polls, the new cms does not start and `deploy.sh` stops (step 8 there).
+> first: they list the polls that become restricted, the users who have
+> no department and the guests, who see no poll after the deploy until an
+> admin or editor turns on "Visible to guests" for it. If the first boot
+> cannot set Audience on the existing polls, the new cms does not start and
+> `deploy.sh` stops (step 8 there). Never roll the cms back to `808e2e7`
+> alone (see **Rollback** there).
 >
 > **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
 > an instance that runs the datetime release: no env change, no migration.
@@ -800,25 +804,36 @@ is degraded while the new cms boots. For the manual production-safe sequence
 
 #### Upgrading to poll department targeting
 
-This release (branch `feat/poll-targeting`, after the
+This release (branch `feat/poll-targeting`, merged as `808e2e7`, and
+`feat/poll-guest-access` on top of it, shipped together in ONE deploy;
+after the
 [ICS and cms start fixes](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
 below, which follow the datetime and draft-twin release of 2026-09-27)
-enforces the department targeting of polls. Until now a poll's departments
-were stored but checked nowhere:
-every signed-in user saw every published poll and its results, and every
-role but guest could vote on it.
+enforces the department targeting of polls and, by the owner decision of
+2026-09-27, **hides polls from guests** unless an admin or editor opens a
+poll to them. Until now a poll's departments were stored but checked
+nowhere: every signed-in user, guests included, saw every published poll
+and its results, and every role but guest could vote on it.
 
 What the release changes:
 
+- **GUESTS NO LONGER SEE EXISTING POLLS.** A user with the `guest` role
+  sees a poll only when an admin or editor has turned on **Visible to
+  guests** for it, and votes only where **Guests can vote** is on as well.
+  Both are new poll fields, off for every existing and every new poll, so
+  right after the deploy a guest's `/polls` page is empty ("No polls yet")
+  and a poll's vote and results endpoints answer 404 to a guest, as for a
+  poll that does not exist. See **Guest access** below.
 - **A poll without departments is company-wide:** every signed-in user
-  sees it, sees its results and can vote, **guests included** (they could
-  not vote before).
+  except guests sees it, sees its results and can vote (guests: see the
+  point above).
 - **A poll with departments is restricted** to the members of those
   departments: users whose own department (the `department` of their user
   record) is one of them. Everyone else gets "not found": the poll
   disappears from their `/polls` page and from search, and its vote and
   results endpoints answer 404. The role never adds membership: a guest
-  in the department is in, a department head of another department is out.
+  in the department is in (and then needs guest access), a department head
+  of another department is out.
 - **Admins and editors** see every poll and its results, but vote only on
   company-wide polls and on polls of their own department. On a poll of
   another department their card shows the results with the buttons
@@ -846,19 +861,45 @@ What the release changes:
   (what the admin panel edits), each by its own departments. It runs in
   one transaction: if anything fails, nothing is changed and the cms does
   not start (step 8).
-- **Guests get the poll vote permission** (one new permission row).
+- **Guests get the poll vote permission** (one new permission row). It
+  takes effect only on polls with **Guests can vote** on; on every other
+  poll the cms refuses a guest's vote.
 - The poll form says "Restrict to departments (optional)" and explains the
   effect; it refuses to create a poll while the department list cannot be
-  loaded, instead of silently offering company-wide only.
+  loaded, instead of silently offering company-wide only. Its new **Guest
+  access** section has "Visible to guests" and "Guests can vote", both
+  unchecked; "Guests can vote" can only be ticked while "Visible to guests"
+  is.
 - Votes already cast stay counted, also those of users outside the
   departments. A department change of a user applies on their next page
   load.
 
+**Guest access** (`visibleToGuests`, `guestsCanVote`; rules in
+`apps/cms/src/utils/poll-audience.ts`). For a user whose role type is
+exactly `guest` (not the `authenticated` fallback):
+
+| Visible to guests | Guests can vote | The guest (in the poll's audience) |
+| --- | --- | --- |
+| off (default, also every existing poll) | any | does not see the poll: not listed, not found by search, 404 on its results and vote |
+| on | off | sees the poll and its results; the vote buttons are disabled with "Guests can't vote on this poll."; a vote answers 403 |
+| on | on | sees the poll, its results and can vote |
+
+"In the poll's audience" is the department rule above: a guest sees a
+company-wide poll and a poll of their own department, never a poll of
+another department, whatever the switches say. "Guests can vote" without
+"Visible to guests" does nothing. The two columns are added empty (NULL) to
+the existing poll rows, which counts as off: nothing is backfilled and no
+existing poll changes for anyone but guests. Admins and editors see a
+"Visible to guests" and a "Guests can vote" note on the card of a poll
+that has them. The switches are read from the published poll, like
+everything else here.
+
 **Nothing else is needed on an existing instance:** no env change, no
 migration script, no `JWT_SECRET` rotation. Deploy cms and web together,
 as `infra/deploy.sh` does (compose starts the new web only once the new
-cms is healthy): the new web sends Audience when it creates a poll, which
-the previous cms refuses with a 400. A fresh install needs nothing.
+cms is healthy): the new web sends Audience and the two guest switches
+when it creates a poll, which the previous cms refuses with a 400. A fresh
+install needs nothing.
 
 **Together with the ICS and cms start fixes** (an instance on the datetime
 release that has neither): still one normal deploy. Run steps 1–6 here
@@ -927,6 +968,26 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    To give someone a department: Strapi admin → **Content Manager → User**
    → the user → **department** → Save (before or after the deploy).
 
+   **And the guests.** Every guest loses every poll with this deploy: today
+   a guest sees all published polls and their results; afterwards none,
+   until an admin or editor turns on **Visible to guests** for a poll
+   (**Guest access** above). Count them first:
+
+   ```bash
+   psql_db <<'SQL'
+   SELECT (SELECT count(*) FROM up_users u
+             JOIN up_users_role_lnk rl ON rl.user_id = u.id
+             JOIN up_roles r ON r.id = rl.role_id
+           WHERE r.type = 'guest') AS guest_users,
+          (SELECT count(*) FROM polls WHERE published_at IS NOT NULL) AS published_polls;
+   SQL
+   ```
+
+   With `guest_users` above 0, decide before the deploy which of the
+   `published_polls` guests should keep seeing (and on which they may
+   vote), and turn the switches on for those right after it (**Authoring in
+   the Strapi admin panel** below); tell the guests if some polls go away.
+
 4. **Read-only: saved, unpublished changes of a poll's departments.** The
    first boot flags each row by its own departments, so publishing such a
    draft applies what it says: a draft without departments makes the poll
@@ -969,10 +1030,16 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    `docker compose up -d --build` from `infra/`.
 
 **What the first boot changes in the database.** Strapi adds the nullable
-column `polls.audience`; the cms sets it on every existing poll row; one
-permission row is added (guest → poll vote). Nothing else is written: no
-notification, no live update, and the polls keep their `updated_at`, so
-the admin panel shows them as **Published**, not **Modified**.
+columns `polls.audience`, `polls.visible_to_guests` and
+`polls.guests_can_vote` (booleans without a database default); the cms
+sets `audience` on every existing poll row and leaves the two guest
+columns NULL (= off: hidden from guests); one permission row is added
+(guest → poll vote). Nothing else is written: no notification, no live
+update, and the polls keep their `updated_at`, so the admin panel shows
+them as **Published**, not **Modified**. The admin panel labels of the two
+new fields ("Visible to guests", "Guests can vote (needs Visible to
+guests)", each with a short description) come with the release; a label
+you change under **Configure the view** stays yours.
 
 **After the deploy**
 
@@ -1000,12 +1067,16 @@ the admin panel shows them as **Published**, not **Modified**.
    (compose also restarts the cms on its own; every start retries the
    whole backfill), or roll back with the printed commands (**Rollback**
    below).
-9. **Read-only: every poll row has its Audience** (`without_audience` 0):
+9. **Read-only: every poll row has its Audience** (`without_audience` 0),
+   and no poll is open to guests yet (`visible_to_guests` 0 until an admin
+   or editor turns it on):
 
    ```bash
    psql_db <<'SQL'
    SELECT count(*) FILTER (WHERE audience IS NULL) AS without_audience,
           count(*) FILTER (WHERE audience = 'departments') AS restricted_rows,
+          count(*) FILTER (WHERE published_at IS NOT NULL AND visible_to_guests) AS visible_to_guests,
+          count(*) FILTER (WHERE published_at IS NOT NULL AND visible_to_guests AND guests_can_vote) AS guests_can_vote,
           count(*) AS rows
    FROM polls;
    SQL
@@ -1034,10 +1105,20 @@ the admin panel shows them as **Published**, not **Modified**.
       ORDER BY p.question;
       SQL
       ```
-    - as a guest (if there is one), voting on a poll without departments
-      works;
+    - as a guest (if there is one; otherwise give a test account the
+      `guest` role for these checks), `/polls` shows **no poll** ("No polls
+      yet"), and the search finds none;
+    - as an admin or editor, open a poll without departments in the
+      Content Manager, turn on **Visible to guests** and publish: the guest
+      now sees it with its results, the buttons disabled and "Guests can't
+      vote on this poll." (the admin's card notes "Visible to guests");
+    - turn on **Guests can vote** for it as well and publish: the guest can
+      vote (the card notes "Guests can vote"); turn both off again if the
+      poll was not meant for guests;
     - `/polls/new` (admin or editor) shows "Restrict to departments
-      (optional)" and creates a poll restricted to the chosen departments.
+      (optional)" and creates a poll restricted to the chosen departments,
+      and its **Guest access** section shows both switches unchecked, with
+      "Guests can vote" greyed out until "Visible to guests" is ticked.
 
 **Authoring in the Strapi admin panel.** When a poll keeps departments
 selected, the cms saves its **Audience** as `departments`, whatever the
@@ -1052,14 +1133,31 @@ deleted; deleting one removes it from every poll, and when that changed a
 poll's Audience the cms logs
 `[poll-audience] department delete: set the audience of N poll row(s) to 'departments', …`.
 
+Guest access is set per poll with the two new fields in the same form:
+**Visible to guests** shows the poll (and its results) to the guests in its
+audience; **Guests can vote (needs Visible to guests)** lets them vote as
+well. Both are off by default. Like every field they apply once the poll
+is **published** (the published row decides; a saved draft changes
+nothing for guests yet). "Guests can vote" without "Visible to guests" has
+no effect, and the cms does not clear it: turning "Visible to guests" on
+again later brings guest voting back with it, so turn both off when a poll
+should be closed to guests. The web form (`/polls/new`) sets both when it
+creates a poll; changing them later happens here. The departments and
+Audience rules above are unaffected: a guest never sees a poll of another
+department.
+
 **What users and editors notice** (worth a short release note):
 
 - Polls: department targeting is now enforced. A poll with departments
   selected can only be seen, voted on and have its results viewed by
   members of those departments. Admins and editors can always see it and
   its results, but can vote only if they belong to one of the departments.
-- Polls without departments are open to every signed-in user, and guests
-  can now vote.
+- Polls are hidden from guests. **Guests no longer see the existing polls**
+  (they did until now, with their results) until an admin or editor turns
+  on "Visible to guests" for a poll; guests vote only on polls where
+  "Guests can vote" is on as well. A guest who sees a poll without guest
+  voting gets the results and "Guests can't vote on this poll."
+- Polls without departments are open to every other signed-in user.
 - Existing polls that had departments selected become restricted with
   this update (step 2). Votes already cast stay counted.
 - If all target departments of a poll are deleted, the poll becomes
@@ -1069,21 +1167,43 @@ poll's Audience the cms logs
   Audience = `departments`; to open it to everyone, remove the departments
   and set Audience to `all`.
 - The poll form's department picker is now called "Restrict to departments
-  (optional)" and explains who sees the poll.
+  (optional)" and explains who sees the poll; the form's new "Guest access"
+  section sets "Visible to guests" and "Guests can vote" (both off by
+  default). In the Strapi admin panel, both fields are on the poll form.
+  Admins and editors see "Visible to guests" / "Guests can vote" on the
+  poll cards that have them.
 
 **Rollback.** The previous images run on the upgraded database without a
-restore (verified on Postgres 16): the previous cms ignores the
-`audience` column, and `forceMigration: false` keeps it. **Before** you
-retag, save the list of restricted polls
+restore (verified on Postgres 16 with 34c250c): the previous cms ignores the
+`audience`, `visible_to_guests` and `guests_can_vote` columns, and
+`forceMigration: false` keeps them. **Before** you retag, save the list of
+restricted polls
 ([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)).
+
+**Never roll the cms back to `808e2e7` alone** (poll targeting without
+guest access, never deployed): that cms enforces the departments but knows
+no guest switches, and with the guest vote permission of this release it
+lets every guest see **and vote on** every company-wide poll. Roll back to
+the image that ran before this deploy (`:rollback`, on the owner instance
+34c250c), or forward.
+
 Until you roll forward again:
 
-- targeting is not enforced: every signed-in user sees every poll again;
-- guests keep the vote permission this release added (the previous cms
-  never removes it), so a guest can vote on every poll. If that matters for
-  the rollback window, remove it: Strapi admin → **Settings → Users &
-  Permissions plugin → Roles → Guest → Poll-vote → vote** → Save. Rolling
-  forward adds it again;
+- targeting is not enforced: every signed-in user sees every poll again,
+  **guests included: on 34c250c guests see every poll and its results
+  again**, whatever "Visible to guests" says;
+- **remove the guest vote permission right after the retag**, or guests
+  can vote on every poll: it is the one permission row this release added,
+  and the previous cms never removes it (verified: a guest's vote answered
+  200 on 34c250c until the row was gone, 403 after). Strapi admin →
+  **Settings → Users & Permissions plugin → Roles → Guest → Poll-vote →
+  vote** → Save. Guests then see every poll and its results but cannot
+  vote, exactly as before this deploy. Rolling forward adds it again;
+- a poll published or edited and published on the previous cms gets a
+  new published row **without** the guest switches: after rolling forward
+  it is hidden from guests again, although its draft (and the admin panel
+  form) still shows them on. Publish it again on this release to bring
+  its guest access back (the check below lists such polls);
 - a poll created on the previous cms gets no Audience; the next boot of
   this release sets it (step 8's log line);
 - publishing or discarding changes of a poll on the previous cms writes a
@@ -1110,7 +1230,9 @@ Until you roll forward again:
   other departments (the vote fails with "Your vote couldn't be saved"),
   and its form creates polls with Audience `all` (the new cms applies the
   default; their departments still restrict them, and the new cms saves
-  them with Audience = `departments`).
+  them with Audience = `departments`) and hidden from guests (it sends no
+  guest switches, the new cms stores false); guests on a poll without
+  guest voting see enabled buttons whose vote fails the same way.
 
 **Rolling back both** (deployed together with the ICS and cms start
 fixes): the `:rollback` images are from before both. Roll back web and cms
@@ -1121,8 +1243,9 @@ every start, so it needs registry.npmjs.org; see **Rollback** in
 for the check and for starting it without the registry. Everything in the
 list above applies as well.
 
-**Local dev (SQLite):** the next `pnpm cms:dev` adds the column and sets
-Audience the same way; a new demo seed writes Audience `all`.
+**Local dev (SQLite):** the next `pnpm cms:dev` adds the columns and sets
+Audience the same way; a new demo seed writes Audience `all` and leaves
+every poll hidden from guests.
 
 ##### Checking targeted polls after rolling forward
 
@@ -1178,6 +1301,32 @@ only the second query is left, and a poll whose rows both lost Audience
 looks like any company-wide poll. (Rehearsed on Postgres 16 with both
 rows of a poll restricted by Audience alone cleared the way the previous
 cms leaves them: that poll was the one line of the first check.)
+
+Guest access after rolling forward: the polls whose saved draft is open to
+guests while the published poll is not (published on the previous cms,
+which writes the published row without the guest switches; read-only):
+
+```bash
+psql_db <<'SQL'
+SELECT p.document_id, p.question AS poll,
+       d.visible_to_guests AS draft_visible, d.guests_can_vote AS draft_vote,
+       p.visible_to_guests AS published_visible, p.guests_can_vote AS published_vote
+FROM polls p
+JOIN polls d ON d.document_id = p.document_id AND d.published_at IS NULL
+WHERE p.published_at IS NOT NULL
+  AND (coalesce(d.visible_to_guests, false) <> coalesce(p.visible_to_guests, false)
+       OR coalesce(d.guests_can_vote, false) <> coalesce(p.guests_can_vote, false))
+ORDER BY p.question;
+SQL
+```
+
+A listed poll is hidden from guests (or keeps guest voting off) until it
+is published again: open it in the Content Manager and **Publish** if the
+draft's switches are what you want. It also lists a poll with a saved,
+unpublished change of its guest switches made on this release. (Rehearsed
+on Postgres 16: a poll opened to guests, republished on 34c250c, was
+hidden from guests after rolling forward and open again after one
+publish.)
 
 #### Upgrading to the ICS and cms start fixes (2026-09-27)
 
@@ -3688,10 +3837,14 @@ steps 3–7).
 
 The retag commands above are enough: the previous images run on the
 upgraded database without a restore and need no override file. Until you
-roll forward, poll targeting is not enforced and guests keep the vote
-permission; the details, and how to take that permission away for the
-rollback window, are under **Rollback** in
+roll forward, poll targeting and guest access are not enforced (guests
+see every poll and its results again) and guests keep the vote
+permission, so they can vote on every poll until you remove it right
+after the retag; the details, and how to take that permission away, are
+under **Rollback** in
 [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
+Never roll the cms back to `808e2e7` alone: it lets guests see and vote on
+every company-wide poll.
 Save the list of restricted polls before you retag
 ([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)),
 and run the checks there after rolling forward.

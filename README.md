@@ -295,7 +295,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
-| **poll** | Question + options, `closesAt`, `anonymous` flag, **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role, guests included, sees it, votes and sees its results); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls |
+| **poll** | Question + options, `closesAt`, `anonymous` flag, **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
@@ -332,7 +332,8 @@ so publishing it still drops them. The runbook lists both kinds up front:
 
 | Caller | Poll without departments | Poll whose departments include the caller's | Poll of other departments |
 | --- | --- | --- | --- |
-| member, team lead, department head, guest, `authenticated` | see, vote, results | see, vote, results | not found (list, detail, vote, results) |
+| member, team lead, department head, `authenticated` | see, vote, results | see, vote, results | not found (list, detail, vote, results) |
+| guest | as the poll's guest access says (below); by default not found | the same | not found |
 | admin, editor | see, vote, results | see, vote, results | see and results; voting refused |
 
 - "The caller's department" is the `department` of their user record
@@ -363,6 +364,31 @@ so publishing it still drops them. The runbook lists both kinds up front:
   transaction: if it fails, nothing is changed and the cms does not start
   (a poll row without the flag could leave a restricted poll open):
   [Upgrading to poll department targeting](./docs/DEPLOYMENT.md#upgrading-to-poll-department-targeting).
+
+**Poll guest access** (owner decision 2026-09-27; enforced by the cms, in
+the same rules module): polls are **hidden from guests** (role type exactly
+`guest`) unless an admin or editor opens them, per poll, with two fields
+(admin panel and the `/polls/new` form):
+
+| Visible to guests | Guests can vote | A guest in the poll's audience |
+| --- | --- | --- |
+| off (default) | any | not found: not listed, not in search, 404 on results and vote |
+| on | off | sees the poll and its results; a vote answers 403 "Guests cannot vote on this poll" and the card says "Guests can't vote on this poll." |
+| on | on | sees, votes, results |
+
+- The department rule still applies: a guest never gets a poll of another
+  department. "Guests can vote" without "Visible to guests" does nothing.
+  NULL (a poll from before the fields) counts as off; nothing is
+  backfilled. Every other role is unaffected by the two fields.
+- `canSeePoll` and `canVoteOnPoll` in `apps/cms/src/utils/poll-audience.ts`
+  decide for the list/detail policy and the vote/results actions alike;
+  results return both fields and `canVote`. Admins and editors see
+  "Visible to guests" / "Guests can vote" on the cards that have them.
+- No other path hands a poll to a guest: notifications, live pings,
+  e-mail digests, comments and reactions never concern polls, the search
+  goes through the filtered `/api/polls`, and relations into polls are cut
+  by the relation guard (`apps/cms/src/poll-exposure.test.ts` pins this and
+  fails when a new module starts reading polls).
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart), `microsoftOid`, and the
@@ -463,9 +489,10 @@ Read-side filters:
   still decides which rows of their populated draft & publish relations
   come back. The custom ICS, vote and results actions read published rows
   only as well
-- `poll-visibility` — poll department targeting (see above): the published
-  polls whose audience holds the caller, resolved to a non-relational id
-  filter; pins `status=published`; admin/editor bypass (drafts included)
+- `poll-visibility` — poll department targeting and guest access (see
+  above): the published polls the caller may see (audience, and for a guest
+  "Visible to guests"), resolved to a non-relational id filter; pins
+  `status=published`; admin/editor bypass (drafts included)
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
 - `announcement-visibility` — server-side audience targeting (#9):
@@ -621,8 +648,8 @@ above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
 No role holds any `poll-vote` CRUD grant: votes are cast and counted only
 through the custom `vote`/`results` actions below, which every role holds
-(guest included); whether a caller may vote on a given poll is decided per
-poll by the department targeting above.
+(guest included); whether a caller may see or vote on a given poll is
+decided per poll by the department targeting and the guest access above.
 
 Fine print encoded in the matrix (and enforced by the policies/controllers):
 acknowledgements are **immutable read receipts** — only `admin_role` may
@@ -654,9 +681,10 @@ acknowledgements** (a guest can never see a mandatory announcement, so ack
 grants were dead attack surface), **no event-rsvp** (guests read the
 calendar but neither respond nor see attendee names), and **no training**
 (no course/lesson/lesson-progress grants at all — while `search-log.create`
-IS granted to guest: search telemetry is anonymous by design). Guests do
-vote in polls: a poll without departments is open to every signed-in user,
-and a guest in a poll's department is part of its audience. Grants that older
+IS granted to guest: search telemetry is anonymous by design). Guests hold
+the poll read, results and vote grants, but see and vote only on the polls
+an admin or editor opened to them (poll guest access above, in the poll's
+audience like everyone else). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
 `REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
@@ -677,7 +705,8 @@ officeLocation, microsoftOid) are removed output-side by the contact-field
 sanitizer (#10, see the global guards above). Custom (non-CRUD) route
 actions (ICS export, celebrations — staff roles only, not `guest` or
 `authenticated` —, poll `vote` and `results` — every role, `guest`
-included, narrowed per poll by the department targeting —,
+included, narrowed per poll by the department targeting and the guest
+access —,
 mark-read/mark-all-read, `/api/me`, `changePassword`,
 `role.find` for the admin ack
 report, the classified `cleanupUploads` endpoint, the admin-only
@@ -732,13 +761,15 @@ never pass, and exclusion checks such as `role !== "guest"` are not allowed:
 | Helper | Roles | Used for |
 | --- | --- | --- |
 | `isAdmin` | `admin_role` | sidebar *Admin* link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
-| `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action |
+| `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards |
 | `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP fetch on `/events` |
 | `canPostAds` | the five staff roles | *New ad* button, `/marketplace/new` |
+| `isGuest` | `guest` | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint |
 
 Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
-departments), so an admin or editor outside a poll's departments sees its
+departments, the guest-access fields), so an admin or editor outside a
+poll's departments, and a guest on a poll without guest voting, see its
 results with the vote buttons disabled.
 
 The marketplace detail/edit pages show the edit/delete controls to the ad's
@@ -887,8 +918,11 @@ trimming.
       *New poll*; a guest sees no RSVP controls and no *New ad* button
 - [ ] Poll targeting: a poll restricted to one department is listed for
       its members only; an editor outside it sees *Only for: …*, the
-      results and disabled buttons; a guest can vote on a poll without
-      departments
+      results and disabled buttons
+- [ ] Poll guest access: a guest sees no poll until an admin or editor
+      turns on *Visible to guests* (then results, disabled buttons and
+      *Guests can't vote on this poll.*); with *Guests can vote* on as well
+      the guest can vote
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two
