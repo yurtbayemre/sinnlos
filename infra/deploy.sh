@@ -220,6 +220,9 @@ print_rollback_hint() {
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
+  echo "       A cms image built before 2026-09-27 downloads pnpm from registry.npmjs.org at every" >&2
+  echo "       start; without registry access, start it directly (docs/DEPLOYMENT.md, \"Upgrading to" >&2
+  echo "       the ICS and cms start fixes (2026-09-27)\", Rollback)." >&2
   echo "       A re-run of this script tags whatever runs then as :rollback; see docs/DEPLOYMENT.md." >&2
 }
 
