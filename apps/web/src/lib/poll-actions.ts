@@ -17,6 +17,7 @@ export type CreatePollInput = {
   /** yyyy-mm-dd from <input type="date">, empty = no closing date. */
   closesAt: string;
   anonymous: boolean;
+  /** Numeric ids of the departments to restrict the poll to; empty = everyone. */
   departmentIds: number[];
 };
 
@@ -44,10 +45,18 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
     if (!closesAt) return { ok: false, code: "failed" };
   }
 
+  // Department targeting (decision 02): the flag is set explicitly, so the
+  // poll stays restricted even if its departments are deleted later (the
+  // CMS then shows it to admins and editors only). Department ids are the
+  // numeric ids of the single department rows (decision 05).
+  const departmentIds = [
+    ...new Set(input.departmentIds.filter((id) => Number.isInteger(id) && id > 0)),
+  ];
+
   try {
     // Polls use draftAndPublish — without status=published the REST create
     // lands as an invisible draft.
-    await strapi<any>(`/api/polls?status=published`, {
+    await strapi<unknown>(`/api/polls?status=published`, {
       method: "POST",
       body: JSON.stringify({
         data: {
@@ -55,7 +64,8 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
           options,
           closesAt,
           anonymous: input.anonymous,
-          departments: input.departmentIds,
+          audience: departmentIds.length > 0 ? "departments" : "all",
+          departments: departmentIds,
         },
       }),
     });
@@ -63,9 +73,9 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
     return { ok: false, code: "failed" };
   }
 
-  // polls.list is uncached (D-DC01), so re-rendering the current route with
-  // refresh() is all read-your-own-writes needs.
-  refresh();
+  // No refresh(): the form navigates to /polls right after this action, and
+  // that page reads the list uncached (D-DC01). Refreshing the current route
+  // (/polls/new) first would only re-render the form (FX20).
   return { ok: true };
 }
 

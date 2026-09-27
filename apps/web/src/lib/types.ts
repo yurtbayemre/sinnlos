@@ -190,9 +190,22 @@ export interface Poll {
   options: string[];
   closesAt?: string | null;
   anonymous?: boolean;
+  /**
+   * Department targeting flag (decision 02). A poll is targeted when this
+   * is "departments" OR it links a department; null = a row from before
+   * the flag. The web decides nothing from it: the CMS filters the list
+   * and answers `canVote` per poll in the results.
+   */
+  audience?: "all" | "departments" | null;
   departments?: Department[];
   author?: UserLite | null;
   createdAt?: string;
+}
+
+/** One targeted department of a poll, as GET /api/polls/:id/results names it. */
+export interface PollAudienceDepartment {
+  documentId: string;
+  name: string;
 }
 
 export interface PollResults {
@@ -205,7 +218,19 @@ export interface PollResults {
   };
   counts: number[];
   total: number;
+  /** The caller's own vote, also on anonymous polls. */
   myVoteIndex: number | null;
+  /**
+   * Whether the caller may vote: true for the poll's audience, false for
+   * an admin/editor outside it (they see the poll and its results only).
+   * Absent from a CMS older than decision 02; read it as `!== false`.
+   */
+  canVote?: boolean;
+  /** Targeting summary; absent from a CMS older than decision 02. */
+  audience?: {
+    targeted: boolean;
+    departments: PollAudienceDepartment[];
+  };
 }
 
 export interface Document {

@@ -41,6 +41,7 @@ import { demo } from "@/lib/demo";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import { getStrapiToken } from "@/lib/session";
 import { StrapiError } from "@/lib/strapi-error";
+import type { PollResults } from "@/lib/types";
 
 export type StrapiListResponse<T> = {
   data: T[];
@@ -296,18 +297,24 @@ export const api = {
     },
   },
   polls: {
+    // Per-user: the CMS poll-visibility policy filters the list to the
+    // polls the caller may see (department targeting, decision 02), so a
+    // department change applies on the next request (reads are never
+    // cached, D-DC01). The cards are built from the per-user results()
+    // endpoint, which also says whether the caller may vote and which
+    // departments a poll targets, so the list populates no departments.
+    //
     // The `author` user relation is field-limited to displayName: no poll
-    // consumer renders an author contact field (the poll cards are built from
-    // the per-user results() endpoint), so no sensitive user field enters the
-    // payload (data minimisation, issue #10 / F1).
+    // consumer renders an author contact field, so no sensitive user field
+    // enters the payload (data minimisation, issue #10 / F1).
     //
     // pageSize=20 is a deliberate feed/render cap (issue #26) — counts must
     // come from `meta.pagination.total`, never `data.length`.
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/polls?populate[departments]=true&populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
+        "/api/polls?populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
       ),
-    results: (id: number) => strapi<any>(`/api/polls/${id}/results`),
+    results: (id: number) => strapi<PollResults>(`/api/polls/${id}/results`),
   },
   documents: {
     // Per-user: document-visibility filters per caller (department scoping)

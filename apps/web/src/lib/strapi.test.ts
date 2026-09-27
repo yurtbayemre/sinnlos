@@ -198,6 +198,16 @@ describe("strapi() — responses", () => {
   });
 });
 
+describe("api.polls (decision 02)", () => {
+  it("lists polls without populating departments (the CMS filters per user)", async () => {
+    await api.polls.list();
+    const [url] = fetchMock.mock.calls[0]!;
+    expect(url).toContain("http://cms.test/api/polls?");
+    expect(url).not.toContain("departments");
+    expect(url).toContain("populate[author][fields][0]=displayName");
+  });
+});
+
 describe("strapi() — DEMO_MODE", () => {
   it("answers from the fixtures without a session read or a fetch", async () => {
     state.demo = true;
