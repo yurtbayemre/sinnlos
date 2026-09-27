@@ -13,7 +13,26 @@ import {
  * 'departments' too (a republish or discard on a previous cms); nothing
  * happens once no row is NULL. Everything runs in one transaction, and any
  * error rolls it back and fails the boot (Codex review, findings 3 and 4).
+ * The NULL rows are read in pages by an id cursor, all of them before the
+ * first lookup or update (Codex review, P2; the query engine side is in
+ * poll-audience-backfill-sqlite.test.ts).
  */
+
+/**
+ * One page of the NULL-row read as the query engine answers it: rows after
+ * the `id.$gt` cursor, by id, at most `limit` (all of them without one).
+ */
+function nullRowPage<T extends { id: number }>(rows: T[], params: Record<string, unknown>): T[] {
+  const after = (params.where as { id?: { $gt?: number } }).id?.$gt ?? 0;
+  const page = rows.filter((row) => row.id > after).sort((a, b) => a.id - b.id);
+  return typeof params.limit === "number" ? page.slice(0, params.limit) : page;
+}
+
+/** The params of the backfill's page reads (the calls with `$null`). */
+const pageReads = (calls: [Record<string, unknown>][]) =>
+  calls
+    .map(([params]) => params)
+    .filter((params) => typeof (params.where as { audience?: unknown }).audience === "object");
 
 interface Row {
   id: number;
@@ -41,7 +60,7 @@ function host(
         .filter((row) => row.audience === where.audience && documentIds.includes(row.documentId))
         .map((row) => ({ documentId: row.documentId }));
     }
-    return rows as unknown[];
+    return nullRowPage(rows, params) as unknown[];
   });
   const updateMany = vi.fn(async (params: Record<string, unknown>) => {
     if (options.failOn === "updateMany") throw new Error("deadlock detected");
@@ -61,15 +80,61 @@ function host(
 }
 
 describe("backfillPollAudience", () => {
-  it("reads only rows whose flag is NULL, with their department links", async () => {
+  it("reads only rows whose flag is NULL, with their department links, one bounded page at a time", async () => {
     const { strapi, findMany } = host([]);
     await backfillPollAudience(strapi);
     expect(strapi.db.query).toHaveBeenCalledWith("api::poll.poll");
     expect(findMany).toHaveBeenCalledWith({
-      where: { audience: { $null: true } },
+      where: { audience: { $null: true }, id: { $gt: 0 } },
       select: ["id", "documentId"],
+      orderBy: { id: "asc" },
+      limit: POLL_AUDIENCE_BACKFILL_CHUNK,
       populate: { departments: { select: ["id"] } },
     });
+  });
+
+  it("reads every page before the first sibling lookup or update", async () => {
+    // Codex P2: the department populate binds the ids of every row a read
+    // returned, so one read of all NULL rows broke the bind limit. Two full
+    // pages and a short one; the sibling case sits in the last page.
+    const rows: Row[] = Array.from({ length: 2 * POLL_AUDIENCE_BACKFILL_CHUNK + 1 }, (_, i) => ({
+      id: i + 1,
+      documentId: `d${i}`,
+      departments: i % 100 === 1 ? [{ id: 2 }] : [],
+    }));
+    rows[rows.length - 1].documentId = "p-republished";
+    const { strapi, findMany, updateMany, log } = host(rows, {
+      flagged: [{ id: 9001, documentId: "p-republished", audience: "departments" }],
+    });
+    await backfillPollAudience(strapi);
+
+    const reads = pageReads(findMany.mock.calls);
+    expect(reads.map((params) => [(params.where as { id: { $gt: number } }).id.$gt, params.limit])).toEqual([
+      [0, POLL_AUDIENCE_BACKFILL_CHUNK],
+      [POLL_AUDIENCE_BACKFILL_CHUNK, POLL_AUDIENCE_BACKFILL_CHUNK],
+      [2 * POLL_AUDIENCE_BACKFILL_CHUNK, POLL_AUDIENCE_BACKFILL_CHUNK],
+    ]);
+    // The three page reads come first, then the sibling lookups, then the updates.
+    const order = findMany.mock.invocationCallOrder;
+    expect(order.length).toBeGreaterThan(reads.length);
+    expect(pageReads(findMany.mock.calls.slice(reads.length))).toEqual([]);
+    expect(Math.min(...updateMany.mock.invocationCallOrder)).toBeGreaterThan(Math.max(...order));
+    expect(log.info).toHaveBeenCalledWith(
+      "[poll-audience] set the audience of 401 existing poll row(s): 4 to 'departments' (they link a department), " +
+        "1 to 'departments' (the other row of their poll is restricted), 396 to 'all'",
+    );
+  });
+
+  it("stops with a [poll-audience] error instead of looping when a full page does not advance", async () => {
+    const rows = Array.from({ length: POLL_AUDIENCE_BACKFILL_CHUNK }, (_, i) => ({ id: i + 1, departments: [] }));
+    const { strapi, findMany, updateMany } = host(rows);
+    // A read that ignores the cursor returns the same full page forever.
+    findMany.mockImplementation(async () => rows);
+    await expect(backfillPollAudience(strapi)).rejects.toThrow(
+      /^\[poll-audience\] could not backfill .*did not advance past id 200\); nothing was changed/,
+    );
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(updateMany).not.toHaveBeenCalled();
   });
 
   it("keeps a flag-only restricted poll restricted when a previous cms republished or discarded it", async () => {
@@ -230,7 +295,7 @@ describe("backfillPollAudience: atomic and fail closed", () => {
     let updates = 0;
     let finds = 0;
     const query = {
-      findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      findMany: vi.fn(async ({ where, limit }: { where: Record<string, unknown>; limit?: number }) => {
         finds += 1;
         if (finds === fail.findManyCall) throw new Error("canceling statement due to lock timeout");
         if (where.audience === "departments") {
@@ -239,9 +304,10 @@ describe("backfillPollAudience: atomic and fail closed", () => {
             .filter((row) => row.audience === "departments" && documentIds.includes(row.documentId))
             .map((row) => ({ documentId: row.documentId }));
         }
-        return table
-          .filter((row) => row.audience === null)
-          .map((row) => ({ id: row.id, documentId: row.documentId, departments: row.departments.map((id) => ({ id })) }));
+        return nullRowPage(
+          table.filter((row) => row.audience === null),
+          { where, limit },
+        ).map((row) => ({ id: row.id, documentId: row.documentId, departments: row.departments.map((id) => ({ id })) }));
       }),
       updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { audience: string } }) => {
         updates += 1;
@@ -312,5 +378,30 @@ describe("backfillPollAudience: atomic and fail closed", () => {
       "[poll-audience] set the audience of 7 existing poll row(s): 3 to 'departments' (they link a department), " +
         "1 to 'departments' (the other row of their poll is restricted), 3 to 'all'",
     );
+  });
+
+  it("paging keeps the classification of one read when the rows of a poll are pages apart", async () => {
+    // The INITIAL rows with two pages of filler in between: every draft row
+    // is read in the first page, every published row two pages later.
+    // Flagging page by page would, among others, make the linked draft of
+    // p-a a restricted sibling of its unlinked published row.
+    const gap = 2 * POLL_AUDIENCE_BACKFILL_CHUNK;
+    const shifted = (id: number) =>
+      INITIAL.find((row) => row.id === id)?.published ? id + INITIAL.length + gap : id;
+    const initial: TableRow[] = [
+      ...INITIAL.map((row) => ({ ...row, id: shifted(row.id) })),
+      ...Array.from({ length: gap }, (_, i) => ({
+        id: INITIAL.length + 1 + i,
+        documentId: `f${i}`,
+        published: false,
+        audience: null,
+        departments: [],
+      })),
+    ].sort((a, b) => a.id - b.id);
+    const { strapi, table } = tableHost(initial);
+    await backfillPollAudience(strapi);
+    const audienceOf = new Map(table().map((row) => [row.id, row.audience]));
+    expect(CLEAN_RUN.map(([id]) => [id, audienceOf.get(shifted(Number(id)))])).toEqual(CLEAN_RUN);
+    expect(table().filter((row) => row.documentId.startsWith("f")).every((row) => row.audience === "all")).toBe(true);
   });
 });

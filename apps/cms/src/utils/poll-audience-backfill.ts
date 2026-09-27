@@ -52,6 +52,17 @@ import { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  * (deploy.sh stops at `up -d`, restart retries, rollback) is in
  * docs/DEPLOYMENT.md.
  *
+ * BOUNDED STATEMENTS (Codex review, P2). The NULL rows are read in pages
+ * of POLL_AUDIENCE_BACKFILL_CHUNK by an id cursor. The department populate
+ * of a manyToMany relation binds the ids of every row the read returned
+ * as one IN list (@strapi/database 5.55.1 query/helpers/populate/apply.js
+ * manyToMany, no chunking), so a single read of all NULL rows failed once
+ * they passed the driver's bind limit (SQLite 32766, Postgres 65535): the
+ * transaction rolled back and every boot failed the same way. ALL pages
+ * are read before the sibling lookup and before the first update, so no
+ * row this run flags can count as a restricted sibling, and the
+ * classification is exactly that of one read.
+ *
  * Runs before the draft-twin repair (utils/draft-twins.ts), so a draft
  * cloned from a published row copies the backfilled flag. `updateMany`
  * leaves `updatedAt` alone (the timestamps subscriber only stamps array
@@ -64,7 +75,12 @@ export const POLL_AUDIENCE_BACKFILL_LOG = "[poll-audience]";
 
 const POLL_UID = "api::poll.poll";
 
-/** Ids per UPDATE statement (keeps well below every driver's bind limit). */
+/**
+ * Rows per read page, and ids or documentIds per lookup and UPDATE: no
+ * statement of the backfill binds more than about this many values (a
+ * page's department populate binds the page's row ids), well below every
+ * driver's bind limit.
+ */
 export const POLL_AUDIENCE_BACKFILL_CHUNK = 200;
 
 interface BackfillQuery {
@@ -81,10 +97,18 @@ export interface PollAudienceBackfillHost {
   log: { info(message: string): void };
 }
 
-interface NullFlagRow {
+/** A row with a NULL flag as the read returns it. */
+interface NullFlagRead {
   id: number;
   documentId?: unknown;
   departments?: unknown[] | null;
+}
+
+/** What the classification keeps of a NULL row. */
+interface NullFlagRow {
+  id: number;
+  documentId?: unknown;
+  linked: boolean;
 }
 
 /** Rows set per class in one run. */
@@ -94,7 +118,7 @@ interface BackfillCounts {
   all: number;
 }
 
-const isNullFlagRow = (row: unknown): row is NullFlagRow =>
+const isNullFlagRead = (row: unknown): row is NullFlagRead =>
   typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "number";
 
 async function setAudience(
@@ -141,28 +165,53 @@ async function restrictedDocuments(query: BackfillQuery, documentIds: string[]):
   return restricted;
 }
 
+/**
+ * Every row whose flag is NULL, with whether it links a department. Read
+ * in pages of POLL_AUDIENCE_BACKFILL_CHUNK rows by an id cursor, so the
+ * department populate binds one page of row ids, not all of them.
+ */
+async function readNullFlagRows(query: BackfillQuery): Promise<NullFlagRow[]> {
+  const rows: NullFlagRow[] = [];
+  let afterId = 0;
+  for (;;) {
+    const page = await query.findMany({
+      where: { audience: { $null: true }, id: { $gt: afterId } },
+      select: ["id", "documentId"],
+      orderBy: { id: "asc" },
+      limit: POLL_AUDIENCE_BACKFILL_CHUNK,
+      populate: { departments: { select: ["id"] } },
+    });
+    let lastId = afterId;
+    for (const row of page) {
+      if (!isNullFlagRead(row)) continue;
+      rows.push({ id: row.id, documentId: row.documentId, linked: (row.departments ?? []).length > 0 });
+      lastId = Math.max(lastId, row.id);
+    }
+    if (page.length < POLL_AUDIENCE_BACKFILL_CHUNK) return rows;
+    // A full page that does not move the cursor would repeat forever.
+    if (lastId <= afterId) {
+      throw new Error(`the read of poll rows without the flag did not advance past id ${afterId}`);
+    }
+    afterId = lastId;
+  }
+}
+
 /** Classifies every NULL row and writes the flags (inside the transaction). */
 async function classifyAndUpdate(query: BackfillQuery): Promise<BackfillCounts | null> {
-  const rows = (
-    await query.findMany({
-      where: { audience: { $null: true } },
-      select: ["id", "documentId"],
-      populate: { departments: { select: ["id"] } },
-    })
-  ).filter(isNullFlagRow);
+  // Every page first: nothing is looked up or written before the last one.
+  const rows = await readNullFlagRows(query);
   if (rows.length === 0) return null;
 
-  const hasLinks = (row: NullFlagRow) => (row.departments ?? []).length > 0;
   const unlinkedDocumentIds = [
-    ...new Set(rows.filter((row) => !hasLinks(row)).map((row) => row.documentId).filter(isDocumentId)),
+    ...new Set(rows.filter((row) => !row.linked).map((row) => row.documentId).filter(isDocumentId)),
   ];
   const restricted = await restrictedDocuments(query, unlinkedDocumentIds);
   const bySibling = (row: NullFlagRow) =>
-    !hasLinks(row) && isDocumentId(row.documentId) && restricted.has(row.documentId);
+    !row.linked && isDocumentId(row.documentId) && restricted.has(row.documentId);
 
-  const linked = rows.filter(hasLinks).map((row) => row.id);
+  const linked = rows.filter((row) => row.linked).map((row) => row.id);
   const siblingRestricted = rows.filter(bySibling).map((row) => row.id);
-  const companyWide = rows.filter((row) => !hasLinks(row) && !bySibling(row)).map((row) => row.id);
+  const companyWide = rows.filter((row) => !row.linked && !bySibling(row)).map((row) => row.id);
 
   return {
     departments: await setAudience(query, linked, POLL_AUDIENCE_DEPARTMENTS),
