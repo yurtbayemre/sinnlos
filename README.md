@@ -341,12 +341,14 @@ so publishing it still drops them. The runbook lists both kinds up front:
   change applies on the next request; votes already cast stay counted.
 - A poll is restricted when its **Audience** field (`all` | `departments`)
   is `departments` **or** it has departments. The web form sets Audience
-  itself. **In the Strapi admin panel, set Audience = `departments` when
-  you select departments**: only the flag keeps a poll restricted after
-  all its departments are deleted (then only admins and editors see it,
-  and the card asks to re-select departments). With Audience `all` it would
-  become company-wide. To open a restricted poll to everyone, remove its
-  departments and set Audience to `all`.
+  itself; in the Strapi admin panel, set Audience = `departments` when you
+  select departments. Only the flag keeps a poll restricted after all its
+  departments are deleted (then only admins and editors see it, and the
+  card asks to re-select departments), so deleting a department also sets
+  Audience = `departments` on every poll that has it
+  (`api/department/content-types/department/lifecycles.ts`). To open a
+  restricted poll to everyone, remove its departments and set Audience to
+  `all`.
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail) and the custom `vote`/`results` actions, all through
   `apps/cms/src/utils/poll-audience.ts`. Departments are compared by

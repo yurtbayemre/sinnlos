@@ -805,6 +805,11 @@ What the release changes:
   visible to admins and editors only, and its card says "The target
   department no longer exists – nobody can vote. Re-select departments and
   republish."
+- **Deleting a department sets Audience = `departments`** on every poll
+  that has it (both rows), before the delete removes the department from
+  those polls. A poll created in the admin panel with departments but
+  Audience left at `all` therefore stays restricted too, instead of
+  becoming company-wide.
 - **The first boot sets Audience on every existing poll row:**
   `departments` where the row has departments, `all` otherwise. Both rows
   of a poll are set, the published one (what readers get) and the draft
@@ -987,13 +992,15 @@ the admin panel shows them as **Published**, not **Modified**.
 
 **Authoring in the Strapi admin panel.** When you select departments for a
 poll in the admin panel, also set **Audience** to `departments`. The poll is
-restricted either way, but only Audience = `departments` keeps it
-restricted should all its departments be deleted later; with Audience
-`all` it would then become company-wide. To make a restricted poll
-company-wide, remove its departments **and** set Audience to `all`, then
-publish: removing only the departments leaves it visible to admins and
-editors alone (the card says so). Departments can no longer be unpublished
-(2026-09-26), only deleted; deleting one removes it from every poll.
+restricted either way, and deleting a department sets Audience to
+`departments` on every poll that has it, so it stays restricted once all
+its departments are gone; setting it yourself keeps the form honest. To
+make a restricted poll company-wide, remove its departments **and** set
+Audience to `all`, then publish: removing only the departments leaves it
+visible to admins and editors alone (the card says so). Departments can
+no longer be unpublished (2026-09-26), only deleted; deleting one removes
+it from every poll, and when that changed a poll's Audience the cms logs
+`[poll-audience] department delete: set the audience of N poll row(s) to 'departments', …`.
 
 **What users and editors notice** (worth a short release note):
 
@@ -1026,6 +1033,9 @@ forward again:
   forward adds it again;
 - a poll created on the previous cms gets no Audience; the next boot of
   this release sets it (step 8's log line);
+- the previous cms does not set Audience when a department is deleted:
+  delete departments only after rolling forward, or a poll that had only
+  that department and Audience `all` becomes company-wide;
 - a web-only rollback shows admins and editors vote buttons on polls of
   other departments (the vote fails with "Your vote couldn't be saved"),
   and its form creates polls without Audience (their departments still

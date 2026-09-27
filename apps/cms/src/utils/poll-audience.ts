@@ -33,12 +33,14 @@ import { hasAudienceBypass } from "./announcement-audience";
  * (`ON DELETE CASCADE` on polls_departments_lnk, both poll rows), and since
  * decision 05 a department cannot be unpublished, only deleted.
  * Relation-only targeting would then turn a restricted poll into a
- * company-wide one. With the flag
- * the poll stays restricted, and with no department left nobody but
- * admin_role/editor sees it (the web card tells them to re-select
- * departments). A set relation restricts even when the flag says "all"
- * (e.g. an editor picked departments in the admin panel and left the flag
- * at its default), and any flag value other than null/"all" restricts too:
+ * company-wide one. With the flag the poll stays restricted, and with no
+ * department left nobody but admin_role/editor sees it (the web card tells
+ * them to re-select departments). Deleting a department therefore first
+ * sets the flag on every poll row that links it (department lifecycles,
+ * poll-department-delete.ts), also on a poll whose flag was left at "all".
+ * A set relation restricts even when the flag says "all" (e.g. an editor
+ * picked departments in the admin panel and left the flag at its default),
+ * and any flag value other than null/"all" restricts too:
  * only the absence of both means company-wide. NULL is a row from before
  * the flag existed and counts as "all" (the boot backfill,
  * poll-audience-backfill.ts, sets it from the links).
