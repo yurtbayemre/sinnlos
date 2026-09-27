@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { pollClosesAtForDay } from "@/lib/poll-close";
+import { normalizeGuestAccess } from "@/lib/poll-guest-access";
 import { canCreatePolls } from "@/lib/roles";
 import { strapi } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
@@ -19,6 +20,10 @@ export type CreatePollInput = {
   anonymous: boolean;
   /** Numeric ids of the departments to restrict the poll to; empty = everyone. */
   departmentIds: number[];
+  /** Guests see the poll (owner decision 2026-09-27); missing = hidden. */
+  visibleToGuests?: boolean;
+  /** Guests may vote; only together with visibleToGuests. */
+  guestsCanVote?: boolean;
 };
 
 export type CreatePollResult = { ok: true } | { ok: false; code: CreatePollErrorCode };
@@ -53,6 +58,11 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
     ...new Set(input.departmentIds.filter((id) => Number.isInteger(id) && id > 0)),
   ];
 
+  // Guest access (owner decision 2026-09-27): always sent, as strict
+  // booleans, hidden unless the author ticked it; guest voting only with
+  // visibility. The CMS decides per guest from these two fields.
+  const { visibleToGuests, guestsCanVote } = normalizeGuestAccess(input);
+
   try {
     // Polls use draftAndPublish — without status=published the REST create
     // lands as an invisible draft.
@@ -66,6 +76,8 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
           anonymous: input.anonymous,
           audience: departmentIds.length > 0 ? "departments" : "all",
           departments: departmentIds,
+          visibleToGuests,
+          guestsCanVote,
         },
       }),
     });

@@ -108,4 +108,26 @@ describe("PollForm", () => {
     expect(html).toContain(en.polls.formDepartmentsHint);
     expect(html).not.toContain(en.polls.departmentsUnavailable);
   });
+
+  /** The <input> tag with the given id. */
+  const inputById = (html: string, id: string) => html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] ?? "";
+  const isChecked = (tag: string) => /\schecked=""/.test(tag);
+
+  it("offers both guest switches unchecked, the vote switch disabled until the poll is visible to guests", () => {
+    for (const props of [{ departments }, { departments: [] }]) {
+      const html = render(createElement(PollForm, props));
+      const visible = inputById(html, "poll-visible-to-guests");
+      const vote = inputById(html, "poll-guests-can-vote");
+      expect(visible).toContain('type="checkbox"');
+      expect(vote).toContain('type="checkbox"');
+      expect(isChecked(visible)).toBe(false);
+      expect(isChecked(vote)).toBe(false);
+      expect(isDisabled(visible)).toBe(false);
+      expect(isDisabled(vote)).toBe(true);
+      expect(html).toContain(en.polls.formGuestAccess);
+      expect(html).toContain(en.polls.formGuestAccessHint);
+      expect(html).toContain(en.polls.formVisibleToGuests);
+      expect(html).toContain(en.polls.formGuestsCanVote);
+    }
+  });
 });

@@ -6,6 +6,7 @@ import { Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { createPoll, type CreatePollErrorCode } from "@/lib/poll-actions";
+import { NO_GUEST_ACCESS, normalizeGuestAccess, type PollGuestAccess } from "@/lib/poll-guest-access";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
@@ -23,7 +24,12 @@ const MAX_OPTIONS = 10;
  * `departmentsUnavailable`: the department list could not be loaded. The
  * form then says so and refuses to submit, because the only poll it could
  * create would be company-wide, although the author may have meant to
- * restrict it (decision 02: fail closed). */
+ * restrict it (decision 02: fail closed).
+ *
+ * Guest access (owner decision 2026-09-27): "Visible to guests" and
+ * "Guests can vote" start unchecked (polls are hidden from guests by
+ * default); the vote switch is disabled until the poll is visible to guests
+ * and is cleared when visibility is switched off again. */
 export function PollForm({
   departments,
   departmentsUnavailable = false,
@@ -45,6 +51,7 @@ export function PollForm({
   const [closesAt, setClosesAt] = useState("");
   const [anonymous, setAnonymous] = useState(false);
   const [departmentIds, setDepartmentIds] = useState<number[]>([]);
+  const [guestAccess, setGuestAccess] = useState<PollGuestAccess>(NO_GUEST_ACCESS);
   const [error, setError] = useState<CreatePollErrorCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -57,6 +64,9 @@ export function PollForm({
   };
   const toggleDepartment = (id: number) =>
     setDepartmentIds((prev) => (prev.includes(id) ? prev.filter((d) => d !== id) : [...prev, id]));
+  // normalizeGuestAccess clears the vote switch whenever visibility is off.
+  const changeGuestAccess = (change: Partial<PollGuestAccess>) =>
+    setGuestAccess((prev) => normalizeGuestAccess({ ...prev, ...change }));
 
   const today = new Date().toISOString().slice(0, 10);
 
@@ -71,6 +81,7 @@ export function PollForm({
         closesAt,
         anonymous,
         departmentIds,
+        ...guestAccess,
       });
       if (result.ok) {
         router.push("/polls");
@@ -200,6 +211,39 @@ export function PollForm({
           </div>
         </fieldset>
       )}
+
+      <fieldset className="space-y-2" aria-describedby="poll-guest-access-hint">
+        <legend className="text-sm font-medium">{t("formGuestAccess")}</legend>
+        <p id="poll-guest-access-hint" className="text-xs text-muted-foreground">
+          {t("formGuestAccessHint")}
+        </p>
+        <label className="flex items-center gap-2.5">
+          <input
+            id="poll-visible-to-guests"
+            type="checkbox"
+            checked={guestAccess.visibleToGuests}
+            onChange={(e) => changeGuestAccess({ visibleToGuests: e.target.checked })}
+            className="h-4 w-4 rounded border accent-primary"
+          />
+          <span className="text-sm">{t("formVisibleToGuests")}</span>
+        </label>
+        <label
+          className={cn(
+            "flex items-center gap-2.5",
+            !guestAccess.visibleToGuests && "text-muted-foreground opacity-60",
+          )}
+        >
+          <input
+            id="poll-guests-can-vote"
+            type="checkbox"
+            checked={guestAccess.guestsCanVote}
+            disabled={!guestAccess.visibleToGuests}
+            onChange={(e) => changeGuestAccess({ guestsCanVote: e.target.checked })}
+            className="h-4 w-4 rounded border accent-primary disabled:cursor-not-allowed"
+          />
+          <span className="text-sm">{t("formGuestsCanVote")}</span>
+        </label>
+      </fieldset>
 
       {error && (
         <p role="alert" className="text-sm text-destructive">
