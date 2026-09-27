@@ -314,6 +314,9 @@ const polls: AnyEntry[] = [
     author: users.maria,
     audience: "all",
     departments: [],
+    // Guest access (owner decision 2026-09-27): opened to guests, with voting.
+    visibleToGuests: true,
+    guestsCanVote: true,
     createdAt: iso(-2),
   },
   {
@@ -328,6 +331,9 @@ const polls: AnyEntry[] = [
     departments: [
       { id: 1, documentId: "demo-department-1", name: "Engineering", slug: "engineering" },
     ],
+    // Hidden from guests (the default).
+    visibleToGuests: false,
+    guestsCanVote: false,
     createdAt: iso(-9),
   },
 ];
@@ -340,6 +346,8 @@ const pollResults: Record<number, unknown> = {
       options: polls[0].options,
       closesAt: polls[0].closesAt,
       anonymous: false,
+      visibleToGuests: true,
+      guestsCanVote: true,
     },
     counts: [9, 6, 4],
     total: 19,
@@ -354,6 +362,8 @@ const pollResults: Record<number, unknown> = {
       options: polls[1].options,
       closesAt: polls[1].closesAt,
       anonymous: true,
+      visibleToGuests: false,
+      guestsCanVote: false,
     },
     counts: [14, 5, 1],
     total: 20,

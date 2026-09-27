@@ -382,9 +382,13 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   ],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
-  // Every role, guest included (decision 02: a company-wide poll is open to
-  // every signed-in user). Which polls a caller may vote on is decided per
-  // poll in the controller (department targeting, utils/poll-audience.ts).
+  // Every role, guest included: guests need both for the polls opened to
+  // them. Which polls a caller may see and vote on is decided per poll by
+  // utils/poll-audience.ts (canSeePoll/canVoteOnPoll: department targeting,
+  // and for guests visibleToGuests/guestsCanVote, owner decision
+  // 2026-09-27). A cms from before guest access ignores those switches and
+  // never removes the guest vote row: a rollback removes it first
+  // (docs/DEPLOYMENT.md, "Upgrading to poll department targeting", Rollback).
   "api::poll-vote.poll-vote.vote": "*",
   "api::poll-vote.poll-vote.results": "*",
   // Aggregated search analytics (issue #19) — /manage/analytics is

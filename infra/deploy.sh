@@ -188,9 +188,16 @@ jwt_rotation_missing() {
 # Strapi's bookkeeping tables do not count (the cms guard converts them).
 # Prints the number of naive timestamp columns of the running database's
 # app tables (bookkeeping excluded), or nothing when there is no db
-# container to ask.
+# container to ask or the query gave up (after 5 s waiting for a lock, 10 s
+# in all). Arguments run in front of the docker call: the rollback hint
+# passes PROBE_TIMEOUT.
 naive_app_columns() {
-  docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+  # $POSTGRES_USER / $POSTGRES_DB expand in the db container's sh (shellcheck
+  # no longer sees the docker exec behind the "$@" prefix).
+  # shellcheck disable=SC2016
+  "$@" docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SET lock_timeout = '5s';
+SET statement_timeout = '10s';
 SELECT count(*) FROM information_schema.columns
  WHERE table_schema = 'public' AND data_type = 'timestamp without time zone'
    AND table_name NOT IN ('strapi_migrations', 'strapi_migrations_internal', 'strapi_database_schema');
@@ -205,6 +212,67 @@ datetime_repair_env_missing() {
   [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
 }
 
+# The rollback hint runs on a failed deploy and must print every line, also
+# with a hung docker daemon or a locked database: each of its docker calls
+# runs under this bound. `timeout` exits 124 at the deadline (137 after the
+# kill) and 127 when it is missing; the hint then treats what that call
+# would have told as unknown and prints the safe variant.
+PROBE_TIMEOUT=(timeout -k 5 15)
+
+# Whether a cms image knows poll guest access (its poll schema has
+# visibleToGuests): exit 0 yes, 1 no, anything else unknown (no such image
+# here, another layout, docker failed or timed out, no `timeout`). Never
+# pulls, no network.
+POLL_SCHEMA_IN_IMAGE="/app/apps/cms/src/api/poll/content-types/poll/schema.json"
+image_has_poll_guest_access() {
+  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
+    -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
+}
+
+# Poll guest access: the first boot of that release grants the guest role
+# api::poll-vote.poll-vote.vote. A cms from before it (on the owner
+# instance the :rollback image of that deploy) ignores the per-poll guest
+# switches and the department targeting and never removes that row, so
+# there every guest can vote on every open poll. What the database holds
+# at the time decides nothing: a new cms that missed compose's health
+# deadline before its bootstrap granted the row keeps starting (or
+# restarts) and grants it afterwards. So every rollback to such a cms, or to one that cannot be
+# checked, stops the cms, removes the row, retags, starts, and removes it
+# again (docs/DEPLOYMENT.md, "Upgrading to poll department targeting",
+# Rollback). Only a :rollback cms that knows guest access goes without:
+# the row is then its own grant.
+REVOKE_GUEST_VOTE_PSQL='psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+
+# Before the retag commands: stop the cms, then remove the row. $1 is the
+# exit code of image_has_poll_guest_access for the :rollback cms (not 0).
+print_guest_vote_revoke_hint() {
+  local image="${PROJECT}-cms:rollback"
+  if [[ "$1" == "1" ]]; then
+    echo "       FIRST, before the retag: ${image} predates poll guest access." >&2
+  else
+    echo "       FIRST, before the retag, unless ${image} knows poll guest access (it could not be" >&2
+    echo "       checked here: skip the removal and its rerun below only if this prints 1 or more):" >&2
+    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c visibleToGuests ${POLL_SCHEMA_IN_IMAGE}" >&2
+  fi
+  echo "       A cms from before poll guest access ignores the guest switches and the department targeting" >&2
+  echo "       of polls and never removes the guest poll-vote permission this release grants: while it" >&2
+  echo "       exists, every guest can vote on every open poll there. Stop the cms, then remove the" >&2
+  echo "       permission, also when the database or the admin panel shows none (a new cms that is" >&2
+  echo "       still starting or restarting grants it afterwards):" >&2
+  echo "                      ${COMPOSE[*]} stop cms" >&2
+  echo "                      ${COMPOSE[*]} exec -T db sh -c '${REVOKE_GUEST_VOTE_PSQL}' < ${SCRIPT_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
+}
+
+# After the start commands: the same removal once more, which must find
+# nothing.
+print_guest_vote_recheck_hint() {
+  echo "       THEN, once the previous cms is up, run the removal again. It must remove nothing" >&2
+  echo "       (guest_links_removed 0, permission_rows_removed 0); anything else means a new cms had" >&2
+  echo "       granted the permission again in between, and the rerun removed it:" >&2
+  echo "                      ${COMPOSE[*]} exec -T db sh -c '${REVOKE_GUEST_VOTE_PSQL}' < ${SCRIPT_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
+  echo "       (docs/DEPLOYMENT.md, \"Upgrading to poll department targeting\", Rollback)." >&2
+}
+
 # The rollback commands for a failed deploy. While the datetime repair has
 # not run (naive app columns left), the previous cms image predates the
 # datetime contract and must run in its old zone, never in the UTC this
@@ -212,16 +280,28 @@ datetime_repair_env_missing() {
 # A cms image from before the ICS and cms start fixes starts with
 # `pnpm start` and downloads pnpm at every start. Its Cmd tells, not its
 # build date: the :rollback image of this release's first deploy was built
-# on the same day as the fix.
+# on the same day as the fix. A :rollback cms from before poll guest access,
+# or one that cannot be checked, gets the guest vote row removed before the
+# retag and once more after the start (print_guest_vote_revoke_hint).
+# Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
+# prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
-  local rollback=("${COMPOSE[@]}") naive cms_cmd
-  naive="$(naive_app_columns || true)"
-  cms_cmd="$(docker image inspect -f '{{json .Config.Cmd}}' "${PROJECT}-cms:rollback" 2>/dev/null || true)"
+  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0
+  naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
+  cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${PROJECT}-cms:rollback" 2>/dev/null || true)"
+  image_has_poll_guest_access "${PROJECT}-cms:rollback" || guest_access=$?
+  if [[ "${guest_access}" != "0" ]]; then
+    print_guest_vote_revoke_hint "${guest_access}"
+  fi
   echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
   if [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]; then
     rollback+=(-f "${COMPOSE_LEGACY_TZ}")
     echo "       (the datetime repair has NOT run: the previous cms must run in DATETIME_LEGACY_ZONE," >&2
     echo "       hence the extra override file)" >&2
+  elif ! [[ "${naive}" =~ ^[0-9]+$ ]]; then
+    echo "       (the database could not be asked whether the datetime repair has run; if it has not, the" >&2
+    echo "       previous cms must run in DATETIME_LEGACY_ZONE: add -f ${COMPOSE_LEGACY_TZ} before up," >&2
+    echo "       docs/DEPLOYMENT.md, \"Rolling back this release\")" >&2
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
@@ -238,6 +318,9 @@ print_rollback_hint() {
     echo "                      docker image inspect -f '{{json .Config.Cmd}}' ${PROJECT}-cms:rollback" >&2
     echo "       Without registry access, start it directly (docs/DEPLOYMENT.md, \"Upgrading to the ICS" >&2
     echo "       and cms start fixes (2026-09-27)\", Rollback)." >&2
+  fi
+  if [[ "${guest_access}" != "0" ]]; then
+    print_guest_vote_recheck_hint
   fi
   echo "       A re-run of this script tags whatever runs then as :rollback; see docs/DEPLOYMENT.md." >&2
 }

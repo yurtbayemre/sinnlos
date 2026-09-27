@@ -45,6 +45,10 @@ export interface PublishedPoll extends PollTargeting {
   anonymous: boolean | null;
   audience: string | null;
   departments: PollDepartment[];
+  /** Strictly true only when the column is true (NULL/false = hidden from guests). */
+  visibleToGuests: boolean;
+  /** Strictly true only when the column is true (see poll-audience.ts). */
+  guestsCanVote: boolean;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -102,7 +106,17 @@ export async function loadPublishedPoll(
   if (id === null) return null;
   const row = await strapi.db.query(POLL_UID).findOne({
     where: { id, publishedAt: { $notNull: true } },
-    select: ["id", "documentId", "question", "options", "closesAt", "anonymous", "audience"],
+    select: [
+      "id",
+      "documentId",
+      "question",
+      "options",
+      "closesAt",
+      "anonymous",
+      "audience",
+      "visibleToGuests",
+      "guestsCanVote",
+    ],
     populate: { departments: { select: ["documentId", "name"] } },
   });
   if (!isRecord(row) || typeof row.id !== "number") return null;
@@ -120,5 +134,9 @@ export async function loadPublishedPoll(
           name: typeof department.name === "string" ? department.name : null,
         }))
       : [],
+    // @strapi/database reads booleans as true/false on every client
+    // (fields/boolean.js fromDB); anything else, NULL included, is "no".
+    visibleToGuests: row.visibleToGuests === true,
+    guestsCanVote: row.guestsCanVote === true,
   };
 }

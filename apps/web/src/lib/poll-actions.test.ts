@@ -6,6 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * positive integer department ids reach the CMS, a role that may not
  * create polls is turned away before any write, and the action no longer
  * refreshes or tags a cache (D-DC01; the form navigates to /polls itself).
+ * Guest access (owner decision 2026-09-27): `visibleToGuests` and
+ * `guestsCanVote` are always sent as strict booleans, hidden by default,
+ * guest voting only together with visibility.
  *
  * `@/lib/strapi`, `@/lib/viewer` and `next/cache` are mocked: only the
  * request the action builds matters here.
@@ -83,7 +86,37 @@ describe("createPoll", () => {
       anonymous: true,
       audience: "all",
       departments: [],
+      visibleToGuests: false,
+      guestsCanVote: false,
     });
+  });
+
+  it("sends the poll hidden from guests unless the author opened it", async () => {
+    await createPoll(input([]));
+    expect(sentData()).toMatchObject({ visibleToGuests: false, guestsCanVote: false });
+  });
+
+  it("sends both guest switches as given when the poll is visible to guests", async () => {
+    await createPoll({ ...input([3]), visibleToGuests: true, guestsCanVote: false });
+    expect(sentData()).toMatchObject({ visibleToGuests: true, guestsCanVote: false });
+    strapiMock.mockClear();
+    await createPoll({ ...input([3]), visibleToGuests: true, guestsCanVote: true });
+    expect(sentData()).toMatchObject({ visibleToGuests: true, guestsCanVote: true });
+  });
+
+  it("forces guest voting off when the poll is not visible to guests", async () => {
+    await createPoll({ ...input([]), visibleToGuests: false, guestsCanVote: true });
+    expect(sentData()).toMatchObject({ visibleToGuests: false, guestsCanVote: false });
+  });
+
+  it("sends strict booleans only, whatever a crafted call passes", async () => {
+    const crafted = { ...input([]), visibleToGuests: "true", guestsCanVote: 1 } as unknown as Parameters<
+      typeof createPoll
+    >[0];
+    await createPoll(crafted);
+    const data = sentData();
+    expect(data.visibleToGuests).toBe(false);
+    expect(data.guestsCanVote).toBe(false);
   });
 
   it("turns a role that may not create polls away before any write", async () => {
