@@ -340,22 +340,28 @@ so publishing it still drops them. The runbook lists both kinds up front:
   user without a department sees company-wide polls only. A department
   change applies on the next request; votes already cast stay counted.
 - A poll is restricted when its **Audience** field (`all` | `departments`)
-  is `departments` **or** it has departments. The web form sets Audience
-  itself; in the Strapi admin panel, set Audience = `departments` when you
-  select departments. Only the flag keeps a poll restricted after all its
-  departments are deleted (then only admins and editors see it, and the
-  card asks to re-select departments), so deleting a department also sets
-  Audience = `departments` on every poll that has it
-  (`api/department/content-types/department/lifecycles.ts`). To open a
-  restricted poll to everyone, remove its departments and set Audience to
-  `all`.
+  is `departments` **or** it has departments. Only the flag keeps a poll
+  restricted after all its departments are deleted (then only admins and
+  editors see it, and the card asks to re-select departments), so the cms
+  sets it itself: every save of a poll that leaves departments selected
+  (admin panel, content API and web form alike, draft and published row,
+  in the same transaction) sets Audience = `departments`
+  (`apps/cms/src/utils/poll-audience-guard.ts`), and deleting a department
+  sets it on every poll that still has the department
+  (`api/department/content-types/department/lifecycles.ts`, for rows
+  written outside the cms, e.g. by a previous release during a rollback).
+  To open a restricted poll to everyone, remove its departments **and** set
+  Audience to `all`; Audience `all` with departments still selected is
+  saved as `departments`.
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail) and the custom `vote`/`results` actions, all through
   `apps/cms/src/utils/poll-audience.ts`. Departments are compared by
   documentId. `results` also tells the web whether the caller may vote
   (`canVote`) and which departments a poll targets.
 - Existing polls get their Audience on the first boot of this release
-  (`[poll-audience] set the audience of N existing poll row(s) …`):
+  (`[poll-audience] set the audience of N existing poll row(s) …`), in one
+  transaction: if it fails, nothing is changed and the cms does not start
+  (a poll row without the flag could leave a restricted poll open):
   [Upgrading to poll department targeting](./docs/DEPLOYMENT.md#upgrading-to-poll-department-targeting).
 
 The users-permissions **User** is extended with `department`, `teams`,

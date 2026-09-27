@@ -730,7 +730,8 @@ systemctl start docker
 > together, as `infra/deploy.sh` does). Run the read-only checks of
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > first: they list the polls that become restricted and the users who have
-> no department.
+> no department. If the first boot cannot set Audience on the existing
+> polls, the new cms does not start and `deploy.sh` stops (step 8 there).
 >
 > **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
 > an instance that runs the datetime release: no env change, no migration.
@@ -822,22 +823,29 @@ What the release changes:
   company-wide polls and on polls of their own department. On a poll of
   another department their card shows the results with the buttons
   disabled and "Only members of these departments can vote."
-- **New poll field Audience** (`all` | `departments`). The web form sets
-  it (`departments` when departments are chosen). A poll is restricted when
-  Audience is `departments` **or** it has departments. Audience keeps a
-  poll restricted when its departments are deleted later: it is then
-  visible to admins and editors only, and its card says "The target
-  department no longer exists – nobody can vote. Re-select departments and
-  republish."
+- **New poll field Audience** (`all` | `departments`). A poll is
+  restricted when Audience is `departments` **or** it has departments.
+  Audience keeps a poll restricted when its departments are deleted later:
+  it is then visible to admins and editors only, and its card says "The
+  target department no longer exists – nobody can vote. Re-select
+  departments and republish."
+- **Saving a poll with departments sets Audience = `departments`**, on
+  both rows and in the same transaction as the save, whoever saves it
+  (admin panel, API, web form), also when the admin panel form still says
+  `all`. A poll created in the admin panel with departments but Audience
+  left at `all` therefore stays restricted when its departments are
+  deleted, instead of becoming company-wide.
 - **Deleting a department sets Audience = `departments`** on every poll
-  that has it (both rows), before the delete removes the department from
-  those polls. A poll created in the admin panel with departments but
-  Audience left at `all` therefore stays restricted too, instead of
-  becoming company-wide.
+  that still has it (both rows), before the delete removes the department
+  from those polls. After the point above this matters only for polls
+  written outside this cms, e.g. by the previous release during a
+  rollback.
 - **The first boot sets Audience on every existing poll row:**
   `departments` where the row has departments, `all` otherwise. Both rows
   of a poll are set, the published one (what readers get) and the draft
-  (what the admin panel edits), each by its own departments.
+  (what the admin panel edits), each by its own departments. It runs in
+  one transaction: if anything fails, nothing is changed and the cms does
+  not start (step 8).
 - **Guests get the poll vote permission** (one new permission row).
 - The poll form says "Restrict to departments (optional)" and explains the
   effect; it refuses to create a poll while the department list cannot be
@@ -977,10 +985,21 @@ the admin panel shows them as **Published**, not **Modified**.
    ```
 
    The row count is about twice the number of polls (draft and published
-   row); `to 'departments'` counts the rows of the polls from step 2. A
-   `[poll-audience] could not backfill the audience of existing polls (…)`
-   warning does not stop the cms: polls with departments stay restricted
-   by their departments, and `"${COMPOSE[@]}" restart cms` retries.
+   row); `to 'departments'` counts the rows of the polls from step 2.
+
+   **If the first boot cannot set Audience**, the cms logs
+   `[poll-audience] could not backfill the audience of existing polls (<reason>); nothing was changed (the transaction rolled back), and the cms does not start, …`
+   and exits. That is deliberate: the whole backfill is one transaction,
+   and a half-done one could leave a restricted poll open while the cms
+   serves requests. `infra/deploy.sh` then stops at `up -d` (the new cms
+   never becomes healthy, so the new web never starts; the site is down)
+   and prints the rollback commands. The backfill wrote nothing; the new
+   `audience` column and the guest vote permission (granted earlier in the
+   same boot) stay. Either fix the cause the log names (e.g. a lock another
+   session holds on `polls`) and start again with `"${COMPOSE[@]}" up -d`
+   (compose also restarts the cms on its own; every start retries the
+   whole backfill), or roll back with the printed commands (**Rollback**
+   below).
 9. **Read-only: every poll row has its Audience** (`without_audience` 0):
 
    ```bash
@@ -1020,16 +1039,17 @@ the admin panel shows them as **Published**, not **Modified**.
     - `/polls/new` (admin or editor) shows "Restrict to departments
       (optional)" and creates a poll restricted to the chosen departments.
 
-**Authoring in the Strapi admin panel.** When you select departments for a
-poll in the admin panel, also set **Audience** to `departments`. The poll is
-restricted either way, and deleting a department sets Audience to
-`departments` on every poll that has it, so it stays restricted once all
-its departments are gone; setting it yourself keeps the form honest. To
-make a restricted poll company-wide, remove its departments **and** set
-Audience to `all`, then publish: removing only the departments leaves it
-visible to admins and editors alone (the card says so). Departments can
-no longer be unpublished (2026-09-26), only deleted; deleting one removes
-it from every poll, and when that changed a poll's Audience the cms logs
+**Authoring in the Strapi admin panel.** When a poll keeps departments
+selected, the cms saves its **Audience** as `departments`, whatever the
+form says (after the save the form shows `departments`), and logs
+`[poll-audience] poll <action>: set the audience of N poll row(s) to 'departments' (they link a department)`
+when that changed the flag. To make a restricted poll company-wide, remove
+its departments **and** set Audience to `all`, then publish: removing only
+the departments leaves it visible to admins and editors alone (the card
+says so), and Audience `all` with departments still selected is saved as
+`departments`. Departments can no longer be unpublished (2026-09-26), only
+deleted; deleting one removes it from every poll, and when that changed a
+poll's Audience the cms logs
 `[poll-audience] department delete: set the audience of N poll row(s) to 'departments', …`.
 
 **What users and editors notice** (worth a short release note):
@@ -1045,15 +1065,18 @@ it from every poll, and when that changed a poll's Audience the cms logs
 - If all target departments of a poll are deleted, the poll becomes
   visible to admins and editors only. Re-select departments and republish
   it.
-- In the Strapi admin panel, set Audience = `departments` when targeting a
-  poll.
+- In the Strapi admin panel, a poll with departments is saved with
+  Audience = `departments`; to open it to everyone, remove the departments
+  and set Audience to `all`.
 - The poll form's department picker is now called "Restrict to departments
   (optional)" and explains who sees the poll.
 
 **Rollback.** The previous images run on the upgraded database without a
 restore (verified on Postgres 16): the previous cms ignores the
-`audience` column, and `forceMigration: false` keeps it. Until you roll
-forward again:
+`audience` column, and `forceMigration: false` keeps it. **Before** you
+retag, save the list of restricted polls
+([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)).
+Until you roll forward again:
 
 - targeting is not enforced: every signed-in user sees every poll again;
 - guests keep the vote permission this release added (the previous cms
@@ -1071,14 +1094,23 @@ forward again:
   restricted)`). A poll you opened to everyone on the previous cms by
   removing its departments therefore stays restricted after rolling
   forward: set its Audience to `all` and publish it again;
+- **a restricted poll can come back company-wide.** When **both** rows of
+  a poll lose Audience on the previous cms (it is published there **and**
+  its changes are discarded), nothing is left that says it was
+  restricted. For a poll restricted by Audience alone
+  (all its departments deleted) rolling forward then sets `all` on both
+  rows, and everyone sees it. The previous cms enforces no targeting at
+  all, so this is a limit of the rollback window, not something the roll
+  forward can repair; the check below finds such polls;
 - the previous cms does not set Audience when a department is deleted:
-  delete departments only after rolling forward, or a poll that had only
-  that department and Audience `all` becomes company-wide;
+  delete departments only after rolling forward, or a poll saved on the
+  previous cms (it has no Audience) whose only department that was
+  becomes company-wide;
 - a web-only rollback shows admins and editors vote buttons on polls of
   other departments (the vote fails with "Your vote couldn't be saved"),
   and its form creates polls with Audience `all` (the new cms applies the
-  default; their departments still restrict them, and deleting a
-  department sets Audience = `departments` on them).
+  default; their departments still restrict them, and the new cms saves
+  them with Audience = `departments`).
 
 **Rolling back both** (deployed together with the ICS and cms start
 fixes): the `:rollback` images are from before both. Roll back web and cms
@@ -1091,6 +1123,61 @@ list above applies as well.
 
 **Local dev (SQLite):** the next `pnpm cms:dev` adds the column and sets
 Audience the same way; a new demo seed writes Audience `all`.
+
+##### Checking targeted polls after rolling forward
+
+Re-check the targeted polls after every roll forward from a rollback. Save
+the list of restricted polls **before** you roll back (read-only; with
+`COMPOSE` and `psql_db` from above):
+
+```bash
+psql_db -At <<'SQL' > restricted-polls-before-rollback.txt
+SELECT q.document_id, min(q.question) AS poll
+FROM polls q
+WHERE (q.audience IS NOT NULL AND q.audience <> 'all')
+   OR EXISTS (SELECT 1 FROM polls_departments_lnk l WHERE l.poll_id = q.id)
+GROUP BY q.document_id
+ORDER BY 1;
+SQL
+```
+
+After rolling forward (the first boot has logged step 8's line), run the
+same query into `restricted-polls-after-roll-forward.txt`, then list the
+polls restricted before and not now:
+
+```bash
+comm -23 <(cut -d'|' -f1 restricted-polls-before-rollback.txt | sort) \
+         <(cut -d'|' -f1 restricted-polls-after-roll-forward.txt | sort)
+```
+
+and the published polls that are company-wide while their other row is
+restricted (read-only; this one needs no saved list):
+
+```bash
+psql_db <<'SQL'
+SELECT o.document_id, o.question AS poll
+FROM polls o
+WHERE o.published_at IS NOT NULL
+  AND coalesce(o.audience, 'all') = 'all'
+  AND NOT EXISTS (SELECT 1 FROM polls_departments_lnk l WHERE l.poll_id = o.id)
+  AND EXISTS (SELECT 1 FROM polls s
+              WHERE s.document_id = o.document_id AND s.id <> o.id
+                AND ((s.audience IS NOT NULL AND s.audience <> 'all')
+                     OR EXISTS (SELECT 1 FROM polls_departments_lnk l2 WHERE l2.poll_id = s.id)))
+ORDER BY o.question;
+SQL
+```
+
+Open each listed poll in the Content Manager (search for its question). If
+it is meant for its departments, select them again (Audience follows) and
+publish; if it was opened to everyone on purpose during the rollback,
+nothing is to do. The second query also lists a poll with a saved,
+unpublished change of departments (the draft is restricted, the published
+poll not yet): publishing it applies the draft. Without the saved list,
+only the second query is left, and a poll whose rows both lost Audience
+looks like any company-wide poll. (Rehearsed on Postgres 16 with both
+rows of a poll restricted by Audience alone cleared the way the previous
+cms leaves them: that poll was the one line of the first check.)
 
 #### Upgrading to the ICS and cms start fixes (2026-09-27)
 
@@ -3605,8 +3692,11 @@ roll forward, poll targeting is not enforced and guests keep the vote
 permission; the details, and how to take that permission away for the
 rollback window, are under **Rollback** in
 [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
+Save the list of restricted polls before you retag
+([Checking targeted polls after rolling forward](#checking-targeted-polls-after-rolling-forward)),
+and run the checks there after rolling forward.
 Deployed together with the ICS and cms start fixes, `:rollback` holds the
-images from before both (the 2026-09-27 release): roll back web and cms
+images from before both (the datetime and draft-twin release of 2026-09-27): roll back web and cms
 together, as the commands above do, and mind the `["pnpm","start"]` note
 above: that cms image downloads pnpm at every start.
 
