@@ -30,7 +30,10 @@ import {
  *      with a real (GUID) client id, and is fatal,
  *   5. the rollback hint of a failed deploy tells a cms image that still
  *      starts with pnpm by its Cmd and prints a working direct start (runs
- *      the real function with docker stubbed where `bash` exists).
+ *      the real function with docker stubbed where `bash` exists),
+ *   6. for a :rollback cms from before poll guest access it prints, before
+ *      the retag, how to stop the cms and remove the guest vote permission
+ *      (infra/rollback/revoke-guest-poll-vote.sql), and nothing otherwise.
  *
  * Lives with the cms tests because it imports cms code
  * (tsconfig.test.json: no infra test imports cms code).
@@ -313,33 +316,59 @@ function runBash(script: string): { status: number | null; stdout: string; stder
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
 
+/** What the guest vote probes of the rollback hint see (poll guest access). */
+interface GuestVoteStub {
+  /** guest_poll_vote_grants output: the guest vote rows, "" = no db to ask. */
+  grants: string;
+  /** Exit code of the `docker run … grep visibleToGuests` image check. */
+  imageCheck: number;
+}
+
 /**
- * print_rollback_hint with docker and the naive-column probe stubbed:
+ * print_rollback_hint with docker and the database probes stubbed:
  * `cmd` is what `docker image inspect -f '{{json .Config.Cmd}}'` prints for
- * infra-cms:rollback, null when that image does not exist.
+ * infra-cms:rollback, null when that image does not exist. The real
+ * image_has_poll_guest_access runs against the docker stub, which prints
+ * its `docker run` arguments to stdout.
  */
-function rollbackHint(cmd: string | null, naive = "0"): string {
+function rollbackHintRun(
+  cmd: string | null,
+  naive = "0",
+  guest: GuestVoteStub = { grants: "0", imageCheck: 0 },
+): { stdout: string; stderr: string } {
   const script = [
     "set -euo pipefail",
     "PROJECT=infra",
+    "SCRIPT_DIR=/srv/infra",
     "COMPOSE=(docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml)",
     "COMPOSE_LEGACY_TZ=/srv/infra/docker-compose.cms-legacy-tz.yml",
+    `POLL_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("POLL_SCHEMA_IN_IMAGE"))}`,
     `STUB_CMD=${shellQuote(cmd ?? "")}`,
     `STUB_NAIVE=${shellQuote(naive)}`,
+    `STUB_GRANTS=${shellQuote(guest.grants)}`,
+    `STUB_IMAGE_CHECK=${guest.imageCheck}`,
     `naive_app_columns() { printf '%s\n' "\${STUB_NAIVE}"; }`,
+    `guest_poll_vote_grants() { printf '%s\n' "\${STUB_GRANTS}"; }`,
     "docker() {",
-    '  [[ "$1 $2" == "image inspect" ]] || return 0',
-    '  [[ -n "${STUB_CMD}" ]] || return 1',
-    "  printf '%s\n' \"${STUB_CMD}\"",
+    '  case "$1 ${2:-}" in',
+    '    "image inspect") [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
+    '    "run "*) printf \'docker %s\\n\' "$*"; return "${STUB_IMAGE_CHECK}" ;;',
+    "    *) return 0 ;;",
+    "  esac",
     "}",
+    shellFunction("image_has_poll_guest_access"),
+    shellFunction("print_guest_vote_revoke_hint"),
     shellFunction("print_rollback_hint"),
     "print_rollback_hint",
     "",
   ].join("\n");
   const res = runBash(script);
-  expect(res.status).toBe(0);
-  return res.stderr;
+  expect(res.status, res.stderr).toBe(0);
+  return { stdout: res.stdout, stderr: res.stderr };
 }
+
+const rollbackHint = (cmd: string | null, naive = "0", guest?: GuestVoteStub): string =>
+  rollbackHintRun(cmd, naive, guest).stderr;
 
 describe("rollback hint: cms images that start with pnpm", () => {
   const COMPOSE_LINE =
@@ -394,5 +423,108 @@ describe("rollback hint: cms images that start with pnpm", () => {
     expect(hint).toContain("docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback");
     expect(hint).toContain('(Cmd ["pnpm","start"])');
     expect(hint).not.toContain("cms-direct-start.yml up");
+  });
+});
+
+describe("rollback hint: the guest vote permission of poll guest access", () => {
+  const COMPOSE_LINE =
+    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+  const REVOKE_SQL = "infra/rollback/revoke-guest-poll-vote.sql";
+  const PSQL = 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"';
+  const REVOKE_LINE = `${COMPOSE_LINE} exec -T db sh -c '${PSQL}' < /srv/${REVOKE_SQL}`;
+  const IMAGE_CHECK =
+    "docker run --rm --pull never --network none --entrypoint grep infra-cms:rollback -q visibleToGuests /app/apps/cms/src/api/poll/content-types/poll/schema.json";
+
+  it("checks the in-image path of the poll schema that the cms Dockerfile ships", () => {
+    const path = shellAssignment("POLL_SCHEMA_IN_IMAGE");
+    expect(path).toBe("/app/apps/cms/src/api/poll/content-types/poll/schema.json");
+    // The runner stage copies the builder's /app, which holds apps/cms from the build context.
+    const dockerfile = read("apps", "cms", "Dockerfile");
+    expect(dockerfile).toContain("COPY apps/cms ./apps/cms");
+    expect(dockerfile).toContain("COPY --from=builder --chown=node:node /app /app");
+    expect(read(...path.replace(/^\/app\//, "").split("/"))).toContain('"visibleToGuests"');
+  });
+
+  it("revokes exactly the guest role's poll vote permission, in one transaction", () => {
+    const sql = read(...REVOKE_SQL.split("/"));
+    const statements = sql
+      .split("\n")
+      .filter((line) => !line.startsWith("--"))
+      .join("\n")
+      .split(";")
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter(Boolean);
+    expect(statements[0]).toBe("BEGIN");
+    expect(statements[statements.length - 1]).toBe("COMMIT");
+    const writes = statements.filter((s) => /^(DELETE|UPDATE|INSERT)\b/i.test(s));
+    expect(writes).toEqual([
+      "DELETE FROM up_permissions_role_lnk l USING up_permissions p, up_roles r WHERE l.permission_id = p.id AND l.role_id = r.id AND r.type = 'guest' AND p.action = 'api::poll-vote.poll-vote.vote'",
+      "DELETE FROM up_permissions p WHERE p.action = 'api::poll-vote.poll-vote.vote' AND NOT EXISTS (SELECT 1 FROM up_permissions_role_lnk l WHERE l.permission_id = p.id)",
+    ]);
+    // The action the cms grants every role, guest included, and the probe deploy.sh runs.
+    expect(read("apps", "cms", "src", "index.ts")).toContain('"api::poll-vote.poll-vote.vote": "*"');
+    expect(shellFunction("guest_poll_vote_grants")).toContain(
+      "WHERE r.type = 'guest' AND p.action = 'api::poll-vote.poll-vote.vote'",
+    );
+  });
+
+  it.skipIf(!HAS_BASH)("prints the removal BEFORE the retag for a :rollback cms from before guest access", () => {
+    const { stdout, stderr } = rollbackHintRun('["node_modules/.bin/strapi","start"]', "0", {
+      grants: "1",
+      imageCheck: 1,
+    });
+    expect(stdout).toContain(IMAGE_CHECK);
+    expect(stderr).toContain("FIRST, before the retag: infra-cms:rollback predates poll guest access.");
+    expect(stderr).toContain(`${COMPOSE_LINE} stop cms`);
+    expect(stderr).toContain(REVOKE_LINE);
+    expect(stderr).toContain("both DELETEs must report 0");
+    expect(stderr.indexOf("FIRST")).toBeLessThan(stderr.indexOf("To roll back:"));
+    expect(stderr.indexOf(`${COMPOSE_LINE} stop cms`)).toBeLessThan(stderr.indexOf("To roll back:"));
+    expect(stderr).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+  });
+
+  it.skipIf(!HAS_BASH)("prints it too when the database cannot be asked", () => {
+    const hint = rollbackHint('["node_modules/.bin/strapi","start"]', "0", { grants: "", imageCheck: 1 });
+    expect(hint).toContain(REVOKE_LINE);
+  });
+
+  it.skipIf(!HAS_BASH)("prints it with the image check when the :rollback image cannot be checked", () => {
+    const hint = rollbackHint(null, "0", { grants: "1", imageCheck: 125 });
+    expect(hint).toContain("if infra-cms:rollback predates poll guest access (this prints 0 then):");
+    expect(hint).toContain(IMAGE_CHECK.replace(" -q ", " -c "));
+    expect(hint).toContain(REVOKE_LINE);
+    expect(hint.indexOf("FIRST")).toBeLessThan(hint.indexOf("To roll back:"));
+  });
+
+  it.skipIf(!HAS_BASH)("says nothing when the database has no guest vote row", () => {
+    const { stdout, stderr } = rollbackHintRun('["node_modules/.bin/strapi","start"]', "0", {
+      grants: "0",
+      imageCheck: 1,
+    });
+    expect(stdout).not.toContain("docker run");
+    expect(stderr).not.toContain("FIRST");
+    expect(stderr).not.toContain(REVOKE_SQL);
+  });
+
+  it.skipIf(!HAS_BASH)("says nothing when the :rollback cms knows guest access (the row is its own grant)", () => {
+    const hint = rollbackHint('["node_modules/.bin/strapi","start"]', "0", { grants: "1", imageCheck: 0 });
+    expect(hint).not.toContain("FIRST");
+    expect(hint).not.toContain(REVOKE_SQL);
+    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+  });
+
+  it.skipIf(!HAS_BASH)("prints a removal command that the shell splits into the psql call of DEPLOYMENT", () => {
+    const hint = rollbackHint('["node_modules/.bin/strapi","start"]', "0", { grants: "1", imageCheck: 1 });
+    const line = hint
+      .split("\n")
+      .map((l) => l.trim())
+      .find((l) => l.includes(" exec -T db "));
+    expect(line).toBeDefined();
+    const redirect = ` < /srv/${REVOKE_SQL}`;
+    expect(line?.endsWith(redirect)).toBe(true);
+    // Run as printed (minus the redirect) with docker printing one argument per line.
+    const run = runBash(`docker() { printf '%s\n' "$@"; }\n${line?.slice(0, -redirect.length)}\n`);
+    expect(run.status).toBe(0);
+    expect(run.stdout.trimEnd().split("\n").slice(-4)).toEqual(["db", "sh", "-c", PSQL]);
   });
 });

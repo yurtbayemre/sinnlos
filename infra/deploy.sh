@@ -205,6 +205,59 @@ datetime_repair_env_missing() {
   [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]
 }
 
+# Poll guest access: the first boot of that release grants the guest role
+# api::poll-vote.poll-vote.vote. A cms from before it (on the owner
+# instance the :rollback image of that deploy) ignores the per-poll guest
+# switches and the department targeting and never removes that row, so
+# there every guest can vote on every open poll. Prints how many such rows
+# the running database has, or nothing when there is no db container to
+# ask.
+guest_poll_vote_grants() {
+  docker exec -i "${PROJECT}-db-1" sh -c 'psql -X -q -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' 2>/dev/null <<'SQL'
+SELECT count(*) FROM up_permissions p
+  JOIN up_permissions_role_lnk l ON l.permission_id = p.id
+  JOIN up_roles r ON r.id = l.role_id
+ WHERE r.type = 'guest' AND p.action = 'api::poll-vote.poll-vote.vote';
+SQL
+}
+
+# Whether a cms image knows poll guest access (its poll schema has
+# visibleToGuests): exit 0 yes, 1 no, anything else unknown (no such image
+# here, another layout, docker failed). Never pulls, no network.
+POLL_SCHEMA_IN_IMAGE="/app/apps/cms/src/api/poll/content-types/poll/schema.json"
+image_has_poll_guest_access() {
+  docker run --rm --pull never --network none --entrypoint grep "$1" \
+    -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
+}
+
+# Printed before the retag commands: a rollback to a cms from before poll
+# guest access removes the guest vote row first, with the cms stopped (each
+# start of the new cms grants it again), so the previous cms never serves a
+# request with it (docs/DEPLOYMENT.md, "Upgrading to poll department
+# targeting", Rollback). Nothing when the database has no such row or the
+# :rollback image knows guest access (the row is then its own grant).
+print_guest_vote_revoke_hint() {
+  local grants access image="${PROJECT}-cms:rollback"
+  local psql_cmd='psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+  grants="$(guest_poll_vote_grants || true)"
+  if [[ "${grants}" == "0" ]]; then return 0; fi
+  if image_has_poll_guest_access "${image}"; then return 0; else access=$?; fi
+  if [[ "${access}" == "1" ]]; then
+    echo "       FIRST, before the retag: ${image} predates poll guest access." >&2
+  else
+    echo "       FIRST, before the retag, if ${image} predates poll guest access (this prints 0 then):" >&2
+    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c visibleToGuests ${POLL_SCHEMA_IN_IMAGE}" >&2
+  fi
+  echo "       A cms from before poll guest access ignores the guest switches and the department targeting" >&2
+  echo "       of polls and never removes the guest poll-vote permission this release granted: while it" >&2
+  echo "       exists, every guest can vote on every open poll there. Stop the cms (each start of the new" >&2
+  echo "       cms grants it again) and remove the permission:" >&2
+  echo "                      ${COMPOSE[*]} stop cms" >&2
+  echo "                      ${COMPOSE[*]} exec -T db sh -c '${psql_cmd}' < ${SCRIPT_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
+  echo "       Run the removal again once the previous cms is up: both DELETEs must report 0" >&2
+  echo "       (docs/DEPLOYMENT.md, \"Upgrading to poll department targeting\", Rollback)." >&2
+}
+
 # The rollback commands for a failed deploy. While the datetime repair has
 # not run (naive app columns left), the previous cms image predates the
 # datetime contract and must run in its old zone, never in the UTC this
@@ -212,11 +265,13 @@ datetime_repair_env_missing() {
 # A cms image from before the ICS and cms start fixes starts with
 # `pnpm start` and downloads pnpm at every start. Its Cmd tells, not its
 # build date: the :rollback image of this release's first deploy was built
-# on the same day as the fix.
+# on the same day as the fix. A :rollback cms from before poll guest access
+# needs the guest vote row removed first (print_guest_vote_revoke_hint).
 print_rollback_hint() {
   local rollback=("${COMPOSE[@]}") naive cms_cmd
   naive="$(naive_app_columns || true)"
   cms_cmd="$(docker image inspect -f '{{json .Config.Cmd}}' "${PROJECT}-cms:rollback" 2>/dev/null || true)"
+  print_guest_vote_revoke_hint
   echo "       To roll back:  docker tag ${PROJECT}-web:rollback ${PROJECT}-web:latest (and cms), then:" >&2
   if [[ "${naive}" =~ ^[0-9]+$ && "${naive}" -gt 0 ]]; then
     rollback+=(-f "${COMPOSE_LEGACY_TZ}")
