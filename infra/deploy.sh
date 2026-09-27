@@ -235,8 +235,8 @@ image_has_poll_guest_access() {
 # switches and the department targeting and never removes that row, so
 # there every guest can vote on every open poll. What the database holds
 # at the time decides nothing: a new cms that missed compose's health
-# deadline before its bootstrap granted the row keeps restarting and grants
-# it later. So every rollback to such a cms, or to one that cannot be
+# deadline before its bootstrap granted the row keeps starting (or
+# restarts) and grants it afterwards. So every rollback to such a cms, or to one that cannot be
 # checked, stops the cms, removes the row, retags, starts, and removes it
 # again (docs/DEPLOYMENT.md, "Upgrading to poll department targeting",
 # Rollback). Only a :rollback cms that knows guest access goes without:
@@ -258,7 +258,7 @@ print_guest_vote_revoke_hint() {
   echo "       of polls and never removes the guest poll-vote permission this release grants: while it" >&2
   echo "       exists, every guest can vote on every open poll there. Stop the cms, then remove the" >&2
   echo "       permission, also when the database or the admin panel shows none (a new cms that is" >&2
-  echo "       still restarting grants it on its next start):" >&2
+  echo "       still starting or restarting grants it afterwards):" >&2
   echo "                      ${COMPOSE[*]} stop cms" >&2
   echo "                      ${COMPOSE[*]} exec -T db sh -c '${REVOKE_GUEST_VOTE_PSQL}' < ${SCRIPT_DIR}/rollback/revoke-guest-poll-vote.sql" >&2
 }

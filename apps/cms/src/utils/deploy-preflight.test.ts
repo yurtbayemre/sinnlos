@@ -552,7 +552,8 @@ describe("rollback hint: the guest vote permission of poll guest access", () => 
   it.skipIf(!HAS_BASH)("prints it whatever the database holds: it never asks for the permission", () => {
     // A slow first boot can miss compose's health deadline before its
     // bootstrap grants the row: the database holds none (every query
-    // answers 0 here), and the restarting new cms grants it afterwards.
+    // answers 0 here), and the still starting or restarting new cms grants
+    // it afterwards.
     const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { naive: "0", imageCheck: 1 });
     expect(stdout).not.toContain("permission probe");
     expectInOrder(stderr, FULL_SEQUENCE);

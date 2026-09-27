@@ -13,7 +13,8 @@
 --
 -- Every rollback to a cms from before guest access runs it twice, whatever
 -- the database or the admin panel shows at the time: a new cms whose first
--- boot failed can still be restarting and grant the row on its next start.
+-- boot missed compose's health deadline or failed can still be starting or
+-- restarting and grant the row afterwards.
 -- From the checkout (e.g. /opt/sinnlos):
 --   1. stop the cms:
 --      docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml stop cms
