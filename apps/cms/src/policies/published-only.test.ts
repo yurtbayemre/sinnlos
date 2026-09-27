@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import publishedOnly from "./published-only";
 
 /**
- * Wiring test for the publication pin on event/poll/department/team reads
- * (FX06, modelled on announcement-visibility.test.ts). Pinned traps:
+ * Wiring test for the publication pin on event/department/team reads
+ * (FX06, modelled on announcement-visibility.test.ts; poll reads have
+ * pinned the status through poll-visibility since decision 02). Pinned traps:
  *   1. the status lands on `policyContext.request.query` — the controller
  *      never reads the throw-away `policyContext.query` copy (§5.14),
  *   2. a client `?status=draft` is overwritten, and the legacy v4

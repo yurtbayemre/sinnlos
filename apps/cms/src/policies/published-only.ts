@@ -4,8 +4,9 @@ import { forcePublishedStatus, getMutableQuery } from "../utils/policy-query";
 /**
  * Pins reads to `status=published` (FX06, §5.24).
  *
- * For types whose reads need no row filter: event and poll (draft &
- * publish; poll until its audience policy lands), and department and team.
+ * For types whose reads need no row filter: event (draft & publish), and
+ * department and team. Poll left it for its own poll-visibility policy
+ * (decision 02), which pins the status as well.
  * Without any read policy the core service merges the client's params OVER
  * its default — `getFetchParams` = `{ status: 'published', ...params }` — so
  * every role holding `<type>.find` read unpublished drafts by appending
@@ -26,8 +27,8 @@ import { forcePublishedStatus, getMutableQuery } from "../utils/policy-query";
  * boolean (undefined counts as PASS).
  *
  * Do NOT stack it with a visibility policy that already pins the status
- * (announcement-, document-, quick-link-, wiki-, training-visibility, and
- * the planned poll-visibility of decisions/02 — which replaces it on poll).
+ * (announcement-, document-, quick-link-, wiki-, training- and
+ * poll-visibility).
  */
 
 interface PolicyContext {

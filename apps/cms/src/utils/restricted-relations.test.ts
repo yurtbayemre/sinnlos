@@ -54,7 +54,7 @@ const FILE = "plugin::upload.file";
 const API_NAMES = ["department", "team", "wiki-page", "wiki-space", "wiki-revision"];
 const MODELS: Record<string, RelationModel> = {
   ...Object.fromEntries(
-    [...API_NAMES, "announcement", "event", "poll"].map((name) => [
+    [...API_NAMES, "announcement", "event", "poll", "poll-vote"].map((name) => [
       `api::${name}.${name}`,
       runtimeModel(
         `api::${name}.${name}`,
@@ -114,6 +114,19 @@ describe("isRestrictedRelation", () => {
         isRestrictedRelation(MODELS[uid], attr(uid, "pages"), RESTRICTED_RELATION_TARGETS),
       ).toBe(true);
     }
+  });
+
+  it("cuts poll-vote.poll: no source is trusted into poll (decision 02)", () => {
+    const POLL = "api::poll.poll";
+    const POLL_VOTE = "api::poll-vote.poll-vote";
+    expect(
+      isRestrictedRelation(MODELS[POLL_VOTE], attr(POLL_VOTE, "poll"), RESTRICTED_RELATION_TARGETS),
+    ).toBe(true);
+    expect(populateOn(POLL_VOTE, { poll: "true", voter: "true" })).toEqual({ voter: "true" });
+    // The poll's own relations stay followable from its (filtered) routes.
+    expect(
+      isRestrictedRelation(MODELS[POLL], attr(POLL, "departments"), RESTRICTED_RELATION_TARGETS),
+    ).toBe(false);
   });
 
   it("trusts the wiki domain's own relations into wiki-page", () => {
