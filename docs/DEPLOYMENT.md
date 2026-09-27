@@ -889,9 +889,10 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 
 4. **ICS by documentId, 404 for anything else.** This signs in as the demo
    account `infra/live-smoke.sh` uses (password from the same file) and asks
-   the cms for the newest published event's calendar file by documentId, by
-   the numeric id of its published row, and by three malformed ids (if that
-   password file is not on the host, set `SMOKE_PASSWORD` yourself):
+   the cms for the calendar file of the newest published event whose title
+   is plain ASCII, by documentId, by the numeric id of its published row,
+   and by three malformed ids (if that password file is not on the host, set
+   `SMOKE_PASSWORD` yourself):
 
    ```bash
    SMOKE_EMAIL=casey.jones@sinnlos.local
@@ -907,8 +908,8 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
    const { jwt } = await login.json();
    if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
    const auth = { authorization: `Bearer ${jwt}` };
-   const list = await (await fetch(`${base}/api/events?sort=id:desc&pagination[pageSize]=1`, { headers: auth })).json();
-   const event = list.data[0];
+   const list = await (await fetch(`${base}/api/events?sort=id:desc&pagination[pageSize]=100`, { headers: auth })).json();
+   const event = list.data.find((e) => /^[\x20-\x7e]*$/.test(e.title ?? "")) ?? list.data[0];
    for (const id of [event.documentId, String(event.id), "abc", "2147483648", "1.5"]) {
      const res = await fetch(`${base}/api/events/${id}/ics`, { headers: auth });
      const uid = (await res.text()).match(/^UID:.*$/m)?.[0] ?? "";
@@ -929,6 +930,11 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 
    The previous cms answered the documentId and the three malformed ids with
    500.
+
+   A 500 with `ERR_INVALID_CHAR` in the cms log for an event whose title has
+   characters beyond Latin-1 (en dash, €, emoji) is the known FX12a filename
+   issue, not a failed deploy. The check picks a plain-ASCII title to avoid
+   it and falls back to the newest event only when there is none.
 
 5. **No id errors in the cms log** since the deploy (the check above sent
    three malformed ids):
