@@ -25,9 +25,14 @@ All methods share the same [prerequisites](#prerequisites) and
 (the Entra setup is only needed for Microsoft sign-in, which this release
 cannot offer; see the note there).
 
-> **Upgrading an existing instance?** Work through
-> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> before you deploy: this release introduces the
+> **Upgrading an existing instance?** On an instance that already runs the
+> datetime release (the owner instance since 2026-09-27), the current release
+> is a normal deploy: see
+> [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+> for the checks after it and the rollback note. Coming from an older release,
+> work through the datetime runbook,
+> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release),
+> before you deploy: the datetime release introduces the
 > [datetime contract](#310-datetime-contract): the cms runs in UTC, every
 > stored instant becomes `timestamptz`, and the **first boot repairs the times
 > the old cms stored**, once. An existing database needs
@@ -714,6 +719,14 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
+> an instance that runs the datetime release: no env change, no migration.
+> The cms image no longer contains pnpm and starts without registry access;
+> cms images built before it still download pnpm at every start, which
+> matters for a rollback. See
+> [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+> for the checks after the deploy and the rollback note.
+>
 > **Upgrading to this release (datetime contract)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
 > first: an existing database needs `DATETIME_LEGACY_ZONE` in `infra/.env`,
@@ -762,6 +775,205 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the ICS and cms start fixes (2026-09-27)
+
+This release (branch `fix/ics-and-cms-start`, after the datetime release that
+went live on 2026-09-27) fixes what that deploy turned up:
+
+- **The calendar (ICS) download by documentId.** `GET /api/events/:id/ics`
+  looked the event up by the numeric id of its row. A documentId or any other
+  non-numeric value made the Postgres query fail, and the API answered 500
+  (plus an error line in the cms log). The `UID` in the file was
+  `event-<row id>@sinnlos`, and publishing an event again gives its published
+  row a new id, so a calendar that imported the file again showed the event
+  twice. Now:
+  - the route takes the event's documentId, and still the numeric id of its
+    published row (links from before this release);
+  - any other value, an unknown event and a draft-only event all answer the
+    same 404, and a malformed value never reaches the database;
+  - the `UID` is `event-<documentId>@sinnlos` and stays the same when the
+    event is published again;
+  - the events page links `/events/<documentId>/ics`, and the web route
+    answers 404 for any other value before it calls the cms. The rest of the
+    file (dates, all-day events, text) is unchanged.
+- **The same 500 in other endpoints.** Comment delete, classified update and
+  delete, RSVP update, notification and reaction delete, the write checks of
+  departments, teams and wiki pages, notification mark-read and the image ids
+  of classifieds passed a malformed or out-of-range id (for example `abc` or
+  `2147483648`) to a database lookup, and Postgres failed the same way. They
+  now answer like an unknown entry (404, or 403 from an ownership check) or,
+  for a malformed request body, 400, and write no error to the cms log.
+- **The cms container starts without pnpm.** The image ran `pnpm start` as
+  the `node` user, but pnpm was only set up for root, so **every start of the
+  cms container downloaded pnpm from registry.npmjs.org**: a restart, a deploy
+  or a rollback failed while the registry was unreachable. The image now
+  starts Strapi directly (`node_modules/.bin/strapi start`, the command
+  `pnpm start` ran) and contains no pnpm, and compose runs the cms with
+  `init: true`: docker-init passes the stop signal on to Strapi, which shuts
+  down cleanly as before ("Shutting down Strapi", exit code 0; measured
+  `docker stop`: 1.6 s before, 0.6 s now). **The cms container no longer
+  needs registry access to start.** Building the image still downloads
+  packages. Cms images built before this release, including the
+  `infra-cms:rollback` and `infra-cms:pre-datetime` tags on the host, still
+  download pnpm at every start; see **Rollback** below.
+
+**Nothing else is needed on an existing instance: a normal deploy.** No env
+change, no migration, no `JWT_SECRET` rotation, no permission change; the
+database is not touched.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+**Deploy**
+
+2. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`. Compose recreates cms and web; the usual short downtime.
+
+   `pnpm` is no longer in the cms image. A registry check such as
+   `docker run --rm infra-cms pnpm --version` (the one the 2026-09-27 deploy
+   script ran) now fails with `Cannot find module '/app/apps/cms/pnpm'` by
+   design; it is not needed any more.
+
+**After the deploy**
+
+3. **The cms runs Strapi directly, under docker-init:**
+
+   ```bash
+   docker inspect -f '{{json .Config.Cmd}} init={{.HostConfig.Init}}' infra-cms-1
+   # ["node_modules/.bin/strapi","start"] init=true
+   docker top infra-cms-1 -o pid,args
+   # PID     COMMAND
+   # …       /sbin/docker-init -- docker-entrypoint.sh node_modules/.bin/strapi start
+   # …       node node_modules/.bin/../@strapi/strapi/bin/strapi.js start
+   ```
+
+   No `pnpm` in either output. Optionally, the start command without any
+   network (prints the Strapi version, `5.55.1`):
+
+   ```bash
+   docker run --rm --network none infra-cms:latest node_modules/.bin/strapi version
+   ```
+
+4. **ICS by documentId, 404 for anything else.** This signs in as the demo
+   account `infra/live-smoke.sh` uses (password from the same file) and asks
+   the cms for the newest published event's calendar file by documentId, by
+   the numeric id of its published row, and by three malformed ids (if that
+   password file is not on the host, set `SMOKE_PASSWORD` yourself):
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
+   const [identifier, password] = process.argv.slice(2);
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password }),
+   });
+   const { jwt } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const auth = { authorization: `Bearer ${jwt}` };
+   const list = await (await fetch(`${base}/api/events?sort=id:desc&pagination[pageSize]=1`, { headers: auth })).json();
+   const event = list.data[0];
+   for (const id of [event.documentId, String(event.id), "abc", "2147483648", "1.5"]) {
+     const res = await fetch(`${base}/api/events/${id}/ics`, { headers: auth });
+     const uid = (await res.text()).match(/^UID:.*$/m)?.[0] ?? "";
+     console.log(`${id} -> ${res.status} ${uid}`.trim());
+   }
+   NODE
+   ```
+
+   Expected (with that event's documentId and row id):
+
+   ```
+   lj5n10lqpweysvb5m9hmiv8p -> 200 UID:event-lj5n10lqpweysvb5m9hmiv8p@sinnlos
+   12 -> 200 UID:event-lj5n10lqpweysvb5m9hmiv8p@sinnlos
+   abc -> 404
+   2147483648 -> 404
+   1.5 -> 404
+   ```
+
+   The previous cms answered the documentId and the three malformed ids with
+   500.
+
+5. **No id errors in the cms log** since the deploy (the check above sent
+   three malformed ids):
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -cE 'invalid input syntax for type integer|out of range for type integer'
+   # 0
+   ```
+
+6. **In the browser:** on `/events`, the download icon of an event links
+   `/events/<documentId>/ics`, and the downloaded file contains
+   `UID:event-<documentId>@sinnlos`. `/events/abc/ics` answers
+   `Event not found` (404).
+
+**What users notice** (worth a short release note):
+
+- The calendar download works as before; its link now names the event's
+  documentId. A link copied before the deploy keeps working until that event
+  is published again (a publish gives the published row a new id, as
+  before).
+- A calendar that imported an event before this release has it under the old
+  `UID`. Importing that event's file again adds a second entry (once); delete
+  the older one. After that, importing a re-published event updates the
+  entry instead of adding one, in calendar apps that match events by `UID`.
+- Nothing else changes for readers or editors.
+
+**Rollback.** The previous images run unchanged on this database: nothing in
+the schema or the data changed. Roll back web and cms together (the new web
+links documentIds, which the previous cms answers with 500). Note:
+
+- **Every cms image built before this release starts with `pnpm start` and
+  downloads pnpm at every start**, so re-upping it needs registry.npmjs.org
+  reachable from the host. If the registry is not reachable, start the
+  previous image directly with a one-off override file:
+
+  ```bash
+  cat > /tmp/cms-direct-start.yml <<'YAML'
+  services:
+    cms:
+      command: ["node_modules/.bin/strapi", "start"]
+  YAML
+  docker tag infra-web:rollback infra-web:latest
+  docker tag infra-cms:rollback infra-cms:latest
+  docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+    -f /tmp/cms-direct-start.yml up -d --no-build web cms
+  ```
+
+  (Standalone Caddy box: leave out the Traefik file. For a cms image from
+  before the datetime contract, add `-f infra/docker-compose.cms-legacy-tz.yml`
+  before the `/tmp` file, see
+  [Rolling back this release](#rolling-back-this-release).) The override file
+  may live outside the checkout: compose reads `infra/.env` through the first
+  `-f` file. Verified with an image of `main` 0e8dadb (the release before
+  this one): it starts this way without any network, under `init: true`, and
+  stops cleanly. Roll forward with `infra/deploy.sh` as usual (it uses only
+  the live compose files) and delete `/tmp/cms-direct-start.yml`.
+- With this checkout, compose also runs a previous cms image with
+  `init: true`: docker-init starts pnpm, which starts Strapi, and a stop still
+  reaches Strapi (verified, exit code 0).
 
 #### Upgrading to the draft-twin repair (FX38)
 
@@ -2983,6 +3195,12 @@ docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   up -d --no-build web cms
 ```
+
+A cms image built before 2026-09-27 runs `pnpm start` and downloads pnpm
+from registry.npmjs.org at every start. If the registry is unreachable, start
+it directly: see the rollback note of
+[Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
+Current images start without registry access.
 
 If a code revert is needed instead, reset and rebuild:
 
