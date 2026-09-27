@@ -13,6 +13,11 @@
     "options": { "type": "json", "required": true },
     "closesAt": { "type": "datetime" },
     "anonymous": { "type": "boolean", "default": false },
+    "audience": {
+      "type": "enumeration",
+      "enum": ["all", "departments"],
+      "default": "all"
+    },
     "departments": {
       "type": "relation",
       "relation": "manyToMany",
