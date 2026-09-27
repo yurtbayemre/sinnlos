@@ -843,6 +843,26 @@ describe("route → policy matrix (S01)", async () => {
       }
     });
 
+    it("decision 02: vote and results are granted to every role, guest included", () => {
+      expect(matrixRoles).toEqual(
+        expect.arrayContaining([
+          "admin_role",
+          "editor",
+          "department_head",
+          "team_lead",
+          "member",
+          "guest",
+          "authenticated",
+        ]),
+      );
+      for (const action of ["api::poll-vote.poll-vote.vote", "api::poll-vote.poll-vote.results"]) {
+        expect(CUSTOM_ACTION_GRANTS[action], action).toBe("*");
+        for (const role of matrixRoles) {
+          expect(effectiveGrants(role).has(action), `${role}: ${action}`).toBe(true);
+        }
+      }
+    });
+
     it("decision 02: vote and results stay custom routes on the poll-vote controller", () => {
       expect(routes.get("api::poll-vote.poll-vote.vote")?.kind).toBe("custom");
       expect(routes.get("api::poll-vote.poll-vote.results")?.kind).toBe("custom");

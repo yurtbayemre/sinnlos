@@ -363,6 +363,7 @@ WITH expected(role_type, action, source) AS (VALUES
   ('guest', 'api::notification.notification.markAllRead', 'custom'),
   ('guest', 'api::notification.notification.markRead', 'custom'),
   ('guest', 'api::poll-vote.poll-vote.results', 'custom'),
+  ('guest', 'api::poll-vote.poll-vote.vote', 'custom'),
   ('guest', 'api::poll.poll.find', 'matrix'),
   ('guest', 'api::poll.poll.findOne', 'matrix'),
   ('guest', 'api::profile.profile.me', 'custom'),

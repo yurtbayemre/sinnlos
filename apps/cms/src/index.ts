@@ -267,7 +267,9 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   /**
-   * `guest` is strictly read-only. It is denied kudos (celebrations
+   * `guest` is read-only on content (it writes only search telemetry, and
+   * casts poll votes through the custom vote action, CUSTOM_ACTION_GRANTS;
+   * decision 02). It is denied kudos (celebrations
    * populate user relations and leak hire dates), but it DOES keep the
    * baseline `users-permissions.user.find/findOne` grant handed out to
    * every reading role below.
@@ -378,14 +380,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   ],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
-  "api::poll-vote.poll-vote.vote": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-    "authenticated",
-  ],
+  // Every role, guest included (decision 02: a company-wide poll is open to
+  // every signed-in user). Which polls a caller may vote on is decided per
+  // poll in the controller (department targeting, utils/poll-audience.ts).
+  "api::poll-vote.poll-vote.vote": "*",
   "api::poll-vote.poll-vote.results": "*",
   // Aggregated search analytics (issue #19) — /manage/analytics is
   // admin-only, so is the summary endpoint.
