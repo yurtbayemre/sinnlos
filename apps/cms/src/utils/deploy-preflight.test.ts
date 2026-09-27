@@ -27,7 +27,10 @@ import {
  *      escaping, so equal secrets compare equal,
  *   4. the Microsoft sign-in gate (Strapi 5.51+ rejects the web's token
  *      exchange) fires exactly when the web would offer Microsoft sign-in
- *      with a real (GUID) client id, and is fatal.
+ *      with a real (GUID) client id, and is fatal,
+ *   5. the rollback hint of a failed deploy tells a cms image that still
+ *      starts with pnpm by its Cmd and prints a working direct start (runs
+ *      the real function with docker stubbed where `bash` exists).
  *
  * Lives with the cms tests because it imports cms code
  * (tsconfig.test.json: no infra test imports cms code).
@@ -287,5 +290,109 @@ describe("D-SESSION-01 JWT rotation gate (C3)", () => {
     expect(
       runAwk(ENV_VALUE_AWK, { want: "JWT_SECRET" }, composeJson({ JWT_SECRET: null })),
     ).toEqual([]);
+  });
+});
+
+/** The body of a top-level shell function in deploy.sh, `name() {` to `}`. */
+function shellFunction(name: string): string {
+  const start = DEPLOY.indexOf(`\n${name}() {\n`);
+  if (start < 0) throw new Error(`${name}() not found in infra/deploy.sh`);
+  const end = DEPLOY.indexOf("\n}\n", start + 1);
+  return DEPLOY.slice(start + 1, end + 2);
+}
+
+const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
+const shellQuote = (value: string) => `'${value.replace(/'/g, `'\''`)}'`;
+
+/**
+ * Runs `script` in bash from stdin (no file path crosses from Windows into
+ * the MSYS or WSL side) and returns what it wrote to stderr.
+ */
+function runBash(script: string): { status: number | null; stdout: string; stderr: string } {
+  const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+}
+
+/**
+ * print_rollback_hint with docker and the naive-column probe stubbed:
+ * `cmd` is what `docker image inspect -f '{{json .Config.Cmd}}'` prints for
+ * infra-cms:rollback, null when that image does not exist.
+ */
+function rollbackHint(cmd: string | null, naive = "0"): string {
+  const script = [
+    "set -euo pipefail",
+    "PROJECT=infra",
+    "COMPOSE=(docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml)",
+    "COMPOSE_LEGACY_TZ=/srv/infra/docker-compose.cms-legacy-tz.yml",
+    `STUB_CMD=${shellQuote(cmd ?? "")}`,
+    `STUB_NAIVE=${shellQuote(naive)}`,
+    `naive_app_columns() { printf '%s\n' "\${STUB_NAIVE}"; }`,
+    "docker() {",
+    '  [[ "$1 $2" == "image inspect" ]] || return 0',
+    '  [[ -n "${STUB_CMD}" ]] || return 1',
+    "  printf '%s\n' \"${STUB_CMD}\"",
+    "}",
+    shellFunction("print_rollback_hint"),
+    "print_rollback_hint",
+    "",
+  ].join("\n");
+  const res = runBash(script);
+  expect(res.status).toBe(0);
+  return res.stderr;
+}
+
+describe("rollback hint: cms images that start with pnpm", () => {
+  const COMPOSE_LINE =
+    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+
+  it("identifies such an image by its Cmd, not by a build date", () => {
+    // The :rollback image of the fix's first deploy was built on the same
+    // day as the fix, so a date told the operator the wrong thing.
+    expect(DEPLOY).not.toMatch(/built before 20\d\d-\d\d-\d\d/);
+    expect(shellFunction("print_rollback_hint")).toContain(
+      `docker image inspect -f '{{json .Config.Cmd}}' "\${PROJECT}-cms:rollback"`,
+    );
+  });
+
+  it.skipIf(!HAS_BASH)("prints the direct start for a :rollback image that runs pnpm start", () => {
+    const hint = rollbackHint('["pnpm","start"]');
+    expect(hint).toContain('infra-cms:rollback starts with pnpm (Cmd ["pnpm","start"])');
+    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    expect(hint).toContain(`${COMPOSE_LINE} -f /tmp/cms-direct-start.yml up -d --no-build web cms`);
+
+    // The printed printf line, run as printed (minus the redirect), writes
+    // the override file of docs/DEPLOYMENT.md.
+    const printf = hint
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line.startsWith("printf "));
+    expect(printf).toBeDefined();
+    const redirect = " > /tmp/cms-direct-start.yml";
+    expect(printf?.endsWith(redirect)).toBe(true);
+    const written = runBash(`${printf?.slice(0, -redirect.length)}\n`);
+    expect(written.status).toBe(0);
+    expect(written.stdout).toBe(
+      'services:\n  cms:\n    command: ["node_modules/.bin/strapi", "start"]\n',
+    );
+  });
+
+  it.skipIf(!HAS_BASH)("adds the direct start after the legacy-zone override", () => {
+    const hint = rollbackHint('["pnpm","start"]', "3");
+    expect(hint).toContain(
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+    );
+  });
+
+  it.skipIf(!HAS_BASH)("says nothing about pnpm for an image that starts Strapi directly", () => {
+    const hint = rollbackHint('["node_modules/.bin/strapi","start"]');
+    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    expect(hint).not.toContain("pnpm");
+  });
+
+  it.skipIf(!HAS_BASH)("prints the Cmd check when there is no :rollback image to inspect", () => {
+    const hint = rollbackHint(null);
+    expect(hint).toContain("docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback");
+    expect(hint).toContain('(Cmd ["pnpm","start"])');
+    expect(hint).not.toContain("cms-direct-start.yml up");
   });
 });

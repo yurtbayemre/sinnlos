@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../utils/entry-id.test.helper";
 import isReactionAuthor from "./is-reaction-author";
 
 /**
@@ -8,11 +9,14 @@ import isReactionAuthor from "./is-reaction-author";
  *
  * Trap c: the policy must accept both a numeric `id` (direct API consumers)
  * and a String `documentId` (v5 routes) and query the MATCHING column. Both
- * lookup paths are exercised below.
+ * lookup paths are exercised below. Anything else is refused like an
+ * unknown reaction before any lookup: the stub fails like Postgres on a
+ * value an int4 `id` lookup cannot take (EVT-ICS-ID class).
  */
 
 const AUTHOR = 100;
 const STRANGER = 200;
+const DOC = "k3v9q2m8x7c4b1n6p5z0r2t8";
 
 interface StubRow {
   id: number;
@@ -20,13 +24,17 @@ interface StubRow {
   author?: { id: number };
 }
 
-const REACTION: StubRow = { id: 1, documentId: "doc-1", author: { id: AUTHOR } };
+const REACTION: StubRow = { id: 1, documentId: DOC, author: { id: AUTHOR } };
+
+const lookups: unknown[] = [];
 
 function stubStrapi(rows: StubRow[]) {
   return {
     db: {
       query: (uid: string) => ({
         findOne: async ({ where }: any) => {
+          lookups.push(where);
+          failLikePostgres(where);
           if (uid !== "api::reaction.reaction") return null;
           // Trap c: honour whichever column the policy chose to look up on.
           const match = (r: StubRow) =>
@@ -62,7 +70,15 @@ describe("is-reaction-author policy", () => {
   });
 
   it("lets the author through via a String documentId (trap c)", async () => {
-    await expect(run(context(author, "doc-1"))).resolves.toBe(true);
+    await expect(run(context(author, DOC))).resolves.toBe(true);
+  });
+
+  it("refuses a malformed or out-of-range id like an unknown reaction, without a lookup", async () => {
+    lookups.length = 0;
+    for (const id of MALFORMED_ENTRY_IDS) {
+      await expect(run(context(author, id)), id).resolves.toBe(false);
+    }
+    expect(lookups).toEqual([]);
   });
 
   it("rejects a non-author", async () => {

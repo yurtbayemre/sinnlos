@@ -1,5 +1,6 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it } from "vitest";
+import { MALFORMED_ROW_IDS, failLikePostgres } from "../utils/entry-id.test.helper";
 import { MAX_ANCESTOR_WALK } from "../utils/wiki-write-targets";
 import {
   writeAllowlistMessage,
@@ -223,14 +224,25 @@ function matches(row: Row, where: Record<string, unknown> | undefined): boolean 
   });
 }
 
+/** Every `where` a lookup ran with; fails like Postgres on a value an int4 `id` lookup cannot take. */
+const lookups: Array<Record<string, unknown> | undefined> = [];
+function lookup(where: Record<string, unknown> | undefined) {
+  lookups.push(where);
+  failLikePostgres(where);
+}
+
 function fakeStrapi(data: Tables = tables()): StrapiDb {
   return {
     db: {
       query: (uid: string) => ({
-        findOne: async (params: Params) =>
-          (data[uid] ?? []).find((row) => matches(row, params.where)) ?? null,
-        findMany: async (params: Params = {}) =>
-          (data[uid] ?? []).filter((row) => matches(row, params.where)),
+        findOne: async (params: Params) => {
+          lookup(params.where);
+          return (data[uid] ?? []).find((row) => matches(row, params.where)) ?? null;
+        },
+        findMany: async (params: Params = {}) => {
+          lookup(params.where);
+          return (data[uid] ?? []).filter((row) => matches(row, params.where));
+        },
       }),
     },
   };
@@ -309,6 +321,20 @@ describe("can-edit-wiki policy", () => {
     it("returns false when the page does not exist (both id shapes)", async () => {
       await expect(run(context(caller(AUTHOR), 999, { title: "A" }))).resolves.toBe(false);
       await expect(run(context(caller(AUTHOR), "nope", { title: "A" }))).resolves.toBe(false);
+    });
+
+    it("returns false for a malformed or out-of-range id, without a lookup and never as a create", async () => {
+      // A payload the create rule accepts: an update with a bad id must not
+      // fall through to the create branch.
+      const createPayload = { title: "A", space: "space-handbook" };
+      await expect(run(context(caller(AUTHOR), undefined, createPayload))).resolves.toBe(true);
+      lookups.length = 0;
+      for (const id of MALFORMED_ROW_IDS) {
+        await expect(run(context(caller(AUTHOR), id, { ...createPayload })), id).resolves.toBe(
+          false,
+        );
+      }
+      expect(lookups).toEqual([]);
     });
 
     it("allows the head of the page's department, not of another", async () => {

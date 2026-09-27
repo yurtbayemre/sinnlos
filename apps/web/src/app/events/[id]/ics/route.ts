@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { STRAPI_URL } from "@/lib/config";
+import { parseEntryRef } from "@/lib/entry-id";
 import { getStrapiToken } from "@/lib/session";
 
 /**
@@ -9,13 +10,18 @@ import { getStrapiToken } from "@/lib/session";
  * gated, so a direct link to the CMS would 403. This handler attaches
  * the caller's Strapi JWT server-side and streams the file back.
  *
+ * `[id]` is the event's documentId (what the events page links) or, for
+ * links from before 2026-09-27, the numeric id of its published row. Any
+ * other value is a 404 before anything is sent to the cms, checked with the
+ * same rules as the cms handler (lib/entry-id.ts, mirrored from the cms).
+ *
  * Lives under /events/[id]/ics (NOT /api/...) because the Caddy reverse
  * proxy routes /api/* straight to Strapi.
  */
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  if (!/^\d+$/.test(id)) {
-    return new NextResponse("Invalid event id", { status: 400 });
+  if (!parseEntryRef(id)) {
+    return new NextResponse("Event not found", { status: 404 });
   }
 
   const jwt = await getStrapiToken();
@@ -23,7 +29,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     return new NextResponse("Unauthorized", { status: 401 });
   }
 
-  const res = await fetch(`${STRAPI_URL}/api/events/${id}/ics`, {
+  const res = await fetch(`${STRAPI_URL}/api/events/${encodeURIComponent(id)}/ics`, {
     headers: { Authorization: `Bearer ${jwt}` },
     cache: "no-store",
   });

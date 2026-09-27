@@ -1,4 +1,5 @@
 import { factories } from "@strapi/strapi";
+import { parseRowId } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
 
 export default factories.createCoreController("api::notification.notification", ({ strapi }) => ({
@@ -6,8 +7,13 @@ export default factories.createCoreController("api::notification.notification", 
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
 
-    const { ids } = ctx.request.body as { ids?: number[] };
-    if (!ids?.length) return ctx.badRequest("ids required");
+    const raw = ((ctx.request.body ?? {}) as { ids?: unknown }).ids;
+    if (!Array.isArray(raw) || raw.length === 0) return ctx.badRequest("ids required");
+    // Row ids only (numbers or decimal strings within int4), checked before
+    // any query: anything else made the Postgres lookup fail with a 500
+    // (utils/entry-id.ts).
+    const ids = raw.map(parseRowId);
+    if (ids.includes(null)) return ctx.badRequest("ids must be notification ids");
 
     const now = new Date().toISOString();
     let updated = 0;

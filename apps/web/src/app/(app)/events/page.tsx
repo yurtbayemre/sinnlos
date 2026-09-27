@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
+import { icsHref } from "@/lib/event-ics";
 import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
@@ -304,7 +305,7 @@ function EventCard({
           )}
         </div>
         <a
-          href={`/events/${event.id}/ics`}
+          href={icsHref(event)}
           className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition-colors hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           title={t("downloadIcs")}
           aria-label={t("downloadIcs")}

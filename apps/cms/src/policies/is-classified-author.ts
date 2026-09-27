@@ -1,3 +1,5 @@
+import { parseEntryRef } from "../utils/entry-id";
+
 /**
  * Write-side guard for marketplace ads: only the author may update or
  * delete their classified. Which roles bypass ownership is configurable
@@ -21,12 +23,14 @@ export default async (
   if (bypassRoles.includes(user.role?.type)) return true;
 
   // v5 routes carry a documentId; the web app sends numeric ids — accept
-  // both (same gotcha as in the comment controller).
-  const idParam = String(policyContext.params?.id ?? "");
-  if (!idParam) return false;
+  // both (same gotcha as in the comment controller). A missing or
+  // malformed id is refused like an unknown ad, before any query
+  // (utils/entry-id.ts).
+  const where = parseEntryRef(policyContext.params?.id);
+  if (!where) return false;
 
   const classified = await strapi.db.query("api::classified.classified").findOne({
-    where: /^\d+$/.test(idParam) ? { id: Number(idParam) } : { documentId: idParam },
+    where,
     populate: { author: true },
   });
   if (!classified) return false;

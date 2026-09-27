@@ -25,16 +25,21 @@ All methods share the same [prerequisites](#prerequisites) and
 (the Entra setup is only needed for Microsoft sign-in, which this release
 cannot offer; see the note there).
 
-> **Upgrading from the 2026-09-27 release (datetime contract and draft
-> twins)?** Work through
-> [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting):
-> a normal deploy, with read-only checks first. Polls that have departments
-> become visible to those departments' members only (plus admins and
-> editors), and guests can vote.
->
-> **Upgrading an existing instance?** Work through
-> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
-> before you deploy: this release introduces the
+> **Upgrading an existing instance?** On an instance that already runs the
+> datetime release (the owner instance since 2026-09-27), the current release
+> is a normal deploy with read-only checks first. Work through the notes of
+> what the instance does not run yet, newest first:
+> [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
+> (read-only checks before the deploy; polls that have departments become
+> visible to those departments' members only, plus admins and editors, and
+> guests can vote) and
+> [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+> (the checks after the deploy and the rollback note). Deploying both
+> together is one normal deploy plus the read-only pre-deploy queries of the
+> poll targeting note. Coming from an older release,
+> work through the datetime runbook,
+> [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release),
+> before you deploy: the datetime release introduces the
 > [datetime contract](#310-datetime-contract): the cms runs in UTC, every
 > stored instant becomes `timestamptz`, and the **first boot repairs the times
 > the old cms stored**, once. An existing database needs
@@ -727,6 +732,22 @@ systemctl start docker
 > first: they list the polls that become restricted and the users who have
 > no department.
 >
+> **Deploying the ICS and cms start fixes (2026-09-27)?** A normal deploy on
+> an instance that runs the datetime release: no env change, no migration.
+> The cms image no longer contains pnpm and starts without registry access;
+> cms images from before it (Cmd `["pnpm","start"]`, including the
+> `:rollback` image this deploy tags) still download pnpm at every start,
+> which matters for a rollback. See
+> [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+> for the checks after the deploy and the rollback note.
+>
+> **Deploying both at once** (on an instance that runs the datetime
+> release)? Still one normal deploy, cms and web together: the read-only
+> checks of the poll targeting note before it, the checks of both notes
+> after it. The `:rollback` images it tags are from before both, so a
+> rollback re-ups web and cms together, and that cms image starts with
+> `pnpm start` (see the rollback note of the ICS and cms start fixes).
+>
 > **Upgrading to this release (datetime contract)?** Follow
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)
 > first: an existing database needs `DATETIME_LEGACY_ZONE` in `infra/.env`,
@@ -778,9 +799,11 @@ is degraded while the new cms boots. For the manual production-safe sequence
 
 #### Upgrading to poll department targeting
 
-This release (branch `feat/poll-targeting`, after the datetime and
-draft-twin release of 2026-09-27) enforces the department targeting of
-polls. Until now a poll's departments were stored but checked nowhere:
+This release (branch `feat/poll-targeting`, after the
+[ICS and cms start fixes](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+below, which follow the datetime and draft-twin release of 2026-09-27)
+enforces the department targeting of polls. Until now a poll's departments
+were stored but checked nowhere:
 every signed-in user saw every published poll and its results, and every
 role but guest could vote on it.
 
@@ -828,6 +851,12 @@ migration script, no `JWT_SECRET` rotation. Deploy cms and web together,
 as `infra/deploy.sh` does (compose starts the new web only once the new
 cms is healthy): the new web sends Audience when it creates a poll, which
 the previous cms refuses with a 400. A fresh install needs nothing.
+
+**Together with the ICS and cms start fixes** (an instance on the datetime
+release that has neither): still one normal deploy. Run steps 1–6 here
+before it; after it, run steps 8–11 here and the checks after the deploy
+of
+[Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
 
 Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
 read-only queries and the log check below (on a standalone Caddy box, drop
@@ -1051,8 +1080,253 @@ forward again:
   default; their departments still restrict them, and deleting a
   department sets Audience = `departments` on them).
 
+**Rolling back both** (deployed together with the ICS and cms start
+fixes): the `:rollback` images are from before both. Roll back web and cms
+together (the new web links events by documentId, which that cms answers
+with 500). That cms image starts with `pnpm start` and downloads pnpm at
+every start, so it needs registry.npmjs.org; see **Rollback** in
+[Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
+for the check and for starting it without the registry. Everything in the
+list above applies as well.
+
 **Local dev (SQLite):** the next `pnpm cms:dev` adds the column and sets
 Audience the same way; a new demo seed writes Audience `all`.
+
+#### Upgrading to the ICS and cms start fixes (2026-09-27)
+
+This release (branch `fix/ics-and-cms-start`, after the datetime release that
+went live on 2026-09-27) fixes what that deploy turned up:
+
+- **The calendar (ICS) download by documentId.** `GET /api/events/:id/ics`
+  looked the event up by the numeric id of its row. A documentId or any other
+  non-numeric value made the Postgres query fail, and the API answered 500
+  (plus an error line in the cms log). The `UID` in the file was
+  `event-<row id>@sinnlos`, and publishing an event again gives its published
+  row a new id, so a calendar that imported the file again showed the event
+  twice. Now:
+  - the route takes the event's documentId, and still the numeric id of its
+    published row (links from before this release);
+  - any other value, an unknown event and a draft-only event all answer the
+    same 404, and a malformed value never reaches the database;
+  - the `UID` is `event-<documentId>@sinnlos` and stays the same when the
+    event is published again;
+  - the events page links `/events/<documentId>/ics`, and the web route
+    answers 404 for any other value before it calls the cms. The rest of the
+    file (dates, all-day events, text) is unchanged.
+- **The same 500 in other endpoints.** Comment delete, classified update and
+  delete, RSVP update, notification and reaction delete, the write checks of
+  departments, teams and wiki pages, notification mark-read and the image ids
+  of classifieds passed an all-digit id beyond the int4 range (for example
+  `2147483648`) to a numeric lookup. The ICS route and notification
+  mark-read also passed non-numeric values such as `abc`. Postgres failed
+  the same way. They now answer like an unknown entry (404, or 403 from an
+  ownership check) or, for a malformed request body, 400, and write no error
+  to the cms log. Unchanged: a notification or reaction delete by a role
+  that bypasses the ownership check (admin; for reactions also editor)
+  answers 204 for any id. Not in this release: poll vote and results
+  (`POST /api/polls/:id/vote`, `GET /api/polls/:id/results`) still answer a
+  malformed id with 500; the poll targeting release (`feat/poll-targeting`,
+  above) adds the same check there, so with both deployed they answer 404.
+- **The cms container starts without pnpm.** The image ran `pnpm start` as
+  the `node` user, but pnpm was only set up for root, so **every start of the
+  cms container downloaded pnpm from registry.npmjs.org**: a restart, a deploy
+  or a rollback failed while the registry was unreachable. The image now
+  starts Strapi directly (`node_modules/.bin/strapi start`, the command
+  `pnpm start` ran) and contains no pnpm (corepack is not enabled), and
+  compose runs the cms with `init: true`: docker-init passes the stop signal
+  on to Strapi. A running cms shuts down as before: "Shutting down Strapi",
+  exit code 0, `docker stop` in about 0.5 to 0.8 s with either image. What
+  `init: true` changes is a stop during boot: the cms now exits with code 143
+  in about 0.5 s instead of being killed (code 137) when the stop grace
+  period runs out. Without DNS on the host, a stop right after requests can
+  take up to about 5 s (Strapi's telemetry lookups time out), still within
+  compose's 10 s grace period. **The cms container no longer
+  needs registry access to start.** Building the image still downloads
+  packages. Cms images from before this release (their
+  `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`),
+  including the `infra-cms:rollback` and `infra-cms:pre-datetime` tags on
+  the host, still download pnpm at every start; see **Rollback** below.
+
+**Nothing else is needed on an existing instance: a normal deploy.** No env
+change, no migration, no `JWT_SECRET` rotation, no permission change; the
+database is not touched.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+   Repeat after each fix until it prints `Preflight OK`.
+
+**Deploy**
+
+2. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`. Compose recreates cms and web; the usual short downtime.
+
+   `pnpm` is no longer in the cms image. A registry check such as
+   `docker run --rm infra-cms pnpm --version` (the one the 2026-09-27 deploy
+   script ran) now fails with `Cannot find module '/app/apps/cms/pnpm'` by
+   design; it is not needed any more.
+
+**After the deploy**
+
+3. **The cms runs Strapi directly, under docker-init:**
+
+   ```bash
+   docker inspect -f '{{json .Config.Cmd}} init={{.HostConfig.Init}}' infra-cms-1
+   # ["node_modules/.bin/strapi","start"] init=true
+   docker top infra-cms-1 -o pid,args
+   # PID     COMMAND
+   # …       /sbin/docker-init -- docker-entrypoint.sh node_modules/.bin/strapi start
+   # …       node node_modules/.bin/../@strapi/strapi/bin/strapi.js start
+   ```
+
+   No `pnpm` in either output. Optionally, the start command without any
+   network (prints the Strapi version, `5.55.1`):
+
+   ```bash
+   docker run --rm --network none infra-cms:latest node_modules/.bin/strapi version
+   ```
+
+4. **ICS by documentId, 404 for anything else.** This signs in as the demo
+   account `infra/live-smoke.sh` uses (password from the same file) and asks
+   the cms for the calendar file of the newest published event whose title
+   is plain ASCII, by documentId, by the numeric id of its published row,
+   and by three malformed ids (if that password file is not on the host, set
+   `SMOKE_PASSWORD` yourself):
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
+   const [identifier, password] = process.argv.slice(2);
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password }),
+   });
+   const { jwt } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const auth = { authorization: `Bearer ${jwt}` };
+   const list = await (await fetch(`${base}/api/events?sort=id:desc&pagination[pageSize]=100`, { headers: auth })).json();
+   const event = list.data.find((e) => /^[\x20-\x7e]*$/.test(e.title ?? "")) ?? list.data[0];
+   for (const id of [event.documentId, String(event.id), "abc", "2147483648", "1.5"]) {
+     const res = await fetch(`${base}/api/events/${id}/ics`, { headers: auth });
+     const uid = (await res.text()).match(/^UID:.*$/m)?.[0] ?? "";
+     console.log(`${id} -> ${res.status} ${uid}`.trim());
+   }
+   NODE
+   ```
+
+   Expected (with that event's documentId and row id):
+
+   ```
+   lj5n10lqpweysvb5m9hmiv8p -> 200 UID:event-lj5n10lqpweysvb5m9hmiv8p@sinnlos
+   12 -> 200 UID:event-lj5n10lqpweysvb5m9hmiv8p@sinnlos
+   abc -> 404
+   2147483648 -> 404
+   1.5 -> 404
+   ```
+
+   The previous cms answered the documentId and the three malformed ids with
+   500.
+
+   A 500 with `ERR_INVALID_CHAR` in the cms log for an event whose title has
+   characters beyond Latin-1 (en dash, €, emoji) is the known FX12a filename
+   issue, not a failed deploy. The check picks a plain-ASCII title to avoid
+   it and falls back to the newest event only when there is none.
+
+5. **No id errors in the cms log** since the deploy (the check above sent
+   three malformed ids):
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -cE 'invalid input syntax for type integer|out of range for type integer'
+   # 0
+   ```
+
+6. **In the browser:** on `/events`, the download icon of an event links
+   `/events/<documentId>/ics`, and the downloaded file contains
+   `UID:event-<documentId>@sinnlos`. `/events/abc/ics` answers
+   `Event not found` (404).
+
+**What users notice** (worth a short release note):
+
+- The calendar download works as before; its link now names the event's
+  documentId. A link copied before the deploy keeps working until that event
+  is published again (a publish gives the published row a new id, as
+  before).
+- A calendar that imported an event before this release has it under the old
+  `UID`. Importing that event's file again adds a second entry (once); delete
+  the older one. After that, importing a re-published event no longer adds
+  a second entry; whether the existing entry is updated depends on the
+  calendar app (the file carries no `SEQUENCE` or `LAST-MODIFIED` yet,
+  FX12).
+- Nothing else changes for readers or editors.
+
+**Rollback.** The previous images run unchanged on this database: nothing in
+the schema or the data changed. Roll back web and cms together (the new web
+links documentIds, which the previous cms answers with 500). Note:
+
+- **Every cms image from before this release starts with `pnpm start` and
+  downloads pnpm at every start**, so re-upping it needs registry.npmjs.org
+  reachable from the host. Tell such an image by its command, not by its
+  build date (the `infra-cms:rollback` this deploy tags was built on
+  2026-09-27 too):
+
+  ```bash
+  docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback
+  # ["pnpm","start"]                      -> starts with pnpm, needs the registry
+  # ["node_modules/.bin/strapi","start"]  -> starts directly
+  ```
+
+  When a deploy fails, `infra/deploy.sh` runs this check itself and, for a
+  `["pnpm","start"]` image, prints the direct start below (the same override
+  file, written with `printf`) next to the rollback commands; without a
+  `:rollback` image it prints the check. If the registry is not reachable,
+  start the previous image directly with a one-off override file:
+
+  ```bash
+  cat > /tmp/cms-direct-start.yml <<'YAML'
+  services:
+    cms:
+      command: ["node_modules/.bin/strapi", "start"]
+  YAML
+  docker tag infra-web:rollback infra-web:latest
+  docker tag infra-cms:rollback infra-cms:latest
+  docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+    -f /tmp/cms-direct-start.yml up -d --no-build web cms
+  ```
+
+  (Standalone Caddy box: leave out the Traefik file. For a cms image from
+  before the datetime contract, add `-f infra/docker-compose.cms-legacy-tz.yml`
+  before the `/tmp` file, see
+  [Rolling back this release](#rolling-back-this-release).) The override file
+  may live outside the checkout: compose reads `infra/.env` through the first
+  `-f` file. Verified with an image of `main` 0e8dadb (the release before
+  this one): it starts this way without any network, under `init: true`, and
+  stops cleanly. Roll forward with `infra/deploy.sh` as usual (it uses only
+  the live compose files) and delete `/tmp/cms-direct-start.yml`.
+- With this checkout, compose also runs a previous cms image with
+  `init: true`: docker-init starts pnpm, which starts Strapi, and a stop still
+  reaches Strapi (verified, exit code 0).
+- Deployed together with poll department targeting, the **Rollback** note
+  of [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
+  applies as well.
 
 #### Upgrading to the draft-twin repair (FX38)
 
@@ -3290,6 +3564,17 @@ docker compose -p infra \
   up -d --no-build web cms
 ```
 
+A cms image from before the ICS and cms start fixes, whose
+`docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
+(including `infra-cms:rollback` right after deploying that release), runs
+`pnpm start` and downloads pnpm from registry.npmjs.org at every start. Its
+build date does not tell: the image that release's first deploy tags
+`:rollback` was built on the same day. If the registry is unreachable, start
+it directly: see the rollback note of
+[Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
+Current images (`["node_modules/.bin/strapi","start"]`) start without
+registry access.
+
 If a code revert is needed instead, reset and rebuild:
 
 ```bash
@@ -3314,12 +3599,25 @@ steps 3–7).
 
 #### Rolling back poll department targeting
 
-The retag commands above are enough: the previous images (the 2026-09-27
-release) run on the upgraded database without a restore and need no
-override file. Until you roll forward, poll targeting is not enforced and
-guests keep the vote permission; the details, and how to take that
-permission away for the rollback window, are under **Rollback** in
+The retag commands above are enough: the previous images run on the
+upgraded database without a restore and need no override file. Until you
+roll forward, poll targeting is not enforced and guests keep the vote
+permission; the details, and how to take that permission away for the
+rollback window, are under **Rollback** in
 [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
+Deployed together with the ICS and cms start fixes, `:rollback` holds the
+images from before both (the 2026-09-27 release): roll back web and cms
+together, as the commands above do, and mind the `["pnpm","start"]` note
+above: that cms image downloads pnpm at every start.
+
+#### Rolling back the ICS and cms start fixes
+
+The retag commands above are enough, web and cms together (the new web
+links events by documentId, which the previous cms answers with 500);
+nothing in the database changed. The previous cms image starts with
+`pnpm start` and needs the registry (see above); the direct start without
+it is under **Rollback** in
+[Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27).
 
 #### Rolling back this release
 
