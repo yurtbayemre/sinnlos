@@ -30,6 +30,11 @@ services:
       context: ..
       dockerfile: apps/cms/Dockerfile
     restart: unless-stopped
+    # docker-init as PID 1: it forwards SIGTERM to Strapi (which shuts down
+    # gracefully on its own) and reaps zombies. Without it node is PID 1, and
+    # a SIGTERM that arrives before Strapi installs its handler (the first
+    # moments of a boot) is ignored until `docker stop` kills the container.
+    init: true
     depends_on:
       db:
         condition: service_healthy

@@ -293,7 +293,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement |
 | **kudos** | Peer recognition (`from` → `to` user, message, company value) |
 | **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
-| **event** | Calendar events, ICS export via custom route; optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
+| **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
 | **poll** | Question + options, `closesAt`, `anonymous` flag. `departments` is stored but not enforced yet (every poll is visible to every role with `poll.find`; poll targeting is planned) |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
@@ -459,6 +459,17 @@ comment/reaction target visibility for #28, and
 controller into the revision-snapshot lifecycle via `AsyncLocalStorage`, so
 revisions written through the REST API record who actually edited (edits in
 the Strapi admin panel have no such context).
+
+Every custom handler and policy that looks an entry up by an id from the
+request (a route `:id`, or ids in a request body) checks it first with
+`apps/cms/src/utils/entry-id.ts` (except poll-vote vote/results:
+`feat/poll-targeting` adds that check): a positive row id within the int4
+range, or a documentId in the shape Strapi generates (the FX07 write policies keep
+their own, wider documentId rule). Anything else answers like an unknown
+entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
+used to fail such a lookup, which Strapi answered with a 500. The web's ICS
+route applies the same check (`apps/web/src/lib/entry-id.ts`, a
+byte-identical copy).
 
 Global guards that apply to **every** content-API route, not per route:
 
@@ -742,7 +753,14 @@ response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must
 not accept that header from clients. The web and cms containers run
-**non-root** with `no-new-privileges`. Full details — upgrading an existing
+**non-root** with `no-new-privileges`. Neither needs pnpm or registry access
+to start: the web runs `node apps/web/server.js`, the cms Strapi's own
+`node_modules/.bin/strapi start` under docker-init (`init: true`). A cms
+image from before the ICS and cms start fixes, whose
+`docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
+(including `infra-cms:rollback` right after deploying that release), still
+runs `pnpm start` and downloads pnpm at every start, which matters when
+rolling back to one. Full details — upgrading an existing
 instance, backup/restore, rollback, hardening — are in
 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**.
 
@@ -767,7 +785,8 @@ node dist/scripts/datetime-migration-report.js [--around <ISO>] [--all] [--basel
 
 The Postgres integration suites (`apps/cms/src/database/*.pg.test.ts`: the
 timestamptz guard, the one-time repair through Strapi's own migration
-runner, the report) run when `SINNLOS_TEST_PG_URL` points at a Postgres 16
+runner, the report; `apps/cms/src/utils/entry-id.pg.test.ts`: the request id
+checks against an int4 column) run when `SINNLOS_TEST_PG_URL` points at a Postgres 16
 they may create schemas in, e.g. a throwaway
 `docker run --rm -d -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`
 with `SINNLOS_TEST_PG_URL=postgres://postgres:test@127.0.0.1:55432/postgres`;
@@ -830,3 +849,5 @@ trimming.
       APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
       (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
       is an all-day entry
+- [ ] The `.ics` link on `/events` names the event's documentId, the file's
+      `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404

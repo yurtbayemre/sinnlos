@@ -1,5 +1,6 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it } from "vitest";
+import { MALFORMED_ROW_IDS, failLikePostgres } from "../utils/entry-id.test.helper";
 import {
   MISSING_DATA_MESSAGE,
   writeAllowlistMessage,
@@ -49,12 +50,18 @@ interface Where {
   documentId?: string;
 }
 
+/** Department lookups the policy ran. */
+const departmentLookups: Where[] = [];
+
 function stubStrapi(callerRecords: CallerRecord[]): StrapiDb {
   return {
     db: {
       query: (uid: string) => ({
         findOne: async ({ where }: { where: Where }) => {
+          // Fails like Postgres on a value an int4 `id` lookup cannot take.
+          failLikePostgres(where);
           if (uid === "api::department.department") {
+            departmentLookups.push(where);
             const hit =
               where.documentId !== undefined
                 ? where.documentId === DEPARTMENT.documentId
@@ -155,6 +162,17 @@ describe("can-edit-department policy", () => {
       await expect(run(context(head, "ghost", { description: "x" }), ownDepartment)).resolves.toBe(
         false,
       );
+    });
+
+    it("returns false for a malformed or out-of-range id, without a lookup", async () => {
+      departmentLookups.length = 0;
+      for (const id of MALFORMED_ROW_IDS) {
+        await expect(
+          run(context(head, id, { description: "x" }), ownDepartment),
+          id,
+        ).resolves.toBe(false);
+      }
+      expect(departmentLookups).toEqual([]);
     });
 
     it("returns false when the caller has no resolvable department", async () => {

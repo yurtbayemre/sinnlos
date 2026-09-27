@@ -1,5 +1,6 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it } from "vitest";
+import { MALFORMED_ROW_IDS, failLikePostgres } from "../utils/entry-id.test.helper";
 import type { StrapiDb, WriteCaller, WritePolicy } from "../utils/write-allowlist";
 import canEditTeam from "./can-edit-team";
 
@@ -60,12 +61,18 @@ interface Where {
   documentId?: string;
 }
 
+/** Team lookups the policy ran. */
+const teamLookups: Where[] = [];
+
 function stubStrapi(callerRecords: CallerRecord[], team: TeamRow = TEAM): StrapiDb {
   return {
     db: {
       query: (uid: string) => ({
         findOne: async ({ where }: { where: Where }) => {
+          // Fails like Postgres on a value an int4 `id` lookup cannot take.
+          failLikePostgres(where);
           if (uid === "api::team.team") {
+            teamLookups.push(where);
             const hit =
               where.documentId !== undefined
                 ? where.documentId === team.documentId
@@ -157,6 +164,14 @@ describe("can-edit-team policy", () => {
   it("returns false when the team does not exist (both id shapes)", async () => {
     await expect(run(context(lead, 999))).resolves.toBe(false);
     await expect(run(context(lead, "ghost"))).resolves.toBe(false);
+  });
+
+  it("returns false for a malformed or out-of-range id, without a lookup", async () => {
+    teamLookups.length = 0;
+    for (const id of MALFORMED_ROW_IDS) {
+      await expect(run(context(lead, id)), id).resolves.toBe(false);
+    }
+    expect(teamLookups).toEqual([]);
   });
 
   describe("department_head branch (second findOne for the caller's department)", () => {

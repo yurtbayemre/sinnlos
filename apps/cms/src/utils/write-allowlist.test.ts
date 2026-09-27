@@ -13,8 +13,10 @@ import {
   WRITE_ALLOWLIST,
   applyWriteRule,
   enforceWriteAllowlist,
+  hasTargetId,
   isWriteBypassRole,
   parseToOneRelation,
+  targetRowWhere,
   uniqueSlugFrom,
   valueChecks,
   writeAllowlistMessage,
@@ -79,6 +81,8 @@ describe("parseToOneRelation", () => {
     ["a documentId string", "k3x9page01", set({ documentId: "k3x9page01" })],
     ["{ id }", { id: 5 }, set({ id: 5 })],
     ["{ id } with a numeric string", { id: "5" }, set({ id: 5 })],
+    ["the largest int4 id", 2147483647, set({ id: 2147483647 })],
+    ["the largest int4 id as a string", "2147483647", set({ id: 2147483647 })],
     ["{ documentId }", { documentId: "k3x9page01" }, set({ documentId: "k3x9page01" })],
     ["a one-element array", [7], set({ id: 7 })],
     ["an array of one longhand", [{ documentId: "d1" }], set({ documentId: "d1" })],
@@ -117,6 +121,10 @@ describe("parseToOneRelation", () => {
     ["NaN", Number.NaN],
     ["Infinity", Number.POSITIVE_INFINITY],
     ["an unsafe integer", 2 ** 53],
+    // Beyond the int4 id columns: the Postgres lookup failed with a 500.
+    ["an id beyond int4", 2147483648],
+    ["a numeric string beyond int4", "2147483648"],
+    ["{ id } beyond int4", { id: "99999999999" }],
     ["an empty string", ""],
     ["a zero-padded id (parseInt would read it)", "05"],
     ["a numeric prefix (parseInt would read it)", "12abc"],
@@ -146,6 +154,43 @@ describe("parseToOneRelation", () => {
     ["{ connect } with a positional entry", { connect: [{ id: 5, position: { start: true } }] }],
   ])("refuses %s", (_label, input) => {
     expect(parseToOneRelation(input)).toBeNull();
+  });
+});
+
+describe("targetRowWhere / hasTargetId (the write policies' target row)", () => {
+  it("reads a row id or a documentId like a relation ref", () => {
+    expect(targetRowWhere("12")).toEqual({ id: 12 });
+    expect(targetRowWhere(12)).toEqual({ id: 12 });
+    expect(targetRowWhere("2147483647")).toEqual({ id: 2147483647 });
+    expect(targetRowWhere("k3v9q2m8x7c4b1n6p5z0r2t8")).toEqual({
+      documentId: "k3v9q2m8x7c4b1n6p5z0r2t8",
+    });
+  });
+
+  it("is null without an id, which is a create for hasTargetId", () => {
+    for (const idParam of [undefined, null, ""]) {
+      expect(targetRowWhere(idParam)).toBeNull();
+      expect(hasTargetId(idParam)).toBe(false);
+    }
+  });
+
+  it("is null for a malformed or out-of-range id, which still names a target", () => {
+    // Beyond int4 (or not an integer) the Postgres lookup failed with a 500.
+    for (const idParam of [
+      "2147483648",
+      "99999999999999999999",
+      "1.5",
+      "1e3",
+      "0",
+      "05",
+      "-1",
+      " 1",
+      "12abc",
+      "a b",
+    ]) {
+      expect(targetRowWhere(idParam), idParam).toBeNull();
+      expect(hasTargetId(idParam)).toBe(true);
+    }
   });
 });
 

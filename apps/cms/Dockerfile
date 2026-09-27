@@ -22,8 +22,8 @@ RUN pnpm build
 
 # NOTE: keep the full node_modules tree in the runtime image — Strapi's
 # admin/runtime resolves packages that a --prod re-install would strip.
+# No pnpm here (corepack is not enabled): the container starts Strapi directly (CMD below).
 FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
-RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 WORKDIR /app
 ENV NODE_ENV=production
 # Datetime contract: the cms runs in UTC. Business dates use APP_TIME_ZONE;
@@ -33,4 +33,10 @@ COPY --from=builder --chown=node:node /app /app
 WORKDIR /app/apps/cms
 USER node
 EXPOSE 1337
-CMD ["pnpm", "start"]
+# Strapi's own bin (the pnpm shim that `pnpm start` ran; it execs node), not
+# `pnpm start`: corepack had prepared pnpm for root only, so every start as
+# `node` downloaded pnpm from registry.npmjs.org, and a restart or rollback
+# failed while the registry was unreachable. Strapi handles SIGTERM itself
+# (graceful shutdown); compose adds `init: true` for signal forwarding and
+# zombie reaping.
+CMD ["node_modules/.bin/strapi", "start"]

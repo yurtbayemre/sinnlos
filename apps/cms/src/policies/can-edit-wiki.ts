@@ -4,6 +4,7 @@ import {
   USER_UID,
   WIKI_PAGE_UID,
   enforceWriteAllowlist,
+  hasTargetId,
   isWriteBypassRole,
   targetRowWhere,
   type StrapiDb,
@@ -70,8 +71,7 @@ export default async (
   if (isWriteBypassRole(roleType)) return true;
   if (roleType === "guest") return false;
 
-  const where = targetRowWhere(policyContext.params?.id);
-  if (!where) {
+  if (!hasTargetId(policyContext.params?.id)) {
     const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);
     return enforceWriteAllowlist(
       policyContext,
@@ -80,6 +80,9 @@ export default async (
     );
   }
 
+  // A malformed target id is refused like a missing page (never queried).
+  const where = targetRowWhere(policyContext.params?.id);
+  if (!where) return false;
   const page = (await strapi.db.query(WIKI_PAGE_UID).findOne({
     where,
     populate: { author: true, department: true, team: { populate: { lead: true } } },
