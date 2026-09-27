@@ -14,7 +14,9 @@ import pollVoteController from "./poll-vote";
  *     vote even on anonymous polls.
  *
  * The db stub evaluates the `where` it receives, so dropping the published
- * pin or the voter filter fails the tests.
+ * pin or the voter filter fails the tests. Its vote `findMany` also returns
+ * what @strapi/database returns for a relation filter: only the selected
+ * columns, DISTINCT (see `distinctProjection`).
  */
 
 vi.mock("@strapi/strapi", () => ({
@@ -42,6 +44,11 @@ interface VoteRow {
   poll: number;
   voter: number;
   optionIndex: number;
+}
+
+/** A vote as the table holds it: with its primary key. */
+interface StoredVoteRow extends VoteRow {
+  id: number;
 }
 
 interface UserRow {
@@ -113,6 +120,27 @@ function matches(row: object, where: Where): boolean {
   });
 }
 
+/**
+ * A relation key in `where` (every vote query filters on `poll`) makes
+ * @strapi/database join the link table, and a joined select without
+ * groupBy is SELECT DISTINCT over the selected columns (5.55.1
+ * query/query-builder.js shouldUseDistinct). Rows with the same projection
+ * collapse into one, as they would in the real query.
+ */
+function distinctProjection(rows: StoredVoteRow[], select: string[] | undefined): object[] {
+  if (!select) return rows;
+  const seen = new Set<string>();
+  const projected: object[] = [];
+  for (const row of rows) {
+    const picked = Object.fromEntries(select.map((key) => [key, (row as unknown as Record<string, unknown>)[key]]));
+    const key = JSON.stringify(picked);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    projected.push(picked);
+  }
+  return projected;
+}
+
 type Handler = (ctx: unknown) => Promise<unknown>;
 
 function setup(options: {
@@ -121,7 +149,7 @@ function setup(options: {
   body?: unknown;
   votes?: VoteRow[];
 }) {
-  const votesTable = [...(options.votes ?? [])];
+  const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) =>
     POLLS.find((row) => matches(row, where)) ?? null,
   );
@@ -129,9 +157,14 @@ function setup(options: {
     findOne: vi.fn(async ({ where }: { where: Where }) =>
       votesTable.find((row) => matches(row, where)) ?? null,
     ),
-    findMany: vi.fn(async ({ where }: { where: Where }) => votesTable.filter((row) => matches(row, where))),
+    findMany: vi.fn(async ({ where, select }: { where: Where; select?: string[] }) =>
+      distinctProjection(
+        votesTable.filter((row) => matches(row, where)),
+        select,
+      ),
+    ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
-      votesTable.push(data);
+      votesTable.push({ id: 77, ...data });
       return { id: 77, optionIndex: data.optionIndex };
     }),
   };
@@ -354,7 +387,21 @@ describe("results", () => {
       canVote: true,
       audience: { targeted: false, departments: [] },
     });
-    expect(votes.findMany).toHaveBeenCalledWith({ where: { poll: OPEN.id }, select: ["optionIndex"] });
+    expect(votes.findMany).toHaveBeenCalledWith({ where: { poll: OPEN.id }, select: ["id", "optionIndex"] });
+  });
+
+  it("counts identical votes one by one: the vote query selects the primary key", async () => {
+    const { controller, ctx, votes } = setup({
+      id: OPEN.id,
+      votes: [11, 12, 13, 14, 15, 16].map((voter) => ({ poll: OPEN.id, voter, optionIndex: 1 })),
+    });
+    await controller.results(ctx);
+    expect(sent(ctx)).toMatchObject({ counts: [0, 6], total: 6 });
+    // id must stay in the select: a relation filter makes @strapi/database
+    // add DISTINCT (query-builder.js shouldUseDistinct), and without the
+    // primary key identical votes collapse into one row.
+    const [params] = votes.findMany.mock.calls[0] ?? [];
+    expect(params?.select).toContain("id");
   });
 
   it("gives admin_role/editor outside the audience the results with canVote false and the departments", async () => {

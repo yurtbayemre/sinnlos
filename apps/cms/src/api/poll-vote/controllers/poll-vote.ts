@@ -82,9 +82,12 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
 
     // Never populate `voter`: the response carries counts and the caller's
     // own vote only, whatever `anonymous` says.
+    // id must stay in the select: a relation filter makes @strapi/database
+    // add DISTINCT (query-builder.js shouldUseDistinct), and without the
+    // primary key identical votes collapse into one row.
     const votes = strapi.db.query("api::poll-vote.poll-vote");
     const [rows, mine] = (await Promise.all([
-      votes.findMany({ where: { poll: poll.id }, select: ["optionIndex"] }),
+      votes.findMany({ where: { poll: poll.id }, select: ["id", "optionIndex"] }),
       votes.findOne({ where: { poll: poll.id, voter: user.id }, select: ["optionIndex"] }),
     ])) as [OptionIndexRow[], OptionIndexRow | null];
 

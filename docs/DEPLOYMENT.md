@@ -967,6 +967,19 @@ the admin panel shows them as **Published**, not **Modified**.
     - as an admin or editor, a poll of another department shows its
       results, disabled buttons and "Only members of these departments can
       vote.";
+    - as an admin, each poll card's "N votes" equals the poll's count in
+      this read-only query (two votes on the same option count as two):
+
+      ```bash
+      psql_db <<'SQL'
+      SELECT p.question AS poll, count(l.poll_vote_id) AS votes
+      FROM polls p
+      LEFT JOIN poll_votes_poll_lnk l ON l.poll_id = p.id
+      WHERE p.published_at IS NOT NULL
+      GROUP BY p.id, p.question
+      ORDER BY p.question;
+      SQL
+      ```
     - as a guest (if there is one), voting on a poll without departments
       works;
     - `/polls/new` (admin or editor) shows "Restrict to departments
