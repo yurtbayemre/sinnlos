@@ -66,13 +66,18 @@ const fullUser = () => ({
   microsoftOid: "oid-ada-123",
 });
 
-/** The Strapi slice the datetime guard touches in register(): log, hooks, dialect. */
+/**
+ * The Strapi slice the datetime guard touches in register(): log, hooks,
+ * dialect; plus the Document Service middleware registry the poll audience
+ * guard hangs onto.
+ */
 function datetimeHost() {
   const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
   return {
     hooks,
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     db: { dialect: { client: "sqlite" } },
+    documents: { use: vi.fn() },
     hook: (name: string) => ({
       register: (handler: (context: unknown) => Promise<void>) => {
         hooks.set(name, [...(hooks.get(name) ?? []), handler]);
@@ -397,6 +402,45 @@ describe("org draft guard in register() (decision 05)", () => {
     expect(counted).toEqual(["departments", "teams"]);
     expect(strapi.sanitizers.get("content-api.output")).toHaveLength(2);
     expect(strapi.contentAPI.sanitize.query).not.toBe(coreSanitizeQuery);
+  });
+
+  it("registers no poll audience guard while draft rows exist", async () => {
+    const { strapi } = orgHost({ departments: 1 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(/^\[org-dp\]/);
+    expect(strapi.documents.use).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Wiring test for the write-time poll audience guard (decision 02, Codex
+ * review finding 1; utils/poll-audience-guard.ts): register() hangs exactly
+ * one Document Service middleware onto `strapi.documents`, before any
+ * plugin bootstrap or our own bootstrap writes a poll, and refuses to boot
+ * without the registry.
+ */
+describe("poll audience guard in register() (decision 02)", () => {
+  function guardHost(documents: unknown) {
+    return {
+      ...datetimeHost(),
+      getModel: () => undefined,
+      requestContext: { get: () => undefined },
+      sanitizers: makeSanitizers(),
+      contentAPI: { sanitize: { query: vi.fn(async (query: unknown) => query) } },
+      documents,
+    };
+  }
+
+  it("registers exactly one Document Service middleware", async () => {
+    const use = vi.fn();
+    await lifecycle.register({ strapi: guardHost({ use }) });
+    expect(use).toHaveBeenCalledOnce();
+    expect(typeof use.mock.calls[0]?.[0]).toBe("function");
+  });
+
+  it("refuses to boot when strapi.documents.use is gone", async () => {
+    await expect(lifecycle.register({ strapi: guardHost({}) })).rejects.toThrow(
+      /^\[poll-audience\] strapi\.documents\.use not found/,
+    );
   });
 });
 

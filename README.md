@@ -295,7 +295,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
-| **poll** | Question + options, `closesAt`, `anonymous` flag. `departments` is stored but not enforced yet (every poll is visible to every role with `poll.find`; poll targeting is planned) |
+| **poll** | Question + options, `closesAt`, `anonymous` flag, **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role, guests included, sees it, votes and sees its results); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
@@ -327,6 +327,42 @@ draft once that move is published or discarded (the log names the draft),
 and a draft saved before the upgrade keeps any relations it already lacked,
 so publishing it still drops them. The runbook lists both kinds up front:
 [Upgrading to the draft-twin repair](./docs/DEPLOYMENT.md#upgrading-to-the-draft-twin-repair-fx38).
+
+**Poll department targeting** (enforced by the cms, not only in the UI):
+
+| Caller | Poll without departments | Poll whose departments include the caller's | Poll of other departments |
+| --- | --- | --- | --- |
+| member, team lead, department head, guest, `authenticated` | see, vote, results | see, vote, results | not found (list, detail, vote, results) |
+| admin, editor | see, vote, results | see, vote, results | see and results; voting refused |
+
+- "The caller's department" is the `department` of their user record
+  (Strapi admin → Content Manager → User). Role never adds membership; a
+  user without a department sees company-wide polls only. A department
+  change applies on the next request; votes already cast stay counted.
+- A poll is restricted when its **Audience** field (`all` | `departments`)
+  is `departments` **or** it has departments. Only the flag keeps a poll
+  restricted after all its departments are deleted (then only admins and
+  editors see it, and the card asks to re-select departments), so the cms
+  sets it itself: every save of a poll that leaves departments selected
+  (admin panel, content API and web form alike, draft and published row,
+  in the same transaction) sets Audience = `departments`
+  (`apps/cms/src/utils/poll-audience-guard.ts`), and deleting a department
+  sets it on every poll that still has the department
+  (`api/department/content-types/department/lifecycles.ts`, for rows
+  written outside the cms, e.g. by a previous release during a rollback).
+  To open a restricted poll to everyone, remove its departments **and** set
+  Audience to `all`; Audience `all` with departments still selected is
+  saved as `departments`.
+- Where it is enforced: the `poll-visibility` read policy (list and
+  detail) and the custom `vote`/`results` actions, all through
+  `apps/cms/src/utils/poll-audience.ts`. Departments are compared by
+  documentId. `results` also tells the web whether the caller may vote
+  (`canVote`) and which departments a poll targets.
+- Existing polls get their Audience on the first boot of this release
+  (`[poll-audience] set the audience of N existing poll row(s) …`), in one
+  transaction: if it fails, nothing is changed and the cms does not start
+  (a poll row without the flag could leave a restricted poll open):
+  [Upgrading to poll department targeting](./docs/DEPLOYMENT.md#upgrading-to-poll-department-targeting).
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart), `microsoftOid`, and the
@@ -420,13 +456,16 @@ Read-side filters:
 - `quick-link-visibility` — same `departments`-relation scheme as documents
 - `notification-visibility` — reads restricted to the caller's own rows
   (recipient = caller)
-- `published-only` — pins reads without a row filter (event, poll,
-  department, team) to `status=published`, so `?status=draft` no longer
+- `published-only` — pins reads without a row filter (event, department,
+  team) to `status=published`, so `?status=draft` no longer
   returns unpublished entries; admin/editor bypass and keep draft reads.
   department and team have no drafts of their own any more, but `status`
   still decides which rows of their populated draft & publish relations
   come back. The custom ICS, vote and results actions read published rows
   only as well
+- `poll-visibility` — poll department targeting (see above): the published
+  polls whose audience holds the caller, resolved to a non-relational id
+  filter; pins `status=published`; admin/editor bypass (drafts included)
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
 - `announcement-visibility` — server-side audience targeting (#9):
@@ -462,8 +501,8 @@ the Strapi admin panel have no such context).
 
 Every custom handler and policy that looks an entry up by an id from the
 request (a route `:id`, or ids in a request body) checks it first with
-`apps/cms/src/utils/entry-id.ts` (except poll-vote vote/results:
-`feat/poll-targeting` adds that check): a positive row id within the int4
+`apps/cms/src/utils/entry-id.ts` (poll vote/results take the row id only,
+through `parseRowId`): a positive row id within the int4
 range, or a documentId in the shape Strapi generates (the FX07 write policies keep
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
@@ -479,7 +518,9 @@ Global guards that apply to **every** content-API route, not per route:
   domain. Today this protects wiki pages: `department.pages`/`team.pages`
   (and any chain that reaches them, e.g. `/api/users?populate[department]…`)
   are dropped from `populate`, rejected with a 400 in `filters`/`sort`, and
-  deleted from responses. `admin_role`/`editor` bypass it. It wraps
+  deleted from responses. Polls are guarded the same way, with no trusted
+  source at all (the one relation into them, `poll-vote.poll`, has no
+  content-API route). `admin_role`/`editor` bypass it. It wraps
   `strapi.contentAPI.sanitize.query`, so it covers core, users-permissions
   and upload routes, reads and writes. Boot fails if that hook point
   disappears after a Strapi upgrade.
@@ -578,8 +619,10 @@ above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 | `guest` | — | — · — | — / — | R | — | R | R · R · — | R | — | R | — / — | C |
 | `authenticated` *(fallback)* | R | R+C · R+C+U | R / R | R | R | R | R | R+C | R+C | R | R / R+C | C |
 
-No role holds any `poll-vote` grant: votes are cast and counted only
-through the custom `vote`/`results` actions below.
+No role holds any `poll-vote` CRUD grant: votes are cast and counted only
+through the custom `vote`/`results` actions below, which every role holds
+(guest included); whether a caller may vote on a given poll is decided per
+poll by the department targeting above.
 
 Fine print encoded in the matrix (and enforced by the policies/controllers):
 acknowledgements are **immutable read receipts** — only `admin_role` may
@@ -611,7 +654,9 @@ acknowledgements** (a guest can never see a mandatory announcement, so ack
 grants were dead attack surface), **no event-rsvp** (guests read the
 calendar but neither respond nor see attendee names), and **no training**
 (no course/lesson/lesson-progress grants at all — while `search-log.create`
-IS granted to guest: search telemetry is anonymous by design). Grants that older
+IS granted to guest: search telemetry is anonymous by design). Guests do
+vote in polls: a poll without departments is open to every signed-in user,
+and a guest in a poll's department is part of its audience. Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
 `REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
@@ -631,8 +676,9 @@ The contact fields a guest could read that way (email, phone, hireDate,
 officeLocation, microsoftOid) are removed output-side by the contact-field
 sanitizer (#10, see the global guards above). Custom (non-CRUD) route
 actions (ICS export, celebrations — staff roles only, not `guest` or
-`authenticated` —, poll `vote` — every role except `guest` —,
-mark-read/mark-all-read, poll `results`, `/api/me`, `changePassword`,
+`authenticated` —, poll `vote` and `results` — every role, `guest`
+included, narrowed per poll by the department targeting —,
+mark-read/mark-all-read, `/api/me`, `changePassword`,
 `role.find` for the admin ack
 report, the classified `cleanupUploads` endpoint, the admin-only
 search-log `summary` aggregate behind `/manage/analytics`, and the upload
@@ -689,6 +735,11 @@ never pass, and exclusion checks such as `role !== "guest"` are not allowed:
 | `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action |
 | `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP fetch on `/events` |
 | `canPostAds` | the five staff roles | *New ad* button, `/marketplace/new` |
+
+Poll voting has no role helper: the poll card renders what the cms answers
+per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
+departments), so an admin or editor outside a poll's departments sees its
+results with the vote buttons disabled.
 
 The marketplace detail/edit pages show the edit/delete controls to the ad's
 owner and to `admin_role` (editors can still delete through the API, but the
@@ -834,6 +885,10 @@ trimming.
       or department
 - [ ] An admin sees the *Admin* link and `/manage`; an editor sees
       *New poll*; a guest sees no RSVP controls and no *New ad* button
+- [ ] Poll targeting: a poll restricted to one department is listed for
+      its members only; an editor outside it sees *Only for: …*, the
+      results and disabled buttons; a guest can vote on a poll without
+      departments
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two

@@ -16,7 +16,10 @@ export default async function NewPollPage() {
   if (!canCreatePolls((await getViewer()).role)) redirect("/polls");
 
   const t = await getTranslations("polls");
-  const { data } = await tryFetch(() => api.departments.list(), "departments");
+  // A failed department fetch must not look like "no departments": the form
+  // could then only create a company-wide poll (decision 02), so it refuses
+  // to submit instead.
+  const { data, failed } = await tryFetch(() => api.departments.list(), "departments");
   const departments = ((data?.data ?? []) as { id: number; name: string }[]).map((d) => ({
     id: d.id,
     name: d.name,
@@ -25,7 +28,7 @@ export default async function NewPollPage() {
   return (
     <div className="space-y-8">
       <PageHeader title={t("newPoll")} description={t("newPollDescription")} />
-      <PollForm departments={departments} />
+      <PollForm departments={departments} departmentsUnavailable={failed} />
     </div>
   );
 }

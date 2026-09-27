@@ -10,6 +10,8 @@ import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
+import { backfillPollAudience } from "./utils/poll-audience-backfill";
+import { registerPollAudienceGuard } from "./utils/poll-audience-guard";
 import {
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
@@ -267,7 +269,9 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
     "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   /**
-   * `guest` is strictly read-only. It is denied kudos (celebrations
+   * `guest` is read-only on content (it writes only search telemetry, and
+   * casts poll votes through the custom vote action, CUSTOM_ACTION_GRANTS;
+   * decision 02). It is denied kudos (celebrations
    * populate user relations and leak hire dates), but it DOES keep the
    * baseline `users-permissions.user.find/findOne` grant handed out to
    * every reading role below.
@@ -378,14 +382,10 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   ],
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
-  "api::poll-vote.poll-vote.vote": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-    "authenticated",
-  ],
+  // Every role, guest included (decision 02: a company-wide poll is open to
+  // every signed-in user). Which polls a caller may vote on is decided per
+  // poll in the controller (department targeting, utils/poll-audience.ts).
+  "api::poll-vote.poll-vote.vote": "*",
   "api::poll-vote.poll-vote.results": "*",
   // Aggregated search analytics (issue #19) — /manage/analytics is
   // admin-only, so is the summary endpoint.
@@ -805,6 +805,12 @@ export default {
     enforceSecretGuard(process.env, strapi.log);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
+    // Decision 02, fail closed: every Document Service write of a poll sets
+    // audience='departments' on each row of the poll that links a
+    // department, in the write's own transaction (utils/poll-audience-guard.ts).
+    // Here, before any plugin or bootstrap code writes a poll; throws when
+    // strapi.documents.use is gone.
+    registerPollAudienceGuard(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
@@ -831,6 +837,13 @@ export default {
 
     await syncRolePermissions(strapi);
     await syncAdvancedSettings(strapi);
+    // Decision 02: give existing polls their `audience` flag ('departments'
+    // when they link a department). A no-op once no row is NULL. One
+    // transaction; on any error it rolls back and THROWS, so the cms does
+    // not start with a restricted poll left open (fail closed, see
+    // utils/poll-audience-backfill.ts). Before the draft-twin repair below,
+    // so a cloned draft copies the flag.
+    await backfillPollAudience(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.

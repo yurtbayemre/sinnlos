@@ -2,11 +2,12 @@ import { factories } from "@strapi/strapi";
 
 export default factories.createCoreRouter("api::poll.poll", {
   config: {
-    // Pin reads to published rows (FX06, §5.24). The planned
-    // global::poll-visibility (decisions/02-poll-targeting) pins the status
-    // itself and REPLACES this policy here — do not stack both.
-    find: { policies: ["global::published-only"] },
-    findOne: { policies: ["global::published-only"] },
+    // Department targeting (decision 02): a targeted poll is readable only
+    // by its departments' members (admin_role/editor bypass). The policy
+    // also pins reads to published rows, so it REPLACES
+    // global::published-only here (FX06) — do not stack both.
+    find: { policies: ["global::poll-visibility"] },
+    findOne: { policies: ["global::poll-visibility"] },
     create: { policies: ["global::is-admin-or-editor"] },
     update: { policies: ["global::is-admin-or-editor"] },
     delete: { policies: ["global::is-admin-or-editor"] },

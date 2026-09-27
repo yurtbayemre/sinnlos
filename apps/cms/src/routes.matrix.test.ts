@@ -293,8 +293,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::notification.notification.markRead": [],
   "api::notification.notification.markAllRead": [],
 
-  "api::poll.poll.find": ["global::published-only"],
-  "api::poll.poll.findOne": ["global::published-only"],
+  "api::poll.poll.find": ["global::poll-visibility"],
+  "api::poll.poll.findOne": ["global::poll-visibility"],
   "api::poll.poll.create": ADMIN_OR_EDITOR,
   "api::poll.poll.update": ADMIN_OR_EDITOR,
   "api::poll.poll.delete": ADMIN_OR_EDITOR,
@@ -393,6 +393,7 @@ const FX01_REMOVED = [
 const PUBLISHED_PINNING_POLICIES = new Set([
   "global::announcement-visibility",
   "global::document-visibility",
+  "global::poll-visibility",
   "global::published-only",
   "global::quick-link-visibility",
   "global::training-visibility",
@@ -401,7 +402,8 @@ const PUBLISHED_PINNING_POLICIES = new Set([
 
 /**
  * D&P types whose reads still honour a client `?status=draft`. Empty since
- * FX06 put global::published-only on event/poll/department/team.
+ * FX06 put global::published-only on event/poll/department/team (poll has
+ * pinned it through global::poll-visibility since decision 02).
  */
 const KNOWN_DRAFT_READS = new Set<string>([]);
 
@@ -428,6 +430,7 @@ const VISIBILITY_FILTER_POLICIES = new Set([
   "global::document-visibility",
   "global::lesson-progress-visibility",
   "global::notification-visibility",
+  "global::poll-visibility",
   "global::quick-link-visibility",
   "global::training-visibility",
   "global::wiki-visibility",
@@ -647,9 +650,13 @@ describe("route → policy matrix (S01)", async () => {
       }
     }
 
-    it("sees the department/team → wiki-page relations (rule sanity)", () => {
+    it("sees the department/team → wiki-page and poll-vote → poll relations (rule sanity)", () => {
       expect([...sideChannels.keys()]).toEqual(
-        expect.arrayContaining(["api::department.department.pages", "api::team.team.pages"]),
+        expect.arrayContaining([
+          "api::department.department.pages",
+          "api::team.team.pages",
+          "api::poll-vote.poll-vote.poll",
+        ]),
       );
     });
 
@@ -749,11 +756,17 @@ describe("route → policy matrix (S01)", async () => {
       }
     });
 
-    /** Every model a trusted or restricted wiki relation starts or ends at. */
-    const wikiDomain = new Set([
-      ...Object.keys(RESTRICTED_RELATION_TARGETS),
-      ...Object.values(RESTRICTED_RELATION_TARGETS).flat(),
-    ]);
+    /**
+     * Every model a trusted or restricted wiki relation starts or ends at:
+     * the guard targets that TRUST some sources, with those sources. A
+     * target without trusted sources (poll, decision 02) has no relation
+     * whose consistency the write side has to keep.
+     */
+    const wikiDomain = new Set(
+      Object.entries(RESTRICTED_RELATION_TARGETS)
+        .filter(([, sources]) => sources.length > 0)
+        .flatMap(([target, sources]) => [target, ...sources]),
+    );
     /** `<uid>.<relation> <write>` for every write route a restricted role holds. */
     const guardedWrites = [...schemas].flatMap(([uid, schema]) =>
       Object.entries(schema.attributes)
@@ -822,6 +835,40 @@ describe("route → policy matrix (S01)", async () => {
         "api::poll-vote.poll-vote.vote",
         "api::poll-vote.poll-vote.results",
       ]);
+    });
+
+    it("decision 02: poll reads are filtered by poll-visibility alone (not stacked on published-only)", () => {
+      for (const action of ["api::poll.poll.find", "api::poll.poll.findOne"]) {
+        expect(policiesOf(action).map(policyName), action).toEqual(["global::poll-visibility"]);
+      }
+    });
+
+    it("decision 02: vote and results are granted to every role, guest included", () => {
+      expect(matrixRoles).toEqual(
+        expect.arrayContaining([
+          "admin_role",
+          "editor",
+          "department_head",
+          "team_lead",
+          "member",
+          "guest",
+          "authenticated",
+        ]),
+      );
+      for (const action of ["api::poll-vote.poll-vote.vote", "api::poll-vote.poll-vote.results"]) {
+        expect(CUSTOM_ACTION_GRANTS[action], action).toBe("*");
+        for (const role of matrixRoles) {
+          expect(effectiveGrants(role).has(action), `${role}: ${action}`).toBe(true);
+        }
+      }
+    });
+
+    it("decision 02: vote and results stay custom routes on the poll-vote controller", () => {
+      expect(routes.get("api::poll-vote.poll-vote.vote")?.kind).toBe("custom");
+      expect(routes.get("api::poll-vote.poll-vote.results")?.kind).toBe("custom");
+      expect(controllerMethods.get("api::poll-vote.poll-vote")).toEqual(
+        expect.arrayContaining(["vote", "results"]),
+      );
     });
 
     it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {

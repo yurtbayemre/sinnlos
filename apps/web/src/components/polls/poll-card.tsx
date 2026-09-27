@@ -3,11 +3,12 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BarChart3, Clock, Check } from "lucide-react";
+import { BarChart3, Clock, Check, Users } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { isPollClosed } from "@/lib/poll-close";
 import { votePoll } from "@/lib/poll-actions";
+import { pollAudienceView } from "@/lib/poll-audience-view";
 import type { PollResults } from "@/lib/types";
 
 export function PollCard({ results }: { results: PollResults }) {
@@ -29,12 +30,19 @@ export function PollCard({ results }: { results: PollResults }) {
   }));
   const { counts: localCounts, total: localTotal, myVoteIndex: voted } = optimistic;
 
+  // Department targeting (decision 02): the CMS says per poll whether this
+  // caller may vote; an admin or editor outside the poll's departments sees
+  // the results but no vote buttons.
+  const { canVote, targeted, departmentNames, hint } = pollAudienceView(results);
+
   const isClosed = isPollClosed(poll.closesAt);
   const hasVoted = voted !== null;
-  const showResults = hasVoted || isClosed;
+  // Results show exactly when voting is over for this caller: voted,
+  // closed, or not in the poll's audience.
+  const showResults = hasVoted || isClosed || !canVote;
 
   const handleVote = (index: number) => {
-    if (hasVoted || isClosed || isPending) return;
+    if (showResults || isPending) return;
     setError(null);
     startTransition(async () => {
       applyVote(index);
@@ -59,10 +67,20 @@ export function PollCard({ results }: { results: PollResults }) {
             {tCommon("vote", { count: localTotal })}
           </div>
         </div>
-        {isClosed && (
-          <div className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Clock className="h-3 w-3" />
-            {tPolls("closed")}
+        {(isClosed || (targeted && departmentNames.length > 0)) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            {isClosed && (
+              <span className="inline-flex items-center gap-1">
+                <Clock className="h-3 w-3" aria-hidden="true" />
+                {tPolls("closed")}
+              </span>
+            )}
+            {targeted && departmentNames.length > 0 && (
+              <span className="inline-flex items-center gap-1">
+                <Users className="h-3 w-3" aria-hidden="true" />
+                {tPolls("audienceDepartments", { departments: departmentNames.join(", ") })}
+              </span>
+            )}
           </div>
         )}
       </CardHeader>
@@ -72,6 +90,7 @@ export function PollCard({ results }: { results: PollResults }) {
             {error}
           </p>
         )}
+        {hint && <p className="text-xs text-muted-foreground">{tPolls(hint)}</p>}
         {poll.options.map((option, i) => {
           const pct = localTotal > 0 ? Math.round((localCounts[i] / localTotal) * 100) : 0;
           const isMyVote = voted === i;
@@ -80,13 +99,13 @@ export function PollCard({ results }: { results: PollResults }) {
               key={i}
               type="button"
               onClick={() => handleVote(i)}
-              disabled={hasVoted || isClosed || isPending}
+              disabled={showResults || isPending}
               className={cn(
                 "relative w-full overflow-hidden rounded-lg border px-4 py-2.5 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
                 !showResults && "hover:border-primary/40 hover:bg-muted",
                 isPending && !showResults && "opacity-60",
                 isMyVote && "border-primary/40",
-                (hasVoted || isClosed) && "cursor-default",
+                showResults && "cursor-default",
               )}
             >
               {showResults && (

@@ -108,6 +108,12 @@ export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
     "api::wiki-space.wiki-space", // pages
     "api::wiki-revision.wiki-revision", // page
   ],
+  // Poll department targeting (decision 02): poll-visibility narrows the
+  // poll routes only. The one relation into poll, poll-vote.poll, has no
+  // content-API route today (the poll-vote router is `only: []`); this
+  // entry keeps it, and any relation added later, from handing out polls
+  // outside their audience. No source is trusted.
+  "api::poll.poll": [],
 };
 
 export interface RestrictedRelationOptions {
