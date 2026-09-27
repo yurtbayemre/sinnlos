@@ -817,10 +817,15 @@ went live on 2026-09-27) fixes what that deploy turned up:
   cms container downloaded pnpm from registry.npmjs.org**: a restart, a deploy
   or a rollback failed while the registry was unreachable. The image now
   starts Strapi directly (`node_modules/.bin/strapi start`, the command
-  `pnpm start` ran) and contains no pnpm, and compose runs the cms with
-  `init: true`: docker-init passes the stop signal on to Strapi, which shuts
-  down cleanly as before ("Shutting down Strapi", exit code 0; measured
-  `docker stop`: 1.6 s before, 0.6 s now). **The cms container no longer
+  `pnpm start` ran) and contains no pnpm (corepack is not enabled), and
+  compose runs the cms with `init: true`: docker-init passes the stop signal
+  on to Strapi. A running cms shuts down as before: "Shutting down Strapi",
+  exit code 0, `docker stop` in about 0.5 to 0.8 s with either image. What
+  `init: true` changes is a stop during boot: the cms now exits with code 143
+  in about 0.5 s instead of being killed (code 137) when the stop grace
+  period runs out. Without DNS on the host, a stop right after requests can
+  take up to about 5 s (Strapi's telemetry lookups time out), still within
+  compose's 10 s grace period. **The cms container no longer
   needs registry access to start.** Building the image still downloads
   packages. Cms images from before this release (their
   `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`),

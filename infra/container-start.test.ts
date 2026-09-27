@@ -58,7 +58,9 @@ describe("cms image", () => {
     expect(cmdOf(stage)).toEqual(["node_modules/.bin/strapi", "start"]);
   });
 
-  it("has no pnpm or corepack in the runtime stage", () => {
+  // The base image still ships corepack, npm and yarn; the stage must not
+  // set up or call any of them (only the pnpm shim is gone).
+  it("sets up and calls no package manager in the runtime stage", () => {
     expect(stage.filter((line) => PACKAGE_MANAGER.test(line))).toEqual([]);
   });
 

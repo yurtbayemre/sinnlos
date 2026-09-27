@@ -22,7 +22,7 @@ RUN pnpm build
 
 # NOTE: keep the full node_modules tree in the runtime image — Strapi's
 # admin/runtime resolves packages that a --prod re-install would strip.
-# No pnpm/corepack here: the container starts Strapi directly (CMD below).
+# No pnpm here (corepack is not enabled): the container starts Strapi directly (CMD below).
 FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
