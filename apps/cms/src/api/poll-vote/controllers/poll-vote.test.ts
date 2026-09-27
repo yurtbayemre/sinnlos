@@ -13,6 +13,10 @@ import pollVoteController from "./poll-vote";
  *     on an id an int4 column cannot hold,
  *   - admin_role/editor read every poll and its results but vote only in
  *     the audience (403 outside it),
+ *   - a guest (owner decision 2026-09-27) gets the same 404 for a poll that
+ *     is not visible to guests (NULL flags included), and 403 "Guests
+ *     cannot vote on this poll" on a visible poll without guest voting;
+ *     results carry both flags and `canVote` from the same rule,
  *   - the voter is always the caller, whatever the body says,
  *   - results never carry voter identities, but do carry the caller's own
  *     vote even on anonymous polls.
@@ -42,6 +46,8 @@ interface PollRow {
   audience: string | null;
   departments: { documentId: string; name: string }[];
   publishedAt: string | null;
+  visibleToGuests: boolean | null;
+  guestsCanVote: boolean | null;
 }
 
 interface VoteRow {
@@ -74,6 +80,8 @@ const DRAFT: PollRow = {
   audience: "all",
   departments: [],
   publishedAt: null,
+  visibleToGuests: false,
+  guestsCanVote: false,
 };
 const OPEN: PollRow = {
   ...DRAFT,
@@ -101,7 +109,44 @@ const ENG_ONLY: PollRow = {
   departments: [ENG],
 };
 const CLOSED: PollRow = { ...OPEN, id: 5, documentId: "p-closed", closesAt: "2020-01-01T00:00:00.000Z" };
-const POLLS = [DRAFT, OPEN, CLOSING, ENG_ONLY, CLOSED];
+/** Guest access (owner decision 2026-09-27): visible to guests, no guest vote. */
+const GUEST_VISIBLE: PollRow = { ...OPEN, id: 6, documentId: "p-guest-read", visibleToGuests: true };
+/** Visible to guests, and guests may vote. */
+const GUEST_VOTABLE: PollRow = {
+  ...OPEN,
+  id: 7,
+  documentId: "p-guest-vote",
+  visibleToGuests: true,
+  guestsCanVote: true,
+};
+/** guestsCanVote without visibleToGuests: inert, hidden from guests. */
+const GUEST_VOTE_ONLY: PollRow = { ...OPEN, id: 8, documentId: "p-guest-vote-only", guestsCanVote: true };
+/** A row from before the guest columns: NULL flags. */
+const GUEST_NULL: PollRow = {
+  ...OPEN,
+  id: 9,
+  documentId: "p-legacy",
+  audience: null,
+  visibleToGuests: null,
+  guestsCanVote: null,
+};
+/** Engineering only, open to guests (of Engineering) with voting. */
+const ENG_GUESTS: PollRow = { ...ENG_ONLY, id: 10, documentId: "p-eng-guests", visibleToGuests: true, guestsCanVote: true };
+/** Engineering only, visible to guests (of Engineering) without voting. */
+const ENG_GUESTS_READ: PollRow = { ...ENG_GUESTS, id: 11, documentId: "p-eng-guests-read", guestsCanVote: false };
+const POLLS = [
+  DRAFT,
+  OPEN,
+  CLOSING,
+  ENG_ONLY,
+  CLOSED,
+  GUEST_VISIBLE,
+  GUEST_VOTABLE,
+  GUEST_VOTE_ONLY,
+  GUEST_NULL,
+  ENG_GUESTS,
+  ENG_GUESTS_READ,
+];
 
 /**
  * Route ids that name no poll row: the routes take the numeric id of the
@@ -115,7 +160,9 @@ const DESIGNER: UserRow = { id: 6, role: { type: "member" }, department: { id: 7
 const GUEST: UserRow = { id: 7, role: { type: "guest" }, department: null };
 const EDITOR_OUTSIDE: UserRow = { id: 8, role: { type: "editor" }, department: null };
 const ADMIN_OUTSIDE: UserRow = { id: 9, role: { type: "admin_role" }, department: { id: 7, documentId: "d-design" } };
-const USERS = [ENGINEER, DESIGNER, GUEST, EDITOR_OUTSIDE, ADMIN_OUTSIDE];
+const GUEST_ENG: UserRow = { id: 10, role: { type: "guest" }, department: { id: 1, documentId: "d-eng" } };
+const FALLBACK: UserRow = { id: 11, role: { type: "authenticated" }, department: null };
+const USERS = [ENGINEER, DESIGNER, GUEST, EDITOR_OUTSIDE, ADMIN_OUTSIDE, GUEST_ENG, FALLBACK];
 
 type Where = Record<string, unknown>;
 
@@ -240,6 +287,12 @@ describe("vote", () => {
       { id: DRAFT.id, user: ENGINEER },
       { id: ENG_ONLY.id, user: DESIGNER },
       { id: ENG_ONLY.id, user: GUEST },
+      // Guest access: a poll not visible to guests is as missing as any.
+      { id: OPEN.id, user: GUEST },
+      { id: GUEST_NULL.id, user: GUEST },
+      { id: GUEST_VOTE_ONLY.id, user: GUEST },
+      { id: ENG_ONLY.id, user: GUEST_ENG },
+      { id: ENG_GUESTS.id, user: GUEST },
     ];
     for (const { id, user } of cases) {
       const { controller, ctx, votes } = setup({ id, user });
@@ -315,10 +368,54 @@ describe("vote", () => {
     expect(ctx.send).toHaveBeenCalledOnce();
   });
 
-  it("records a guest's vote on a company-wide poll", async () => {
-    const { controller, ctx, votes } = setup({ id: OPEN.id, user: GUEST });
-    await controller.vote(ctx);
-    expect(votes.create).toHaveBeenCalledWith({ data: { poll: OPEN.id, optionIndex: 0, voter: GUEST.id } });
+  it("answers 403 to a guest on a poll visible to guests without guest voting", async () => {
+    for (const [id, user] of [
+      [GUEST_VISIBLE.id, GUEST],
+      [GUEST_VISIBLE.id, GUEST_ENG],
+      [ENG_GUESTS_READ.id, GUEST_ENG],
+    ] as const) {
+      const { controller, ctx, votes } = setup({ id, user });
+      await controller.vote(ctx);
+      expect(ctx.forbidden, `${id} as ${user.id}`).toHaveBeenCalledWith("Guests cannot vote on this poll");
+      expect(ctx.notFound).not.toHaveBeenCalled();
+      expect(votes.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it("records a guest's vote where guests may vote (company-wide, and the guest's own department)", async () => {
+    const companyWide = setup({ id: GUEST_VOTABLE.id, user: GUEST });
+    await companyWide.controller.vote(companyWide.ctx);
+    expect(companyWide.votes.create).toHaveBeenCalledWith({
+      data: { poll: GUEST_VOTABLE.id, optionIndex: 0, voter: GUEST.id },
+    });
+    for (const spy of errorSpies) expect(companyWide.ctx[spy], spy).not.toHaveBeenCalled();
+
+    const ownDepartment = setup({ id: ENG_GUESTS.id, user: GUEST_ENG, body: { optionIndex: 1 } });
+    await ownDepartment.controller.vote(ownDepartment.ctx);
+    expect(ownDepartment.votes.create).toHaveBeenCalledWith({
+      data: { poll: ENG_GUESTS.id, optionIndex: 1, voter: GUEST_ENG.id },
+    });
+  });
+
+  it("keeps the other vote rules for a guest who may vote (second vote refused)", async () => {
+    const again = setup({
+      id: GUEST_VOTABLE.id,
+      user: GUEST,
+      votes: [{ poll: GUEST_VOTABLE.id, voter: GUEST.id, optionIndex: 0 }],
+    });
+    await again.controller.vote(again.ctx);
+    expect(again.ctx.badRequest).toHaveBeenCalledWith("Already voted");
+    expect(again.votes.create).not.toHaveBeenCalled();
+  });
+
+  it("lets every non-guest vote whatever the guest flags say", async () => {
+    for (const poll of [OPEN, GUEST_VISIBLE, GUEST_VOTE_ONLY, GUEST_NULL]) {
+      for (const user of [ENGINEER, DESIGNER, FALLBACK, EDITOR_OUTSIDE]) {
+        const { controller, ctx, votes } = setup({ id: poll.id, user });
+        await controller.vote(ctx);
+        expect(votes.create, `${poll.documentId} as ${user.role.type}`).toHaveBeenCalledOnce();
+      }
+    }
   });
 
   it("lets admin_role/editor vote on a company-wide poll", async () => {
@@ -367,6 +464,13 @@ describe("results", () => {
       { id: DRAFT.id, user: ENGINEER },
       { id: ENG_ONLY.id, user: DESIGNER },
       { id: ENG_ONLY.id, user: GUEST },
+      // Guest access: question, options and counts of a poll not visible
+      // to guests never reach a guest.
+      { id: OPEN.id, user: GUEST },
+      { id: GUEST_NULL.id, user: GUEST },
+      { id: GUEST_VOTE_ONLY.id, user: GUEST },
+      { id: ENG_ONLY.id, user: GUEST_ENG },
+      { id: ENG_GUESTS.id, user: GUEST },
     ];
     for (const { id, user } of cases) {
       const { controller, ctx, votes } = setup({ id, user });
@@ -415,6 +519,8 @@ describe("results", () => {
         options: OPEN.options,
         closesAt: null,
         anonymous: false,
+        visibleToGuests: false,
+        guestsCanVote: false,
       },
       counts: [1, 2],
       total: 3,
@@ -477,6 +583,65 @@ describe("results", () => {
     });
     for (const call of votes.findMany.mock.calls) {
       expect(call[0]).not.toHaveProperty("populate");
+    }
+  });
+
+  it("gives a guest a visible poll's results with canVote false when guests may not vote", async () => {
+    for (const [poll, user] of [
+      [GUEST_VISIBLE, GUEST],
+      [ENG_GUESTS_READ, GUEST_ENG],
+    ] as const) {
+      const { controller, ctx } = setup({
+        id: poll.id,
+        user,
+        votes: [{ poll: poll.id, voter: 42, optionIndex: 1 }],
+      });
+      await controller.results(ctx);
+      expect(ctx.notFound, poll.documentId).not.toHaveBeenCalled();
+      expect(sent(ctx), poll.documentId).toMatchObject({
+        poll: { id: poll.id, question: poll.question, visibleToGuests: true, guestsCanVote: false },
+        counts: [0, 1],
+        total: 1,
+        canVote: false,
+      });
+    }
+  });
+
+  it("gives a guest canVote true where guests may vote", async () => {
+    for (const [poll, user] of [
+      [GUEST_VOTABLE, GUEST],
+      [ENG_GUESTS, GUEST_ENG],
+    ] as const) {
+      const { controller, ctx } = setup({ id: poll.id, user });
+      await controller.results(ctx);
+      expect(sent(ctx), poll.documentId).toMatchObject({
+        poll: { visibleToGuests: true, guestsCanVote: true },
+        canVote: true,
+      });
+    }
+  });
+
+  it("reports the stored guest flags as strict booleans to every reader (NULL = false)", async () => {
+    const cases: [PollRow, UserRow, { visibleToGuests: boolean; guestsCanVote: boolean }][] = [
+      [GUEST_NULL, ENGINEER, { visibleToGuests: false, guestsCanVote: false }],
+      [GUEST_VOTE_ONLY, EDITOR_OUTSIDE, { visibleToGuests: false, guestsCanVote: true }],
+      [GUEST_VOTABLE, ADMIN_OUTSIDE, { visibleToGuests: true, guestsCanVote: true }],
+    ];
+    for (const [poll, user, flags] of cases) {
+      const { controller, ctx } = setup({ id: poll.id, user });
+      await controller.results(ctx);
+      const body = sent(ctx);
+      expect(body.poll, poll.documentId).toMatchObject(flags);
+      // Non-guests: the flags change nothing about voting.
+      expect(body.canVote, poll.documentId).toBe(true);
+    }
+  });
+
+  it("keeps canVote for the `authenticated` fallback and members on polls hidden from guests", async () => {
+    for (const user of [FALLBACK, ENGINEER, DESIGNER]) {
+      const { controller, ctx } = setup({ id: OPEN.id, user });
+      await controller.results(ctx);
+      expect(sent(ctx), user.role.type).toMatchObject({ canVote: true, poll: { visibleToGuests: false } });
     }
   });
 });

@@ -1,7 +1,12 @@
 import { factories } from "@strapi/strapi";
 
 import { loadPollViewer, loadPublishedPoll, type PollCaller } from "../../../utils/poll-access";
-import { canSeePoll, isInPollAudience, isPollTargeted } from "../../../utils/poll-audience";
+import {
+  canSeePoll,
+  canVoteOnPoll,
+  isInPollAudience,
+  isPollTargeted,
+} from "../../../utils/poll-audience";
 import { isPollClosed } from "../../../utils/poll-close";
 
 /**
@@ -9,13 +14,17 @@ import { isPollClosed } from "../../../utils/poll-close";
  * not exist, routes/poll-vote.ts): POST /polls/:id/vote and
  * GET /polls/:id/results, `:id` = the numeric id of the PUBLISHED poll row.
  *
- * Department targeting (decision 02, rules in utils/poll-audience.ts) is
- * checked here, not by a route policy:
- *   - a missing id, a malformed id, a draft row and a poll outside the
- *     caller's audience all answer the SAME 404 (no existence oracle);
+ * Department targeting (decision 02) and guest access (owner decision
+ * 2026-09-27), rules in utils/poll-audience.ts, are checked here, not by a
+ * route policy:
+ *   - a missing id, a malformed id, a draft row, a poll outside the
+ *     caller's audience and, for a guest, a poll not visible to guests all
+ *     answer the SAME 404 (no existence oracle);
  *   - admin_role/editor read every poll and its results, but voting takes
- *     audience membership (403 for them outside it; nobody else can get
- *     that far);
+ *     audience membership (403 "Not in poll audience" for them outside it;
+ *     nobody else can get that far);
+ *   - a guest who sees a poll votes only when guests may vote on it (403
+ *     "Guests cannot vote on this poll" otherwise; only a guest gets there);
  *   - the voter is always the caller: the body's `poll`/`voter` are never
  *     read.
  * Results never name a voter. They include the caller's own vote even on
@@ -48,6 +57,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     if (!poll || !canSeePoll(poll, viewer)) return ctx.notFound();
     // Only admin_role/editor can see a poll outside its audience.
     if (!isInPollAudience(poll, viewer)) return ctx.forbidden("Not in poll audience");
+    // Only a guest can see a poll it may not vote on (guestsCanVote off).
+    if (!canVoteOnPoll(poll, viewer)) return ctx.forbidden("Guests cannot vote on this poll");
 
     if (optionIndex >= pollOptions(poll.options).length) return ctx.badRequest("Invalid optionIndex");
 
@@ -101,11 +112,15 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
         options,
         closesAt: poll.closesAt,
         anonymous: poll.anonymous ?? false,
+        // The stored guest-access flags as strict booleans (NULL = false);
+        // guestsCanVote counts only together with visibleToGuests.
+        visibleToGuests: poll.visibleToGuests,
+        guestsCanVote: poll.guestsCanVote,
       },
       counts,
       total: rows.length,
       myVoteIndex: isOptionIndex(mine?.optionIndex) ? mine.optionIndex : null,
-      canVote: isInPollAudience(poll, viewer),
+      canVote: canVoteOnPoll(poll, viewer),
       audience: {
         targeted: isPollTargeted(poll),
         departments: poll.departments

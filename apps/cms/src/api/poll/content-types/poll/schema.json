@@ -27,6 +27,26 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user"
+    },
+    "visibleToGuests": { "type": "boolean", "default": false },
+    "guestsCanVote": { "type": "boolean", "default": false }
+  },
+  "config": {
+    "metadatas": {
+      "visibleToGuests": {
+        "edit": {
+          "label": "Visible to guests",
+          "description": "Off: guests do not see this poll (list, search, results). On: guests in its audience see it and its results."
+        },
+        "list": { "label": "Visible to guests" }
+      },
+      "guestsCanVote": {
+        "edit": {
+          "label": "Guests can vote (needs Visible to guests)",
+          "description": "On together with Visible to guests: guests in its audience can vote. Without Visible to guests it has no effect."
+        },
+        "list": { "label": "Guests can vote" }
+      }
     }
   }
 }

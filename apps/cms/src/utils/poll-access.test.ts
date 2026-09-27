@@ -140,9 +140,11 @@ describe("loadPublishedPoll", () => {
     anonymous: true,
     audience: "departments",
     departments: [{ documentId: "d-eng", name: "Engineering" }],
+    visibleToGuests: true,
+    guestsCanVote: false,
   };
 
-  it("pins the lookup to the published row and loads the targeting fields", async () => {
+  it("pins the lookup to the published row and loads the targeting and guest fields", async () => {
     const { strapi, queries } = host({ [POLL_UID]: row });
     await expect(loadPublishedPoll(strapi, "12")).resolves.toEqual(row);
     expect(queries).toEqual([
@@ -150,11 +152,35 @@ describe("loadPublishedPoll", () => {
         uid: POLL_UID,
         params: {
           where: { id: 12, publishedAt: { $notNull: true } },
-          select: ["id", "documentId", "question", "options", "closesAt", "anonymous", "audience"],
+          select: [
+            "id",
+            "documentId",
+            "question",
+            "options",
+            "closesAt",
+            "anonymous",
+            "audience",
+            "visibleToGuests",
+            "guestsCanVote",
+          ],
           populate: { departments: { select: ["documentId", "name"] } },
         },
       },
     ]);
+  });
+
+  it("reads the guest flags as strict booleans: only true is true (fail closed)", async () => {
+    for (const value of [null, undefined, false, 1, "true", "1"]) {
+      const { strapi } = host({ [POLL_UID]: { ...row, visibleToGuests: value, guestsCanVote: value } });
+      const poll = await loadPublishedPoll(strapi, "12");
+      expect(poll?.visibleToGuests, String(value)).toBe(false);
+      expect(poll?.guestsCanVote, String(value)).toBe(false);
+    }
+    const { strapi } = host({ [POLL_UID]: { ...row, visibleToGuests: true, guestsCanVote: true } });
+    await expect(loadPublishedPoll(strapi, "12")).resolves.toMatchObject({
+      visibleToGuests: true,
+      guestsCanVote: true,
+    });
   });
 
   it("answers null when no published row matches (missing or draft id)", async () => {
@@ -162,7 +188,7 @@ describe("loadPublishedPoll", () => {
     await expect(loadPublishedPoll(strapi, "12")).resolves.toBeNull();
   });
 
-  it("normalises a legacy row (NULL flag, no departments)", async () => {
+  it("normalises a legacy row (NULL flag, no departments, no guest columns)", async () => {
     const { strapi } = host({
       [POLL_UID]: { id: 3, documentId: "d", question: "q", options: [], closesAt: null, anonymous: null, audience: null },
     });
@@ -175,6 +201,8 @@ describe("loadPublishedPoll", () => {
       anonymous: null,
       audience: null,
       departments: [],
+      visibleToGuests: false,
+      guestsCanVote: false,
     });
   });
 });

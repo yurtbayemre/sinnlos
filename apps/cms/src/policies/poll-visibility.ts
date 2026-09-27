@@ -1,6 +1,6 @@
 import { hasAudienceBypass } from "../utils/announcement-audience";
 import { loadPollViewer, POLL_UID, type PollCaller } from "../utils/poll-access";
-import { isInPollAudience, type PollTargeting } from "../utils/poll-audience";
+import { canSeePoll, type PollTargeting } from "../utils/poll-audience";
 import {
   forcePublishedStatus,
   getMutableQuery,
@@ -8,12 +8,13 @@ import {
 } from "../utils/policy-query";
 
 /**
- * Enforces poll department targeting on reads of the `poll` content type
- * (find and findOne; decision 02). The rules live in
- * `utils/poll-audience.ts`: a company-wide poll is visible to every
- * signed-in role, a targeted one only to members of its departments;
- * admin_role / editor bypass. The vote and results controllers apply the
- * same rules to the custom routes.
+ * Enforces poll department targeting and guest access on reads of the
+ * `poll` content type (find and findOne; decision 02, owner decision
+ * 2026-09-27 for guests). The rules live in `utils/poll-audience.ts`
+ * (`canSeePoll`): a company-wide poll is visible to every signed-in role, a
+ * targeted one only to members of its departments, and a guest sees either
+ * only when the poll is `visibleToGuests`; admin_role / editor bypass. The
+ * vote and results controllers apply the same rules to the custom routes.
  *
  * It REPLACES `global::published-only` on these routes (it pins the status
  * itself); do not stack both.
@@ -21,9 +22,10 @@ import {
  *   1. No signed-in user: false (403). No role reads polls anonymously.
  *   2. admin_role / editor: true with the query untouched, so they keep
  *      draft reads for authoring (?status=draft).
- *   3. Everyone else: the ids of the PUBLISHED poll rows whose audience
- *      holds the caller are resolved server-side and injected as a plain
- *      `id` filter, then the status is pinned to published.
+ *   3. Everyone else: the ids of the PUBLISHED poll rows the caller may see
+ *      (audience, and for a guest `visibleToGuests`) are resolved
+ *      server-side and injected as a plain `id` filter, then the status is
+ *      pinned to published.
  *
  * HOW IT WORKS — the same id-injection pattern as quick-link-visibility
  * and announcement-visibility:
@@ -83,12 +85,12 @@ export default async (
   const viewer = await loadPollViewer(strapi, user);
   const rows = await strapi.db.query(POLL_UID).findMany({
     where: { publishedAt: { $notNull: true } },
-    select: ["id", "audience"],
+    select: ["id", "audience", "visibleToGuests"],
     populate: { departments: { select: ["documentId"] } },
   });
   const idList = rows
     .filter(isPollRow)
-    .filter((row) => isInPollAudience(row, viewer))
+    .filter((row) => canSeePoll(row, viewer))
     .map((row) => row.id);
 
   const query = getMutableQuery(policyContext);
