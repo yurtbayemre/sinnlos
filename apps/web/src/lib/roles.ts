@@ -44,6 +44,12 @@ export const AD_POSTER_ROLES: ReadonlySet<string> = new Set([
   "member",
 ]);
 
+/**
+ * The guest role, for wording only (the poll card says why a guest cannot
+ * vote). Never a gate: what a guest may see or do is decided by the CMS.
+ */
+export const GUEST_ROLES: ReadonlySet<string> = new Set(["guest"]);
+
 function hasRole(allowed: ReadonlySet<string>, role: Role): boolean {
   return typeof role === "string" && allowed.has(role);
 }
@@ -62,4 +68,9 @@ export function canRsvp(role: Role): boolean {
 
 export function canPostAds(role: Role): boolean {
   return hasRole(AD_POSTER_ROLES, role);
+}
+
+/** Exact `guest` only; see GUEST_ROLES (wording, never a gate). */
+export function isGuest(role: Role): boolean {
+  return hasRole(GUEST_ROLES, role);
 }

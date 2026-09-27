@@ -70,7 +70,7 @@ export default async function PollsPage() {
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {active.map((p) =>
                   resultsMap.has(p.id) ? (
-                    <PollCard key={p.id} results={resultsMap.get(p.id)} />
+                    <PollCard key={p.id} results={resultsMap.get(p.id)} viewerRole={viewer.role} />
                   ) : null,
                 )}
               </div>
@@ -83,7 +83,7 @@ export default async function PollsPage() {
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {closed.map((p) =>
                   resultsMap.has(p.id) ? (
-                    <PollCard key={p.id} results={resultsMap.get(p.id)} />
+                    <PollCard key={p.id} results={resultsMap.get(p.id)} viewerRole={viewer.role} />
                   ) : null,
                 )}
               </div>

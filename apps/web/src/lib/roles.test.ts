@@ -5,7 +5,9 @@ import {
   canCreatePolls,
   canPostAds,
   canRsvp,
+  GUEST_ROLES,
   isAdmin,
+  isGuest,
   POLL_CREATOR_ROLES,
   RSVP_ROLES,
 } from "./roles";
@@ -109,6 +111,25 @@ describe.each([
   it("fails closed for a missing, unknown or differently-cased role", () => {
     for (const role of NOT_A_ROLE) {
       expect(predicate(role), String(role)).toBe(false);
+    }
+  });
+});
+
+/**
+ * `isGuest` only picks the poll card's wording for a guest (owner decision
+ * 2026-09-27); it gates nothing. Exact match like every helper here.
+ */
+describe("isGuest", () => {
+  it("is true for the exact guest role type only", () => {
+    for (const role of ALL_ROLES) {
+      expect(isGuest(role), role).toBe(role === "guest");
+    }
+    expect([...GUEST_ROLES]).toEqual(["guest"]);
+  });
+
+  it("is false for a missing, unknown or differently-cased role", () => {
+    for (const role of [...NOT_A_ROLE, "Guest", "GUEST", " guest", "guests"]) {
+      expect(isGuest(role), String(role)).toBe(false);
     }
   });
 });

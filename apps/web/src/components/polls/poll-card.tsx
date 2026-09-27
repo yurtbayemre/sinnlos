@@ -3,15 +3,28 @@
 import { useOptimistic, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { BarChart3, Clock, Check, Users } from "lucide-react";
+import { BarChart3, Clock, Check, Eye, Users, Vote } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { isPollClosed } from "@/lib/poll-close";
 import { votePoll } from "@/lib/poll-actions";
-import { pollAudienceView } from "@/lib/poll-audience-view";
+import { pollAudienceView, pollGuestNotes } from "@/lib/poll-audience-view";
+import { canCreatePolls, isGuest } from "@/lib/roles";
 import type { PollResults } from "@/lib/types";
 
-export function PollCard({ results }: { results: PollResults }) {
+/**
+ * `viewerRole` (getViewer().role) only shapes the wording: admins and
+ * editors (canCreatePolls) get the guest-access notes, a guest gets the
+ * guestVotingDisabled hint instead of notInAudience. Whether the caller may
+ * vote comes from `results.canVote` alone.
+ */
+export function PollCard({
+  results,
+  viewerRole = null,
+}: {
+  results: PollResults;
+  viewerRole?: string | null;
+}) {
   const tPolls = useTranslations("polls");
   const tCommon = useTranslations("common");
   const router = useRouter();
@@ -30,10 +43,14 @@ export function PollCard({ results }: { results: PollResults }) {
   }));
   const { counts: localCounts, total: localTotal, myVoteIndex: voted } = optimistic;
 
-  // Department targeting (decision 02): the CMS says per poll whether this
-  // caller may vote; an admin or editor outside the poll's departments sees
-  // the results but no vote buttons.
-  const { canVote, targeted, departmentNames, hint } = pollAudienceView(results);
+  // Department targeting (decision 02) and guest access (owner decision
+  // 2026-09-27): the CMS says per poll whether this caller may vote; an
+  // admin or editor outside the poll's departments, and a guest on a poll
+  // without guest voting, see the results but no vote buttons.
+  const { canVote, targeted, departmentNames, hint } = pollAudienceView(results, {
+    viewerIsGuest: isGuest(viewerRole),
+  });
+  const guestNotes = canCreatePolls(viewerRole) ? pollGuestNotes(poll) : [];
 
   const isClosed = isPollClosed(poll.closesAt);
   const hasVoted = voted !== null;
@@ -67,7 +84,7 @@ export function PollCard({ results }: { results: PollResults }) {
             {tCommon("vote", { count: localTotal })}
           </div>
         </div>
-        {(isClosed || (targeted && departmentNames.length > 0)) && (
+        {(isClosed || (targeted && departmentNames.length > 0) || guestNotes.length > 0) && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {isClosed && (
               <span className="inline-flex items-center gap-1">
@@ -81,6 +98,16 @@ export function PollCard({ results }: { results: PollResults }) {
                 {tPolls("audienceDepartments", { departments: departmentNames.join(", ") })}
               </span>
             )}
+            {guestNotes.map((note) => (
+              <span key={note} className="inline-flex items-center gap-1">
+                {note === "guestAccessVisible" ? (
+                  <Eye className="h-3 w-3" aria-hidden="true" />
+                ) : (
+                  <Vote className="h-3 w-3" aria-hidden="true" />
+                )}
+                {tPolls(note)}
+              </span>
+            ))}
           </div>
         )}
       </CardHeader>
