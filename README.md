@@ -383,7 +383,17 @@ the same rules module): polls are **hidden from guests** (role type exactly
 - `canSeePoll` and `canVoteOnPoll` in `apps/cms/src/utils/poll-audience.ts`
   decide for the list/detail policy and the vote/results actions alike;
   results return both fields and `canVote`. Admins and editors see
-  "Visible to guests" / "Guests can vote" on the cards that have them.
+  "Visible to guests" / "Guests can vote" on the cards that have them; a
+  guest with no poll open to them sees "No polls for you yet" instead of
+  the generic empty state. Both fields apply once the poll is published
+  (the admin-panel descriptions say so).
+- Rolling back to a cms from before guest access: that cms ignores both
+  fields and never removes the guest vote permission, so it goes first,
+  with the cms stopped and before the retag
+  (`infra/rollback/revoke-guest-poll-vote.sql`; `infra/deploy.sh` prints
+  the steps when a deploy fails; see
+  [Upgrading to poll department targeting](./docs/DEPLOYMENT.md#upgrading-to-poll-department-targeting),
+  Rollback).
 - No other path hands a poll to a guest: notifications, live pings,
   e-mail digests, comments and reactions never concern polls, the search
   goes through the filtered `/api/polls`, and relations into polls are cut
@@ -684,7 +694,8 @@ calendar but neither respond nor see attendee names), and **no training**
 IS granted to guest: search telemetry is anonymous by design). Guests hold
 the poll read, results and vote grants, but see and vote only on the polls
 an admin or editor opened to them (poll guest access above, in the poll's
-audience like everyone else). Grants that older
+audience like everyone else; a rollback to a cms from before guest access
+removes the vote grant first). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
 `REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
