@@ -7,7 +7,7 @@ import {
   isInPollAudience,
   isPollTargeted,
 } from "../../../utils/poll-audience";
-import { isOptionIndex, tallyBallots, type BallotRow } from "../../../utils/poll-ballots";
+import { countPollBallots, isOptionIndex } from "../../../utils/poll-ballots";
 import { isPollClosed } from "../../../utils/poll-close";
 
 /**
@@ -40,7 +40,10 @@ import { isPollClosed } from "../../../utils/poll-close";
  * a voter's first accepted ballot (the row with the lowest id) is the one
  * the results count, whatever duplicates a parallel race stored. The vote
  * handler also deletes a voter's later rows right after its insert, so
- * stored duplicates converge to that ballot.
+ * stored duplicates converge to that ballot. The results count in ONE SQL
+ * statement with a GROUP BY (countPollBallots, FX20): rows and voters from
+ * one snapshot, so a duplicate a parallel cleanup deletes mid-read never
+ * shows up as a ballot of a deleted account.
  */
 
 interface OptionIndexRow {
@@ -128,21 +131,17 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     ]);
     if (!poll || !canSeePoll(poll, viewer)) return ctx.notFound();
 
-    // The voter's id only, to count one ballot per voter (tallyBallots) and
-    // find the caller's own: it never leaves this handler. The response
-    // carries counts and the caller's own vote only, whatever `anonymous`
-    // says.
-    // id must stay in the select: a relation filter makes @strapi/database
-    // add DISTINCT (query-builder.js shouldUseDistinct), and without the
-    // primary key identical votes collapse into one row.
-    const rows = (await strapi.db.query("api::poll-vote.poll-vote").findMany({
-      where: { poll: poll.id },
-      select: ["id", "optionIndex"],
-      populate: { voter: { select: ["id"] } },
-    })) as BallotRow[];
-
+    // Counted in the database: ballots per option, one per voter, and the
+    // caller's own option (FX20). No voter id leaves the statement; the
+    // response carries counts and the caller's own vote only, whatever
+    // `anonymous` says.
     const options = pollOptions(poll.options);
-    const { counts, total, myVoteIndex } = tallyBallots(rows, options.length, user.id);
+    const { counts, total, myVoteIndex } = await countPollBallots(
+      strapi,
+      poll.id,
+      user.id,
+      options.length,
+    );
 
     return ctx.send({
       poll: {

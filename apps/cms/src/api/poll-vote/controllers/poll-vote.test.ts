@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
+import { countPollBallots, tallyBallots } from "../../../utils/poll-ballots";
 import pollVoteController from "./poll-vote";
 
 /**
@@ -34,9 +35,20 @@ import pollVoteController from "./poll-vote";
  * The db stub evaluates the `where` it receives, so dropping the published
  * pin or the voter filter fails the tests. Its vote `findMany` also returns
  * what @strapi/database returns for a relation filter: only the selected
- * columns, DISTINCT (see `distinctProjection`), then the populated voter
- * with only the selected fields.
+ * columns, DISTINCT (see `distinctProjection`).
+ *
+ * The results count is ONE SQL statement (utils/poll-ballots.ts
+ * countPollBallots, FX20), which a stub cannot run: here it is replaced by
+ * the reference rule (tallyBallots) over the stub's table, and
+ * utils/poll-ballots.engine.test.ts holds the statement equal to that rule
+ * on SQLite and Postgres 16 (duplicates, deleted accounts, identical votes,
+ * the DISTINCT trap, the single statement).
  */
+
+vi.mock("../../../utils/poll-ballots", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../utils/poll-ballots")>()),
+  countPollBallots: vi.fn(),
+}));
 
 vi.mock("@strapi/strapi", () => ({
   factories: {
@@ -230,27 +242,6 @@ function distinctProjection(rows: StoredVoteRow[], select: string[] | undefined)
   return projected;
 }
 
-type VotePopulate = { voter?: { select?: string[] } };
-
-/**
- * The populate step, after the DISTINCT select: a populated `voter` is the
- * user with only the selected fields (the stub knows only `id`), or null
- * when the voter is gone. It needs the row's id, as the real one does.
- */
-function populateVoter(projected: object[], table: StoredVoteRow[], populate: VotePopulate | undefined): object[] {
-  if (!populate?.voter) return projected;
-  const fields = populate.voter.select ?? ["id"];
-  return projected.map((picked) => {
-    const id = (picked as { id?: unknown }).id;
-    if (typeof id !== "number") throw new Error("populate needs the primary key in the select");
-    const voter = table.find((row) => row.id === id)?.voter ?? null;
-    return {
-      ...picked,
-      voter: voter === null ? null : Object.fromEntries(fields.map((key) => [key, key === "id" ? voter : undefined])),
-    };
-  });
-}
-
 type Handler = (ctx: unknown) => Promise<unknown>;
 
 /** The id the stub's create gives this request's vote. */
@@ -284,20 +275,10 @@ function setup(options: {
       votesTable.find((row) => matches(row, where)) ?? null,
     ),
     findMany: vi.fn(
-      async ({
-        where,
-        select,
-        populate,
-        orderBy,
-      }: {
-        where: Where;
-        select?: string[];
-        populate?: VotePopulate;
-        orderBy?: { id: "asc" };
-      }) => {
+      async ({ where, select, orderBy }: { where: Where; select?: string[]; orderBy?: { id: "asc" } }) => {
         const found = votesTable.filter((row) => matches(row, where));
         if (orderBy) found.sort((a, b) => a.id - b.id);
-        return populateVoter(distinctProjection(found, select), votesTable, populate);
+        return distinctProjection(found, select);
       },
     ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
@@ -326,6 +307,22 @@ function setup(options: {
       }),
     },
   };
+  // The results statement, as the reference rule over this table.
+  const countBallots = vi.mocked(countPollBallots);
+  countBallots.mockReset();
+  countBallots.mockImplementation(async (_host, pollId, callerId, optionCount) =>
+    tallyBallots(
+      votesTable
+        .filter((row) => row.poll === pollId)
+        .map((row) => ({
+          id: row.id,
+          optionIndex: row.optionIndex,
+          voter: row.voter === null ? null : { id: row.voter },
+        })),
+      optionCount,
+      callerId,
+    ),
+  );
   const controller = (
     pollVoteController as unknown as (deps: { strapi: unknown }) => {
       vote: Handler;
@@ -343,7 +340,7 @@ function setup(options: {
     forbidden: vi.fn(),
     send: vi.fn(),
   };
-  return { controller, ctx, pollFindOne, votes, votesTable };
+  return { controller, ctx, pollFindOne, votes, votesTable, countBallots };
 }
 
 /** The ctx error spies a handler must NOT have touched on the happy path. */
@@ -695,10 +692,11 @@ describe("results", () => {
   const sent = (ctx: { send: ReturnType<typeof vi.fn> }) => ctx.send.mock.calls[0]?.[0] as Record<string, unknown>;
 
   it("answers 401 without a signed-in user", async () => {
-    const { controller, ctx, votes } = setup({ id: OPEN.id, user: null });
+    const { controller, ctx, votes, countBallots } = setup({ id: OPEN.id, user: null });
     await controller.results(ctx);
     expect(ctx.unauthorized).toHaveBeenCalledWith();
     expect(votes.findMany).not.toHaveBeenCalled();
+    expect(countBallots).not.toHaveBeenCalled();
   });
 
   it("answers the same 404 for a missing, malformed, draft and out-of-audience poll", async () => {
@@ -721,20 +719,22 @@ describe("results", () => {
       { id: ENG_GUESTS.id, user: GUEST },
     ];
     for (const { id, user } of cases) {
-      const { controller, ctx, votes } = setup({ id, user });
+      const { controller, ctx, votes, countBallots } = setup({ id, user });
       await controller.results(ctx);
       expect(ctx.notFound, `${String(id)} as ${user.id}`).toHaveBeenCalledWith();
       expect(votes.findMany).not.toHaveBeenCalled();
+      expect(countBallots).not.toHaveBeenCalled();
       expect(ctx.send).not.toHaveBeenCalled();
     }
   });
 
   it("answers a malformed id with that 404 and no poll query", async () => {
     for (const id of MALFORMED_POLL_IDS) {
-      const { controller, ctx, votes, pollFindOne } = setup({ id });
+      const { controller, ctx, votes, pollFindOne, countBallots } = setup({ id });
       await controller.results(ctx);
       expect(ctx.notFound, id).toHaveBeenCalledWith();
       expect(pollFindOne, id).not.toHaveBeenCalled();
+      expect(countBallots, id).not.toHaveBeenCalled();
       expect(votes.findMany, id).not.toHaveBeenCalled();
       expect(votes.findOne, id).not.toHaveBeenCalled();
       expect(ctx.send, id).not.toHaveBeenCalled();
@@ -750,7 +750,7 @@ describe("results", () => {
   });
 
   it("counts every vote of the published row and totals them", async () => {
-    const { controller, ctx, votes } = setup({
+    const { controller, ctx, votes, countBallots } = setup({
       id: OPEN.id,
       votes: [
         { poll: OPEN.id, voter: 11, optionIndex: 1 },
@@ -776,13 +776,11 @@ describe("results", () => {
       canVote: true,
       audience: { targeted: false, departments: [] },
     });
-    expect(votes.findMany).toHaveBeenCalledWith({
-      where: { poll: OPEN.id },
-      select: ["id", "optionIndex"],
-      populate: { voter: { select: ["id"] } },
-    });
-    // One query: the caller's own vote comes from the same rows.
-    expect(votes.findMany).toHaveBeenCalledOnce();
+    // One statement for the counts and the caller's own vote (FX20): the
+    // published row's id, the caller, the number of options.
+    expect(countBallots).toHaveBeenCalledOnce();
+    expect(countBallots.mock.calls[0]?.slice(1)).toEqual([OPEN.id, ENGINEER.id, 2]);
+    expect(votes.findMany).not.toHaveBeenCalled();
     expect(votes.findOne).not.toHaveBeenCalled();
   });
 
@@ -849,18 +847,23 @@ describe("results", () => {
     expect(sent(ctx)).toMatchObject({ counts: [1, 2], total: 3, myVoteIndex: null });
   });
 
-  it("counts identical votes one by one: the vote query selects the primary key", async () => {
-    const { controller, ctx, votes } = setup({
+  it("counts identical votes one by one", async () => {
+    // The DISTINCT trap (0bc7830) is pinned on the real engines in
+    // poll-ballots.engine.test.ts; the statement counts `v.id`.
+    const { controller, ctx } = setup({
       id: OPEN.id,
       votes: [11, 12, 13, 14, 15, 16].map((voter) => ({ poll: OPEN.id, voter, optionIndex: 1 })),
     });
     await controller.results(ctx);
     expect(sent(ctx)).toMatchObject({ counts: [0, 6], total: 6 });
-    // id must stay in the select: a relation filter makes @strapi/database
-    // add DISTINCT (query-builder.js shouldUseDistinct), and without the
-    // primary key identical votes collapse into one row.
-    const [params] = votes.findMany.mock.calls[0] ?? [];
-    expect(params?.select).toContain("id");
+  });
+
+  it("counts the published row of a documentId, whose options set the count's length (DA01, FX20)", async () => {
+    const { controller, ctx, countBallots } = setup({ id: TWIN_DOCUMENT_ID, user: DESIGNER });
+    await controller.results(ctx);
+    expect(countBallots.mock.calls.map((call) => call.slice(1))).toEqual([
+      [TWIN_PUBLISHED.id, DESIGNER.id, TWIN_PUBLISHED.options.length],
+    ]);
   });
 
   it("gives admin_role/editor outside the audience the results with canVote false and the departments", async () => {
@@ -895,10 +898,8 @@ describe("results", () => {
     expect(body.myVoteIndex).toBe(1);
     expect((body.poll as { anonymous: boolean }).anonymous).toBe(true);
     expect(JSON.stringify(body)).not.toContain("voter");
-    // The voter is read for counting only, and then its id alone.
-    for (const call of votes.findMany.mock.calls) {
-      expect(call[0].populate).toEqual({ voter: { select: ["id"] } });
-    }
+    // No voter is loaded at all: the statement counts in the database.
+    expect(votes.findMany).not.toHaveBeenCalled();
   });
 
   it("gives a guest a visible poll's results with canVote false when guests may not vote", async () => {
