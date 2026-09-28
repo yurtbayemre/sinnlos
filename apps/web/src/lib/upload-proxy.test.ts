@@ -12,7 +12,9 @@ import {
 
 /**
  * The pure parts of the session-gated /uploads byte proxy (issue #21, S06).
- * The route itself (auth() check, fetch, streaming) is not exercised here.
+ * The route itself (session and account checks, fetch, streaming) is
+ * covered in app/uploads/[...path]/route.test.ts, the FX41 status map in
+ * upload-block-cache.test.ts.
  * Pinned:
  *   1. only hash-style file segments reach cms — traversal, encoded slashes,
  *      dot-files and empty segments are a 404 before any upstream call,

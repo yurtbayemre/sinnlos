@@ -1,11 +1,14 @@
 import { factories } from "@strapi/strapi";
 
 /**
- * Reads use the core routes without a policy, but the CONTROLLER post-
- * filters them: attendance ("yes") is public inside the intranet, while
- * the user relation of maybe/no rows is stripped unless the row belongs
- * to the caller or the caller is admin_role (see stripPrivateUsers in the
- * controller) — counts stay possible, decliner names don't leak. guest is
+ * Raw reads return the CALLER's own rows only (FX21): the
+ * `global::event-rsvp-own-rows` policy narrows find/findOne to
+ * `user = caller` (admin_role bypasses) and refuses a client filter on the
+ * user relation; the controller refuses the Strapi-Response-Format header
+ * for non-admins and still strips other people's maybe/no users as a
+ * backstop. Who else answered what is served only aggregated, by
+ * GET /api/event-rsvps/summary (custom-event-rsvp.ts: counts, "yes" names,
+ * the caller's own answer — decliner names never leave the CMS). guest is
  * additionally kept out via the bootstrap permission matrix (it reads
  * events but holds no event-rsvp grants).
  *
@@ -17,8 +20,8 @@ import { factories } from "@strapi/strapi";
  */
 export default factories.createCoreRouter("api::event-rsvp.event-rsvp", {
   config: {
-    find: { policies: [] },
-    findOne: { policies: [] },
+    find: { policies: ["global::event-rsvp-own-rows"] },
+    findOne: { policies: ["global::event-rsvp-own-rows"] },
     create: { policies: [] },
     update: { policies: ["global::is-event-rsvp-owner"] },
     delete: { policies: [] },

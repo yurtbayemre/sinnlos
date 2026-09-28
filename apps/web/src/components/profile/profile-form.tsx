@@ -20,7 +20,36 @@ export type ProfileInitial = {
   digestFrequency?: string | null;
 };
 
-export function ProfileForm({ initial }: { initial: ProfileInitial }) {
+/**
+ * Roles that get e-mail digests: the holders of announcement.find in the
+ * cms matrix (apps/cms/src/index.ts PERMISSION_MATRIX). The cms decides
+ * (send-digests skips guests, PUT /api/me ignores their opt-ins, FX19); this
+ * only keeps the form from offering what the cms ignores. Fail-closed like
+ * lib/roles.ts: an unknown or missing role sees no digest options. A
+ * component-local copy like the report pages' ANNOUNCEMENT_READER_ROLES
+ * until SH02 moves the role sets into one place.
+ */
+export const DIGEST_ROLES: ReadonlySet<string> = new Set([
+  "admin_role",
+  "editor",
+  "department_head",
+  "team_lead",
+  "member",
+  "authenticated",
+]);
+
+/** The digest checkboxes (the frequency is the fourth digest field). */
+const DIGEST_OPT_INS = ["digestAnnouncements", "digestMentions", "digestKudos"] as const;
+
+export function ProfileForm({
+  initial,
+  viewerRole,
+}: {
+  initial: ProfileInitial;
+  /** The viewer's role type from GET /api/me; decides whether the digest options show. */
+  viewerRole?: string | null;
+}) {
+  const showDigest = typeof viewerRole === "string" && DIGEST_ROLES.has(viewerRole);
   const tProfile = useTranslations("profile");
   const tCommon = useTranslations("common");
   const [state, formAction, isPending] = useActionState<ProfileFormState, FormData>(
@@ -109,43 +138,67 @@ export function ProfileForm({ initial }: { initial: ProfileInitial }) {
         </span>
       </label>
 
-      <fieldset className="space-y-3 rounded-xl border p-4">
-        <legend className="px-1 text-sm font-medium">{tProfile("digestSection")}</legend>
-        <p className="text-xs text-muted-foreground">{tProfile("digestHint")}</p>
-        {(
-          [
-            ["digestAnnouncements", initial.digestAnnouncements],
-            ["digestMentions", initial.digestMentions],
-            ["digestKudos", initial.digestKudos],
-          ] as const
-        ).map(([name, checked]) => (
-          <label key={name} className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              name={name}
-              defaultChecked={(v ? v[name] : checked) ?? false}
-              className="mt-0.5 h-4 w-4 rounded border accent-primary"
-            />
-            <span className="block text-sm">{tProfile(name)}</span>
-          </label>
-        ))}
-        <div className="flex gap-6 pt-1" role="radiogroup" aria-label={tProfile("digestFrequency")}>
-          {(["weekly", "daily"] as const).map((freq) => (
-            <label key={freq} className="flex items-center gap-2 text-sm">
+      {!showDigest && (
+        // Not offered, but submitted as stored: updateProfile maps an absent
+        // checkbox to false, so without these a save would clear the opt-ins
+        // of a reader whose role could not be read (or a role this copy does
+        // not know yet). The cms ignores them for guests.
+        <>
+          {DIGEST_OPT_INS.map((name) =>
+            (v ? v[name] : initial[name]) === true ? (
+              <input key={name} type="hidden" name={name} value="on" />
+            ) : null,
+          )}
+          <input
+            type="hidden"
+            name="digestFrequency"
+            value={(v?.digestFrequency ?? initial.digestFrequency) === "daily" ? "daily" : "weekly"}
+          />
+        </>
+      )}
+      {showDigest && (
+        <fieldset className="space-y-3 rounded-xl border p-4">
+          <legend className="px-1 text-sm font-medium">{tProfile("digestSection")}</legend>
+          <p className="text-xs text-muted-foreground">{tProfile("digestHint")}</p>
+          {(
+            [
+              ["digestAnnouncements", initial.digestAnnouncements],
+              ["digestMentions", initial.digestMentions],
+              ["digestKudos", initial.digestKudos],
+            ] as const
+          ).map(([name, checked]) => (
+            <label key={name} className="flex items-start gap-3">
               <input
-                type="radio"
-                name="digestFrequency"
-                value={freq}
-                defaultChecked={
-                  (v?.digestFrequency ?? initial.digestFrequency ?? "weekly") === freq
-                }
-                className="h-4 w-4 accent-primary"
+                type="checkbox"
+                name={name}
+                defaultChecked={(v ? v[name] : checked) ?? false}
+                className="mt-0.5 h-4 w-4 rounded border accent-primary"
               />
-              {tProfile(`digestFrequency_${freq}`)}
+              <span className="block text-sm">{tProfile(name)}</span>
             </label>
           ))}
-        </div>
-      </fieldset>
+          <div
+            className="flex gap-6 pt-1"
+            role="radiogroup"
+            aria-label={tProfile("digestFrequency")}
+          >
+            {(["weekly", "daily"] as const).map((freq) => (
+              <label key={freq} className="flex items-center gap-2 text-sm">
+                <input
+                  type="radio"
+                  name="digestFrequency"
+                  value={freq}
+                  defaultChecked={
+                    (v?.digestFrequency ?? initial.digestFrequency ?? "weekly") === freq
+                  }
+                  className="h-4 w-4 accent-primary"
+                />
+                {tProfile(`digestFrequency_${freq}`)}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      )}
 
       {state.error && <p className="text-sm text-destructive">{state.error}</p>}
       {state.success && (

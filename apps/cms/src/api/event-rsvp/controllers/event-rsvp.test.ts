@@ -1,5 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { errors } from "@strapi/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import eventRsvpOwnRows from "../../../policies/event-rsvp-own-rows";
+import {
+  createStrapiStub,
+  matchWhere,
+  type Row as StubRow,
+} from "../../../test/strapi-stub.test.helper";
 import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
+import { MAX_SUMMARY_TARGETS } from "../../../utils/rsvp";
 import eventRsvpController from "./event-rsvp";
 
 /**
@@ -294,8 +302,9 @@ describe("event-rsvp create: target and payload checks (S09)", () => {
   });
 });
 
-describe("event-rsvp create: capacity counts distinct yes users (S09)", () => {
+describe("event-rsvp create: capacity counts each user's newest answer (S09)", () => {
   const full = event({ capacity: 2 });
+  const yes = { data: { targetDocumentId: EVENT_DOC, status: "yes" } };
 
   it("counts a user with duplicate yes rows once", async () => {
     const { ctx } = await answer(
@@ -355,6 +364,50 @@ describe("event-rsvp create: capacity counts distinct yes users (S09)", () => {
       },
     );
     expect(withDuplicate.ctx.badRequest).not.toHaveBeenCalled();
+  });
+
+  it("reads every status of the event's rows, with only the user id", async () => {
+    const { log } = await answer(yes, { events: [full] });
+    // [0] is the caller's own rows (the upsert), [1] the seat count.
+    expect(ops(log, "findMany")[1]?.params).toEqual({
+      where: { targetDocumentId: EVENT_DOC },
+      select: ["id", "status", "respondedAt"],
+      populate: { user: { select: ["id"] } },
+    });
+  });
+
+  it("frees the seat of an older yes that a newer no replaced, as the summary shows it", async () => {
+    const single = event({ capacity: 1 });
+    const freed = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(1, 8, "yes", "2026-09-10T10:00:00.000Z"),
+        rsvp(2, 8, "no", "2026-09-10T11:00:00.000Z"),
+      ],
+    });
+    expect(freed.ctx.badRequest).not.toHaveBeenCalled();
+    expect(ops(freed.log, "create")).toHaveLength(1);
+
+    // The reverse order: the newer row says yes, so the seat stays taken.
+    const held = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(1, 8, "no", "2026-09-10T10:00:00.000Z"),
+        rsvp(2, 8, "yes", "2026-09-10T11:00:00.000Z"),
+      ],
+    });
+    expect(held.ctx.badRequest).toHaveBeenCalledWith("Event is at capacity");
+    expect(ops(held.log, "create")).toEqual([]);
+
+    // A respondedAt tie goes to the higher id, as in the summary.
+    const tie = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(4, 8, "no", "2026-09-10T10:00:00.000Z"),
+        rsvp(3, 8, "yes", "2026-09-10T10:00:00.000Z"),
+      ],
+    });
+    expect(tie.ctx.badRequest).not.toHaveBeenCalled();
   });
 
   it("has no limit without a positive integer capacity", async () => {
@@ -430,5 +483,370 @@ describe("event-rsvp find/findOne: stripPrivateUsers (S09)", () => {
     expect((await controller.findOne(ctx)).data.user).toEqual({ id: OWNER.id });
     mocks.superFindOne.mockResolvedValueOnce({ data: null });
     expect((await controller.findOne(ctx)).data).toBeNull();
+  });
+});
+
+/**
+ * FX21: GET /api/event-rsvps/summary on the shared stub (S03). The stub
+ * evaluates the where clauses, `select` and the user populate like the query
+ * engine, and records every call.
+ */
+describe("event-rsvp summary (FX21)", () => {
+  const USER_UID = "plugin::users-permissions.user";
+  const EVT_1 = "e1e1e1e1e1e1e1e1e1e1e1e1";
+  const EVT_2 = "e2e2e2e2e2e2e2e2e2e2e2e2";
+  const DRAFT = "e3e3e3e3e3e3e3e3e3e3e3e3";
+  const MISSING = "e4e4e4e4e4e4e4e4e4e4e4e4";
+
+  function setupSummary(rsvps: StubRow[], caller: { id?: number; role?: { type: string } } | null) {
+    const strapi = createStrapiStub({
+      tables: {
+        [USER_UID]: [
+          { id: 5, username: "owner", displayName: "Owner" },
+          { id: 8, username: "ada", displayName: "Ada" },
+          { id: 9, username: "grace", displayName: "Grace" },
+          { id: 10, username: "decliner", displayName: "Decliner" },
+          { id: 11, username: "unsure", displayName: "Unsure" },
+          { id: 12, username: "nameless" },
+        ],
+        [RSVP_UID]: rsvps,
+      },
+    });
+    const published = { status: "published" as const };
+    strapi.seedDocument(
+      EVENT_UID,
+      { title: "One", rsvpEnabled: true },
+      { ...published, documentId: EVT_1 },
+    );
+    strapi.seedDocument(
+      EVENT_UID,
+      { title: "Two", rsvpEnabled: true },
+      { ...published, documentId: EVT_2 },
+    );
+    strapi.seedDocument(EVENT_UID, { title: "Draft", rsvpEnabled: true }, { documentId: DRAFT });
+    const controller = (
+      eventRsvpController as unknown as (deps: { strapi: unknown }) => {
+        summary(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi });
+    const ctx = (targets: unknown) => ({
+      state: { user: caller ?? undefined },
+      query: { targets },
+      badRequest: vi.fn((message: string) => ({ status: 400, message })),
+      unauthorized: vi.fn(() => ({ status: 401 })),
+      send: vi.fn((payload: unknown) => payload),
+    });
+    return { strapi, controller, ctx };
+  }
+
+  let rowId = 100;
+  const at = (hour: number) => `2026-09-10T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const answer = (
+    target: string,
+    userId: number | null,
+    status: string,
+    hour: number,
+  ): StubRow => ({
+    id: rowId++,
+    targetDocumentId: target,
+    status,
+    respondedAt: at(hour),
+    user: userId === null ? null : { id: userId },
+  });
+
+  it("answers counts, yes names and the caller's own answer per published event", async () => {
+    const { controller, ctx } = setupSummary(
+      [
+        answer(EVT_1, 8, "yes", 9),
+        answer(EVT_1, 9, "yes", 8),
+        answer(EVT_1, 10, "no", 10),
+        answer(EVT_1, 11, "maybe", 11),
+        answer(EVT_1, OWNER.id, "maybe", 12),
+        answer(EVT_2, 10, "no", 9),
+      ],
+      OWNER,
+    );
+    const c = ctx(`${EVT_1},${EVT_2}`);
+    const response = await controller.summary(c);
+    expect(c.badRequest).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      data: [
+        {
+          targetDocumentId: EVT_1,
+          yesCount: 2,
+          maybeCount: 2,
+          noCount: 1,
+          // Oldest answer first.
+          yesNames: ["Grace", "Ada"],
+          myStatus: "maybe",
+        },
+        {
+          targetDocumentId: EVT_2,
+          yesCount: 0,
+          maybeCount: 0,
+          noCount: 1,
+          yesNames: [],
+          myStatus: null,
+        },
+      ],
+    });
+  });
+
+  it("never lets a maybe/no name or a user id leave the CMS, not even for admin_role", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(EVT_1, 10, "no", 9), answer(EVT_1, 11, "maybe", 10), answer(EVT_1, 8, "yes", 11)],
+      { id: 77, role: { type: "admin_role" } },
+    );
+    const json = JSON.stringify(await controller.summary(ctx(EVT_1)));
+    expect(json).toContain("Ada");
+    expect(json).not.toContain("Decliner");
+    expect(json).not.toContain("Unsure");
+    expect(json).not.toMatch(/"user"|"id"/);
+  });
+
+  it("counts a user's duplicate rows once, by the newest answer", async () => {
+    const { controller, ctx } = setupSummary(
+      [
+        answer(EVT_1, 8, "yes", 9),
+        answer(EVT_1, 8, "no", 12),
+        answer(EVT_1, 8, "maybe", 10),
+        answer(EVT_1, OWNER.id, "no", 9),
+        answer(EVT_1, OWNER.id, "yes", 11),
+      ],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(EVT_1))) as { data: unknown[] };
+    expect(response.data[0]).toMatchObject({
+      yesCount: 1,
+      maybeCount: 0,
+      noCount: 1,
+      yesNames: ["Owner"],
+      myStatus: "yes",
+    });
+  });
+
+  it("counts answers whose user is gone, and a yes without a display name, without a name", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(EVT_1, null, "yes", 9), answer(EVT_1, null, "yes", 10), answer(EVT_1, 12, "yes", 11)],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(EVT_1))) as { data: unknown[] };
+    expect(response.data[0]).toMatchObject({ yesCount: 3, yesNames: [] });
+  });
+
+  it("leaves draft-only and unknown events out, identically, and keeps the requested order", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(DRAFT, 8, "yes", 9), answer(MISSING, 8, "yes", 9), answer(EVT_1, 8, "yes", 9)],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(`${EVT_2},${DRAFT},${MISSING},${EVT_1}`))) as {
+      data: { targetDocumentId: string }[];
+    };
+    expect(response.data.map((s) => s.targetDocumentId)).toEqual([EVT_2, EVT_1]);
+    expect(await controller.summary(ctx(`${DRAFT},${MISSING}`))).toEqual({ data: [] });
+  });
+
+  it("accepts repeated targets and collapses duplicates", async () => {
+    const { controller, ctx } = setupSummary([answer(EVT_1, 8, "yes", 9)], OWNER);
+    const response = (await controller.summary(ctx([EVT_1, `${EVT_2},${EVT_1}`]))) as {
+      data: { targetDocumentId: string; yesCount: number }[];
+    };
+    expect(response.data.map((s) => [s.targetDocumentId, s.yesCount])).toEqual([
+      [EVT_1, 1],
+      [EVT_2, 0],
+    ]);
+  });
+
+  it("reads published events and the targets' rows only, with the user's id and display name", async () => {
+    const { strapi, controller, ctx } = setupSummary([answer(EVT_1, 8, "yes", 9)], OWNER);
+    await controller.summary(ctx(EVT_1));
+    expect(strapi.calls.map((call) => [call.uid, call.method, call.params])).toEqual([
+      [
+        EVENT_UID,
+        "findMany",
+        {
+          where: { documentId: { $in: [EVT_1] }, publishedAt: { $notNull: true } },
+          select: ["documentId"],
+        },
+      ],
+      [
+        RSVP_UID,
+        "findMany",
+        {
+          where: { targetDocumentId: { $in: [EVT_1] } },
+          select: ["id", "targetDocumentId", "status", "respondedAt"],
+          populate: { user: { select: ["id", "displayName"] } },
+        },
+      ],
+    ]);
+  });
+
+  it.each([
+    ["no targets", undefined, "targets required"],
+    ["an empty list", "", "Invalid targets"],
+    ["a malformed id", "abc", "Invalid targets"],
+    ["a numeric id", "12", "Invalid targets"],
+    ["an empty segment", `${EVT_1},`, "Invalid targets"],
+    ["a non-string", { 0: EVT_1 }, "Invalid targets"],
+    ["a prototype key", "constructor", "Invalid targets"],
+  ])("answers %s with 400 before any query", async (_label, targets, message) => {
+    const { strapi, controller, ctx } = setupSummary([], OWNER);
+    const c = ctx(targets);
+    await controller.summary(c);
+    expect(c.badRequest).toHaveBeenCalledWith(message);
+    expect(strapi.calls).toEqual([]);
+  });
+
+  it(`takes at most ${MAX_SUMMARY_TARGETS} distinct targets`, async () => {
+    const ids = Array.from(
+      { length: MAX_SUMMARY_TARGETS + 1 },
+      (_, i) => `e${String(i).padStart(23, "0")}`,
+    );
+    const { strapi, controller, ctx } = setupSummary([], OWNER);
+    const tooMany = ctx(ids.join(","));
+    await controller.summary(tooMany);
+    expect(tooMany.badRequest).toHaveBeenCalledWith(`At most ${MAX_SUMMARY_TARGETS} targets`);
+    expect(strapi.calls).toEqual([]);
+
+    const enough = ctx([...ids.slice(0, MAX_SUMMARY_TARGETS), ids[0]].join(","));
+    await controller.summary(enough);
+    expect(enough.badRequest).not.toHaveBeenCalled();
+  });
+
+  it("answers 401 without a caller", async () => {
+    const { strapi, controller, ctx } = setupSummary([], null);
+    const c = ctx(EVT_1);
+    await controller.summary(c);
+    expect(c.unauthorized).toHaveBeenCalled();
+    expect(strapi.calls).toEqual([]);
+  });
+});
+
+/**
+ * FX21: the raw reads as a route runs them — the find/findOne policy
+ * (global::event-rsvp-own-rows, the real module) and then the controller.
+ * The core find is a spy that answers with the stored rows matching the
+ * filters the policy left on the REAL request query (the stub's where
+ * evaluator), so "own rows" is observed on the response, not assumed.
+ */
+describe("event-rsvp raw reads: own rows, no user filter, no v4 shape (FX21)", () => {
+  const STORED: Row[] = [
+    rsvp(1, 8, "yes", null),
+    rsvp(2, 9, "no", null),
+    rsvp(3, OWNER.id, "maybe", null),
+    rsvp(4, 10, "maybe", null),
+  ];
+  const ADMIN = { id: 78, role: { type: "admin_role" } };
+  const MEMBER = { id: OWNER.id, role: { type: "member" } };
+  const EDITOR = { id: 77, role: { type: "editor" } };
+
+  // route() installs a table-backed core find; the other suites expect the
+  // hoisted defaults back.
+  afterEach(() => {
+    mocks.superFind.mockImplementation(async () => ({ data: [] }));
+    mocks.superFindOne.mockImplementation(async () => ({ data: null }));
+  });
+
+  function route(
+    user: { id: number; role: { type: string } },
+    query: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
+    const controller = (
+      eventRsvpController as unknown as (deps: { strapi: unknown }) => {
+        find(ctx: unknown): Promise<unknown>;
+        findOne(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi: {} });
+    const ctx = {
+      state: { user },
+      request: { query: JSON.parse(JSON.stringify(query)) as Record<string, unknown> },
+      headers,
+      badRequest: vi.fn((message: string) => ({ status: 400, message })),
+    };
+    const answer = (c: typeof ctx) =>
+      STORED.filter((row) =>
+        matchWhere(RSVP_UID, row as StubRow, c.request.query.filters as Where | undefined),
+      ).map((row) => ({ ...row, user: row.user ? { ...(row.user as object) } : row.user }));
+    mocks.superFind.mockImplementation(async (c) => ({ data: answer(c as typeof ctx) }));
+    mocks.superFindOne.mockImplementation(async (c) => ({
+      data: answer(c as typeof ctx)[0] ?? null,
+    }));
+    const run = async (action: "find" | "findOne") => {
+      const allowed = await eventRsvpOwnRows(ctx, undefined, { strapi: {} });
+      if (!allowed) return { status: 403 };
+      return controller[action](ctx);
+    };
+    return { ctx, run };
+  }
+
+  const ids = (response: unknown) =>
+    ((response as { data: Row[] }).data ?? []).map((row) => row.id);
+
+  it("serves a member only their own row", async () => {
+    const { ctx, run } = route(MEMBER);
+    expect(ids(await run("find"))).toEqual([3]);
+    expect(ctx.request.query.filters).toEqual({ user: { id: OWNER.id } });
+    // One route() per request: each request parses its own query.
+    const one = (await route(MEMBER).run("findOne")) as { data: Row };
+    expect(one.data).toMatchObject({ id: 3, user: { id: OWNER.id } });
+  });
+
+  it("gives editors no bypass: an RSVP is a personal statement", async () => {
+    const { run } = route(EDITOR);
+    expect(ids(await run("find"))).toEqual([]);
+  });
+
+  it("keeps a client filter, narrowed to the caller's rows", async () => {
+    const { ctx, run } = route(MEMBER, { filters: { status: { $eq: "maybe" } } });
+    expect(ids(await run("find"))).toEqual([3]);
+    expect(ctx.request.query.filters).toEqual({
+      $and: [{ status: { $eq: "maybe" } }, { user: { id: OWNER.id } }],
+    });
+  });
+
+  it("refuses a user.id filter with 400 before the core find runs", async () => {
+    const { run } = route(MEMBER, { filters: { user: { id: { $eq: 9 } }, status: "no" } });
+    await expect(run("find")).rejects.toBeInstanceOf(errors.ValidationError);
+    expect(mocks.superFind).not.toHaveBeenCalled();
+  });
+
+  it.each(["v4", "V4", "v5", "anything"])(
+    "refuses Strapi-Response-Format: %s with 400 for a non-admin",
+    async (format) => {
+      for (const action of ["find", "findOne"] as const) {
+        const { ctx, run } = route(MEMBER, {}, { "strapi-response-format": format });
+        expect(await run(action)).toEqual({
+          status: 400,
+          message: "Strapi-Response-Format is not supported here",
+        });
+        expect(ctx.badRequest).toHaveBeenCalledTimes(1);
+      }
+      expect(mocks.superFind).not.toHaveBeenCalled();
+      expect(mocks.superFindOne).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets admin_role through: every row and name, user filters and the v4 header", async () => {
+    const all = route(ADMIN);
+    const response = (await all.run("find")) as { data: Row[] };
+    expect(ids(response)).toEqual([1, 2, 3, 4]);
+    expect(response.data.map((row) => (row.user as { id: number }).id)).toEqual([
+      8,
+      9,
+      OWNER.id,
+      10,
+    ]);
+    expect(all.ctx.request.query).toEqual({});
+
+    const filtered = route(
+      ADMIN,
+      { filters: { user: { id: { $eq: 9 } } } },
+      {
+        "strapi-response-format": "v4",
+      },
+    );
+    expect(ids(await filtered.run("find"))).toEqual([2]);
+    expect(filtered.ctx.badRequest).not.toHaveBeenCalled();
   });
 });

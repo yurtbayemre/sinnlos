@@ -4,7 +4,8 @@
  * route.ts because a route module may only export HTTP handlers and segment
  * config (Next type-checks route exports at build time), and the tests
  * (upload-proxy.test.ts, S06) need them. The route keeps the session check,
- * the fetch with its connect timeout, and the 304/204 body handling.
+ * the fetch with its connect timeout, and the 304/204 body handling; the
+ * account check against Strapi (FX41) lives in lib/upload-block-cache.ts.
  */
 
 /**

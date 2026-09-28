@@ -182,7 +182,21 @@ describe("comments, reactions and read receipts", () => {
 
 describe("live (SSE) pings", () => {
   const fetchMock = vi.fn();
-  type Subscriber = (event: unknown) => Promise<void>;
+  type Handler = (event: unknown) => Promise<void>;
+  /** Function or object form (utils/live-events.ts subscribes in object form, LF06). */
+  type Subscriber = Handler | ({ models?: string[] } & Record<string, unknown>);
+
+  /** Dispatches one event the way @strapi/database 5.55.1 does (lifecycles/index.js run). */
+  async function dispatch(
+    subscriber: Subscriber,
+    event: { model: { uid: string }; action: string } & Record<string, unknown>,
+  ): Promise<void> {
+    if (typeof subscriber === "function") return subscriber(event);
+    if (!(event.action in subscriber)) return;
+    if (subscriber.models && !subscriber.models.includes(event.model.uid)) return;
+    const handler = subscriber[event.action];
+    if (typeof handler === "function") await (handler as Handler)(event);
+  }
 
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
@@ -220,7 +234,7 @@ describe("live (SSE) pings", () => {
     };
     for (const uid of [POLL_UID, POLL_VOTE_UID]) {
       for (const action of ["afterCreate", "afterUpdate", "afterDelete", "afterCreateMany", "afterUpdateMany"]) {
-        await subscriber({ model: { uid }, action, result: row, params: { data: row } });
+        await dispatch(subscriber, { model: { uid }, action, result: row, params: { data: row } });
       }
     }
     await __flushLiveEventsForTest();
@@ -228,7 +242,7 @@ describe("live (SSE) pings", () => {
 
     // Control: the same stub does emit for a watched type, and the ping is
     // content-free (a channel, never a title or a question).
-    await subscriber({
+    await dispatch(subscriber, {
       model: { uid: "api::announcement.announcement" },
       action: "afterCreate",
       result: { id: 1, title: "News", publishedAt: row.publishedAt },

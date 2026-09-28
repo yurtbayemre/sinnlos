@@ -30,6 +30,37 @@ describe("renderDigest", () => {
     expect(only.text).toContain("https://intranet.example/profile");
   });
 
+  it("summarises capped announcements as '+N more' and counts them (FX48)", () => {
+    const capped = {
+      announcements: [{ title: "Newest", author: null }],
+      announcementsMore: 3,
+      mentions: [],
+      kudos: [],
+    };
+    expect(totalItems(capped)).toBe(4);
+    const en = renderDigest(capped, { displayName: "C", locale: "en", baseUrl: "https://x" });
+    expect(en.subject).toContain("4 updates");
+    expect(en.text).toContain("• Newest\n• +3 more");
+    expect(en.html).toContain("<li>+3 more</li>");
+    const de = renderDigest(capped, { displayName: "C", locale: "de", baseUrl: "https://x" });
+    expect(de.text).toContain("• +3 weitere");
+  });
+
+  it("ignores a zero, negative or fractional '+N more'", () => {
+    for (const announcementsMore of [0, -2, 1.5, Number.NaN]) {
+      const content = {
+        announcements: [{ title: "Only", author: null }],
+        announcementsMore,
+        mentions: [],
+        kudos: [],
+      };
+      expect(totalItems(content)).toBe(1);
+      expect(renderDigest(content, { displayName: "C", baseUrl: "https://x" }).text).not.toContain(
+        "more",
+      );
+    }
+  });
+
   it("escapes HTML in user-generated content", () => {
     const evil = renderDigest(
       {

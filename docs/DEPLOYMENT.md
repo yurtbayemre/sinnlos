@@ -26,16 +26,20 @@ All methods share the same [prerequisites](#prerequisites) and
 cannot offer; see the note there).
 
 > **Upgrading an existing instance?** On an instance that runs `main`
-> `afc1506` (the owner instance since 2026-09-28), batch 6 is one normal
-> deploy of cms and web (one optional read-only query first; see
-> [3.8 Updates](#38-updates)): the test safety nets, the web correctness
-> fixes and the
-> [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28).
+> `a88d45a` (batch 6; the owner instance since 2026-09-28), batch 7 is one
+> normal deploy of cms and web together, with read-only checks before and
+> after it: follow
+> [Deploying batch 7 (2026-09-28)](#deploying-batch-7-2026-09-28). Its first
+> boot adds one permission and one nullable column by itself; never deploy
+> or roll back the cms or the web alone. On an instance that runs `main`
+> `afc1506`, batch 6 comes first or in the same deploy (the batch 6 note
+> in [3.8 Updates](#38-updates), with its optional poll query
+> of the
+> [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28)).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 6 (the first
-> note of [3.8 Updates](#38-updates)),
+> what the instance does not run yet, newest first: batch 7, batch 6,
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
@@ -44,8 +48,8 @@ cannot offer; see the note there).
 > [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
 > (the checks after the deploy and the rollback note). Deploying all of them
 > together is one normal deploy plus the read-only pre-deploy queries of the
-> poll targeting note and the optional poll query of the cms input
-> hardening. Coming from an older release,
+> poll targeting note, the optional poll query of the cms input hardening
+> and the checks of batch 7. Coming from an older release,
 > work through the datetime runbook,
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release),
 > before you deploy: the datetime release introduces the
@@ -735,6 +739,48 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 7 (2026-09-28)?** The notification pipeline fixes, the
+> user data and search hardening and the RSVP summary and reports (the three
+> notes below) ship as one normal deploy of cms and web **together**
+> (`infra/deploy.sh`): no env, edge or Traefik change; the first boot adds
+> one permission (the RSVP summary) and one nullable column on the manager
+> link table by itself. Read-only checks before it, and after it the boot
+> grant line, a clean permission diff, the manager links, an RSVP probe,
+> ⌘K as member and guest, an hour of watching `[sensitive-query-guard]`
+> and the next morning's digest line: follow
+> [Deploying batch 7 (2026-09-28)](#deploying-batch-7-2026-09-28), which
+> also has the rollback (both images together; the RSVP summary
+> permission rows a rollback leaves behind).
+>
+> **Deploying the notification pipeline fixes (2026-09-28)?** A normal
+> deploy of cms and web (`infra/deploy.sh`): no env, schema or permission
+> change of its own; batch 7 ships it with the RSVP summary (lane 2B), so
+> deploy and roll back cms and web together (see
+> [Deploying batch 7](#deploying-batch-7-2026-09-28)). Guests and blocked
+> users stop getting announcement bells and digests, live pings and
+> notifications follow the save, a failing notification no longer discards
+> a comment or kudos, and weekly digests missed on a Monday are caught up
+> the next morning.
+> Optional read-only checks first, and the next morning the 07:30
+> `[digest] run complete` line: see
+> [Upgrading to the notification pipeline fixes (2026-09-28)](#upgrading-to-the-notification-pipeline-fixes-2026-09-28).
+>
+> **Deploying the user data and search hardening (batch 7, lane 2C)?** A
+> normal deploy of cms and web together (`infra/deploy.sh`): no env, edge or
+> permission change. Its one schema change (a nullable column on the manager
+> link table) is covered by the pre-deploy backup `deploy.sh` takes. In the
+> first hour, watch the cms log for `[sensitive-query-guard]`: a hit from a
+> web page is a web query the new guard refuses. See
+> [Upgrading to the user data and search hardening (batch 7, lane 2C)](#upgrading-to-the-user-data-and-search-hardening-batch-7-lane-2c).
+>
+> **Deploying the RSVP summary and reports (batch 7, lane 2B)?** A normal
+> deploy of cms and web **together** (`infra/deploy.sh` does both): no env,
+> schema or edge change. The first boot adds one permission (the RSVP
+> summary, logged as `[bootstrap] granted 6 permission(s) across intranet
+> roles`). Never deploy or roll back the cms alone: an older web against
+> the new cms shows every user only their own RSVP. See
+> [Upgrading to the RSVP summary and reports (batch 7, lane 2B)](#upgrading-to-the-rsvp-summary-and-reports-batch-7-lane-2b).
+>
 > **Deploying batch 6 (2026-09-28)?** The test safety nets, the web
 > correctness fixes and the cms input hardening (the two notes below and
 > the "Uploads gate" and live-event notes further down) ship as one normal
@@ -858,6 +904,875 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 7 (2026-09-28)
+
+Batch 7 (branch `batch/7`, on `main` `a88d45a`, which production runs since
+2026-09-28) ships three lanes in one deploy. The three runbooks below
+explain each change in detail; **this section is the one sequence to
+follow**:
+
+- [the notification pipeline fixes](#upgrading-to-the-notification-pipeline-fixes-2026-09-28)
+  (lane 2A): only readers of an announcement are notified, never guests or
+  blocked users; notifications and live pings follow the commit; digests
+  filter before their cap, skip what the bell already announced and catch
+  up a missed Monday;
+- [the user data and search hardening](#upgrading-to-the-user-data-and-search-hardening-batch-7-lane-2c)
+  (lane 2C): contact fields are no filter or sort key for guests; the
+  person page lists direct reports; the ⌘K search runs through `GET
+  /search`; a blocked account loses `/uploads` within a minute;
+- [the RSVP summary and reports](#upgrading-to-the-rsvp-summary-and-reports-batch-7-lane-2b)
+  (lane 2B): the cms counts RSVPs and raw RSVP reads return only the
+  caller's own rows; the acknowledgement report scales past 2000
+  confirmations; leaner pages; the bell shows the true unread total.
+
+It is **one normal deploy of cms and web together** with `infra/deploy.sh`:
+no env, edge or Traefik change, nothing to migrate by hand. The first boot
+of the new cms makes two additive changes by itself, both covered by the
+pre-deploy backup `deploy.sh` takes:
+
+- one new permission, the RSVP summary, granted to six roles (never
+  `guest`);
+- one nullable column and its index on the existing manager link table
+  (FX23): `alter table up_users_manager_lnk add column user_ord double
+  precision null` and the index `up_users_manager_lnk_oifk` (recorded on
+  Postgres 16).
+
+**Never deploy or roll back the cms or the web alone.** Both directions
+break a page:
+
+- an older web against the new cms: `/events` shows every user only their
+  own RSVP, and a guest's ⌘K finds no people (the old web still sends the
+  e-mail clause the cms now refuses with a 400);
+- the new web against an older cms: `/events` shows the error banner and no
+  RSVP counts (the summary route does not exist there, 404).
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (all read-only)
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Permissions.** After the `git pull` the permission diff describes
+   batch 7:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   Expected in section 1: six new rows `MISSING_IN_DB | <role> |
+   api::event-rsvp.event-rsvp.summary`, for `admin_role`, `authenticated`,
+   `department_head`, `editor`, `member` and `team_lead` (never `guest`).
+   A database created before the Strapi 5.55.1 release, such as
+   production's, also lists the two known informational `MISSING_IN_DB`
+   rows for `authenticated` (`plugin::users-permissions.auth.getSessions`
+   and `…auth.revokeSession`): users-permissions grants them only on a
+   fresh database (step 9 of
+   [Upgrading to the Strapi 5.55.1 release](#upgrading-to-the-strapi-5551-release-2026-09-25)),
+   so a database first booted by 5.55.1 or later holds both, and the diff
+   lists neither. Anything else was there before this deploy: compare it
+   with the result of the batch 6 deploy before you go on.
+
+3. **Census.** Who the notification and digest rules affect, and the
+   manager links FX23 pairs. Write the numbers down; the link count is
+   compared after the deploy (replace `Europe/Berlin` with your
+   `APP_TIME_ZONE`):
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   SELECT p.action, string_agg(r.type, ', ' ORDER BY r.type) AS roles
+   FROM up_permissions p
+   JOIN up_permissions_role_lnk pr ON pr.permission_id = p.id
+   JOIN up_roles r ON r.id = pr.role_id
+   WHERE p.action IN ('api::announcement.announcement.find',
+                      'api::event.event.find',
+                      'api::kudos.kudos.find')
+   GROUP BY p.action
+   ORDER BY p.action;
+
+   SELECT coalesce(r.type, '(no role)') AS role,
+          count(*) AS users,
+          count(*) FILTER (WHERE u.blocked) AS blocked,
+          count(*) FILTER (WHERE u.digest_announcements OR u.digest_mentions OR u.digest_kudos) AS digest_opt_ins
+   FROM up_users u
+   LEFT JOIN up_users_role_lnk rl ON rl.user_id = u.id
+   LEFT JOIN up_roles r ON r.id = rl.role_id
+   GROUP BY 1
+   ORDER BY 1;
+
+   SELECT count(*) AS weekly_due_next_morning
+   FROM up_users
+   WHERE coalesce(blocked, false) = false
+     AND digest_frequency = 'weekly'
+     AND (digest_announcements OR digest_mentions OR digest_kudos)
+     AND (last_digest_at IS NULL
+          OR last_digest_at < date_trunc('week', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin');
+
+   SELECT count(*) AS manager_links FROM up_users_manager_lnk;
+   ROLLBACK;
+   SQL
+   ```
+
+   Expected: `announcement.find` and `kudos.find` for `admin_role,
+   authenticated, department_head, editor, member, team_lead`, `event.find`
+   for those plus `guest`. After the deploy, guests and blocked users get no
+   announcement bells and no digests: a guest row with `digest_opt_ins`
+   loses its digest (tell them if that matters). Production had no guests
+   and no digest opt-ins when this batch was planned (2026-09-28), so nothing
+   visible changes there apart from the live pings arriving after the save.
+   At most the `weekly_due_next_morning` users get a catch-up digest the
+   next morning (guests, roles without `announcement.find` and users with
+   nothing new get none).
+
+**Deploy**
+
+4. Run `infra/deploy.sh` on the Traefik host. It runs the preflight, takes
+   the pre-deploy backup, tags the running images `:rollback`, rebuilds and
+   restarts **cms and web together**, and runs `infra/live-smoke.sh` when
+   the demo credentials file is readable (otherwise it says `live-smoke
+   SKIPPED`: run `infra/live-smoke.sh` by hand, the live pings are part of
+   this change). On a standalone Caddy box, run `infra/backup/pg-backup.sh`,
+   then `docker compose up -d --build` from `infra/` (it rebuilds both).
+
+**After the deploy**
+
+5. **Boot lines.**
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\] granted|\[live-emit\] DB lifecycle'
+   # [bootstrap] granted 6 permission(s) across intranet roles
+   # [live-emit] DB lifecycle subscriber registered
+   ```
+
+   The grant line appears on the first boot only (a later boot grants
+   nothing and logs no such line; after an earlier rollback of this batch
+   without the cleanup below it reads `granted N` with N ≤ 6).
+
+6. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+   lists no `event-rsvp` row any more; at most the two known informational
+   `MISSING_IN_DB` rows for `authenticated` remain (only on a database
+   created before the Strapi 5.55.1 release, see step 2).
+
+7. **FX23: the column is there and no link was lost.**
+
+   ```bash
+   psql_db -X -c '\d up_users_manager_lnk'
+   psql_db -X -c 'SELECT count(*) AS links, count(user_ord) AS ordered FROM up_users_manager_lnk'
+   ```
+
+   Expected: the columns `id`, `user_id`, `inv_user_id`, `user_ord` (double
+   precision) and the index `up_users_manager_lnk_oifk`; `links` equals
+   step 3's `manager_links`, `ordered` is 0 until someone changes a manager.
+   `/people/<id>` of a manager shows the *Direct reports* card.
+
+8. **RSVPs as a non-admin.** Run the API probe of step 6 of the
+   [RSVP runbook](#upgrading-to-the-rsvp-summary-and-reports-batch-7-lane-2b)
+   (it signs in as the `infra/live-smoke.sh` demo account). Expected for
+   any role but `admin_role`: `raw read: … 0 of someone else`, `user filter:
+   400`, `format header: 400`, `summary: 200` with one entry per published
+   RSVP event and no names of maybe or no answers. As a member, `/events`
+   shows the same counts and "yes" names as before the deploy, except where
+   one user had two rows for an event (the known double-click race): that
+   user now counts once, by their latest answer. So a maybe or no count can
+   drop by one per such user (the yes count too, with the name, when their
+   latest answer is not yes), and their "yes" name moves to the position of
+   their latest answer.
+
+9. **Search as member and guest.** ⌘K as a member finds a colleague by
+   e-mail; as a guest (if you have one, or a test account set to `guest`)
+   the same colleague by name but not by e-mail, and no error. Images and
+   document downloads still load (they go through the web's `/uploads`
+   proxy, which now asks the cms once a minute per session token whether
+   the account is still active).
+
+10. **First hour: watch the query guard.**
+
+    ```bash
+    "${COMPOSE[@]}" logs -f --since 5m cms | grep --line-buffered sensitive-query-guard
+    ```
+
+    Each line names the method, path, model and role, never a value. Only
+    a `[sensitive-query-guard]` line counts. If its path is one the web
+    calls while rendering a page (a guest's or an `authenticated` user's
+    page with an error banner or a missing list), it is a missed web query:
+    note the page and the line and report it; nothing needs to be rolled
+    back for it (`infra/sensitive-queries.test.ts` pins the web's queries
+    against the guard). Lines that match no page are probes the guard
+    refused as intended. A banner without such a line is not a guard issue.
+    Known and unchanged by this batch (403s from grants the role does not
+    hold, not guard refusals): a guest sees the cms error banner on `/`,
+    `/announcements`, `/departments`, `/teams`, `/kudos`, `/marketplace`,
+    `/training` and the lesson pages, and an error page on every department,
+    team and course page; an `authenticated`-role user sees it on `/kudos`
+    (celebrations).
+
+11. **First publish.** The next announcement or event logs
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 30m cms | grep '\[notifications\]'
+    # [notifications] created 9 notification(s) for announcement 42 (source <documentId>)
+    ```
+
+    and rings the bell of its audience only. `could not create the
+    notification for user <id>` names a recipient whose row failed; on
+    Postgres its reason is often Strapi's follow-up statement (`… current
+    transaction is aborted`) rather than the original error, which the
+    Postgres log has. The publish is saved either way, and the next
+    publish of that entry delivers the missing notification. `failed for
+    comment: …` or `failed for kudos: …` means that one notification is
+    missing; the comment or kudos itself is saved.
+
+12. **Next morning.** The 07:30 digest run (with SMTP configured; in dark
+    mode the line is `[digest] skipped: …`):
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 24h cms | grep '\[digest\]'
+    # [digest] run complete: sent=… empty=… skipped=… failed=… of … candidate(s)
+    ```
+
+    Guests and users whose role lacks `announcement.find` count as
+    `skipped`. `could not load the announcements` or `could not load the
+    recipients` means those users failed this run and keep their window;
+    the next run covers it.
+
+13. **Optional: revocation.** Block a test account in the admin panel
+    (Content Manager → User → *blocked*): its next page load goes to
+    sign-in, and its `/uploads` requests answer 401 within 60 s. Unblock it
+    again. While the cms cannot answer, `/uploads` answers 503. Cost: at most
+    one cms request per session token and minute, per web replica.
+
+**What users notice** (worth a short release note):
+
+- Guests see no e-mail digest options on `/profile` and get no digests or
+  announcement bells; blocked accounts get no bells. Digests list at most
+  25 announcements plus "+N more", and a weekly digest missed on Monday
+  arrives the next morning. Very long titles show shortened in the bell.
+- The bell badge shows all unread notifications (up to 99+), not just the
+  unread among the newest 20.
+- *Give kudos* no longer offers yourself or blocked colleagues, shows
+  avatars, and its search matches names and job titles (no longer e-mail
+  addresses). `/people` shows the first 48 people and a button for the
+  next ones; the person page of a manager lists their direct reports.
+- ⌘K no longer blocks other clicks while it searches; guests find people
+  by name and job title only.
+- RSVP counts can only drop where a duplicate row of one user was counted
+  twice.
+
+**Rollback: both images together.** Follow the hint `infra/deploy.sh`
+prints (`docker tag infra-web:rollback infra-web:latest`, the same for
+`infra-cms`, then `"${COMPOSE[@]}" up -d --no-build web cms`); never one of
+them alone, for the reasons above. The `:rollback` images are batch 6's,
+which already knows poll guest access, so the hint has no guest-vote step
+(follow whatever it prints). What stays in the database, all harmless:
+
+- **The RSVP summary permission rows.** Each boot of the previous cms
+  deletes only ONE of the six rows (users-permissions' `syncPermissions`
+  deletes one row per action its code does not know, per boot). The others
+  are inert (the previous cms has no such route) and the previous
+  release's diff lists them as `EXTRA_IN_DB | <role> |
+  api::event-rsvp.event-rsvp.summary` (`git show
+  a88d45a:infra/diagnostics/prod-perm-diff.sql | psql_db -X`; five after its
+  first boot, one fewer per further boot). Optionally remove them while the
+  previous cms runs (it never grants them again; a second run removes
+  nothing):
+
+  ```bash
+  psql_db -X <<'SQL'
+  BEGIN;
+  WITH stale AS (
+    SELECT id FROM up_permissions
+     WHERE action = 'api::event-rsvp.event-rsvp.summary'
+  ), unlinked AS (
+    DELETE FROM up_permissions_role_lnk l USING stale s
+     WHERE l.permission_id = s.id RETURNING l.id
+  ), removed AS (
+    DELETE FROM up_permissions p USING stale s
+     WHERE p.id = s.id RETURNING p.id
+  )
+  SELECT (SELECT count(*) FROM unlinked) AS links_removed,
+         (SELECT count(*) FROM removed) AS permission_rows_removed;
+  COMMIT;
+  SQL
+  ```
+
+  Rolling forward again grants only the missing rows: step 5 then reads
+  `granted N` with N ≤ 6 (6 after the cleanup), and step 6 is clean.
+- **The FX23 column.** `user_ord` and its index stay; the previous cms runs
+  no DDL for them (`forceMigration` is off), keeps every manager link and
+  just shows no *Direct reports* card again; rolling forward runs no DDL
+  either (checked on Postgres 16 and SQLite). Do not drop it by hand.
+- **Schema flags.** `private` and `searchable: false` on `microsoftOid`
+  and the digest fields are no column property: no DDL in either
+  direction.
+- **Notifications** written by batch 7 have the same shape as before;
+  nothing to undo.
+
+After a rollback the fixed problems are back: bells for guests and blocked
+users, long titles failing the publish, pings before the save, comments and
+kudos lost when their notification fails, weekly digests only on Mondays,
+contact-field filters for guests, the RSVP rows of everyone in the
+browser, the capped acknowledgement report and file access for blocked
+accounts until their session ends.
+
+#### Upgrading to the notification pipeline fixes (2026-09-28)
+
+This release (branch `fix/notification-pipeline`, on `batch/6` `997bf7f`)
+changes who is notified and when, and how the e-mail digest is put
+together:
+
+- **Notification titles fit their column (FX18).** A title is at most 255
+  characters; a long announcement or event title is shortened with `…`
+  (the "New announcement: " prefix and the quotes around a commented title
+  stay). Before, a title of about 237 characters or more made the
+  notification insert fail on Postgres, which failed the whole publish.
+- **Only readers are notified (FX19).** The bell for an announcement goes to
+  the targeted users whose role holds `announcement.find` and who are not
+  blocked; for an event, to the users of its departments (everyone without
+  departments) whose role holds `event.find` and who are not blocked. The
+  roles are read from the permissions table at runtime, so a grant changed
+  in the admin panel applies to the next publish. Guests (no
+  `announcement.find`) and blocked users no longer get announcement bells;
+  guests keep the event bell. Admins and editors get strictly the targeted
+  audience, as before. If the published entry cannot be read back, nobody
+  is notified (before: everyone).
+- **Digests (FX19, FX48).** Only users whose role holds
+  `announcement.find` get digests: never guests, never blocked users; the
+  kudos section needs `kudos.find`. `/profile` offers the digest options
+  only to those roles, and `PUT /api/me` ignores a guest's digest settings.
+  Each user's announcements are filtered to the window and the user's
+  audience first and then capped at 25, with "+N more" (before, the cap of
+  25 ran first and could hide every announcement the user may read). An
+  announcement that was edited and published again is not repeated for a
+  user whose bell announced it before the digest window, nor for its
+  author once it was first published before the author's window (the bell
+  never notifies the author, so before, the author got every republish of
+  their own announcement again). Weekly digests
+  are due whenever the last one is older than the start of the week
+  (Monday 00:00 in `APP_TIME_ZONE`): a Monday whose send failed, or that
+  had nothing to send, is caught up the next morning, still at most once a
+  week. A run reads users, permissions and announcements once instead of
+  once per user.
+- **After the commit (LF02, LF06).** Live pings and the announcement and
+  event notifications are sent after the publish is saved: a publish that
+  fails notifies and pings nobody, the bell's refetch finds the new rows,
+  and one failing notification insert costs that one recipient (logged,
+  delivered by the next publish) instead of the publish. The title and
+  the audience both come from the entry as saved when the notifications
+  go out: if an announcement is renamed, retargeted and published again
+  before its first notifications were sent (they queue behind larger
+  ones), everyone gets the current title, never the replaced one. Comment
+  and kudos notifications are written after the comment or kudos is
+  saved as well: before, on Postgres, a failing notification insert
+  discarded the comment or kudos although the API answered 201. The
+  live-event subscriber now runs only for the four content types it
+  watches.
+
+**Nothing else is needed: a normal deploy of cms and web.** No env change,
+no migration, and no schema or permission change of its own. On its own
+the order of web and cms would not matter (an older web shows guests the
+digest options, which the new cms ignores; the new web works with an older
+cms), but batch 7 ships this lane with the RSVP summary (lane 2B), so
+deploy and roll back cms and web together: see
+[Deploying batch 7](#deploying-batch-7-2026-09-28).
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Optional, read-only: who is affected.** The roles that hold the read
+   grants (the new audience), the guests, blocked users and digest opt-ins
+   per role, and the weekly subscribers who are due a catch-up digest the
+   next morning (replace `Europe/Berlin` with your `APP_TIME_ZONE`):
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT p.action, string_agg(r.type, ', ' ORDER BY r.type) AS roles
+   FROM up_permissions p
+   JOIN up_permissions_role_lnk pr ON pr.permission_id = p.id
+   JOIN up_roles r ON r.id = pr.role_id
+   WHERE p.action IN ('api::announcement.announcement.find',
+                      'api::event.event.find',
+                      'api::kudos.kudos.find')
+   GROUP BY p.action
+   ORDER BY p.action;
+
+   SELECT coalesce(r.type, '(no role)') AS role,
+          count(*) AS users,
+          count(*) FILTER (WHERE u.blocked) AS blocked,
+          count(*) FILTER (WHERE u.digest_announcements OR u.digest_mentions OR u.digest_kudos) AS digest_opt_ins
+   FROM up_users u
+   LEFT JOIN up_users_role_lnk rl ON rl.user_id = u.id
+   LEFT JOIN up_roles r ON r.id = rl.role_id
+   GROUP BY 1
+   ORDER BY 1;
+
+   SELECT count(*) AS weekly_due_next_morning
+   FROM up_users
+   WHERE coalesce(blocked, false) = false
+     AND digest_frequency = 'weekly'
+     AND (digest_announcements OR digest_mentions OR digest_kudos)
+     AND (last_digest_at IS NULL
+          OR last_digest_at < date_trunc('week', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin');
+   SQL
+   ```
+
+   Expected on a default install: `announcement.find` and `kudos.find` for
+   `admin_role, authenticated, department_head, editor, member, team_lead`,
+   `event.find` for those plus `guest`. Guests with `digest_opt_ins` stop
+   getting digests; tell them if that matters. The owner instance had no
+   guests and no opt-ins at the 2026-09-28 deploy, so nothing visible
+   changes there apart from the live pings arriving after the save.
+   `weekly_due_next_morning` is an upper bound: guests, roles without
+   `announcement.find` and users with nothing new get no digest.
+
+**Deploy**
+
+3. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup,
+   tags the running images `:rollback` and runs `infra/live-smoke.sh` when
+   the demo credentials exist; the live pings are part of this change, so
+   run it by hand otherwise). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`.
+
+**After the deploy**
+
+4. **Publish something** (or wait for the next announcement or event). The
+   cms log shows one line per publish, and an error line per recipient
+   whose notification could not be written:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep '\[notifications\]'
+   # [notifications] created 9 notification(s) for announcement 42 (source <documentId>)
+   ```
+
+   `could not create the notification for user <id>` names the recipient;
+   on Postgres its reason is often Strapi's follow-up statement (`delete
+   from "public"."notifications" … current transaction is aborted`) rather
+   than the original error, which the Postgres log has. The publish itself
+   is saved either way, and the next publish of that entry delivers the
+   missing notification. `[notifications] failed for comment: …` or
+   `failed for kudos: …` means that one notification is missing; the
+   comment or kudos itself is saved.
+5. **The next morning**, check the 07:30 digest run (with SMTP configured;
+   in dark mode the line is `[digest] skipped: …`):
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 24h cms | grep '\[digest\]'
+   # [digest] run complete: sent=… empty=… skipped=… failed=… of … candidate(s)
+   ```
+
+   Guests and users whose role lacks `announcement.find` count as
+   `skipped`. `[digest] could not load the announcements` or `could not
+   load the recipients` means those users failed this run and keep their
+   window; the next run covers it.
+
+**What users notice** (worth a short release note):
+
+- Guests no longer see e-mail digest options on `/profile` and get no
+  digests or announcement bells; blocked accounts get no bells.
+- Digests list at most 25 announcements plus "+N more", and a weekly
+  digest missed on Monday arrives the next morning.
+- Very long titles show shortened in the bell.
+
+**Rollback.** The previous images run unchanged on this database: nothing
+in the schema changed, and the notification rows this release writes are
+the same shape. After a rollback the fixed errors are back (bells for
+guests and blocked users, long titles failing the publish, pings before
+the save, comments and kudos lost when their notification fails, weekly
+digests only on Mondays). Follow the rollback hint
+`infra/deploy.sh` prints; it rolls back cms and web together, which batch 7
+needs (see [Deploying batch 7](#deploying-batch-7-2026-09-28)).
+
+#### Upgrading to the user data and search hardening (batch 7, lane 2C)
+
+This release (branch `fix/user-data-and-search-hardening`, on `batch/6`
+`997bf7f`) closes four gaps around user data:
+
+- **Contact fields are no filter or sort key for non-staff callers
+  (FX22).** The cms removed e-mail, phone, hire date, office location and
+  the Entra id from every response to guests, the `authenticated` fallback
+  role and callers without a known role, but those callers could still
+  filter or sort by the fields and read them off which rows came back. A
+  new global cms middleware, `global::sensitive-query-guard`, now answers
+  400 `Invalid key <field>` to such a query: a filter or sort on one of the
+  fields of a user, on `/api/users*` and through every user relation
+  (`author`, `manager`, `members`, …, nested `populate` included), and a
+  full-text `_q` on `/api/users`. Staff roles (admin, editor, department
+  head, team lead, member) keep every query they had, and the admin panel
+  is not affected. Each refusal is logged without the value, for example
+  `[sensitive-query-guard] 400 Invalid key email on GET /api/users
+  (plugin::users-permissions.user, role guest)`. `microsoftOid` and the
+  digest opt-ins are now schema-`private`: no role reads, filters or
+  `_q`-searches them through the content API any more (the sign-in
+  extension, `/api/me` and the digest cron read them directly). The search
+  box of the admin panel no longer matches an Entra id either; a filter on
+  `microsoftOid` there still works. `blocked`, `provider` and `confirmed`
+  stay filterable.
+- **Direct reports (FX23).** `user.manager` is now paired with its inverse
+  `directReports`; before, the *Direct reports* card on `/people/<id>`
+  never showed. The first boot adds one nullable column and its index to
+  the existing link table: `alter table up_users_manager_lnk add column
+  user_ord double precision null` and the index `up_users_manager_lnk_oifk`
+  (nothing else; recorded on Postgres 16). Every existing manager link
+  stays and shows up at once.
+- **Search (WD06).** The ⌘K palette calls `GET /search` on the web instead
+  of Server Actions, so typing no longer holds up other clicks or the
+  navigation after a selection. `/search` is outside `/api`, so both edge
+  configs already send it to Next.js; like every page it needs a session.
+  Guests and the `authenticated` fallback role find people by name and job
+  title only, staff roles also by e-mail. People are no longer preloaded
+  (that list was unbounded); every live query is limited to 5 rows per
+  kind. Search terms are still logged only once they settle.
+- **Blocked accounts lose `/uploads` within a minute (FX41).** Before it
+  streams a file, the web now asks the cms whether the session's Strapi
+  token is still accepted (`GET /api/users/me`, uncached) and remembers the
+  answer for 60 s per session token, in the web process. A blocked or
+  deleted account gets 401 for files within a minute (its pages already
+  sent it to sign-in); before, it kept file access until its session
+  expired (up to 7 days).
+  While the cms cannot answer, `/uploads` answers 503, also when the file
+  fetch itself fails (before, that was an empty 500). Cost: at most one cms
+  request per session token and minute, per web replica.
+
+**Nothing else is needed: a normal deploy.** No env change (the existing
+`INTERNAL_UPLOAD_TOKEN` is reused), no permission, edge or Traefik change.
+The schema change is additive; the pre-deploy backup covers it.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+**Deploy**
+
+2. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`. Deploy web and cms together: an older web against the new cms
+   still searches people by e-mail for guests, which the cms now refuses
+   (the guest's search then finds no people until the web is updated).
+
+**After the deploy**
+
+3. **The manager links survived** (read-only):
+
+   ```bash
+   psql_db -X -c '\d up_users_manager_lnk'
+   psql_db -X -c 'SELECT count(*) AS links, count(user_ord) AS ordered FROM up_users_manager_lnk'
+   ```
+
+   Expected: the columns `id`, `user_id`, `inv_user_id`, `user_ord`, and as
+   many links as before the deploy (`ordered` is 0 until someone changes a
+   manager). Open `/people/<id>` of a manager: the *Direct reports* card
+   lists their reports.
+
+4. **Watch the guard for the first hour.** Every web page and the search
+   must keep working for guests and members. A refused query shows up as:
+
+   ```bash
+   "${COMPOSE[@]}" logs -f --since 5m cms | grep --line-buffered sensitive-query-guard
+   ```
+
+   Each line names the method, path, model and role. Only such a line
+   counts. If its path is one the web calls while rendering a page (a
+   guest's or an `authenticated` user's page with an error banner or a
+   missing list), it is a missed web query: note the page and report it;
+   nothing needs to be rolled back for it. Lines nobody can match to a page
+   are probes the guard refused as intended. A banner without such a line
+   is not a guard issue: guests and the `authenticated` role already see
+   error banners on several pages for grants they do not hold (the list is
+   in step 10 of [Deploying batch 7](#deploying-batch-7-2026-09-28)).
+
+5. **Search and files.** Press ⌘K as a guest (if you have one) and as a
+   member: a colleague is found by name; only the member finds them by
+   e-mail. Images and document downloads still load.
+
+6. **Optional: revocation.** Block a test account in the admin panel
+   (Content Manager → User → *blocked*): its next page load goes to
+   sign-in at once, and its `/uploads` requests answer 401 within 60 s.
+   Unblock it again.
+
+**Rollback.** Follow the hint `deploy.sh` prints. Nothing in the database
+needs undoing: the previous cms runs no DDL for the extra column (it stays
+unused, `forceMigration` is off) and reads every manager link as before;
+rolling forward again runs no DDL either (both checked on Postgres 16 and
+SQLite). The `searchable: false` flags on `microsoftOid` and
+`digestFrequency` are no column property: no DDL in either direction
+(checked on Postgres 16). The previous release shows no *Direct reports*
+card again, lets guests filter by contact fields again, lets every other
+role find users by Entra id or digest frequency with `_q` again and gives
+blocked accounts their files until their session ends.
+
+#### Upgrading to the RSVP summary and reports (batch 7, lane 2B)
+
+This release (branch `feat/rsvp-summary-and-reports`, on `batch/6`
+`997bf7f`) moves the RSVP counting into the cms and makes the admin reports
+and a few pages cheaper:
+
+- **RSVP summary (FX21).** The events list used to download every RSVP row
+  of the listed events (up to 3000) and count them in the web. The cms now
+  answers `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50
+  published events per request) with the yes/maybe/no counts, the names of
+  the "yes" answers and the caller's own answer; who answered maybe or no
+  never leaves the cms. `/events` makes one such request. The raw reads
+  (`GET /api/event-rsvps`, `GET /api/event-rsvps/:id`) now return only the
+  caller's own answers (an admin still sees all of them); a filter on the
+  `user` relation and the `Strapi-Response-Format` header answer 400 for
+  everyone but an admin. The new action is granted on boot to exactly the
+  roles that read RSVPs (admin, editor, department head, team lead, member
+  and the `authenticated` fallback), never to guests.
+- **Acknowledgement report beyond 2000 confirmations (FX32).**
+  `/manage/acknowledgements` read every announcement acknowledgement of the
+  intranet and stopped at 2000 rows, after which the report stayed
+  "incomplete" for good. It now asks only for the acknowledgements of the
+  mandatory announcements it lists, 20 announcements per request, each with
+  its own cap. It still shows "–" whenever an input is incomplete.
+- **Stable page walks (WD02).** The training report and the learner's own
+  progress page through lesson progress sorted by id; without an order
+  Postgres could skip or repeat rows between pages. The page arithmetic
+  moved into tested modules; nothing else changes.
+- **Smaller pages (WD05).** Relations no page renders are no longer loaded
+  (announcement department, event departments, department header image,
+  poll author, and the notification actor: the bell's feed is part of every
+  page, so each notification used to carry the actor's whole user row).
+  The kudos picker receives only name, job title and avatar thumbnail of
+  the other active colleagues; `/people` and the org chart
+  receive only the fields their cards show, and `/people` renders 48 cards
+  at a time.
+- **Counts (WD10).** The dashboard people count and the user count on
+  `/manage/analytics` load after the rest of the page instead of holding it
+  back. The bell badge shows the number of all unread notifications (99+),
+  not only of the unread among the newest 20. Image URLs of the local upload
+  provider stay relative (`/uploads/...`), so they always load through the
+  web's session-gated proxy, also when the cms has a host of its own.
+
+**Nothing else is needed: a normal deploy of cms and web together.** No env,
+schema, edge or Traefik change. The one permission change is added by the
+first boot. `infra/deploy.sh` rebuilds and restarts both; never deploy the
+cms alone, and roll both back together:
+
+- an older web against the new cms reads RSVPs row by row and now gets only
+  the caller's own rows, so every event shows at most the caller's answer;
+- the new web against an older cms asks for a summary route that does not
+  exist there (404), so `/events` shows the error banner and no RSVP counts.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Optional, read-only: permissions before.** After the `git pull` the
+   permission diff describes this release, so section 1 lists six new rows
+   `MISSING_IN_DB | <role> | api::event-rsvp.event-rsvp.summary` (for
+   `admin_role`, `authenticated`, `department_head`, `editor`, `member` and
+   `team_lead`) next to what it listed before:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+**Deploy**
+
+3. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/` (it rebuilds cms and web together).
+
+**After the deploy**
+
+4. **The new grant.** The first boot logs it once:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep '\[bootstrap\] granted'
+   # [bootstrap] granted 6 permission(s) across intranet roles
+   ```
+
+   A later boot grants nothing new and logs no such line.
+
+5. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+   lists no `event-rsvp` row any more. At most the two known informational
+   `MISSING_IN_DB` rows for `authenticated` remain
+   (`plugin::users-permissions.auth.getSessions` and `…auth.revokeSession`),
+   and only on a database created before the Strapi 5.55.1 release, such as
+   production's: users-permissions grants them only on a fresh database
+   (see step 9 of
+   [Upgrading to the Strapi 5.55.1 release](#upgrading-to-the-strapi-5551-release-2026-09-25)).
+
+6. **RSVPs through the API.** This signs in as the demo account
+   `infra/live-smoke.sh` uses (password from the same file, or set
+   `SMOKE_PASSWORD` yourself; it reaches the container through the
+   environment, not the command line) and prints what the raw reads and the
+   summary answer:
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   SMOKE_PASSWORD="$SMOKE_PASSWORD" docker exec -i -e SMOKE_PASSWORD infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" <<'NODE'
+   const [identifier] = process.argv.slice(2);
+   const password = process.env.SMOKE_PASSWORD;
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password }),
+   });
+   const { jwt, user } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const get = (path, headers = {}) =>
+     fetch(`${base}${path}`, { headers: { authorization: `Bearer ${jwt}`, ...headers } });
+   const me = await (await get("/api/me")).json();
+   console.log("role:", me.data?.role?.type);
+   const raw = await (await get("/api/event-rsvps?populate[user][fields][0]=id&pagination[pageSize]=100")).json();
+   const others = raw.data.filter((row) => row.user?.id !== user.id).length;
+   console.log(`raw read: ${raw.data.length} row(s), ${others} of someone else`);
+   console.log("user filter:", (await get(`/api/event-rsvps?filters[user][id][$eq]=${user.id}`)).status);
+   console.log("format header:", (await get("/api/event-rsvps", { "strapi-response-format": "v4" })).status);
+   const events = await (await get("/api/events?filters[rsvpEnabled][$eq]=true&fields[0]=title&sort=start:desc&pagination[pageSize]=50")).json();
+   const targets = events.data.map((event) => event.documentId);
+   if (targets.length === 0) {
+     console.log("summary: no RSVP event to ask for");
+   } else {
+     const res = await get(`/api/event-rsvps/summary?targets=${targets.join(",")}`);
+     const body = await res.json();
+     console.log("summary:", res.status, `${body.data?.length} event(s)`, JSON.stringify(body.data?.[0] ?? null));
+   }
+   NODE
+   ```
+
+   Expected for a role other than `admin_role`: `raw read: … 0 of someone
+   else`, `user filter: 400`, `format header: 400`, and `summary: 200` with
+   one entry per published RSVP event (`yesCount`, `maybeCount`, `noCount`,
+   `yesNames`, `myStatus`; no names of maybe or no answers). For an
+   `admin_role` account the raw read includes everyone's rows and both
+   checks answer 200, by design.
+
+7. **Pages** (`deploy.sh`'s smoke and live-smoke pass as before):
+    - as a member, `/events` shows the same counts and "yes" names on the
+      upcoming RSVP events as before the deploy, and answering yes, maybe
+      or no updates them; a user who had two rows for one event (the known
+      double-click race) now counts once, by their latest answer, in maybe
+      and no as well (the yes count drops too, with the name, when their
+      latest answer is not yes), and their "yes" name moves to the position
+      of their latest answer;
+    - as an admin, `/manage/acknowledgements` and `/manage/training` show
+      their percentages (a "–" only where an input is really incomplete);
+    - the kudos picker lists neither you nor blocked accounts; `/people`
+      shows 48 cards and a *+ N people* button when more people match; the
+      org chart and the avatars load;
+    - the dashboard's people count appears a moment after the page; the
+      bell badge counts every unread notification.
+
+**What users notice** (worth a short release note):
+
+- *Give kudos* no longer offers yourself or blocked colleagues, shows
+  avatars, and its search matches names and job titles (no longer e-mail
+  addresses).
+- `/people` shows the first 48 people and a button for the next ones.
+- The bell badge shows all unread notifications (up to 99+), not just the
+  unread among the newest 20.
+- Nothing else changes for readers; the RSVP counts can only drop where a
+  duplicate row of one user was counted twice.
+
+**Rollback.** Follow the hint `infra/deploy.sh` prints; it retags and
+re-ups web and cms together. After a rollback the raw RSVP reads return
+every row again, with the older name stripping, and the older web counts
+them as before. Nothing in the database has to be undone, but the six
+`api::event-rsvp.event-rsvp.summary` permission rows do not all go away:
+each boot of the previous cms deletes only ONE of them (users-permissions'
+`syncPermissions` deletes one row per action its code does not have, per
+boot). The others are inert, because the previous cms has no such route,
+and the rolled-back checkout's `prod-perm-diff.sql` lists them as
+`EXTRA_IN_DB | <role> | api::event-rsvp.event-rsvp.summary` (five after its
+first boot, one fewer after each further boot). Optional cleanup, with
+`COMPOSE` and `psql_db` from above, while the previous cms runs (it never
+grants them again):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN;
+WITH stale AS (
+  SELECT id FROM up_permissions
+   WHERE action = 'api::event-rsvp.event-rsvp.summary'
+), unlinked AS (
+  DELETE FROM up_permissions_role_lnk l USING stale s
+   WHERE l.permission_id = s.id RETURNING l.id
+), removed AS (
+  DELETE FROM up_permissions p USING stale s
+   WHERE p.id = s.id RETURNING p.id
+)
+SELECT (SELECT count(*) FROM unlinked) AS links_removed,
+       (SELECT count(*) FROM removed) AS permission_rows_removed;
+COMMIT;
+SQL
+```
+
+It removes each leftover row with its role link (a second run removes
+nothing), and `prod-perm-diff.sql` then lists no `event-rsvp` row. Rolling
+forward again grants only the rows that are missing, so the line from
+step 4 reads `[bootstrap] granted N permission(s) across intranet roles`
+with N ≤ 6 (6 after the cleanup, else one per boot of the previous cms),
+and step 5's check is clean afterwards.
+
+On the Postgres 16 rehearsal (this branch against `997bf7f`, the cleanup
+taken verbatim from above): two boots of the previous cms left four rows,
+listed as four `EXTRA_IN_DB` rows by its `prod-perm-diff.sql`, and a
+roll-forward logged `granted 2`; the cleanup under a running previous cms
+removed `5 | 5`, a second run `0 | 0`, the previous cms stayed healthy and
+recreated nothing on its next boot, and the roll-forward after the cleanup
+logged `granted 6` with no `event-rsvp` row in the diff.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 

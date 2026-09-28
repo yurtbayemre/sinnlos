@@ -292,9 +292,9 @@ Strapi ships 22 collection types plus one routes-only API
 | **comment** | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28) |
 | **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement. `create` toggles; with the optional boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store it; each create keeps the oldest copy and deletes the others right after its insert. Removing deletes every copy (also copies from an older release). Delete takes the documentId or the numeric id |
 | **kudos** | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id |
-| **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
+| **notification** | Per-user notification rows (recipient, actor, link), written by the lifecycles through `apps/cms/src/utils/notify.ts` (one row per recipient, titles at most 255 characters, shortened with `…`). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (`announcement.find` / `event.find`, read from the permissions table at runtime) and who are not blocked, after the publish is saved, with the title and audience of the entry as saved at that moment; one failing row costs that recipient only, and the next publish delivers it. Admins and editors get strictly the targeted audience. Comment and kudos notifications are also written after the comment or kudos is saved, so a failing notification never discards it. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
-| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
+| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
 | **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
@@ -402,15 +402,26 @@ the same rules module): polls are **hidden from guests** (role type exactly
   fails when a new module starts reading polls).
 
 The users-permissions **User** is extended with `department`, `teams`,
-`manager` (self-relation, drives the org chart), `microsoftOid`, and the
+`manager` (self-relation, drives the org chart; paired with its inverse
+`directReports`, which the person page shows as *Direct reports*), the
+schema-`private` `microsoftOid` (read only by the sign-in extension; like
+`digestFrequency` also `searchable: false`, so no `_q` finds it), and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
 **opt-in** (maintained via `/api/me`, never exposed through user reads) and
 only surface — without the year of birth — in the celebrations feed when
 `birthdayVisible` is set. Since the e-mail digests (#18) the user also
 carries `digestAnnouncements` / `digestMentions` / `digestKudos` (booleans),
-`digestFrequency` (`daily` | `weekly`, default weekly) and the
-schema-`private`, cron-owned `lastDigestAt` — the opt-ins are maintained on
-the profile page via the same `/api/me` whitelist.
+`digestFrequency` (`daily` | `weekly`, default weekly) and the cron-owned
+`lastDigestAt`, all schema-`private` — the opt-ins are maintained on the
+profile page via the same `/api/me` whitelist. Digests go only to users
+whose role holds `announcement.find`, never to guests or blocked users (the
+kudos section also needs `kudos.find`); guests see no digest options, and
+`PUT /api/me` ignores theirs. A digest lists at most 25 announcements the
+user may read, then "+N more"; an announcement that was edited and
+published again is not repeated for users its bell reached before their
+digest window, nor for its author. A weekly digest is due whenever the last
+one is older than this week's Monday, so a missed Monday is caught up the
+next morning.
 
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
@@ -506,6 +517,13 @@ Read-side filters:
   `status=published`; admin/editor bypass (drafts included)
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
+- `event-rsvp-own-rows` — raw RSVP reads restricted to the caller's own
+  answers (`$and`-ed onto the request, so a client filter only narrows);
+  a client filter on the `user` relation answers 400. `admin_role`
+  bypasses (corrections); editors do not. The event-rsvp controller also
+  answers 400 to a `Strapi-Response-Format` header from anyone but
+  `admin_role`. The events page reads everyone else's answers only through
+  the aggregated `summary` action
 - `announcement-visibility` — server-side audience targeting (#9):
   department AND team AND audienceRoles, resolved to a non-relational id
   filter; pins `status=published`
@@ -572,9 +590,18 @@ Global guards that apply to **every** content-API route, not per route:
   removes email/phone/hireDate/officeLocation/microsoftOid from every
   response to callers outside the five staff roles (guest, the
   `authenticated` fallback, unknown roles).
+- **`global::sensitive-query-guard`** (FX22) — the query side of the same
+  rule: for those callers a filter, sort, nested populate filter/sort or
+  users `_q` on one of these fields answers 400 `Invalid key`, on
+  `/api/users*` and through every user relation. Staff roles and the admin
+  panel are unaffected. Its factory wraps `strapi.contentAPI.validate.query`
+  at boot (global middlewares run before authentication); each refusal is
+  logged as `[sensitive-query-guard] 400 …`.
 - **`global::uploads-auth`** middleware — `/uploads/*` file bytes only for
   requests carrying `INTERNAL_UPLOAD_TOKEN` (i.e. the web's session-gated
-  proxy); everything else gets 404, whatever the encoding of the path.
+  proxy); everything else gets 404, whatever the encoding of the path. The
+  web proxy itself also asks Strapi whether the session's JWT is still
+  accepted (a blocked account loses the files within 60 s, FX41).
 - **`global::auth-path-guard`** middleware — any spelling of `/api/auth/*`
   other than the literal lowercase one (`/api/Auth/local`, `%61uth`, `//`,
   `..`) gets 404. Traefik's `/api/auth` rule is case-sensitive but Strapi's
@@ -690,7 +717,8 @@ leak hire dates), **no classifieds** (the flea market is internal and ads
 populate author contact data), **no announcements and therefore no
 acknowledgements** (a guest can never see a mandatory announcement, so ack
 grants were dead attack surface), **no event-rsvp** (guests read the
-calendar but neither respond nor see attendee names), and **no training**
+calendar but neither respond nor see attendee names, and hold no RSVP
+`summary` grant either), and **no training**
 (no course/lesson/lesson-progress grants at all — while `search-log.create`
 IS granted to guest: search telemetry is anonymous by design). Guests hold
 the poll read, results and vote grants, but see and vote only on the polls
@@ -714,11 +742,14 @@ which would still strip every author and uploader name from guest pages;
 filters through a user relation still answer 400.)
 The contact fields a guest could read that way (email, phone, hireDate,
 officeLocation, microsoftOid) are removed output-side by the contact-field
-sanitizer (#10, see the global guards above). Custom (non-CRUD) route
+sanitizer (#10), and filtering or sorting by them is refused query-side
+(`global::sensitive-query-guard`, FX22; see the global guards above). Custom (non-CRUD) route
 actions (ICS export, celebrations — staff roles only, not `guest` or
 `authenticated` —, poll `vote` and `results` — every role, `guest`
 included, narrowed per poll by the department targeting and the guest
-access —,
+access —, the RSVP `summary` behind `/events` — exactly the roles that
+hold event-rsvp `find` (the staff roles and `authenticated`), never
+`guest`; `routes.matrix.test.ts` pins that —,
 mark-read/mark-all-read, `/api/me`, `changePassword`,
 `role.find` for the admin ack
 report, the classified `cleanupUploads` endpoint, the admin-only
@@ -774,7 +805,7 @@ never pass, and exclusion checks such as `role !== "guest"` are not allowed:
 | --- | --- | --- |
 | `isAdmin` | `admin_role` | sidebar *Admin* link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
 | `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards |
-| `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP fetch on `/events` |
+| `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant) |
 | `canPostAds` | the five staff roles | *New ad* button, `/marketplace/new` |
 | `isGuest` | `guest` | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint |
 
@@ -918,6 +949,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
   (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
   pin fails first on purpose.
+- `apps/cms/src/middlewares/sensitive-query-guard.test.ts` also reads
+  `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
+  global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)
+  or names a `global::` middleware without its file in `src/middlewares`.
 - `infra/contracts.test.ts` pins what the cms and the web both state: the
   announcement audience rule, the YouTube parser, comment anchors, schema
   enums against the web unions and constants, relation pairs, and the web
@@ -926,11 +961,19 @@ Safety nets for refactors (roadmap S03–S06, S09):
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
   schema. After changing a union in `apps/web/src/lib/types.ts`, run both.
+- `infra/sensitive-queries.test.ts` runs the web's user and search query
+  builders through the cms's own `sensitive-query-guard` walk (real schemas,
+  Strapi's query parser) for guest, the `authenticated` fallback and a
+  role-less caller, and scans `apps/web/src` for any other filter or sort
+  on a contact field (or a `_q`): a web query that the guard would refuse
+  for guests fails here, not on a guest's page.
 - The server actions in `apps/web/src/lib` have characterisation tests next
   to them: the event, classified, acknowledgement, kudos, training and
   notification actions (S09), and the auth, comment, poll and profile
-  actions. `announcement-live-actions.ts`, `locale-actions.ts` and
-  `search-action.ts` have none yet (search: roadmap WD06).
+  actions. `announcement-live-actions.ts` and `locale-actions.ts` have
+  none yet. The ⌘K search is no Server Action any more: it runs through
+  `GET /search` (`apps/web/src/app/search/route.ts`), covered by
+  `apps/web/src/lib/search.test.ts`.
   `/api/live/emit` is covered by `apps/web/src/lib/live-emit.test.ts`; its
   logic lives in `live-emit.ts`.
 
@@ -978,14 +1021,35 @@ Safety nets for refactors (roadmap S03–S06, S09):
       `/manage/training` shows the completion report (admin)
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)
+- [ ] ⌘K as a guest finds a colleague by name but not by e-mail; while a new
+      term loads, the previous term's results are not shown (nor the old
+      results of the same term typed again)
+- [ ] `/people/<id>` of a manager shows *Direct reports*
+- [ ] A user blocked in the Strapi admin loses `/uploads` files within a
+      minute (401) and is sent to sign-in on the next page load
 - [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
-      logs `[digest] skipped` (dark mode)
+      logs `[digest] skipped` (dark mode); a guest sees no digest options
+- [ ] Publishing an announcement logs `[notifications] created <n>
+      notification(s) for announcement …` and rings the bell of its
+      audience only (no guest, no blocked user)
 - [ ] On Postgres the cms log shows `[datetime] process time zone UTC,
       APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
       (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
       is an all-day entry
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
+- [ ] `/events` shows each upcoming RSVP event's counts, the names of the
+      "yes" answers and your own answer (never who answered maybe or no);
+      as a member, `GET /api/event-rsvps` returns only your own answers,
+      and a `filters[user]…` query or a `Strapi-Response-Format` header
+      answers 400
+- [ ] `/manage/acknowledgements` shows a percentage per mandatory
+      announcement (not "–") while the directory is complete, also with
+      more than 2000 confirmations in total
+- [ ] The kudos picker lists neither you nor blocked accounts; `/people`
+      renders 48 cards and a *+ N people* button when more match; the bell
+      badge counts every unread notification (99+ above 99), not only the
+      20 in the panel
 - [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
       real domain, since localhost can hide the Referer effect
 - [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`

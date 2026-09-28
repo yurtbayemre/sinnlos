@@ -14,6 +14,8 @@
  * the page's Next.js / Strapi runtime.
  */
 
+import { isAnnouncementVisibleTo, type AnnouncementAudience } from "@/lib/audience";
+
 export interface ReportInputs {
   usersFailed: boolean;
   /** Directory walk stopped at its cap (see users.ts MAX_USERS). */
@@ -59,4 +61,122 @@ export function reportCompleteness(inputs: ReportInputs): ReportCompleteness {
       inputs.acksTruncated ||
       inputs.announcementsTruncated,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Report rows (WD02: moved out of app/(app)/manage/acknowledgements/page.tsx)
+// ---------------------------------------------------------------------------
+
+/** A directory row as the report reads it (/api/users with role and department). */
+export interface ReportUser {
+  id: number;
+  username?: string;
+  email?: string;
+  displayName?: string;
+  department?: { id: number; name?: string } | null;
+  role?: { id: number; type?: string } | null;
+  blocked?: boolean;
+}
+
+/** A mandatory announcement plus every field its targeting depends on. */
+export interface ReportAnnouncement extends AnnouncementAudience {
+  id: number;
+  documentId?: string;
+  title?: string;
+  requiresAck?: boolean;
+  ackDeadline?: string | null;
+  department?: { id: number; name?: string } | null;
+  team?: { id: number; name?: string } | null;
+  audienceRoles?: { id: number; type?: string; name?: string }[] | null;
+}
+
+/** One acknowledgement as the report needs it: whose, and for which document. */
+export interface ReportAck {
+  targetDocumentId: string;
+  user?: { id: number } | null;
+}
+
+/** Announcement documentId → ids of the users who acknowledged it. */
+export type AckIndex = Map<string, Set<number>>;
+
+/**
+ * Index ack rows by their announcement's documentId (FX32), into `index`
+ * when given. A Set dedupes duplicate ack rows (the accepted
+ * check-then-insert race in the CMS); a row without a user (deleted
+ * account) or without a target confirms nothing.
+ */
+export function indexAcks(rows: ReportAck[], index: AckIndex = new Map()): AckIndex {
+  for (const row of rows) {
+    const userId = row.user?.id;
+    if (typeof row.targetDocumentId !== "string" || typeof userId !== "number") continue;
+    const users = index.get(row.targetDocumentId);
+    if (users) users.add(userId);
+    else index.set(row.targetDocumentId, new Set([userId]));
+  }
+  return index;
+}
+
+export interface AckReportRow<U extends ReportUser, A extends ReportAnnouncement> {
+  announcement: A;
+  /** The users the announcement targets (meaningless when targetUnknown). */
+  targetUsers: U[];
+  openUsers: U[];
+  ackedCount: number;
+  /** Confirmation rate in whole percent; 0 for an empty audience. */
+  pct: number;
+  /** The audience cannot be determined: render "–", never a rate. */
+  targetUnknown: boolean;
+}
+
+/**
+ * Only unblocked users whose role can actually read announcements count
+ * toward the report — a blocked account or a guest can never confirm
+ * anything, and would permanently drag every percentage down. The page
+ * passes its ANNOUNCEMENT_READER_ROLES (the role types holding
+ * announcement.find; infra/contracts.test.ts pins that page-local copy
+ * against the CMS matrix until SH02 moves it).
+ */
+export function eligibleReportUsers<U extends ReportUser>(
+  users: U[],
+  readerRoles: ReadonlySet<string>,
+): U[] {
+  return users.filter((u) => u.blocked !== true && readerRoles.has(u.role?.type ?? ""));
+}
+
+/**
+ * One row per mandatory announcement. The target set is only as
+ * trustworthy as its inputs: without the user directory NO row has a
+ * determinable audience, and without the team roster the rows with a
+ * `team` criterion do not (fail closed, see reportCompleteness). The
+ * audience is exactly the targeting the CMS policy enforces on reads
+ * (lib/audience.ts): the report runs as admin_role, which bypasses that
+ * policy, so it recomputes it. Acks come indexed by the announcement's
+ * stable documentId (numeric ids change on every re-publish, see indexAcks).
+ */
+export function buildAckReportRows<U extends ReportUser, A extends ReportAnnouncement>(input: {
+  announcements: A[];
+  acks: AckIndex;
+  /** Already narrowed with eligibleReportUsers. */
+  eligibleUsers: U[];
+  userTeamIds: Map<number, number[]>;
+  usersUnknown: boolean;
+  teamsUnknown: boolean;
+}): AckReportRow<U, A>[] {
+  const { announcements, acks, eligibleUsers, userTeamIds, usersUnknown, teamsUnknown } = input;
+  const none: ReadonlySet<number> = new Set();
+  return announcements.map((a) => {
+    const targetUnknown = usersUnknown || (a.team?.id != null && teamsUnknown);
+    const targetUsers = eligibleUsers.filter((u) =>
+      isAnnouncementVisibleTo(a, {
+        roleId: u.role?.id,
+        departmentId: u.department?.id,
+        teamIds: userTeamIds.get(u.id) ?? [],
+      }),
+    );
+    const ackedUserIds = (a.documentId ? acks.get(a.documentId) : undefined) ?? none;
+    const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
+    const ackedCount = targetUsers.length - openUsers.length;
+    const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
+    return { announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown };
+  });
 }

@@ -17,11 +17,23 @@ const typeIcon: Record<string, typeof Bell> = {
   kudos: Award,
 };
 
+/** The badge text: the count, capped at "99+". */
+export function unreadBadge(count: number): string {
+  return count > 99 ? "99+" : String(count);
+}
+
 export function NotificationBell({
   notifications,
+  unreadTotal,
   onChanged,
 }: {
+  /** The newest notifications (the panel lists these). */
   notifications: Notification[];
+  /**
+   * ALL unread notifications of the caller (getNotifications, WD10) — the
+   * badge used to count only the unread among the 20 loaded ones.
+   */
+  unreadTotal: number;
   onChanged?: () => void | Promise<void>;
 }) {
   const t = useTranslations("notifications");
@@ -31,7 +43,9 @@ export function NotificationBell({
   const ref = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  const unreadCount = notifications.filter((n) => !n.readAt).length;
+  // Never below what the panel itself shows as unread (a notification
+  // that arrived between the list and the count request).
+  const unreadCount = Math.max(unreadTotal, notifications.filter((n) => !n.readAt).length);
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -101,7 +115,7 @@ export function NotificationBell({
         <Bell className="h-4 w-4" />
         {unreadCount > 0 && (
           <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-bold text-primary-foreground">
-            {unreadCount > 99 ? "99+" : unreadCount}
+            {unreadBadge(unreadCount)}
           </span>
         )}
       </button>

@@ -1,292 +1,452 @@
-"use server";
-
-import { unstable_rethrow } from "next/navigation";
+/**
+ * Global search (⌘K), server side (WD06, the web part of FX22). The palette
+ * (components/search-command.tsx) calls GET /search (app/search/route.ts)
+ * with fetch and an AbortController; this module builds the Strapi queries,
+ * maps the rows to typed SearchItems and writes the search telemetry.
+ *
+ * Why a route and no longer Server Actions: Next.js runs a client's Server
+ * Actions one at a time, so every typeahead request queued behind the
+ * previous one and blocked every other action (a reaction, a mark-read) and
+ * the navigation that follows a selection. A GET can be aborted when the
+ * term changes. The route is outside /api (the edge sends /api to Strapi,
+ * docs/architecture.md §5.1) and not public in proxy.ts.
+ *
+ * Rules:
+ *   - Contact fields: only staff (CONTACT_SEARCH_ROLES = the cms
+ *     PRIVILEGED_ROLE_TYPES, pinned in infra/contracts.test.ts) search
+ *     people by email. For every other role the cms refuses an email
+ *     filter with a 400 (middlewares/sensitive-query-guard.ts), so the
+ *     clause is not sent.
+ *   - /api/users ignores pagination[]: the people query pages with
+ *     start/limit and an explicit sort (docs/architecture.md §5.25).
+ *   - Bounded: every live query takes LIVE_LIMIT rows per kind; the preload
+ *     is field-limited, departments/teams/wiki spaces are complete page
+ *     walks (issue #26), the other kinds keep their windows (wiki pages
+ *     100, announcements 20, upcoming events 50, polls 20, documents 50).
+ *     People are not preloaded: the live search finds them.
+ *   - Typed: rows come in as unknown and go through toSearchItems(); a row
+ *     without the fields its link needs is skipped.
+ *   - Per user and uncached: every read goes through strapi() (no-store,
+ *     the caller's JWT, D-DC01).
+ */
+import "server-only";
 import type { Route } from "next";
+import { unstable_rethrow } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
-import { api, strapi, type StrapiListResponse } from "@/lib/strapi";
+import { walkAllPages } from "@/lib/paginate";
+import { strapi, type StrapiListResponse } from "@/lib/strapi";
 
-// Fallbacks for the best-effort fetches below. They rethrow Next.js
-// control-flow errors (e.g. the redirect strapi() issues on 401) so an
-// expired session navigates to sign-in instead of showing empty results.
-function emptyList(e: unknown): { data: any[] } {
-  unstable_rethrow(e);
-  return { data: [] };
-}
-function emptyArray(e: unknown): any[] {
-  unstable_rethrow(e);
-  return [];
-}
+export const SEARCH_KINDS = [
+  "department",
+  "team",
+  "wiki-space",
+  "wiki-page",
+  "announcement",
+  "person",
+  "event",
+  "poll",
+  "document",
+] as const;
+
+export type SearchKind = (typeof SEARCH_KINDS)[number];
 
 export type SearchItem = {
-  kind:
-    | "department"
-    | "team"
-    | "wiki-space"
-    | "wiki-page"
-    | "announcement"
-    | "person"
-    | "event"
-    | "poll"
-    | "document";
+  /** Unique within one result list: kind plus documentId (people: id). */
+  key: string;
+  kind: SearchKind;
   title: string;
   subtitle?: string;
   href: Route;
 };
 
-export async function fetchSearchItems(): Promise<SearchItem[]> {
-  const [locale, tSearch, tCommon] = await Promise.all([
-    getLocale(),
-    getTranslations("search"),
-    getTranslations("common"),
-  ]);
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  // Preload coverage (issue #26): departments/teams/wiki-spaces are full
-  // page walks since #26, so those indexes are complete. Deliberately
-  // capped remain the wiki-pages preload (pageSize=100), announcements
-  // (20), events.upcoming (50), polls (20), documents (50) and the users
-  // preload below (users-permissions ignores pagination[] params anyway,
-  // see the analytics countUsers note). That is fine: this preload is a
-  // best-effort typeahead — the live search in searchContent() queries
-  // Strapi with $containsi and finds everything beyond these windows.
-  const [departments, teams, wikiSpaces, wikiPages, announcements, events, polls, documents] =
-    await Promise.all([
-      api.departments.list().catch(emptyList),
-      api.teams.list().catch(emptyList),
-      api.wiki.spaces().catch(emptyList),
-      // Per-user: wiki-pages are filtered by the wiki-visibility policy.
-      strapi<StrapiListResponse<any>>(
-        "/api/wiki-pages?populate[space]=true&populate[author]=true&pagination[pageSize]=100&sort=title:asc",
-      ).catch(emptyList),
-      api.announcements.list().catch(emptyList),
-      // Upcoming only (api.events is time-window based now): the old global
-      // list returned the 50 oldest events, so current ones were unfindable
-      // anyway once history grew past 50.
-      api.events.upcoming(startOfToday.toISOString()).catch(emptyList),
-      api.polls.list().catch(emptyList),
-      api.documents.list().catch(emptyList),
-    ]);
+/** The kinds the palette preloads, one GET /search?kind=<kind> each. */
+export const PRELOAD_KINDS = [
+  "department",
+  "team",
+  "wiki-space",
+  "wiki-page",
+  "announcement",
+  "event",
+  "poll",
+  "document",
+] as const satisfies readonly SearchKind[];
 
-  const items: SearchItem[] = [];
+export type PreloadKind = (typeof PRELOAD_KINDS)[number];
 
-  for (const d of departments.data) {
-    items.push({
-      kind: "department",
-      title: d.name,
-      subtitle: d.description,
-      href: `/departments/${d.slug}` as Route,
-    });
-  }
+/** The kinds the live search queries, in the order they are listed. */
+export const LIVE_KINDS = [
+  "announcement",
+  "wiki-page",
+  "document",
+  "event",
+  "poll",
+  "person",
+] as const satisfies readonly SearchKind[];
 
-  for (const t of teams.data) {
-    items.push({
-      kind: "team",
-      title: t.name,
-      subtitle: t.department?.name
-        ? `${t.department.name} · ${t.description ?? ""}`
-        : t.description,
-      href: `/teams/${t.slug}` as Route,
-    });
-  }
+export type LiveKind = (typeof LIVE_KINDS)[number];
 
-  for (const s of wikiSpaces.data) {
-    items.push({
-      kind: "wiki-space",
-      title: s.name,
-      subtitle: s.description,
-      href: `/wiki/${s.slug}` as Route,
-    });
-  }
+/** Shorter terms are answered by the preload (filtered in the browser). */
+export const MIN_TERM_LENGTH = 2;
+/** Longer terms are cut (a search box, not a query language). */
+export const MAX_TERM_LENGTH = 100;
+/** Rows per kind in the live search. */
+export const LIVE_LIMIT = 5;
 
-  for (const p of wikiPages.data) {
-    const spaceSlug = p.space?.slug;
-    if (!spaceSlug) continue;
-    items.push({
-      kind: "wiki-page",
-      title: p.title,
-      subtitle: `${p.space.name ?? spaceSlug} · ${p.summary ?? ""}`,
-      href: `/wiki/${spaceSlug}/${p.slug}` as Route,
-    });
-  }
+/**
+ * Roles that may search people by e-mail: the staff roles that read contact
+ * fields (cms utils/sanitize-user-contact.ts PRIVILEGED_ROLE_TYPES). Exact
+ * and fail-closed like lib/roles.ts.
+ */
+export const CONTACT_SEARCH_ROLES: ReadonlySet<string> = new Set([
+  "admin_role",
+  "editor",
+  "department_head",
+  "team_lead",
+  "member",
+]);
 
-  for (const a of announcements.data) {
-    items.push({
-      kind: "announcement",
-      title: a.title,
-      subtitle: a.author?.displayName,
-      href: "/announcements",
-    });
-  }
-
-  for (const e of events.data) {
-    items.push({
-      kind: "event",
-      title: e.title,
-      subtitle: e.start
-        ? new Date(e.start).toLocaleDateString(locale, {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : undefined,
-      href: "/events",
-    });
-  }
-
-  for (const p of polls.data) {
-    items.push({
-      kind: "poll",
-      title: p.question,
-      subtitle: p.closesAt
-        ? tSearch("pollCloses", { date: new Date(p.closesAt).toLocaleDateString(locale) })
-        : tSearch("pollOpen"),
-      href: "/polls",
-    });
-  }
-
-  for (const d of documents.data) {
-    items.push({
-      kind: "document",
-      title: d.title,
-      subtitle: d.description ?? d.category ?? undefined,
-      href: "/documents",
-    });
-  }
-
-  const people = await strapi<any[]>(
-    "/api/users?populate[department]=true&pagination[pageSize]=200&sort=displayName:asc",
-  ).catch(emptyArray);
-
-  // DEMO_MODE answers /api/users with a `{ data, meta }` object, not an
-  // array — same guard as in searchContent below.
-  const peoplePreload = Array.isArray(people) ? people : [];
-  for (const u of peoplePreload) {
-    items.push({
-      kind: "person",
-      title: u.displayName ?? u.username ?? u.email ?? tCommon("unknown"),
-      subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
-      href: `/people/${u.id}` as Route,
-    });
-  }
-
-  return items;
+export function canSearchByEmail(role: string | null | undefined): boolean {
+  return typeof role === "string" && CONTACT_SEARCH_ROLES.has(role);
 }
 
-export async function searchContent(query: string): Promise<SearchItem[]> {
-  if (!query || query.length < 2) return [];
+export function isPreloadKind(value: unknown): value is PreloadKind {
+  return typeof value === "string" && (PRELOAD_KINDS as readonly string[]).includes(value);
+}
 
-  const [locale, tSearch, tCommon] = await Promise.all([
-    getLocale(),
-    getTranslations("search"),
-    getTranslations("common"),
-  ]);
-  const q = encodeURIComponent(query);
-  const items: SearchItem[] = [];
+/** The term as the live search uses it: cut to MAX_TERM_LENGTH. */
+export function normalizeTerm(term: string): string {
+  return term.slice(0, MAX_TERM_LENGTH);
+}
 
-  const [announcements, wikiPages, documents, events, polls, people] = await Promise.all([
-    strapi<StrapiListResponse<any>>(
-      `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[author]=true&pagination[pageSize]=5&sort=createdAt:desc`,
-    ).catch(emptyList),
-    strapi<StrapiListResponse<any>>(
-      `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&populate[space]=true&pagination[pageSize]=5&sort=title:asc`,
-    ).catch(emptyList),
-    strapi<StrapiListResponse<any>>(
-      `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&populate[file]=true&pagination[pageSize]=5&sort=title:asc`,
-    ).catch(emptyList),
-    strapi<StrapiListResponse<any>>(
-      `/api/events?filters[title][$containsi]=${q}&pagination[pageSize]=5&sort=start:desc`,
-    ).catch(emptyList),
-    strapi<StrapiListResponse<any>>(
-      `/api/polls?filters[question][$containsi]=${q}&pagination[pageSize]=5&sort=createdAt:desc`,
-    ).catch(emptyList),
-    strapi<any[]>(
-      `/api/users?filters[$or][0][displayName][$containsi]=${q}&filters[$or][1][email][$containsi]=${q}&filters[$or][2][jobTitle][$containsi]=${q}&populate[department]=true&pagination[pageSize]=5&sort=displayName:asc`,
-    ).catch(emptyArray),
-  ]);
+// ---------------------------------------------------------------------------
+// Query building (pure)
+// ---------------------------------------------------------------------------
 
-  for (const a of (announcements as any).data ?? []) {
-    items.push({
-      kind: "announcement",
-      title: a.title,
-      subtitle: a.author?.displayName,
-      href: "/announcements",
-    });
-  }
-
-  for (const p of (wikiPages as any).data ?? []) {
-    const spaceSlug = p.space?.slug;
-    if (!spaceSlug) continue;
-    items.push({
-      kind: "wiki-page",
-      title: p.title,
-      subtitle: p.space?.name ?? spaceSlug,
-      href: `/wiki/${spaceSlug}/${p.slug}` as Route,
-    });
-  }
-
-  for (const d of (documents as any).data ?? []) {
-    items.push({
-      kind: "document",
-      title: d.title,
-      subtitle: d.description ?? d.category ?? undefined,
-      href: "/documents",
-    });
-  }
-
-  for (const e of (events as any).data ?? []) {
-    items.push({
-      kind: "event",
-      title: e.title,
-      subtitle: e.start
-        ? new Date(e.start).toLocaleDateString(locale, {
-            month: "short",
-            day: "numeric",
-            year: "numeric",
-          })
-        : undefined,
-      href: "/events",
-    });
-  }
-
-  for (const p of (polls as any).data ?? []) {
-    items.push({
-      kind: "poll",
-      title: p.question,
-      subtitle: p.closesAt
-        ? tSearch("pollCloses", { date: new Date(p.closesAt).toLocaleDateString(locale) })
-        : tSearch("pollOpen"),
-      href: "/polls",
-    });
-  }
-
-  const peopleArr = Array.isArray(people) ? people : [];
-  for (const u of peopleArr) {
-    items.push({
-      kind: "person",
-      title: u.displayName ?? u.username ?? u.email ?? tCommon("unknown"),
-      subtitle: [u.jobTitle, u.department?.name].filter(Boolean).join(" · "),
-      href: `/people/${u.id}` as Route,
-    });
-  }
-
-  return items;
+/** The Strapi path of each live-search kind for `term` and the viewer's role. */
+export function liveSearchPaths(term: string, role: string | null): Record<LiveKind, string> {
+  const q = encodeURIComponent(normalizeTerm(term));
+  const page = `pagination[pageSize]=${LIVE_LIMIT}`;
+  const people = [
+    `filters[$or][0][displayName][$containsi]=${q}`,
+    `filters[$or][1][jobTitle][$containsi]=${q}`,
+    ...(canSearchByEmail(role) ? [`filters[$or][2][email][$containsi]=${q}`] : []),
+    "fields[0]=displayName",
+    "fields[1]=username",
+    "fields[2]=jobTitle",
+    "populate[department][fields][0]=name",
+    "sort[0]=displayName:asc",
+    "sort[1]=id:asc",
+    "start=0",
+    `limit=${LIVE_LIMIT}`,
+  ].join("&");
+  return {
+    announcement: `/api/announcements?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc&${page}`,
+    "wiki-page": `/api/wiki-pages?filters[$or][0][title][$containsi]=${q}&filters[$or][1][body][$containsi]=${q}&fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&${page}`,
+    document: `/api/documents?filters[$or][0][title][$containsi]=${q}&filters[$or][1][description][$containsi]=${q}&fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc&${page}`,
+    event: `/api/events?filters[title][$containsi]=${q}&fields[0]=title&fields[1]=start&sort[0]=start:desc&${page}`,
+    poll: `/api/polls?filters[question][$containsi]=${q}&fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&${page}`,
+    person: `/api/users?${people}`,
+  };
 }
 
 /**
- * Anonymous search instrumentation (issue #19, stage 1). Fire-and-forget:
- * a failed log write must never surface in the palette. The palette calls
- * this only for SETTLED queries (2s stable, a selection, or close) — the
- * debounced typeahead would otherwise log every prefix the user types
- * ("of", "off", "offs", …) and drown the zero-result signal in noise.
+ * The Strapi path of a preload kind. `page` is the page of the complete
+ * walks (department, team, wiki-space); `fromIso` the start of the
+ * upcoming-events window.
+ */
+export function preloadPath(kind: PreloadKind, page: number, fromIso: string): string {
+  const walk = (sort: string) => `${sort}&pagination[page]=${page}&pagination[pageSize]=100`;
+  switch (kind) {
+    case "department":
+      return `/api/departments?fields[0]=name&fields[1]=slug&fields[2]=description&${walk("sort[0]=name:asc&sort[1]=id:asc")}`;
+    case "team":
+      return `/api/teams?fields[0]=name&fields[1]=slug&fields[2]=description&populate[department][fields][0]=name&${walk("sort[0]=name:asc&sort[1]=id:asc")}`;
+    case "wiki-space":
+      return `/api/wiki-spaces?fields[0]=name&fields[1]=slug&fields[2]=description&${walk("sort[0]=name:asc&sort[1]=id:asc")}`;
+    case "wiki-page":
+      return "/api/wiki-pages?fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&sort[1]=id:asc&pagination[pageSize]=100";
+    case "announcement":
+      return "/api/announcements?fields[0]=title&populate[author][fields][0]=displayName&sort[0]=pinned:desc&sort[1]=createdAt:desc&pagination[pageSize]=20";
+    case "event":
+      return `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&fields[0]=title&fields[1]=start&sort[0]=start:asc&pagination[pageSize]=50`;
+    case "poll":
+      return "/api/polls?fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&pagination[pageSize]=20";
+    case "document":
+      return "/api/documents?fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[pageSize]=50";
+  }
+}
+
+/** Kinds whose preload is a complete page walk, with their page cap. */
+const WALKED: Partial<Record<PreloadKind, number>> = {
+  department: 10,
+  team: 20,
+  "wiki-space": 10,
+};
+
+// ---------------------------------------------------------------------------
+// Mapping (pure)
+// ---------------------------------------------------------------------------
+
+/** What the mapper needs from the locale: dates and the poll wording. */
+export interface SearchFormat {
+  /** An event start as a date ("Oct 5, 2026"); undefined for an invalid value. */
+  eventDate(iso: string): string | undefined;
+  /** A poll deadline as "Closes <date>"; undefined for an invalid value. */
+  pollCloses(iso: string): string | undefined;
+  pollOpen: string;
+  unknown: string;
+}
+
+type Row = Record<string, unknown>;
+
+const isRow = (value: unknown): value is Row =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A non-empty string field, else undefined. */
+const text = (row: Row | undefined, key: string): string | undefined => {
+  const value = row?.[key];
+  return typeof value === "string" && value !== "" ? value : undefined;
+};
+
+const relation = (row: Row, key: string): Row | undefined => {
+  const value = row[key];
+  return isRow(value) ? value : undefined;
+};
+
+/** kind:documentId, or kind:id for rows without one; undefined without both. */
+function keyOf(kind: SearchKind, row: Row): string | undefined {
+  const documentId = text(row, "documentId");
+  if (documentId) return `${kind}:${documentId}`;
+  return typeof row.id === "number" ? `${kind}:${row.id}` : undefined;
+}
+
+const joined = (...parts: Array<string | undefined>) =>
+  parts.filter((part): part is string => Boolean(part)).join(" · ") || undefined;
+
+const path = (...segments: string[]) => `/${segments.map(encodeURIComponent).join("/")}` as Route;
+
+function toItem(kind: SearchKind, row: Row, format: SearchFormat): SearchItem | null {
+  const key = keyOf(kind, row);
+  if (!key) return null;
+  const item = (title: string | undefined, href: Route | undefined, subtitle?: string) =>
+    title && href ? { key, kind, title, href, ...(subtitle ? { subtitle } : {}) } : null;
+
+  switch (kind) {
+    case "department": {
+      const slug = text(row, "slug");
+      return item(
+        text(row, "name"),
+        slug ? path("departments", slug) : undefined,
+        text(row, "description"),
+      );
+    }
+    case "team": {
+      const slug = text(row, "slug");
+      const department = text(relation(row, "department"), "name");
+      const description = text(row, "description");
+      return item(
+        text(row, "name"),
+        slug ? path("teams", slug) : undefined,
+        department ? `${department} · ${description ?? ""}` : description,
+      );
+    }
+    case "wiki-space": {
+      const slug = text(row, "slug");
+      return item(
+        text(row, "name"),
+        slug ? path("wiki", slug) : undefined,
+        text(row, "description"),
+      );
+    }
+    case "wiki-page": {
+      const space = relation(row, "space");
+      const spaceSlug = text(space, "slug");
+      const slug = text(row, "slug");
+      return item(
+        text(row, "title"),
+        spaceSlug && slug ? path("wiki", spaceSlug, slug) : undefined,
+        joined(text(space, "name") ?? spaceSlug, text(row, "summary")),
+      );
+    }
+    case "announcement":
+      return item(
+        text(row, "title"),
+        "/announcements",
+        text(relation(row, "author"), "displayName"),
+      );
+    case "event": {
+      const start = text(row, "start");
+      return item(text(row, "title"), "/events", start ? format.eventDate(start) : undefined);
+    }
+    case "poll": {
+      const closesAt = text(row, "closesAt");
+      return item(
+        text(row, "question"),
+        "/polls",
+        closesAt ? format.pollCloses(closesAt) : format.pollOpen,
+      );
+    }
+    case "document":
+      return item(
+        text(row, "title"),
+        "/documents",
+        text(row, "description") ?? text(row, "category"),
+      );
+    case "person": {
+      if (typeof row.id !== "number") return null;
+      const title =
+        text(row, "displayName") ?? text(row, "username") ?? text(row, "email") ?? format.unknown;
+      return item(
+        title,
+        path("people", String(row.id)),
+        joined(text(row, "jobTitle"), text(relation(row, "department"), "name")),
+      );
+    }
+  }
+}
+
+/**
+ * Map Strapi rows of one kind to SearchItems. Accepts the row array or a
+ * `{ data }` list response; anything else, and every row without the fields
+ * its link needs, maps to nothing. Duplicate keys are dropped.
+ */
+export function toSearchItems(kind: SearchKind, rows: unknown, format: SearchFormat): SearchItem[] {
+  const list = Array.isArray(rows)
+    ? rows
+    : isRow(rows) && Array.isArray(rows.data)
+      ? rows.data
+      : [];
+  const seen = new Set<string>();
+  const items: SearchItem[] = [];
+  for (const row of list) {
+    if (!isRow(row)) continue;
+    const item = toItem(kind, row, format);
+    if (!item || seen.has(item.key)) continue;
+    seen.add(item.key);
+    items.push(item);
+  }
+  return items;
+}
+
+// ---------------------------------------------------------------------------
+// Loading (server)
+// ---------------------------------------------------------------------------
+
+async function searchFormat(): Promise<SearchFormat> {
+  const [locale, tSearch, tCommon] = await Promise.all([
+    getLocale(),
+    getTranslations("search"),
+    getTranslations("common"),
+  ]);
+  const valid = (iso: string) => {
+    const date = new Date(iso);
+    return Number.isNaN(date.getTime()) ? undefined : date;
+  };
+  return {
+    eventDate: (iso) =>
+      valid(iso)?.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" }),
+    pollCloses: (iso) => {
+      const date = valid(iso);
+      return date ? tSearch("pollCloses", { date: date.toLocaleDateString(locale) }) : undefined;
+    },
+    pollOpen: tSearch("pollOpen"),
+    unknown: tCommon("unknown"),
+  };
+}
+
+/**
+ * A failed read is an empty kind: the palette is best effort (guest, for
+ * example, holds no announcement grant). Next.js control flow (the redirect
+ * strapi() raises on an expired session) is rethrown.
+ */
+async function rowsOf(read: () => Promise<unknown>): Promise<unknown> {
+  try {
+    return await read();
+  } catch (e) {
+    unstable_rethrow(e);
+    return [];
+  }
+}
+
+/** The preload of one kind for the current viewer. */
+export async function loadPreload(
+  kind: PreloadKind,
+  now: Date = new Date(),
+): Promise<SearchItem[]> {
+  // Upcoming events from the start of the server's local day (the old
+  // palette's window; the business-zone port is datetime phase 2, D-DT3).
+  const fromIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  const maxPages = WALKED[kind];
+  const [format, rows] = await Promise.all([
+    searchFormat(),
+    rowsOf(() =>
+      maxPages
+        ? walkAllPages<unknown>(
+            (page) => strapi<StrapiListResponse<unknown>>(preloadPath(kind, page, fromIso)),
+            { maxPages, label: `search ${kind}` },
+          )
+        : strapi<StrapiListResponse<unknown>>(preloadPath(kind, 1, fromIso)),
+    ),
+  ]);
+  return toSearchItems(kind, rows, format);
+}
+
+/**
+ * The live search for `term`: LIVE_LIMIT rows of each LIVE_KINDS kind, in
+ * that order. `viewerRole` resolves the viewer's role, which decides the
+ * e-mail clause of the people query; it is called only for a term long
+ * enough to search, and only the people query waits for it.
+ */
+export async function searchLive(
+  term: string,
+  viewerRole: () => Promise<string | null>,
+): Promise<SearchItem[]> {
+  if (term.length < MIN_TERM_LENGTH) return [];
+  // Only the people query depends on the role.
+  const paths = liveSearchPaths(term, null);
+  const [format, ...lists] = await Promise.all([
+    searchFormat(),
+    ...LIVE_KINDS.map((kind) =>
+      rowsOf(async () =>
+        strapi<unknown>(
+          kind === "person" ? liveSearchPaths(term, await viewerRole()).person : paths[kind],
+        ),
+      ),
+    ),
+  ]);
+  return LIVE_KINDS.flatMap((kind, index) => toSearchItems(kind, lists[index], format));
+}
+
+// ---------------------------------------------------------------------------
+// Telemetry
+// ---------------------------------------------------------------------------
+
+/** A search-log entry from the palette's POST body, or null. */
+export function parseSearchLog(body: unknown): { term: string; count: number } | null {
+  if (!isRow(body) || typeof body.term !== "string") return null;
+  const count = typeof body.count === "number" && Number.isFinite(body.count) ? body.count : 0;
+  return { term: body.term, count };
+}
+
+/**
+ * Anonymous search instrumentation (issue #19, stage 1). The palette sends
+ * only SETTLED terms (2 s stable, a selection, or close), never every
+ * prefix. Never throws for a failed write (telemetry only); Next.js control
+ * flow is rethrown like everywhere else.
  */
 export async function logSearch(term: string, resultCount: number): Promise<void> {
   const trimmed = term.trim();
-  if (trimmed.length < 2) return;
+  if (trimmed.length < MIN_TERM_LENGTH) return;
   try {
     await strapi("/api/search-logs", {
       method: "POST",
       body: JSON.stringify({
-        data: { term: trimmed.slice(0, 120), resultCount: Math.max(0, resultCount | 0) },
+        // The cms normalises both again (utils/search-log-input.ts: 120
+        // characters, 0..100000).
+        data: {
+          term: trimmed.slice(0, 120),
+          resultCount: Number.isFinite(resultCount) ? Math.max(0, Math.trunc(resultCount)) : 0,
+        },
       }),
     });
   } catch (e) {

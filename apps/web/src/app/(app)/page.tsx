@@ -8,6 +8,7 @@ import { api } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { AckBanner } from "@/components/dashboard/ack-banner";
 import { TrainingBanner } from "@/components/training/training-banner";
@@ -26,12 +27,15 @@ export default async function DashboardPage() {
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user
   // sees a banner instead of mistaking "API down" for "no content yet".
-  const [departments, teams, announcements, peopleResult, events, quickLinks] = await Promise.all([
+  // The people count is NOT in this Promise.all (WD10): /api/users has no
+  // count for every role, so it walks the whole directory, and that walk
+  // must not hold back the first flush of the dashboard. PeopleStatCard
+  // streams it in its own Suspense boundary below.
+  const [departments, teams, announcements, events, quickLinks] = await Promise.all([
     tryFetch(() => api.departments.list(), "dashboard"),
     tryFetch(() => api.teams.list(), "dashboard"),
     // Targeting is applied by the CMS policy — no department argument.
     tryFetch(() => api.announcements.list(), "dashboard"),
-    tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard"),
     // Upcoming only — the stat card counts events that still matter, not
     // the 50 oldest history entries (api.events is time-window based now).
     tryFetch(() => api.events.upcoming(startOfToday().toISOString()), "dashboard"),
@@ -47,7 +51,6 @@ export default async function DashboardPage() {
   // walk results are covered, but a future fixture drift must not crash.
   const deptCount = departments.data?.data.length ?? 0;
   const teamCount = teams.data?.data.length ?? 0;
-  const peopleCount = peopleResult.data?.users.length ?? 0;
   const eventCount = events.data?.meta?.pagination?.total ?? events.data?.data.length ?? 0;
   const newsCount =
     announcements.data?.meta?.pagination?.total ?? announcements.data?.data.length ?? 0;
@@ -55,7 +58,6 @@ export default async function DashboardPage() {
     departments.failed ||
     teams.failed ||
     announcements.failed ||
-    peopleResult.failed ||
     events.failed ||
     quickLinks.failed;
 
@@ -86,12 +88,11 @@ export default async function DashboardPage() {
       </Suspense>
 
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-        <StatCard
-          icon={<Contact className="h-5 w-5" aria-hidden="true" />}
-          label={tNav("people")}
-          value={peopleCount}
-          href="/people"
-        />
+        <Suspense
+          fallback={<PeopleStatCardShell label={tNav("people")} value={<ValueSkeleton />} />}
+        >
+          <PeopleStatCard label={tNav("people")} />
+        </Suspense>
         <StatCard
           icon={<Building2 className="h-5 w-5" aria-hidden="true" />}
           label={tNav("departments")}
@@ -135,6 +136,34 @@ export default async function DashboardPage() {
       <LatestNews items={(announcements.data?.data ?? []) as any[]} />
     </div>
   );
+}
+
+/**
+ * The people count (WD10): the directory walk in its own Suspense boundary,
+ * so it streams in after the dashboard's first flush. A failed walk shows
+ * "–" in the card instead of a misleading 0 (the dashboard's error banner
+ * has already been sent by then).
+ */
+async function PeopleStatCard({ label }: { label: string }) {
+  const result = await tryFetch(() => fetchAllUsers("fields[0]=id"), "dashboard-people");
+  const value = result.failed ? "–" : (result.data?.users.length ?? 0);
+  return <PeopleStatCardShell label={label} value={value} />;
+}
+
+function PeopleStatCardShell({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <StatCard
+      icon={<Contact className="h-5 w-5" aria-hidden="true" />}
+      label={label}
+      value={value}
+      href="/people"
+    />
+  );
+}
+
+/** Placeholder for a count that is still loading. */
+function ValueSkeleton() {
+  return <Skeleton aria-hidden="true" className="mt-1 h-7 w-12 rounded-md" />;
 }
 
 function StatCard({

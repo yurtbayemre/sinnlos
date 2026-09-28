@@ -1,5 +1,6 @@
 import { Contact } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { ORG_CHART_QUERY, toOrgPeople } from "@/lib/people-dto";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
@@ -15,14 +16,14 @@ export async function generateMetadata() {
 
 export default async function OrgChartPage() {
   const t = await getTranslations("people");
+  // Field-limited fetch and a lean node DTO before the client boundary
+  // (WD05): name, job title, department, avatar thumbnail and the manager's
+  // id per person — the manager is no longer a full user row.
   const { data, failed } = await tryFetch(
-    () =>
-      fetchAllUsers(
-        "populate[manager]=true&populate[avatar]=true&populate[department]=true&sort=displayName:asc",
-      ),
+    () => fetchAllUsers<UserLite>(ORG_CHART_QUERY),
     "org-chart",
   );
-  const people = (data?.users ?? []) as (UserLite & { manager?: { id: number } | null })[];
+  const people = toOrgPeople(data?.users ?? []);
 
   return (
     <div className="space-y-6">

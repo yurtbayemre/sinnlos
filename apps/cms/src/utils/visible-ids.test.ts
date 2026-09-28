@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { loadUserScope, visibleWikiSpaceIds } from "./visible-ids";
+import { DEPT, ROLE, TEAM, USER, USER_UID, createOrgStub } from "../test/org-fixtures.test.helper";
+import {
+  ANNOUNCEMENT_FIND,
+  EVENT_FIND,
+  KUDOS_FIND,
+  announcementRecipients,
+  audienceScopeOf,
+  holdsGrant,
+  loadAllUserScopes,
+  loadRoleGrants,
+  loadUserScope,
+  visibleWikiSpaceIds,
+} from "./visible-ids";
 import type { UserScope } from "./visible-ids";
 
 /**
@@ -246,6 +258,139 @@ describe("loadUserScope", () => {
       departmentId: undefined,
       teamIds: [],
       ledTeamIds: [],
+    });
+  });
+});
+
+describe("loadAllUserScopes (FX19)", () => {
+  it("every active user in one users query plus the team-lead map", async () => {
+    const strapi = createOrgStub();
+    const scopes = await loadAllUserScopes(strapi);
+    expect(strapi.calls.map((call) => `${call.method} ${call.uid}`).sort()).toEqual([
+      "findMany api::team.team",
+      `findMany ${USER_UID}`,
+    ]);
+    expect(scopes.map((scope) => scope.userId)).toEqual([
+      USER.alice,
+      USER.bob,
+      USER.carol,
+      USER.dave,
+      USER.gina,
+      USER.anna,
+    ]);
+    expect(scopes.find((scope) => scope.userId === USER.dave)).toEqual({
+      userId: USER.dave,
+      roleId: ROLE.teamLead,
+      roleType: "team_lead",
+      departmentId: DEPT.sales,
+      teamIds: [],
+      ledTeamIds: [TEAM.frontend],
+    });
+    expect(scopes.find((scope) => scope.userId === USER.alice)).toMatchObject({
+      roleType: "member",
+      teamIds: [TEAM.frontend],
+      ledTeamIds: [],
+    });
+  });
+
+  it("excludes blocked users NULL-safe and keeps users without role or department", async () => {
+    const strapi = createOrgStub();
+    for (const user of strapi.tables[USER_UID]) {
+      if (user.id === USER.bob) user.blocked = null;
+      if (user.id === USER.alice) {
+        user.role = null;
+        user.department = null;
+      }
+    }
+    const scopes = await loadAllUserScopes(strapi);
+    expect(scopes.map((scope) => scope.userId)).toContain(USER.bob);
+    expect(scopes.map((scope) => scope.userId)).not.toContain(USER.bert);
+    expect(scopes.find((scope) => scope.userId === USER.alice)).toMatchObject({
+      roleId: undefined,
+      roleType: null,
+      departmentId: undefined,
+    });
+  });
+});
+
+describe("loadRoleGrants (FX19)", () => {
+  it("reads the holders of each action from up_permissions in one query", async () => {
+    const strapi = createOrgStub();
+    const grants = await loadRoleGrants(strapi, [ANNOUNCEMENT_FIND, KUDOS_FIND, EVENT_FIND]);
+    expect(strapi.calls).toHaveLength(1);
+    expect([...grants.holders(ANNOUNCEMENT_FIND)].sort()).toEqual(
+      [
+        ROLE.admin,
+        ROLE.editor,
+        ROLE.departmentHead,
+        ROLE.teamLead,
+        ROLE.member,
+        ROLE.authenticated,
+      ].sort(),
+    );
+    expect(grants.holders(ANNOUNCEMENT_FIND).has(ROLE.guest)).toBe(false);
+    expect(grants.holders(EVENT_FIND).has(ROLE.guest)).toBe(true);
+    // findOne alone (the fixture's noise row for guest) is no read grant here.
+    expect(grants.holders("api::poll.poll.find").size).toBe(0);
+  });
+
+  it("an action that was not loaded, or rows without a role, grant nothing", async () => {
+    const strapi = createOrgStub({ grants: false });
+    strapi.tables["plugin::users-permissions.permission"] = [
+      { id: 1, action: ANNOUNCEMENT_FIND, role: null },
+      { id: 2, action: ANNOUNCEMENT_FIND, role: { id: ROLE.member } },
+    ];
+    const grants = await loadRoleGrants(strapi, [ANNOUNCEMENT_FIND]);
+    expect([...grants.holders(ANNOUNCEMENT_FIND)]).toEqual([ROLE.member]);
+    expect(grants.holders(KUDOS_FIND).size).toBe(0);
+  });
+});
+
+describe("the announcement recipient filter (FX19)", () => {
+  async function recipients(targeting: Parameters<typeof announcementRecipients>[0]) {
+    const strapi = createOrgStub();
+    const [scopes, grants] = await Promise.all([
+      loadAllUserScopes(strapi),
+      loadRoleGrants(strapi, [ANNOUNCEMENT_FIND]),
+    ]);
+    return announcementRecipients(targeting, scopes, grants.holders(ANNOUNCEMENT_FIND)).map(
+      (scope) => scope.userId,
+    );
+  }
+
+  it("guest and blocked are excluded, everyone else with the grant is in", async () => {
+    expect(await recipients({})).toEqual([USER.alice, USER.bob, USER.carol, USER.dave, USER.anna]);
+    expect(await recipients({ department: { id: DEPT.engineering } })).toEqual([
+      USER.alice,
+      USER.carol,
+    ]);
+  });
+
+  it("a team's lead is included although no member", async () => {
+    expect(await recipients({ team: { id: TEAM.frontend } })).toEqual([USER.alice, USER.dave]);
+  });
+
+  it("admins and editors get strictly the targeted audience", async () => {
+    expect(await recipients({ audienceRoles: [{ id: ROLE.member }] })).toEqual([
+      USER.alice,
+      USER.bob,
+    ]);
+  });
+
+  it("holdsGrant and audienceScopeOf", () => {
+    const scope: UserScope = {
+      roleId: ROLE.member,
+      departmentId: 1,
+      teamIds: [2],
+      ledTeamIds: [3],
+    };
+    expect(holdsGrant(scope, new Set([ROLE.member]))).toBe(true);
+    expect(holdsGrant(scope, new Set([ROLE.guest]))).toBe(false);
+    expect(holdsGrant({ ...scope, roleId: undefined }, new Set([ROLE.member]))).toBe(false);
+    expect(audienceScopeOf(scope)).toEqual({
+      roleId: ROLE.member,
+      departmentId: 1,
+      teamIds: [2, 3],
     });
   });
 });
