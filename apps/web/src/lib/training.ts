@@ -42,7 +42,9 @@ export async function fetchLessonByDocumentId(documentId: string): Promise<Lesso
  * for admin_role (the lesson-progress-visibility policy scopes everyone
  * else to their own rows). The /manage/training report walks it PER COURSE
  * (`targetDocumentId $in <lesson ids>`), so the walk cap scales with the
- * course size, not with the global row count.
+ * course size, not with the global row count. Sorted by id: without an
+ * ORDER BY, Postgres may return rows in a different order per page, and
+ * the page walk would skip or repeat rows (WD02).
  */
 export function fetchCourseProgress(
   lessonIds: string[],
@@ -54,7 +56,7 @@ export function fetchCourseProgress(
   return walkAllPages<LessonProgress>(
     (page) =>
       strapi<StrapiListResponse<LessonProgress>>(
-        `/api/lesson-progresses?${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&pagination[page]=${page}&pagination[pageSize]=100`,
+        `/api/lesson-progresses?${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
       ),
     { maxPages: 20, label },
   );
@@ -64,8 +66,9 @@ export function fetchCourseProgress(
  * The caller's own completion receipts (the lesson-progress-visibility
  * policy scopes the list server-side). Returns a documentId →
  * completedAt map — the Map dedupes accidental duplicate rows (accepted
- * check-then-insert race, first row wins) and every consumer derives
- * its Set from the keys.
+ * check-then-insert race, the oldest row wins: the walk is sorted by id,
+ * which also keeps the pages stable on Postgres) and every consumer
+ * derives its Set from the keys.
  */
 export async function fetchMyProgress(): Promise<{
   completed: Map<string, string | null>;
@@ -74,7 +77,7 @@ export async function fetchMyProgress(): Promise<{
   const result: WalkResult<LessonProgress> = await walkAllPages<LessonProgress>(
     (page) =>
       strapi<StrapiListResponse<LessonProgress>>(
-        `/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&pagination[page]=${page}&pagination[pageSize]=100`,
+        `/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
       ),
     { maxPages: 20, label: "lesson-progress" },
   );
