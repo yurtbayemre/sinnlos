@@ -217,3 +217,30 @@ jobs:
           DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
             -f infra/docker-compose.cms-legacy-tz.yml \
             -f infra/docker-compose.web-legacy-tz.yml config -q
+
+  # Both production images build from a clean checkout, exactly as
+  # infra/deploy.sh builds them (context = repo root). Nothing is pushed;
+  # the layer cache lives in the GitHub Actions cache, one scope per image.
+  images:
+    name: images · ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [cms, web]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build apps/${{ matrix.app }}/Dockerfile (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=image-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}
