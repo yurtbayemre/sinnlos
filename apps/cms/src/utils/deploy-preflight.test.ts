@@ -319,6 +319,8 @@ function shellFunction(name: string): string {
 }
 
 const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
+/** Test budget for the cases that start bash (see runBash). */
+const BASH_BUDGET = { timeout: 30_000 };
 const shellQuote = (value: string) => `'${value.replace(/'/g, `'\''`)}'`;
 
 /**
@@ -326,6 +328,9 @@ const shellQuote = (value: string) => `'${value.replace(/'/g, `'\''`)}'`;
  * the MSYS or WSL side) and returns what it wrote to stderr.
  */
 function runBash(script: string): { status: number | null; stdout: string; stderr: string } {
+  // A bash start costs about 0.1-1 s alone but took 8 s under a full
+  // parallel run on Windows (Git Bash), so every describe whose cases call
+  // this carries BASH_BUDGET (docs/architecture.md §5.40 "Last-Timeouts").
   const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
   return { status: res.status, stdout: res.stdout, stderr: res.stderr };
 }
@@ -441,7 +446,7 @@ function expectInOrder(text: string, needles: readonly string[]): void {
   }
 }
 
-describe("rollback hint: cms images that start with pnpm", () => {
+describe("rollback hint: cms images that start with pnpm", BASH_BUDGET, () => {
   const COMPOSE_LINE =
     "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
 
@@ -497,7 +502,7 @@ describe("rollback hint: cms images that start with pnpm", () => {
   });
 });
 
-describe("rollback hint: the guest vote permission of poll guest access", () => {
+describe("rollback hint: the guest vote permission of poll guest access", BASH_BUDGET, () => {
   const COMPOSE_LINE =
     "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
   const REVOKE_SQL = "infra/rollback/revoke-guest-poll-vote.sql";
@@ -643,7 +648,7 @@ describe("rollback hint: the guest vote permission of poll guest access", () => 
   });
 });
 
-describe("rollback hint: bounded probes (a failed deploy must print every line)", () => {
+describe("rollback hint: bounded probes (a failed deploy must print every line)", BASH_BUDGET, () => {
   const COMPOSE_LINE =
     "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
 
@@ -704,7 +709,7 @@ describe("rollback hint: bounded probes (a failed deploy must print every line)"
   });
 });
 
-describe("datetime phase 2: the web in UTC, and the web legacy-zone override for a rollback", () => {
+describe("datetime phase 2: the web in UTC, and the web legacy-zone override for a rollback", BASH_BUDGET, () => {
   const COMPOSE_LINE =
     "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
   const WEB_OVERRIDE = "/srv/infra/docker-compose.web-legacy-tz.yml";
