@@ -529,6 +529,7 @@
     "continueCourse": "Continue",
     "noLessons": "This course has no lessons yet.",
     "lessonPosition": "Lesson {current} of {total}",
+    "videoTitle": "Lesson video",
     "quizTitle": "Self-check questions",
     "quizCorrect": "Correct!",
     "quizWrong": "Not quite — try again.",

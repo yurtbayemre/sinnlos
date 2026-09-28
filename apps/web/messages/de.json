@@ -529,6 +529,7 @@
     "continueCourse": "Fortsetzen",
     "noLessons": "Dieser Kurs hat noch keine Lektionen.",
     "lessonPosition": "Lektion {current} von {total}",
+    "videoTitle": "Lektionsvideo",
     "quizTitle": "Verständnisfragen (Selbstkontrolle)",
     "quizCorrect": "Richtig!",
     "quizWrong": "Nicht ganz — probier es nochmal.",
