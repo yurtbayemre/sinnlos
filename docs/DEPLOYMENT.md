@@ -326,11 +326,34 @@ cms image does not write them back.
    `ENTRA_ENABLED=1` and `AUTH_LOCAL_ENABLED` unset keeps e-mail sign-in
    **off** (`This provider is disabled`): nobody can sign in, and the old
    5.49 Microsoft flow is off as well, its client id and secret cleared.
-   Re-enable them in the Strapi admin panel (its admin accounts are not
+   The web needs a change as well: a web from before batch 9 decides local
+   sign-in from `MS_CLIENT_ID` and `MS_CLIENT_SECRET`, not from
+   `ENTRA_ENABLED`. With both set and `AUTH_LOCAL_ENABLED` not `1` it hides
+   the e-mail form and shows only a Microsoft button, which cannot complete
+   against a cms on Strapi 5.55.1 (batch 8 and every release since
+   2026-09-25). The simplest order:
+   1. Set `AUTH_LOCAL_ENABLED=1` in `infra/.env`. (Rolling back to batch 8
+      or another release since 2026-09-25, deleting `MS_CLIENT_ID` and
+      `MS_CLIENT_SECRET` works as well and also hides that button; for the
+      old 5.49 flow keep them.)
+   2. Restart only the cms of this release on it, **not** with
+      `infra/deploy.sh`: a re-run tags the running images `:rollback` and
+      so replaces the images you want to go back to. From the checkout:
+      `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build cms`
+      (on a standalone Caddy box, drop the second `-f`). Its boot turns
+      e-mail sign-in back on and logs `[bootstrap] users-permissions
+      providers synced (email=on, microsoft=off)`.
+   3. Roll both images back as the deploy's hint says (`docker tag … :rollback`,
+      then `up -d --no-build web cms`). E-mail sign-in works in the cms and
+      the web shows its form.
+
+   Rolled back without that cms restart, the old cms keeps e-mail sign-in
+   off: re-enable it in the Strapi admin panel (its admin accounts are not
    affected): **Settings → Users & Permissions plugin → Providers →
-   Email** → *Enable* on → *Save*. For the old Microsoft flow of a 5.49
-   image also open **Microsoft** there, turn it on and enter its client id
-   and secret again.
+   Email** → *Enable* on → *Save*; the web still needs
+   `AUTH_LOCAL_ENABLED=1`. For the old Microsoft flow of a 5.49 image also
+   open **Microsoft** there, turn it on and enter its client id and secret
+   again (this release cleared them).
 3. For the first rollout (the employer migration) keep a break-glass local
    account: `AUTH_LOCAL_ENABLED=1` and one local admin user whose password
    is known, until Microsoft sign-in has worked for a while. Then the
@@ -1914,10 +1937,15 @@ these Entra steps:
    Entra.
 4. Deploy, review the `[entra]` lines in dry-run, then switch to `on`.
 5. Rollback: prefer switching back in `infra/.env` (`ENTRA_ENABLED=0` or
-   `AUTH_LOCAL_ENABLED=1`) over an image rollback. Going back to the 5.49
-   image needs the providers re-enabled in the Strapi admin panel first,
-   the Microsoft one with its client id and secret
-   ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on)).
+   `AUTH_LOCAL_ENABLED=1`) over an image rollback. An image rollback needs
+   `AUTH_LOCAL_ENABLED=1` in `infra/.env` before the old images start (a
+   web from before batch 9 shows no e-mail form while `MS_CLIENT_ID` and
+   `MS_CLIENT_SECRET` are set), and this release's cms restarted on it
+   first, which turns e-mail sign-in back on. Going back to the 5.49 image
+   also needs the Microsoft provider re-enabled in the Strapi admin panel,
+   with its client id and secret
+   ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on),
+   step 2).
 
 #### Deploying batch 8 (2026-09-28)
 
@@ -6456,7 +6484,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |
 | Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; check whose it is, then bind or delete it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)) |
 | Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
-| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that does not help: re-enable the Email provider in the Strapi admin panel ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on)) |
+| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that alone does not help: restart this release's cms on it before the rollback, or re-enable the Email provider in the Strapi admin panel afterwards ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on), step 2) |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
 | cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
