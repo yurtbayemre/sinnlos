@@ -17,17 +17,21 @@ export const DEMO_MODE = process.env.DEMO_MODE === "1";
  *
  * Strapi returns upload URLs that are absolute when an external provider
  * (e.g. S3) is configured, but relative (e.g. "/uploads/avatar.png") for
- * the default local provider. For a relative URL we prefix the browser-facing
- * Strapi base so the asset loads from the public host.
+ * the default local provider.
  *
- * Note on client components: only `NEXT_PUBLIC_*` env vars are inlined into
- * the browser bundle, so `process.env.STRAPI_PUBLIC_URL` is undefined there.
- * We therefore read the raw env (not the localhost-fallback STRAPI_PUBLIC_URL
- * constant) and, when no explicit public base is configured, leave the URL
- * relative — it then resolves same-origin, which is correct in deployments
- * that serve the web app and Strapi from the same host (the current setup:
- * WEB_PUBLIC_URL === CMS_PUBLIC_URL). This avoids ever pointing a browser at
- * "http://localhost:1337".
+ * A local-provider path (`/uploads/...`) stays RELATIVE (WD10): the web
+ * serves /uploads itself, through the session-gated proxy
+ * (app/uploads/[...path]/route.ts, architecture §7b P1.4), so the browser
+ * must load it from the web origin with the session cookie. Prefixing the
+ * CMS public URL was right only while both hosts coincided; with a separate
+ * CMS host the images would bypass the proxy and fail.
+ *
+ * Any other relative URL still gets the browser-facing Strapi base. Only
+ * `NEXT_PUBLIC_*` env vars are inlined into the browser bundle, so
+ * `process.env.STRAPI_PUBLIC_URL` is undefined in client components; we read
+ * the raw env (not the localhost-fallback STRAPI_PUBLIC_URL constant), so
+ * without an explicit public base such a URL stays relative too and a
+ * browser is never pointed at "http://localhost:1337".
  */
 const MEDIA_BASE = process.env.STRAPI_PUBLIC_URL || "";
 
@@ -36,6 +40,7 @@ export function mediaUrl(url: string | null | undefined): string | null;
 export function mediaUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   if (url.startsWith("http")) return url;
+  if (url.startsWith("/uploads/")) return url;
   return `${MEDIA_BASE}${url}`;
 }
 
