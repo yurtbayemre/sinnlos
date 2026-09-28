@@ -13,6 +13,7 @@
     "typecheck:tests": "pnpm --filter @sinnlos/web exec tsc -p ../../tsconfig.test.json && pnpm --filter @sinnlos/cms exec tsc -p ../../tsconfig.test.cms.json",
     "test": "vitest run",
     "test:tz": "node scripts/test-tz.mjs",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "cms:dev": "pnpm --filter @sinnlos/cms dev",
