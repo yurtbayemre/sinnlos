@@ -948,6 +948,76 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to the policy primitives (batch 9, lane 4B)
+
+This release (branch `refactor/policy-primitives`, on `batch/8` `5f2eac0`)
+rebuilds the cms read and ownership policies on shared helpers. What each
+role can read and write is unchanged, except for the two defence-in-depth
+points at the end of this list:
+
+- **Policy primitives and factories (PL01, PL02).** One role check
+  (`hasRole`), one way to add a policy's filter (`narrowFilters`, always
+  `$and`), one id lookup (`findByRef`), and three factories in
+  `apps/cms/src/utils/policy-factories.ts` that the fourteen read and
+  ownership policies now call. A per-role snapshot of every policy-guarded
+  read, recorded on the previous release, is unchanged on SQLite and
+  Postgres (`apps/cms/src/integration/role-read-snapshot.integration.test.ts`).
+- **Comment and reaction threads (PL04).** A read that pins one thread (the
+  web's comment sections) checks only that target instead of resolving
+  every visible announcement and wiki page. A caller's role, department and
+  teams are read once per request.
+- **Bind-parameter guard (PL04).** A policy whose list of visible ids would
+  exceed what one SQL statement can bind (65535 parameters on Postgres,
+  32766 on SQLite, minus 1000 headroom) answers with an empty result and
+  logs `[policy] <policy>: <count> values exceed ...` at error level, where
+  the request used to fail with a 500. Nothing near that size exists on an
+  intranet; the log line is the signal to change that policy.
+- **Wiki threads follow the published space.** Comment and reaction lists
+  now judge a wiki page the way a single thread and the page itself are
+  judged: by its published row. A wiki space whose visibility was widened
+  only in an unpublished draft no longer shows that space's discussions to
+  the wider audience before the change is published.
+- **Callers without a user id.** A request whose user carries no numeric
+  id owns no row and reads like an anonymous one. users-permissions always
+  sets one, so no real request is affected.
+
+**A normal deploy with `infra/deploy.sh`.** Only the cms changes; no
+schema, env, edge or grant change, nothing to migrate.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **Smoke:** open the dashboard, announcements with comments, a wiki space
+   and page, documents, polls and a course as a member, and the wiki and
+   documents as a guest.
+3. **First hour:** watch the cms log for policy errors and guard lines
+   (on a standalone Caddy box, drop the second `-f`):
+
+   ```bash
+   cd /opt/sinnlos
+   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+     logs --since 1h cms | grep -E '\[policy\]|error'
+   ```
+
+   Expect no output (a policy that throws shows up as an `error` line, and
+   its request as a 500). A `[policy]` line names the policy and the list
+   size that did not fit; the affected list is empty for everyone without
+   the admin/editor bypass until that policy is changed.
+
+**Rollback:** the batch 8 image runs on the same database as it is (no
+schema or data change), with the commands `infra/deploy.sh` prints.
+
+**Rehearsal (integration harness, SQLite and Postgres 16, compared with
+`5f2eac0`):** the per-role snapshot of every guarded read was identical;
+one comment-thread read ran 22 (announcement) or 24 (wiki page) SQL
+statements instead of 27, without loading every announcement and page; a
+wiki space widened only in its draft opened its page's thread before and
+does not now, on both the thread and the list; numeric id and documentId on
+comment delete, classified update and RSVP update answered exactly as
+before (owner 204/200, stranger 403, missing or malformed id 404); one
+visible wiki page more than a statement can bind (31,767 on SQLite, 64,536
+on Postgres) turned the member's page list and full comment list from a 500
+into an empty 200 with the log line, while a single thread and the admin
+list were unaffected.
+
 #### Deploying batch 8 (2026-09-28)
 
 Batch 8 (branch `batch/8`, on `main` `c219034`, which production runs since

@@ -550,7 +550,11 @@ Read-side filters:
   filter; pins `status=published`
 - `comment-target-visibility` — comment/reaction reads filtered to targets
   the caller may see (#28; the create counterpart lives in the controllers
-  via `isTargetVisible`)
+  via `isTargetVisible`). A read that pins exactly one
+  `{targetType, targetDocumentId}` with `$eq` (the web's comment sections)
+  checks only that target; any other filter resolves every visible target.
+  Both judge a target by its published row when it has one, so a wiki space
+  widened only in an unpublished draft opens no threads
 - `training-visibility` — courses/lessons pinned to `status=published`;
   lessons only visible when their owning course is published (fail-closed);
   admin/editor bypass for draft preview (#29)
@@ -561,13 +565,29 @@ Read-side filters:
 The read-side policies share helpers in `apps/cms/src/utils/`:
 `policy-query.ts` provides `getMutableQuery` (policies must mutate the real
 Koa `request.query` — `policyContext.query` is a copy the core controllers
-never read) and `restrictiveIdFilter` (an empty id allow-list is injected as
-`{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an empty
-`$in: []`, which would fail **open**), and `forcePublishedStatus` (after the
-`admin_role`/`editor` bypass: pins `status=published` and drops the
+never read), `narrowFilters` (a policy's clause is always `$and`-composed
+with the client filter, never spread-merged, so a client filter can only
+narrow the result) and `restrictiveIdFilter` (an empty id allow-list is
+injected as `{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an
+empty `$in: []`, which would fail **open**), `boundedIdFilter` (the same for
+a list longer than one SQL statement can bind — 65535 parameters on
+Postgres, 32766 on SQLite, minus 1000 headroom: the policy answers with
+nothing and logs a `[policy]` error line instead of failing with a 500), and
+`forcePublishedStatus` (after the `admin_role`/`editor` bypass: pins
+`status=published` and drops the
 publication-cohort keys `publicationFilter`/`hasPublishedVersion` and the
 v4 `publicationState`, so a reader can neither fetch drafts nor learn which
-published entries have pending edits). `visible-ids.ts` (`loadUserScope`,
+published entries have pending edits). `policy-factories.ts` builds the
+policies from those steps, so each policy file only states its rules:
+`ownRowsFilter` (own rows: acknowledgements, notifications, lesson
+progress, RSVPs), `visibleIdsPolicy` (ids resolved server-side:
+announcements, documents, quick links, wiki, polls, lessons) and
+`ownerGate` (write/delete only by the row's owner: classifieds, RSVPs,
+notifications, reactions); it also holds `findByRef`, the id lookup the
+ownership gates and the classified, comment and RSVP controllers share. The
+role check everywhere is `hasRole(user, roles)` from `bootstrap/roles.ts`
+(exact role types; a caller without a numeric user id owns nothing).
+`visible-ids.ts` (`loadUserScope`, read once per request and user;
 `visibleWikiSpaceIds`) resolves per-user wiki-space visibility,
 `target-visibility.ts` (`visibleTargetAnchors`, `isTargetVisible`) decides
 comment/reaction target visibility for #28, and
