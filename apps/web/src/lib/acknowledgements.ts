@@ -47,3 +47,24 @@ export function fetchMyAnnouncementAcks(): Promise<AnnouncementAcksResult> {
 export function fetchAllAnnouncementAcks(): Promise<AnnouncementAcksResult> {
   return fetchAllAnnouncementAcksPaged("&populate[user]=true");
 }
+
+/**
+ * The mandatory announcements the caller has not confirmed yet, in list
+ * order (WD02: one rule for the dashboard banner and the pinned "open
+ * confirmations" section on /announcements). Re-checks requiresAck:
+ * DEMO_MODE's fixture answers announcement paths unfiltered, and it keeps
+ * the count honest if the query ever changes. Matching runs on documentId,
+ * stable across re-publishes (the numeric id changes on every publish
+ * cycle); duplicate ack rows (the accepted check-then-insert race in the
+ * CMS) collapse in the Set.
+ */
+export function computeOpenAcks<A extends { requiresAck?: boolean; documentId?: string }>(
+  announcements: A[],
+  acks: { targetDocumentId: string }[],
+): (A & { documentId: string })[] {
+  const acked = new Set(acks.map((ack) => ack.targetDocumentId));
+  return announcements.filter(
+    (a): a is A & { documentId: string } =>
+      !!a.requiresAck && !!a.documentId && !acked.has(a.documentId),
+  );
+}

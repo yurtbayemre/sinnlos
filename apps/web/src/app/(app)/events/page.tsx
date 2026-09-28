@@ -2,6 +2,8 @@ import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { icsHref } from "@/lib/event-ics";
+import { EMPTY_RSVP_SUMMARY, buildRsvpSummaries } from "@/lib/event-rsvp";
+import { buildMonthGrid } from "@/lib/month-grid";
 import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
@@ -14,7 +16,7 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { EventRsvpPanel } from "@/components/events/event-rsvp-panel";
-import { EventsMonthView, monthGridRange } from "@/components/events/events-month-view";
+import { EventsMonthView } from "@/components/events/events-month-view";
 
 export async function generateMetadata() {
   const t = await getTranslations("events");
@@ -40,51 +42,6 @@ function formatDate(iso: string, locale: string, allDay?: boolean) {
     minute: "2-digit",
   });
 }
-
-/**
- * Collapse the raw RSVP rows into one summary per event documentId.
- * Dedupe per (event, user) keeping the LATEST respondedAt: the CMS accepts
- * a benign create race that can leave duplicate rows per user, so counting
- * rows directly would overstate the buckets.
- */
-function buildRsvpSummaries(
-  rows: EventRsvp[],
-  myUserId: number | null,
-): Map<string, EventRsvpSummary> {
-  const latest = new Map<string, EventRsvp>();
-  for (const row of rows) {
-    if (!row.targetDocumentId) continue;
-    const key = `${row.targetDocumentId}:${row.user?.id ?? `row-${row.id}`}`;
-    const prev = latest.get(key);
-    const rowTime = row.respondedAt ? new Date(row.respondedAt).getTime() : 0;
-    const prevTime = prev?.respondedAt ? new Date(prev.respondedAt).getTime() : 0;
-    if (!prev || rowTime >= prevTime) latest.set(key, row);
-  }
-
-  const map = new Map<string, EventRsvpSummary>();
-  for (const row of latest.values()) {
-    let summary = map.get(row.targetDocumentId);
-    if (!summary) {
-      summary = { yesNames: [], yesCount: 0, maybeCount: 0, noCount: 0, myStatus: null };
-      map.set(row.targetDocumentId, summary);
-    }
-    if (row.status === "yes") {
-      summary.yesCount += 1;
-      if (row.user?.displayName) summary.yesNames.push(row.user.displayName);
-    } else if (row.status === "maybe") summary.maybeCount += 1;
-    else if (row.status === "no") summary.noCount += 1;
-    if (myUserId != null && row.user?.id === myUserId) summary.myStatus = row.status;
-  }
-  return map;
-}
-
-const EMPTY_SUMMARY: EventRsvpSummary = {
-  yesNames: [],
-  yesCount: 0,
-  maybeCount: 0,
-  noCount: 0,
-  myStatus: null,
-};
 
 export default async function EventsPage({
   searchParams,
@@ -114,7 +71,7 @@ export default async function EventsPage({
   let monthEvents: Event[] = [];
   let failed = false;
   if (isMonthView) {
-    const range = monthGridRange(month, now);
+    const range = buildMonthGrid(month, now);
     const res = await tryFetch(
       () => api.events.window(range.from.toISOString(), range.until.toISOString()),
       "events",
@@ -214,7 +171,7 @@ export default async function EventsPage({
                     rsvp={
                       canRsvp && e.rsvpEnabled && typeof e.documentId === "string"
                         ? {
-                            summary: summaries.get(e.documentId) ?? EMPTY_SUMMARY,
+                            summary: summaries.get(e.documentId) ?? EMPTY_RSVP_SUMMARY,
                             selfName,
                           }
                         : null

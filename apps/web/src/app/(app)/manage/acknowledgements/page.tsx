@@ -2,8 +2,14 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { isAnnouncementVisibleTo, teamIdsByUser } from "@/lib/audience";
-import { reportCompleteness } from "@/lib/ack-report";
+import { teamIdsByUser } from "@/lib/audience";
+import {
+  buildAckReportRows,
+  eligibleReportUsers,
+  reportCompleteness,
+  type ReportAnnouncement,
+  type ReportUser,
+} from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
@@ -12,7 +18,7 @@ import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
 import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Acknowledgement, Announcement, UserLite } from "@/lib/types";
+import type { Acknowledgement } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -22,25 +28,12 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-type ReportUser = UserLite & {
-  department?: { id: number; name: string } | null;
-  role?: { id: number; type?: string } | null;
-  blocked?: boolean;
-};
-
-/** A mandatory announcement plus every field its targeting depends on. */
-type ReportAnnouncement = Announcement & {
-  audience?: string;
-  department?: { id: number; name?: string } | null;
-  team?: { id: number; name?: string } | null;
-  audienceRoles?: { id: number; type?: string; name?: string }[] | null;
-};
-
 /**
  * Role types holding `announcement.find` in the CMS permission matrix
  * (apps/cms/src/index.ts) — only they can ever see, and therefore be
  * expected to confirm, a mandatory announcement. `guest` deliberately has
  * NO announcement read and must not inflate the report's denominator.
+ * infra/contracts.test.ts pins this copy against the matrix.
  */
 const ANNOUNCEMENT_READER_ROLES = new Set([
   "admin_role",
@@ -77,9 +70,9 @@ export default async function AcknowledgementReportPage() {
         // announcement dropped past the first page would silently vanish from
         // the report and never be chased for confirmation (#14). Secondary
         // sort on id keeps the walk stable when rows share a createdAt.
-        walkAllPages<Announcement>(
+        walkAllPages<ReportAnnouncement>(
           (page) =>
-            strapi<StrapiListResponse<Announcement>>(
+            strapi<StrapiListResponse<ReportAnnouncement>>(
               `/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
             ),
           { maxPages: 50, label: "ack-report announcements" },
@@ -110,18 +103,13 @@ export default async function AcknowledgementReportPage() {
     announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed;
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
   // unfiltered, and it keeps the report honest if the query ever changes.
-  const announcements = ((announcementsResult.data?.data ?? []) as ReportAnnouncement[]).filter(
-    (a) => a.requiresAck,
-  );
+  const announcements = (announcementsResult.data?.data ?? []).filter((a) => a.requiresAck);
   const acks = (acksResult.data?.acks ?? []) as Acknowledgement[];
   const users = usersResult.data?.users ?? [];
 
   // Only unblocked users whose role can actually read announcements count
-  // toward the report — a blocked account or a guest can never confirm
-  // anything, and would permanently drag every percentage down.
-  const eligibleUsers = users.filter(
-    (u) => u.blocked !== true && ANNOUNCEMENT_READER_ROLES.has(u.role?.type ?? ""),
-  );
+  // toward the report (lib/ack-report.ts).
+  const eligibleUsers = eligibleReportUsers(users, ANNOUNCEMENT_READER_ROLES);
   const userTeamIds = teamIdsByUser(teamsResult.data?.teams ?? []);
 
   /**
@@ -188,35 +176,15 @@ export default async function AcknowledgementReportPage() {
     return parts.length > 0 ? parts : [t("audienceAll")];
   };
 
-  const rows = announcements.map((a) => {
-    // The target set is only as trustworthy as its inputs — a row whose
-    // audience cannot be determined is reported as UNKNOWN, never as
-    // "everyone confirmed".
-    const targetUnknown = usersUnknown || (a.team?.id != null && teamsUnknown);
-    // Exactly the targeting the CMS policy enforces on reads (department
-    // AND team AND role, over whatever the announcement sets) — the report
-    // runs as admin_role, which bypasses that policy, so it has to
-    // recompute the audience itself. See lib/audience.ts.
-    const targetUsers = eligibleUsers.filter((u) =>
-      isAnnouncementVisibleTo(a, {
-        roleId: u.role?.id,
-        departmentId: u.department?.id,
-        teamIds: userTeamIds.get(u.id) ?? [],
-      }),
-    );
-    // Acks anchor on the stable documentId (numeric ids change on every
-    // re-publish); the Set dedupes duplicate ack rows (accepted
-    // check-then-insert race in the CMS).
-    const ackedUserIds = new Set(
-      acks
-        .filter((k) => k.targetDocumentId === a.documentId)
-        .map((k) => k.user?.id)
-        .filter((id): id is number => id != null),
-    );
-    const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
-    const ackedCount = targetUsers.length - openUsers.length;
-    const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
-    return { announcement: a, targetUsers, openUsers, ackedCount, pct, targetUnknown };
+  // A row whose audience cannot be determined is reported as UNKNOWN, never
+  // as "everyone confirmed" (lib/ack-report.ts buildAckReportRows).
+  const rows = buildAckReportRows({
+    announcements,
+    acks,
+    eligibleUsers,
+    userTeamIds,
+    usersUnknown,
+    teamsUnknown,
   });
 
   return (
