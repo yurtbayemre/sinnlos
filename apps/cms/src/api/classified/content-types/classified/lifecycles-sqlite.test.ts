@@ -102,6 +102,8 @@ function engine(): QueryEngine {
   return db;
 }
 
+// The first hook loads @strapi/database and the SQLite driver cold, which
+// can pass the 10 s hook default under a full parallel run (§5.40).
 beforeEach(async () => {
   const Database = loadDatabase();
   tempDir = mkdtempSync(join(tmpdir(), "sinnlos-classified-delete-"));
@@ -140,7 +142,7 @@ beforeEach(async () => {
       }),
     }),
   };
-});
+}, 30_000);
 
 afterEach(async () => {
   (globalThis as { strapi?: unknown }).strapi = restoreStrapi;

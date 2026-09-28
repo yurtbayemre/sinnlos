@@ -126,12 +126,14 @@ const WHERE_CASES: Array<[string, Where]> = [
 
 let engine: SqliteEngine;
 
+// The cold load of @strapi/database and the SQLite driver can pass the 10 s
+// hook default under a full parallel run: an explicit budget (§5.40).
 beforeAll(async () => {
   engine = await openSqliteEngine(MODELS);
   for (const group of GROUPS) await engine.db.query(GROUP).create({ data: { name: group.name } });
   for (const tag of TAGS) await engine.db.query(TAG).create({ data: { label: tag.label } });
   for (const { id: _id, ...thing } of THINGS) await engine.db.query(THING).create({ data: thing });
-});
+}, 30_000);
 
 afterAll(async () => {
   await engine.close();

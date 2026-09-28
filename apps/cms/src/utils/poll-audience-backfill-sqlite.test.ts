@@ -95,6 +95,8 @@ async function rows<T>(sql: string): Promise<T[]> {
   return (await engine().connection.raw(sql)) as T[];
 }
 
+// The first hook loads @strapi/database and the SQLite driver cold, which
+// can pass the 10 s hook default under a full parallel run (§5.40).
 beforeEach(async () => {
   const Database = loadDatabase();
   tempDir = mkdtempSync(join(tmpdir(), "sinnlos-poll-backfill-"));
@@ -111,7 +113,7 @@ beforeEach(async () => {
   await db.init({ models: MODELS });
   await db.schema.create();
   await db.connection.raw("insert into departments (document_id, name) values ('dept-a', 'A')");
-});
+}, 30_000);
 
 afterEach(async () => {
   await db?.destroy();
