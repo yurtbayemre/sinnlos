@@ -53,6 +53,22 @@ const EDITABLE_FIELDS = [
 ] as const;
 
 /**
+ * The digest opt-ins among EDITABLE_FIELDS. A guest gets no digest (FX19:
+ * no announcement.find, and send-digests skips guests), so updateMe drops
+ * these keys for guests instead of storing opt-ins that could never be
+ * served; the profile form does not offer them to guests either.
+ */
+export const DIGEST_FIELDS = [
+  "digestAnnouncements",
+  "digestMentions",
+  "digestKudos",
+  "digestFrequency",
+] as const satisfies readonly (typeof EDITABLE_FIELDS)[number][];
+
+/** Role types whose digest opt-ins updateMe ignores. */
+export const DIGEST_IGNORED_ROLE_TYPES: readonly string[] = ["guest"];
+
+/**
  * Free-text fields of PUT /api/me (FX26): trimmed, `null` clears them, and
  * at most PROFILE_TEXT_MAX characters. They are `string` attributes, i.e.
  * varchar(255) on Postgres, where a longer value failed the UPDATE with a
@@ -264,8 +280,10 @@ export default {
 
     const raw = ctx.request.body;
     const body = isRow(raw) && isRow(raw.data) ? raw.data : isRow(raw) ? raw : {};
+    const ignoresDigest = DIGEST_IGNORED_ROLE_TYPES.includes(user.role?.type ?? "");
     const data: Record<string, unknown> = {};
     for (const field of EDITABLE_FIELDS) {
+      if (ignoresDigest && (DIGEST_FIELDS as readonly string[]).includes(field)) continue;
       if (has(body, field)) data[field] = body[field];
     }
     if (Object.keys(data).length === 0) return ctx.badRequest("No editable fields provided");

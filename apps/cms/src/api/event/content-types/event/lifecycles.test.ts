@@ -11,7 +11,10 @@ import {
   DEPT,
   EVENT_UID,
   NOTIFICATION_UID,
+  PERMISSION_UID,
+  ROLE,
   USER,
+  USER_UID,
   createOrgStub,
   recipientsOf,
 } from "../../../../test/org-fixtures.test.helper";
@@ -46,20 +49,49 @@ function publish(strapi: StrapiStub, data: Record<string, unknown>): Row {
 
 const notificationRows = (strapi: StrapiStub) => strapi.tables[NOTIFICATION_UID] ?? [];
 
+/** Active users holding event.find: everyone but bert (blocked); guest reads the calendar. */
+const READERS = ALL_USERS.filter((id) => id !== USER.bert);
+
 describe("event afterCreate", () => {
-  it("an event without departments notifies every user but the organizer", async () => {
+  it("an event without departments notifies every reader but the organizer", async () => {
     const strapi = setup();
     const row = publish(strapi, {});
     await lifecycles.afterCreate({ result: row });
-    // guest and blocked users included.
-    expect(recipientsOf(strapi)).toEqual(ALL_USERS.filter((id) => id !== USER.carol));
+    // FX19: the blocked user is out; the guest holds event.find and stays in.
+    expect(recipientsOf(strapi)).toEqual(READERS.filter((id) => id !== USER.carol));
   });
 
   it("departments restrict to their members", async () => {
     const strapi = setup();
     const row = publish(strapi, { departments: [{ id: DEPT.engineering }] });
     await lifecycles.afterCreate({ result: row });
-    expect(recipientsOf(strapi)).toEqual([USER.alice, USER.gina, USER.bert]);
+    expect(recipientsOf(strapi)).toEqual([USER.alice, USER.gina]);
+  });
+
+  it("several departments, and users without one only for untargeted events", async () => {
+    const strapi = setup();
+    for (const user of strapi.tables[USER_UID]) if (user.id === USER.bob) user.department = null;
+    const both = publish(strapi, {
+      departments: [{ id: DEPT.engineering }, { id: DEPT.sales }],
+    });
+    await lifecycles.afterCreate({ result: both });
+    expect(recipientsOf(strapi)).toEqual([USER.alice, USER.dave, USER.gina, USER.anna]);
+
+    const untargeted = publish(strapi, {});
+    await lifecycles.afterCreate({ result: untargeted });
+    expect(
+      recipientsOf(strapi, (n) => n.sourceDocumentId === untargeted.documentId),
+    ).toContain(USER.bob);
+  });
+
+  it("the read grant comes from up_permissions: a role without event.find is out", async () => {
+    const strapi = setup();
+    strapi.tables[PERMISSION_UID] = strapi.tables[PERMISSION_UID].filter(
+      (p) => !(p.action === "api::event.event.find" && (p.role as { id: number }).id === ROLE.guest),
+    );
+    const row = publish(strapi, { departments: [{ id: DEPT.engineering }] });
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual([USER.alice]);
   });
 
   it("writes one anchored row per recipient", async () => {
@@ -109,12 +141,20 @@ describe("event afterCreate", () => {
     expect(recipientsOf(strapi)).toEqual([USER.bob, USER.dave, USER.anna]);
   });
 
-  it("a row that cannot be re-read notifies everyone", async () => {
+  it("a row that cannot be re-read notifies nobody (targeting unknown, FX19)", async () => {
     const strapi = setup();
     await lifecycles.afterCreate({
-      result: { id: 999, documentId: "k3v9q2m8x7c4b1n6p5z0r2t8", title: "Gone", publishedAt: "2026-09-28T08:00:00.000Z" },
+      result: {
+        id: 999,
+        documentId: "k3v9q2m8x7c4b1n6p5z0r2t8",
+        title: "Gone",
+        publishedAt: "2026-09-28T08:00:00.000Z",
+      },
     });
-    expect(recipientsOf(strapi)).toEqual(ALL_USERS);
+    expect(recipientsOf(strapi)).toEqual([]);
+    expect(strapi.log.warn).toHaveBeenCalledWith(
+      "[notifications] event 999 could not be re-read, nobody notified (targeting unknown)",
+    );
   });
 
   it("runs inside the publish transaction and never throws", async () => {

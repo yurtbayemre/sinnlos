@@ -1,4 +1,5 @@
 import { runSourceFanout, type SourceAudience } from "../../../../utils/notify";
+import { EVENT_FIND, holdsGrant, loadAllUserScopes, loadRoleGrants } from "../../../../utils/visible-ids";
 
 /** The lifecycle result of an event row (only what the fan-out reads). */
 interface EventRow {
@@ -31,29 +32,43 @@ export default {
 };
 
 /**
- * Users of the event's departments, or everyone for an event without
- * departments; the organizer is excluded. A missing row (should not happen)
- * notifies everyone, the previous behaviour.
+ * The event's audience (FX19): users of its departments, or everyone for an
+ * event without departments, whose role holds event.find (the calendar's
+ * read grant, which guest holds) and who are not blocked; the organizer is
+ * excluded. A row that cannot be re-read has unknown targeting: nobody is
+ * notified (fail-closed; before FX19 it notified everyone).
  */
 async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>> {
-  const full = await strapi.db.query("api::event.event").findOne({
-    where: { id: ev.id },
-    populate: { departments: true, organizer: true },
-  });
-
-  let users: Array<{ id: number }>;
-  if (full?.departments?.length) {
-    const deptIds = full.departments.map((d: { id: number }) => d.id);
-    users = await strapi.db.query("plugin::users-permissions.user").findMany({
-      where: { department: { id: { $in: deptIds } } },
-    });
-  } else {
-    users = await strapi.db.query("plugin::users-permissions.user").findMany({});
+  const [full, scopes, grants] = await Promise.all([
+    strapi.db.query("api::event.event").findOne({
+      where: { id: ev.id },
+      populate: { departments: { select: ["id"] }, organizer: { select: ["id"] } },
+    }),
+    loadAllUserScopes(strapi),
+    loadRoleGrants(strapi, [EVENT_FIND]),
+  ]);
+  if (!full) {
+    strapi.log.warn(
+      `[notifications] event ${ev.id} could not be re-read, nobody notified (targeting unknown)`,
+    );
+    return { source: null, recipients: [], actorId: null };
   }
 
-  const organizerId: number | null = full?.organizer?.id ?? null;
-  const recipients = (users ?? []).map((user) => user.id).filter((id) => id !== organizerId);
-  return { source: full ?? null, recipients, actorId: organizerId };
+  const departmentIds = new Set<number>(
+    (full.departments ?? []).map((department: { id: number }) => department.id),
+  );
+  const readers = grants.holders(EVENT_FIND);
+  const organizerId: number | null = full.organizer?.id ?? null;
+  const recipients = scopes
+    .filter(
+      (scope) =>
+        holdsGrant(scope, readers) &&
+        (departmentIds.size === 0 ||
+          (scope.departmentId != null && departmentIds.has(scope.departmentId))),
+    )
+    .map((scope) => scope.userId)
+    .filter((id) => id !== organizerId);
+  return { source: full, recipients, actorId: organizerId };
 }
 
 /**

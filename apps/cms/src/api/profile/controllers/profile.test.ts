@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SENSITIVE_USER_FIELDS } from "../../../utils/sanitize-user-contact";
 import profile, {
+  DIGEST_FIELDS,
+  DIGEST_IGNORED_ROLE_TYPES,
   MANAGER_CONTACT_FIELDS,
   MANAGER_SUMMARY_FIELDS,
   PROFILE_LOCALES,
@@ -443,6 +445,64 @@ describe("PUT /api/me (FX02 allowlist)", () => {
     await expect(profile.updateMe(makeCtx(caller("member"), "displayName=x").ctx)).resolves.toBe(
       "400 No editable fields provided",
     );
+  });
+});
+
+describe("PUT /api/me digest opt-ins and guests (FX19)", () => {
+  let stub: ReturnType<typeof stubStrapi>;
+
+  beforeEach(() => {
+    stub = stubStrapi();
+    vi.stubGlobal("strapi", stub.strapi);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const optIns = {
+    digestAnnouncements: "on",
+    digestMentions: true,
+    digestKudos: "true",
+    digestFrequency: "daily",
+  };
+
+  it("ignores a guest's digest keys and writes the rest", async () => {
+    const { ctx } = makeCtx(caller("guest"), { data: { displayName: "Gina", ...optIns } });
+    await profile.updateMe(ctx);
+    expect(stub.updateCalls).toEqual([{ where: { id: 1 }, data: { displayName: "Gina" } }]);
+  });
+
+  it("digest keys alone are nothing editable for a guest (400, no write)", async () => {
+    const { ctx } = makeCtx(caller("guest"), { data: optIns });
+    await expect(profile.updateMe(ctx)).resolves.toBe("400 No editable fields provided");
+    expect(stub.updateCalls).toHaveLength(0);
+    // Even an invalid frequency is not looked at: the key is dropped first.
+    const bad = makeCtx(caller("guest"), { data: { displayName: "Gina", digestFrequency: "hourly" } });
+    await profile.updateMe(bad.ctx);
+    expect(stub.updateCalls[0].data).toEqual({ displayName: "Gina" });
+  });
+
+  it("every other role, and a caller without a role, keeps the opt-ins", async () => {
+    for (const roleType of ["member", "editor", "admin_role", "authenticated", null, undefined]) {
+      stub.updateCalls.length = 0;
+      await profile.updateMe(makeCtx(caller(roleType), { data: optIns }).ctx);
+      expect(stub.updateCalls[0].data, String(roleType)).toEqual({
+        digestAnnouncements: true,
+        digestMentions: true,
+        digestKudos: true,
+        digestFrequency: "daily",
+      });
+    }
+  });
+
+  it("DIGEST_FIELDS are editable fields and exactly the digest opt-ins", () => {
+    expect([...DIGEST_FIELDS]).toEqual([
+      "digestAnnouncements",
+      "digestMentions",
+      "digestKudos",
+      "digestFrequency",
+    ]);
+    expect(DIGEST_IGNORED_ROLE_TYPES).toEqual(["guest"]);
   });
 });
 
