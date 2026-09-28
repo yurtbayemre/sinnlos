@@ -57,6 +57,11 @@ export const ICONS = {
 
 export type IconName = keyof typeof ICONS;
 
+/**
+ * Own keys only (FX27): `name in ICONS` also accepted inherited keys, so a
+ * quick link whose icon is "constructor" rendered Object as a component and
+ * crashed the dashboard.
+ */
 export function isIconName(name: string | null | undefined): name is IconName {
-  return typeof name === "string" && name in ICONS;
+  return typeof name === "string" && Object.hasOwn(ICONS, name);
 }

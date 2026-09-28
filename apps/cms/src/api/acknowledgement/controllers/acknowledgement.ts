@@ -31,7 +31,13 @@ export default factories.createCoreController(
       const targetType = data?.targetType as string | undefined;
       const targetDocumentId = data?.targetDocumentId;
 
-      const targetUid = targetType ? TARGET_UIDS[targetType] : undefined;
+      // Own keys only (FX27): a plain index also found inherited keys, so
+      // "constructor" or "__proto__" reached the query and failed with a 500.
+      const targetUid =
+        typeof targetType === "string" &&
+        Object.prototype.hasOwnProperty.call(TARGET_UIDS, targetType)
+          ? TARGET_UIDS[targetType]
+          : undefined;
       if (!targetUid) return ctx.badRequest("Invalid targetType");
       if (typeof targetDocumentId !== "string" || targetDocumentId.length === 0) {
         return ctx.badRequest("targetDocumentId required");

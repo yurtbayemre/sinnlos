@@ -44,6 +44,21 @@ describe("targetUid / isCommentTargetType", () => {
       expect(targetUid(value)).toBeNull();
     }
   });
+
+  it("rejects inherited Object keys (FX27: 'constructor' was a 500)", () => {
+    for (const value of [
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+      "valueOf",
+      "isPrototypeOf",
+      "__defineGetter__",
+    ]) {
+      expect(isCommentTargetType(value), value).toBe(false);
+      expect(targetUid(value), value).toBeNull();
+    }
+  });
 });
 
 describe("targetAnchor", () => {
@@ -332,5 +347,15 @@ describe("resolveWriteTarget", () => {
 
   it("answers 'missing' and 'unresolved' identically — no documentId oracle", () => {
     expect(WRITE_TARGET_ERRORS["unresolved-target"]).toBe(WRITE_TARGET_ERRORS["missing-target"]);
+  });
+
+  it("rejects an inherited Object key as targetType before any query (FX27)", async () => {
+    const strapi = stubStrapi({ "api::announcement.announcement": [publishedAnnouncement] });
+    for (const targetType of ["constructor", "__proto__", "toString"]) {
+      expect(
+        await resolveWriteTarget(strapi, { targetType, targetDocumentId: ANNOUNCEMENT_DOC }),
+      ).toEqual({ status: "rejected", reason: "invalid-target-type" });
+    }
+    expect(strapi.calls).toHaveLength(0);
   });
 });
