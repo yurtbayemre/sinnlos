@@ -21,7 +21,9 @@ import pollVoteController from "./poll-vote";
  *   - results never carry voter identities, but do carry the caller's own
  *     vote even on anonymous polls,
  *   - results count one ballot per voter: the voter's first ballot (the
- *     lowest row id), whatever duplicates a parallel race stored.
+ *     lowest row id), whatever duplicates a parallel race stored, and a
+ *     vote deletes the voter's later rows for the poll right after its
+ *     insert (answering "Already voted" when its own row was the later one).
  *
  * The db stub evaluates the `where` it receives, so dropping the published
  * pin or the voter filter fails the tests. Its vote `findMany` also returns
@@ -225,11 +227,20 @@ function populateVoter(projected: object[], table: StoredVoteRow[], populate: Vo
 
 type Handler = (ctx: unknown) => Promise<unknown>;
 
+/** The id the stub's create gives this request's vote. */
+const CREATED_ID = 77;
+
 function setup(options: {
   id: unknown;
   user?: UserRow | null;
   body?: unknown;
   votes?: VoteRow[];
+  /**
+   * Rows that land while this request runs, after its "Already voted" check
+   * and together with its insert: parallel votes. An id below CREATED_ID was
+   * inserted first, one above it later.
+   */
+  concurrent?: StoredVoteRow[];
 }) {
   const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
@@ -240,20 +251,32 @@ function setup(options: {
     findOne: vi.fn(async ({ where }: { where: Where }) =>
       votesTable.find((row) => matches(row, where)) ?? null,
     ),
-    findMany: vi.fn(async ({ where, select, populate }: { where: Where; select?: string[]; populate?: VotePopulate }) =>
-      populateVoter(
-        distinctProjection(
-          votesTable.filter((row) => matches(row, where)),
-          select,
-        ),
-        votesTable,
+    findMany: vi.fn(
+      async ({
+        where,
+        select,
         populate,
-      ),
+        orderBy,
+      }: {
+        where: Where;
+        select?: string[];
+        populate?: VotePopulate;
+        orderBy?: { id: "asc" };
+      }) => {
+        const found = votesTable.filter((row) => matches(row, where));
+        if (orderBy) found.sort((a, b) => a.id - b.id);
+        return populateVoter(distinctProjection(found, select), votesTable, populate);
+      },
     ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
-      votesTable.push({ id: 77, ...data });
-      return { id: 77, optionIndex: data.optionIndex };
+      votesTable.push({ id: CREATED_ID, ...data }, ...(options.concurrent ?? []));
+      return { id: CREATED_ID, optionIndex: data.optionIndex };
     }),
+    delete: vi.fn(async ({ where }: { where: { id: number } }) => {
+      const index = votesTable.findIndex((row) => row.id === where.id);
+      return index < 0 ? null : votesTable.splice(index, 1)[0];
+    }),
+    deleteMany: vi.fn(),
   };
   const users = {
     findOne: vi.fn(async ({ where }: { where: { id: number } }) => USERS.find((u) => u.id === where.id) ?? null),
@@ -284,7 +307,7 @@ function setup(options: {
     forbidden: vi.fn(),
     send: vi.fn(),
   };
-  return { controller, ctx, pollFindOne, votes };
+  return { controller, ctx, pollFindOne, votes, votesTable };
 }
 
 /** The ctx error spies a handler must NOT have touched on the happy path. */
@@ -451,6 +474,85 @@ describe("vote", () => {
     const { controller, ctx, votes } = setup({ id: OPEN.id, user: EDITOR_OUTSIDE });
     await controller.vote(ctx);
     expect(votes.create).toHaveBeenCalledOnce();
+  });
+});
+
+describe("vote: one ballot per voter after a parallel race", () => {
+  const ballotsOf = (table: StoredVoteRow[], poll: number, voter: number) =>
+    table.filter((row) => row.poll === poll && row.voter === voter).map((row) => row.id);
+
+  it("looks for the voter's rows of this poll after the insert and deletes nothing when it is the only one", async () => {
+    const { controller, ctx, votes, votesTable } = setup({ id: OPEN.id, user: ENGINEER });
+    await controller.vote(ctx);
+    expect(votes.findMany).toHaveBeenCalledWith({
+      where: { poll: OPEN.id, voter: ENGINEER.id },
+      select: ["id"],
+      orderBy: { id: "asc" },
+    });
+    expect(votes.create.mock.invocationCallOrder[0]).toBeLessThan(
+      votes.findMany.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(votes.delete).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith({ data: { id: CREATED_ID, optionIndex: 0 } });
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID]);
+  });
+
+  it("deletes the voter's later ballots and answers with its own, the first", async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      concurrent: [
+        { id: CREATED_ID + 3, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { id: CREATED_ID + 5, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: CREATED_ID + 3 } },
+      { where: { id: CREATED_ID + 5 } },
+    ]);
+    // Row by row through the entity manager, so the link rows go too.
+    expect(votes.deleteMany).not.toHaveBeenCalled();
+    for (const spy of errorSpies) expect(ctx[spy], spy).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith({ data: { id: CREATED_ID, optionIndex: 0 } });
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID]);
+  });
+
+  it('deletes its own ballot and answers "Already voted" when an earlier one landed first', async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      body: { optionIndex: 0 },
+      concurrent: [{ id: CREATED_ID - 7, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 }],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete).toHaveBeenCalledOnce();
+    expect(votes.delete).toHaveBeenCalledWith({ where: { id: CREATED_ID } });
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already voted");
+    expect(ctx.send).not.toHaveBeenCalled();
+    // The first ballot (option 1) is the one that stays and counts.
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID - 7]);
+  });
+
+  it("never touches other voters' ballots or the voter's ballots on other polls", async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      concurrent: [
+        { id: CREATED_ID - 1, poll: OPEN.id, voter: DESIGNER.id, optionIndex: 1 },
+        { id: CREATED_ID + 1, poll: OPEN.id, voter: DESIGNER.id, optionIndex: 1 },
+        { id: CREATED_ID - 2, poll: CLOSING.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledOnce();
+    expect(votesTable.map((row) => row.id).sort((a, b) => a - b)).toEqual([
+      CREATED_ID - 2,
+      CREATED_ID - 1,
+      CREATED_ID,
+      CREATED_ID + 1,
+    ]);
   });
 });
 

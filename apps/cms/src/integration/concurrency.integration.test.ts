@@ -15,10 +15,13 @@ import {
  * The races the code ACCEPTS (docs/architecture.md §7b, issue #16; no DB
  * unique constraint is possible, the user sits in a link table; DA04) are
  * pinned as what they are, so a change in behaviour shows up here:
- *   - poll vote (check-then-insert): parallel votes of ONE user may store
- *     more than one row; each stored row is one 200, every other answer is
- *     the 400 "Already voted", and once the race is over the next vote is
- *     refused. The results count one ballot per voter, the first one
+ *   - poll vote (check-then-insert): parallel votes of ONE user may all
+ *     insert a row. Each vote then deletes the voter's later rows for the
+ *     poll, keeping the first (lowest id), so exactly one row stays; the
+ *     request that inserted it answers 200, one whose row was a later one
+ *     the 400 "Already voted" (or 200, if it looked before the first row
+ *     was visible), and once the race is over the next vote is refused.
+ *     The results count one ballot per voter, the first one
  *     (utils/poll-ballots.ts), so a duplicate never counts;
  *   - RSVP upsert: parallel answers of one user may store duplicate rows;
  *     the summary and the capacity gate count only the newest row per user,
@@ -33,8 +36,8 @@ import {
  * Observed in the lane rehearsal (2026-09-28, 8 parallel requests): SQLite
  * serialises the requests and showed no race at all (1 stored vote, 1 RSVP
  * row, 1 seat at capacity 1); Postgres 16 stored 4-8 of 8 votes of the same
- * user (varies per run; until batch 8 all of them counted in the
- * results), 8 RSVP rows, and
+ * user (varies per run; before the batch 8 integration all of them stayed
+ * and counted in the results, now one stays), 8 RSVP rows, and
  * seated 5 of 5 at capacity 1. The assertions hold for every outcome in
  * between.
  */
@@ -68,26 +71,32 @@ describe.each(testEngines())("concurrent writes on %s", (engine) => {
       status: "published",
     });
 
-  it("parallel votes of one user: no 5xx, one 200 per stored row, then refused", async () => {
+  it("parallel votes of one user: no 5xx, one stored row whose vote answered 200, then refused", async () => {
     const poll = await createPoll("IT race: same voter");
     const responses = await Promise.all(
       Array.from({ length: PARALLEL }, () =>
-        t.api<{ error?: { message?: string } }>("member", `/api/polls/${poll.id}/vote`, {
-          json: { optionIndex: 1 },
-        }),
+        t.api<{ data?: { id?: number }; error?: { message?: string } }>(
+          "member",
+          `/api/polls/${poll.id}/vote`,
+          { json: { optionIndex: 1 } },
+        ),
       ),
     );
     expect(responses.filter(isServerError)).toEqual([]);
-    const accepted = responses.filter((res) => res.status === 200).length;
+    const accepted = responses.filter((res) => res.status === 200);
     const refused = responses.filter((res) => res.status === 400);
-    expect(accepted).toBeGreaterThanOrEqual(1);
-    expect(accepted + refused.length).toBe(PARALLEL);
+    expect(accepted.length).toBeGreaterThanOrEqual(1);
+    expect(accepted.length + refused.length).toBe(PARALLEL);
     for (const res of refused) expect(res.body.error?.message).toBe("Already voted");
 
-    const stored = await t.strapi.db.query("api::poll-vote.poll-vote").count({
+    // The cleanup after each insert leaves the voter's first row only, and
+    // the request that inserted it was answered 200.
+    const stored = (await t.strapi.db.query("api::poll-vote.poll-vote").findMany({
       where: { poll: poll.id, voter: t.fixtures.users.member.id },
-    });
-    expect(stored).toBe(accepted);
+      select: ["id", "optionIndex"],
+    })) as Row[];
+    expect(stored).toHaveLength(1);
+    expect(accepted.map((res) => res.body.data?.id)).toContain(stored[0]?.id);
 
     const results = await t.api<{ total: number; counts: number[]; myVoteIndex: number | null }>(
       "member",
@@ -99,10 +108,42 @@ describe.each(testEngines())("concurrent writes on %s", (engine) => {
     expect(later.status).toBe(400);
   });
 
+  it("parallel votes of one user for different options: the first stored ballot is the one that stays and counts", async () => {
+    const poll = await createPoll("IT race: same voter, two options");
+    const responses = await Promise.all(
+      Array.from({ length: PARALLEL }, (_, index) =>
+        t.api<{ data?: { id?: number; optionIndex?: number } }>(
+          "team_lead",
+          `/api/polls/${poll.id}/vote`,
+          { json: { optionIndex: index % 2 } },
+        ),
+      ),
+    );
+    expect(responses.filter(isServerError)).toEqual([]);
+    const stored = (await t.strapi.db.query("api::poll-vote.poll-vote").findMany({
+      where: { poll: poll.id, voter: t.fixtures.users.team_lead.id },
+      select: ["id", "optionIndex"],
+    })) as Row[];
+    expect(stored).toHaveLength(1);
+    const kept = responses.find((res) => res.status === 200 && res.body.data?.id === stored[0]?.id);
+    expect(kept?.body.data?.optionIndex).toBe(stored[0]?.optionIndex);
+
+    const results = await t.api<{ total: number; counts: number[]; myVoteIndex: number | null }>(
+      "team_lead",
+      `/api/polls/${poll.id}/results`,
+    );
+    const option = stored[0]?.optionIndex as number;
+    expect(results.body).toMatchObject({
+      total: 1,
+      counts: option === 0 ? [1, 0] : [0, 1],
+      myVoteIndex: option,
+    });
+  });
+
   it("stored duplicate ballots count once: the voter's first ballot wins", async () => {
-    // Duplicates as a race (or a release before the cleanup on the vote
-    // path) leaves them, written straight into the table like the seed
-    // does: the member's first ballot is option 0, the later ones option 1.
+    // Duplicates as a release before the cleanup on the vote path left
+    // them, written straight into the table like the seed does: the
+    // member's first ballot is option 0, the later ones option 1.
     const poll = await createPoll("IT race: stored duplicates");
     const votes = t.strapi.db.query("api::poll-vote.poll-vote");
     const { member, editor } = t.fixtures.users;

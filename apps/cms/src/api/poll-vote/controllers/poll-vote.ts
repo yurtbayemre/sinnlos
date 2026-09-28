@@ -33,11 +33,17 @@ import { isPollClosed } from "../../../utils/poll-close";
  *
  * One ballot per voter (utils/poll-ballots.ts): a vote cannot be changed, so
  * a voter's first accepted ballot (the row with the lowest id) is the one
- * the results count, whatever duplicates a parallel race stored.
+ * the results count, whatever duplicates a parallel race stored. The vote
+ * handler also deletes a voter's later rows right after its insert, so
+ * stored duplicates converge to that ballot.
  */
 
 interface OptionIndexRow {
   optionIndex?: unknown;
+}
+
+interface IdRow {
+  id: number;
 }
 
 const pollOptions = (options: unknown): unknown[] => (Array.isArray(options) ? options : []);
@@ -68,8 +74,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     if (isPollClosed(poll.closesAt)) return ctx.badRequest("Poll is closed");
 
     // Check-then-insert without a DB unique constraint (voter is a link-table
-    // relation): two truly parallel votes by one user can both land. Accepted
-    // race, as for acks and RSVPs (#16).
+    // relation, #16, DA04): truly parallel votes by one user can all pass
+    // this check and insert. The cleanup below collapses them.
     const votes = strapi.db.query("api::poll-vote.poll-vote");
     const existing = await votes.findOne({
       where: { poll: poll.id, voter: user.id },
@@ -77,9 +83,28 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     });
     if (existing) return ctx.badRequest("Already voted");
 
-    const vote = await votes.create({
+    const vote = (await votes.create({
       data: { poll: poll.id, optionIndex, voter: user.id },
-    });
+    })) as IdRow;
+
+    // Keep the voter's first ballot for this poll (the lowest id, the one the
+    // results count, utils/poll-ballots.ts) and delete the later ones. Every
+    // vote checks AFTER its own insert, so the one that checks last sees
+    // every row and leaves exactly one; the first ballot is never deleted
+    // here, so one always stays. The same pattern as the reaction create.
+    const mine = (await votes.findMany({
+      where: { poll: poll.id, voter: user.id },
+      select: ["id"],
+      orderBy: { id: "asc" },
+    })) as IdRow[];
+    const [first, ...later] = mine;
+    // One entity-manager delete per row, not deleteMany: the latter is a bare
+    // query-builder delete in @strapi/database 5.55.1 and would leave the
+    // poll and voter link rows behind.
+    for (const row of later) await votes.delete({ where: { id: row.id } });
+    // This request's ballot came second: it does not count, the answer a
+    // vote gets that finds the first ballot already there.
+    if (first && first.id !== vote.id) return ctx.badRequest("Already voted");
     return ctx.send({ data: vote });
   },
 
