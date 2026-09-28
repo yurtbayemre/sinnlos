@@ -24,7 +24,7 @@ import {
  * Both tests boot in their body: warm restarts on the schema of the first
  * boot (1.5-2.5 s measured), but a Strapi boot all the same, so they carry
  * an explicit budget above the 60 s test default (docs/architecture.md
- * §5.40 "Last-Timeouts", §5.65).
+ * §5.40 "Last-Timeouts", §5.58).
  */
 const RESTART_BUDGET = 120_000;
 
