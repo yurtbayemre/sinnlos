@@ -66,6 +66,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "utils/poll-access.ts": "loaders for the policy and the controller",
   "utils/poll-audience-backfill.ts": "boot backfill of `audience`, writes flags only",
   "utils/poll-audience-guard.ts": "write-time `audience` guard, writes flags only",
+  "utils/poll-ballots.ts":
+    "the results count (FX20), called by the results handler after canSeePoll; counts only, no voter",
   "utils/poll-department-delete.ts": "department delete hook, writes `audience` only",
   "utils/restricted-relations.ts": "FX05 guard: no source is trusted into polls",
 };
