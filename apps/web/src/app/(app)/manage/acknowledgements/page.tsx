@@ -14,11 +14,10 @@ import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { walkAllPages } from "@/lib/paginate";
-import { fetchAllAnnouncementAcks } from "@/lib/acknowledgements";
+import { fetchAnnouncementAckIndex } from "@/lib/acknowledgements";
 import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Acknowledgement } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -56,12 +55,11 @@ export default async function AcknowledgementReportPage() {
   ]);
 
   // admin_role bypasses both the acknowledgement-visibility and the
-  // announcement-visibility policy, so these return EVERY user's acks and
-  // EVERY announcement — the target audience is recomputed below instead
-  // of being handed to us by the API. Users come via the paginated
-  // directory helper. Like every strapi() read, all four are uncached
-  // (D-DC01).
-  const [announcementsResult, acksResult, usersResult, teamsResult] = await Promise.all([
+  // announcement-visibility policy, so these return EVERY announcement and
+  // (below) every user's acks of them — the target audience is recomputed
+  // instead of being handed to us by the API. Users come via the paginated
+  // directory helper. Like every strapi() read, all are uncached (D-DC01).
+  const [announcementsResult, usersResult, teamsResult] = await Promise.all([
     tryFetch(
       () =>
         // audienceRoles populate needs `plugin::users-permissions.role.find`,
@@ -79,7 +77,6 @@ export default async function AcknowledgementReportPage() {
         ),
       "ack-report",
     ),
-    tryFetch(() => fetchAllAnnouncementAcks(), "ack-report"),
     tryFetch(
       () =>
         // role is populated with the users-permissions role.find grant;
@@ -99,13 +96,23 @@ export default async function AcknowledgementReportPage() {
     tryFetch(() => fetchAllTeams(), "ack-report"),
   ]);
 
-  const anyFailed =
-    announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed;
   // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
   // unfiltered, and it keeps the report honest if the query ever changes.
   const announcements = (announcementsResult.data?.data ?? []).filter((a) => a.requiresAck);
-  const acks = (acksResult.data?.acks ?? []) as Acknowledgement[];
+  // The acks of exactly the listed announcements, fetched per chunk of
+  // documentIds with a cap per chunk (FX32; the old global walk stopped at
+  // 2000 acks and left the report "incomplete" for good).
+  const acksResult = await tryFetch(
+    () =>
+      fetchAnnouncementAckIndex(
+        announcements.map((a) => a.documentId).filter((id): id is string => !!id),
+      ),
+    "ack-report",
+  );
+  const acks = acksResult.data?.index ?? new Map<string, Set<number>>();
   const users = usersResult.data?.users ?? [];
+  const anyFailed =
+    announcementsResult.failed || acksResult.failed || usersResult.failed || teamsResult.failed;
 
   // Only unblocked users whose role can actually read announcements count
   // toward the report (lib/ack-report.ts).

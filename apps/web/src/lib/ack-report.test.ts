@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildAckReportRows,
   eligibleReportUsers,
+  indexAcks,
   reportCompleteness,
   type ReportAck,
   type ReportAnnouncement,
@@ -111,7 +112,7 @@ describe("buildAckReportRows", () => {
   ) =>
     buildAckReportRows({
       announcements,
-      acks,
+      acks: indexAcks(acks),
       eligibleUsers: eligibleReportUsers(users, READERS),
       userTeamIds: flags.teams ?? new Map(),
       usersUnknown: flags.usersUnknown ?? false,
@@ -212,5 +213,34 @@ describe("buildAckReportRows", () => {
     const list = [announcement(3), announcement(1), announcement(2)];
     expect(rows(list, [], [user(1)]).map((r) => r.announcement.id)).toEqual([3, 1, 2]);
     expect(rows([], [], [user(1)])).toEqual([]);
+  });
+});
+
+describe("indexAcks (FX32)", () => {
+  it("maps each announcement documentId to the set of users who confirmed it", () => {
+    const index = indexAcks([
+      { targetDocumentId: "a", user: { id: 1 } },
+      { targetDocumentId: "a", user: { id: 2 } },
+      { targetDocumentId: "a", user: { id: 1 } }, // duplicate row
+      { targetDocumentId: "b", user: { id: 2 } },
+      { targetDocumentId: "b", user: null }, // deleted account
+      { targetDocumentId: "c" }, // user not populated
+    ]);
+    expect([...index].map(([doc, users]) => [doc, [...users]])).toEqual([
+      ["a", [1, 2]],
+      ["b", [2]],
+    ]);
+  });
+
+  it("adds into a given index, keeping its empty entries", () => {
+    const index = new Map([
+      ["a", new Set([1])],
+      ["z", new Set<number>()],
+    ]);
+    expect(indexAcks([{ targetDocumentId: "a", user: { id: 3 } }], index)).toBe(index);
+    expect([...index].map(([doc, users]) => [doc, [...users]])).toEqual([
+      ["a", [1, 3]],
+      ["z", []],
+    ]);
   });
 });

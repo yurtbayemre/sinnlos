@@ -96,6 +96,26 @@ export interface ReportAck {
   user?: { id: number } | null;
 }
 
+/** Announcement documentId → ids of the users who acknowledged it. */
+export type AckIndex = Map<string, Set<number>>;
+
+/**
+ * Index ack rows by their announcement's documentId (FX32), into `index`
+ * when given. A Set dedupes duplicate ack rows (the accepted
+ * check-then-insert race in the CMS); a row without a user (deleted
+ * account) or without a target confirms nothing.
+ */
+export function indexAcks(rows: ReportAck[], index: AckIndex = new Map()): AckIndex {
+  for (const row of rows) {
+    const userId = row.user?.id;
+    if (typeof row.targetDocumentId !== "string" || typeof userId !== "number") continue;
+    const users = index.get(row.targetDocumentId);
+    if (users) users.add(userId);
+    else index.set(row.targetDocumentId, new Set([userId]));
+  }
+  return index;
+}
+
 export interface AckReportRow<U extends ReportUser, A extends ReportAnnouncement> {
   announcement: A;
   /** The users the announcement targets (meaningless when targetUnknown). */
@@ -130,13 +150,12 @@ export function eligibleReportUsers<U extends ReportUser>(
  * `team` criterion do not (fail closed, see reportCompleteness). The
  * audience is exactly the targeting the CMS policy enforces on reads
  * (lib/audience.ts): the report runs as admin_role, which bypasses that
- * policy, so it recomputes it. Acks match on the stable documentId (numeric
- * ids change on every re-publish); a Set dedupes duplicate ack rows (the
- * accepted check-then-insert race in the CMS).
+ * policy, so it recomputes it. Acks come indexed by the announcement's
+ * stable documentId (numeric ids change on every re-publish, see indexAcks).
  */
 export function buildAckReportRows<U extends ReportUser, A extends ReportAnnouncement>(input: {
   announcements: A[];
-  acks: ReportAck[];
+  acks: AckIndex;
   /** Already narrowed with eligibleReportUsers. */
   eligibleUsers: U[];
   userTeamIds: Map<number, number[]>;
@@ -144,6 +163,7 @@ export function buildAckReportRows<U extends ReportUser, A extends ReportAnnounc
   teamsUnknown: boolean;
 }): AckReportRow<U, A>[] {
   const { announcements, acks, eligibleUsers, userTeamIds, usersUnknown, teamsUnknown } = input;
+  const none: ReadonlySet<number> = new Set();
   return announcements.map((a) => {
     const targetUnknown = usersUnknown || (a.team?.id != null && teamsUnknown);
     const targetUsers = eligibleUsers.filter((u) =>
@@ -153,12 +173,7 @@ export function buildAckReportRows<U extends ReportUser, A extends ReportAnnounc
         teamIds: userTeamIds.get(u.id) ?? [],
       }),
     );
-    const ackedUserIds = new Set(
-      acks
-        .filter((k) => k.targetDocumentId === a.documentId)
-        .map((k) => k.user?.id)
-        .filter((id): id is number => id != null),
-    );
+    const ackedUserIds = (a.documentId ? acks.get(a.documentId) : undefined) ?? none;
     const openUsers = targetUsers.filter((u) => !ackedUserIds.has(u.id));
     const ackedCount = targetUsers.length - openUsers.length;
     const pct = targetUsers.length > 0 ? Math.round((ackedCount / targetUsers.length) * 100) : 0;
