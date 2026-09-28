@@ -554,7 +554,8 @@ Read-side filters:
   `{targetType, targetDocumentId}` with `$eq` (the web's comment sections)
   checks only that target; any other filter resolves every visible target.
   Both judge a target by its published row when it has one, so a wiki space
-  widened only in an unpublished draft opens no threads
+  widened or a page moved only in an unpublished draft, or a published page
+  whose space was never published, opens no threads
 - `training-visibility` — courses/lessons pinned to `status=published`;
   lessons only visible when their owning course is published (fail-closed);
   admin/editor bypass for draft preview (#29)

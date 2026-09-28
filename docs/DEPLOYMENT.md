@@ -952,8 +952,9 @@ is degraded while the new cms boots. For the manual production-safe sequence
 
 This release (branch `refactor/policy-primitives`, on `batch/8` `5f2eac0`)
 rebuilds the cms read and ownership policies on shared helpers. What each
-role can read and write is unchanged, except for the two defence-in-depth
-points at the end of this list:
+role can read and write is unchanged, except for one visible fix (wiki
+threads follow the published space) and one defence-in-depth point (callers
+without a user id), both at the end of this list:
 
 - **Policy primitives and factories (PL01, PL02).** One role check
   (`hasRole`), one way to add a policy's filter (`narrowFilters`, always
@@ -986,9 +987,15 @@ points at the end of this list:
   bind-parameter error, is the signal to change that policy.
 - **Wiki threads follow the published space.** Comment and reaction lists
   now judge a wiki page the way a single thread and the page itself are
-  judged: by its published row. A wiki space whose visibility was widened
-  only in an unpublished draft no longer shows that space's discussions to
-  the wider audience before the change is published.
+  judged: by its published row, or by its draft when it was never
+  published. The previous release showed a page's discussions in these
+  lists, while the page itself stayed hidden, in three cases that are now
+  closed: a wiki space whose visibility was widened only in an unpublished
+  draft, a page moved into a wider space only in its draft, and a
+  published page whose space was never published (its published row has
+  no space, its draft links the draft-only space). Depending on that
+  space's visibility, this reached up to every signed-in role, guest
+  included.
 - **Callers without a user id.** A request whose user carries no numeric
   id owns no row and reads like an anonymous one. users-permissions always
   sets one, so no real request is affected.
@@ -1026,15 +1033,19 @@ schema or data change), with the commands `infra/deploy.sh` prints.
 one comment-thread read ran 22 (announcement) or 24 (wiki page) SQL
 statements instead of 27, without loading every announcement and page; a
 wiki space widened only in its draft opened its page's thread before and
-does not now, on both the thread and the list; numeric id and documentId on
-comment delete, classified update and RSVP update answered exactly as
-before (owner 204/200, stranger 403, missing or malformed id 404); past the
-engine limit (33,000 visible wiki pages on SQLite and 66,000 on Postgres in
-the rehearsal, 32,767 and 65,536 in the integration test) the previous
-release answered the member's page list and full comment list with a 500
-and this one answers an empty 200 with the log line, while a single thread
-and the admin list were unaffected. The guard already answers the page list
-empty from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
+does not now, on both the thread and the list, and a wider review matrix
+(6,084 read keys per engine) changed only by losing threads of the three
+wiki cases above; numeric id and documentId on comment delete, classified
+update and RSVP update answered exactly as before (owner 204/200, stranger
+403; a missing or malformed id is 403 at the ownership policy for
+non-bypass callers on classified update/delete and RSVP update, and 404
+for the bypass roles and for comment delete); past the engine limit
+(33,000 visible wiki pages on SQLite and 66,000 on Postgres in the
+rehearsal, 32,767 and 65,536 in the integration test) the previous release
+answered the member's page list and full comment list with a 500 and this
+one answers an empty 200 with the log line, while a single thread and the
+admin list were unaffected. The guard already answers the page list empty
+from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
 comment list from one page fewer plus an announcement, where the previous
 release still served the rows.
 
