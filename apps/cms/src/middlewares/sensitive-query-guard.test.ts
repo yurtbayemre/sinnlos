@@ -45,7 +45,7 @@ import { NOT_BLOCKED } from "../utils/visible-ids";
  *   4. the schema-private user fields are no `_q` target for any role:
  *      `searchable: false`, checked on the installed @strapi/database; and
  *      db.query still filters, reads and writes them (the digest cron,
- *      /api/me and the sign-in extension rely on that),
+ *      /api/me and the Entra exchange rely on that),
  *   5. config/middlewares.ts registers the guard (and the other global
  *      guards): every other test here would still pass if a merge dropped
  *      that line, and the boot check only fires once the factory runs.
@@ -325,6 +325,12 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
     "digestMentions",
     "digestKudos",
     "digestFrequency",
+    // The Entra identity columns (batch 9, D-ENTRA-01): only the Entra
+    // exchange and /api/me read them, through db.query.
+    "entraTenantId",
+    "roleSource",
+    "entraAppliedRole",
+    "entraManagerOid",
   ] as const;
 
   it.each(PRIVATE)("%s is private in the user schema", (field) => {
@@ -345,7 +351,15 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
       return isPrivate === true && (isString(type) || isNumber(type));
     });
     expect(privateSearchTargets.map(([name]) => name)).toEqual(
-      expect.arrayContaining(["microsoftOid", "digestFrequency", "resetPasswordToken"]),
+      expect.arrayContaining([
+        "microsoftOid",
+        "digestFrequency",
+        "resetPasswordToken",
+        "entraTenantId",
+        "roleSource",
+        "entraAppliedRole",
+        "entraManagerOid",
+      ]),
     );
     for (const [name, attribute] of privateSearchTargets) {
       expect({ name, searchable: (attribute as { searchable?: boolean }).searchable }).toEqual({
@@ -378,6 +392,10 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
         digestMentions: true,
         digestKudos: false,
         digestFrequency: "daily",
+        entraTenantId: "tenant-ada",
+        roleSource: "entra",
+        entraAppliedRole: "member",
+        entraManagerOid: "oid-manager",
         blocked: false,
       },
       user(),
@@ -445,8 +463,8 @@ describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
     // FX22 made the digest opt-ins, digestFrequency and microsoftOid
     // private; the digest cron (send-digests.ts candidates: NOT_BLOCKED AND
     // an opt-in, these columns selected, lastDigestAt written back after a
-    // send), /api/me (profile.ts) and the sign-in extension read and write
-    // them through db.query, which applies no `private` rule. The
+    // send), /api/me (profile.ts) and the Entra exchange (entra/provision.ts)
+    // read and write them through db.query, which applies no `private` rule. The
     // candidate read below has the digest's where and select.
     engine = await openUserEngine();
     const users = engine.db.query(USER_UID) as EngineQuery & {

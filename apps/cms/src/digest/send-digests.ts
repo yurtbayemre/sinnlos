@@ -54,16 +54,17 @@
  * with nothing louder than a daily warning.
  */
 
+import { GUEST, hasRole, type RoleType } from "../bootstrap/roles";
 import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
 import { instantMsOrNull } from "../utils/time";
 import {
   ANNOUNCEMENT_FIND,
   KUDOS_FIND,
   NOT_BLOCKED,
-  audienceScopeOf,
   holdsGrant,
   loadAllUserScopes,
   loadRoleGrants,
+  toAudienceScope,
   type RecipientScope,
   type RoleGrants,
   type ScopeStrapi,
@@ -85,7 +86,7 @@ const KUDOS_UID = "api::kudos.kudos";
 export const DIGEST_ANNOUNCEMENT_CAP = 25;
 
 /** Role types that never get a digest, whatever up_permissions says (FX19). */
-export const DIGEST_EXCLUDED_ROLE_TYPES: readonly string[] = ["guest"];
+export const DIGEST_EXCLUDED_ROLE_TYPES: readonly RoleType[] = [GUEST];
 
 /**
  * `skip`: intentionally dark (kill switch / no SMTP) → info log.
@@ -169,7 +170,7 @@ export function isDigestRecipient(
   announcementReaders: ReadonlySet<number>,
 ): scope is RecipientScope {
   if (!scope) return false;
-  if (scope.roleType != null && DIGEST_EXCLUDED_ROLE_TYPES.includes(scope.roleType)) return false;
+  if (hasRole({ role: { type: scope.roleType } }, DIGEST_EXCLUDED_ROLE_TYPES)) return false;
   return holdsGrant(scope, announcementReaders);
 }
 
@@ -195,7 +196,7 @@ export function selectAnnouncements(
   },
 ): { items: DigestContent["announcements"]; more: number } {
   const sinceMs = options.since.getTime();
-  const audience = audienceScopeOf(options.scope);
+  const audience = toAudienceScope(options.scope);
   const seen = new Set<string>();
   const selected: DigestAnnouncement[] = [];
   for (const row of rows) {

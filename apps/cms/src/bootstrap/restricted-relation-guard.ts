@@ -1,4 +1,3 @@
-import { hasAudienceBypass } from "../utils/announcement-audience";
 import {
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
@@ -6,6 +5,7 @@ import {
   type RelationModel,
 } from "../utils/restricted-relations";
 import { pickContentApiQueryParams, type RouteWithQuerySchema } from "../utils/rest-query-params";
+import { MODERATORS, hasRole } from "./roles";
 
 type SanitizeQuery = (
   query: Record<string, unknown>,
@@ -83,7 +83,7 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
     getModel: (uid: string) => strapi.getModel(uid),
     rules: RESTRICTED_RELATION_TARGETS,
   };
-  const bypass = () => hasAudienceBypass(strapi.requestContext.get()?.state?.user?.role?.type);
+  const bypass = () => hasRole(strapi.requestContext.get()?.state?.user, MODERATORS);
 
   sanitize.query = async (query, schema, sanitizeOptions) => {
     const sanitized = pickContentApiQueryParams(

@@ -301,6 +301,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::department.department.update": ["global::can-edit-department"],
   "api::department.department.delete": ADMIN_OR_EDITOR,
 
+  // D-ENTRA-01: auth:false, authenticated in the controller (shared secret +
+  // ID-token verification), 404 while ENTRA_ENABLED is not '1'.
+  "api::entra-auth.entra-auth.exchange": [],
+
   "api::document.document.find": ["global::document-visibility"],
   "api::document.document.findOne": ["global::document-visibility"],
   "api::document.document.create": ADMIN_OR_EDITOR,
@@ -577,9 +581,20 @@ describe("route → policy matrix (S01)", async () => {
     expect(actual).toEqual(GOLDEN);
   });
 
-  it("no route disables authentication (auth: false)", () => {
+  it("only the Entra exchange disables authentication (auth: false)", () => {
+    // The exchange authenticates its caller itself (shared secret + the
+    // cms's own ID-token verification, src/entra/provision.ts); a caller
+    // has no Strapi JWT before it. Any other auth:false route is a hole.
     const publicRoutes = [...routes.values()].filter((e) => e.config.auth === false);
-    expect(publicRoutes.map((e) => e.action)).toEqual([]);
+    expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual(
+      [
+        {
+          action: "api::entra-auth.entra-auth.exchange",
+          method: "POST",
+          path: "/auth/entra/exchange",
+        },
+      ],
+    );
   });
 
   describe("(b) every granted core action is gated", () => {
@@ -617,8 +632,18 @@ describe("route → policy matrix (S01)", async () => {
       expect(customActions.filter((a) => !isOverridden(a))).toEqual([]);
     });
 
+    const isPublicRoute = (action: string) => routes.get(action)?.config.auth === false;
+
     it("every custom handler has a CUSTOM_ACTION_GRANTS key (else it 403s for everyone)", () => {
-      expect(customActions.filter((a) => !(a in CUSTOM_ACTION_GRANTS))).toEqual([]);
+      expect(
+        customActions.filter((a) => !(a in CUSTOM_ACTION_GRANTS) && !isPublicRoute(a)),
+      ).toEqual([]);
+    });
+
+    it("an auth:false route has no grant (users-permissions never checks one there)", () => {
+      const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
+      expect(customActions.filter((a) => isPublicRoute(a) && granted.has(a))).toEqual([]);
+      expect(customActions.filter(isPublicRoute)).toEqual(["api::entra-auth.entra-auth.exchange"]);
     });
 
     it("every api:: CUSTOM_ACTION_GRANTS key has a custom route (no dead grants)", () => {
@@ -704,8 +729,22 @@ describe("route → policy matrix (S01)", async () => {
       expect(overlaps).toEqual([]);
     });
 
-    it("only names roles of the matrix", () => {
-      expect(Object.keys(REVOKED_PERMISSIONS).filter((r) => !matrixRoles.includes(r))).toEqual([]);
+    it("only names roles of the matrix, plus the anonymous `public` role", () => {
+      expect(Object.keys(REVOKED_PERMISSIONS).filter((r) => !matrixRoles.includes(r))).toEqual([
+        "public",
+      ]);
+    });
+
+    it("D-ENTRA-01: revokes the anonymous forgot/reset-password flow", () => {
+      // Neither users-permissions action checks the account's provider, so
+      // the e-mail reset would give an Entra-only account a local password.
+      expect(REVOKED_PERMISSIONS.public).toEqual([
+        "plugin::users-permissions.auth.forgotPassword",
+        "plugin::users-permissions.auth.resetPassword",
+      ]);
+      const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
+      for (const action of REVOKED_PERMISSIONS.public)
+        expect(granted.has(action), action).toBe(false);
     });
   });
 

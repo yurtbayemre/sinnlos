@@ -1,6 +1,6 @@
 # Sinnlos Intranet
 
-A self-hosted company intranet with **Microsoft Entra ID (Azure AD)** single sign-on,
+A self-hosted company intranet with optional **Microsoft Entra ID (Azure AD)** single sign-on,
 all gated by **user roles**: announcements with **live comments & reactions**
 (SSE push — other sessions see new comments in under two seconds, with
 polling as the fallback) and **read confirmation** for mandatory news, a
@@ -17,12 +17,12 @@ anonymous search analytics, and an **English/German UI**
 
 - **Backend** — Strapi v5 (Postgres) at `apps/cms`
 - **Frontend** — Next.js 16 + TailwindCSS + shadcn/ui at `apps/web`
-- **Auth** — Auth.js (NextAuth v5) Microsoft Entra ID provider → Strapi
-  users-permissions Microsoft provider → Strapi JWT, or local e-mail +
-  password against Strapi. **Microsoft sign-in is unavailable on the current
-  release** (Strapi 5.55.1 rejects the token exchange, see
-  [step 4](#4-run-locally-two-terminals)); local sign-in is the supported
-  path until the planned Entra redesign ships.
+- **Auth** — local e-mail + password against Strapi (the default), and
+  optionally **Microsoft Entra ID** (`ENTRA_ENABLED=1`, off by default):
+  Auth.js signs the user in against one tenant, the cms verifies the ID
+  token itself and provisions the user with the role of their Entra app
+  role (`POST /api/auth/entra/exchange`), then issues a Strapi JWT (see
+  [step 2](#2-optional-microsoft-entra-id-sign-in)).
 - **Deployment** — Docker Compose in `infra/`. Local full-stack runs use the
   bundled **Caddy** (automatic TLS); the live production host (srv-prod-01)
   fronts the same compose stack with **Traefik** via a second override file.
@@ -57,9 +57,10 @@ anonymous search analytics, and an **English/German UI**
   end-of-life)
 - pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Docker + Docker Compose (for production / full stack run)
-- A Microsoft Entra ID tenant with permission to register an app — only for
-  Microsoft sign-in, which the current release cannot offer (use
-  [standalone mode](#running-without-microsoft-standalone-mode))
+- A Microsoft Entra ID tenant in which you may register an app and grant
+  admin consent — only for the optional Microsoft sign-in
+  ([step 2](#2-optional-microsoft-entra-id-sign-in)); without it the intranet
+  runs in [standalone mode](#running-without-microsoft-standalone-mode)
 
 ## 1. Install dependencies
 
@@ -70,54 +71,65 @@ pnpm install
 Run it again after pulling a change to the lockfile (hardening batch 2, for
 example, brought vitest 4.1.11 and Vite 7.3.6 for the root test tooling).
 
-## 2. Register the Microsoft Entra ID app
+## 2. Optional: Microsoft Entra ID sign-in
 
-> **Skip this on the current release.** Strapi 5.51+ (the cms runs 5.55.1)
-> answers the web's server-side Microsoft token exchange with a 400, so
-> Microsoft sign-in cannot complete. Use
-> [standalone mode](#running-without-microsoft-standalone-mode) until the
-> planned Entra redesign ships; the steps below stay for reference.
+Skip this for local sign-in only: Microsoft sign-in is **off unless
+`ENTRA_ENABLED=1`** is set for both apps, and every `MS_*` / `ENTRA_*` value
+is ignored until then. The full runbook, including a dry-run on staging
+before roles are applied, is in
+[docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"](./docs/DEPLOYMENT.md#microsoft-entra-id-sign-in).
 
-In the Azure portal:
+In the Microsoft Entra admin center:
 
-1. **App registrations → New registration**
-2. **Redirect URIs (Web)** — add both:
-   - `http://localhost:3000/api/auth/callback/microsoft-entra-id` (Next.js / Auth.js)
-   - `http://localhost:1337/api/connect/microsoft/callback` (Strapi's own
-     OAuth redirect; not used by the current flow, which exchanges the
-     access token server-side, but harmless to register)
-   - Add the production equivalents once you have a domain.
-3. **Front-channel logout URL** (on the same *Authentication* blade,
-   further down the page): `http://localhost:3000/sign-in`. This is
-   required for federated sign-out — without it, clicking "Sign out"
-   still ends the local session but leaves the Microsoft tenant cookie
-   intact, and the next login skips the password prompt. Add the
-   production equivalent alongside it.
-4. **API permissions (delegated)**:
-   - `openid`, `profile`, `email`, `User.Read`
-   - `GroupMember.Read.All` (needed to map Entra groups → intranet roles)
-   - Grant admin consent.
-5. **Certificates & secrets** → new client secret, copy the value.
+1. **App registrations → New registration**, *Accounts in this organizational
+   directory only* (single tenant). Note the **Directory (tenant) ID** and the
+   **Application (client) ID** (both GUIDs; `common`, `organizations` and
+   `consumers` are refused).
+2. **Authentication → Web redirect URI**:
+   `http://localhost:3000/api/auth/callback/microsoft-entra-id` (and the
+   production equivalent). No cms redirect URI: Strapi's own Microsoft
+   provider is not used and stays disabled.
+3. **A second Web redirect URI** (same blade): `http://localhost:3000/sign-in`
+   (and the production equivalent). "Sign out" ends the intranet session and
+   the Microsoft session and returns there; Microsoft only redirects to a
+   registered redirect URI, so without it users end on Microsoft's "signed
+   out" page. Leave the *Front-channel logout URL* empty: single sign-out is
+   not implemented.
+4. **API permissions (delegated)**: `openid`, `profile`, `email`, `User.Read`;
+   `User.Read.All` only with `ENTRA_SYNC_MANAGER=1`. Grant admin consent.
+   (`GroupMember.Read.All` is not needed.)
+5. **App roles** (allowed member types *Users/Groups*): `Intranet.Admin`,
+   `Intranet.Editor`, `Intranet.DepartmentHead`, `Intranet.TeamLead`,
+   `Intranet.Member`, `Intranet.Guest`. In **Enterprise applications**, set
+   *Assignment required* = Yes and assign the roles to users or security
+   groups (see [Role flow](#role-flow-sign-in--strapi--frontend)).
+6. **Certificates & secrets** → new client secret.
+
+Then set, in `infra/.env` (or both apps' env files locally): `ENTRA_ENABLED=1`,
+`MS_TENANT_ID`, `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and a shared
+`ENTRA_EXCHANGE_SECRET` (`openssl rand -hex 32`). With `ENTRA_ENABLED=1` an
+invalid value refuses the start of both apps, naming the variable, and
+`infra/deploy.sh --check` refuses the deploy first. Local sign-in is off next
+to Microsoft unless `AUTH_LOCAL_ENABLED=1` (break-glass).
 
 ## Running without Microsoft (standalone mode)
 
-No Entra ID tenant? Leave every `MS_*` / `AUTH_MICROSOFT_*` variable
-empty and local email+password sign-in (against Strapi) activates
-automatically on both apps — no extra configuration needed. **On the
-current release this is the supported sign-in path** (Microsoft sign-in
-cannot complete, see step 2). Accounts
+No Entra ID tenant? Leave `ENTRA_ENABLED` unset (the default) and local
+email+password sign-in (against Strapi) is on in both apps — no extra
+configuration needed; leftover `MS_*` / `AUTH_MICROSOFT_*` values are
+ignored. Accounts
 are created in the Strapi admin (**Content Manager → User**) or via
 self-registration when `LOCAL_REGISTRATION=1` is set in **both**
 `apps/web/.env.local` and `apps/cms/.env`. New local users get the
 `member` role; users manage their own display name, job title and phone
 on **/profile**; password resets are done by an admin in the Strapi
-panel (no SMTP required).
+panel (no SMTP required; the anonymous forgot/reset-password endpoints are
+revoked).
 
 Quick start:
 
-1. Copy the env files (step 3 below) and leave all `MS_*` /
-   `AUTH_MICROSOFT_*` values empty; generate `AUTH_SECRET` and the
-   Strapi secrets as usual.
+1. Copy the env files (step 3 below) and leave `ENTRA_ENABLED` unset;
+   generate `AUTH_SECRET` and the Strapi secrets as usual.
 2. Optionally set `LOCAL_REGISTRATION=1` in both apps to enable the
    self-registration form on the sign-in page.
 3. Start Strapi and Next.js (step 4 below).
@@ -132,10 +144,10 @@ Quick start:
    themselves if you enabled registration.
 5. Sign in at http://localhost:3000/sign-in with email + password.
 
-To offer local sign-in *alongside* Microsoft, keep the Entra vars set
-and add `AUTH_LOCAL_ENABLED=1` to `apps/web/.env.local`. On the current
-release that only adds a Microsoft button that cannot complete, and
-`infra/deploy.sh` refuses to deploy with a real app registration configured.
+To offer local sign-in *alongside* Microsoft, set `AUTH_LOCAL_ENABLED=1`
+for both apps next to `ENTRA_ENABLED=1` (the cms mirrors it into its own
+e-mail provider switch, so without it the cms refuses password sign-ins
+too).
 
 ## 3. Environment files
 
@@ -145,10 +157,9 @@ cp apps/web/.env.example apps/web/.env.local
 cp infra/.env.example infra/.env
 ```
 
-Leave `MS_CLIENT_ID`, `MS_CLIENT_SECRET` and `MS_TENANT_ID` empty on the
-current release (Microsoft sign-in cannot complete, see step 2), and
-generate strong secrets for every empty secret in `infra/.env` and every
-`toBeModified` placeholder in `apps/cms/.env`:
+Leave the commented Entra block as it is unless you set up Microsoft sign-in
+(step 2), and generate strong secrets for every empty secret in
+`infra/.env` and every `toBeModified` placeholder in `apps/cms/.env`:
 
 ```bash
 openssl rand -base64 32   # APP_KEYS (two, comma-separated), *_SALT, *_SECRET, ENCRYPTION_KEY
@@ -171,16 +182,25 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   in development it only warns. `infra/deploy.sh --check` runs the same
   check (plus `AUTH_SECRET`) against `infra/.env` before anything is
   deployed.
-- **`JWT_SECRET`** signs the users' 7-day Strapi JWTs. Rotating it signs
-  everyone out once. An instance upgraded from a release before 2026-09-24
+- **`JWT_SECRET`** signs the users' Strapi JWTs (7 days for local sign-ins,
+  `ENTRA_SESSION_TTL`, 12 hours by default, for Microsoft sign-ins; the web
+  session ends with the JWT). Rotating it signs everyone out once. An instance upgraded from a release before 2026-09-24
   must rotate it once (see
   [Upgrading from a release before 2026-09-24](./docs/DEPLOYMENT.md#upgrading-from-a-release-before-2026-09-24));
   `infra/deploy.sh` refuses to deploy until it is rotated. The Strapi 5.55.1
   upgrade needs no rotation: tokens issued by 5.49 stay valid.
-- **`MS_*`:** leave empty on the current release. `infra/deploy.sh` refuses
-  to deploy while `MS_CLIENT_ID` (a real app registration) and
-  `MS_CLIENT_SECRET` are set, because Microsoft sign-in cannot complete on
-  Strapi 5.51+ ([upgrade notes](./docs/DEPLOYMENT.md#upgrading-to-the-strapi-5551-release-2026-09-25)).
+- **Microsoft Entra ID** (optional): `ENTRA_ENABLED=1` is the only switch;
+  without it every `MS_*` / `ENTRA_*` value is ignored (`infra/deploy.sh`
+  notes leftover `MS_*` lines, and warns when they are a real app
+  registration whose Microsoft sign-in goes off with the deploy). With it,
+  `MS_TENANT_ID`,
+  `MS_CLIENT_ID` (GUIDs), `MS_CLIENT_SECRET` (web only) and
+  `ENTRA_EXCHANGE_SECRET` (32+ characters, same for both apps) are required;
+  `ENTRA_SYNC_MODE` (`dry-run` by default, then `on`), `ENTRA_DEFAULT_ROLE`,
+  `ENTRA_GROUP_ROLES`, `ENTRA_SYNC_DEPARTMENT`, `ENTRA_SYNC_MANAGER`,
+  `ENTRA_SESSION_TTL` and `AUTH_LOCAL_ENABLED` tune it. An invalid value
+  refuses the start of both apps and the deploy
+  ([table](./docs/DEPLOYMENT.md#microsoft-entra-id-sign-in)).
 - **Time zones** ([datetime contract](./docs/DEPLOYMENT.md#310-datetime-contract)):
   `APP_TIME_ZONE` (IANA name, default `Europe/Berlin`) is the business zone
   of every date the apps compute: "today", classified expiry, birthdays and
@@ -231,9 +251,10 @@ pnpm --filter @sinnlos/web dev
 
 - Strapi admin: http://localhost:1337/admin (see admin bootstrap note below)
 - Web: http://localhost:3000 — redirects to `/sign-in`; sign in with e-mail +
-  password ([standalone mode](#running-without-microsoft-standalone-mode)).
-  With Microsoft configured, the web logs an `[auth]` error at boot: the
-  Microsoft button cannot complete a sign-in on the current release.
+  password ([standalone mode](#running-without-microsoft-standalone-mode)),
+  or with Microsoft when `ENTRA_ENABLED=1` is set for both apps (step 2).
+  The cms logs one `[entra] disabled` or `[entra] enabled tenant=… mode=…`
+  line at boot.
 
 > **Strapi admin account:** the first time Strapi boots with an empty
 > `admin_users` table, `src/index.ts → bootstrap()` will auto-create a
@@ -266,35 +287,38 @@ pnpm --filter @sinnlos/web dev
 > `strapi content-types:list` and the other `…:list` commands) now need the
 > configured database to be reachable as well.
 
-On first sign-in, Strapi will:
+With `ENTRA_ENABLED=1`, a Microsoft sign-in works like this (D-ENTRA-01,
+[`apps/cms/src/entra/`](./apps/cms/src/entra)):
 
-1. Create a user keyed on the Entra ID `oid` claim.
-2. Fetch `displayName`, `jobTitle`, `department` from Microsoft Graph `/me`.
-3. Look up the user's Entra groups via Graph `/me/memberOf`.
-4. Map the first matching group to a Strapi role (see
-   [`apps/cms/config/ms-role-map.ts`](./apps/cms/config/ms-role-map.ts)).
+1. Auth.js runs the OIDC code flow against the one configured tenant
+   (scope `openid profile email User.Read`, no refresh token) and refuses an
+   account of any other tenant.
+2. The web POSTs the ID token and the Graph access token to the cms
+   (`POST /api/auth/entra/exchange`, authenticated by
+   `ENTRA_EXCHANGE_SECRET`). The cms verifies the ID token itself (the
+   tenant's signing keys, issuer, audience, issued at most 10 minutes ago
+   plus 5 minutes of clock tolerance, so effectively 15), reads
+   Graph `/me`, and finds the user by **tenant id + object id** (never by
+   e-mail), backed by a unique database index.
+3. A new user is created on the spot (username `entra-<object id>`,
+   independent of `LOCAL_REGISTRATION`) with the role of their Entra **app
+   role**; a local account with the same e-mail is never taken over (the
+   sign-in answers "account exists" until an admin who has confirmed the
+   account is theirs binds it).
+4. Display name, job title, phone and office location are synced from Entra
+   at every sign-in and are read-only on `/profile`; the department
+   (`ENTRA_SYNC_DEPARTMENT=1`) and the manager (`ENTRA_SYNC_MANAGER=1`)
+   optionally too.
+5. The cms issues a Strapi JWT for `ENTRA_SESSION_TTL` (12 hours by default);
+   the web session ends with it, and every sign-in re-syncs roles and
+   profile. Each exchange writes one `[entra] user=… result=…` audit line
+   without tokens.
 
-> **Current state (verified 2026-09-25):** Microsoft sign-in does not
-> complete at all on the current release. Strapi's users-permissions 5.51+
-> (the cms runs 5.55.1) finishes `/api/auth/microsoft/callback` only from
-> its own OAuth session, so it answers the web's server-side access-token
-> exchange with a 400 and the sign-in fails closed. The web logs an
-> `[auth]` error at boot when Microsoft is configured, and `infra/deploy.sh`
-> refuses to deploy with a real app registration. An instance that relies
-> on Microsoft sign-in stays on the previous (Strapi 5.49) release.
->
-> Even on Strapi 5.49 steps 2–4 do not run. The users-permissions extension
-> patches the controller factory instead of the controller, so it is inert.
-> Strapi's built-in callback keys a new Microsoft user on the lowercased
-> `userPrincipalName` (as e-mail), creates it only while
-> `LOCAL_REGISTRATION=1` is set on the cms, and gives it the default
-> `member` role. Roles are then assigned in the Strapi admin. A redesign of
-> the Entra sign-in replaces this path; it is not part of the current
-> release. See [Role flow](#role-flow-sign-in--strapi--frontend).
+See [Role flow](#role-flow-sign-in--strapi--frontend) for the roles.
 
 ## 5. Content model + roles
 
-Strapi ships 22 collection types plus one routes-only API
+Strapi ships 22 collection types plus two routes-only APIs
 (`apps/cms/src/api/`):
 
 | Type | Purpose |
@@ -310,7 +334,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
 | **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
-| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), and a vote removes the voter's later rows right after it is stored (parallel votes) |
+| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes; `:id` is the poll's documentId (what the web sends; it survives a republish) or its published row id. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), in one SQL statement with a GROUP BY, and a vote removes the voter's later rows right after it is stored (parallel votes) |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
 | **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
@@ -321,7 +345,8 @@ Strapi ships 22 collection types plus one routes-only API
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only. For a user bound to Microsoft Entra those four fields belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields` (the form shows them read-only) |
+| *entra-auth* | Routes-only API (no schema): `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (`auth: false`; authenticated by `ENTRA_EXCHANGE_SECRET` and the cms's own ID-token check). 404 while `ENTRA_ENABLED` is not `1` |
 
 **Draft & publish.** announcement, course, document, event, lesson, poll,
 quick-link, wiki-space, wiki-page and wiki-revision keep Strapi's draft &
@@ -418,8 +443,13 @@ the same rules module): polls are **hidden from guests** (role type exactly
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart; paired with its inverse
 `directReports`, which the person page shows as *Direct reports*), the
-schema-`private` `microsoftOid` (read only by the sign-in extension; like
-`digestFrequency` also `searchable: false`, so no `_q` finds it), and the
+schema-`private` Entra columns `microsoftOid` and `entraTenantId` (the
+identity of a Microsoft user; an admin sets both, lower-case, to bind an
+existing account once its owner is confirmed), `roleSource` (`entra` |
+`manual`, empty = manual: who owns the role), `entraAppliedRole` and
+`entraManagerOid` (all read only by the
+Entra exchange; like `digestFrequency` also `searchable: false`, so no `_q`
+finds them), and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
 **opt-in** (maintained via `/api/me`, never exposed through user reads) and
 only surface — without the year of birth — in the celebrations feed when
@@ -550,7 +580,12 @@ Read-side filters:
   filter; pins `status=published`
 - `comment-target-visibility` — comment/reaction reads filtered to targets
   the caller may see (#28; the create counterpart lives in the controllers
-  via `isTargetVisible`)
+  via `isTargetVisible`). A read that pins exactly one
+  `{targetType, targetDocumentId}` with `$eq` (the web's comment sections)
+  checks only that target; any other filter resolves every visible target.
+  Both judge a target by its published row when it has one, so a wiki space
+  widened or a page moved only in an unpublished draft, or a published page
+  whose space was never published, opens no threads
 - `training-visibility` — courses/lessons pinned to `status=published`;
   lessons only visible when their owning course is published (fail-closed);
   admin/editor bypass for draft preview (#29)
@@ -561,13 +596,37 @@ Read-side filters:
 The read-side policies share helpers in `apps/cms/src/utils/`:
 `policy-query.ts` provides `getMutableQuery` (policies must mutate the real
 Koa `request.query` — `policyContext.query` is a copy the core controllers
-never read) and `restrictiveIdFilter` (an empty id allow-list is injected as
-`{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an empty
-`$in: []`, which would fail **open**), and `forcePublishedStatus` (after the
-`admin_role`/`editor` bypass: pins `status=published` and drops the
+never read), `narrowFilters` (a policy's clause is always `$and`-composed
+with the client filter, never spread-merged, so a client filter can only
+narrow the result) and `restrictiveIdFilter` (an empty id allow-list is
+injected as `{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an
+empty `$in: []`, which would fail **open**), `boundedIdFilter` (the same for
+a list longer than the guard admits — one SQL statement binds at most 65535
+parameters on Postgres and 32766 on SQLite, and the guard keeps 1000 of
+them as headroom for the rest of the statement: the policy answers with
+nothing and logs a `[policy]` error line; past the engine limit that
+replaces a 500, and in the headroom window just below it the list is now
+empty where it used to be served. It covers the loaders that bind only an
+id list: wiki pages and revisions, lessons and the comment and reaction
+wiki anchors. The announcement, document, quick-link, poll, wiki-space and
+team loaders read whole tables with `populate` and still fail with a 500
+past the engine limit, with no data returned and no `[policy]` line; see
+[architecture.md §5.63](./docs/architecture.md)), and
+`forcePublishedStatus` (after the `admin_role`/`editor` bypass: pins
+`status=published` and drops the
 publication-cohort keys `publicationFilter`/`hasPublishedVersion` and the
 v4 `publicationState`, so a reader can neither fetch drafts nor learn which
-published entries have pending edits). `visible-ids.ts` (`loadUserScope`,
+published entries have pending edits). `policy-factories.ts` builds the
+policies from those steps, so each policy file only states its rules:
+`ownRowsFilter` (own rows: acknowledgements, notifications, lesson
+progress, RSVPs), `visibleIdsPolicy` (ids resolved server-side:
+announcements, documents, quick links, wiki, polls, lessons) and
+`ownerGate` (write/delete only by the row's owner: classifieds, RSVPs,
+notifications, reactions); it also holds `findByRef`, the id lookup the
+ownership gates and the classified, comment and RSVP controllers share. The
+role check everywhere is `hasRole(user, roles)` from `bootstrap/roles.ts`
+(exact role types; a caller without a numeric user id owns nothing).
+`visible-ids.ts` (`loadUserScope`, read once per request and user;
 `visibleWikiSpaceIds`) resolves per-user wiki-space visibility,
 `target-visibility.ts` (`visibleTargetAnchors`, `isTargetVisible`) decides
 comment/reaction target visibility for #28, and
@@ -578,8 +637,8 @@ the Strapi admin panel have no such context).
 
 Every custom handler and policy that looks an entry up by an id from the
 request (a route `:id`, or ids in a request body) checks it first with
-`apps/cms/src/utils/entry-id.ts` (poll vote/results take the row id only,
-through `parseRowId`): a positive row id within the int4
+`apps/cms/src/utils/entry-id.ts` (poll vote/results take either form,
+the documentId from the web): a positive row id within the int4
 range, or a documentId in the shape Strapi generates (the FX07 write policies keep
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
@@ -640,9 +699,9 @@ Strapi admin applies on the user's next page load, without a new sign-in:
 ┌─────────────────────────────────────────────────────────────────┐
 │  1. Sign-in (web/src/auth.ts, Auth.js)                          │
 │     local:     POST /api/auth/local → Strapi JWT                │
-│     Microsoft: Entra access token →                             │
-│                /api/auth/microsoft/callback → Strapi JWT        │
-│                (Strapi 5.51+ answers 400: unavailable for now)  │
+│     Microsoft: ID token + Graph token (ENTRA_ENABLED=1) →       │
+│                POST /api/auth/entra/exchange → Strapi JWT       │
+│                (the cms verifies, provisions, sets the role)    │
 │     The JWT stays in the encrypted session cookie only          │
 │     (never on /api/auth/session); the session ends when         │
 │     that JWT expires                                            │
@@ -666,31 +725,39 @@ Strapi admin applies on the user's next page load, without a new sign-in:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**Entra ID group → Strapi role** (configured in
-[`apps/cms/config/ms-role-map.ts`](./apps/cms/config/ms-role-map.ts)):
+**Microsoft Entra ID → Strapi role** (only with `ENTRA_ENABLED=1`;
+[`apps/cms/src/entra/roles.ts`](./apps/cms/src/entra/roles.ts)). The app
+roles come from the signed ID token; the highest privilege wins:
 
-| Microsoft group    | Strapi `role.type`             |
-| ------------------ | ------------------------------ |
-| `Intranet-Admins`  | `admin_role`                   |
-| `Intranet-Editors` | `editor`                       |
-| `Department-Heads` | `department_head`              |
-| `Team-Leads`       | `team_lead`                    |
-| *(no match)*       | `member`  ← `DEFAULT_ROLE`     |
-| *(manual only)*    | `guest`                        |
+| Entra app role (or `ENTRA_GROUP_ROLES` group) | Strapi `role.type` |
+| --- | --- |
+| `Intranet.Admin` | `admin_role` |
+| `Intranet.Editor` | `editor` |
+| `Intranet.DepartmentHead` | `department_head` |
+| `Intranet.TeamLead` | `team_lead` |
+| `Intranet.Member` | `member` |
+| `Intranet.Guest` | `guest` |
+| *(tenant member, no match)* | `ENTRA_DEFAULT_ROLE`: `member` (default), `guest` or refused (`deny`) |
+| *(B2B guest, no match)* | refused |
 
-> This mapping is configured but **not applied**: Microsoft sign-in is
-> unavailable on the current release (Strapi 5.55.1), and on Strapi 5.49 the
-> users-permissions extension that would run it was inert (see the note
-> under [step 4](#4-run-locally-two-terminals)). Microsoft users keep the
-> default `member` role until an admin changes it in the Strapi admin.
-> The planned Entra redesign takes roles from Entra app roles instead.
+`ENTRA_GROUP_ROLES` (optional, `<roleType>:<groupObjectId>,…`, at most 20
+groups) adds group **object ids** checked through Graph
+`/me/checkMemberGroups`, for nested groups or tenants without Entra ID P1;
+group names are never matched. Who owns a user's role is stored per user
+(`roleSource`): users the sign-in created are `entra` and follow Entra at
+every sign-in; every account that existed before, and every account whose
+role an admin changes in the Strapi admin, is `manual` and keeps its role.
+A Graph failure never changes a role. `ENTRA_SYNC_MODE=dry-run` (the
+default) only logs what Entra would change and creates new users as
+`member` at most; `on` applies it.
 
-`guest` has no group mapping — only an admin can assign it in Strapi.
+`guest` is otherwise assigned by an admin in Strapi.
 `authenticated` is the users-permissions plugin's built-in role. The
-bootstrap forces `default_role = member` on every boot, so new local and
-Microsoft users start as `member`; `authenticated` only applies to accounts
-an admin (or an older version) put there. Its permissions mirror
-`member`-level read access so the dashboard still works for such accounts.
+bootstrap forces `default_role = member` on every boot, so new local users
+start as `member`, and the Entra sign-in creates its users with an intranet
+role; `authenticated` only applies to accounts an admin (or an older
+version) put there. Its permissions mirror `member`-level read access so the
+dashboard still works for such accounts.
 
 **Strapi role capabilities** (REST API permissions seeded by
 `PERMISSION_MATRIX` in `apps/cms/src/bootstrap/permission-matrix.ts`, further gated by the policies
@@ -836,7 +903,12 @@ Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
 departments, the guest-access fields), so an admin or editor outside a
 poll's departments, and a guest on a poll without guest voting, see its
-results with the vote buttons disabled.
+results with the vote buttons disabled. The page and the card address each
+poll by its documentId, so a republish while the page is open does not
+break the vote, unless it changed the options: the card also sends the
+answer text it showed, and when a reorder or replacement moved that text
+the cms refuses the vote ("Poll options changed") and the card reloads,
+instead of recording whatever answer now sits at that position.
 
 The marketplace detail/edit pages show the edit/delete controls to the ad's
 owner and to `admin_role` (editors can still delete through the API, but the
@@ -866,7 +938,8 @@ self-hosted box works with one command:
 ```bash
 cd infra
 cp .env.example .env
-# fill in DOMAIN and the secrets; leave MS_* empty on the current release
+# fill in DOMAIN and the secrets; leave the Entra block commented out unless
+# you set up Microsoft sign-in (step 2)
 docker compose up -d --build
 ```
 
@@ -1017,8 +1090,11 @@ Safety nets for refactors (roadmap S03–S06, S09):
   or names a `global::` middleware without its file in `src/middlewares`.
 - `infra/contracts.test.ts` pins what the cms and the web both state: the
   announcement audience rule, the YouTube parser, comment anchors, schema
-  enums against the web unions and constants, relation pairs, and the web
-  role sets against the permission matrix. Known gaps are listed in the file
+  enums against the web unions and constants (the live channel pattern from
+  `apps/web/src/lib/live-contract.ts`), relation pairs, and the web
+  role sets against the permission matrix. The live contract itself (event,
+  frame and channel shapes of the SSE pipeline) is one file kept
+  byte-identical in both apps (`apps/web/src/lib/live-contract-mirror.test.ts`). Known gaps are listed in the file
   and asserted as they are, so closing one means removing its entry. A web
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
@@ -1052,8 +1128,13 @@ Safety nets for refactors (roadmap S03–S06, S09):
       (author, department, space, …)
 - [ ] Next.js dashboard at `:3000` shows stat cards and empty states
 - [ ] Local sign-in (e-mail + password) completes and returns to the
-      dashboard with your display name in the topbar (Microsoft sign-in is
-      unavailable on the current release)
+      dashboard with your display name in the topbar
+- [ ] Without `ENTRA_ENABLED=1`: no Microsoft button, the cms logs
+      `[entra] disabled`, and `POST /api/auth/entra/exchange` answers 404
+- [ ] With `ENTRA_ENABLED=1` (a test tenant): the Microsoft sign-in returns
+      to the dashboard, the cms logs one `[entra] user=… result=created`
+      line, the profile shows name, job title, phone and office as
+      read-only, and sign-out goes through Microsoft back to `/sign-in`
 - [ ] Editing a wiki page as a non-author member is blocked (403)
 - [ ] Through the API, a team lead can change their team's description, and
       a payload with `members` (or any other field outside the write
@@ -1077,7 +1158,9 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two
-      seconds without a reload (SSE) — or run `infra/live-smoke.sh`
+      seconds without a reload (SSE) — or run `infra/live-smoke.sh`; on
+      `/announcements` the network panel shows one `POST /live/subscribe`
+      for all cards, and a comment on one card refreshes that card only
 - [ ] `/training` lists published courses; on a `quizGate` course the
       completion button stays locked until every quiz answer is correct;
       `/manage/training` shows the completion report (admin)

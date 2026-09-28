@@ -35,6 +35,14 @@ type Row = Record<string, unknown>;
 
 /** Columns that must never leave /api/me for ANY user. */
 const SECRET_KEYS = ["password", "resetPasswordToken", "confirmationToken"];
+/** The Entra identity and role-ownership columns (D-ENTRA-01): never in /api/me. */
+const ENTRA_COLUMNS = [
+  "microsoftOid",
+  "entraTenantId",
+  "roleSource",
+  "entraAppliedRole",
+  "entraManagerOid",
+];
 /** Columns that are the caller's own business only. */
 const FOREIGN_PRIVATE_KEYS = [...SECRET_KEYS, "birthday", "birthdayVisible", "lastDigestAt"];
 
@@ -145,8 +153,8 @@ interface UpdateArgs {
  * a relation populate of `true` returns the FULL target row (private columns
  * included); `{ select: [...] }` returns only those columns.
  */
-function stubStrapi(opts: { manager?: Row | null } = {}) {
-  const row = selfRow();
+function stubStrapi(opts: { manager?: Row | null; self?: Row } = {}) {
+  const row = { ...selfRow(), ...opts.self };
   const manager = opts.manager === undefined ? MANAGER_ROW : opts.manager;
   const findOneCalls: FindOneArgs[] = [];
   const updateCalls: UpdateArgs[] = [];
@@ -217,7 +225,12 @@ const caller = (roleType?: string | null) => ({
 });
 
 const RELATION_KEYS = ["role", "department", "avatar", "manager"];
-const ALLOWED_TOP_LEVEL = new Set<string>([...SELF_PROFILE_FIELDS, ...RELATION_KEYS]);
+const ALLOWED_TOP_LEVEL = new Set<string>([
+  ...SELF_PROFILE_FIELDS,
+  ...RELATION_KEYS,
+  // Computed (D-ENTRA-01): which fields the form must not offer.
+  "entraManagedFields",
+]);
 
 describe("GET /api/me (FX02 allowlist)", () => {
   let stub: ReturnType<typeof stubStrapi>;
@@ -627,6 +640,80 @@ describe("normalizeProfileText", () => {
   });
 });
 
+describe("Entra-owned profile fields (D-ENTRA-01)", () => {
+  const TENANT = "11111111-2222-4333-8444-555555555555";
+  const MANAGED = ["displayName", "jobTitle", "phone", "officeLocation"];
+  const bound: Row = {
+    entraTenantId: TENANT,
+    microsoftOid: "0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b",
+    roleSource: "entra",
+    entraAppliedRole: "member",
+    entraManagerOid: "5a5a5a5a-6b6b-4c7c-8d8d-9e9e9e9e9e9e",
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("GET lists the managed fields for a bound user, none for everyone else, and no Entra column", async () => {
+    for (const [self, expected] of [
+      [bound, MANAGED],
+      [{}, []],
+      [{ entraTenantId: null, microsoftOid: "legacy-oid" }, []],
+      [{ entraTenantId: "" }, []],
+    ] as const) {
+      vi.stubGlobal("strapi", stubStrapi({ self: { ...self } }).strapi);
+      const { ctx, sent } = makeCtx(caller("member"));
+      await profile.me(ctx);
+      expect(sent()!.entraManagedFields).toEqual(expected);
+      for (const key of ENTRA_COLUMNS) expect(sent()).not.toHaveProperty(key);
+    }
+  });
+
+  it("PUT drops the Entra-owned fields of a bound user and writes the rest", async () => {
+    const stub = stubStrapi({ self: bound });
+    vi.stubGlobal("strapi", stub.strapi);
+    const { ctx, sent } = makeCtx(caller("member"), {
+      data: {
+        displayName: "Self-chosen",
+        jobTitle: "Self-promoted",
+        phone: "+1 555",
+        officeLocation: "Moon",
+        locale: "de",
+        birthdayVisible: "on",
+      },
+    });
+    await profile.updateMe(ctx);
+    expect(stub.updateCalls).toEqual([
+      { where: { id: 1 }, data: { locale: "de", birthdayVisible: true } },
+    ]);
+    expect(sent()).toMatchObject({
+      displayName: "Sam Chen",
+      jobTitle: "Engineer",
+      locale: "de",
+      entraManagedFields: MANAGED,
+    });
+  });
+
+  it("PUT with only Entra-owned fields writes nothing and answers the profile", async () => {
+    const stub = stubStrapi({ self: bound });
+    vi.stubGlobal("strapi", stub.strapi);
+    const { ctx, sent } = makeCtx(caller("member"), { data: { displayName: "", jobTitle: "" } });
+    await profile.updateMe(ctx);
+    expect(stub.updateCalls).toEqual([]);
+    expect(sent()).toMatchObject({ displayName: "Sam Chen", entraManagedFields: MANAGED });
+  });
+
+  it("PUT keeps every field editable for a local (unbound) user", async () => {
+    const stub = stubStrapi({ self: { microsoftOid: "legacy-oid" } });
+    vi.stubGlobal("strapi", stub.strapi);
+    await profile.updateMe(
+      makeCtx(caller("member"), { data: { displayName: "Sam C.", phone: "1" } }).ctx,
+    );
+    expect(stub.updateCalls[0].data).toEqual({ displayName: "Sam C.", phone: "1" });
+  });
+});
+
 describe("toSelfProfile / toManagerSummary", () => {
   it("never invents keys that the row does not carry", () => {
     expect(toSelfProfile({ id: 1, username: "a" })).toEqual({ id: 1, username: "a" });
@@ -656,9 +743,11 @@ describe("toSelfProfile / toManagerSummary", () => {
     expect(Object.keys(reduced).sort()).toEqual([...MANAGER_SUMMARY_FIELDS].sort());
   });
 
-  it("allowlists never name a secret column", () => {
+  it("allowlists never name a secret column or an Entra column", () => {
     for (const list of [SELF_PROFILE_FIELDS, MANAGER_SUMMARY_FIELDS, MANAGER_CONTACT_FIELDS]) {
-      for (const key of SECRET_KEYS) expect(list as readonly string[]).not.toContain(key);
+      for (const key of [...SECRET_KEYS, ...ENTRA_COLUMNS]) {
+        expect(list as readonly string[]).not.toContain(key);
+      }
     }
     // Manager contact data is exactly the #10-gated kind.
     for (const key of MANAGER_CONTACT_FIELDS) {

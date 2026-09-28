@@ -18,6 +18,8 @@ type MeProfile = ProfileInitial & {
   username?: string | null;
   email?: string | null;
   avatar?: UserLite["avatar"];
+  /** Fields the Microsoft Entra sign-in owns (D-ENTRA-01); [] for local accounts. */
+  entraManagedFields?: string[] | null;
 };
 
 export async function generateMetadata() {
@@ -72,6 +74,7 @@ export default async function ProfilePage() {
             <CardContent>
               <ProfileForm
                 viewerRole={viewer.role}
+                managedFields={Array.isArray(me.entraManagedFields) ? me.entraManagedFields : []}
                 initial={{
                   displayName: me.displayName ?? null,
                   jobTitle: me.jobTitle ?? null,

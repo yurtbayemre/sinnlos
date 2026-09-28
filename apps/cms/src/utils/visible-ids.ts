@@ -103,26 +103,92 @@ interface SpaceRow {
  * so loading it and matching the lead in JS is cheaper
  * and less brittle than a relational `where` clause — same reasoning as
  * the id resolution above.
+ *
+ * Memoised per request (PL04): inside an HTTP request (`strapi.requestContext`
+ * holds the Koa context) the first call per user reads the database and
+ * every later call in the same request gets the same result, so a policy,
+ * a controller and a lifecycle of one request share two queries. The memo
+ * lives on the request context (a WeakMap entry, gone with the request),
+ * never across requests: a role, department or team change applies from
+ * the next request on, as before. Without a request context (cron,
+ * bootstrap, tests without one) every call reads. A failed read is not
+ * remembered. The result is frozen: callers only read it.
+ *
+ * `strapi` is the Strapi instance (a ScopeHost); it is typed `unknown` for
+ * the callers that hold it untyped (the acknowledgement controller).
  */
-export async function loadUserScope(strapi: any, userId: number): Promise<UserScope> {
+export async function loadUserScope(instance: unknown, userId: number): Promise<UserScope> {
+  const strapi = instance as ScopeHost;
+  const request = currentRequest(strapi);
+  if (!request) return readUserScope(strapi, userId);
+  let scopes = scopesByRequest.get(request);
+  if (!scopes) {
+    scopes = new Map();
+    scopesByRequest.set(request, scopes);
+  }
+  const known = scopes.get(userId);
+  if (known) return known;
+  const pending = readUserScope(strapi, userId);
+  scopes.set(userId, pending);
+  const memo = scopes;
+  pending.catch(() => {
+    if (memo.get(userId) === pending) memo.delete(userId);
+  });
+  return pending;
+}
+
+/** The slice of `strapi` loadUserScope reads; the request context is optional. */
+export interface ScopeHost {
+  db: {
+    query(uid: string): {
+      findOne(params: object): Promise<unknown>;
+      findMany(params: object): Promise<unknown>;
+    };
+  };
+  requestContext?: { get(): unknown };
+}
+
+/** Per request (the Koa context of strapi.requestContext) and user: the scope read. */
+const scopesByRequest = new WeakMap<object, Map<number, Promise<UserScope>>>();
+
+function currentRequest(strapi: ScopeHost): object | null {
+  const store =
+    typeof strapi.requestContext?.get === "function" ? strapi.requestContext.get() : undefined;
+  return typeof store === "object" && store !== null ? store : null;
+}
+
+interface ScopeUserRow {
+  role?: { id?: number } | null;
+  department?: { id?: number } | null;
+  teams?: { id: number }[] | null;
+}
+
+async function readUserScope(strapi: ScopeHost, userId: number): Promise<UserScope> {
   const [meFull, teams] = await Promise.all([
-    strapi.db.query("plugin::users-permissions.user").findOne({
+    strapi.db.query(USER_UID).findOne({
       where: { id: userId },
-      populate: { department: true, teams: true, role: true },
-    }),
-    strapi.db.query("api::team.team").findMany({
+      select: ["id"],
+      populate: {
+        department: { select: ["id"] },
+        teams: { select: ["id"] },
+        role: { select: ["id"] },
+      },
+    }) as Promise<ScopeUserRow | null>,
+    strapi.db.query(TEAM_UID).findMany({
       select: ["id"],
       populate: { lead: { select: ["id"] } },
     }),
   ]);
-  return {
+  return Object.freeze({
     roleId: meFull?.role?.id,
     departmentId: meFull?.department?.id,
-    teamIds: (meFull?.teams ?? []).map((t: { id: number }) => t.id),
-    ledTeamIds: (teams ?? [])
-      .filter((team: { lead?: { id: number } | null }) => team.lead?.id === userId)
-      .map((team: { id: number }) => team.id),
-  };
+    teamIds: Object.freeze((meFull?.teams ?? []).map((team) => team.id)) as number[],
+    ledTeamIds: Object.freeze(
+      rowsOf<TeamLeadRow>(teams)
+        .filter((team) => team.lead?.id === userId)
+        .map((team) => team.id),
+    ) as number[],
+  });
 }
 
 /** The slice of the Strapi instance the recipient loaders need. */
@@ -197,8 +263,19 @@ export async function loadAllUserScopes(strapi: ScopeStrapi): Promise<RecipientS
   }));
 }
 
-/** Announcement targeting reads a team as "member OR lead" (announcement-audience.ts). */
-export function audienceScopeOf(scope: UserScope): AudienceScope {
+/**
+ * The announcement audience scope of a user scope (PL01): announcement
+ * targeting reads a team as "member OR lead" (announcement-audience.ts),
+ * unlike wiki team spaces (membership only). An anonymous caller (null)
+ * stays null, which sees untargeted announcements only. The one mapping for
+ * the announcement read policy, the comment/reaction targets
+ * (target-visibility.ts re-exports it) and the fan-out and digest
+ * recipients.
+ */
+export function toAudienceScope(scope: UserScope): AudienceScope;
+export function toAudienceScope(scope: UserScope | null): AudienceScope | null;
+export function toAudienceScope(scope: UserScope | null): AudienceScope | null {
+  if (!scope) return null;
   return {
     roleId: scope.roleId,
     departmentId: scope.departmentId,
@@ -262,7 +339,7 @@ export function announcementRecipients(
 ): RecipientScope[] {
   return scopes.filter(
     (scope) =>
-      holdsGrant(scope, readers) && isAnnouncementVisible(announcement, audienceScopeOf(scope)),
+      holdsGrant(scope, readers) && isAnnouncementVisible(announcement, toAudienceScope(scope)),
   );
 }
 

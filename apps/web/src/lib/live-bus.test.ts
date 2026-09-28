@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getLiveBus, parseLiveEvents, type LiveFrame } from "./live-bus";
+import { MAX_EVENTS_PER_EMIT, channelFor } from "./live-contract";
 
 type TestConn = {
   id: string;
@@ -95,6 +96,24 @@ describe("delivery filtering", () => {
     expect(b.frames).toEqual([{ type: "announcements" }]);
   });
 
+  it("addresses content pings by the contract's channel name", () => {
+    const channel = channelFor({ targetType: "wiki-page", targetDocumentId: "doc-w" });
+    expect(channel).toBe("wiki-page:doc-w");
+    const conn = connect({ userId: 1, channels: [channel ?? ""] });
+    getLiveBus().publish([{ kind: "content", targetType: "wiki-page", targetDocumentId: "doc-w" }]);
+    expect(conn.frames).toEqual([{ type: "content", channel: "wiki-page:doc-w" }]);
+  });
+
+  it("delivers a content event without a valid channel to nobody", () => {
+    // Channel-shaped strings a connection could hold, but no valid target.
+    const conn = connect({ userId: 1, channels: ["event:abc", "announcement:a b"] });
+    getLiveBus().publish([
+      { kind: "content", targetType: "event", targetDocumentId: "abc" },
+      { kind: "content", targetType: "announcement", targetDocumentId: "a b" },
+    ]);
+    expect(conn.frames).toEqual([]);
+  });
+
   it("drops a connection whose enqueue fails", () => {
     connect({ userId: 1, broken: true });
     expect(getLiveBus().connectionCount()).toBe(1);
@@ -152,6 +171,12 @@ describe("parseLiveEvents", () => {
         ],
       }),
     ).toHaveLength(3);
+  });
+
+  it("accepts up to MAX_EVENTS_PER_EMIT events and refuses one more (the cms chunks, LF01)", () => {
+    const events = (n: number) => Array.from({ length: n }, () => ({ kind: "announcements" }));
+    expect(parseLiveEvents({ events: events(MAX_EVENTS_PER_EMIT) })).toHaveLength(1000);
+    expect(parseLiveEvents({ events: events(MAX_EVENTS_PER_EMIT + 1) })).toBeNull();
   });
 
   it.each([

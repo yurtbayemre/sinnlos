@@ -1,4 +1,4 @@
-import { parseRowId } from "./entry-id";
+import { parseEntryRef } from "./entry-id";
 import type { PollTargeting, PollViewer } from "./poll-audience";
 
 /**
@@ -89,23 +89,32 @@ export async function loadPollViewer(strapi: PollAccessHost, user: PollCaller): 
 }
 
 /**
- * The PUBLISHED poll row with numeric id `rawId`, or null: a malformed
- * id, a missing row and a draft row all answer null, so the controllers
- * give the same 404 for each (no existence oracle).
+ * The PUBLISHED row of the poll addressed by `rawRef`, or null: a malformed
+ * reference, a missing poll and a draft-only poll all answer null, so the
+ * controllers give the same 404 for each (no existence oracle).
  *
- * `rawId` (the route's `:id`) is read by `parseRowId` (utils/entry-id.ts):
- * a positive integer within int4, as a number or a canonical decimal
- * string. Anything else, a documentId included, answers null without a
- * query: Postgres fails an int4 lookup on such a value (a 500).
+ * `rawRef` (the route's `:id`) is read by `parseEntryRef`
+ * (utils/entry-id.ts, DA01):
+ *   - a documentId in Strapi's shape: the poll's stable address, which the
+ *     web sends. Publishing replaces the published row (delete + recreate,
+ *     a new row id), the documentId stays;
+ *   - a row id (a positive integer within int4, as a number or a canonical
+ *     decimal string): the numeric fallback for callers from before DA01.
+ *     A draft row's id finds nothing, as before.
+ * Anything else answers null without a query: Postgres fails an int4 lookup
+ * on a malformed id (a 500). Either way the lookup is pinned to the
+ * published row, and the caller works with that row's id (the vote stores
+ * it, the results count its votes; the poll-vote.poll link follows a
+ * republish to the new published row).
  */
 export async function loadPublishedPoll(
   strapi: PollAccessHost,
-  rawId: unknown,
+  rawRef: unknown,
 ): Promise<PublishedPoll | null> {
-  const id = parseRowId(rawId);
-  if (id === null) return null;
+  const ref = parseEntryRef(rawRef);
+  if (ref === null) return null;
   const row = await strapi.db.query(POLL_UID).findOne({
-    where: { id, publishedAt: { $notNull: true } },
+    where: { ...ref, publishedAt: { $notNull: true } },
     select: [
       "id",
       "documentId",

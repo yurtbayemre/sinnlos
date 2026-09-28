@@ -42,6 +42,17 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > per-role field allowlists (hardening item FX07, done):
 > `apps/cms/src/utils/write-allowlist.ts` is the one place to extend for any
 > frontend authoring, such as a web wiki editor (docs/architecture.md §5.34).
+>
+> **Status update (2026-09-28, batch 9, lane 4A):** the Entra redesign
+> (D-ENTRA-01) is implemented, not yet deployed: Microsoft sign-in is
+> optional (`ENTRA_ENABLED=1`, off by default); the cms verifies the ID token
+> itself at `POST /api/auth/entra/exchange`, provisions users just in time
+> with the role of their Entra app role, and syncs the Entra-owned profile
+> fields (read-only on `/profile`), optionally the department and the manager
+> (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"). The inert Graph
+> extension and the group-name role map are deleted; `GroupMember.Read.All`
+> is no longer needed (GitHub issue #20). The test against a real tenant
+> waits for the owner.
 
 ## Why this is cheaper than it looks
 
@@ -58,13 +69,14 @@ Three architectural decisions already made carry most of the weight:
    (until 2026-09-24 they were frozen onto the session at sign-in), so content
    targeting and personalization are filter expressions, not new
    infrastructure.
-3. **Graph enrichment hook** — `apps/cms/src/extensions/users-permissions/strapi-server.ts`
-   was meant to sync profile data from Microsoft Graph at sign-in, so the
-   directory and celebrations features could extend it instead of building
-   a sync job. (Verified 2026-09-24: on Strapi 5.49 this extension is inert —
-   it patches the controller factory, not the controller. Since the Strapi
-   5.55.1 upgrade Microsoft sign-in does not complete at all. A redesign of
-   the Entra sign-in replaces it.)
+3. **Graph sync at sign-in** — the Entra exchange
+   (`apps/cms/src/entra/provision.ts`, batch 9) syncs display name, job
+   title, phone, office location and, optionally, department and manager
+   from Microsoft Graph at every Microsoft sign-in, so directory and
+   celebrations features can extend it instead of building a sync job (pure
+   decisions in `apps/cms/src/entra/profile.ts`; only with
+   `ENTRA_ENABLED=1`). (Until batch 9 this was the inert
+   `extensions/users-permissions/strapi-server.ts`, deleted with D-ENTRA-01.)
 
 Every new content type follows the same recipe:
 schema in `apps/cms/src/api/<name>/`, permissions added to the

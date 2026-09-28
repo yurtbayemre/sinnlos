@@ -1,4 +1,4 @@
-import { hasAudienceBypass } from "./announcement-audience";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 
 /**
  * Poll department targeting and guest access: the single source of truth
@@ -9,9 +9,11 @@ import { hasAudienceBypass } from "./announcement-audience";
  * Pure functions, no Strapi runtime. The DB-facing side lives in
  * `poll-access.ts` (viewer and poll loaders); the `poll-visibility` read
  * policy and the vote/results controllers load their inputs there and
- * decide HERE. Every future poll consumer (DA01 documentId routing, WD04
- * batched results, notifications, digests, dashboard widgets) must decide
- * through this module as well.
+ * decide HERE (the documentId addressing of vote/results, DA01, too:
+ * loadPublishedPoll resolves the address, canSeePoll decides). Every future
+ * poll consumer (WD04 batched results, notifications, digests, dashboard
+ * widgets) must decide through this module as well, and joins the reviewed
+ * inventory in poll-exposure.test.ts.
  *
  * Rules, evaluated on the PUBLISHED poll row:
  *   - A poll is company-wide unless it is TARGETED. Company-wide polls are
@@ -159,12 +161,12 @@ export function canGuestsVoteOnPoll(poll: PollTargeting): boolean {
 
 /**
  * Read access (list, findOne, results): admin_role and editor see every
- * poll (exact role match, see hasAudienceBypass); everyone else needs the
+ * poll (exact role match, hasRole with MODERATORS); everyone else needs the
  * department audience, and a guest also needs `visibleToGuests`.
  */
 export function canSeePoll(poll: PollTargeting, viewer: PollViewer | null): boolean {
   if (viewer == null) return false;
-  if (hasAudienceBypass(viewer.roleType)) return true;
+  if (hasRole({ role: { type: viewer.roleType } }, MODERATORS)) return true;
   if (!isInPollAudience(poll, viewer)) return false;
   return !isGuestViewer(viewer) || isPollVisibleToGuests(poll);
 }

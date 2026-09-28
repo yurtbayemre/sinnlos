@@ -14,6 +14,7 @@ import {
   type CommentTargetType as WebCommentTargetType,
 } from "../apps/web/src/lib/comment-target";
 import { NO_GUEST_ACCESS, normalizeGuestAccess } from "../apps/web/src/lib/poll-guest-access";
+import { CHANNEL_RE, LIVE_TARGET_TYPES } from "../apps/web/src/lib/live-contract";
 import { ALL_EMOJIS } from "../apps/web/src/lib/reaction-summary";
 import * as webRoles from "../apps/web/src/lib/roles";
 import { youtubeVideoId as webYoutubeVideoId } from "../apps/web/src/lib/training-shared";
@@ -643,21 +644,19 @@ describe("schema.json enums = web unions and constants", () => {
   });
 
   it("the live CHANNEL_RE accepts exactly the comment/reaction target types with a real documentId", () => {
-    const [source] = sourceStrings(
-      "apps/web/src/app/live/subscribe/route.ts",
-      /const CHANNEL_RE = \/(.+)\/;/,
-      /^(.*)$/g,
-    );
-    const channel = new RegExp(source);
+    // The live contract (LF04, apps/web/src/lib/live-contract.ts, byte-
+    // identical in the cms) builds CHANNEL_RE from LIVE_TARGET_TYPES.
+    const channel = CHANNEL_RE;
     const documentId = "k3m9x0000000000000000000";
     for (const type of enumOf("api::comment.comment", "targetType")) {
       expect(channel.test(`${type}:${documentId}`), type).toBe(true);
     }
     // The alternation names the same types, nothing more.
-    const alternation = /^\^\(([^)]*)\)/.exec(source)?.[1] ?? "";
-    expect(sorted(alternation.split("|"))).toEqual(
+    expect(sorted([...LIVE_TARGET_TYPES])).toEqual(
       sorted(enumOf("api::reaction.reaction", "targetType")),
     );
+    const alternation = /^\^\(\?:([^)]*)\)/.exec(channel.source)?.[1] ?? "";
+    expect(sorted(alternation.split("|"))).toEqual(sorted([...LIVE_TARGET_TYPES]));
     for (const bad of [
       `document:${documentId}`,
       `announcement:`,

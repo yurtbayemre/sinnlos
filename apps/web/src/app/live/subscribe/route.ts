@@ -14,19 +14,21 @@
 import { getSession } from "@/lib/session";
 
 import { getLiveBus, liveEventsDisabled } from "@/lib/live-bus";
+import { MAX_SUBSCRIBE_LIST, isContentChannel, type ContentChannel } from "@/lib/live-contract";
 
 export const dynamic = "force-dynamic";
 
-/** `${targetType}:${targetDocumentId}` — target types from comment-target.ts. */
-const CHANNEL_RE = /^(announcement|wiki-page):[A-Za-z0-9_-]{1,64}$/;
-const MAX_LIST = 100;
-
-function parseChannels(value: unknown): string[] | null {
+/**
+ * A list of content channels ("<targetType>:<targetDocumentId>", the comment
+ * target types; lib/live-contract.ts). The global channels need no
+ * subscription and are refused like any other malformed entry.
+ */
+function parseChannels(value: unknown): ContentChannel[] | null {
   if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_LIST) return null;
-  const out: string[] = [];
+  if (!Array.isArray(value) || value.length > MAX_SUBSCRIBE_LIST) return null;
+  const out: ContentChannel[] = [];
   for (const ch of value) {
-    if (typeof ch !== "string" || !CHANNEL_RE.test(ch)) return null;
+    if (!isContentChannel(ch)) return null;
     out.push(ch);
   }
   return out;

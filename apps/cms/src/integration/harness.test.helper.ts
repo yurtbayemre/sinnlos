@@ -46,8 +46,10 @@
  *
  * HERMETIC:
  *   - the env of a boot is a fixed base (random secrets, no SMTP, no
- *     WEB_INTERNAL_URL, no Microsoft, no STRAPI_ADMIN_*, telemetry off) plus
- *     `env`; stop() restores process.env;
+ *     WEB_INTERNAL_URL, no Microsoft: every MS_* and ENTRA_* key and
+ *     AUTH_LOCAL_ENABLED unset, so Entra is off and local sign-in on; no
+ *     STRAPI_ADMIN_*, telemetry off) plus `env`; stop() restores
+ *     process.env;
  *   - no dotenv file refills that base: @strapi/core loads dotenv from
  *     ENV_PATH (default `<cwd>/.env`) once per process, at the first
  *     Strapi require, which boot() does after setting the env; ENV_PATH
@@ -427,6 +429,18 @@ function hermeticEnv(): Record<string, string | undefined> {
     MS_TENANT_ID: undefined,
     AUTH_MICROSOFT_ENTRA_ID_ID: undefined,
     AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
+    // The Entra sign-in (entra/config.ts parseEntraConfig reads each one): a
+    // shell with ENTRA_ENABLED=1 would otherwise refuse every boot (or run
+    // an Entra-only cms). The provisioning suite passes its own values.
+    ENTRA_ENABLED: undefined,
+    ENTRA_EXCHANGE_SECRET: undefined,
+    ENTRA_SYNC_MODE: undefined,
+    ENTRA_DEFAULT_ROLE: undefined,
+    ENTRA_GROUP_ROLES: undefined,
+    ENTRA_SYNC_DEPARTMENT: undefined,
+    ENTRA_SYNC_MANAGER: undefined,
+    ENTRA_SESSION_TTL: undefined,
+    AUTH_LOCAL_ENABLED: undefined,
     STRAPI_ADMIN_EMAIL: undefined,
     STRAPI_ADMIN_PASSWORD: undefined,
     STRAPI_ADMIN_FIRSTNAME: undefined,

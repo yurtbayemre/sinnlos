@@ -33,7 +33,7 @@ vi.mock("@/lib/config", () => ({
 vi.mock("next/navigation", () => ({ redirect: (url: string) => redirectMock(url) }));
 vi.stubGlobal("fetch", fetchMock);
 
-const { api, strapi } = await import("./strapi");
+const { api, pollRef, strapi } = await import("./strapi");
 const { demo } = await import("./demo");
 const { StrapiError } = await import("./strapi-error");
 
@@ -207,6 +207,26 @@ describe("api.polls (decision 02)", () => {
     // WD05: no poll consumer renders the author.
     expect(url).not.toContain("populate[author]");
   });
+
+  it("addresses a poll by its documentId, with the row id as the fallback (DA01)", () => {
+    expect(pollRef({ id: 7, documentId: "k3m9x0000000000000000001" })).toBe(
+      "k3m9x0000000000000000001",
+    );
+    // Not in Strapi's documentId shape (e.g. the demo fixtures) or missing.
+    expect(pollRef({ id: 7, documentId: "demo-poll-1" })).toBe(7);
+    expect(pollRef({ id: 7 })).toBe(7);
+  });
+
+  it("reads the results at the address it is given, encoded", async () => {
+    await api.polls.results("k3m9x0000000000000000001");
+    await api.polls.results(7);
+    await api.polls.results("a/b");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "http://cms.test/api/polls/k3m9x0000000000000000001/results",
+      "http://cms.test/api/polls/7/results",
+      "http://cms.test/api/polls/a%2Fb/results",
+    ]);
+  });
 });
 
 describe("strapi() — DEMO_MODE", () => {
@@ -215,5 +235,11 @@ describe("strapi() — DEMO_MODE", () => {
     await expect(strapi("/api/departments")).resolves.toEqual(demo("/api/departments"));
     expect(getStrapiTokenMock).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("serves poll results by documentId and by row id alike (DA01)", () => {
+    const byId = demo("/api/polls/2/results") as { poll: { id: number } };
+    expect(byId.poll.id).toBe(2);
+    expect(demo("/api/polls/demo-poll-2/results")).toEqual(byId);
   });
 });

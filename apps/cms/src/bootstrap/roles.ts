@@ -7,10 +7,11 @@
  * The type strings are a contract with the web (lib/roles.ts reads
  * `role.type` from /api/users/me): the admin role is `admin_role`, not
  * `admin`. Pure data, no Strapi runtime and no side effects at load time
- * (config/ms-role-map.ts imports it while the config loads).
+ * (entra/config.ts imports it, and register() loads that before the
+ * bootstrap).
  *
- * Extend, never rename or remove an export: the Entra sign-in (batch 4)
- * imports RoleType and ROLE_PRIVILEGE_ORDER.
+ * Extend, never rename or remove an export: the Entra sign-in
+ * (entra/roles.ts) imports RoleType and ROLE_PRIVILEGE_ORDER.
  */
 
 /**
@@ -57,6 +58,28 @@ export const STAFF_ROLES: readonly RoleType[] = ROLE_PRIVILEGE_ORDER.filter(
 /** True when `value` is one of the seeded role types. */
 export function isRoleType(value: unknown): value is RoleType {
   return (ROLE_PRIVILEGE_ORDER as readonly unknown[]).includes(value);
+}
+
+/**
+ * What a role check reads from a caller: users-permissions puts the user
+ * with its populated role on ctx.state.user (policies, controllers) and the
+ * request context.
+ */
+export interface RoleHolder {
+  role?: { type?: unknown } | null;
+}
+
+/**
+ * Whether the caller's role type is one of `roles` (PL01): the one role
+ * check the policies, controllers and utils decide bypasses by. The match
+ * is exact, so "Admin_role", " editor" or "admin" never pass, and a caller
+ * without a user, a role or a string role type holds none. `roles` is typed
+ * as RoleType, so a misspelt role fails `tsc`; a list from route config goes
+ * through isRoleType first.
+ */
+export function hasRole(user: RoleHolder | null | undefined, roles: readonly RoleType[]): boolean {
+  const type = user?.role?.type;
+  return typeof type === "string" && (roles as readonly string[]).includes(type);
 }
 
 export type RoleSeed = {

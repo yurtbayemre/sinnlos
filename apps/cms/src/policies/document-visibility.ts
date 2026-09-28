@@ -1,9 +1,5 @@
 import { MODERATORS } from "../bootstrap/roles";
-import {
-  forcePublishedStatus,
-  getMutableQuery,
-  restrictiveIdFilter,
-} from "../utils/policy-query";
+import { departmentScopedIds, visibleIdsPolicy } from "../utils/policy-factories";
 
 /**
  * Enforces document visibility on reads of the `document` content type,
@@ -14,9 +10,10 @@ import {
  *   - documents WITH departments set    → only authenticated users whose
  *                                         department is among them
  *
- * admin_role / editor bypass the filter entirely.
+ * admin_role / editor bypass the filter entirely (and keep draft reads).
  *
- * HOW IT WORKS — id-based filtering, no relation traversal:
+ * HOW IT WORKS — id-based filtering, no relation traversal
+ * (visibleIdsPolicy + departmentScopedIds, utils/policy-factories.ts):
  *   This policy used to write a `departments`-traversing filter onto
  *   `policyContext.query`, which was a silent no-op (Koa's `query` is a
  *   prototype getter that `createPolicyContext`'s `Object.assign` never
@@ -27,69 +24,22 @@ import {
  *   `throwRestrictedRelations` rejects any filter reaching through the
  *   `departments` relation.
  *
- *   Instead we resolve the set of visible primary-key ids SERVER-SIDE via
+ *   Instead the visible primary-key ids are resolved SERVER-SIDE via
  *   `strapi.db.query` (which bypasses both permission gating AND
- *   `throwRestrictedRelations`): load every document with its departments
- *   populated and decide membership in plain JS. The policy then injects a
- *   single non-relational `{ id: { $in: [...] } }` clause — `id` is a plain
- *   attribute, so the filter validates for every role and traverses
- *   nothing, no 400.
+ *   `throwRestrictedRelations`) and injected as a single non-relational
+ *   `{ id: { $in: [...] } }` clause, $and-composed with the client filter;
+ *   an empty list becomes `{ id: { $eq: -1 } }` (an empty `$in` would be
+ *   stripped by sanitizeQuery, fail-open).
  *
- * The clause is `$and`-wrapped with any incoming client filter so a
- * caller-supplied filter can only narrow the result set, never widen it. An
- * empty id list must NOT become `{ id: { $in: [] } }` — sanitizeQuery strips
- * empty array operands, which would drop the filter entirely (fail-open);
- * `restrictiveIdFilter` injects a scalar `{ id: { $eq: -1 } }` instead.
- *
- * Draft & publish note: `strapi.db.query` returns both draft and published
- * rows, so the id list is a superset spanning BOTH publication states.
- * Which of them the caller gets is decided by the client-supplied `status`
- * param, so the policy pins it to "published" — otherwise `?status=draft`
- * would hand unpublished documents to every role holding `document.find`
- * (incl. guest). See `forcePublishedStatus` for the full trap; admin_role /
- * editor keep draft access via the bypass above.
+ * Draft & publish note: the id list spans draft AND published rows, so the
+ * status is pinned to "published" — otherwise `?status=draft` would hand
+ * unpublished documents to every role holding `document.find` (incl.
+ * guest). See `forcePublishedStatus` for the full trap.
  */
-
-interface DocRow {
-  id: number;
-  departments?: { id: number }[];
-}
-
-export default async (policyContext: any, _config: unknown, { strapi }: any) => {
-  const user = policyContext.state?.user;
-
-  // admin_role / editor see everything, no filter needed.
-  if (user && MODERATORS.includes(user.role?.type)) return true;
-
-  let departmentId: number | undefined;
-  if (user) {
-    const meFull = await strapi.db.query("plugin::users-permissions.user").findOne({
-      where: { id: user.id },
-      populate: { department: true },
-    });
-    departmentId = meFull?.department?.id;
-  }
-
-  const docs: DocRow[] = await strapi.db.query("api::document.document").findMany({
-    select: ["id"],
-    populate: { departments: { select: ["id"] } },
-  });
-
-  const idList = docs
-    .filter((doc) => {
-      const depts = doc.departments ?? [];
-      // Company-wide (no departments) → visible to everyone.
-      if (depts.length === 0) return true;
-      // Department-scoped → only the owning department's members (never
-      // anonymous, who have no departmentId).
-      return departmentId != null && depts.some((d) => d.id === departmentId);
-    })
-    .map((doc) => doc.id);
-
-  const query = getMutableQuery(policyContext);
-  const idFilter = restrictiveIdFilter(idList);
-  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
-  forcePublishedStatus(query);
-
-  return true;
-};
+export default visibleIdsPolicy({
+  uid: "api::document.document",
+  bypass: MODERATORS,
+  anonymous: "filter",
+  pinPublished: true,
+  loadVisibleIds: departmentScopedIds,
+});

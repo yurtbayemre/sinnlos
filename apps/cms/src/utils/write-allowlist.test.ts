@@ -28,6 +28,8 @@ import {
   type WriteAllowlist,
   type WriteRule,
 } from "./write-allowlist";
+import { parseEntryRef } from "./entry-id";
+import { MALFORMED_ENTRY_IDS, MALFORMED_ROW_IDS } from "./entry-id.test.helper";
 
 /**
  * Field-level write allowlists (FX07), pure part: the relation input parser,
@@ -190,6 +192,35 @@ describe("targetRowWhere / hasTargetId (the write policies' target row)", () => 
     ]) {
       expect(targetRowWhere(idParam), idParam).toBeNull();
       expect(hasTargetId(idParam)).toBe(true);
+    }
+  });
+
+  // PL01: parseEntryRef (every other id-addressed policy and controller)
+  // and targetRowWhere share the row-id rule; the documentId rule of
+  // targetRowWhere is wider (see its doc comment).
+  it("reads every id parseEntryRef accepts the same way (parseEntryRef ⊆ targetRowWhere)", () => {
+    for (const idParam of [1, 12, "12", "2147483647", "k3v9q2m8x7c4b1n6p5z0r2t8"]) {
+      expect(parseEntryRef(idParam), String(idParam)).not.toBeNull();
+      expect(targetRowWhere(idParam), String(idParam)).toEqual(parseEntryRef(idParam));
+    }
+  });
+
+  it("refuses every malformed row id parseEntryRef refuses", () => {
+    for (const idParam of MALFORMED_ROW_IDS) {
+      expect(parseEntryRef(idParam), idParam).toBeNull();
+      expect(targetRowWhere(idParam), idParam).toBeNull();
+    }
+  });
+
+  it("differs only on documentIds Strapi never generates", () => {
+    // parseEntryRef refuses these before any query; targetRowWhere looks
+    // them up (a varchar comparison) and finds nothing.
+    const wider = MALFORMED_ENTRY_IDS.filter((idParam) => targetRowWhere(idParam) !== null);
+    expect(wider.length).toBeGreaterThan(0);
+    for (const idParam of wider) {
+      expect(parseEntryRef(idParam), idParam).toBeNull();
+      expect(targetRowWhere(idParam), idParam).toEqual({ documentId: idParam });
+      expect(MALFORMED_ROW_IDS, idParam).not.toContain(idParam);
     }
   });
 });

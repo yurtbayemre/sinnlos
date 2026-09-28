@@ -17,12 +17,22 @@ import type { PollResults } from "@/lib/types";
  * editors (canCreatePolls) get the guest-access notes, a guest gets the
  * guestVotingDisabled hint instead of notInAudience. Whether the caller may
  * vote comes from `results.canVote` alone.
+ *
+ * `pollRef` is the address the vote goes to (lib/strapi.ts pollRef, DA01):
+ * the poll's documentId, so a vote still reaches the poll after an editor
+ * republished it while the page was open. Without one the card falls back
+ * to the published row id from the results. The vote also carries the
+ * option text the card shows, so a republish that reordered or replaced the
+ * options is refused (and the card reloads) instead of recording the
+ * answer now at that index.
  */
 export function PollCard({
   results,
+  pollRef,
   viewerRole = null,
 }: {
   results: PollResults;
+  pollRef?: string | number;
   viewerRole?: string | null;
 }) {
   const tPolls = useTranslations("polls");
@@ -64,7 +74,9 @@ export function PollCard({
     startTransition(async () => {
       applyVote(index);
       try {
-        await votePoll(poll.id, index);
+        // The option text too: the cms refuses the vote when an edit moved
+        // the options since this card rendered (the catch below reloads).
+        await votePoll(pollRef ?? poll.id, index, poll.options[index]);
       } catch {
         // Vote rejected (already voted, poll closed meanwhile, …) —
         // surface it and pull the authoritative counts from the server.

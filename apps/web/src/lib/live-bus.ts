@@ -19,15 +19,16 @@
  * 5 per user with oldest-first eviction.
  */
 
-export type LiveEvent =
-  | { kind: "content"; targetType: string; targetDocumentId: string }
-  | { kind: "notification"; recipientId: number }
-  | { kind: "announcements" };
+import {
+  MAX_EVENTS_PER_EMIT,
+  channelFor,
+  type LiveEvent,
+  type LiveFrame,
+} from "@/lib/live-contract";
 
-export type LiveFrame =
-  | { type: "content"; channel: string }
-  | { type: "notification" }
-  | { type: "announcements" };
+// Event and frame shapes, channel names and the batch limit live in the live
+// contract (LF04), shared byte for byte with the cms emitter.
+export type { LiveEvent, LiveFrame } from "@/lib/live-contract";
 
 type Connection = {
   id: string;
@@ -97,8 +98,9 @@ class LiveBus {
       for (const conn of this.connections.values()) {
         let frame: LiveFrame | null = null;
         if (event.kind === "content") {
-          const channel = `${event.targetType}:${event.targetDocumentId}`;
-          if (conn.channels.has(channel)) frame = { type: "content", channel };
+          // A target without a valid channel cannot have a subscriber.
+          const channel = channelFor(event);
+          if (channel && conn.channels.has(channel)) frame = { type: "content", channel };
         } else if (event.kind === "notification") {
           if (conn.userId === event.recipientId) frame = { type: "notification" };
         } else {
@@ -181,7 +183,11 @@ export function liveEventsDisabled(): boolean {
 export function parseLiveEvents(body: unknown): LiveEvent[] | null {
   if (!body || typeof body !== "object") return null;
   const events = (body as { events?: unknown }).events;
-  if (!Array.isArray(events) || events.length === 0 || events.length > 1000) return null;
+  // The cms sends at most MAX_EVENTS_PER_EMIT per POST and splits a bigger
+  // burst (LF01), so a longer list is refused as malformed.
+  if (!Array.isArray(events) || events.length === 0 || events.length > MAX_EVENTS_PER_EMIT) {
+    return null;
+  }
   const parsed: LiveEvent[] = [];
   for (const e of events) {
     if (!e || typeof e !== "object") return null;

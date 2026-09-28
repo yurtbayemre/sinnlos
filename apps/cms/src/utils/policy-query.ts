@@ -66,6 +66,89 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
 }
 
 /**
+ * Adds a policy's clause to the query's filters so that a client filter can
+ * only NARROW the result (PL01): `{ $and: [clientFilters, clause] }`, or the
+ * clause alone when the client sent none.
+ *
+ * Never a spread merge: in `{ ...a, ...b }` a key of one side REPLACES the
+ * same key of the other (`id`, `user`, `$and`, `$or`), so depending on the
+ * order either the client's condition is lost or the client overwrites the
+ * policy's clause and widens the result. The client filter stays one opaque
+ * operand; Strapi validates and sanitizes the whole tree afterwards.
+ *
+ * `query` must be the REAL request query (getMutableQuery above); a falsy
+ * client value (absent, null, "") counts as none, so the clause never ends
+ * up next to an empty operand in an `$and`.
+ */
+export function narrowFilters(
+  query: Record<string, unknown>,
+  clause: Record<string, unknown>,
+): void {
+  query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
+}
+
+/**
+ * Bind-parameter ceilings of ONE SQL statement (PL04): Postgres 65535 (the
+ * wire protocol counts parameters in an int16), SQLite 32766
+ * (SQLITE_MAX_VARIABLE_NUMBER since SQLite 3.32; better-sqlite3 bundles a
+ * newer one). Every value of an `$in` list is one parameter.
+ */
+export const BIND_LIMITS = { postgres: 65535, sqlite: 32766 } as const;
+
+/**
+ * Parameters a statement keeps for everything besides an injected list:
+ * the client's own filters, pagination, status, locale.
+ */
+export const BIND_HEADROOM = 1000;
+
+/** What the bind-limit guard reads from `strapi`: the dialect and the log. */
+export interface BindLimitHost {
+  db?: { dialect?: { client?: unknown } };
+  log?: { error(message: string): void };
+}
+
+/**
+ * The most values one injected list may carry on this database: the
+ * dialect's limit minus BIND_HEADROOM, the lower (SQLite) limit when the
+ * dialect is unknown.
+ */
+export function maxBoundValues(strapi: BindLimitHost): number {
+  const client = strapi.db?.dialect?.client;
+  return (client === "postgres" ? BIND_LIMITS.postgres : BIND_LIMITS.sqlite) - BIND_HEADROOM;
+}
+
+/**
+ * Whether a list of `count` values fits one statement (PL04). Beyond the
+ * limit Postgres and SQLite fail the query ("too many SQL variables", a
+ * bind message error), which Strapi answers with a 500; a policy asks
+ * first and fails CLOSED instead: an error log naming `what` and the count
+ * (never the values), and the caller answers with nothing. Far beyond this
+ * intranet's size (tens of thousands of visible rows of one type); the log
+ * is the signal to switch that policy to a join before it matters.
+ */
+export function fitsBindLimit(strapi: BindLimitHost, count: number, what: string): boolean {
+  const max = maxBoundValues(strapi);
+  if (count <= max) return true;
+  strapi.log?.error(
+    `[policy] ${what}: ${count} values exceed the ${max} one statement may carry; ` +
+      "answering with nothing (fail closed)",
+  );
+  return false;
+}
+
+/**
+ * restrictiveIdFilter for a resolved id list, fail-closed beyond the bind
+ * limit (fitsBindLimit): an oversized list becomes `{ id: { $eq: -1 } }`.
+ */
+export function boundedIdFilter(
+  strapi: BindLimitHost,
+  idList: readonly number[],
+  what: string,
+): Record<string, unknown> {
+  return restrictiveIdFilter(fitsBindLimit(strapi, idList.length, what) ? [...idList] : []);
+}
+
+/**
  * Pins a read query to PUBLISHED rows for the content types that use
  * draft & publish.
  *

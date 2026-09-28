@@ -20,12 +20,20 @@ This guide walks through every supported deployment method for **Sinnlos Intrane
 After deploying, run the [post-deployment verification](#post-deployment-verification)
 and set up [backup & restore](#backup--restore) for any production environment.
 
-All methods share the same [prerequisites](#prerequisites) and
-[Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first
-(the Entra setup is only needed for Microsoft sign-in, which this release
-cannot offer; see the note there).
+All methods share the same [prerequisites](#prerequisites); the optional
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) is off by default
+(`ENTRA_ENABLED=1` switches it on) and set up the same way for each.
 
 > **Upgrading an existing instance?** On an instance that runs `main`
+> `03d4ea0` (batch 8), batch 9 (the policy primitives, the live contract
+> and poll documentIds, and the optional Entra sign-in, switched off) is
+> one normal deploy of cms and web together with `ENTRA_ENABLED` unset,
+> with read-only checks before and after it: follow
+> [Deploying batch 9 (2026-09-28)](#deploying-batch-9-2026-09-28). Its first
+> boot adds four empty user columns and one index and revokes the anonymous
+> forgot/reset-password endpoints; nothing else in the database changes,
+> and a rollback re-ups both images, never one alone.
+> On an instance that runs `main`
 > `c219034` (batch 7; the owner instance since 2026-09-28 15:03 CEST),
 > batch 8 is one normal deploy of cms and web together, with read-only
 > checks before and after it: follow
@@ -47,7 +55,7 @@ cannot offer; see the note there).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 8, batch 7, batch 6,
+> what the instance does not run yet, newest first: batch 9, batch 8, batch 7, batch 6,
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
@@ -75,7 +83,8 @@ cannot offer; see the note there).
 > database with department or team drafts needs a one-time migration first),
 > [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
 > (additive database changes; **Microsoft sign-in stops working**, so an
-> instance that uses it must stay on its current release) and
+> instance that uses it must stay on its current release until it moves to
+> the [Entra sign-in](#microsoft-entra-id-sign-in) of batch 9) and
 > [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24)
 > (stricter env contract, one `JWT_SECRET` rotation).
 
@@ -111,79 +120,312 @@ openssl version  # OpenSSL 3.x.x
 
 ---
 
-## Microsoft Entra ID App Registration
+## Microsoft Entra ID sign-in
 
-Sinnlos uses **Microsoft Entra ID (formerly Azure AD)** for SSO. You need one
-app registration and you'll reference it in every deployment method.
+Sinnlos signs users in with e-mail and password (local sign-in) by default.
+**Microsoft Entra ID** (formerly Azure AD) single sign-on is optional and
+**off unless `ENTRA_ENABLED=1`** is set; without it every `MS_*` and
+`ENTRA_*` value is ignored (leftover `MS_*` lines in `infra/.env` only earn
+a note from `infra/deploy.sh`, or a warning when they are a real app
+registration; see [the upgrade notes](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)).
+The owner's instance runs without it.
 
-> **Microsoft sign-in is unavailable in this release.** Strapi's
-> users-permissions 5.51+ (this release runs Strapi 5.55.1) completes
-> `/api/auth/:provider/callback` only from its own OAuth session, so it
-> answers the web's server-side access-token exchange with a 400 and every
-> Microsoft sign-in fails. Until the planned Entra exchange ships, leave every
-> `MS_*` / `AUTH_MICROSOFT_*` value empty and use local e-mail + password
-> sign-in ([README → standalone mode](../README.md#running-without-microsoft-standalone-mode)).
-> With a real app registration configured, the web logs an `[auth]` error at
-> boot and `infra/deploy.sh` refuses to deploy (see
-> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)).
-> The steps below stay for reference.
+How it works (D-ENTRA-01): Auth.js runs the OIDC code flow against exactly
+one tenant. The web then POSTs the ID token and the Graph access token to the
+cms (`POST /api/auth/entra/exchange`, server to server, authenticated by
+`ENTRA_EXCHANGE_SECRET`). The cms verifies the ID token itself against the
+tenant's signing keys, reads Graph `/me`, finds the user by **tenant id +
+object id** (backed by a unique index, never by e-mail), creates new users on
+the spot with the role of their **app role**, syncs the Entra-owned profile,
+and answers with a Strapi JWT that lasts `ENTRA_SESSION_TTL` (12 hours by
+default). The web session ends with that JWT, and every sign-in re-syncs
+roles and profile. The cms therefore needs outbound HTTPS to
+`login.microsoftonline.com` (signing keys) and `graph.microsoft.com`;
+without it Microsoft sign-ins fail with *entra_unavailable* and local
+sign-in is unaffected.
 
 ### Step 1 — Create the app registration
 
-1. Open [portal.azure.com](https://portal.azure.com) → search **App registrations** → **New registration**.
-2. **Name**: `Sinnlos Intranet` (or any name you prefer).
-3. **Supported account types**: *Accounts in this organizational directory only* (single-tenant).
-   - Choose **single-tenant** for a company intranet so only your org's users can sign in.
-   - Choose **multi-tenant** only if you want any Microsoft work/school account to sign in.
-4. Leave Redirect URI blank for now → **Register**.
+1. Open the [Microsoft Entra admin center](https://entra.microsoft.com) →
+   **App registrations** → **New registration**.
+2. **Name**: `Sinnlos Intranet` (or any name).
+3. **Supported account types**: *Accounts in this organizational directory
+   only* (single tenant). Multi-tenant registrations are not supported: the
+   apps refuse `common`, `organizations` and `consumers`.
+4. **Redirect URI** (platform *Web*):
+   `${WEB_PUBLIC_URL}/api/auth/callback/microsoft-entra-id`, for example
+   `https://intranet.example.com/api/auth/callback/microsoft-entra-id` (and
+   `http://localhost:3000/...` for local development). There is **no** cms
+   redirect URI: Strapi's own Microsoft provider is not used and is forced
+   off at every boot.
+5. **Register**. On the overview page copy the **Directory (tenant) ID**
+   (`MS_TENANT_ID`) and the **Application (client) ID** (`MS_CLIENT_ID`),
+   both GUIDs.
 
-### Step 2 — Copy the IDs
+### Step 2 — Sign-out redirect URI
 
-On the app overview page, copy:
+**Authentication** → platform **Web** → **Add URI**:
+`${WEB_PUBLIC_URL}/sign-in`, a second redirect URI next to the callback of
+step 1 (and `http://localhost:3000/sign-in` for local development). *Sign
+out* ends the intranet session, then sends Microsoft users to
+`https://login.microsoftonline.com/<tenant>/oauth2/v2.0/logout` with
+`post_logout_redirect_uri=${WEB_PUBLIC_URL}/sign-in`, which ends their
+Microsoft session as well. Microsoft only sends them back to that address
+when it is one of the app's registered redirect URIs; without it they stay
+on Microsoft's generic "You signed out" page (the intranet session is gone
+either way).
 
-- **Application (client) ID** → this is `MS_CLIENT_ID`
-- **Directory (tenant) ID** → this is `MS_TENANT_ID`
+Leave the **Front-channel logout URL** empty. It is a different mechanism
+(single sign-out: Microsoft calls it when the user signs out of *another*
+app), which Sinnlos does not implement: signing out elsewhere does not end
+an intranet session, `ENTRA_SESSION_TTL` does.
 
-> **MS_TENANT_ID tip:** Use the actual tenant GUID (not `common` or `organizations`)
-> for a single-tenant company intranet. Using `common` would let any MS account
-> in the world attempt to sign in — Strapi would still reject unauthorized users,
-> but it's cleaner to scope the token issuer to your tenant at the OIDC layer.
+### Step 3 — Client secret
 
-### Step 3 — Create a client secret
-
-**Certificates & secrets** → **New client secret** → set an expiry → **Add**.
-Copy the **Value** immediately (it is shown only once) → this is `MS_CLIENT_SECRET`.
+**Certificates & secrets** → **New client secret** → set an expiry → copy the
+**Value** (shown only once) → `MS_CLIENT_SECRET`. Only the web uses it; the cms
+never needs it. Note the expiry date: an expired secret makes every Microsoft
+sign-in fail at the token step.
 
 ### Step 4 — API permissions
 
-**API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated**:
+**API permissions** → **Add a permission** → **Microsoft Graph** →
+**Delegated**:
 
 | Permission | Why |
 |---|---|
-| `openid` | Basic OIDC login |
-| `profile` | Read display name and photo |
-| `email` | Read email address |
-| `User.Read` | Pull job title and department from Graph `/me` |
-| `GroupMember.Read.All` | Map Entra groups → intranet roles |
+| `openid`, `profile`, `email` | The OIDC sign-in and its ID token |
+| `User.Read` | Graph `/me` (display name, job title, department, office, phone, member or guest) and `/me/checkMemberGroups` for `ENTRA_GROUP_ROLES` |
+| `User.Read.All` | **Only with `ENTRA_SYNC_MANAGER=1`**: `/me/manager` |
 
-Click **Grant admin consent for \<tenant\>** → **Yes**.
+Then **Grant admin consent for \<tenant\>**. `GroupMember.Read.All` (the old
+group-name mapping) is not needed; remove it from existing registrations.
 
-### Step 5 — Redirect URIs
+### Step 5 — App roles and assignment
 
-**Authentication** → **Add a platform** → **Web** — add all URIs you'll use:
+**App roles** → **Create app role**, six times, *Allowed member types*:
+*Users/Groups*:
 
-| Deployment | Next.js (Auth.js) | Strapi |
+| Value | Intranet role |
+|---|---|
+| `Intranet.Admin` | `admin_role` |
+| `Intranet.Editor` | `editor` |
+| `Intranet.DepartmentHead` | `department_head` |
+| `Intranet.TeamLead` | `team_lead` |
+| `Intranet.Member` | `member` |
+| `Intranet.Guest` | `guest` |
+
+Then **Enterprise applications** → the app → **Properties** → *Assignment
+required?* = **Yes** (recommended: without it every member of the tenant can
+sign in, with `ENTRA_DEFAULT_ROLE`) → **Users and groups** → assign the roles
+to users, or to security groups (needs Entra ID P1; nested groups are **not**
+expanded). Never assign public Microsoft 365 groups or Teams to a privileged
+role: their members can add themselves. The roles arrive in the signed ID
+token; a user with several gets the highest. Use `ENTRA_GROUP_ROLES` only for
+nested groups or tenants without P1 (it asks Graph `/me/checkMemberGroups`
+for up to 20 group object ids; group names never count).
+
+### Step 6 — Configuration
+
+Set these in `infra/.env` (compose hands each app the keys it reads); for
+bare-metal development put the cms keys into `apps/cms/.env` and the web keys
+(`AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
+`AUTH_MICROSOFT_ENTRA_ID_SECRET`, `ENTRA_ENABLED`, `ENTRA_EXCHANGE_SECRET`,
+`ENTRA_SYNC_MANAGER`) into `apps/web/.env.local`:
+
+| Name | Default | Effect |
 |---|---|---|
-| Local bare-metal | `http://localhost:3000/api/auth/callback/microsoft-entra-id` | `http://localhost:1337/api/connect/microsoft/callback` |
-| Local Docker | `http://localhost:3000/api/auth/callback/microsoft-entra-id` | `http://localhost/api/connect/microsoft/callback` |
-| VPS / Azure VM | `https://intranet.example.com/api/auth/callback/microsoft-entra-id` | `https://intranet.example.com/api/connect/microsoft/callback` |
+| `ENTRA_ENABLED` | 0 | Master switch for cms and web. With anything but `1`, Entra is fully off and `MS_*` values are ignored. With `1`, the config is validated and an invalid one refuses the start (the cms at boot, the web on its first request) and the deploy (`infra/deploy.sh --check`), naming the variable. |
+| `MS_TENANT_ID` | (unset) | Tenant GUID (required). Web: `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`; the issuer is computed from it. |
+| `MS_CLIENT_ID` | (unset) | Application (client) GUID (required); the cms checks the ID token's audience against it. Web: `AUTH_MICROSOFT_ENTRA_ID_ID`. |
+| `MS_CLIENT_SECRET` | (unset) | Web only (`AUTH_MICROSOFT_ENTRA_ID_SECRET`, required). |
+| `ENTRA_EXCHANGE_SECRET` | (unset) | At least 32 characters, the same for web and cms (`openssl rand -hex 32`); distinct from every other secret. |
+| `ENTRA_SYNC_MODE` | dry-run | cms. `on` applies Entra's roles and departments. `dry-run` logs them, never changes an existing user, and creates new users at most as `member`. |
+| `ENTRA_DEFAULT_ROLE` | member | cms. Role of tenant members with no recognised app role or group: `member`, `guest` or `deny`. Unassigned B2B guests are always refused. |
+| `ENTRA_GROUP_ROLES` | (empty) | cms, optional. `<roleType>:<groupObjectId>,…`, at most 20 groups (see step 5). |
+| `ENTRA_SYNC_DEPARTMENT` | 0 | cms. `1` sets the user's department to the one published department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it, so access does not survive a move. Only admins and editors can rename departments. |
+| `ENTRA_SYNC_MANAGER` | 0 | cms and web. `1` requests `User.Read.All` (admin consent) and syncs the manager from `/me/manager`; a manager who has not signed in yet is linked on their first sign-in. |
+| `ENTRA_SESSION_TTL` | 12h | cms. Lifetime of an Entra sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`. Local sign-ins keep 7 days. |
+| `AUTH_LOCAL_ENABLED` | 0 | Web and cms. `1` keeps local e-mail + password sign-in next to Microsoft (break-glass admin account). Without Entra, local sign-in is always on. |
+| `LOCAL_REGISTRATION` | 0 | Unchanged: local self-registration only; it does not affect Entra users. Next to Entra it logs one warning at boot: a registered address is not verified, so check such an account before binding it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)). |
 
-You can add all of them up front so a single registration covers every environment.
+The cms logs one line at every boot: `[entra] disabled`, or
+`[entra] enabled tenant=<guid> mode=<on|dry-run> default=<role> groupRules=<n>
+syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
 
-The Strapi column (`/api/connect/microsoft/callback`) is not used by the
-current sign-in flow: the web exchanges the Entra access token server-side at
-`/api/auth/microsoft/callback` and never sends the browser through Strapi's
-own OAuth redirect. Registering it is harmless.
+### What Entra owns
+
+- **Identity**: tenant id + object id, stored in the private user fields
+  `entraTenantId` and `microsoftOid`. A new user's username is
+  `entra-<object id>`, the e-mail is `mail` (else the UPN), and `provider` is
+  `microsoft`; such accounts have no password.
+- **Role**, per user (`roleSource`, private): users the sign-in created are
+  `entra` and follow Entra at every sign-in (also downwards). Every account
+  that existed before is `manual`, and so is every account whose role an
+  admin changes in the admin panel (detected at the next sign-in): the
+  sign-in never touches a manual role, and a manual user is not refused for
+  a missing assignment. A Graph failure never changes any role. To hand a
+  user back to Entra, set *Role source* = `entra` and clear *Entra applied
+  role* on the user; the next sign-in applies Entra's role.
+- **Profile**: display name (only overwritten with a non-empty value), job
+  title, phone (first business phone) and office location are copied from
+  Entra at every sign-in (an empty value clears them; a value over 255
+  characters is cut to 255, the column size, e.g. Entra's 256-character
+  display names) and are read-only on
+  `/profile` (`PUT /api/me` ignores them). Accounts the sign-in created also
+  get their e-mail from Entra, unless another account uses that address.
+- **Department** and **manager** only with `ENTRA_SYNC_DEPARTMENT=1` /
+  `ENTRA_SYNC_MANAGER=1` (table above).
+- **Blocking** a user in the admin panel takes effect on their next request
+  (Strapi refuses a blocked user's JWT) and refuses their next sign-in
+  (*entra_blocked*). Offboarding in Entra takes effect at the latest when
+  the session ends (`ENTRA_SESSION_TTL`).
+
+### Staging dry-run, then on
+
+1. Configure a staging instance with `ENTRA_ENABLED=1` and
+   `ENTRA_SYNC_MODE=dry-run` (the default); run `infra/deploy.sh --check`
+   until it prints `Preflight OK`, then deploy. The cms logs
+   `[entra] enabled … mode=dry-run`.
+   `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
+   a local demo account. Without `AUTH_LOCAL_ENABLED=1` (Entra only) that
+   sign-in fails after an otherwise good deploy whenever the demo
+   credentials file (`PASSWORDS_FILE`) is readable: `live-smoke: FAIL —
+   sign-in … produced no session cookie`, then `live-smoke failed — the
+   SSE pipeline is NOT delivering pings` and exit code 1. Either keep
+   `AUTH_LOCAL_ENABLED=1` (the break-glass account, see
+   [the rollback notes](#rolling-back-after-switching-microsoft-sign-in-on),
+   step 3), or deploy with `PASSWORDS_FILE=/nonexistent infra/deploy.sh`
+   (it logs `live-smoke SKIPPED`) and check the live pings in a browser: a
+   comment from a second session refreshes the card in the first. This
+   holds for every deploy of an Entra-only instance, step 5 included.
+2. Let a few users sign in: an app-role user, a user in an
+   `ENTRA_GROUP_ROLES` group (if used), a B2B guest without and then with
+   `Intranet.Guest`, a user without a manager, a user whose Entra department
+   matches no published department (with `ENTRA_SYNC_DEPARTMENT=1`).
+3. Review the audit lines, one per sign-in, without tokens:
+
+   ```bash
+   docker logs infra-cms-1 2>&1 | grep '\[entra\]'
+   ```
+
+   `[entra] user=<id|new> oid=<first 8> result=<created|existing|conflict|denied|blocked|unavailable> role=<…> via=<approle:X|group:<guid>|default> mode=dry-run graph=me:ok,groups:…,manager:…`,
+   plus `department=` / `manager=` when those syncs are on. In dry-run,
+   `role=would member->editor` or `role=new->member would new->admin_role`
+   shows what `on` would do; nothing is changed for existing users.
+4. Sign out as a Microsoft user: the browser passes Microsoft's sign-out and
+   lands on `/sign-in`. Staying on Microsoft's "You signed out" page means
+   `${WEB_PUBLIC_URL}/sign-in` is missing from the redirect URIs (step 2).
+5. Switch to `ENTRA_SYNC_MODE=on` and deploy. The next sign-in of each user
+   applies the role (`role=member->editor`); new users get their full role.
+6. Check a manual override: change a user's role in the admin panel, sign
+   them in again: `role=manual-override`, and the role stays.
+7. Then production, the same way (dry-run first if it holds existing users).
+
+### Rolling back after switching Microsoft sign-in on
+
+Every cms boot of this release writes the sign-in providers into Strapi's
+database (the users-permissions *grant* store): e-mail sign-in on exactly
+when local sign-in is (`AUTH_LOCAL_ENABLED=1`, or Entra off), and Strapi's
+own Microsoft provider off with its client id and secret cleared. An older
+cms image does not write them back.
+
+1. **Prefer the env rollback.** Set `ENTRA_ENABLED=0` (Microsoft off, local
+   sign-in on) or `AUTH_LOCAL_ENABLED=1` (both) in `infra/.env` and deploy
+   again (`infra/deploy.sh`). The cms of this release restores e-mail
+   sign-in at its next boot.
+2. **An image rollback to a cms from before batch 9** after running with
+   `ENTRA_ENABLED=1` and `AUTH_LOCAL_ENABLED` unset keeps e-mail sign-in
+   **off** (`This provider is disabled`): nobody can sign in, and the old
+   5.49 Microsoft flow is off as well, its client id and secret cleared.
+   The web needs a change as well: a web from before batch 9 decides local
+   sign-in from `MS_CLIENT_ID` and `MS_CLIENT_SECRET`, not from
+   `ENTRA_ENABLED`. With both set and `AUTH_LOCAL_ENABLED` not `1` it hides
+   the e-mail form and shows only a Microsoft button, which cannot complete
+   against a cms on Strapi 5.55.1 (batch 8 and every release since
+   2026-09-25). The simplest order:
+   1. Set `AUTH_LOCAL_ENABLED=1` in `infra/.env`. (Rolling back to batch 8
+      or another release since 2026-09-25, deleting `MS_CLIENT_ID` and
+      `MS_CLIENT_SECRET` works as well and also hides that button; for the
+      old 5.49 flow keep them.)
+   2. Restart only the cms of this release on it, **not** with
+      `infra/deploy.sh`: a re-run tags the running images `:rollback` and
+      so replaces the images you want to go back to. From the checkout:
+      `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build cms`
+      (on a standalone Caddy box, drop the second `-f`). Its boot turns
+      e-mail sign-in back on and logs `[bootstrap] users-permissions
+      providers synced (email=on, microsoft=off)`.
+   3. Roll both images back as the deploy's hint says (`docker tag … :rollback`,
+      then `up -d --no-build web cms`). E-mail sign-in works in the cms and
+      the web shows its form.
+
+   Rolled back without that cms restart, the old cms keeps e-mail sign-in
+   off: re-enable it in the Strapi admin panel (its admin accounts are not
+   affected): **Settings → Users & Permissions plugin → Providers →
+   Email** → *Enable* on → *Save*; the web still needs
+   `AUTH_LOCAL_ENABLED=1`. For the old Microsoft flow of a 5.49 image also
+   open **Microsoft** there, turn it on and enter its client id and secret
+   again (this release cleared them).
+3. For the first rollout (the employer migration) keep a break-glass local
+   account: `AUTH_LOCAL_ENABLED=1` and one local admin user whose password
+   is known, until Microsoft sign-in has worked for a while. Then the
+   provider store keeps e-mail sign-in on, and step 2 is only needed for
+   the old Microsoft flow.
+
+### An e-mail address that already has an account (409)
+
+A new Microsoft identity whose e-mail address (case-insensitive) an existing
+account already uses is **not** linked automatically (that would let
+whoever controls the address take the account over). The sign-in page says
+*"An intranet account with your e-mail address already exists"*, and the
+cms logs `result=conflict`. Binding hands that account, with everything
+it holds, to the Microsoft user. An admin:
+
+1. **checks whose account it is.** Bind only an account you know belongs
+   to this person: one an admin created for them, or one they have used
+   themselves. The cms never verifies the address of a self-registered
+   account: with `LOCAL_REGISTRATION=1`, now or at any earlier time,
+   anyone could have registered the address first. Do not bind such an
+   account while you cannot confirm its owner; **delete it** instead
+   (**Content Manager → User** → the user → *Delete*). The cms refuses
+   the sessions of a deleted user at their next request, and the next
+   Microsoft sign-in creates a fresh account;
+2. looks up the user's **Object ID** in the Entra admin center (*Users* →
+   the user → *Overview*) and the tenant's **Directory (tenant) ID**;
+3. opens the existing user in the Strapi admin (**Content Manager → User**)
+   and sets **entraTenantId** and **microsoftOid** to those two GUIDs, in
+   **lower case**, then saves;
+4. asks the user to sign in with Microsoft again.
+
+User id, password, provider, e-mail and role stay as they were; the role
+stays **manual** until an admin sets *Role source* = `entra`, and the
+Entra-owned profile fields are synced from then on (and read-only on
+`/profile`). The binding ends nothing that existed before it: the kept
+password still signs in while `AUTH_LOCAL_ENABLED=1`, and sessions issued
+earlier stay valid until they expire (7 days; a password change does not
+end them either). So when anyone else might know the password, set a new
+one on the user in the same Content Manager form (or have the owner change
+it on `/profile` after a local sign-in). A row with a `microsoftOid` but
+no `entraTenantId` (from an old release or a self-registration) is never
+trusted.
+
+### Sign-in errors
+
+| The sign-in page says | Cause |
+|---|---|
+| *belongs to another organisation* (`entra_tenant`) | An account of another tenant; Auth.js' own issuer check usually refuses it earlier |
+| *already exists* (`entra_account_exists`) | See the 409 procedure above |
+| *has no access* (`entra_not_assigned`) | No app role and `ENTRA_DEFAULT_ROLE=deny`, or a B2B guest without `Intranet.Guest` |
+| *is blocked* (`entra_blocked`) | The account is blocked in the admin panel |
+| *could not be verified* (`entra_invalid`) | The ID token was refused (clock skew over 5 minutes, another app's token) or Graph `/me` is another user |
+| *unavailable right now* (`entra_unavailable`) | The cms is unreachable or cannot reach Microsoft, the two `ENTRA_EXCHANGE_SECRET` values differ (the web logs it), `ENTRA_ENABLED` is not `1` for the cms, or a new user's role could not be decided because the Graph group check failed |
+
+A failed database write shows in the cms log as `[entra] exchange failed (<code>)`
+(the sign-in answered *unavailable*) or `[entra] user=<id>: <step> failed (<code>)`
+(an optional profile, department or manager write; the sign-in went on).
+`<code>` is a Postgres SQLSTATE such as `22001` (value too long), a SQLite or
+Node error code, or an error class name; the SQL and the profile values are
+never logged.
 
 ---
 
@@ -225,11 +467,13 @@ ENCRYPTION_KEY=               # openssl rand -base64 32
 
 PUBLIC_URL=http://localhost:1337
 
-# Microsoft sign-in cannot complete on this release (Strapi 5.51+, see the
-# Entra section above): leave these empty and use local sign-in.
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
-MS_TENANT_ID=<your-tenant-id>
+# Optional Microsoft sign-in (off unless ENTRA_ENABLED=1; see "Microsoft
+# Entra ID sign-in" above). The cms never needs the client secret.
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32, same as the web>
+# ENTRA_SYNC_MODE=dry-run
 
 # Optional locally — authenticates the live-event pings the cms sends to
 # Next.js (POST /api/live/emit, see "Live-event ingest" below). Must match
@@ -297,11 +541,14 @@ AUTH_SECRET=<openssl rand -base64 32>
 # the server-side Strapi token reader derives the name the same way.
 AUTH_URL=http://localhost:3000
 AUTH_TRUST_HOST=true
-# Leave the three Entra values empty on this release (Microsoft sign-in
-# cannot complete on Strapi 5.51+); local sign-in then switches on by itself.
-AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-id>
-AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
-AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id>/v2.0
+# Optional Microsoft sign-in (off unless ENTRA_ENABLED=1; local sign-in is
+# on by itself without it). The issuer is computed from the tenant GUID.
+# ENTRA_ENABLED=1
+# AUTH_MICROSOFT_ENTRA_ID_TENANT_ID=<your-tenant-guid>
+# AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-guid>
+# AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<same value as the cms>
+# AUTH_LOCAL_ENABLED=1   # keep e-mail + password next to Microsoft
 
 # Must match REVALIDATE_SECRET in apps/cms/.env (or leave both unset
 # to disable the live-event pings locally).
@@ -354,9 +601,9 @@ pnpm dev
 1. Open **http://localhost:3000** → you are redirected to `/sign-in`.
 2. Sign in with e-mail + password. Create the account first in the Strapi
    admin (**Content Manager → User**: e-mail, password, confirmed = true), or
-   boot once with `SEED_DEMO_DATA=1` for demo users. Microsoft sign-in cannot
-   complete on this release (see the
-   [Entra section](#microsoft-entra-id-app-registration)).
+   boot once with `SEED_DEMO_DATA=1` for demo users. With `ENTRA_ENABLED=1`
+   (both apps), *Sign in with Microsoft* works too (see
+   [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)).
 3. You land on the dashboard with your name in the top-right corner.
 
 ### 1.6 Demo mode (no Microsoft account needed)
@@ -412,11 +659,13 @@ REVALIDATE_SECRET=<openssl rand -hex 32>
 # Without it every uploaded file answers 404 (fail closed).
 INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>
 
-# Microsoft sign-in: leave empty on this release (it cannot complete on
-# Strapi 5.51+); both apps then offer local sign-in.
-MS_TENANT_ID=<your-tenant-id>
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
+# Optional Microsoft sign-in: off unless ENTRA_ENABLED=1 (both apps then
+# offer local sign-in only). See "Microsoft Entra ID sign-in" above.
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# MS_CLIENT_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32>
 
 # --- Optional features (safe to leave unset) --------------------------
 # First Strapi super-admin on an empty database (else: register at /admin).
@@ -594,11 +843,15 @@ AUTH_SECRET=<secret>
 REVALIDATE_SECRET=<secret>
 INTERNAL_UPLOAD_TOKEN=<secret>
 
-# Microsoft sign-in: leave empty on this release. It cannot complete on
-# Strapi 5.51+, and infra/deploy.sh refuses a real app registration here.
-MS_TENANT_ID=<your-tenant-id>
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
+# Optional Microsoft sign-in: off unless ENTRA_ENABLED=1, then validated by
+# infra/deploy.sh --check and at start ("Microsoft Entra ID sign-in" above;
+# start with ENTRA_SYNC_MODE=dry-run).
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# MS_CLIENT_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32>
+# ENTRA_SYNC_MODE=dry-run
 
 # --- Optional features (safe to leave unset) --------------------------
 # Business time zone (IANA): "today", expiry, birthdays, digests, cron
@@ -632,12 +885,13 @@ DIGESTS_DISABLED=0
 > Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a
 > template placeholder (`<…>`, `change-me…`, `toBeModified…`).
 
-Update Entra ID redirect URIs (only once Microsoft sign-in is usable again;
-the second one is not used by the current flow):
+With Microsoft sign-in, register both production redirect URIs (platform
+*Web*) in the app registration (no cms redirect URI, no front-channel logout
+URL):
 
 ```
 https://intranet.example.com/api/auth/callback/microsoft-entra-id
-https://intranet.example.com/api/connect/microsoft/callback
+https://intranet.example.com/sign-in   (where sign-out returns to)
 ```
 
 ### 3.6 Deploy
@@ -719,12 +973,17 @@ The preflight fails (naming keys, never values) when:
   2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
   be deployed equals the one the running cms uses. A fresh install (no
   running web/cms) skips this check;
-- Microsoft sign-in is configured: `MS_CLIENT_ID` and `MS_CLIENT_SECRET` are
-  both set and the client id is a GUID (a real app registration). Strapi
-  5.51+ rejects the web's access-token exchange, so every Microsoft sign-in
-  would fail, and with `AUTH_LOCAL_ENABLED=0` nobody could sign in. A
-  non-GUID client id (template text) only warns. The rule goes away with the
-  Entra exchange;
+- `ENTRA_ENABLED=1` and an Entra setting the cms or the web would refuse to
+  start with: `MS_TENANT_ID` or `MS_CLIENT_ID` not a GUID (`common` and
+  domain names included), `MS_CLIENT_SECRET` empty, `ENTRA_EXCHANGE_SECRET`
+  under 32 characters or a template placeholder, `ENTRA_SYNC_MODE` not
+  `on`/`dry-run`, `ENTRA_DEFAULT_ROLE` not `member`/`guest`/`deny`,
+  `ENTRA_SESSION_TTL` not `<n>m|h|d` up to `7d`, or `ENTRA_GROUP_ROLES`
+  malformed or over 20 groups. It prints the key names, never the values.
+  Without `ENTRA_ENABLED=1`, leftover `MS_CLIENT_ID`/`MS_CLIENT_SECRET` lines
+  only earn a note (they are ignored), or a warning when they are a real app
+  registration (a GUID client id plus a secret: Microsoft sign-in of the
+  running release, if any, is off after the deploy); neither stops it;
 - the running database still holds datetime columns in the pre-contract
   format (`timestamp without time zone` outside Strapi's bookkeeping tables)
   and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
@@ -733,9 +992,10 @@ The preflight fails (naming keys, never values) when:
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
-`send-digests.ts`), and the Microsoft rule to the web's `MICROSOFT_ENABLED`
-and the compose mapping, so the preflight cannot silently drift from what
-the apps do at boot.
+`send-digests.ts`), and the Entra rules to the cms's `parseEntraConfig`
+(`apps/cms/src/entra/config.ts`), the web's `auth-config.ts` and the compose
+mapping, so the preflight cannot silently drift from what the apps do at
+boot.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -749,6 +1009,54 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 9 (2026-09-28)?** The policy primitives, the live
+> contract and poll documentIds, and the (switched off) Entra sign-in (the
+> three notes below) ship as one normal deploy of cms and web **together**
+> (`infra/deploy.sh`) once batch 8 runs, with `ENTRA_ENABLED` left unset:
+> no env, edge or Traefik change. The first boot adds four empty user
+> columns and one index and revokes the anonymous forgot/reset-password
+> endpoints by itself. Read-only checks before it: `deploy.sh --check`
+> (what its notes about leftover `MS_*` lines mean), the permission diff,
+> the old Microsoft accounts (expected none) and the poll baseline. After
+> it: the boot lines, the columns and the index, the exchange and the
+> reset flow closed, the permission diff, local sign-in and a password
+> change, the poll baseline and one vote, live-smoke and an hour of the cms
+> log. A rollback re-ups both images and needs no database step; never
+> roll back one alone (a new web in front of the batch 8 cms shows no poll
+> card). Follow [Deploying batch 9 (2026-09-28)](#deploying-batch-9-2026-09-28).
+>
+> **Deploying the policy primitives (batch 9, lane 4B)?** A normal deploy:
+> only the cms changes, no schema, env, edge or grant change. Comment and
+> reaction threads of wiki pages follow the published space; watch the cms
+> log for `[policy]` lines in the first hour. Batch 9 ships it with lanes
+> 4C and 4A, so deploy and roll back cms and web together (see
+> [Deploying batch 9](#deploying-batch-9-2026-09-28)). See
+> [Upgrading to the policy primitives (batch 9, lane 4B)](#upgrading-to-the-policy-primitives-batch-9-lane-4b).
+>
+> **Deploying the live contract and poll documentIds (batch 9, lane 4C)?**
+> A normal deploy of cms and web **together** (`infra/deploy.sh`): no
+> schema, permission, env, route or edge change. Polls are addressed by
+> documentId, poll results are counted in one SQL statement (same totals),
+> the cms sends live events in POSTs of at most 1000, and `/announcements`
+> loads its comment sections in one batch. Note the poll results before,
+> run `infra/live-smoke.sh` after, then have a member vote and compare. A
+> rollback takes back both images, never the cms alone. Batch 9 ships it
+> with lanes 4B and 4A (see [Deploying batch 9](#deploying-batch-9-2026-09-28)). See
+> [Upgrading to the live contract and poll documentIds (batch 9, lane 4C)](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c).
+>
+> **Deploying the Entra sign-in (batch 9, lane 4A)?** A normal deploy of cms
+> and web together with `ENTRA_ENABLED` unset: the first boot adds four
+> empty, private user columns and one unique index, forces Strapi's own
+> Microsoft provider off and revokes the anonymous forgot/reset-password
+> endpoints (`[bootstrap] revoked 2 obsolete permission(s)`); the cms logs
+> `[entra] disabled`. Leftover `MS_*` lines in `infra/.env` become inert
+> (`deploy.sh` notes them, or warns when they are a real app registration
+> whose Microsoft sign-in goes off; optional cleanup). Run
+> `infra/diagnostics/prod-perm-diff.sql` afterwards. A rollback needs no
+> database step. Switching Microsoft sign-in on is a separate, later step.
+> Batch 9 ships it with lanes 4B and 4C (see [Deploying batch 9](#deploying-batch-9-2026-09-28)).
+> See [Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a).
+>
 > **Deploying batch 8 (2026-09-28)?** The cms bootstrap split, the web
 > datetime port and one fix to poll results (the two notes below; the
 > integration suite is test-only) ship as one normal deploy of cms and web
@@ -908,7 +1216,8 @@ systemctl start docker
 > **Upgrading from before 2026-09-25 (Strapi 5.55.1)?** Follow
 > [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
 > as well: take the pre-deploy backup, and do not deploy an instance that
-> signs users in with Microsoft. Coming from a release before 2026-09-24,
+> signs users in with the old Microsoft flow before it can move to the
+> [Entra sign-in](#microsoft-entra-id-sign-in) (batch 9). Coming from a release before 2026-09-24,
 > also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > that deploy needs env changes and one `JWT_SECRET` rotation.
 >
@@ -947,6 +1256,717 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 9 (2026-09-28)
+
+Batch 9 (branch `batch/9`, on `main` `03d4ea0`, the batch 8 merge) ships
+three lanes in one deploy, once batch 8 runs. The runbooks below explain
+each change in detail; **this section is the one sequence to follow** on an
+instance that keeps Microsoft sign-in off (`ENTRA_ENABLED` unset, the owner
+instance):
+
+- [the policy primitives](#upgrading-to-the-policy-primitives-batch-9-lane-4b)
+  (lane 4B): the cms read and ownership policies run on shared helpers and
+  factories, a thread read checks only its one target, and a list of
+  visible ids too long for one SQL statement answers empty with a
+  `[policy]` log line. One visible fix: comments and reactions of a wiki
+  page follow its published space (three draft-only cases closed);
+- [the live contract and poll documentIds](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c)
+  (lane 4C): polls are addressed by documentId, and a vote whose shown
+  answer a republish moved is refused instead of counting another answer;
+  poll results are counted in one SQL statement (the same totals); the cms
+  sends live events in POSTs of at most 1000; `/announcements` loads its
+  comment sections in one batch;
+- [the Entra sign-in](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)
+  (lane 4A): the optional Microsoft Entra ID sign-in, **off** here. The
+  first boot adds four empty, private user columns and one unique index,
+  forces Strapi's own Microsoft provider off (it was off) and revokes the
+  anonymous forgot/reset-password endpoints (the web never offered them);
+- from the integration: the remaining role checks outside the lanes
+  (acknowledgements, the relation guard, poll visibility, RSVP names, the
+  profile's digest fields) decide through `hasRole`; behaviour unchanged.
+
+It is **one normal deploy of cms and web together** with `infra/deploy.sh`:
+no edge or Traefik change, nothing to migrate by hand, and no change to
+`infra/.env` (keep `ENTRA_ENABLED` unset). Compose passes the new
+`ENTRA_*` keys with their defaults, the cms no longer gets
+`MS_CLIENT_SECRET` and the web no longer gets
+`AUTH_MICROSOFT_ENTRA_ID_ISSUER`; both are unused here. **Why together:**
+the new web addresses polls by documentId, which the batch 8 cms answers
+with 404, so `/polls` would show no poll card at all while a new web runs
+in front of the old cms. The new cms still accepts what a batch 8 web
+sends (the numeric id of the published row, a vote without the answer
+text). So whichever container restarts first, the seconds in between are
+harmless: a batch 8 web in front of the new cms works fully, a new web in
+front of the batch 8 cms only misses the poll cards until the cms is up.
+Local
+sign-in, sign-out, the password change, `/profile` and the live pings work
+across the two versions in both directions. All of this was rehearsed
+with the built images (see the end of this section). The routes golden
+gains the exchange route and `infra/diagnostics/prod-perm-diff.sql` the
+two revocations; nothing else in either changes.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (all read-only)
+
+1. **Fast-forward to the new `main` and validate**, deploying nothing:
+
+   ```bash
+   git pull --ff-only
+   git log -1 --oneline      # the batch 9 merge
+   infra/deploy.sh --check
+   ```
+
+   It prints `Preflight OK`. The Microsoft refusal of earlier releases
+   ("Microsoft sign-in is configured …") is gone; the Entra-aware
+   preflight reads the `MS_*` lines left in `infra/.env` instead, and
+   both of its messages only inform (exit code 0):
+   - no message: no `MS_*` values, or none that matter;
+   - `NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but
+     ENTRA_ENABLED is not 1: Microsoft sign-in stays off and the MS_*
+     values are ignored (safe to delete).`: leftover placeholders or a
+     half-filled registration. Nothing reads them; deleting the lines is
+     optional cleanup;
+   - `WARNING: infra/.env holds a Microsoft app registration (MS_CLIENT_ID
+     is a GUID and MS_CLIENT_SECRET is set), but ENTRA_ENABLED is not 1. …`:
+     a real app registration that nothing uses once this deploy runs. On
+     the owner instance nobody signs in with Microsoft (it stopped working
+     with the Strapi 5.55.1 release, and step 3 finds no such account), so
+     the lines can stay or go. Only an instance where people still sign
+     in with Microsoft stops here and follows the
+     [Entra runbook](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)
+     (its last paragraph) first;
+   - `ERROR: ENTRA_ENABLED=1, but these Entra settings … are invalid`
+     (exit code 1) appears only when `ENTRA_ENABLED=1` is set: remove it,
+     the owner instance keeps it unset.
+
+2. **Permissions: the post-batch-8 state**, read with the new file:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   The file now describes batch 9, so it shows what batch 8 left (on
+   production the two informational `MISSING_IN_DB` rows for
+   `authenticated`, `plugin::users-permissions.auth.getSessions` and
+   `…auth.revokeSession`) **plus exactly two** `EXTRA_IN_DB` rows for
+   `public`: `plugin::users-permissions.auth.forgotPassword` and
+   `…auth.resetPassword`, both with `revoked_by_code = t` (the first boot
+   of this batch revokes them). Keep the output for step 9. Any other row
+   was there before this batch: compare it with the output you kept from
+   the batch 8 deploy.
+
+3. **Accounts of the old Microsoft flow** (expected 0 and 0):
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT count(*) FILTER (WHERE provider = 'microsoft') AS microsoft_rows,
+          count(*) FILTER (WHERE microsoft_oid IS NOT NULL) AS rows_with_oid
+     FROM up_users;
+   SQL
+   ```
+
+   Anything but 0 and 0 means accounts that only Microsoft ever signed in
+   (they have no password, and have not been able to sign in since the
+   Strapi 5.55.1 release). This deploy does not change that; note them for
+   the day Microsoft sign-in is switched on (they are bound one by one,
+   [the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)).
+
+4. **The poll baseline:** step 1 of the
+   [lane 4C runbook](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c)
+   (`… | tee poll-baseline-before.txt`): the counted votes per option of
+   every published poll, by the rule the results use. It equals what the
+   cards on `/polls` show now.
+
+**Deploy**
+
+5. Run `infra/deploy.sh` on the Traefik host. It runs the preflight, takes
+   the pre-deploy backup, tags the running images `:rollback`, rebuilds
+   and restarts **cms and web together**, and runs `infra/live-smoke.sh`
+   when the demo credentials file is readable (otherwise it logs
+   `live-smoke SKIPPED`: run `infra/live-smoke.sh` by hand in step 11). On
+   a standalone Caddy box, run `infra/backup/pg-backup.sh`, then
+   `docker compose up -d --build` from `infra/`.
+
+**After the deploy**
+
+6. **cms boot.**
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\]|\[entra\]'
+   # [bootstrap] revoked 2 obsolete permission(s)
+   # [bootstrap] permission drift: none (report-only check of 119 managed actions)
+   # [entra] disabled
+   ```
+
+   The drift line checks 119 managed actions (batch 8: 117; the two
+   revoked `public` actions are managed now). The `revoked` line appears
+   on the first boot only (with a smaller number if an admin had removed
+   either action before). `[bootstrap] users-permissions providers synced
+   (email=on, microsoft=off)` may also appear once, when Strapi's own
+   Microsoft provider was on or still held a client id or secret (from the
+   Strapi 5.49 era); they are now off and cleared, which is expected. A
+   drift warning lists `<role> <action>` pairs added in the admin panel,
+   as since batch 8. `[entra] enabled …` or an
+   `[entra] … invalid` error would mean `ENTRA_ENABLED=1` reached the cms:
+   roll back (below) and check `infra/.env`.
+
+7. **The four columns and the unique index** (4 rows, then 1 row):
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT column_name, is_nullable FROM information_schema.columns
+    WHERE table_name = 'up_users'
+      AND column_name IN ('entra_tenant_id', 'role_source', 'entra_applied_role', 'entra_manager_oid')
+    ORDER BY 1;
+   SELECT indexdef FROM pg_indexes WHERE indexname = 'up_users_entra_identity_uq';
+   SQL
+   ```
+
+   Every column is nullable (`YES`) and NULL on every existing row: a
+   local account's role stays *manual*, no sign-in ever touches it. The
+   index is `UNIQUE … (entra_tenant_id, microsoft_oid) WHERE (microsoft_oid
+   IS NOT NULL)`.
+
+8. **The exchange is off and the anonymous reset flow closed**, asked from
+   inside the stack (the edge sends `/api/auth/*` to the web, so the cms
+   is only reachable there): `404`, then `403`:
+
+   ```bash
+   "${COMPOSE[@]}" exec -T web node -e "fetch('http://cms:1337/api/auth/entra/exchange',{method:'POST'}).then(r=>console.log(r.status))"
+   "${COMPOSE[@]}" exec -T web node -e "fetch('http://cms:1337/api/auth/forgot-password',{method:'POST',headers:{'content-type':'application/json'},body:'{\"email\":\"nobody@example.com\"}'}).then(r=>console.log(r.status))"
+   ```
+
+9. **Permissions after:** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+   gives the output of step 2 without the two `public` rows (on
+   production: only the two informational `MISSING_IN_DB` rows for
+   `authenticated`). That is the expected new state; keep it for the next
+   batch.
+
+10. **Local sign-in.** On `/sign-in` (no Microsoft button), sign in with a
+    local account, change its password on `/profile`, sign out, and sign
+    in with the new password. `/profile` looks as before (the cms answers
+    an empty `entraManagedFields` there, which locks nothing).
+
+11. **Polls and live pings.** Run the query of step 4 again into
+    `poll-baseline-after.txt`; `diff poll-baseline-before.txt
+    poll-baseline-after.txt` prints nothing unless someone voted
+    meanwhile. Have a member vote on an open poll on `/polls`: the vote
+    succeeds, the card shows the new count, and a third run of the query
+    differs from the second in exactly that poll's option, by one.
+    `infra/live-smoke.sh` passed (step 5, or run it now). Then the smoke of
+    lane 4B: open the dashboard, `/announcements` with comments, a wiki
+    space and page, documents, polls and a course as a member, and the wiki
+    and documents as a guest. Optionally, with the browser's network
+    panel on `/announcements`: after the stream's `hello` there is one
+    `POST /live/subscribe` for all cards, and a comment from a second
+    session refreshes only its card.
+
+12. **First hour.** Watch the cms log for the failure lines of the three
+    lanes:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 1h cms | grep -E '\[policy\]|\[poll-results\]|\[live-emit\] (status|failed)|error'
+    ```
+
+    Expect no output. What a line would mean:
+    - `[policy] <policy>: <count> values exceed …`: a visible-id list too
+      long for one SQL statement; that list reads empty for every caller
+      without the admin/editor bypass until the policy changes
+      ([lane 4B runbook](#upgrading-to-the-policy-primitives-batch-9-lane-4b),
+      step 3). A 500 with a database bind-parameter error and no
+      `[policy]` line is the same limit in a policy that reads whole
+      tables. Neither size exists on an intranet;
+    - `[poll-results] the tables of api::poll-vote.poll-vote are unknown to
+      the query engine`: poll results cannot be counted (every `/polls`
+      card missing): roll back and report it;
+    - `[live-emit] status=…` or `[live-emit] failed …`: the cms does not
+      reach the web's live ingest (`WEB_INTERNAL_URL`,
+      `REVALIDATE_SECRET`); pages fall back to polling. Run
+      `infra/live-smoke.sh`. The info line `[live-emit] N events in K
+      POSTs` is no failure: a bulk write of more than 1000 events, split;
+    - any other `error` line: read it, and compare with the batch 8 log.
+
+**What users notice** (worth a short release note):
+
+- `/announcements` shows the cards first and the comment sections as they
+  arrive, with fewer requests; a comment on one card refreshes that card
+  only.
+- A poll card opened before an editor republished the poll still takes the
+  vote (batch 8 failed it); only when the republish reordered or replaced
+  the answers does the card refuse the click with an error and reload, and
+  the next click counts. Poll totals are unchanged.
+- Comments and reactions of a wiki page whose space was widened only in an
+  unpublished draft (or that was moved into a wider space only in a
+  draft, or whose space was never published) are no longer listed to the
+  wider audience until the space is published.
+- Sign-in is unchanged: e-mail and password, no Microsoft button.
+
+**Rollback: both images together, no database step.** Follow the hint
+`infra/deploy.sh` prints. The `:rollback` images are batch 8's; that web
+already runs in UTC (label `org.sinnlos.datetime=zone-explicit`), so the
+hint adds no override:
+
+```bash
+docker tag infra-web:rollback infra-web:latest
+docker tag infra-cms:rollback infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+Nothing in the database needs undoing: the batch 8 cms ignores the four
+columns (they stay, NULL) and the index (Strapi never drops an index it
+did not create), and its permission sync does not grant the anonymous
+forgot/reset-password actions again, so they stay revoked and harmless
+(the web never offered them). Votes stored meanwhile are ordinary rows on
+the published poll. After a rollback, polls are addressed by the numeric
+id of their published row again, so a poll card opened before a republish
+fails its vote again (that row is gone), as in batch 8. **Never
+roll back one image alone:** a batch 9 web in front of the batch 8 cms
+shows no poll card. Roll forward with `infra/deploy.sh` as usual; that
+boot logs no `revoked` line. With Microsoft sign-in switched on (not on
+the owner instance), see
+[Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on).
+
+**Switching Microsoft sign-in on** is not part of this deploy. It is a
+separate, owner-gated change of `infra/.env`, for the employer's instance
+and only after the owner's Entra questions are answered: tenant setup,
+`ENTRA_SYNC_MODE=dry-run` on staging, review the `[entra]` audit lines,
+then `on`, following
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) (and, for an
+instance on the old Strapi 5.49 image with the old Microsoft flow, the
+last paragraph of the
+[lane 4A runbook](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)).
+
+**Rehearsal (2026-09-28, the integrated `batch/9` against `main`
+`03d4ea0`):** images of both built and run on Postgres 16 in throwaway
+containers, Microsoft sign-in off. The batch 8 cms and web seeded the
+database; the new `prod-perm-diff.sql` showed exactly the two `public`
+rows of step 2 and the census 0 and 0. The batch 9 cms then booted on it
+with `[bootstrap] revoked 2 obsolete permission(s)`, a drift line over
+119 actions and `[entra] disabled`; the four nullable columns and the
+partial unique index were there, the exchange answered 404 and
+forgot/reset-password 403 from inside the network, the permission diff
+was empty, and the poll baseline was unchanged. With the **batch 8 web in
+front of the batch 9 cms**, a click on a `/polls` card (numeric id, no
+answer text) stored the vote on the published row, sign-in, `/profile`,
+sign-out and a password change worked, and `infra/live-smoke.sh` passed.
+With the batch 9 web, a vote by documentId moved exactly its option by
+one in the baseline, the password change on `/profile` worked, and
+live-smoke passed. With the **batch 9 web in front of the batch 8 cms**
+(a cms rolled back alone), sign-in and live-smoke still worked, but
+`/polls` showed no poll card (every results read by documentId answered
+404): hence cms and web together. The batch 8 cms booted on the upgraded
+database without a database step (drift none over its 117 actions, the
+columns ignored, forgot-password still 403), both batch 8 images together
+voted normally again, and rolling forward gave the same baseline and a
+passing live-smoke. Not exercised here: the Traefik/Caddy edge on a public
+domain and a real Microsoft tenant (owner-gated).
+
+#### Upgrading to the policy primitives (batch 9, lane 4B)
+
+This release (branch `refactor/policy-primitives`, on `batch/8` `5f2eac0`)
+rebuilds the cms read and ownership policies on shared helpers. What each
+role can read and write is unchanged, except for one visible fix (wiki
+threads follow the published space) and one defence-in-depth point (callers
+without a user id), both at the end of this list:
+
+- **Policy primitives and factories (PL01, PL02).** One role check
+  (`hasRole`), one way to add a policy's filter (`narrowFilters`, always
+  `$and`), one id lookup (`findByRef`), and three factories in
+  `apps/cms/src/utils/policy-factories.ts` that the fourteen read and
+  ownership policies now call. A per-role snapshot of every policy-guarded
+  read, recorded on the previous release, is unchanged on SQLite and
+  Postgres (`apps/cms/src/integration/role-read-snapshot.integration.test.ts`).
+- **Comment and reaction threads (PL04).** A read that pins one thread (the
+  web's comment sections) checks only that target instead of resolving
+  every visible announcement and wiki page. A caller's role, department and
+  teams are read once per request.
+- **Bind-parameter guard (PL04).** One SQL statement binds at most 65535
+  values on Postgres and 32766 on SQLite. A policy that binds a list of
+  visible ids without reading a whole table first (wiki pages and
+  revisions, lessons, the wiki-page anchors of comment and reaction lists)
+  now checks the list against that limit minus 1000 values of headroom,
+  which the request's own filters, status and pagination need. A longer
+  list answers with an empty result and logs
+  `[policy] <policy>: <count> values exceed ...` at error level. Past the
+  engine limit, where such a list used to fail with a 500, the answer is
+  now an empty 200; in the window of about 1000 values just below the
+  limit, where the previous release still returned the rows, it is empty
+  too (an accepted trade-off). The announcement, document, quick-link and
+  poll policies, the wiki spaces and the team lookup read whole tables
+  with `populate`: past the engine limit they still fail with a 500 inside
+  Strapi, before any guard runs, with no data returned and no `[policy]`
+  line ([architecture.md §5.63](./architecture.md)). Nothing near either
+  size exists on an intranet; the log line, or a 500 with a database
+  bind-parameter error, is the signal to change that policy.
+- **Wiki threads follow the published space.** Comment and reaction lists
+  now judge a wiki page the way a single thread and the page itself are
+  judged: by its published row, or by its draft when it was never
+  published. The previous release showed a page's discussions in these
+  lists, while the page itself stayed hidden, in three cases that are now
+  closed: a wiki space whose visibility was widened only in an unpublished
+  draft, a page moved into a wider space only in its draft, and a
+  published page whose space was never published (its published row has
+  no space, its draft links the draft-only space). Depending on that
+  space's visibility, this reached up to every signed-in role, guest
+  included.
+- **Callers without a user id.** A request whose user carries no numeric
+  id owns no row and reads like an anonymous one. users-permissions always
+  sets one, so no real request is affected.
+
+**A normal deploy with `infra/deploy.sh`.** Only the cms changes; no
+schema, env, edge or grant change, nothing to migrate.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **Smoke:** open the dashboard, announcements with comments, a wiki space
+   and page, documents, polls and a course as a member, and the wiki and
+   documents as a guest.
+3. **First hour:** watch the cms log for policy errors and guard lines
+   (on a standalone Caddy box, drop the second `-f`):
+
+   ```bash
+   cd /opt/sinnlos
+   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+     logs --since 1h cms | grep -E '\[policy\]|error'
+   ```
+
+   Expect no output (a policy that throws shows up as an `error` line, and
+   its request as a 500). A `[policy]` line names the policy and the list
+   size that did not fit; that list reads empty for every caller whose
+   visible ids exceed the limit (admin and editor bypass it) until that
+   policy is changed. For the policies that read whole tables with
+   `populate` (announcements, documents, quick links, polls, wiki spaces,
+   the team lookup) the signal is a 500 with a database bind-parameter
+   error in the log instead, and no `[policy]` line.
+
+**Rollback:** the batch 8 image runs on the same database as it is (no
+schema or data change), with the commands `infra/deploy.sh` prints.
+
+**Rehearsal (integration harness, SQLite and Postgres 16, compared with
+`5f2eac0`):** the per-role snapshot of every guarded read was identical;
+one comment-thread read ran 22 (announcement) or 24 (wiki page) SQL
+statements instead of 27, without loading every announcement and page; a
+wiki space widened only in its draft opened its page's thread before and
+does not now, on both the thread and the list, and a wider review matrix
+(6,084 read keys per engine) changed only by losing threads of the three
+wiki cases above; numeric id and documentId on comment delete, classified
+update and RSVP update answered exactly as before (owner 204/200, stranger
+403; a missing or malformed id is 403 at the ownership policy for
+non-bypass callers on classified update/delete and RSVP update, and 404
+for the bypass roles and for comment delete); past the engine limit
+(33,000 visible wiki pages on SQLite and 66,000 on Postgres in the
+rehearsal, 32,767 and 65,536 in the integration test) the previous release
+answered the member's page list and full comment list with a 500 and this
+one answers an empty 200 with the log line, while a single thread and the
+admin list were unaffected. The guard already answers the page list empty
+from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
+comment list from one page fewer plus an announcement, where the previous
+release still served the rows.
+
+#### Upgrading to the live contract and poll documentIds (batch 9, lane 4C)
+
+This release (branch `feat/live-contract-and-poll-ids`, on `batch/8`
+`5f2eac0`) changes how the cms and the web address polls and talk about
+live events, and how the web loads comment sections. Nobody's permissions
+change:
+
+- **Polls by documentId (DA01).** `POST /api/polls/:id/vote` and
+  `GET /api/polls/:id/results` take the poll's documentId, which the web now
+  sends, or, as before, the numeric id of its published row. The vote still
+  lands on the published row. An editor republishing a poll while someone
+  has `/polls` open no longer breaks that person's vote, unless the
+  republish reordered or replaced the answers: the web also sends the
+  answer text the card showed, and the cms refuses a vote whose text is no
+  longer at that position (400 `Poll options changed`; the card shows its
+  error and reloads) instead of recording a different answer. A draft
+  row's id and a poll that was never published answer 404, like a missing
+  poll.
+- **Poll results in one SQL statement (FX20).** The database counts the
+  results with one `GROUP BY` statement. The rule is the one of batch 8
+  (each voter's first vote counts; votes of a deleted account count on
+  their own), so every total stays what it is. What changes: a results read
+  that races a parallel vote's cleanup can no longer count a duplicate that
+  was just removed as a separate vote.
+- **Live events (LF04, LF01).** The cms and the web share one definition of
+  the live events and channel names. The cms sends at most 1000 events per
+  POST to the web, which refuses a bigger body with 400. That cap only
+  matters for more than 1000 distinct events committed together (a bulk
+  script, an import, anything writing them in one transaction): such a
+  burst used to be refused and lost as a whole, notification pings
+  included. An ordinary announcement fan-out writes one notification per
+  transaction, so it already reached the web in small POSTs and was not
+  affected (rehearsed with 1210 recipients: 31 to 34 POSTs of at most 54
+  events each, before and after this release). A split burst logs
+  `[live-emit] N events in K POSTs (at most 1000 each)`.
+- **Comment sections (WD04).** `/announcements` loads the comments and
+  reactions of all cards in one batch (10 cards: 11 cms requests instead of
+  20), shows the cards first and the sections as they arrive, and keeps
+  them fresh with one poll interval and one live subscription request per
+  page. A comment on one card refreshes that card only. With live events
+  off (`LIVE_EVENTS_DISABLED=1`, or `DEMO_MODE`), returning to the tab
+  still refreshes every section at once, in one batch.
+
+**A normal deploy of cms and web together with `infra/deploy.sh`.** No
+schema, permission, env, route or edge change; `infra/diagnostics/prod-perm-diff.sql`
+and the routes golden are unchanged. Deploy both together: the new web
+addresses polls by documentId, which a batch 8 cms answers with 404 (no
+poll cards until the new cms runs), while the new cms still accepts the
+numeric ids of a web that has not restarted yet. The checks use the helpers
+of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+1. **Before: the poll baseline** (read-only). The counted votes per option
+   of every published poll, by the rule the results use (it never shows
+   who voted):
+
+   ```bash
+   psql_db -X <<'SQL' | tee poll-baseline-before.txt
+   BEGIN TRANSACTION READ ONLY;
+   WITH ranked AS (
+     SELECT vp.poll_id, v.option_index, vv.user_id,
+            row_number() OVER (PARTITION BY vp.poll_id, vv.user_id ORDER BY v.id) AS nth
+     FROM poll_votes v
+     JOIN poll_votes_poll_lnk vp ON vp.poll_vote_id = v.id
+     LEFT JOIN poll_votes_voter_lnk vv ON vv.poll_vote_id = v.id
+   )
+   SELECT p.document_id, p.question AS poll, r.option_index, count(*) AS votes
+   FROM ranked r
+   JOIN polls p ON p.id = r.poll_id
+   WHERE p.published_at IS NOT NULL AND (r.nth = 1 OR r.user_id IS NULL)
+   GROUP BY p.document_id, p.question, r.option_index
+   ORDER BY p.document_id, r.option_index;
+   ROLLBACK;
+   SQL
+   ```
+
+   `option_index` 0 is a poll's first answer. The numbers equal what the
+   poll cards on `/polls` show now.
+2. **Deploy:** `infra/deploy.sh`. It runs `infra/live-smoke.sh` when the
+   demo credentials file is readable; otherwise (`live-smoke SKIPPED`) run
+   `infra/live-smoke.sh` by hand. It must pass: it proves the cms still
+   reaches the web's live ingest and a ping reaches an open stream.
+3. **After: the same totals.** Run the query of step 1 again into
+   `poll-baseline-after.txt`; `diff poll-baseline-before.txt
+   poll-baseline-after.txt` shows nothing unless someone voted meanwhile.
+   Then have a member vote on an open poll on `/polls`: the vote succeeds,
+   the card shows the new count, and a third run of the query differs from
+   the second in exactly that poll's option, by one. The cards on `/polls`
+   show the query's numbers.
+4. **After: logs.**
+   `"${COMPOSE[@]}" logs --since 30m cms | grep -E '\[live-emit\] (status|failed)|\[poll-results\]'`
+   prints nothing. A `[poll-results] the tables of api::poll-vote.poll-vote
+   are unknown to the query engine` error would mean the results cannot be
+   counted (every `/polls` card missing): roll back and report it.
+   Optionally open `/announcements` with the browser's network panel: after
+   the stream's `hello` there is one `POST /live/subscribe` for all cards,
+   and a comment from a second session refreshes only its card.
+
+**Rollback:** re-up both previous images with the commands
+`infra/deploy.sh` prints (the web one with
+`-f infra/docker-compose.web-legacy-tz.yml` only if it predates batch 8).
+Never roll back the cms alone: the new web's documentId addresses would get
+404 from the batch 8 cms. Nothing in the database changes, so the previous
+images run on it as they are.
+
+**Rehearsal (2026-09-28, Postgres 16 in a throwaway container and SQLite,
+the real cms booted in process by the integration harness):** a vote by
+documentId landed on the published row before and after a republish, the
+earlier vote followed the republish, a second vote was refused, results by
+documentId equalled those by the published row id, and a draft row id, the
+replaced published id and a never-published poll answered like a missing
+poll; on company-wide, anonymous, guest-visible, targeted and empty polls
+the results equalled `SELECT count(*)` per option and the query engine's
+joined select; the counting statement equalled the batch 8 rule on seeded
+random polls with duplicates and deleted accounts, ran as one statement,
+and parallel votes of one voter never showed as more than one vote; the
+baseline query of step 1 gave exactly the results' counts on Postgres 16,
+a stored duplicate vote included. 1200 notification rows for 1200
+recipients, written in one transaction through the real lifecycle
+subscriber of a booted cms, reached a stand-in web ingest (400 above 1000
+events, like the web) in POSTs of 1000 and 200 events, all 1200 delivered
+(batch 8 sent them in one POST, which the 400 lost); an ordinary fan-out
+to 1210 recipients, one notification per transaction, arrived in 31 POSTs
+of at most 54 events (batch 8: 34 of at most 48), all accepted. Against
+the built cms and web images of this branch on Postgres 16:
+`infra/live-smoke.sh` passed; on `/announcements` with 10 cards the page
+sent one `POST /live/subscribe` instead of 10, a comment on card 3
+refreshed card 3 only, the server render made 17 cms requests instead of
+26, and a tab regain 16 cms requests and 4 Server Actions instead of 45
+and 23 (headless browser). Not exercised: real tab switching (the regain
+was simulated by switching the page's visibility state) and the
+Traefik/Caddy edge on a public domain.
+
+Fix round after review (2026-09-28, the same setup, a headless browser
+against the built images): a `/polls` card rendered before an admin-panel
+republish that reordered the answers (`Alpha, Beta, Gamma` to
+`Gamma, Alpha, Beta`) and then clicked on `Alpha` got 400
+`Poll options changed`, stored nothing, showed its error and reloaded with
+the new order; the next click stored `Alpha` (index 1) on the new published
+row. The web from before the fix stored that stale click as `Gamma`
+(index 0), which is what this check prevents; a vote body without the
+answer text (that older web) is still accepted. With
+`LIVE_EVENTS_DISABLED=1` a regained `/announcements` tab showed a comment
+posted while it was hidden after 0.2-0.3 s, in one batched read of all
+sections (before the fix: 3.6-6.6 s, at the next 10 s tick); with live
+events on, a regain still made exactly one batched read (the stream's
+catch-up), no second one. `infra/live-smoke.sh` passed.
+
+#### Upgrading to the Entra sign-in (batch 9, lane 4A)
+
+Lane 4A (D-ENTRA-01) adds the optional Microsoft
+Entra ID sign-in ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in))
+and replaces the old, non-working Microsoft path. **With `ENTRA_ENABLED`
+unset** (the owner instance) it is a normal deploy of cms and web together;
+the first boot changes, by itself:
+
+- **Schema:** four nullable, private columns on `up_users`
+  (`entra_tenant_id`, `role_source`, `entra_applied_role`,
+  `entra_manager_oid`) and the unique index `up_users_entra_identity_uq`
+  on (`entra_tenant_id`, `microsoft_oid`). Every existing row keeps NULL
+  there: its role is *manual* and never touched by a sign-in.
+- **Permissions:** the anonymous `auth.forgotPassword` and
+  `auth.resetPassword` (users-permissions' first-boot defaults of the
+  `public` role) are revoked; the web has no UI for either, and they would
+  hand an Entra-only account a local password. The boot logs
+  `[bootstrap] revoked 2 obsolete permission(s)` once (fewer if an admin
+  removed them before), and the drift line now checks 119 managed actions
+  (117 before).
+- **Providers:** Strapi's own Microsoft provider (`/api/connect/microsoft`)
+  is forced off with its key and secret cleared (it was off); e-mail
+  sign-in stays on. The cms logs `[entra] disabled`.
+- **Self-registration** (`LOCAL_REGISTRATION=1` only) accepts `displayName`
+  as its only extra field; the web sends nothing else.
+- **Web:** unchanged for local users. The sign-in page explains Microsoft
+  error codes, `/api/me` answers an empty `entraManagedFields`.
+- **Env:** compose passes the new `ENTRA_*` keys with their defaults; the
+  cms no longer gets `MS_CLIENT_SECRET` and the web no longer gets
+  `AUTH_MICROSOFT_ENTRA_ID_ISSUER`. `MS_*` lines left in `infra/.env` are
+  ignored; `infra/deploy.sh` notes them (`NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET
+  are set …`), and they can be deleted. When they are a real app
+  registration (a GUID `MS_CLIENT_ID` plus `MS_CLIENT_SECRET`) it warns
+  instead (`WARNING: infra/.env holds a Microsoft app registration …`):
+  if Microsoft sign-in works with the running release, it is **off** after
+  this deploy until `ENTRA_ENABLED=1`, see the last paragraph of this
+  section. Both only inform (exit code 0). The old refusal ("Microsoft
+  sign-in is configured …") is gone.
+
+**Before the deploy**
+
+1. `infra/deploy.sh --check` prints `Preflight OK` (a note about leftover
+   `MS_*` lines is fine; the *app registration* warning is fine only if
+   nobody signs in with Microsoft on this instance, otherwise follow the
+   last paragraph of this section first).
+2. Optional, read-only: accounts from the old Microsoft flow, which the new
+   sign-in would not adopt (expected 0 and 0 on the owner instance):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT count(*) FILTER (WHERE provider = 'microsoft') AS microsoft_rows,
+          count(*) FILTER (WHERE microsoft_oid IS NOT NULL) AS rows_with_oid
+     FROM up_users;
+   SQL
+   ```
+
+**Deploy:** `infra/deploy.sh` (cms and web together; it runs live-smoke).
+
+**After the deploy**
+
+1. The cms log (`docker logs infra-cms-1 2>&1 | grep -E '\[entra\]|\[bootstrap\]'`):
+   `[entra] disabled`, `[bootstrap] revoked 2 obsolete permission(s)` (first
+   boot only) and `[bootstrap] permission drift: none (report-only check of
+   119 managed actions)`. `[bootstrap] users-permissions providers synced
+   (email=on, microsoft=off)` may also appear once, when Strapi's own
+   Microsoft provider was on or still held a client id or secret (from the
+   Strapi 5.49 era); they are now off and cleared, which is expected.
+2. The columns and the index (4 rows, then 1):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'up_users'
+      AND column_name IN ('entra_tenant_id', 'role_source', 'entra_applied_role', 'entra_manager_oid');
+   SELECT indexname FROM pg_indexes WHERE indexname = 'up_users_entra_identity_uq';
+   SQL
+   ```
+
+3. The exchange is off and the anonymous reset flow closed, asked from
+   inside the stack (the edge sends `/api/auth/*` to the web): `404` and
+   `403`:
+
+   ```bash
+   docker exec infra-web-1 node -e "fetch('http://cms:1337/api/auth/entra/exchange',{method:'POST'}).then(r=>console.log(r.status))"
+   docker exec infra-web-1 node -e "fetch('http://cms:1337/api/auth/forgot-password',{method:'POST',headers:{'content-type':'application/json'},body:'{\"email\":\"nobody@example.com\"}'}).then(r=>console.log(r.status))"
+   ```
+
+4. `infra/diagnostics/prod-perm-diff.sql` (§3.8 intro): nothing new; the
+   two public rows are gone and no longer expected.
+5. Sign in locally, change a password on `/profile`, sign out; no Microsoft
+   button on `/sign-in`.
+
+**Rollback:** follow the hint `deploy.sh` prints (both images together). The
+previous cms ignores the four columns (they stay, NULL) and the index
+(harmless; Strapi never drops an index it did not create); its permission
+sync does not grant the public forgot/reset-password actions again, so they
+stay revoked. Nothing needs undoing in the database. This holds with
+`ENTRA_ENABLED` unset; after Microsoft sign-in was switched on, see
+[Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on).
+
+**Switching Microsoft sign-in on** (later, and only after the owner's Entra
+questions are answered) is a separate change of `infra/.env`: follow
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in): the tenant setup,
+`ENTRA_SYNC_MODE=dry-run` on staging, review the `[entra]` audit lines, then
+`on`.
+
+**An instance that still signs users in with the old Microsoft flow** (the
+Strapi 5.49 image from before PR #39) must leave it now; it cannot stay on
+that image. `infra/deploy.sh` warns about it (`WARNING: infra/.env holds a
+Microsoft app registration …`) while `ENTRA_ENABLED` is unset: deployed like
+that, Microsoft sign-in is off and only local accounts can sign in, which
+the old flow's accounts are not (no password). Work through the upgrade
+notes it does not run yet (newest first, see the top of this guide), with
+these Entra steps:
+
+1. Tenant: add the app roles, set *Assignment required*, assign the roles,
+   and remove the `…/api/connect/microsoft/callback` redirect URI and the
+   `GroupMember.Read.All` permission
+   ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), steps 1-5).
+2. `infra/.env`: `ENTRA_ENABLED=1`, the `MS_*` keys (tenant GUID, not
+   `common`), `ENTRA_EXCHANGE_SECRET`, `ENTRA_SYNC_MODE=dry-run`, and
+   `AUTH_LOCAL_ENABLED=1` if a local admin account must keep working.
+3. Accounts the old flow created (`provider = microsoft`, e-mail = the UPN)
+   are **not** adopted: they carry no tenant id, so the new sign-in answers
+   *"already exists"* for their e-mail. List them
+   (`SELECT id, username, email FROM up_users WHERE provider = 'microsoft' ORDER BY id;`)
+   and bind each one ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409):
+   tenant id and object id, lower case), or delete the ones nobody needs.
+   Their roles stay as they are (*manual*) until an admin hands them to
+   Entra.
+4. Deploy, review the `[entra]` lines in dry-run, then switch to `on`.
+   Without `AUTH_LOCAL_ENABLED=1`, `infra/deploy.sh`'s live-smoke cannot
+   sign in ([Staging dry-run, then on](#staging-dry-run-then-on), step 1).
+5. Rollback: prefer switching back in `infra/.env` (`ENTRA_ENABLED=0` or
+   `AUTH_LOCAL_ENABLED=1`) over an image rollback. An image rollback needs
+   `AUTH_LOCAL_ENABLED=1` in `infra/.env` before the old images start (a
+   web from before batch 9 shows no e-mail form while `MS_CLIENT_ID` and
+   `MS_CLIENT_SECRET` are set), and this release's cms restarted on it
+   first, which turns e-mail sign-in back on. Going back to the 5.49 image
+   also needs the Microsoft provider re-enabled in the Strapi admin panel,
+   with its client id and secret
+   ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on),
+   step 2).
 
 #### Deploying batch 8 (2026-09-28)
 
@@ -4245,6 +5265,12 @@ with the ones below; both releases then go out in one deploy.
 > sign-in is unaffected. An instance whose users sign in with Microsoft must
 > stay on its current (Strapi 5.49) images until the planned Entra exchange
 > ships. `infra/deploy.sh` enforces this (step 2).
+>
+> *Since batch 9 (lane 4A):* the Entra exchange has shipped, and this
+> refusal is gone; `infra/deploy.sh` now checks the Entra settings instead.
+> Such an instance moves straight to the new sign-in:
+> [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) and
+> [Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a).
 
 **Before the deploy**
 
@@ -4361,7 +5387,8 @@ No data is rewritten, and there are no new tables or indexes.
 **What users and editors notice** (worth a short release note):
 
 - Nobody is signed out.
-- Microsoft sign-in is unavailable until the Entra exchange ships (see above).
+- Microsoft sign-in is unavailable until the Entra exchange ships (see above;
+  it shipped with batch 9).
 - A `%` or `_` in a search term now matches literally (Strapi escapes them in
   `$contains`/`$containsi` filters, which the web search uses).
 - A text field longer than 255 characters is rejected with a 400 validation
@@ -4927,7 +5954,8 @@ On the VM:
 git clone https://github.com/yurtbayemre/sinnlos.git /opt/sinnlos
 cd /opt/sinnlos/infra
 cp .env.example .env
-# Edit .env with your domain and secrets; leave MS_* empty on this release (see §3.5)
+# Edit .env with your domain and secrets; Microsoft sign-in is optional
+# (ENTRA_ENABLED=1, see "Microsoft Entra ID sign-in")
 docker compose up -d --build
 ```
 
@@ -5135,9 +6163,7 @@ az containerapp create \
       "ENCRYPTION_KEY=<secret>" \
       "REVALIDATE_SECRET=<openssl rand -hex 32>" \
       "INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>" \
-      "MS_CLIENT_ID=<client-id>" \
-      "MS_CLIENT_SECRET=<client-secret>" \
-      "MS_TENANT_ID=<tenant-id>" \
+      "ENTRA_ENABLED=0" \
       "LIVE_EVENTS_DISABLED=0" \
       "APP_TIME_ZONE=Europe/Berlin" \
       "SMTP_HOST=<mail.example.com>" \
@@ -5227,9 +6253,7 @@ az containerapp create \
       "AUTH_SECRET=<secret>" \
       "REVALIDATE_SECRET=<same-value-as-cms>" \
       "INTERNAL_UPLOAD_TOKEN=<same-value-as-cms>" \
-      "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
-      "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
-      "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
+      "ENTRA_ENABLED=0" \
       "LIVE_EVENTS_DISABLED=0" \
       "APP_TIME_ZONE=Europe/Berlin" \
       "TZ=UTC"
@@ -5263,15 +6287,19 @@ az containerapp update \
   --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN" "PUBLIC_WEB_URL=https://$WEB_FQDN"
 ```
 
-**Add the Entra redirect URI.** Go to your App registration →
-**Authentication** → **Redirect URIs** and add:
-
-```
-https://<web-fqdn>/api/auth/callback/microsoft-entra-id
-```
-
-Where `<web-fqdn>` is the value `$WEB_FQDN` printed above. Without this,
-Microsoft sign-in will fail with `AADSTS50011`.
+**Optional: Microsoft sign-in.** Both apps above run with `ENTRA_ENABLED=0`.
+To switch it on, follow [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in):
+register `https://<web-fqdn>/api/auth/callback/microsoft-entra-id` and
+`https://<web-fqdn>/sign-in` (where sign-out returns to) as Web redirect URIs
+(`<web-fqdn>` is `$WEB_FQDN` above; without the first Microsoft answers
+`AADSTS50011`), then set on the cms `ENTRA_ENABLED=1`,
+`MS_TENANT_ID`, `MS_CLIENT_ID`, `ENTRA_EXCHANGE_SECRET` and
+`ENTRA_SYNC_MODE=dry-run`, and on the web `ENTRA_ENABLED=1`,
+`AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
+`AUTH_MICROSOFT_ENTRA_ID_SECRET` and the same `ENTRA_EXCHANGE_SECRET`
+(`az containerapp update --set-env-vars …`, secrets as Container Apps
+secrets). The cms needs outbound HTTPS to `login.microsoftonline.com` and
+`graph.microsoft.com`.
 
 The web app gets a public FQDN (`*.azurecontainerapps.io`). Add a custom domain
 via **Container Apps → Custom domains** and Azure will provision a managed TLS
@@ -5374,29 +6402,22 @@ docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "S
 
 ### 6.3 Microsoft sign-in flow
 
-> **Skip this on the current release.** Microsoft sign-in cannot complete on
-> Strapi 5.51+ (see the [Entra section](#microsoft-entra-id-app-registration));
-> check local sign-in instead: `<URL>/` redirects to `/sign-in`, and e-mail +
-> password lands on the dashboard with your display name in the top-right.
-> The steps below apply once the Entra exchange ships.
+Without `ENTRA_ENABLED=1` there is no Microsoft button: check local sign-in
+instead (`<URL>/` redirects to `/sign-in`, e-mail + password lands on the
+dashboard with your display name in the top-right), and that
+`POST <cms>/api/auth/entra/exchange` answers 404. With Microsoft sign-in
+configured ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)):
 
 1. Open `<URL>/` → you should be redirected to `/sign-in`.
-2. Click **Sign in with Microsoft** → complete the OIDC flow.
-3. You should land on the dashboard with your display name in the top-right.
-4. In Strapi admin → **Content Manager → User** — confirm your account was
-   auto-created (e-mail = your lowercased user principal name, role
-   `member`).
-
-> **Current state (verified 2026-09-25):** on Strapi 5.55.1 step 2 already
-> fails: the cms answers the web's token exchange with a 400, and the web
-> shows the Auth.js error page. On Strapi 5.49 (the previous release) the
-> sign-in completed, but the Graph enrichment and group → role mapping did
-> not run (the users-permissions extension is inert, see the README note
-> under step 4), so `microsoftOid` and `displayName` stayed empty and roles
-> were assigned in the Strapi admin. A new user's first Microsoft sign-in
-> there also needs `LOCAL_REGISTRATION=1` on the cms, and the Microsoft
-> provider must be enabled in the Strapi admin (**Settings → Providers**);
-> the `MS_*` env alone does not enable it.
+2. Click **Sign in with Microsoft** → complete the Microsoft sign-in.
+3. You land on the dashboard with your display name in the top-right.
+4. The cms log has one `[entra] user=<id> … result=created role=new->…` line
+   (`docker logs infra-cms-1 2>&1 | grep '\[entra\]'`), without any token.
+5. In the Strapi admin → **Content Manager → User**, your account exists:
+   username `entra-<object id>`, provider `microsoft`, the role of your app
+   role (at most `member` in dry-run), *Role source* `entra`.
+6. `/profile` shows name, job title, phone and office as read-only; *Sign
+   out* goes through Microsoft and returns to `/sign-in`.
 
 ### 6.4 Role enforcement (optional)
 
@@ -5477,11 +6498,14 @@ curl -s <URL>/api/polls/<poll-id>/results \
 |---|---|
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
-| MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)), or roll back ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)) |
-| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
+| MS login `AADSTS50011` | Redirect URI missing in the Entra app registration — add `<WEB_PUBLIC_URL>/api/auth/callback/microsoft-entra-id` ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 1) |
+| Microsoft sign-out ends on Microsoft's "You signed out" page instead of `/sign-in` | `<WEB_PUBLIC_URL>/sign-in` is not a registered Web redirect URI of the app ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 2); the intranet session is already gone |
+| cms stops at boot with `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: …`, or every web request answers 500 with `[auth] ENTRA_ENABLED=1, but …` in the web log | The named Entra setting is invalid (a tenant `common` or a non-GUID, a short `ENTRA_EXCHANGE_SECRET`, …). Fix it in `infra/.env` (`infra/deploy.sh --check` names the keys) or unset `ENTRA_ENABLED` |
+| `infra/deploy.sh` stops with `ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: …` | The same check before the deploy ([§3.6](#36-deploy)) |
+| Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |
+| Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; check whose it is, then bind or delete it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)) |
 | Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
-| MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
+| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that alone does not help: restart this release's cms on it before the rollback, or re-enable the Email provider in the Strapi admin panel afterwards ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on), step 2) |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
 | cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
@@ -5953,13 +6977,10 @@ automatically.
 **Microsoft sign-in returns "AADSTS50011: The redirect URI does not match"**
 
 The redirect URI in your Entra app registration must match exactly (including
-trailing slash) what Auth.js sends:
-- `<WEB_URL>/api/auth/callback/microsoft-entra-id`
-- `<CMS_URL>/api/connect/microsoft/callback` (Strapi's own OAuth redirect;
-  not used by the current flow, harmless to keep)
-
-On this release Microsoft sign-in fails later anyway, at the token exchange
-(see the [Entra section](#microsoft-entra-id-app-registration)).
+trailing slash) what Auth.js sends: `<WEB_URL>/api/auth/callback/microsoft-entra-id`
+(`AUTH_URL`, compose: `WEB_PUBLIC_URL`). An old
+`<CMS_URL>/api/connect/microsoft/callback` entry is unused and can go (see
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)).
 
 **Strapi admin blank / 502 after first deploy**
 

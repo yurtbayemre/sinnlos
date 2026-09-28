@@ -36,8 +36,13 @@
  * report. The two apps are separate Docker build contexts (see
  * `apps/web/Dockerfile`: only `apps/web` is copied), so the module cannot
  * be shared by import; both files carry the same tests.
+ *
+ * The admin_role/editor read bypass (they author and moderate
+ * announcements, so a filtered list would hide their own work) is not
+ * decided here: callers check `hasRole(user, MODERATORS)` from
+ * bootstrap/roles.ts first, as the other visibility policies do (the
+ * announcement-visibility policy, the acknowledgement controller).
  */
-import { MODERATORS } from "../bootstrap/roles";
 
 /**
  * The caller's organisational scope, resolved from the database. All row
@@ -59,18 +64,6 @@ export interface AnnouncementTargeting {
   department?: { id: number } | null;
   team?: { id: number } | null;
   audienceRoles?: { id: number }[] | null;
-}
-
-/**
- * Roles that read every announcement regardless of targeting: they
- * author and moderate them, so a filtered list would hide their own work.
- * Mirrors the bypass of the other visibility policies (document, wiki,
- * quick-link): the MODERATORS of the role vocabulary (bootstrap/roles.ts).
- */
-const BYPASS_ROLE_TYPES: readonly string[] = MODERATORS;
-
-export function hasAudienceBypass(roleType?: string | null): boolean {
-  return roleType != null && BYPASS_ROLE_TYPES.includes(roleType);
 }
 
 /**

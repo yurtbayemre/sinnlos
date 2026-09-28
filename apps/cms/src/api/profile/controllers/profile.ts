@@ -27,8 +27,16 @@
  *     columns are never even loaded.
  * A new column on the user model is therefore invisible here until someone
  * adds it to an allowlist on purpose.
+ *
+ * ENTRA-OWNED FIELDS (D-ENTRA-01 spec J): for a user bound to Microsoft Entra
+ * (entraTenantId set, by the exchange or an admin binding) the sign-in
+ * mirrors displayName, jobTitle, phone and officeLocation from Graph.
+ * updateMe silently drops those four for such a caller, and GET/PUT answer
+ * `entraManagedFields` (the four, or [] for everyone else) so the web can
+ * disable the inputs. The Entra columns themselves never leave /api/me.
  */
-import { GUEST } from "../../../bootstrap/roles";
+import { GUEST, hasRole, type RoleType as IntranetRoleType } from "../../../bootstrap/roles";
+import { ENTRA_MANAGED_PROFILE_FIELDS, isEntraBound } from "../../../entra/profile";
 import {
   SENSITIVE_USER_FIELDS,
   USER_UID,
@@ -67,7 +75,7 @@ export const DIGEST_FIELDS = [
 ] as const satisfies readonly (typeof EDITABLE_FIELDS)[number][];
 
 /** Role types whose digest opt-ins updateMe ignores. */
-export const DIGEST_IGNORED_ROLE_TYPES: readonly string[] = [GUEST];
+export const DIGEST_IGNORED_ROLE_TYPES: readonly IntranetRoleType[] = [GUEST];
 
 /**
  * Free-text fields of PUT /api/me (FX26): trimmed, `null` clears them, and
@@ -208,6 +216,11 @@ export function toSelfProfile(row: Row): Row {
   return out;
 }
 
+/** The profile fields the caller cannot edit because Entra owns them. */
+export function entraManagedFields(row: Row): string[] {
+  return isEntraBound(row) ? [...ENTRA_MANAGED_PROFILE_FIELDS] : [];
+}
+
 /**
  * Shared read for GET and PUT: always the caller's own id (never from the
  * request), manager loaded through an explicit select.
@@ -226,6 +239,7 @@ async function loadProfile(userId: number, callerRoleType: RoleType): Promise<Ro
   return {
     ...toSelfProfile(full),
     manager: toManagerSummary(full.manager, callerRoleType),
+    entraManagedFields: entraManagedFields(full),
   };
 }
 
@@ -281,13 +295,31 @@ export default {
 
     const raw = ctx.request.body;
     const body = isRow(raw) && isRow(raw.data) ? raw.data : isRow(raw) ? raw : {};
-    const ignoresDigest = DIGEST_IGNORED_ROLE_TYPES.includes(user.role?.type ?? "");
+    const ignoresDigest = hasRole(user, DIGEST_IGNORED_ROLE_TYPES);
+    // Entra owns these four for a bound caller (read fresh, not from the JWT).
+    const own: unknown = await strapi.db.query(USER_UID).findOne({
+      where: { id: user.id },
+      select: ["id", "entraTenantId"],
+    });
+    const locked = new Set<string>(isRow(own) ? entraManagedFields(own) : []);
     const data: Record<string, unknown> = {};
+    let dropped = false;
     for (const field of EDITABLE_FIELDS) {
       if (ignoresDigest && (DIGEST_FIELDS as readonly string[]).includes(field)) continue;
-      if (has(body, field)) data[field] = body[field];
+      if (!has(body, field)) continue;
+      if (locked.has(field)) {
+        dropped = true;
+        continue;
+      }
+      data[field] = body[field];
     }
-    if (Object.keys(data).length === 0) return ctx.badRequest("No editable fields provided");
+    if (Object.keys(data).length === 0) {
+      if (!dropped) return ctx.badRequest("No editable fields provided");
+      // Only Entra-owned fields were sent: nothing to write, not an error.
+      const unchanged = await loadProfile(user.id, user.role?.type);
+      if (!unchanged) return ctx.notFound();
+      return ctx.send({ data: unchanged });
+    }
 
     // Every check below runs before the write, so an invalid field rejects
     // the whole request (400) instead of a partial update or a database 500.

@@ -6,10 +6,11 @@
 #   0. Preflight of infra/.env against the env contract (FX13): required
 #      keys set, no template placeholder in the secrets, digest sender set
 #      when SMTP is, JWT_SECRET rotated when the running web still exposed
-#      Strapi JWTs (D-SESSION-01), no Microsoft sign-in configured (it
-#      cannot complete on Strapi 5.51+), DATETIME_LEGACY_ZONE set while the
-#      running database still holds pre-contract datetime columns (the new
-#      cms would refuse to start). Fails before anything is touched.
+#      Strapi JWTs (D-SESSION-01), a valid Entra configuration when
+#      ENTRA_ENABLED=1 (D-ENTRA-01: cms and web would refuse to start),
+#      DATETIME_LEGACY_ZONE set while the running database still holds
+#      pre-contract datetime columns (the new cms would refuse to start).
+#      Fails before anything is touched.
 #   1. Pre-deploy Postgres backup (infra/backup/pg-backup.sh).
 #   2. Rollback-tag the currently running web/cms images as :rollback so a
 #      failed deploy can be reverted by retagging :rollback back to :latest.
@@ -78,12 +79,16 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # rendering folds long values across lines) and prints key names only, never
 # a value: "fatal KEY", "warn KEY", "digest KEY" (SMTP set, but the digest
 # gate in apps/cms/src/digest/send-digests.ts would skip every run),
-# "entra MS_CLIENT_ID" (the web offers Microsoft sign-in with a real app
-# registration, a GUID client id) or "entra-template MS_CLIENT_ID" (the same
-# with a non-GUID value, e.g. the .env.example text).
-# The key lists, the markers, the digest rule and the Microsoft rule are
-# pinned against env-guard.ts, send-digests.ts and the web's auth-config.ts
-# by apps/cms/src/utils/deploy-preflight.test.ts.
+# "entra-invalid KEY" (ENTRA_ENABLED=1 and KEY fails the check the cms
+# (apps/cms/src/entra/config.ts) or the web (apps/web/src/lib/auth-config.ts)
+# runs at start, so both would refuse to start), "entra-was-on MS_CLIENT_ID"
+# (without ENTRA_ENABLED=1, a real app registration: a GUID client id and a
+# client secret, with which the running release may have offered Microsoft
+# sign-in) or "entra-inert MS_CLIENT_ID" (other MS_* values left in
+# infra/.env without ENTRA_ENABLED=1: ignored).
+# The key lists, the markers, the digest rule and the Entra rules are
+# pinned against env-guard.ts, send-digests.ts, entra/config.ts and the web's
+# auth-config.ts by apps/cms/src/utils/deploy-preflight.test.ts.
 preflight_scan() {
   awk -v fatal_keys="${PREFLIGHT_FATAL_KEYS}" -v warn_keys="${PREFLIGHT_WARN_KEYS}" '
     function placeholder(v,    n, i, parts, p) {
@@ -102,6 +107,38 @@ preflight_scan() {
       v = tolower(v)
       if (length(v) != 36 || v !~ /^[0-9a-f-]+$/ || split(v, parts, "-") != 5) return 0
       return length(parts[1]) == 8 && length(parts[2]) == 4 && length(parts[3]) == 4 && length(parts[4]) == 4 && length(parts[5]) == 12
+    }
+    function trim(v) {
+      gsub(/^[ \t]+|[ \t]+$/, "", v)
+      return v
+    }
+    # ENTRA_SESSION_TTL: <n>m, <n>h or <n>d, more than zero, at most 7d.
+    function ttl_ok(v,    n, unit) {
+      v = trim(v)
+      if (v == "") return 1
+      if (v !~ /^[0-9]+[mhd]$/) return 0
+      unit = substr(v, length(v), 1)
+      n = substr(v, 1, length(v) - 1) + 0
+      n = n * (unit == "m" ? 60 : unit == "h" ? 3600 : 86400)
+      return n > 0 && n <= 604800
+    }
+    # ENTRA_GROUP_ROLES: comma list of <roleType>:<groupGuid>, at most 20
+    # distinct groups; blank entries are skipped.
+    function group_roles_ok(v,    n, i, parts, e, c, role, g, seen, count) {
+      n = split(v, parts, ",")
+      count = 0
+      for (i = 1; i <= n; i++) {
+        e = trim(parts[i])
+        if (e == "") continue
+        c = index(e, ":")
+        if (c == 0) return 0
+        role = trim(substr(e, 1, c - 1))
+        g = tolower(trim(substr(e, c + 1)))
+        if (role !~ /^(admin_role|editor|department_head|team_lead|member|guest)$/) return 0
+        if (!guid(g)) return 0
+        if (!(g in seen)) { seen[g] = 1; count++ }
+      }
+      return count <= 20
     }
     BEGIN {
       n = split(fatal_keys, k, " "); for (i = 1; i <= n; i++) fatal[k[i]] = 1
@@ -126,12 +163,26 @@ preflight_scan() {
         if (env["PUBLIC_WEB_URL"] ~ /^[ \t]*$/) print "digest PUBLIC_WEB_URL"
         if (env["DIGEST_FROM"] ~ /^[ \t]*$/) print "digest DIGEST_FROM"
       }
-      # The web offers Microsoft sign-in whenever both of its Entra keys are
-      # non-empty (MICROSOFT_ENABLED in apps/web/src/lib/auth-config.ts;
-      # compose fills them from MS_CLIENT_ID / MS_CLIENT_SECRET).
-      if (env["AUTH_MICROSOFT_ENTRA_ID_ID"] != "" && env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
-        if (guid(env["AUTH_MICROSOFT_ENTRA_ID_ID"])) print "entra MS_CLIENT_ID"
-        else print "entra-template MS_CLIENT_ID"
+      # D-ENTRA-01: ENTRA_ENABLED is the only switch (exactly "1"). With it,
+      # every value the cms and the web validate at start; the web gets
+      # MS_CLIENT_SECRET as AUTH_MICROSOFT_ENTRA_ID_SECRET (compose).
+      if (env["ENTRA_ENABLED"] == "1") {
+        if (!guid(trim(env["MS_TENANT_ID"]))) print "entra-invalid MS_TENANT_ID"
+        if (!guid(trim(env["MS_CLIENT_ID"]))) print "entra-invalid MS_CLIENT_ID"
+        if (trim(env["AUTH_MICROSOFT_ENTRA_ID_SECRET"]) == "") print "entra-invalid MS_CLIENT_SECRET"
+        if (length(trim(env["ENTRA_EXCHANGE_SECRET"])) < 32 || placeholder(env["ENTRA_EXCHANGE_SECRET"])) print "entra-invalid ENTRA_EXCHANGE_SECRET"
+        mode = trim(env["ENTRA_SYNC_MODE"])
+        if (mode != "" && mode != "on" && mode != "dry-run") print "entra-invalid ENTRA_SYNC_MODE"
+        role = trim(env["ENTRA_DEFAULT_ROLE"])
+        if (role != "" && role != "member" && role != "guest" && role != "deny") print "entra-invalid ENTRA_DEFAULT_ROLE"
+        if (!ttl_ok(env["ENTRA_SESSION_TTL"])) print "entra-invalid ENTRA_SESSION_TTL"
+        if (!group_roles_ok(env["ENTRA_GROUP_ROLES"])) print "entra-invalid ENTRA_GROUP_ROLES"
+      } else if (guid(trim(env["AUTH_MICROSOFT_ENTRA_ID_ID"])) && trim(env["AUTH_MICROSOFT_ENTRA_ID_SECRET"]) != "") {
+        # The web before D-ENTRA-01 offered Microsoft sign-in with exactly
+        # these two keys; this deploy switches it off.
+        print "entra-was-on MS_CLIENT_ID"
+      } else if (env["MS_CLIENT_ID"] != "" || env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
+        print "entra-inert MS_CLIENT_ID"
       }
     }' | sort -u
 }
@@ -375,12 +426,24 @@ keys_of() { sed -n "s/^$1 //p" <<<"${findings}" | tr '\n' ' '; }
 fatal_keys="$(keys_of fatal)"
 warn_keys="$(keys_of warn)"
 digest_keys="$(keys_of digest)"
-entra_keys="$(keys_of entra)"
-entra_template_keys="$(keys_of entra-template)"
-if [[ -n "${entra_template_keys}" ]]; then
-  echo "WARNING: MS_CLIENT_ID/MS_CLIENT_SECRET are set, but MS_CLIENT_ID is no GUID (template text?)." >&2
-  echo "         The sign-in page offers a Microsoft button that cannot work, and local sign-in" >&2
-  echo "         is off unless AUTH_LOCAL_ENABLED=1. Clear both in infra/.env for local sign-in." >&2
+entra_invalid_keys="$(keys_of entra-invalid)"
+entra_inert_keys="$(keys_of entra-inert)"
+entra_was_on_keys="$(keys_of entra-was-on)"
+# Not fatal: the owner instance may keep an unused registration in
+# infra/.env. But an instance that still signs users in with the old
+# Microsoft flow loses it with this deploy.
+if [[ -n "${entra_was_on_keys}" ]]; then
+  echo "WARNING: infra/.env holds a Microsoft app registration (MS_CLIENT_ID is a GUID and" >&2
+  echo "         MS_CLIENT_SECRET is set), but ENTRA_ENABLED is not 1. If Microsoft sign-in" >&2
+  echo "         works with the running release, it is OFF after this deploy (local sign-in is" >&2
+  echo "         on) until ENTRA_ENABLED=1 is set. Accounts the old flow created have no password," >&2
+  echo "         and the new sign-in answers \"already exists\" for them until an admin binds each" >&2
+  echo "         one: docs/DEPLOYMENT.md, \"Upgrading to the Entra sign-in (batch 9, lane 4A)\"." >&2
+  echo "         Nothing to do if Microsoft sign-in was never used here." >&2
+fi
+if [[ -n "${entra_inert_keys}" ]]; then
+  echo "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:" >&2
+  echo "      Microsoft sign-in stays off and the MS_* values are ignored (safe to delete)." >&2
 fi
 if [[ -n "${warn_keys}" ]]; then
   echo "WARNING: template placeholder in: ${warn_keys}" >&2
@@ -408,20 +471,16 @@ if [[ -n "${fatal_keys}" ]]; then
   echo "       signs every user out once." >&2
   preflight_failed=1
 fi
-# Strapi 5.51+ completes /api/auth/:provider/callback only from its own OAuth
-# session, so it answers the web's server-side access-token exchange
-# (apps/web/src/auth.ts) with a 400: every Microsoft sign-in fails, and an
-# install without AUTH_LOCAL_ENABLED=1 has no working sign-in at all.
-# Remove this gate together with that exchange (D-ENTRA-01).
-if [[ -n "${entra_keys}" ]]; then
-  echo "ERROR: Microsoft sign-in is configured (MS_CLIENT_ID/MS_CLIENT_SECRET), but it cannot" >&2
-  echo "       work with this release: Strapi 5.51+ no longer accepts the web's access-token" >&2
-  echo "       exchange, so every Microsoft sign-in fails (and with AUTH_LOCAL_ENABLED=0 nobody" >&2
-  echo "       can sign in). Keep the running release until the Entra exchange ships, or clear" >&2
-  echo "       MS_CLIENT_ID and MS_CLIENT_SECRET in infra/.env to run with local sign-in only." >&2
-  echo "       Accounts created through Microsoft sign-in have no local password and" >&2
-  echo "       provider = microsoft: set a password and switch provider to local for each" >&2
-  echo "       (docs/DEPLOYMENT.md, upgrading an existing instance, step 2)." >&2
+# D-ENTRA-01: with ENTRA_ENABLED=1 an invalid Entra configuration makes the
+# new cms (register()) and web (first request) refuse to start, after
+# `up -d --build` replaced the running containers. Refused here instead.
+if [[ -n "${entra_invalid_keys}" ]]; then
+  echo "ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: ${entra_invalid_keys}" >&2
+  echo "       The cms and the web refuse to start with them. MS_TENANT_ID and MS_CLIENT_ID must be" >&2
+  echo "       GUIDs (never common/organizations/consumers), MS_CLIENT_SECRET set, ENTRA_EXCHANGE_SECRET" >&2
+  echo "       32+ characters (openssl rand -hex 32), ENTRA_SYNC_MODE on|dry-run, ENTRA_DEFAULT_ROLE" >&2
+  echo "       member|guest|deny, ENTRA_SESSION_TTL <n>m|h|d up to 7d, ENTRA_GROUP_ROLES <role>:<guid>,..." >&2
+  echo "       (docs/DEPLOYMENT.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
   preflight_failed=1
 fi
 if jwt_rotation_missing; then

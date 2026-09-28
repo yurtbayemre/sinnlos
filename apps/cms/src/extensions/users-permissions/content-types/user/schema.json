@@ -72,6 +72,27 @@
       "private": true,
       "searchable": false
     },
+    "entraTenantId": {
+      "type": "string",
+      "private": true,
+      "searchable": false
+    },
+    "roleSource": {
+      "type": "enumeration",
+      "enum": ["entra", "manual"],
+      "private": true,
+      "searchable": false
+    },
+    "entraAppliedRole": {
+      "type": "string",
+      "private": true,
+      "searchable": false
+    },
+    "entraManagerOid": {
+      "type": "string",
+      "private": true,
+      "searchable": false
+    },
     "displayName": {
       "type": "string"
     },
