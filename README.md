@@ -955,7 +955,9 @@ trimming.
 - [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
       real domain, since localhost can hide the Referer effect
 - [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`
-      answer 404; with the cms stopped, `/profile` shows the error banner
+      show the *Page not found* card (like every `notFound()` page here
+      with HTTP status 200 and `noindex`: `loading.tsx` streams the shell
+      first) and send no request to the cms; with the cms stopped, `/profile` shows the error banner
       and no editable profile form; stopping the cms after a page loaded, a
       reaction click or *Mark all read* shows an inline error while the
       page stays
