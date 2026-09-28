@@ -60,15 +60,19 @@ describe("kudos afterCreate", () => {
     expect(notificationRows(strapi)).toEqual([]);
   });
 
-  it("falls back to 'Someone' and does not truncate a long name", async () => {
+  it("falls back to 'Someone' and truncates a long name (FX18)", async () => {
     const strapi = setup();
     renameUser(strapi, USER.alice, null);
     await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
     expect(notificationRows(strapi)[0].title).toBe("Someone gave you kudos!");
 
+    renameUser(strapi, USER.alice, "   ");
+    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    expect(notificationRows(strapi)[1].title).toBe("Someone gave you kudos!");
+
     renameUser(strapi, USER.alice, "n".repeat(250));
     await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
-    expect(String(notificationRows(strapi)[1].title)).toHaveLength(266);
+    expect(notificationRows(strapi)[2].title).toBe(`${"n".repeat(238)}… gave you kudos!`);
   });
 
   it("never throws", async () => {

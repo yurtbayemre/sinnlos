@@ -44,7 +44,8 @@
  *
  * Pure decision logic, no Strapi runtime, so the dedup itself is unit
  * testable (`notification-source.test.ts`); `resolveFanout` is the thin
- * runtime wrapper the two lifecycles call.
+ * runtime wrapper that `runSourceFanout` (utils/notify.ts, FX18) calls for
+ * the announcement and event lifecycles.
  */
 
 /** Content types whose publish triggers an audience-wide fan-out. */

@@ -134,12 +134,14 @@ describe("announcement afterCreate: the rows it writes", () => {
     expect(notificationRows(strapi)[0].title).toBe("New announcement: Untitled");
   });
 
-  it("does not truncate: a 250-character title makes a 268-character notification title", async () => {
+  it("truncates: a 250-character title fits varchar(255), prefix kept (FX18)", async () => {
     const strapi = setup();
     const title = "x".repeat(250);
     const row = publish(strapi, { title, department: { id: DEPT.sales } });
     await lifecycles.afterCreate({ result: row });
-    expect(String(notificationRows(strapi)[0].title)).toHaveLength(268);
+    const stored = String(notificationRows(strapi)[0].title);
+    expect(stored).toHaveLength(255);
+    expect(stored).toBe(`New announcement: ${"x".repeat(236)}…`);
   });
 });
 

@@ -82,11 +82,11 @@ describe("event afterCreate", () => {
     );
   });
 
-  it("does not truncate the title", async () => {
+  it("truncates the title to varchar(255) (FX18)", async () => {
     const strapi = setup();
     const row = publish(strapi, { title: "y".repeat(250), departments: [{ id: DEPT.sales }] });
     await lifecycles.afterCreate({ result: row });
-    expect(String(notificationRows(strapi)[0].title)).toHaveLength(261);
+    expect(String(notificationRows(strapi)[0].title)).toBe(`New event: ${"y".repeat(243)}…`);
   });
 
   it("a re-publish notifies nobody twice", async () => {

@@ -108,7 +108,7 @@ describe("comment afterCreate", () => {
     expect(notificationRows(strapi)[0].title).toBe('Someone commented on "an announcement"');
   });
 
-  it("does not truncate: a 250-character title overflows varchar(255)", async () => {
+  it("truncates: a 250-character title fits varchar(255), quotes kept (FX18)", async () => {
     const { strapi } = setup();
     const { documentId } = strapi.seedDocument(
       ANNOUNCEMENT_UID,
@@ -117,7 +117,9 @@ describe("comment afterCreate", () => {
     );
     const row = await comment(strapi, { author: USER.alice, targetDocumentId: documentId });
     await lifecycles.afterCreate({ result: row });
-    expect(String(notificationRows(strapi)[0].title).length).toBeGreaterThan(255);
+    expect(notificationRows(strapi)[0].title).toBe(
+      `Alice commented on "${"t".repeat(233)}…"`,
+    );
   });
 
   it("writes inside the comment's transaction and never throws", async () => {
