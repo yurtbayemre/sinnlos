@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { errors, validate } from "@strapi/utils";
+import { errors, sanitize, validate } from "@strapi/utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import sensitiveQueryGuard, {
   assertNoSensitiveUserKeys,
@@ -303,6 +303,51 @@ describe("what stays allowed", () => {
     await expect(
       check("guest", { filters: { email: "x" }, sort: "phone:asc" }, other),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("schema-private user fields (FX22): the core refuses them for every role", () => {
+  const PRIVATE = [
+    "microsoftOid",
+    "digestAnnouncements",
+    "digestMentions",
+    "digestKudos",
+    "digestFrequency",
+  ] as const;
+
+  it.each(PRIVATE)("%s is private in the user schema", (field) => {
+    expect((user().attributes[field] as { private?: boolean }).private).toBe(true);
+  });
+
+  it.each(["admin_role", "member", "guest"])("%s cannot filter or sort by them", async (role) => {
+    for (const field of PRIVATE) {
+      await expect(check(role, { filters: { [field]: { $eq: "x" } } })).rejects.toThrow(
+        `Invalid key ${field}`,
+      );
+      await expect(check(role, { sort: `${field}:asc` })).rejects.toThrow(`Invalid key ${field}`);
+    }
+  });
+
+  it("the core output sanitizer removes them from every response", async () => {
+    const sanitizers = sanitize.createAPISanitizers({
+      getModel: (uid) => getModel(uid) as CoreModel,
+    });
+    const out = (await sanitizers.output(
+      {
+        id: 7,
+        username: "ada",
+        displayName: "Ada",
+        microsoftOid: "oid-ada",
+        digestAnnouncements: true,
+        digestMentions: true,
+        digestKudos: false,
+        digestFrequency: "daily",
+        blocked: false,
+      },
+      user(),
+      {},
+    )) as Record<string, unknown>;
+    expect(out).toEqual({ id: 7, username: "ada", displayName: "Ada", blocked: false });
   });
 });
 

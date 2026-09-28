@@ -68,7 +68,8 @@
     },
     "microsoftOid": {
       "type": "string",
-      "unique": true
+      "unique": true,
+      "private": true
     },
     "displayName": {
       "type": "string"
@@ -128,20 +129,24 @@
     },
     "digestAnnouncements": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestMentions": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestKudos": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestFrequency": {
       "type": "enumeration",
       "enum": ["daily", "weekly"],
-      "default": "weekly"
+      "default": "weekly",
+      "private": true
     },
     "lastDigestAt": {
       "type": "datetime",

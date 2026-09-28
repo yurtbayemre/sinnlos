@@ -48,11 +48,14 @@ export const USER_UID = "plugin::users-permissions.user";
  * deliberately strip two more fields that leak through the exact same
  * populate paths and carry no value for a read-only guest:
  *   - `officeLocation` — part of the physical contact card;
- *   - `microsoftOid`   — the internal Entra object id. It is `unique` but
- *     NOT schema-`private`, so it leaks through populate just like the rest;
- *     it is an internal identifier, never a guest-facing display field.
- * `birthday`/`birthdayVisible` are already schema-`private` and never reach
- * REST output, so they are intentionally NOT listed here.
+ *   - `microsoftOid`   — the internal Entra object id, never a display
+ *     field. Since FX22 it is also schema-`private` (no role reads, filters
+ *     or sorts it through the content API; the users-permissions extension
+ *     reads it through db.query); it stays listed here as defence in depth.
+ * `birthday`/`birthdayVisible`, `lastDigestAt` and (since FX22) the digest
+ * opt-ins are schema-`private` and never reach REST output (the self
+ * profile /api/me reads them through db.query), so they are intentionally
+ * NOT listed here.
  */
 export const SENSITIVE_USER_FIELDS = [
   "email",
