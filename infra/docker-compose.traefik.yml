@@ -9,6 +9,13 @@
 # (apps/cms/config/server.ts) und zählt seine Login-Throttles
 # (/api/auth/local, /admin/login) pro Client-IP; ein fälschbarer Header
 # hebelt sie aus.
+# Middlewares (FX34): jeder Container definiert die Middlewares, die seine
+# Router nutzen, in den EIGENEN Labels. Der Docker-Provider verwirft alle
+# Labels eines Containers, solange er startet, ungesund oder gestoppt ist;
+# ein Router, dessen Middleware fehlt, wird nicht bedient. Früher hingen die
+# cms-Router an den Middlewares des web-Containers, und /admin und /api
+# fielen mit jedem web-Neustart aus. Gleiche Werte auf beiden Seiten pinnt
+# infra/routing-parity.test.ts.
 services:
   caddy:
     profiles: ["manual"]   # auf diesem Host übernimmt Traefik
@@ -23,15 +30,15 @@ services:
       # Parität zum Caddyfile: Security-Header + Kompression
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
       - "traefik.http.middlewares.sinnlos-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
-      # HSTS: erzwingt HTTPS für sinnlos.yurtbay.dev (1 Jahr, inkl. Subdomains)
+      # HSTS: erzwingt HTTPS für die Domain (1 Jahr, inkl. Subdomains)
       - "traefik.http.middlewares.sinnlos-headers.headers.stsSeconds=31536000"
       - "traefik.http.middlewares.sinnlos-headers.headers.stsIncludeSubdomains=true"
-      - "traefik.http.middlewares.sinnlos-compress.compress=true"
       # Clickjacking-Schutz: X-Frame-Options: DENY (am bestehenden Header-Middleware)
       - "traefik.http.middlewares.sinnlos-headers.headers.frameDeny=true"
       # Restriktive Permissions-Policy: das Intranet braucht keine Sensor-/Media-APIs
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-      # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf Auth-/CMS-Router
+      - "traefik.http.middlewares.sinnlos-compress.compress=true"
+      # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf dem Auth-Router
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.period=1s"
@@ -75,6 +82,23 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=frontend"
+      # Eigene Middlewares des cms-Routers (FX34), dieselben Werte wie
+      # sinnlos-headers/-ratelimit/-compress am web, damit /admin und /api
+      # auch dann erreichbar bleiben, wenn der web-Container startet,
+      # ungesund oder gestoppt ist.
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.burst=100"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.period=1s"
+      # Strapi komprimiert selbst nicht (kein strapi::compression in
+      # config/middlewares.ts); ohne sie ginge das Admin-Bundle unkomprimiert
+      # raus.
+      - "traefik.http.middlewares.sinnlos-cms-compress.compress=true"
       # `/upload` (no trailing s) is the media-library admin API — distinct
       # from `/uploads`, which serves the stored file bytes. Without it those
       # calls fall through to the web catch-all, which answers the admin's
@@ -93,7 +117,7 @@ services:
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-cms.service=sinnlos-cms"
-      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
+      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-cms-headers,sinnlos-cms-ratelimit,sinnlos-cms-compress"
       - "traefik.http.services.sinnlos-cms.loadbalancer.server.port=1337"
 
 networks:

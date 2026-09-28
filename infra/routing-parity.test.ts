@@ -917,26 +917,45 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     it("rate-limits the sign-in POSTs tighter than the auth and cms routers", () => {
       expect(traefik.routers.get("sinnlos-signin")?.middlewares).toContain("sinnlos-authlimit");
       expect(traefik.routers.get("sinnlos-auth")?.middlewares).toContain("sinnlos-ratelimit");
-      expect(traefik.routers.get("sinnlos-cms")?.middlewares).toContain("sinnlos-ratelimit");
+      expect(traefik.routers.get("sinnlos-cms")?.middlewares).toContain("sinnlos-cms-ratelimit");
     });
 
-    it("references only middlewares that are defined", () => {
+    // FX34: Traefik's docker provider drops ALL labels of a container while
+    // it is starting, unhealthy or stopped, and a router whose middleware is
+    // missing is not served. A router that borrowed a middleware from
+    // another container therefore went down with that container: /api and
+    // /admin disappeared with every web restart.
+    it("references only middlewares defined on its own container (FX34)", () => {
       for (const router of traefik.routers.values()) {
         for (const name of router.middlewares) {
-          expect(traefik.middlewares.has(name), `${router.name} → middleware ${name}`).toBe(true);
+          expect(
+            traefik.middlewares.get(name)?.container,
+            `${router.name} (${router.container}) → middleware ${name}`,
+          ).toBe(router.container);
         }
       }
     });
 
-    it("currently defines the cms router's middlewares on the web container (FX34)", () => {
-      // Known coupling: while web is starting or stopped, Traefik drops web's
-      // labels — and with them the middlewares the cms router needs, so
-      // /api and /admin go down too. FX34 moves the definitions off web;
-      // that change must flip this assertion.
+    it("defines the cms router's middlewares on the cms container (FX34)", () => {
       const containers = new Set(
         (cmsRouter?.middlewares ?? []).map((name) => traefik.middlewares.get(name)?.container),
       );
-      expect([...containers]).toEqual(["web"]);
+      expect([...containers]).toEqual(["cms"]);
+    });
+
+    it("defines no middleware that no router uses", () => {
+      const used = new Set([...traefik.routers.values()].flatMap((router) => router.middlewares));
+      expect([...traefik.middlewares.keys()].filter((name) => !used.has(name))).toEqual([]);
+    });
+
+    // The cms copies keep today's behaviour: same limits, same compression.
+    it.each([
+      ["sinnlos-ratelimit", "sinnlos-cms-ratelimit"],
+      ["sinnlos-compress", "sinnlos-cms-compress"],
+    ])("%s and %s have the same options", (webName, cmsName) => {
+      const options = (name: string) => [...(traefik.middlewares.get(name)?.options ?? [])].sort();
+      expect(options(webName).length, webName).toBeGreaterThan(0);
+      expect(options(cmsName)).toEqual(options(webName));
     });
   });
 
@@ -997,18 +1016,32 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
   );
 
   describe("security-header parity", () => {
-    const headerMiddlewares = [...traefik.middlewares].filter(([, middleware]) =>
-      [...middleware.options.keys()].some((option) => option.startsWith("headers.")),
+    const headerMiddlewares = new Map(
+      [...traefik.middlewares].filter(([, middleware]) =>
+        [...middleware.options.keys()].some((option) => option.startsWith("headers.")),
+      ),
     );
-    const [headersName, headersMiddleware] = headerMiddlewares[0] ?? ["", undefined];
-    const traefikHeaders = headersMiddleware
-      ? traefikResponseHeaders(headersMiddleware.options)
-      : new Map<string, string>();
+    const headersByMiddleware = new Map(
+      [...headerMiddlewares].map(([name, middleware]) => [
+        name,
+        traefikResponseHeaders(middleware.options),
+      ]),
+    );
+    const traefikHeaders = headersByMiddleware.get("sinnlos-headers") ?? new Map<string, string>();
 
-    it("has exactly one Traefik headers middleware, applied on every router", () => {
-      expect(headerMiddlewares).toHaveLength(1);
+    // One per container since FX34 (sinnlos-headers on web,
+    // sinnlos-cms-headers on cms): each router applies exactly one.
+    it("applies exactly one Traefik headers middleware on every router", () => {
+      expect([...headerMiddlewares.keys()].sort()).toEqual(["sinnlos-cms-headers", "sinnlos-headers"]);
       for (const router of traefik.routers.values()) {
-        expect(router.middlewares, `middlewares of ${router.name}`).toContain(headersName);
+        const applied = router.middlewares.filter((name) => headerMiddlewares.has(name));
+        expect(applied, `headers middlewares of ${router.name}`).toHaveLength(1);
+      }
+    });
+
+    it("sets the same headers on cms and web routes", () => {
+      for (const [name, headers] of headersByMiddleware) {
+        expect([...headers].sort(), name).toEqual([...traefikHeaders].sort());
       }
     });
 
