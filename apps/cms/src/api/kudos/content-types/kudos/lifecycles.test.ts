@@ -53,7 +53,9 @@ describe("kudos afterCreate", () => {
 
   it("self-kudos and rows without both ends notify nobody", async () => {
     const strapi = setup();
-    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.alice }) });
+    await lifecycles.afterCreate({
+      result: await kudos(strapi, { from: USER.alice, to: USER.alice }),
+    });
     await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice }) });
     await lifecycles.afterCreate({ result: await kudos(strapi, { to: USER.bob }) });
     await lifecycles.afterCreate({ result: { id: 4242 } });
@@ -63,15 +65,21 @@ describe("kudos afterCreate", () => {
   it("falls back to 'Someone' and truncates a long name (FX18)", async () => {
     const strapi = setup();
     renameUser(strapi, USER.alice, null);
-    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    await lifecycles.afterCreate({
+      result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
+    });
     expect(notificationRows(strapi)[0].title).toBe("Someone gave you kudos!");
 
     renameUser(strapi, USER.alice, "   ");
-    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    await lifecycles.afterCreate({
+      result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
+    });
     expect(notificationRows(strapi)[1].title).toBe("Someone gave you kudos!");
 
     renameUser(strapi, USER.alice, "n".repeat(250));
-    await lifecycles.afterCreate({ result: await kudos(strapi, { from: USER.alice, to: USER.bob }) });
+    await lifecycles.afterCreate({
+      result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
+    });
     expect(notificationRows(strapi)[2].title).toBe(`${"n".repeat(238)}… gave you kudos!`);
   });
 

@@ -477,7 +477,9 @@ describe("PUT /api/me digest opt-ins and guests (FX19)", () => {
     await expect(profile.updateMe(ctx)).resolves.toBe("400 No editable fields provided");
     expect(stub.updateCalls).toHaveLength(0);
     // Even an invalid frequency is not looked at: the key is dropped first.
-    const bad = makeCtx(caller("guest"), { data: { displayName: "Gina", digestFrequency: "hourly" } });
+    const bad = makeCtx(caller("guest"), {
+      data: { displayName: "Gina", digestFrequency: "hourly" },
+    });
     await profile.updateMe(bad.ctx);
     expect(stub.updateCalls[0].data).toEqual({ displayName: "Gina" });
   });

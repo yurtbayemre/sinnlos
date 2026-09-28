@@ -219,9 +219,11 @@ describe("announcement re-publish dedup (issue #12)", () => {
     await lifecycles.afterCreate({ result: first });
     expect(notificationRows(strapi)).toHaveLength(3);
 
-    const [republished] = (await strapi.documents(ANNOUNCEMENT_UID).publish({
-      documentId: String(first.documentId),
-    })).entries;
+    const [republished] = (
+      await strapi.documents(ANNOUNCEMENT_UID).publish({
+        documentId: String(first.documentId),
+      })
+    ).entries;
     expect(republished.id).not.toBe(first.id);
     await lifecycles.afterCreate({ result: republished });
     expect(notificationRows(strapi)).toHaveLength(3);
@@ -239,9 +241,11 @@ describe("announcement re-publish dedup (issue #12)", () => {
     );
     if (!draft) throw new Error("no draft");
     draft.department = { id: DEPT.sales };
-    const [republished] = (await strapi.documents(ANNOUNCEMENT_UID).publish({
-      documentId: String(first.documentId),
-    })).entries;
+    const [republished] = (
+      await strapi.documents(ANNOUNCEMENT_UID).publish({
+        documentId: String(first.documentId),
+      })
+    ).entries;
     await lifecycles.afterCreate({ result: republished });
     expect(recipientsOf(strapi)).toEqual([USER.alice, USER.bob, USER.dave, USER.anna]);
   });
@@ -290,7 +294,7 @@ describe("announcement hooks", () => {
       return {
         ...q,
         create: async () => {
-          throw new Error('value too long for type character varying(255)');
+          throw new Error("value too long for type character varying(255)");
         },
       };
     };

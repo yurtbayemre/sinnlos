@@ -192,7 +192,10 @@ export function createOrgStub(options: OrgStubOptions = {}): StrapiStub {
 }
 
 /** The recipient ids of the notification rows, sorted. */
-export function recipientsOf(strapi: StrapiStub, where: (row: Row) => boolean = () => true): number[] {
+export function recipientsOf(
+  strapi: StrapiStub,
+  where: (row: Row) => boolean = () => true,
+): number[] {
   return (strapi.tables[NOTIFICATION_UID] ?? [])
     .filter(where)
     .map((row) => (row.recipient as { id: number } | null)?.id ?? -1)

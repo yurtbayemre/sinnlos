@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  DEPT,
-  ROLE,
-  TEAM,
-  USER,
-  USER_UID,
-  createOrgStub,
-} from "../test/org-fixtures.test.helper";
+import { DEPT, ROLE, TEAM, USER, USER_UID, createOrgStub } from "../test/org-fixtures.test.helper";
 import {
   ANNOUNCEMENT_FIND,
   EVENT_FIND,
@@ -326,7 +319,14 @@ describe("loadRoleGrants (FX19)", () => {
     const grants = await loadRoleGrants(strapi, [ANNOUNCEMENT_FIND, KUDOS_FIND, EVENT_FIND]);
     expect(strapi.calls).toHaveLength(1);
     expect([...grants.holders(ANNOUNCEMENT_FIND)].sort()).toEqual(
-      [ROLE.admin, ROLE.editor, ROLE.departmentHead, ROLE.teamLead, ROLE.member, ROLE.authenticated].sort(),
+      [
+        ROLE.admin,
+        ROLE.editor,
+        ROLE.departmentHead,
+        ROLE.teamLead,
+        ROLE.member,
+        ROLE.authenticated,
+      ].sort(),
     );
     expect(grants.holders(ANNOUNCEMENT_FIND).has(ROLE.guest)).toBe(false);
     expect(grants.holders(EVENT_FIND).has(ROLE.guest)).toBe(true);
@@ -378,10 +378,19 @@ describe("the announcement recipient filter (FX19)", () => {
   });
 
   it("holdsGrant and audienceScopeOf", () => {
-    const scope: UserScope = { roleId: ROLE.member, departmentId: 1, teamIds: [2], ledTeamIds: [3] };
+    const scope: UserScope = {
+      roleId: ROLE.member,
+      departmentId: 1,
+      teamIds: [2],
+      ledTeamIds: [3],
+    };
     expect(holdsGrant(scope, new Set([ROLE.member]))).toBe(true);
     expect(holdsGrant(scope, new Set([ROLE.guest]))).toBe(false);
     expect(holdsGrant({ ...scope, roleId: undefined }, new Set([ROLE.member]))).toBe(false);
-    expect(audienceScopeOf(scope)).toEqual({ roleId: ROLE.member, departmentId: 1, teamIds: [2, 3] });
+    expect(audienceScopeOf(scope)).toEqual({
+      roleId: ROLE.member,
+      departmentId: 1,
+      teamIds: [2, 3],
+    });
   });
 });

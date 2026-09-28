@@ -1,5 +1,10 @@
 import { runSourceFanout, type SourceAudience } from "../../../../utils/notify";
-import { EVENT_FIND, holdsGrant, loadAllUserScopes, loadRoleGrants } from "../../../../utils/visible-ids";
+import {
+  EVENT_FIND,
+  holdsGrant,
+  loadAllUserScopes,
+  loadRoleGrants,
+} from "../../../../utils/visible-ids";
 
 /** The lifecycle result of an event row (only what the fan-out reads). */
 interface EventRow {

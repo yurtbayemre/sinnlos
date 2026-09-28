@@ -79,15 +79,16 @@ describe("event afterCreate", () => {
 
     const untargeted = publish(strapi, {});
     await lifecycles.afterCreate({ result: untargeted });
-    expect(
-      recipientsOf(strapi, (n) => n.sourceDocumentId === untargeted.documentId),
-    ).toContain(USER.bob);
+    expect(recipientsOf(strapi, (n) => n.sourceDocumentId === untargeted.documentId)).toContain(
+      USER.bob,
+    );
   });
 
   it("the read grant comes from up_permissions: a role without event.find is out", async () => {
     const strapi = setup();
     strapi.tables[PERMISSION_UID] = strapi.tables[PERMISSION_UID].filter(
-      (p) => !(p.action === "api::event.event.find" && (p.role as { id: number }).id === ROLE.guest),
+      (p) =>
+        !(p.action === "api::event.event.find" && (p.role as { id: number }).id === ROLE.guest),
     );
     const row = publish(strapi, { departments: [{ id: DEPT.engineering }] });
     await lifecycles.afterCreate({ result: row });
@@ -125,8 +126,9 @@ describe("event afterCreate", () => {
     const strapi = setup();
     const row = publish(strapi, { departments: [{ id: DEPT.sales }] });
     await lifecycles.afterCreate({ result: row });
-    const [again] = (await strapi.documents(EVENT_UID).publish({ documentId: String(row.documentId) }))
-      .entries;
+    const [again] = (
+      await strapi.documents(EVENT_UID).publish({ documentId: String(row.documentId) })
+    ).entries;
     await lifecycles.afterCreate({ result: again });
     expect(notificationRows(strapi)).toHaveLength(3);
   });

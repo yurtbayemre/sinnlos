@@ -30,7 +30,9 @@ describe("buildTitle", () => {
 
   it("falls back for a missing, non-string or blank value", () => {
     for (const value of [null, undefined, 42, "", "   "]) {
-      expect(buildTitle(["New event: ", { value, fallback: "Untitled" }])).toBe("New event: Untitled");
+      expect(buildTitle(["New event: ", { value, fallback: "Untitled" }])).toBe(
+        "New event: Untitled",
+      );
     }
     expect(buildTitle([{ value: "  Ada  ", fallback: "Someone" }, " gave you kudos!"])).toBe(
       "Ada gave you kudos!",
@@ -38,7 +40,10 @@ describe("buildTitle", () => {
   });
 
   it("a 255-character source title: 255 code points, the prefix intact, an ellipsis", () => {
-    const title = buildTitle(["New announcement: ", { value: "a".repeat(255), fallback: "Untitled" }]);
+    const title = buildTitle([
+      "New announcement: ",
+      { value: "a".repeat(255), fallback: "Untitled" },
+    ]);
     expect(codePoints(title)).toBe(NOTIFICATION_TITLE_MAX);
     expect(title.startsWith("New announcement: aaa")).toBe(true);
     expect(title.endsWith("a…")).toBe(true);
@@ -99,7 +104,13 @@ describe("buildNotification", () => {
         link: "/kudos",
         recipient: 7,
       }),
-    ).toEqual({ type: "kudos", title: "Ada gave you kudos!", link: "/kudos", recipient: 7, actor: null });
+    ).toEqual({
+      type: "kudos",
+      title: "Ada gave you kudos!",
+      link: "/kudos",
+      recipient: 7,
+      actor: null,
+    });
   });
 
   it("carries the source anchor of a fan-out row", () => {
@@ -135,7 +146,9 @@ const row = (recipient: number): NotificationData =>
 describe("writeNotifications", () => {
   it("one create() per row, never createMany, and one log line", async () => {
     const strapi = createStrapiStub();
-    await expect(writeNotifications(strapi, [row(7), row(8)], "event 3 (source e1)")).resolves.toBe(2);
+    await expect(writeNotifications(strapi, [row(7), row(8)], "event 3 (source e1)")).resolves.toBe(
+      2,
+    );
     expect(strapi.calls.map((call) => `${call.method} ${call.uid}`)).toEqual([
       `create ${NOTIFICATION_UID}`,
       `create ${NOTIFICATION_UID}`,
@@ -188,7 +201,10 @@ describe("runSourceFanout", () => {
       titleParts: () => ["New event: x"],
       link: "/events",
     });
-    expect(strapi.tables[NOTIFICATION_UID][0]).toMatchObject({ sourceDocumentId: "e1", actor: null });
+    expect(strapi.tables[NOTIFICATION_UID][0]).toMatchObject({
+      sourceDocumentId: "e1",
+      actor: null,
+    });
   });
 
   it("never throws: a failing audience load is an error log", async () => {

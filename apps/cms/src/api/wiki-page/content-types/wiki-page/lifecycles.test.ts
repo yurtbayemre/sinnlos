@@ -63,7 +63,12 @@ describe("wiki-page beforeUpdate", () => {
   });
 
   it("without a controller context: the payload's lastEditor, in every relation shape", async () => {
-    for (const lastEditor of [USER.carol, { id: USER.carol }, { set: [{ id: USER.carol }] }, { connect: [{ id: USER.carol }] }]) {
+    for (const lastEditor of [
+      USER.carol,
+      { id: USER.carol },
+      { set: [{ id: USER.carol }] },
+      { connect: [{ id: USER.carol }] },
+    ]) {
       const strapi = setup();
       await update({ body: "New body", lastEditor, revisionSummary: "from the payload" });
       expect(revisions(strapi)[0]).toMatchObject({

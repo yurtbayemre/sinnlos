@@ -32,10 +32,7 @@ function setup() {
   return { strapi, announcement: documentId };
 }
 
-async function comment(
-  strapi: StrapiStub,
-  data: Record<string, unknown>,
-): Promise<Row> {
+async function comment(strapi: StrapiStub, data: Record<string, unknown>): Promise<Row> {
   return strapi.db.query(COMMENT_UID).create({
     data: { body: "Nice", targetType: "announcement", ...data },
   });
@@ -117,9 +114,7 @@ describe("comment afterCreate", () => {
     );
     const row = await comment(strapi, { author: USER.alice, targetDocumentId: documentId });
     await lifecycles.afterCreate({ result: row });
-    expect(notificationRows(strapi)[0].title).toBe(
-      `Alice commented on "${"t".repeat(233)}…"`,
-    );
+    expect(notificationRows(strapi)[0].title).toBe(`Alice commented on "${"t".repeat(233)}…"`);
   });
 
   it("writes inside the comment's transaction and never throws", async () => {
@@ -144,6 +139,8 @@ describe("comment afterCreate", () => {
       };
     };
     await expect(lifecycles.afterCreate({ result: row })).resolves.toBeUndefined();
-    expect(strapi.log.error).toHaveBeenCalledWith("[notifications] failed for comment: insert failed");
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      "[notifications] failed for comment: insert failed",
+    );
   });
 });
