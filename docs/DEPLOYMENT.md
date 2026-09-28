@@ -1079,7 +1079,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    any role but `admin_role`: `raw read: … 0 of someone else`, `user filter:
    400`, `format header: 400`, `summary: 200` with one entry per published
    RSVP event and no names of maybe or no answers. As a member, `/events`
-   shows the same counts and "yes" names as before the deploy.
+   shows the same counts and "yes" names as before the deploy, except where
+   one user had two rows for an event (the known double-click race): that
+   user now counts once, by their latest answer. So a maybe or no count can
+   drop by one per such user (the yes count too, with the name, when their
+   latest answer is not yes), and their "yes" name moves to the position of
+   their latest answer.
 
 9. **Search as member and guest.** ⌘K as a member finds a colleague by
    e-mail; as a guest (if you have one, or a test account set to `guest`)
@@ -1676,7 +1681,10 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     - as a member, `/events` shows the same counts and "yes" names on the
       upcoming RSVP events as before the deploy, and answering yes, maybe
       or no updates them; a user who had two rows for one event (the known
-      double-click race) now counts once in maybe and no as well;
+      double-click race) now counts once, by their latest answer, in maybe
+      and no as well (the yes count drops too, with the name, when their
+      latest answer is not yes), and their "yes" name moves to the position
+      of their latest answer;
     - as an admin, `/manage/acknowledgements` and `/manage/training` show
       their percentages (a "–" only where an input is really incomplete);
     - the kudos picker lists neither you nor blocked accounts; `/people`
