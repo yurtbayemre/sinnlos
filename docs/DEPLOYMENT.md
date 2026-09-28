@@ -31,11 +31,15 @@ cannot offer; see the note there).
 > [3.8 Updates](#38-updates)): the test safety nets, the web correctness
 > fixes and the
 > [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28).
+> The
+> [user data and search hardening (batch 7, lane 2C)](#upgrading-to-the-user-data-and-search-hardening-batch-7-lane-2c)
+> on top of it is one more normal deploy (checks after it only).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 6 (the first
-> note of [3.8 Updates](#38-updates)),
+> what the instance does not run yet, newest first: the user data and
+> search hardening, batch 6 (the batch 6 note at the top of
+> [3.8 Updates](#38-updates)),
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
@@ -745,6 +749,14 @@ systemctl start docker
 > `[digest] run complete` line: see
 > [Upgrading to the notification pipeline fixes (2026-09-28)](#upgrading-to-the-notification-pipeline-fixes-2026-09-28).
 >
+> **Deploying the user data and search hardening (batch 7, lane 2C)?** A
+> normal deploy of cms and web together (`infra/deploy.sh`): no env, edge or
+> permission change. Its one schema change (a nullable column on the manager
+> link table) is covered by the pre-deploy backup `deploy.sh` takes. In the
+> first hour, watch the cms log for `[sensitive-query-guard]`: a hit from a
+> web page is a web query the new guard refuses. See
+> [Upgrading to the user data and search hardening (batch 7, lane 2C)](#upgrading-to-the-user-data-and-search-hardening-batch-7-lane-2c).
+>
 > **Deploying batch 6 (2026-09-28)?** The test safety nets, the web
 > correctness fixes and the cms input hardening (the two notes below and
 > the "Uploads gate" and live-event notes further down) ship as one normal
@@ -1045,6 +1057,135 @@ guests and blocked users, long titles failing the publish, pings before
 the save, comments and kudos lost when their notification fails, weekly
 digests only on Mondays). Follow the rollback hint
 `infra/deploy.sh` prints.
+
+#### Upgrading to the user data and search hardening (batch 7, lane 2C)
+
+This release (branch `fix/user-data-and-search-hardening`, on `batch/6`
+`997bf7f`) closes four gaps around user data:
+
+- **Contact fields are no filter or sort key for non-staff callers
+  (FX22).** The cms removed e-mail, phone, hire date, office location and
+  the Entra id from every response to guests, the `authenticated` fallback
+  role and callers without a known role, but those callers could still
+  filter or sort by the fields and read them off which rows came back. A
+  new global cms middleware, `global::sensitive-query-guard`, now answers
+  400 `Invalid key <field>` to such a query: a filter or sort on one of the
+  fields of a user, on `/api/users*` and through every user relation
+  (`author`, `manager`, `members`, …, nested `populate` included), and a
+  full-text `_q` on `/api/users`. Staff roles (admin, editor, department
+  head, team lead, member) keep every query they had, and the admin panel
+  is not affected. Each refusal is logged without the value, for example
+  `[sensitive-query-guard] 400 Invalid key email on GET /api/users
+  (plugin::users-permissions.user, role guest)`. `microsoftOid` and the
+  digest opt-ins are now schema-`private`: no role reads, filters or
+  `_q`-searches them through the content API any more (the sign-in
+  extension, `/api/me` and the digest cron read them directly). The search
+  box of the admin panel no longer matches an Entra id either; a filter on
+  `microsoftOid` there still works. `blocked`, `provider` and `confirmed`
+  stay filterable.
+- **Direct reports (FX23).** `user.manager` is now paired with its inverse
+  `directReports`; before, the *Direct reports* card on `/people/<id>`
+  never showed. The first boot adds one nullable column and its index to
+  the existing link table: `alter table up_users_manager_lnk add column
+  user_ord double precision null` and the index `up_users_manager_lnk_oifk`
+  (nothing else; recorded on Postgres 16). Every existing manager link
+  stays and shows up at once.
+- **Search (WD06).** The ⌘K palette calls `GET /search` on the web instead
+  of Server Actions, so typing no longer holds up other clicks or the
+  navigation after a selection. `/search` is outside `/api`, so both edge
+  configs already send it to Next.js; like every page it needs a session.
+  Guests and the `authenticated` fallback role find people by name and job
+  title only, staff roles also by e-mail. People are no longer preloaded
+  (that list was unbounded); every live query is limited to 5 rows per
+  kind. Search terms are still logged only once they settle.
+- **Blocked accounts lose `/uploads` within a minute (FX41).** Before it
+  streams a file, the web now asks the cms whether the session's Strapi
+  token is still accepted (`GET /api/users/me`, uncached) and remembers the
+  answer for 60 s per session token, in the web process. A blocked or
+  deleted account gets 401 for files within a minute (its pages already
+  sent it to sign-in); before, it kept file access until its session
+  expired (up to 7 days).
+  While the cms cannot answer, `/uploads` answers 503, also when the file
+  fetch itself fails (before, that was an empty 500). Cost: at most one cms
+  request per session token and minute, per web replica.
+
+**Nothing else is needed: a normal deploy.** No env change (the existing
+`INTERNAL_UPLOAD_TOKEN` is reused), no permission, edge or Traefik change.
+The schema change is additive; the pre-deploy backup covers it.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+**Deploy**
+
+2. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`. Deploy web and cms together: an older web against the new cms
+   still searches people by e-mail for guests, which the cms now refuses
+   (the guest's search then finds no people until the web is updated).
+
+**After the deploy**
+
+3. **The manager links survived** (read-only):
+
+   ```bash
+   psql_db -X -c '\d up_users_manager_lnk'
+   psql_db -X -c 'SELECT count(*) AS links, count(user_ord) AS ordered FROM up_users_manager_lnk'
+   ```
+
+   Expected: the columns `id`, `user_id`, `inv_user_id`, `user_ord`, and as
+   many links as before the deploy (`ordered` is 0 until someone changes a
+   manager). Open `/people/<id>` of a manager: the *Direct reports* card
+   lists their reports.
+
+4. **Watch the guard for the first hour.** Every web page and the search
+   must keep working for guests and members. A refused query shows up as:
+
+   ```bash
+   "${COMPOSE[@]}" logs -f --since 5m cms | grep --line-buffered sensitive-query-guard
+   ```
+
+   Each line names the method, path, model and role. A path the web calls
+   while rendering a page (a guest's or an `authenticated` user's page with
+   an error banner or a missing list) is a missed web query: note the page
+   and report it; nothing needs to be rolled back for it. Lines nobody can
+   match to a page are probes the guard refused as intended.
+
+5. **Search and files.** Press ⌘K as a guest (if you have one) and as a
+   member: a colleague is found by name; only the member finds them by
+   e-mail. Images and document downloads still load.
+
+6. **Optional: revocation.** Block a test account in the admin panel
+   (Content Manager → User → *blocked*): its next page load goes to
+   sign-in at once, and its `/uploads` requests answer 401 within 60 s.
+   Unblock it again.
+
+**Rollback.** Follow the hint `deploy.sh` prints. Nothing in the database
+needs undoing: the previous cms runs no DDL for the extra column (it stays
+unused, `forceMigration` is off) and reads every manager link as before;
+rolling forward again runs no DDL either (both checked on Postgres 16 and
+SQLite). The `searchable: false` flags on `microsoftOid` and
+`digestFrequency` are no column property: no DDL in either direction
+(checked on Postgres 16). The previous release shows no *Direct reports*
+card again, lets guests filter by contact fields again, lets every other
+role find users by Entra id or digest frequency with `_q` again and gives
+blocked accounts their files until their session ends.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 

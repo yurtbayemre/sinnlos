@@ -704,15 +704,13 @@ describe("schema.json enums = web unions and constants", () => {
 
 describe("relations: every mappedBy has its inversedBy and back", () => {
   /**
-   * KNOWN: two phantom inverse sides whose owning side names no inversedBy
-   * (FX23): user.directReports -> user.manager (lane 2C adds the pairing),
-   * and comment.replies -> comment.parent (writes to parent are blocked by
-   * FX04; DA02 decides). Remove an entry when its pair is fixed.
+   * KNOWN: one phantom inverse side whose owning side names no inversedBy:
+   * comment.replies -> comment.parent (writes to parent are blocked by FX04;
+   * DA02 decides). Remove the entry when its pair is fixed. user.directReports
+   * -> user.manager was the other one until FX23 paired it (2026-09-28f):
+   * before that, populating directReports returned nothing.
    */
-  const KNOWN_UNPAIRED = [
-    "api::comment.comment.replies",
-    "plugin::users-permissions.user.directReports",
-  ];
+  const KNOWN_UNPAIRED = ["api::comment.comment.replies"];
 
   it("finds exactly the known unpaired sides", () => {
     const all = { ...pluginSchemas(), ...SCHEMAS };
@@ -792,6 +790,21 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
     expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(
       grantedTo("api::classified.classified.cleanupUploads"),
     );
+  });
+
+  it("search CONTACT_SEARCH_ROLES = the cms contact-field roles (FX22)", async () => {
+    // Only these roles may filter users by e-mail: the cms guard
+    // (middlewares/sensitive-query-guard.ts) refuses the clause for every
+    // other role, so a drift makes the web search 400 or hide results.
+    const { PRIVILEGED_ROLE_TYPES } = await cms<{ PRIVILEGED_ROLE_TYPES: ReadonlySet<string> }>(
+      "utils/sanitize-user-contact.ts",
+    );
+    const web = sourceStrings(
+      "apps/web/src/lib/search-action.ts",
+      /CONTACT_SEARCH_ROLES: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/,
+    );
+    expect(sorted(web)).toEqual(sorted(PRIVILEGED_ROLE_TYPES));
+    expect(web.every((role) => MATRIX_ROLES.includes(role))).toBe(true);
   });
 
   it("GUEST_ROLES: a real matrix role", () => {

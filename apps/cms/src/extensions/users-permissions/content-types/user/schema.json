@@ -68,7 +68,9 @@
     },
     "microsoftOid": {
       "type": "string",
-      "unique": true
+      "unique": true,
+      "private": true,
+      "searchable": false
     },
     "displayName": {
       "type": "string"
@@ -106,7 +108,8 @@
     "manager": {
       "type": "relation",
       "relation": "manyToOne",
-      "target": "plugin::users-permissions.user"
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "directReports"
     },
     "directReports": {
       "type": "relation",
@@ -128,20 +131,25 @@
     },
     "digestAnnouncements": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestMentions": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestKudos": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "private": true
     },
     "digestFrequency": {
       "type": "enumeration",
       "enum": ["daily", "weekly"],
-      "default": "weekly"
+      "default": "weekly",
+      "private": true,
+      "searchable": false
     },
     "lastDigestAt": {
       "type": "datetime",
