@@ -515,9 +515,11 @@ describe("GET /search", () => {
     await expect(get("?q=ada")).rejects.toBe(redirectError);
   });
 
-  it("needs no session in DEMO_MODE", async () => {
+  it("decides by getSession() alone, which answers DEMO_SESSION in DEMO_MODE (WD08)", async () => {
     config.demo = true;
     sessionMock.mockResolvedValue(null);
+    expect((await get("?kind=poll")).status).toBe(401);
+    sessionMock.mockResolvedValue({ user: { id: 1 } });
     expect((await get("?kind=poll")).status).toBe(200);
   });
 

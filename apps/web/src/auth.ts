@@ -39,16 +39,18 @@ import MicrosoftEntraID, {
   type MicrosoftEntraIDProfile,
 } from "next-auth/providers/microsoft-entra-id";
 import Credentials from "next-auth/providers/credentials";
-import { STRAPI_URL } from "@/lib/config";
+import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { ENTRA, LOCAL_ENABLED } from "@/lib/auth-config";
 import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
 import { exchangeEntraSignIn, type EntraExchangeSuccess } from "@/lib/entra-exchange";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
 import { strapiJwtExp, strapiSessionExpired } from "@/lib/strapi-jwt";
 
-const DEMO_MODE = process.env.DEMO_MODE === "1";
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
 
+// The one DEMO_MODE source is lib/config.ts (WD08). A production server
+// refuses to start with it: the demo has no sign-in at all (lib/session.ts
+// DEMO_SESSION, proxy.ts lets every request through).
 if (!IS_BUILD && DEMO_MODE && process.env.NODE_ENV === "production") {
   throw new Error("DEMO_MODE=1 must not be enabled in production — it disables all auth checks.");
 }
