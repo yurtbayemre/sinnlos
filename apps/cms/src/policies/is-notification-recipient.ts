@@ -1,3 +1,4 @@
+import { ADMIN } from "../bootstrap/roles";
 import { parseEntryRef } from "../utils/entry-id";
 
 /**
@@ -8,7 +9,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  if (user.role?.type === "admin_role") return true;
+  if (user.role?.type === ADMIN) return true;
 
   // v5 routes carry a documentId; accept a numeric id too so direct API
   // consumers keep working (same gotcha as in the comment controller). A

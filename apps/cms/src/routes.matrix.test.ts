@@ -6,6 +6,7 @@ import {
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
 } from "./bootstrap/permission-matrix";
+import { ADMIN, MODERATORS } from "./bootstrap/roles";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
 
@@ -514,12 +515,16 @@ describe("route → policy matrix (S01)", async () => {
     }
   }
   const matrixRoles = Object.keys(PERMISSION_MATRIX);
-  const customGrantRoles = (grant: string[] | "*") => (grant === "*" ? matrixRoles : grant);
+  /** The matrix by any role string (the typed keys are pinned by tsc). */
+  const matrixByRole: Readonly<Record<string, Partial<Record<string, readonly string[]>>>> =
+    PERMISSION_MATRIX;
+  const customGrantRoles = (grant: readonly string[] | "*"): readonly string[] =>
+    grant === "*" ? matrixRoles : grant;
 
   /** Every action key a role holds after the bootstrap sync. */
   function effectiveGrants(role: string): Set<string> {
     const grants = new Set(USER_READ_GRANTS);
-    for (const [uid, actions] of Object.entries(PERMISSION_MATRIX[role] ?? {})) {
+    for (const [uid, actions] of Object.entries(matrixByRole[role] ?? {})) {
       for (const action of actions ?? []) grants.add(`${uid}.${action}`);
     }
     for (const [action, grant] of Object.entries(CUSTOM_ACTION_GRANTS)) {
@@ -938,6 +943,15 @@ describe("route → policy matrix (S01)", async () => {
         [...(matrixGrants.get("api::event-rsvp.event-rsvp.find") ?? [])].sort(),
       );
       expect(holders).not.toContain("guest");
+    });
+
+    it("B02: the classified ownership bypasses are ADMIN (update) and MODERATORS (delete)", () => {
+      const bypassOf = (action: string) =>
+        policiesOf(action)
+          .map((spec) => (typeof spec === "string" ? undefined : spec.config?.bypassRoles))
+          .find((roles) => roles !== undefined);
+      expect(bypassOf("api::classified.classified.update")).toEqual([ADMIN]);
+      expect(bypassOf("api::classified.classified.delete")).toEqual([...MODERATORS]);
     });
 
     it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {

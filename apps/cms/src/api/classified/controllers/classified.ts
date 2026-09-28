@@ -1,5 +1,6 @@
 import { factories } from "@strapi/strapi";
 
+import { MODERATORS } from "../../../bootstrap/roles";
 import { clampExpiresAt } from "../../../utils/classified-expiry";
 import { isRowId, parseEntryRef } from "../../../utils/entry-id";
 import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
@@ -62,7 +63,7 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   if (!files.every((f: any) => typeof f.mime === "string" && f.mime.startsWith("image/"))) {
     return null;
   }
-  const isModerator = user?.role?.type === "admin_role" || user?.role?.type === "editor";
+  const isModerator = MODERATORS.includes(user?.role?.type);
   if (!isModerator) {
     const ownsAll =
       user != null &&

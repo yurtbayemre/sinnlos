@@ -14,7 +14,11 @@
  *
  * Without this, Strapi's users-permissions plugin returns 403 on every
  * `/api/*` call, because a freshly-created role has zero permissions.
+ *
+ * Role keys and role lists are typed by the vocabulary in bootstrap/roles.ts
+ * (B02), so a misspelt role fails `tsc` instead of a boot warning.
  */
+import { ADMIN, AUTHENTICATED, STAFF_ROLES, type MatrixRoleType } from "./roles";
 
 /**
  * Intranet content types. We grant explicit permissions on each
@@ -72,7 +76,10 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  * Checked against the routers and controllers by `routes.matrix.test.ts`
  * (roadmap S01), with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS.
  */
-export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, CrudAction[]>>> = {
+export const PERMISSION_MATRIX: Record<
+  MatrixRoleType,
+  Partial<Record<ContentTypeUid, CrudAction[]>>
+> = {
   admin_role: {
     "api::acknowledgement.acknowledgement": ALL_ACTIONS,
     // Training (issue #29, admin-authoring variant): course/lesson are
@@ -310,29 +317,16 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
  * Each entry lists the roles that may call the action. `*` = every role
  * in PERMISSION_MATRIX (including `authenticated`).
  */
-export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
+export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
   "api::event.event.ics": "*",
   // The RSVP summary for the events list (FX21): exactly the roles that
   // hold event-rsvp find in the matrix above. Never guest: guests read the
   // calendar but see no attendee names (routes.matrix.test.ts pins both).
-  "api::event-rsvp.event-rsvp.summary": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-    "authenticated",
-  ],
+  "api::event-rsvp.event-rsvp.summary": [...STAFF_ROLES, AUTHENTICATED],
   // guest and the `authenticated` fallback are excluded: even with email
   // dropped from the payload, years + daysUntil still reconstruct every
   // user's exact hireDate, so this stays limited to the mapped staff roles.
-  "api::kudos.kudos.celebrations": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-  ],
+  "api::kudos.kudos.celebrations": STAFF_ROLES,
   "api::notification.notification.markRead": "*",
   "api::notification.notification.markAllRead": "*",
   // Every role, guest included: guests need both for the polls opened to
@@ -346,7 +340,7 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::poll-vote.poll-vote.results": "*",
   // Aggregated search analytics (issue #19) — /manage/analytics is
   // admin-only, so is the summary endpoint.
-  "api::search-log.search-log.summary": ["admin_role"],
+  "api::search-log.search-log.summary": [ADMIN],
   // Self-service profile (added in this feature)
   "api::profile.profile.me": "*",
   "api::profile.profile.updateMe": "*",
@@ -359,32 +353,20 @@ export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   // 5.55.1 sanitizePopulate drops the relation silently, and the report
   // would count every role as audience (lib/audience.ts: no roles = no
   // role restriction). admin only — no other role reads audienceRoles.
-  "plugin::users-permissions.role.find": ["admin_role"],
+  "plugin::users-permissions.role.find": [ADMIN],
   // Marketplace ad photos: employees may CREATE uploads via POST
   // /api/upload — deliberately NOT `find`/`findOne`/`destroy` on the
   // upload content-api (no browsing or deleting of the media library from
   // outside the admin panel). guest and the `authenticated` fallback get
   // nothing. The route itself is additionally hardened (image-only magic
   // byte allowlist, 5 MB, create-only) in extensions/upload/strapi-server.ts.
-  "plugin::upload.content-api.upload": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-  ],
+  "plugin::upload.content-api.upload": STAFF_ROLES,
   // Best-effort orphan cleanup for the two-step ad flow (issue #13): same
   // five posting roles as the upload grant above, never guest. The action
   // only ever deletes files stamped with the CALLER's own
   // provider_metadata.uploadedBy and without any remaining relation — see
   // controllers/classified.ts.
-  "api::classified.classified.cleanupUploads": [
-    "admin_role",
-    "editor",
-    "department_head",
-    "team_lead",
-    "member",
-  ],
+  "api::classified.classified.cleanupUploads": STAFF_ROLES,
 };
 
 /**
@@ -445,7 +427,7 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
  * user reads (otherwise every boot re-adds and deletes the same row) —
  * pinned by routes.matrix.test.ts.
  */
-const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
+const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
   guest: [
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
@@ -472,8 +454,10 @@ const LEGACY_REVOKED_PERMISSIONS: Record<string, string[]> = {
   ],
 };
 
+const MATRIX_ROLES = Object.keys(PERMISSION_MATRIX) as MatrixRoleType[];
+
 export const REVOKED_PERMISSIONS: Record<string, string[]> = Object.fromEntries(
-  Object.keys(PERMISSION_MATRIX).map((roleType) => [
+  MATRIX_ROLES.map((roleType) => [
     roleType,
     [
       ...(LEGACY_REVOKED_PERMISSIONS[roleType] ?? []),

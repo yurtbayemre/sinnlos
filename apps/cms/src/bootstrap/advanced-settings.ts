@@ -12,7 +12,12 @@
  * them does not survive a restart); every other key of the store is kept.
  */
 
+import type { RoleType } from "./roles";
+
 export type AdvancedSettings = Record<string, unknown>;
+
+/** The role a newly registered user gets. */
+const DEFAULT_ROLE: RoleType = "member";
 
 /** The managed keys applied over the stored settings. Pure. */
 export function nextAdvancedSettings(
@@ -24,7 +29,7 @@ export function nextAdvancedSettings(
     unique_email: true,
     allow_register: env.LOCAL_REGISTRATION === "1",
     email_confirmation: false,
-    default_role: "member",
+    default_role: DEFAULT_ROLE,
   };
 }
 
@@ -49,7 +54,7 @@ export async function syncAdvancedSettings(strapi: AdvancedSettingsHost): Promis
   if (JSON.stringify(next) !== JSON.stringify(current)) {
     await store.set({ value: next });
     strapi.log.info(
-      `[bootstrap] users-permissions advanced settings synced (allow_register=${String(next.allow_register)}, default_role=member)`,
+      `[bootstrap] users-permissions advanced settings synced (allow_register=${String(next.allow_register)}, default_role=${DEFAULT_ROLE})`,
     );
   }
 }

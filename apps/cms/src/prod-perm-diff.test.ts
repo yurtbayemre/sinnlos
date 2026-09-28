@@ -162,10 +162,9 @@ describe("infra/diagnostics/prod-perm-diff.sql", () => {
     const expected = new Set(expectedRows().map((r) => `${r.role} ${r.action}`));
     for (const [role, actions] of Object.entries(REVOKED_PERMISSIONS)) {
       for (const action of actions) {
+        const grant = CUSTOM_ACTION_GRANTS[action];
         const regranted =
-          CUSTOM_ACTION_GRANTS[action] === "*"
-            ? role in PERMISSION_MATRIX
-            : (CUSTOM_ACTION_GRANTS[action] ?? []).includes(role);
+          grant === "*" ? role in PERMISSION_MATRIX : (grant ?? []).some((r) => r === role);
         expect(expected.has(`${role} ${action}`)).toBe(regranted);
       }
     }
