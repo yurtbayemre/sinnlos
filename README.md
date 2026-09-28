@@ -52,8 +52,9 @@ anonymous search analytics, and an **English/German UI**
 
 ## Prerequisites
 
-- Node.js 22.13+ or 24 LTS (root `engines`: `^22.13.0 || ^24.0.0`; CI and
-  the Docker images use Node 24; Node 20 is end-of-life)
+- Node.js 22.13+ or 24 LTS (root and `apps/cms` `engines`:
+  `^22.13.0 || ^24.0.0`; CI and the Docker images use Node 24; Node 20 is
+  end-of-life)
 - pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant with permission to register an app — only for
@@ -197,6 +198,11 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   the stored times once
   ([runbook](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release));
   a fresh install leaves them empty.
+- **cms network and storage:** `CORS_ORIGIN` lists the browser origins that
+  may call the cms API, comma-separated (compose sets it to
+  `WEB_PUBLIC_URL`; unset or empty means `http://localhost:3000`).
+  `DATABASE_FILENAME` (SQLite only) is relative to `apps/cms`, or an
+  absolute path. The cms sends no `X-Powered-By` header.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
   enable the e-mail digests (dark without them). Once SMTP is set,

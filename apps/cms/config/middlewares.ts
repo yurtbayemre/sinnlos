@@ -11,6 +11,12 @@ export default ({ env }: { env: Env }) => {
   // proxied public origin; market-assets.strapi.io serves the marketplace
   // plugin thumbnails (kept while the marketplace UI may still render).
   const publicUrl = env("PUBLIC_URL", "http://localhost:1337");
+  // The web origins allowed to call the API from a browser: comma-separated
+  // (compose passes WEB_PUBLIC_URL). Unset or empty means the local dev web.
+  const corsOrigins = String(env("CORS_ORIGIN", "") || "http://localhost:3000")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean);
 
   return [
     "strapi::logger",
@@ -32,13 +38,14 @@ export default ({ env }: { env: Env }) => {
     {
       name: "strapi::cors",
       config: {
-        origin: (process.env.CORS_ORIGIN || "http://localhost:3000").split(","),
+        origin: corsOrigins,
         headers: ["Content-Type", "Authorization", "Origin", "Accept", "X-Requested-With"],
         methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
         credentials: true,
       },
     },
-    "strapi::poweredBy",
+    // No strapi::poweredBy: the X-Powered-By header only advertised the
+    // framework to every client.
     "strapi::query",
     {
       // Cap multipart bodies at the same 50 MB as the upload plugin's
