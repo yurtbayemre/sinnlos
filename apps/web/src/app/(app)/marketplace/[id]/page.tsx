@@ -119,7 +119,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
                   {t(AD_CATEGORY_KEYS[ad.category] as Parameters<typeof t>[0])}
                 </span>
               )}
-              <span>{t("postedOn", { relative: relativeTime(ad.createdAt, tRel) })}</span>
+              <span>
+                {t("postedOn", { relative: relativeTime(ad.createdAt, tRel, { locale, timeZone }) })}
+              </span>
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{ad.title}</h1>
             <p className="mt-2 text-2xl font-semibold text-primary">{priceLine}</p>

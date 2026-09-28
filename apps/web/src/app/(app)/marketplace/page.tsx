@@ -60,7 +60,8 @@ export default async function MarketplacePage({
 
   // Today in APP_TIME_ZONE: the list shows ads with expiresAt >= today, the
   // same day the cms clamps against (datetime contract, phase 2).
-  const today = classifiedToday(appTimeZone());
+  const timeZone = appTimeZone();
+  const today = classifiedToday(timeZone);
 
   // The ad list needs no role, so it runs alongside getViewer()'s
   // /api/me read; only the "mine" fetch waits for the role gate.
@@ -72,7 +73,7 @@ export default async function MarketplacePage({
     getViewer(),
     tryFetch(() => api.classifieds.list(today, category), "classifieds"),
   ]);
-  const relative = (d: string | undefined) => relativeTime(d, tRel);
+  const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
 
   const userId = session?.user?.id;
   // Fail-closed allowlist (lib/roles.ts): guest, the `authenticated`

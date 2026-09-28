@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useTranslations } from "next-intl";
+import { useLocale, useTimeZone, useTranslations } from "next-intl";
 import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 import { addComment, deleteComment } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
+import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
 import { relativeTime } from "@/lib/relative-time";
 import type { Comment } from "@/lib/types";
 
@@ -26,6 +27,11 @@ export function CommentThread({
   const tComments = useTranslations("comments");
   const tCommon = useTranslations("common");
   const tRel = useTranslations("relativeTime");
+  // The app locale and APP_TIME_ZONE from the provider (i18n/request.ts),
+  // so the server render and the hydrated client show the same label. The
+  // root layout always sets the zone; the fallback is APP_TIME_ZONE's default.
+  const locale = useLocale();
+  const timeZone = useTimeZone() ?? DEFAULT_APP_TIME_ZONE;
   const [body, setBody] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -86,7 +92,7 @@ export function CommentThread({
                   <div className="flex items-baseline gap-2">
                     <span className="text-sm font-medium">{name}</span>
                     <span className="text-xs text-muted-foreground">
-                      {relativeTime(c.createdAt, tRel)}
+                      {relativeTime(c.createdAt, tRel, { locale, timeZone })}
                     </span>
                     {isOwner && (
                       <button
