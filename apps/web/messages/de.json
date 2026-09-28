@@ -28,6 +28,7 @@
     "mainNav": "Hauptnavigation",
     "bottomNav": "Untere Navigation",
     "loadingPage": "Seite lädt",
+    "skipToContent": "Zum Inhalt springen",
     "signedOut": "Abgemeldet"
   },
   "nav": {
@@ -509,6 +510,7 @@
     "somethingWrong": "Da ist etwas schiefgelaufen",
     "somethingWrongHint": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
     "tryAgain": "Erneut versuchen",
+    "reference": "Referenz: {digest}",
     "notFoundTitle": "Seite nicht gefunden",
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
     "backToDashboard": "Zurück zum Dashboard"

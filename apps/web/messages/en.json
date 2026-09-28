@@ -28,6 +28,7 @@
     "mainNav": "Main navigation",
     "bottomNav": "Bottom navigation",
     "loadingPage": "Loading page",
+    "skipToContent": "Skip to content",
     "signedOut": "Signed out"
   },
   "nav": {
@@ -509,6 +510,7 @@
     "somethingWrong": "Something went wrong",
     "somethingWrongHint": "An unexpected error occurred. Please try again.",
     "tryAgain": "Try again",
+    "reference": "Reference: {digest}",
     "notFoundTitle": "Page not found",
     "notFoundHint": "The page you requested does not exist or has moved.",
     "backToDashboard": "Back to dashboard"
