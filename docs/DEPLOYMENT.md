@@ -932,7 +932,8 @@ pre-deploy backup `deploy.sh` takes:
   `guest`);
 - one nullable column and its index on the existing manager link table
   (FX23): `alter table up_users_manager_lnk add column user_ord double
-  precision null` and `up_users_manager_lnk_oifk` (recorded on Postgres 16).
+  precision null` and the index `up_users_manager_lnk_oifk` (recorded on
+  Postgres 16).
 
 **Never deploy or roll back the cms or the web alone.** Both directions
 break a page:
@@ -1049,7 +1050,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    The grant line appears on the first boot only (a later boot grants
    nothing and logs no such line; after an earlier rollback of this batch
-   without the cleanup below it reads `granted N` with N < 6).
+   without the cleanup below it reads `granted N` with N ≤ 6).
 
 6. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
    lists no `event-rsvp` row any more; only the two known informational
