@@ -61,6 +61,8 @@ interface Persona {
   meId?: string;
   /** The manager's oid, null for 404, or a failure status. */
   manager?: string | null | number;
+  /** Awaited before /me answers (lineUp: concurrent exchanges start together). */
+  holdMe?: () => Promise<void>;
 }
 
 const persona = (n: number, overrides: Partial<Persona> = {}): Persona => ({
@@ -76,6 +78,29 @@ const persona = (n: number, overrides: Partial<Persona> = {}): Persona => ({
   roles: [],
   ...overrides,
 });
+
+/**
+ * Holds Graph /me until `size` requests arrived, so that many concurrent
+ * exchanges leave Graph together and race on the identity lookup, the
+ * e-mail check and the insert (the rehearsal held /me for 800 ms). Released
+ * after 2 s at the latest, below Graph's 3 s timeout.
+ */
+function lineUp(size: number): () => Promise<void> {
+  let arrived = 0;
+  let release: () => void = () => undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fallback = setTimeout(() => release(), 2_000);
+  return async () => {
+    arrived += 1;
+    if (arrived >= size) {
+      clearTimeout(fallback);
+      release();
+    }
+    await released;
+  };
+}
 
 interface ExchangeBody {
   jwt?: string;
@@ -111,6 +136,7 @@ const microsoft: OutboundHandler = async (request) => {
   if (!who)
     return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
   if (url.pathname === "/v1.0/me") {
+    await who.holdMe?.();
     if (who.meStatus) return Response.json({ error: {} }, { status: who.meStatus });
     return Response.json({
       id: (who.meId ?? who.oid).toUpperCase(),
@@ -396,14 +422,16 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(await t.strapi.db.query(USER).count({ where: { microsoftOid: oid(11) } })).toBe(1);
   });
 
-  it("creates exactly one row for concurrent first sign-ins", async () => {
-    const who = persona(12);
+  it("creates exactly one row for concurrent first sign-ins, and none of them answers 409", async () => {
+    const who = persona(12, { holdMe: lineUp(4) });
     const results = await Promise.all([
       signIn(t, who),
       signIn(t, who),
       signIn(t, who),
       signIn(t, who),
     ]);
+    // Spec F: a sign-in that loses the race continues as the existing user,
+    // also when its e-mail check already sees the winner's row.
     expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
     const ids = new Set(results.map((r) => r.body.user?.id));
     expect(ids.size).toBe(1);

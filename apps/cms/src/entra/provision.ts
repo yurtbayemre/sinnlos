@@ -19,7 +19,9 @@
  *     match. A new identity whose address a row already uses gets 409
  *     entra_account_exists (an admin binds that row instead). Concurrent
  *     first sign-ins race on up_users_entra_identity_uq: the loser re-reads
- *     and continues with the winner's row;
+ *     and continues with the winner's row, and so does one whose e-mail
+ *     check already sees the winner's row (409 only when the identity is
+ *     still absent, i.e. the address belongs to another row);
  *   - a blocked row gets 403; the role is resolved and written (roles.ts:
  *     deny 403 not_assigned, a new user whose role cannot be decided 503);
  *   - with mode 'on' the Entra-owned profile, the department and the
@@ -348,51 +350,25 @@ async function provision(
     // the existing row by entering tenant and object id on it.
     const taken = await users.findOne({ where: { email: { $eqi: email } }, select: ["id"] });
     if (taken) {
-      audit.result = "conflict";
-      return { kind: "refused", status: 409, error: "account_exists" };
-    }
-    const decision = decideRoleWrite(null, resolution, settings.syncMode);
-    audit.role = decision.audit;
-    if (decision.kind === "reject") {
-      audit.result = decision.status === 403 ? "denied" : "unavailable";
-      return { kind: "refused", status: decision.status, error: decision.error };
-    }
-    if (decision.kind !== "create")
-      throw new Error(`unexpected role decision ${decision.kind} for a new user`);
-    const roleId = await roleIdOf(strapi, decision.role);
-    if (roleId === null) {
-      strapi.log.error(`[entra] role ${decision.role} does not exist; refusing the sign-in`);
-      audit.result = "unavailable";
-      return { kind: "refused", status: 503, error: "unavailable" };
-    }
-    const scalars = me ? buildProfileUpdate(me) : null;
-    try {
-      await users.create({
-        data: {
-          username: `entra-${claims.oid}`,
-          email,
-          provider: "microsoft",
-          confirmed: true,
-          blocked: false,
-          role: roleId,
-          roleSource: "entra",
-          entraAppliedRole: decision.role,
-          entraTenantId: claims.tid,
-          microsoftOid: claims.oid,
-          ...(scalars ?? {}),
-          displayName: scalars?.displayName ?? claims.name ?? email,
-        },
-      });
-      created = true;
-    } catch (err) {
-      // A concurrent first sign-in of the same person won the unique index.
-      if (!(await findIdentity())) throw err;
+      // The row with this address can be this very identity: a concurrent
+      // first sign-in of the same person created it between the lookup
+      // above and this check. Continue as that existing user (spec F); only
+      // an address of ANOTHER row is a conflict.
+      user = await findIdentity();
+      if (!user) {
+        audit.result = "conflict";
+        return { kind: "refused", status: 409, error: "account_exists" };
+      }
       strapi.log.info(
         `[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`,
       );
+    } else {
+      const outcome = await createIdentity(strapi, claims, me, email, resolution, settings, audit);
+      if (outcome.kind === "refused") return outcome;
+      created = outcome.created;
+      user = await findIdentity();
+      if (!user) throw new Error("the provisioned user row could not be read back");
     }
-    user = await findIdentity();
-    if (!user) throw new Error("the provisioned user row could not be read back");
   }
 
   audit.user = String(user.id);
@@ -466,6 +442,69 @@ async function provision(
       email: stringOf(final.email) ?? "",
     },
   };
+}
+
+type CreateOutcome =
+  | { kind: "refused"; status: 403 | 409 | 503; error: ExchangeError }
+  /** created false: a concurrent first sign-in of the same person won the unique index. */
+  | { kind: "row"; created: boolean };
+
+/** Spec F: the row of a new identity whose address no row uses. */
+async function createIdentity(
+  strapi: ExchangeHost,
+  claims: EntraIdClaims,
+  me: GraphMe | null,
+  email: string,
+  resolution: RoleResolution,
+  settings: EntraConfig,
+  audit: Audit,
+): Promise<CreateOutcome> {
+  const users = strapi.db.query(USER_UID);
+  const decision = decideRoleWrite(null, resolution, settings.syncMode);
+  audit.role = decision.audit;
+  if (decision.kind === "reject") {
+    audit.result = decision.status === 403 ? "denied" : "unavailable";
+    return { kind: "refused", status: decision.status, error: decision.error };
+  }
+  if (decision.kind !== "create")
+    throw new Error(`unexpected role decision ${decision.kind} for a new user`);
+  const roleId = await roleIdOf(strapi, decision.role);
+  if (roleId === null) {
+    strapi.log.error(`[entra] role ${decision.role} does not exist; refusing the sign-in`);
+    audit.result = "unavailable";
+    return { kind: "refused", status: 503, error: "unavailable" };
+  }
+  const scalars = me ? buildProfileUpdate(me) : null;
+  try {
+    await users.create({
+      data: {
+        username: `entra-${claims.oid}`,
+        email,
+        provider: "microsoft",
+        confirmed: true,
+        blocked: false,
+        role: roleId,
+        roleSource: "entra",
+        entraAppliedRole: decision.role,
+        entraTenantId: claims.tid,
+        microsoftOid: claims.oid,
+        ...(scalars ?? {}),
+        displayName: scalars?.displayName ?? claims.name ?? email,
+      },
+    });
+    return { kind: "row", created: true };
+  } catch (err) {
+    // A concurrent first sign-in of the same person won the unique index.
+    const winner = await users.findOne({
+      where: { entraTenantId: claims.tid, microsoftOid: claims.oid },
+      select: ["id"],
+    });
+    if (!winner) throw err;
+    strapi.log.info(
+      `[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`,
+    );
+    return { kind: "row", created: false };
+  }
 }
 
 async function roleIdOf(strapi: ExchangeHost, type: string): Promise<number | null> {
