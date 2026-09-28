@@ -37,7 +37,12 @@ services:
       - "traefik.http.middlewares.sinnlos-headers.headers.frameDeny=true"
       # Restriktive Permissions-Policy: das Intranet braucht keine Sensor-/Media-APIs
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+      # Kompression. Traefik 3.7 gzippt auch text/event-stream (trotz
+      # Cache-Control: no-transform; geprüft 2026-09-29 gegen v3.7.13), daher
+      # schließt sie SSE-Antworten aus, und /live/* hat ohnehin einen eigenen
+      # Router ohne Kompression (sinnlos-live).
       - "traefik.http.middlewares.sinnlos-compress.compress=true"
+      - "traefik.http.middlewares.sinnlos-compress.compress.excludedContentTypes=text/event-stream"
       # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf dem Auth-Router
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
@@ -66,6 +71,15 @@ services:
       - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-auth.service=sinnlos-web"
       - "traefik.http.routers.sinnlos-auth.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
+      # Live-SSE (/live/stream, /live/subscribe; FX34): eigener Router OHNE
+      # Kompression und ohne Rate-Limit (wie bisher im Catch-all), vor dem
+      # Catch-all. Nie Puffer- oder Kompressions-Middleware davor.
+      - "traefik.http.routers.sinnlos-live.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/live/`)"
+      - "traefik.http.routers.sinnlos-live.priority=10"
+      - "traefik.http.routers.sinnlos-live.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-live.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-live.service=sinnlos-web"
+      - "traefik.http.routers.sinnlos-live.middlewares=sinnlos-headers"
       # Catch-all -> Next.js
       - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
       - "traefik.http.routers.sinnlos-web.priority=1"
@@ -99,6 +113,7 @@ services:
       # config/middlewares.ts); ohne sie ginge das Admin-Bundle unkomprimiert
       # raus.
       - "traefik.http.middlewares.sinnlos-cms-compress.compress=true"
+      - "traefik.http.middlewares.sinnlos-cms-compress.compress.excludedContentTypes=text/event-stream"
       # `/upload` (no trailing s) is the media-library admin API — distinct
       # from `/uploads`, which serves the stored file bytes. Without it those
       # calls fall through to the web catch-all, which answers the admin's

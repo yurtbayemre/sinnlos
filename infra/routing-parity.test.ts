@@ -15,8 +15,10 @@
  *  1. the set of first path segments routed to cms is identical and equals
  *     the canonical list below,
  *  2. ALL Traefik routers with their load-bearing priorities (auth 100 >
- *     signin 90 > cms 50 > web 1): /api/auth/* and POST /sign-in|/register
- *     must win over the cms /api rule and the catch-all,
+ *     signin 90 > cms 50 > live 10 > web 1): /api/auth/* and POST
+ *     /sign-in|/register must win over the cms /api rule and the catch-all,
+ *     /live/* over the catch-all; each router uses only middlewares of its
+ *     own container, and the live router no compression (FX34),
  *  3. the Caddy route order as Caddy computes it — @nextauth must stay
  *     before @strapi in the FILE (see caddySortedRoutes),
  *  4. a probe table of concrete requests routes identically under both
@@ -75,13 +77,15 @@ const CMS_PREFIXES = [
 /**
  * Router name → priority. Load-bearing (roadmap "Do not touch without
  * care"): auth must beat the cms /api rule, and the sign-in POST router must
- * beat the catch-all so its tighter rate limit applies. Any new router must
- * be added here consciously.
+ * beat the catch-all so its tighter rate limit applies; the live router
+ * (FX34) must beat the catch-all so the SSE stream skips compression. Any new
+ * router must be added here consciously.
  */
 const TRAEFIK_ROUTER_PRIORITIES: Record<string, number> = {
   "sinnlos-auth": 100,
   "sinnlos-signin": 90,
   "sinnlos-cms": 50,
+  "sinnlos-live": 10,
   "sinnlos-web": 1,
 };
 
@@ -167,6 +171,12 @@ const TRAEFIK_ROUTER_PROBES: Array<[Method, string, string]> = [
   ["GET", "/admin", "sinnlos-cms"],
   ["GET", "/", "sinnlos-web"],
   ["GET", "/uploads/document_9f8e7d.pdf", "sinnlos-web"],
+  // Live SSE (FX34): stream and subscribe on their own router without
+  // compression; look-alike paths stay on the catch-all.
+  ["GET", "/live/stream", "sinnlos-live"],
+  ["POST", "/live/subscribe", "sinnlos-live"],
+  ["GET", "/live", "sinnlos-web"],
+  ["GET", "/livestream", "sinnlos-web"],
 ];
 
 /**
@@ -895,11 +905,41 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
       expect(priorities).toEqual(TRAEFIK_ROUTER_PRIORITIES);
     });
 
-    it("orders auth > signin > cms > catch-all", () => {
+    it("orders auth > signin > cms > live > catch-all", () => {
       const p = (name: string) => traefik.routers.get(name)?.priority ?? -1;
       expect(p("sinnlos-auth")).toBeGreaterThan(p("sinnlos-signin"));
       expect(p("sinnlos-signin")).toBeGreaterThan(p("sinnlos-cms"));
-      expect(p("sinnlos-cms")).toBeGreaterThan(p("sinnlos-web"));
+      expect(p("sinnlos-cms")).toBeGreaterThan(p("sinnlos-live"));
+      expect(p("sinnlos-live")).toBeGreaterThan(p("sinnlos-web"));
+    });
+
+    // Traefik's compress middleware gzips a text/event-stream response
+    // despite `Cache-Control: no-transform` (checked against Traefik
+    // v3.7.13 on 2026-09-29), and only excludedContentTypes, matched on the
+    // RESPONSE type, stops it. So: the SSE router carries no compression at
+    // all, and every compress middleware excludes SSE for any other route.
+    it("keeps the live SSE router free of compression (FX34)", () => {
+      const live = traefik.routers.get("sinnlos-live");
+      expect(live?.service).toBe("sinnlos-web");
+      const compressing = (live?.middlewares ?? []).filter((name) =>
+        [...(traefik.middlewares.get(name)?.options.keys() ?? [])].some((option) =>
+          option.startsWith("compress"),
+        ),
+      );
+      expect(compressing).toEqual([]);
+      expect(live?.middlewares).toContain("sinnlos-headers");
+    });
+
+    it("excludes text/event-stream in every compress middleware", () => {
+      const compress = [...traefik.middlewares].filter(([, middleware]) =>
+        [...middleware.options.keys()].some((option) => option.startsWith("compress")),
+      );
+      expect(compress.length).toBeGreaterThan(0);
+      for (const [name, middleware] of compress) {
+        expect(middleware.options.get("compress.excludedcontenttypes"), name).toBe(
+          "text/event-stream",
+        );
+      }
     });
 
     it("serves one host on the websecure entrypoint from every router", () => {
