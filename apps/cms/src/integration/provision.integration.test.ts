@@ -551,6 +551,11 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(
       bossRes.body.user?.id,
     );
+    // Without a successful /me nothing profile-like is applied, not even a 404 manager.
+    await signIn(t, { ...report, manager: null, meStatus: 503 });
+    expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(
+      bossRes.body.user?.id,
+    );
     await signIn(t, { ...report, manager: null });
     expect(await userRow(t, { id: reportId })).toMatchObject({
       entraManagerOid: null,

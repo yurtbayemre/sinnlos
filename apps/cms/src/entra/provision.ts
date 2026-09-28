@@ -446,7 +446,11 @@ async function provision(
     audit.extra.push(`department=${await syncDepartment(strapi, user, me, mayWrite)}`);
   }
   if (settings.syncManager && graph.manager !== null) {
-    audit.extra.push(`manager=${await syncManager(strapi, user, claims, graph.manager, mayWrite)}`);
+    // Like the profile and the department: nothing without a successful
+    // /me (spec J); the back-fill waits for the next sign-in then.
+    audit.extra.push(
+      `manager=${me ? await syncManager(strapi, user, claims, graph.manager, mayWrite) : "unknown"}`,
+    );
   }
 
   const final =
