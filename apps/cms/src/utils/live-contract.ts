@@ -42,7 +42,9 @@ export type LiveTargetType = (typeof LIVE_TARGET_TYPES)[number];
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type AssertTrue<T extends true> = T;
 /** Fails to compile when LIVE_TARGET_TYPES and CommentTargetType differ. */
-export type LiveTargetTypesMatchCommentTargets = AssertTrue<Same<LiveTargetType, CommentTargetType>>;
+export type LiveTargetTypesMatchCommentTargets = AssertTrue<
+  Same<LiveTargetType, CommentTargetType>
+>;
 
 /** "<targetType>:<targetDocumentId>" of a comment/reaction target. */
 export type ContentChannel = `${LiveTargetType}:${string}`;

@@ -167,7 +167,9 @@ export function ballotTables(metadata: { get(uid: string): unknown }): BallotTab
   const names = [votes, optionColumn, poll.table, poll.voteColumn, poll.otherColumn];
   names.push(voter.table, voter.voteColumn, voter.otherColumn);
   if (!names.every(isName)) {
-    throw new Error(`[poll-results] the tables of ${POLL_VOTE_UID} are unknown to the query engine`);
+    throw new Error(
+      `[poll-results] the tables of ${POLL_VOTE_UID} are unknown to the query engine`,
+    );
   }
   return {
     votes: votes as string,
@@ -261,7 +263,8 @@ export function tallyFromCounts(rows: readonly BallotCountRow[], optionCount: nu
   let myVoteIndex: number | null = null;
   for (const row of rows) {
     const ballots = count(row.ballots);
-    const option = typeof row.option_index === "string" ? Number(row.option_index) : row.option_index;
+    const option =
+      typeof row.option_index === "string" ? Number(row.option_index) : row.option_index;
     total += ballots;
     if (isOptionIndex(option) && option < optionCount) counts[option] += ballots;
     if (count(row.mine) > 0) myVoteIndex = isOptionIndex(option) ? option : null;

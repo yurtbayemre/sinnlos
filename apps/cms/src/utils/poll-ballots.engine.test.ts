@@ -364,11 +364,7 @@ function suite(name: string, open: () => Promise<Opened>) {
           totals.push((await countPollBallots(host, poll, voter, 2)).total);
         }
       };
-      await Promise.all([
-        ...Array.from({ length: 8 }, (_, i) => vote(i % 2)),
-        read(),
-        read(),
-      ]);
+      await Promise.all([...Array.from({ length: 8 }, (_, i) => vote(i % 2)), read(), read()]);
       expect(Math.max(...totals)).toBeLessThanOrEqual(1);
       await expect(countPollBallots(host, poll, voter, 2)).resolves.toMatchObject({ total: 1 });
     }, 60_000);

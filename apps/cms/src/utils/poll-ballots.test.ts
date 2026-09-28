@@ -118,7 +118,9 @@ const TABLES: BallotTables = {
 };
 
 /** poll-vote metadata in the shape @strapi/database 5.55.1 builds it. */
-const metadataOf = (meta: unknown) => ({ get: (uid: string) => (uid === POLL_VOTE_UID ? meta : undefined) });
+const metadataOf = (meta: unknown) => ({
+  get: (uid: string) => (uid === POLL_VOTE_UID ? meta : undefined),
+});
 const META = {
   tableName: "poll_votes",
   attributes: {
@@ -157,7 +159,10 @@ describe("ballotTables", () => {
         ...META,
         attributes: {
           ...META.attributes,
-          poll: { type: "relation", joinTable: { name: "poll_votes_poll_lnk", joinColumn: { name: "poll_vote_id" } } },
+          poll: {
+            type: "relation",
+            joinTable: { name: "poll_votes_poll_lnk", joinColumn: { name: "poll_vote_id" } },
+          },
         },
       },
     ];
@@ -178,7 +183,9 @@ describe("ballotCountStatement", () => {
       expect(sql).toMatch(/GROUP BY/);
       expect(sql).toMatch(/count\(v\.id\)/);
       expect(sql).not.toMatch(/distinct/i);
-      const tables = bindings.filter((value) => typeof value === "string" && value.includes("_lnk"));
+      const tables = bindings.filter(
+        (value) => typeof value === "string" && value.includes("_lnk"),
+      );
       for (const table of tables) {
         expect(table).toBe(schema ? `${schema}.${String(table).split(".")[1]}` : table);
       }
@@ -209,7 +216,13 @@ describe("tallyFromCounts", () => {
 
   it("reads Postgres' bigint and numeric strings", () => {
     expect(
-      tallyFromCounts([{ option_index: 1, ballots: "4", mine: "1" }, { option_index: 0, ballots: "2", mine: "0" }], 2),
+      tallyFromCounts(
+        [
+          { option_index: 1, ballots: "4", mine: "1" },
+          { option_index: 0, ballots: "2", mine: "0" },
+        ],
+        2,
+      ),
     ).toEqual({ counts: [2, 4], total: 6, myVoteIndex: 1 });
   });
 
@@ -224,7 +237,9 @@ describe("tallyFromCounts", () => {
         2,
       ),
     ).toEqual({ counts: [0, 1], total: 4, myVoteIndex: 3 });
-    expect(tallyFromCounts([{ option_index: null, ballots: 1, mine: 1 }], 2).myVoteIndex).toBeNull();
+    expect(
+      tallyFromCounts([{ option_index: null, ballots: 1, mine: 1 }], 2).myVoteIndex,
+    ).toBeNull();
   });
 
   it("gives zero counts without rows", () => {
