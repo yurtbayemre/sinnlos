@@ -6,6 +6,11 @@
 
 export interface DigestContent {
   announcements: { title: string; author?: string | null }[];
+  /**
+   * Announcements beyond the shown ones (send-digests caps the section at
+   * 25, FX48); rendered as "+N more" and counted in the subject.
+   */
+  announcementsMore?: number;
   mentions: { title: string }[];
   kudos: { message: string; from?: string | null; value?: string | null }[];
 }
@@ -22,6 +27,7 @@ const STR = {
     greeting: (name: string) => `Hallo ${name},`,
     intro: "hier ist deine Zusammenfassung aus dem Intranet:",
     announcements: "Neuigkeiten",
+    more: (n: number) => `+${n} weitere`,
     mentions: "Erwähnungen & Antworten",
     kudos: "Kudos für dich",
     kudosFrom: (from: string) => `von ${from}`,
@@ -33,6 +39,7 @@ const STR = {
     greeting: (name: string) => `Hi ${name},`,
     intro: "here is your intranet summary:",
     announcements: "Announcements",
+    more: (n: number) => `+${n} more`,
     mentions: "Mentions & replies",
     kudos: "Kudos for you",
     kudosFrom: (from: string) => `from ${from}`,
@@ -49,8 +56,19 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** The "+N more" count: a positive integer, anything else is 0. */
+function moreAnnouncements(content: DigestContent): number {
+  const more = content.announcementsMore ?? 0;
+  return Number.isInteger(more) && more > 0 ? more : 0;
+}
+
 export function totalItems(content: DigestContent): number {
-  return content.announcements.length + content.mentions.length + content.kudos.length;
+  return (
+    content.announcements.length +
+    moreAnnouncements(content) +
+    content.mentions.length +
+    content.kudos.length
+  );
 }
 
 export function renderDigest(
@@ -62,11 +80,13 @@ export function renderDigest(
 
   const sections: { heading: string; lines: string[] }[] = [];
   if (content.announcements.length > 0) {
+    const more = moreAnnouncements(content);
     sections.push({
       heading: t.announcements,
-      lines: content.announcements.map(
-        (a) => `• ${a.title}${a.author ? ` — ${a.author}` : ""}`,
-      ),
+      lines: [
+        ...content.announcements.map((a) => `• ${a.title}${a.author ? ` — ${a.author}` : ""}`),
+        ...(more > 0 ? [`• ${t.more(more)}`] : []),
+      ],
     });
   }
   if (content.mentions.length > 0) {

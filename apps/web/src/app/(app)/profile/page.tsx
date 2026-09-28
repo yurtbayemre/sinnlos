@@ -2,6 +2,7 @@ import { getTranslations } from "next-intl/server";
 import { getSession } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
+import { getViewer } from "@/lib/viewer";
 import { initials } from "@/lib/utils";
 import { avatarThumbUrl } from "@/lib/config";
 import type { UserLite } from "@/lib/types";
@@ -29,7 +30,11 @@ export default async function ProfilePage() {
   const session = await getSession();
   const isLocal = session?.provider === "local";
 
-  const { data } = await tryFetch(() => strapi<{ data: MeProfile | null }>("/api/me"), "profile");
+  // The viewer's role only decides whether the digest options show (FX19).
+  const [{ data }, viewer] = await Promise.all([
+    tryFetch(() => strapi<{ data: MeProfile | null }>("/api/me"), "profile"),
+    getViewer(),
+  ]);
   // The form renders only on top of the stored profile (FX26): a form
   // prefilled with blanks after a failed read overwrote every field on
   // save. Without the profile the page shows the banner and the password
@@ -66,6 +71,7 @@ export default async function ProfilePage() {
             </CardHeader>
             <CardContent>
               <ProfileForm
+                viewerRole={viewer.role}
                 initial={{
                   displayName: me.displayName ?? null,
                   jobTitle: me.jobTitle ?? null,

@@ -34,7 +34,34 @@
  * guard utils/org-dp-guard.ts): every relation into them, from users,
  * teams and both rows of a space, links the one row, and its id never
  * changes (no publish cycle).
+ *
+ * Recipients (FX19): the notification fan-outs and the digest resolve every
+ * active user's scope in ONE users query plus the team-lead map
+ * (loadAllUserScopes) and the roles holding a read grant from
+ * up_permissions at runtime (loadRoleGrants), once per run. A recipient is
+ * targeted AND holds the read grant AND is not blocked.
  */
+import {
+  isAnnouncementVisible,
+  type AnnouncementTargeting,
+  type AudienceScope,
+} from "./announcement-audience";
+
+const USER_UID = "plugin::users-permissions.user";
+const TEAM_UID = "api::team.team";
+const PERMISSION_UID = "plugin::users-permissions.permission";
+
+/** The read grants recipients must hold (users-permissions action keys). */
+export const ANNOUNCEMENT_FIND = "api::announcement.announcement.find";
+export const EVENT_FIND = "api::event.event.find";
+export const KUDOS_FIND = "api::kudos.kudos.find";
+
+/**
+ * "blocked is not true", NULL-safe: SQL `blocked <> true` never matches a
+ * NULL, and a user row written outside users-permissions (seed, import) can
+ * carry one.
+ */
+export const NOT_BLOCKED = { $or: [{ blocked: false }, { blocked: { $null: true } }] };
 
 /**
  * Row ids. department and team are single-row with stable ids (I-ORG, see
@@ -96,6 +123,147 @@ export async function loadUserScope(strapi: any, userId: number): Promise<UserSc
       .filter((team: { lead?: { id: number } | null }) => team.lead?.id === userId)
       .map((team: { id: number }) => team.id),
   };
+}
+
+/** The slice of the Strapi instance the recipient loaders need. */
+export interface ScopeStrapi {
+  db: {
+    query(uid: string): { findMany(params: Record<string, unknown>): Promise<unknown> };
+  };
+}
+
+/** One active (not blocked) user with the scope the audience rules read. */
+export interface RecipientScope extends UserScope {
+  userId: number;
+  /** users-permissions role type (e.g. "guest"); null without a role. */
+  roleType: string | null;
+}
+
+interface UserScopeRow {
+  id: number;
+  role?: { id?: number; type?: string | null } | null;
+  department?: { id?: number } | null;
+  teams?: { id: number }[] | null;
+}
+
+interface TeamLeadRow {
+  id: number;
+  lead?: { id?: number } | null;
+}
+
+const rowsOf = <T>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
+
+/** team.lead has no inverse field on the user: lead id → ids of the teams they lead. */
+function ledTeamMap(teams: readonly TeamLeadRow[]): Map<number, number[]> {
+  const led = new Map<number, number[]>();
+  for (const team of teams) {
+    const leadId = team.lead?.id;
+    if (leadId == null) continue;
+    led.set(leadId, [...(led.get(leadId) ?? []), team.id]);
+  }
+  return led;
+}
+
+/**
+ * Every active user's scope: ONE users query (blocked users excluded,
+ * NULL-safe) plus the team-lead map — two queries whatever the user count.
+ * For the fan-outs and the digest, which used to load users one by one or
+ * without the blocked filter.
+ */
+export async function loadAllUserScopes(strapi: ScopeStrapi): Promise<RecipientScope[]> {
+  const [users, teams] = await Promise.all([
+    strapi.db.query(USER_UID).findMany({
+      where: NOT_BLOCKED,
+      select: ["id"],
+      populate: {
+        role: { select: ["id", "type"] },
+        department: { select: ["id"] },
+        teams: { select: ["id"] },
+      },
+    }),
+    strapi.db.query(TEAM_UID).findMany({
+      select: ["id"],
+      populate: { lead: { select: ["id"] } },
+    }),
+  ]);
+  const led = ledTeamMap(rowsOf<TeamLeadRow>(teams));
+  return rowsOf<UserScopeRow>(users).map((user) => ({
+    userId: user.id,
+    roleId: user.role?.id,
+    roleType: user.role?.type ?? null,
+    departmentId: user.department?.id,
+    teamIds: (user.teams ?? []).map((team) => team.id),
+    ledTeamIds: led.get(user.id) ?? [],
+  }));
+}
+
+/** Announcement targeting reads a team as "member OR lead" (announcement-audience.ts). */
+export function audienceScopeOf(scope: UserScope): AudienceScope {
+  return {
+    roleId: scope.roleId,
+    departmentId: scope.departmentId,
+    teamIds: [...scope.teamIds, ...scope.ledTeamIds],
+  };
+}
+
+/** Which roles hold which action, as up_permissions says at the time of the read. */
+export interface RoleGrants {
+  /** Ids of the roles holding `action`; empty when none does or it was not loaded. */
+  holders(action: string): ReadonlySet<number>;
+}
+
+interface PermissionRow {
+  action?: string;
+  role?: { id?: number } | null;
+}
+
+/**
+ * The roles that hold `actions`, read from up_permissions at runtime (one
+ * query), so a grant changed in the bootstrap matrix or the admin panel
+ * applies to the next fan-out or digest run without a code change here.
+ */
+export async function loadRoleGrants(
+  strapi: ScopeStrapi,
+  actions: readonly string[],
+): Promise<RoleGrants> {
+  const rows = await strapi.db.query(PERMISSION_UID).findMany({
+    where: { action: { $in: [...actions] } },
+    select: ["action"],
+    populate: { role: { select: ["id"] } },
+  });
+  const byAction = new Map<string, Set<number>>();
+  for (const row of rowsOf<PermissionRow>(rows)) {
+    const roleId = row.role?.id;
+    if (typeof row.action !== "string" || typeof roleId !== "number") continue;
+    const roles = byAction.get(row.action) ?? new Set<number>();
+    roles.add(roleId);
+    byAction.set(row.action, roles);
+  }
+  const none: ReadonlySet<number> = new Set<number>();
+  return { holders: (action) => byAction.get(action) ?? none };
+}
+
+/** Whether the user's role holds the grant (a user without a role holds nothing). */
+export function holdsGrant(scope: UserScope, roles: ReadonlySet<number>): boolean {
+  return scope.roleId != null && roles.has(scope.roleId);
+}
+
+/**
+ * The users an announcement reaches (bell and digest): targeted
+ * (isAnnouncementVisible over member-or-lead teams), holding
+ * announcement.find, not blocked (`scopes` holds active users only).
+ * admin_role and editor get strictly the targeted audience like everyone
+ * else (owner default, FX19): their read bypass is not a subscription.
+ */
+export function announcementRecipients(
+  announcement: AnnouncementTargeting,
+  scopes: readonly RecipientScope[],
+  readers: ReadonlySet<number>,
+): RecipientScope[] {
+  return scopes.filter(
+    (scope) =>
+      holdsGrant(scope, readers) && isAnnouncementVisible(announcement, audienceScopeOf(scope)),
+  );
 }
 
 /** Decide whether a single space is visible to the given scope. */
