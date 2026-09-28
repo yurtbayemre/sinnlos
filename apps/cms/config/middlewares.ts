@@ -77,11 +77,11 @@ export default ({ env }: { env: Env }) => {
     // Contact fields (email/phone/hireDate/officeLocation/microsoftOid) are
     // not filterable, sortable or `_q`-searchable for non-staff callers
     // (FX22): a 400 `Invalid key`. The query side of the output sanitizer in
-    // src/index.ts. A global middleware only by registration: its factory
-    // wraps strapi.contentAPI.validate.query once at boot (the per-request
-    // chain runs before authentication and cannot see the role) and returns
-    // a pass-through, so its position here does not matter. See
-    // src/middlewares/sensitive-query-guard.ts.
+    // src/bootstrap/user-contact-sanitizer.ts. A global middleware only by
+    // registration: its factory wraps strapi.contentAPI.validate.query once
+    // at boot (the per-request chain runs before authentication and cannot
+    // see the role) and returns a pass-through, so its position here does
+    // not matter. See src/middlewares/sensitive-query-guard.ts.
     "global::sensitive-query-guard",
     "strapi::public",
   ];

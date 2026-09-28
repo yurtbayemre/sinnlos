@@ -33,7 +33,8 @@ import { errors } from "@strapi/utils";
  * fails when one is not covered.
  *
  * What happens to a restricted relation (for non admin_role/editor callers;
- * registerRestrictedRelationGuard in src/index.ts decides the bypass):
+ * registerRestrictedRelationGuard in bootstrap/restricted-relation-guard.ts
+ * decides the bypass):
  *   - populate: dropped with everything nested under it, in every shape the
  *     core accepts (@strapi/utils convert-query-params.js, @strapi/database
  *     populate/process.js): objects, counts, strings, comma lists, arrays,

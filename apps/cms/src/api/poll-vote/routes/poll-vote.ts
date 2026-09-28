@@ -8,7 +8,7 @@ import { factories } from "@strapi/strapi";
  * closesAt, option bounds), and the core reads let a caller populate the
  * poll of their own old votes. `only: []` makes createCoreRouter pick zero
  * routes; the permission rows are revoked via REMOVED_CORE_ACTIONS in
- * src/index.ts.
+ * src/bootstrap/permission-matrix.ts.
  */
 export default factories.createCoreRouter("api::poll-vote.poll-vote", {
   only: [],

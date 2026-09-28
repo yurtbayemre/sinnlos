@@ -2,9 +2,10 @@
  * The RSVP summary (FX21): counts, "yes" names and the caller's own answer
  * per published event, aggregated in the controller (controllers/
  * event-rsvp.ts `summary`). Granted via CUSTOM_ACTION_GRANTS in
- * src/index.ts to exactly the roles that hold event-rsvp find — never
- * guest. No route policy: the action reads through strapi.db.query and
- * returns only the aggregate, with the privacy rules of utils/rsvp.ts.
+ * src/bootstrap/permission-matrix.ts to exactly the roles that hold
+ * event-rsvp find — never guest. No route policy: the action reads through
+ * strapi.db.query and returns only the aggregate, with the privacy rules of
+ * utils/rsvp.ts.
  *
  * ROUTE ORDER: Strapi registers the route files of an API in file-name
  * order (@strapi/core loaders/apis.js readdir, sorted by libuv), and the

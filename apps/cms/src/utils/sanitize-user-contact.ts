@@ -68,9 +68,10 @@ export const SENSITIVE_USER_FIELDS = [
 
 /**
  * The employee roles that MAY read the fields above. Fail-closed: only a
- * caller whose `role.type` is in this set keeps the fields; `guest`, the
- * pre-role-mapping `authenticated` fallback, anonymous `public`, and any
- * unknown/undefined role are sanitized.
+ * caller whose `role.type` is in this set keeps the fields; `guest`,
+ * `authenticated` (held only by manual assignment or from before
+ * default_role), anonymous `public`, and any unknown/undefined role are
+ * sanitized.
  *
  * These are the STAFF_ROLES of the role vocabulary (bootstrap/roles.ts,
  * B02) — note the admin role is `admin_role`, not `admin`.

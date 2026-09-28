@@ -286,9 +286,9 @@ export const PERMISSION_MATRIX: Record<
   authenticated: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": READ_ACTIONS,
-    // Read-only on purpose: `authenticated` is only the pre-role-mapping
-    // fallback, and posting an ad requires the upload grant anyway (which
-    // this role does not get).
+    // Read-only on purpose: a user holds `authenticated` only by manual
+    // assignment or from before default_role (see above), and posting an ad
+    // requires the upload grant anyway (which this role does not get).
     "api::classified.classified": READ_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create"],
     "api::department.department": READ_ACTIONS,
