@@ -220,6 +220,13 @@ jobs:
             [.services[] | (.labels // {}) | to_entries[]
               | select(.key | test("^traefik\\.http\\.routers\\.[^.]+\\.rule$")) | .value]
             | length > 0 and all(startswith("Host(`intranet.example.com`)"))'
+          echo "Traefik mode: the sinnlos-* aliases stay on the project network"
+          compose -f infra/docker-compose.traefik.yml config --format json | jq -e '
+            .services.db.networks.default.aliases == ["sinnlos-db"]
+            and .services.cms.networks.default.aliases == ["sinnlos-cms"]
+            and .services.web.networks.default.aliases == ["sinnlos-web"]
+            and (.services.cms.networks.frontend.aliases // []) == []
+            and (.services.web.networks.frontend.aliases // []) == []'
           echo "Traefik mode refuses to render without DOMAIN"
           if DOMAIN= compose -f infra/docker-compose.traefik.yml config -q 2> "${RUNNER_TEMP}/domain.err"; then
             echo "::error::docker-compose.traefik.yml rendered without DOMAIN"

@@ -25,6 +25,11 @@ services:
       PGTZ: UTC
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Unique DNS names on the project network only (IN04); see cms below.
+    networks:
+      default:
+        aliases:
+          - sinnlos-db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-sinnlos}"]
       interval: 10s
@@ -50,6 +55,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Unique DNS names for the internal URLs (IN04): DATABASE_HOST,
+    # STRAPI_URL and WEB_INTERNAL_URL use sinnlos-db, sinnlos-cms and
+    # sinnlos-web, aliases on this project's own network only. The service
+    # names `db`, `cms` and `web` are DNS names on EVERY network a container
+    # joins; in Traefik mode web and cms also sit on the shared `frontend`
+    # network, where another project's `web` or `cms` would answer them too.
+    # Container names (infra-cms-1, …) are unchanged; the scripts use those.
+    networks:
+      default:
+        aliases:
+          - sinnlos-cms
     environment:
       NODE_ENV: production
       # Datetime contract (docs/DEPLOYMENT.md): the cms process runs in UTC
@@ -75,7 +91,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - openssl rand -base64 32}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set - openssl rand -base64 32}
       DATABASE_CLIENT: postgres
-      DATABASE_HOST: db
+      DATABASE_HOST: sinnlos-db
       DATABASE_PORT: 5432
       DATABASE_NAME: ${DATABASE_NAME:-sinnlos}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-sinnlos}
@@ -112,7 +128,7 @@ services:
       # Live-event pings → Next.js: WEB_INTERNAL_URL is only the target of
       # POST /api/live/emit and the secret guards only that ingest (the
       # cache-revalidation webhook is gone, D-DC01; names kept).
-      WEB_INTERNAL_URL: http://web:3000
+      WEB_INTERNAL_URL: http://sinnlos-web:3000
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}
       # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
       # no-ops and the app runs byte-for-byte on the pre-SSE polling.
@@ -164,6 +180,11 @@ services:
     depends_on:
       cms:
         condition: service_healthy
+    # Unique DNS name on the project network only (IN04); see cms above.
+    networks:
+      default:
+        aliases:
+          - sinnlos-web
     environment:
       NODE_ENV: production
       # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
@@ -180,7 +201,7 @@ services:
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
       HOSTNAME: 0.0.0.0
       PORT: 3000
-      STRAPI_URL: http://cms:1337
+      STRAPI_URL: http://sinnlos-cms:1337
       STRAPI_PUBLIC_URL: ${CMS_PUBLIC_URL}
       # (NEXT_PUBLIC_APP_URL/NAME and STRAPI_ADMIN_* are not passed any more:
       # the web reads none of them, and NEXT_PUBLIC_* would only take effect
