@@ -18,7 +18,11 @@ import { defineConfig } from "vitest/config";
  *     listeners that `strapi.destroy()` removes (the harness puts them back)
  *     never leak between files.
  *   - Budgets: a boot (schema sync, permission sync, fixtures) takes about
- *     15-40 s depending on the engine and the machine, in beforeAll.
+ *     15-40 s depending on the engine and the machine, in beforeAll
+ *     (hookTimeout). A test that boots in its body (the harness contract,
+ *     the restarts) passes its own budget as the third argument of `it`:
+ *     vitest does not abort a timed-out body, the boot would run on into
+ *     the next case.
  */
 export default defineConfig({
   test: {

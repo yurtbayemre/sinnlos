@@ -19,6 +19,14 @@ import {
  *      after the refused boot, and the next boot starts once it is gone
  *      (the runbook path).
  */
+
+/**
+ * Both tests boot in their body: warm restarts on the schema of the first
+ * boot (1.5-2.5 s measured), but a Strapi boot all the same, so they carry
+ * an explicit budget above the 60 s test default (docs/architecture.md
+ * §5.40 "Last-Timeouts", §5.65).
+ */
+const RESTART_BUDGET = 120_000;
 describe.each(testEngines())("restarts and the org-dp boot guard on %s", (engine) => {
   let database: TestDatabase;
   let fixtures: TestFixtures;
@@ -67,7 +75,7 @@ describe.each(testEngines())("restarts and the org-dp boot guard on %s", (engine
       await t.stop();
     }
     expect(await counts()).toEqual(firstBoot);
-  });
+  }, RESTART_BUDGET);
 
   it("refuses to boot while a department draft row exists, and boots once it is gone", async () => {
     // A draft row as a pre-decision-05 database (or a restored old backup)
@@ -94,5 +102,5 @@ describe.each(testEngines())("restarts and the org-dp boot guard on %s", (engine
     } finally {
       await t.stop();
     }
-  });
+  }, RESTART_BUDGET);
 });

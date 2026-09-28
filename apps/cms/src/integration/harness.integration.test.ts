@@ -14,6 +14,17 @@ import {
  * FX40): a hermetic network with a stub seam, restored process state, and
  * databases that are gone once dropped.
  */
+
+/**
+ * The contract test boots in its body (it asserts on the process before
+ * and after the boot, so the boot cannot move to beforeAll). It is the
+ * file's first boot: a cold @strapi/* require in a fresh fork, schema
+ * creation and the first permission sync on a new database. It gets the
+ * hook budget of vitest.integration.config.ts, not the 60 s test budget:
+ * a timed-out body keeps running (vitest does not abort it) and leaks its
+ * env and the running boot into the next case.
+ */
+const BOOT_BUDGET = 300_000;
 describe.each(testEngines())("integration harness on %s", (engine) => {
   const databaseExists = async (database: TestDatabase) => {
     if (engine === "sqlite") {
@@ -74,5 +85,5 @@ describe.each(testEngines())("integration harness on %s", (engine) => {
     expect(await databaseExists(database)).toBe(true);
     await database.drop();
     expect(await databaseExists(database)).toBe(false);
-  });
+  }, BOOT_BUDGET);
 });
