@@ -9,8 +9,13 @@ import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harn
  * the same relations on both (a draft links the target's draft, the
  * published row the target's published row). department and team have no
  * draft & publish since decision 05: one row per document, published.
- * utils/draft-twins.ts, which runs last in bootstrap, must find nothing to
- * repair on a freshly seeded database.
+ *
+ * utils/draft-twins.ts runs right after the seed in bootstrap and gives a
+ * published-only document its draft, so "one draft + one published row"
+ * alone would stay green for a seed that writes published-only rows again
+ * (the pre-FX38 state). What is asserted: the draft of every seeded
+ * document predates its published row (lower id), so the seed wrote the
+ * pair itself and draft-twins had nothing to repair.
  */
 
 /** The seeded draft & publish types and how many documents the seed writes. */
@@ -59,6 +64,16 @@ describe.each(testEngines())("demo seed on %s (FX38)", (engine) => {
         expect(pair.filter(isPublished)).toHaveLength(1);
         // Two rows, two different ids (publish is delete + recreate).
         expect(new Set(pair.map((row) => row.id)).size).toBe(2);
+        // The Document Service writes the draft and then publishes it
+        // (@strapi/core document-service/repository.js create → publish),
+        // so a seeded draft has the lower id. A draft-twins clone is
+        // inserted AFTER the published row: a higher draft id means the
+        // seed wrote a published-only row and the boot repair covered it.
+        const draft = pair.find((row) => !isPublished(row));
+        const published = pair.find(isPublished);
+        const draftFirst =
+          draft !== undefined && published !== undefined && draft.id < published.id;
+        expect({ documentId, draftFirst }).toEqual({ documentId, draftFirst: true });
       }
     },
   );
