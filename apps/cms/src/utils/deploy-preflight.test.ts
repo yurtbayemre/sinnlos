@@ -38,7 +38,12 @@ import {
  *      again; nothing for a :rollback cms that knows guest access,
  *   7. every docker call of the hint is bounded (timeout; the naive query
  *      also by lock and statement timeouts), and a probe that fails or
- *      times out prints the safe variant, never fewer lines.
+ *      times out prints the safe variant, never fewer lines,
+ *   8. datetime phase 2: the web runs in UTC (image and compose), and the
+ *      hint adds infra/docker-compose.web-legacy-tz.yml for a :rollback web
+ *      without the org.sinnlos.datetime label apps/web/Dockerfile sets (or
+ *      one it cannot check); that override restores exactly the TZ the
+ *      compose file gave the web before the port.
  *
  * The SQL itself runs against Postgres 16 in
  * revoke-guest-poll-vote.pg.test.ts.
@@ -350,6 +355,14 @@ interface HintProbes {
    * stub ends them with 124, as the real one does at the deadline.
    */
   hang?: string[];
+  /**
+   * What `docker image inspect -f '{{ index .Config.Labels
+   * "org.sinnlos.datetime" }}'` prints for infra-web:rollback: default
+   * "zone-explicit" (a web from the datetime port on), "<no value>" for an
+   * older one (docker 29 prints an empty line there; any other value counts
+   * as older), null when that image does not exist.
+   */
+  webLabel?: string | null;
 }
 
 /**
@@ -369,13 +382,17 @@ function rollbackHintRun(cmd: string | null, probes: HintProbes = {}): { stdout:
     "SCRIPT_DIR=/srv/infra",
     "COMPOSE=(docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml)",
     "COMPOSE_LEGACY_TZ=/srv/infra/docker-compose.cms-legacy-tz.yml",
+    "COMPOSE_WEB_LEGACY_TZ=/srv/infra/docker-compose.web-legacy-tz.yml",
     shellLine("PROBE_TIMEOUT=("),
+    shellLine("WEB_DATETIME_LABEL="),
+    shellLine("WEB_DATETIME_VALUE="),
     `POLL_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("POLL_SCHEMA_IN_IMAGE"))}`,
     shellLine("REVOKE_GUEST_VOTE_PSQL="),
     `STUB_CMD=${shellQuote(cmd ?? "")}`,
     `STUB_NAIVE=${shellQuote(probes.naive ?? "0")}`,
     `STUB_IMAGE_CHECK=${probes.imageCheck ?? 0}`,
     `STUB_HANG=${shellQuote(` ${(probes.hang ?? []).join(" ")} `)}`,
+    `STUB_WEB_LABEL=${shellQuote(probes.webLabel === undefined ? "zone-explicit" : (probes.webLabel ?? ""))}`,
     "BOUNDED=0",
     "timeout() {",
     '  while [[ "$1" != docker ]]; do shift; done',
@@ -385,7 +402,11 @@ function rollbackHintRun(cmd: string | null, probes: HintProbes = {}): { stdout:
     "docker() {",
     "  if ((BOUNDED)); then printf 'bounded docker %s\\n' \"$*\" >&3; else printf 'UNBOUNDED docker %s\\n' \"$*\" >&3; fi",
     '  case "$1 ${2:-}" in',
-    '    "image inspect") [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
+    '    "image inspect")',
+    '      if [[ "$*" == *" infra-web:rollback" ]]; then',
+    '        [[ -n "${STUB_WEB_LABEL}" ]] || return 1; printf \'%s\\n\' "${STUB_WEB_LABEL}"; return 0',
+    "      fi",
+    '      [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
     '    "run "*) return "${STUB_IMAGE_CHECK}" ;;',
     '    "exec "*)',
     '      if [[ "$(cat)" == *up_permissions* ]]; then echo "permission probe" >&3; fi',
@@ -395,6 +416,7 @@ function rollbackHintRun(cmd: string | null, probes: HintProbes = {}): { stdout:
     "}",
     shellFunction("naive_app_columns"),
     shellFunction("image_has_poll_guest_access"),
+    shellFunction("image_web_zone_explicit"),
     shellFunction("print_guest_vote_revoke_hint"),
     shellFunction("print_guest_vote_recheck_hint"),
     shellFunction("print_rollback_hint"),
@@ -644,8 +666,12 @@ describe("rollback hint: bounded probes (a failed deploy must print every line)"
       expect(calls.map((l) => l.split(" ").slice(0, 3).join(" ")).sort()).toEqual([
         "bounded docker exec",
         "bounded docker image",
+        "bounded docker image",
         "bounded docker run",
       ]);
+      expect(stdout).toContain(
+        `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:rollback`,
+      );
       expect(stdout).not.toContain("UNBOUNDED");
     }
   });
@@ -659,7 +685,8 @@ describe("rollback hint: bounded probes (a failed deploy must print every line)"
       "To roll back:",
       "(the database could not be asked whether the datetime repair has run",
       "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
-      `${COMPOSE_LINE} up -d --no-build web cms`,
+      "(infra-web:rollback could not be checked for the web's datetime port, so the web",
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
       "(--no-build is essential",
       "Check the rollback image:",
       "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
@@ -674,5 +701,87 @@ describe("rollback hint: bounded probes (a failed deploy must print every line)"
     expect(hint).toContain("the database could not be asked whether the datetime repair has run");
     expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
     expect(rollbackHint('["node_modules/.bin/strapi","start"]', "0")).not.toContain("could not be asked");
+  });
+});
+
+describe("datetime phase 2: the web in UTC, and the web legacy-zone override for a rollback", () => {
+  const COMPOSE_LINE =
+    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+  const WEB_OVERRIDE = "/srv/infra/docker-compose.web-legacy-tz.yml";
+  const OVERRIDE = read("infra", "docker-compose.web-legacy-tz.yml");
+  const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+
+  /** The environment lines of one compose service (two-space service indent). */
+  function serviceEnvironment(compose: string, service: string): string[] {
+    const lines = compose.split("\n");
+    const start = lines.indexOf(`  ${service}:`);
+    expect(start, service).toBeGreaterThanOrEqual(0);
+    const rest = lines.slice(start + 1);
+    const end = rest.findIndex((line) => /^ {0,2}\S/.test(line));
+    return (end === -1 ? rest : rest.slice(0, end)).filter((line) => !line.trim().startsWith("#"));
+  }
+
+  it("runs the web in UTC: the image and compose both say so", () => {
+    expect(WEB_DOCKERFILE).toMatch(/^ENV TZ=UTC$/m);
+    expect(serviceEnvironment(COMPOSE, "web")).toContain("      TZ: UTC");
+    expect(serviceEnvironment(COMPOSE, "web")).toContain(
+      "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
+    );
+  });
+
+  it("labels the web image with the value the rollback hint checks", () => {
+    const label = shellAssignment("WEB_DATETIME_LABEL");
+    const value = shellAssignment("WEB_DATETIME_VALUE");
+    expect(WEB_DOCKERFILE).toContain(`LABEL ${label}="${value}"`);
+    expect(shellFunction("image_web_zone_explicit")).toContain(
+      'docker image inspect -f "{{ index .Config.Labels \\"${WEB_DATETIME_LABEL}\\" }}" "$1"',
+    );
+  });
+
+  it("the override gives the web exactly the TZ the compose file set before the port, and nothing else", () => {
+    const lines = OVERRIDE.split("\n").filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
+    expect(lines).toEqual(["services:", "  web:", "    environment:", "      TZ: ${APP_TIME_ZONE:-Europe/Berlin}"]);
+    // The web's APP_TIME_ZONE default, so the old start check (Node runs in APP_TIME_ZONE) passes.
+    expect(serviceEnvironment(COMPOSE, "web")).toContain(
+      "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
+    );
+    expect(shellAssignment("COMPOSE_WEB_LEGACY_TZ")).toBe("${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml");
+  });
+
+  it.skipIf(!HAS_BASH)("adds the override for a :rollback web from before the port", () => {
+    const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "<no value>" });
+    expectInOrder(hint, [
+      "To roll back:",
+      "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
+      `${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`,
+    ]);
+    expect(hint).not.toContain("could not be checked for the web's datetime port");
+  });
+
+  it.skipIf(!HAS_BASH)("adds it, with the check, when the :rollback web cannot be checked", () => {
+    for (const probes of [{ webLabel: null }, { hang: ["image"] }]) {
+      const hint = rollbackHint(STRAPI_CMD, "0", probes);
+      expect(hint).toContain("(infra-web:rollback could not be checked for the web's datetime port, so the web");
+      expect(hint).toContain(
+        `docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`,
+      );
+      expect(hint).toContain(`${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`);
+    }
+  });
+
+  it.skipIf(!HAS_BASH)("leaves it out for a :rollback web from the port on", () => {
+    const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "zone-explicit" });
+    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    expect(hint).not.toContain("web-legacy-tz");
+  });
+
+  it.skipIf(!HAS_BASH)("puts both overrides and the direct start on the same up line when all are needed", () => {
+    const hint = rollbackHint('["pnpm","start"]', "3", { webLabel: "<no value>" });
+    expect(hint).toContain(
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} up -d --no-build web cms`,
+    );
+    expect(hint).toContain(
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+    );
   });
 });

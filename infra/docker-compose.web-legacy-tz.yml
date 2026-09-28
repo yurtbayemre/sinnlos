@@ -1,0 +1,25 @@
+# Rollback override for a web image from BEFORE the web's datetime port
+# (datetime phase 2; docs/DEPLOYMENT.md, "Upgrading to the web datetime
+# port", Rollback). Use it only together with such an image, on top of the
+# live files:
+#
+#   docker compose -p infra -f infra/docker-compose.yml \
+#     -f infra/docker-compose.traefik.yml \
+#     -f infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms
+#
+# That image renders dates in its process zone (events, the month grid, ad
+# expiry, relative times) and checks at start that Node runs in
+# APP_TIME_ZONE: under docker-compose.yml's TZ=UTC it answers every request
+# with 500 (web log: "The web process runs in UTC …, not in APP_TIME_ZONE
+# …"). This override runs it in APP_TIME_ZONE again, exactly as the compose
+# file before the port did. infra/deploy.sh prints it in its rollback hint
+# when the :rollback web image lacks the org.sinnlos.datetime label.
+#
+# Harmless but unneeded for a web image from the port on (label
+# org.sinnlos.datetime=zone-explicit): it renders in APP_TIME_ZONE in any
+# process zone and only logs a warning. Roll forward with infra/deploy.sh,
+# which uses the live files only, so the web runs in UTC again.
+services:
+  web:
+    environment:
+      TZ: ${APP_TIME_ZONE:-Europe/Berlin}

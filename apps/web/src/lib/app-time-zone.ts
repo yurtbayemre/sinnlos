@@ -10,8 +10,9 @@ import { resolveAppTimeZone } from "./plain-date";
  * every request fail (500) instead of only the first server action that
  * needs it.
  *
- * Phase 1 uses it for the poll deadline only; until the web's phase 2 port
- * the web process itself runs in this zone (compose sets TZ from it).
+ * Since the web's phase 2 port every date the web computes or renders uses
+ * it explicitly (i18n/request.ts gives it to next-intl's formatter), and the
+ * web process runs in UTC like the cms (TZ=UTC in the image and compose).
  */
 export function appTimeZone(): string {
   return resolveAppTimeZone(process.env.APP_TIME_ZONE);
