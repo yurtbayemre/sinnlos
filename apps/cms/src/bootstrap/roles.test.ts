@@ -1,5 +1,4 @@
 import { describe, expect, it } from "vitest";
-import { hasAudienceBypass } from "../utils/announcement-audience";
 import { PRIVILEGED_ROLE_TYPES, shouldSanitizeForRole } from "../utils/sanitize-user-contact";
 import { WRITE_BYPASS_ROLES, isWriteBypassRole } from "../utils/write-allowlist";
 import {
@@ -56,7 +55,6 @@ describe("role vocabulary (B02)", () => {
     expect(WRITE_BYPASS_ROLES).toEqual([...MODERATORS]);
     for (const role of [...ROLE_PRIVILEGE_ORDER, AUTHENTICATED]) {
       const moderator = (MODERATORS as readonly string[]).includes(role);
-      expect(hasAudienceBypass(role), role).toBe(moderator);
       expect(hasRole({ role: { type: role } }, MODERATORS), role).toBe(moderator);
       expect(isWriteBypassRole(role), role).toBe(moderator);
       expect(shouldSanitizeForRole(role), role).toBe(

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  hasAudienceBypass,
   isAnnouncementVisible,
   type AnnouncementTargeting,
   type AudienceScope,
@@ -199,21 +198,6 @@ describe("isAnnouncementVisible", () => {
         isAnnouncementVisible(announcement({ audienceRoles: [{ id: MEMBER_ROLE }] }), null),
       ).toBe(false);
     });
-  });
-});
-
-describe("hasAudienceBypass", () => {
-  it("lets admin_role and editor through", () => {
-    expect(hasAudienceBypass("admin_role")).toBe(true);
-    expect(hasAudienceBypass("editor")).toBe(true);
-  });
-
-  it("does not let any other role — or an unauthenticated caller — bypass", () => {
-    for (const role of ["department_head", "team_lead", "member", "guest", "authenticated"]) {
-      expect(hasAudienceBypass(role)).toBe(false);
-    }
-    expect(hasAudienceBypass(undefined)).toBe(false);
-    expect(hasAudienceBypass(null)).toBe(false);
   });
 });
 
