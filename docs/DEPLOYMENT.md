@@ -1138,13 +1138,19 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     times, an event running now (a multi-day event after its first day, an
     all-day event on its day) is under *Upcoming*, and a multi-day event
     shows its end day. `/marketplace` and one ad: the expiry dates are
-    unchanged. As an admin, `/people/org-chart`: normally unchanged; a
-    warning banner names people whose Manager field forms a loop or points
-    to themselves (fix it in the admin panel, Content Manager → User).
+    unchanged. `/people/org-chart`: normally unchanged. If a Manager field
+    forms a loop or points to the person themselves, every user sees a
+    warning banner that counts the people shown at the top level for that
+    reason; each of them is marked ("Manager chain loops back here" or
+    "Set as their own manager"), and the rest of a loop appears beneath
+    the marked person. Follow the Manager field from a marked person to
+    find the loop and fix it in the admin panel (Content Manager → User).
 
 11. **Poll results.** `/polls` shows the same results as before, except on
     the polls step 4 listed: their totals and option counts now match
-    `total_after` and `votes_after`.
+    `total_after` and `votes_after`, and for a voter step 4 listed, the
+    option marked as their vote (the check mark) is their first vote,
+    which can be another option than the one marked before.
 
 **What users notice** (worth a short release note):
 
@@ -1155,7 +1161,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
   a manager loop (or set as their own manager) with a warning instead of
   leaving them out with everyone below them.
 - Where one person's vote on a poll was stored more than once, the result
-  counts it once (their first vote).
+  counts it once (their first vote), and the poll marks that vote as
+  theirs.
 - With `SMTP_PORT=465`, users who opted in start receiving digests.
 
 **Rollback: both images together, with the web override.** Follow the
@@ -1308,8 +1315,10 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   days ("yesterday" at 00:10 for a comment from 23:50) in the user's
   language; the org chart no longer drops people whose manager assignments
   form a loop or who are set as their own manager (until now they vanished
-  without a notice, together with everyone below them): they appear at the
-  top level with a warning, so an admin can fix the Manager field.
+  without a notice, together with everyone below them): one person per
+  loop, and everyone set as their own manager, appears at the top level
+  with a warning, the rest of the loop beneath them, so an admin can fix
+  the Manager field.
 - **Guardrails:** ESLint rejects process-zone date APIs in the web as
   errors, and the web image carries `ENV TZ=UTC` and the label
   `org.sinnlos.datetime=zone-explicit`.
