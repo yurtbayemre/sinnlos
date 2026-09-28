@@ -54,8 +54,13 @@ jobs:
       - name: Build
         run: pnpm build
 
-      # Advisory only: a failed audit must not block the pipeline.
-      - name: Audit production dependencies (non-blocking)
+      # Blocking: a critical advisory in a production dependency fails the
+      # run (fix it with an update or a scoped pnpm override).
+      - name: Audit production dependencies (critical, blocking)
+        run: pnpm audit --prod --audit-level=critical
+
+      # Advisory only: high findings are reported without blocking.
+      - name: Audit production dependencies (high, non-blocking)
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
