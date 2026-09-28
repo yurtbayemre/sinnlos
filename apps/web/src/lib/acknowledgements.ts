@@ -1,10 +1,11 @@
 import { indexAcks, type AckIndex } from "@/lib/ack-report";
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { announcementAcksPage, myAnnouncementAcksPage } from "@/lib/api/announcements";
 import { walkAllPages } from "@/lib/paginate";
 import type { Acknowledgement } from "@/lib/types";
 
 /**
- * Server-side helpers around /api/acknowledgements.
+ * Server-side helpers around /api/acknowledgements (the requests
+ * themselves: lib/api/announcements.ts).
  *
  * The acknowledgement-visibility policy scopes reads to the caller's own
  * rows (admin_role bypasses): every response here is per-user. strapi()
@@ -45,13 +46,10 @@ export interface AnnouncementAcksResult {
 
 /** The caller's own announcement acknowledgements (policy-scoped to self). */
 export function fetchMyAnnouncementAcks(): Promise<AnnouncementAcksResult> {
-  return walkAllPages<Acknowledgement>(
-    (page) =>
-      strapi<StrapiListResponse<Acknowledgement>>(
-        `/api/acknowledgements?filters[targetType][$eq]=announcement&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-      ),
-    { maxPages: MY_ACKS_MAX_PAGES, label: "announcement acknowledgements" },
-  ).then(({ data, truncated }) => ({ acks: data, truncated }));
+  return walkAllPages<Acknowledgement>((page) => myAnnouncementAcksPage(page, PAGE_SIZE), {
+    maxPages: MY_ACKS_MAX_PAGES,
+    label: "announcement acknowledgements",
+  }).then(({ data, truncated }) => ({ acks: data, truncated }));
 }
 
 /** Who confirmed which of the listed announcements, plus whether every walk finished. */
@@ -82,19 +80,10 @@ export async function fetchAnnouncementAckIndex(
   let truncated = false;
   for (let start = 0; start < ids.length; start += REPORT_ACK_CHUNK) {
     const chunk = ids.slice(start, start + REPORT_ACK_CHUNK);
-    const filter = chunk
-      .map((id, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(id)}`)
-      .join("&");
-    const walk = await walkAllPages<Acknowledgement>(
-      (page) =>
-        strapi<StrapiListResponse<Acknowledgement>>(
-          `/api/acknowledgements?filters[targetType][$eq]=announcement&${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-        ),
-      {
-        maxPages: REPORT_ACK_MAX_PAGES,
-        label: `ack-report acknowledgements ${start / REPORT_ACK_CHUNK + 1}`,
-      },
-    );
+    const walk = await walkAllPages((page) => announcementAcksPage(chunk, page, PAGE_SIZE), {
+      maxPages: REPORT_ACK_MAX_PAGES,
+      label: `ack-report acknowledgements ${start / REPORT_ACK_CHUNK + 1}`,
+    });
     indexAcks(walk.data, index);
     truncated ||= walk.truncated;
   }

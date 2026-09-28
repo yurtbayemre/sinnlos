@@ -1,4 +1,4 @@
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import { teamRosterPage } from "@/lib/api/org";
 import { walkAllPages } from "@/lib/paginate";
 import type { TeamMembership } from "@/lib/audience";
 
@@ -25,7 +25,8 @@ import type { TeamMembership } from "@/lib/audience";
  * is returned regardless of `fields` (same pattern as the report's
  * `audienceRoles` populate). That also keeps member e-mail addresses out
  * of the payload (data minimisation). Uncached like every strapi() read
- * (D-DC01, see lib/strapi.ts).
+ * (D-DC01, see lib/strapi/client.ts); the request itself is
+ * lib/api/org.ts teamRosterPage (sorted by id, so the walk is stable).
  */
 const PAGE_SIZE = 100;
 /**
@@ -44,12 +45,7 @@ export interface AllTeamsResult {
 
 export async function fetchAllTeams(): Promise<AllTeamsResult> {
   const { data: teams, truncated } = await walkAllPages<TeamMembership>(
-    (page) =>
-      strapi<StrapiListResponse<TeamMembership>>(
-        // sort=id:asc keeps the page walk stable (Postgres returns rows in
-        // an undefined order without ORDER BY, so pages could skip rows).
-        `/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=${page}&pagination[pageSize]=${PAGE_SIZE}`,
-      ),
+    (page) => teamRosterPage(page, PAGE_SIZE),
     { maxPages: MAX_PAGES, label: "team roster" },
   );
 

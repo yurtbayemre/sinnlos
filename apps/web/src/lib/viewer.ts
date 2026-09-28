@@ -20,9 +20,9 @@
 import "server-only";
 import { cache } from "react";
 import { unstable_rethrow } from "next/navigation";
+import { me } from "@/lib/api/people";
 import { DEMO_MODE } from "@/lib/config";
 import { getSession } from "@/lib/session";
-import { strapi } from "@/lib/strapi";
 
 export type ViewerDepartment = { id: number; documentId: string; name: string; slug: string };
 
@@ -100,7 +100,7 @@ export const getViewer = cache(async (): Promise<Viewer> => {
   if (DEMO_MODE) return DEMO_VIEWER;
   if (!(await getSession())) return ANONYMOUS_VIEWER;
   try {
-    const res = await strapi<{ data?: unknown }>("/api/me");
+    const res = await me();
     return toViewer(res?.data);
   } catch (e) {
     unstable_rethrow(e);

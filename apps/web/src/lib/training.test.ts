@@ -4,12 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * The lesson-progress page walks (WD02): both are sorted by id, so a walk
  * over several pages neither skips nor repeats rows on Postgres (no ORDER
  * BY means no stable order between pages), and "first row wins" in
- * fetchMyProgress means the oldest receipt. `@/lib/strapi` is mocked; the
- * page walk (lib/paginate.ts) is the real one.
+ * fetchMyProgress means the oldest receipt. The transport
+ * (`@/lib/strapi/client`, WD01) is mocked; the requests
+ * (lib/api/training.ts) and the page walk (lib/paginate.ts) are the real
+ * ones.
  */
 
 const strapiMock = vi.fn();
-vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
+vi.mock("@/lib/strapi/client", () => ({
+  strapi: (...args: unknown[]) => strapiMock(...args),
+}));
 
 const { fetchCourseProgress, fetchMyProgress } = await import("./training");
 

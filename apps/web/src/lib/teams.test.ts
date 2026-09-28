@@ -10,11 +10,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * at Strapi's `api.rest.defaultLimit` = 25. These tests pin the page walk
  * that replaced it, and the `truncated` signal callers need to fail closed.
  *
- * `@/lib/strapi` is mocked wholesale — the real module pulls in next/auth
- * and only its URL contract matters here.
+ * The transport (`@/lib/strapi/client`, WD01) is mocked wholesale — the
+ * real module pulls in next/auth and only its URL contract matters here.
  */
 const strapiMock = vi.fn();
-vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
+vi.mock("@/lib/strapi/client", () => ({
+  strapi: (...args: unknown[]) => strapiMock(...args),
+}));
 
 const { fetchAllTeams } = await import("./teams");
 

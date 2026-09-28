@@ -1,8 +1,9 @@
-import { strapi } from "@/lib/strapi";
+import { usersPage } from "@/lib/api/people";
 
 /**
  * Fetch users from the users-permissions REST endpoint, following
- * pagination until the directory is exhausted.
+ * pagination until the directory is exhausted (one request per page:
+ * lib/api/people.ts usersPage).
  *
  * /api/users is NOT a regular content-type endpoint: it responds with a
  * plain array (no `meta.pagination`) and silently ignores the
@@ -29,7 +30,7 @@ export interface AllUsersResult<T> {
   truncated: boolean;
 }
 
-export async function fetchAllUsers<T = any>(params = ""): Promise<AllUsersResult<T>> {
+export async function fetchAllUsers<T = unknown>(params = ""): Promise<AllUsersResult<T>> {
   // Postgres returns rows in an undefined order without ORDER BY, so a
   // start/limit page walk can duplicate or skip rows across page
   // boundaries. Force a deterministic sort when the caller passed none —
@@ -42,7 +43,7 @@ export async function fetchAllUsers<T = any>(params = ""): Promise<AllUsersResul
   let truncated = false;
   for (let start = 0; start < MAX_USERS; start += PAGE_SIZE) {
     const limit = Math.min(PAGE_SIZE, MAX_USERS - start);
-    const batch = await strapi<T[]>(`/api/users?${query}&start=${start}&limit=${limit}`);
+    const batch = await usersPage<T>(query, start, limit);
     // DEMO_MODE answers unknown paths with a `{ data, meta }` object —
     // treat anything that isn't a plain array as an empty page.
     if (!Array.isArray(batch) || batch.length === 0) break;

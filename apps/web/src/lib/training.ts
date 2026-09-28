@@ -1,40 +1,40 @@
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import {
+  courseBySlug,
+  courseProgressPage,
+  coursesPage,
+  lessonByDocumentId,
+  myProgressPage,
+  type CourseView,
+  type LessonView,
+  type MyProgressRow,
+  type ProgressReportRow,
+} from "@/lib/api/training";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
-import type { Course, Lesson, LessonProgress } from "@/lib/types";
 
 /**
- * Training data helpers (issue #29). Every response is per-user: courses
- * and lessons are status-gated per role (admin/editor see drafts) and
- * progress is strictly the caller's own. Uncached like every strapi()
- * read (D-DC01).
+ * Training data helpers (issue #29): the page walks, their caps and the
+ * result shaping; each request is one function of lib/api/training.ts
+ * (WD01). Every response is per-user: courses and lessons are status-gated
+ * per role (admin/editor see drafts) and progress is strictly the caller's
+ * own. Uncached like every strapi() read (D-DC01).
  */
 
-const COURSE_POPULATE =
-  "populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true";
-
-export async function fetchCourses(): Promise<{ courses: Course[]; truncated: boolean }> {
-  const result: WalkResult<Course> = await walkAllPages<Course>(
-    (page) =>
-      strapi<StrapiListResponse<Course>>(
-        `/api/courses?${COURSE_POPULATE}&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
-      ),
-    { maxPages: 20, label: "courses" },
-  );
+export async function fetchCourses(): Promise<{ courses: CourseView[]; truncated: boolean }> {
+  const result: WalkResult<CourseView> = await walkAllPages<CourseView>(coursesPage, {
+    maxPages: 20,
+    label: "courses",
+  });
   return { courses: result.data, truncated: result.truncated };
 }
 
-export async function fetchCourseBySlug(slug: string): Promise<Course | null> {
-  const res = await strapi<StrapiListResponse<Course>>(
-    `/api/courses?filters[slug][$eq]=${encodeURIComponent(slug)}&${COURSE_POPULATE}`,
-  );
-  return (res.data?.[0] as Course | undefined) ?? null;
+export async function fetchCourseBySlug(slug: string): Promise<CourseView | null> {
+  const res = await courseBySlug(slug);
+  return res.data?.[0] ?? null;
 }
 
-export async function fetchLessonByDocumentId(documentId: string): Promise<Lesson | null> {
-  const res = await strapi<StrapiListResponse<Lesson>>(
-    `/api/lessons?filters[documentId][$eq]=${encodeURIComponent(documentId)}&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId`,
-  );
-  return (res.data?.[0] as Lesson | undefined) ?? null;
+export async function fetchLessonByDocumentId(documentId: string): Promise<LessonView | null> {
+  const res = await lessonByDocumentId(documentId);
+  return res.data?.[0] ?? null;
 }
 
 /**
@@ -49,17 +49,11 @@ export async function fetchLessonByDocumentId(documentId: string): Promise<Lesso
 export function fetchCourseProgress(
   lessonIds: string[],
   label: string,
-): Promise<WalkResult<LessonProgress>> {
-  const filter = lessonIds
-    .map((id, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(id)}`)
-    .join("&");
-  return walkAllPages<LessonProgress>(
-    (page) =>
-      strapi<StrapiListResponse<LessonProgress>>(
-        `/api/lesson-progresses?${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
-      ),
-    { maxPages: 20, label },
-  );
+): Promise<WalkResult<ProgressReportRow>> {
+  return walkAllPages<ProgressReportRow>((page) => courseProgressPage(lessonIds, page), {
+    maxPages: 20,
+    label,
+  });
 }
 
 /**
@@ -74,13 +68,10 @@ export async function fetchMyProgress(): Promise<{
   completed: Map<string, string | null>;
   truncated: boolean;
 }> {
-  const result: WalkResult<LessonProgress> = await walkAllPages<LessonProgress>(
-    (page) =>
-      strapi<StrapiListResponse<LessonProgress>>(
-        `/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
-      ),
-    { maxPages: 20, label: "lesson-progress" },
-  );
+  const result: WalkResult<MyProgressRow> = await walkAllPages<MyProgressRow>(myProgressPage, {
+    maxPages: 20,
+    label: "lesson-progress",
+  });
   const completed = new Map<string, string | null>();
   for (const row of result.data) {
     if (typeof row.targetDocumentId === "string" && !completed.has(row.targetDocumentId)) {

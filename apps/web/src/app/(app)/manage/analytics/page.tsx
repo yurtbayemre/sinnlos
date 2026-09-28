@@ -19,7 +19,16 @@ import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant, type DateTimeFields } from "@/lib/date-format";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
+import {
+  countPage,
+  reactionsPage,
+  recentComments,
+  searchSummary as readSearchSummary,
+  unreadNotificationsPage,
+  type CountedCollection,
+  type SearchSummary,
+} from "@/lib/api/analytics";
+import type { StrapiListResponse } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -29,10 +38,14 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-async function count(path: string): Promise<number> {
+/** A list's total from its pagination (0 without one, e.g. a DEMO_MODE fixture). */
+function totalOf(res: Partial<StrapiListResponse<unknown>> | undefined): number {
+  return res?.meta?.pagination?.total ?? res?.data?.length ?? 0;
+}
+
+async function count(collection: CountedCollection): Promise<number> {
   try {
-    const res = await strapi<StrapiListResponse<any>>(`${path}&pagination[pageSize]=1`);
-    return (res as any).meta?.pagination?.total ?? (res as any).data?.length ?? 0;
+    return totalOf(await countPage(collection));
   } catch (e) {
     unstable_rethrow(e);
     return 0;
@@ -56,18 +69,10 @@ async function countUsers(): Promise<number | null> {
   }
 }
 
-type SearchSummary = {
-  windowDays: number;
-  total: number;
-  zeroResultCount: number;
-  topTerms: { term: string; count: number; avgResults: number }[];
-  topZeroTerms: { term: string; count: number }[];
-};
-
 /** Aggregated search telemetry (issue #19) — admin-only custom route. */
 async function searchSummary(): Promise<SearchSummary | null> {
   try {
-    return await strapi<SearchSummary>("/api/search-logs/summary?days=30");
+    return await readSearchSummary();
   } catch (e) {
     unstable_rethrow(e);
     return null;
@@ -77,18 +82,14 @@ async function searchSummary(): Promise<SearchSummary | null> {
 async function recentActivity() {
   try {
     const [comments, reactions, notifications] = await Promise.all([
-      strapi<StrapiListResponse<any>>(
-        "/api/comments?sort=createdAt:desc&pagination[pageSize]=5&populate[author]=true",
-      ),
-      strapi<StrapiListResponse<any>>("/api/reactions?sort=createdAt:desc&pagination[pageSize]=1"),
-      strapi<StrapiListResponse<any>>(
-        "/api/notifications?sort=createdAt:desc&pagination[pageSize]=1&filters[readAt][$null]=true",
-      ),
+      recentComments(),
+      reactionsPage(),
+      unreadNotificationsPage(),
     ]);
     return {
-      recentComments: (comments as any).data ?? [],
-      totalReactions: (reactions as any).meta?.pagination?.total ?? 0,
-      unreadNotifications: (notifications as any).meta?.pagination?.total ?? 0,
+      recentComments: comments.data ?? [],
+      totalReactions: reactions.meta?.pagination?.total ?? 0,
+      unreadNotifications: notifications.meta?.pagination?.total ?? 0,
     };
   } catch (e) {
     unstable_rethrow(e);
@@ -123,13 +124,13 @@ export default async function AnalyticsPage() {
     activity,
     search,
   ] = await Promise.all([
-    count("/api/announcements?"),
-    count("/api/events?"),
-    count("/api/wiki-pages?"),
-    count("/api/wiki-spaces?"),
-    count("/api/documents?"),
-    count("/api/polls?"),
-    count("/api/comments?"),
+    count("announcements"),
+    count("events"),
+    count("wiki-pages"),
+    count("wiki-spaces"),
+    count("documents"),
+    count("polls"),
+    count("comments"),
     recentActivity(),
     searchSummary(),
   ]);
@@ -294,7 +295,7 @@ export default async function AnalyticsPage() {
           <h2 className="text-sm font-medium text-muted-foreground">{t("recentComments")}</h2>
           <Card>
             <CardContent className="divide-y p-0">
-              {activity.recentComments.map((c: any) => (
+              {activity.recentComments.map((c) => (
                 <div key={c.id} className="flex items-start gap-3 px-4 py-3">
                   <MessageCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0 flex-1">
