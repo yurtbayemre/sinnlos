@@ -28,6 +28,10 @@ export default async function WikiPage({ params }: Props) {
 
   const author = entry.author;
   const lastEditor = entry.lastEditor;
+  // By user id (FX24): author and lastEditor are separate objects in every
+  // response, so an identity check showed "last edited by" on every page,
+  // the author's own edits included.
+  const showLastEditor = !!lastEditor && lastEditor.id !== author?.id;
   const updated = entry.updatedAt ? new Date(entry.updatedAt) : null;
 
   return (
@@ -50,7 +54,7 @@ export default async function WikiPage({ params }: Props) {
               {tCommon("by")} {author.displayName ?? author.username}
             </span>
           ) : null}
-          {lastEditor && lastEditor !== author ? (
+          {showLastEditor ? (
             <span>
               · {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}
             </span>
