@@ -220,32 +220,30 @@ export const PERMISSION_MATRIX: Record<
   /**
    * `guest` is read-only on content (it writes only search telemetry, and
    * casts poll votes through the custom vote action, CUSTOM_ACTION_GRANTS;
-   * decision 02). It is denied kudos (celebrations
-   * populate user relations and leak hire dates), but it DOES keep the
-   * baseline `users-permissions.user.find/findOne` grant handed out to
-   * every reading role below.
+   * decision 02). It is denied kudos (celebrations populate user relations
+   * and leak hire dates), but it DOES keep the baseline
+   * `users-permissions.user.find/findOne/me` grants every role gets
+   * (USER_READ_ACTIONS below).
    *
-   * OPEN ISSUE — guest still sees employee contact data: user.find/findOne
-   * cannot be revoked from guest without breaking the app. Strapi's core
-   * controllers run validateQuery (→ throwRestrictedRelations) BEFORE
-   * sanitizeQuery, so every FILTER through a user relation — the
-   * notification visibility filter references the `recipient` user
-   * relation — throws a 400 for a role lacking `user.find`. Populates of a
-   * user relation (wiki-page.author, comment.author, document.uploadedBy,
-   * department.head, team.lead, ...) threw the same 400 on 5.49; in
-   * @strapi/utils 5.55.1 validatePopulate no longer checks the scope and
-   * sanitizePopulate silently drops the relation instead, so without
-   * user.find guest pages would lose every author/uploader name. So guest
-   * keeps user.find; the email/phone/hireDate
-   * it could therefore read from the directory are now removed OUTPUT-side by
-   * a role-aware content-api.output sanitizer (registerUserContactSanitizer
-   * below → utils/sanitize-user-contact.ts, issue #10): it covers both direct
-   * /api/users reads and POPULATED user relations, runs AFTER
-   * validateQuery/sanitizeQuery (so it never trips throwRestrictedRelations),
-   * and strips only for non-privileged callers (guest/authenticated/public/
-   * unknown). Verified via node repro against @strapi/utils 5.49 (collection-
-   * type controller order + validateFilters/throwRestrictedRelations); the
-   * populate change above is from the 5.55.1 validate/sanitize sources.
+   * WHY guest keeps user.find/findOne: Strapi's core controllers run
+   * validateQuery (→ throwRestrictedRelations) BEFORE sanitizeQuery, so
+   * every FILTER through a user relation — the notification visibility
+   * filter references the `recipient` user relation — throws a 400 for a
+   * role lacking `user.find`. Populates of a user relation (wiki-page.author,
+   * comment.author, document.uploadedBy, department.head, team.lead, ...)
+   * threw the same 400 on 5.49; in @strapi/utils 5.55.1 validatePopulate no
+   * longer checks the scope and sanitizePopulate silently drops the relation
+   * instead, so without user.find guest pages would lose every
+   * author/uploader name.
+   *
+   * The employee contact data this would expose is closed on both sides
+   * (P1.2, docs/architecture.md §7b): the fields are removed OUTPUT-side by
+   * the role-aware content-api.output sanitizer
+   * (bootstrap/user-contact-sanitizer.ts → utils/sanitize-user-contact.ts,
+   * issue #10), on /api/users reads and on every POPULATED user relation,
+   * and a non-staff caller cannot filter, sort or search by them
+   * (middlewares/sensitive-query-guard.ts, FX22). Both apply to every caller
+   * outside STAFF_ROLES: guest, `authenticated`, public and unknown roles.
    */
   guest: {
     // NO acknowledgement grants: guest has no announcement.find, so it can
@@ -273,14 +271,17 @@ export const PERMISSION_MATRIX: Record<
     "api::wiki-page.wiki-page": READ_ACTIONS,
   },
   /**
-   * `authenticated` is the users-permissions built-in default role.
-   * A newly-registered OAuth user is assigned it before our Microsoft
-   * callback extension has a chance to re-map them to one of the six
-   * intranet roles above. If that reassignment fails (missing access
-   * token, Graph hiccup, race on first login, ...), the user would
-   * otherwise be stuck with zero permissions and hit 403 on every
-   * `/api/*` call. Grant baseline reads on the intranet content types
-   * so the dashboard works even in that fallback case.
+   * `authenticated` is the users-permissions built-in role for a signed-in
+   * user without an intranet role. New local and OAuth accounts do NOT land
+   * here: users-permissions creates them with the advanced setting
+   * `default_role`, which the bootstrap pins to `member`
+   * (bootstrap/advanced-settings.ts). A user holds `authenticated` only when
+   * an admin assigned it by hand or the account predates that setting; no
+   * code re-maps roles at sign-in today (the Microsoft callback extension is
+   * inert, and the Entra sign-in of decision 01 replaces it). Such a user
+   * still gets baseline reads, so the dashboard works instead of 403ing on
+   * every `/api/*` call, but none of the staff-only grants (celebrations,
+   * uploads, ads) — and the contact fields stay hidden (not a STAFF_ROLE).
    */
   authenticated: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
@@ -377,8 +378,9 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
  *
  * This applies to `guest` too: revoking it (as an earlier audit attempt
  * did) turned every guest read that populates a user relation — and the
- * notification visibility filter — into a 400. See the OPEN
- * ISSUE note on the `guest` matrix above. No role is excluded.
+ * notification visibility filter — into a 400. See the note on the `guest`
+ * matrix above. No role is excluded: computeDesiredGrants grants these to
+ * every role of PERMISSION_MATRIX, and routes.matrix.test.ts pins it.
  *
  * `me` is equally required for every role: the web app's sign-in flow
  * fetches `/api/users/me?populate[role]=true` to stamp role + department
@@ -390,7 +392,6 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
  */
 export const USER_READ_ACTIONS: (CrudAction | "me")[] = ["find", "findOne", "me"];
 export const USER_UID = "plugin::users-permissions.user";
-export const USER_READ_EXCLUDED_ROLES: string[] = [];
 
 /**
  * Core actions whose routes were removed with `only:` in the routers
@@ -433,8 +434,7 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
   guest: [
     // NOTE: user.find/findOne are intentionally NOT revoked — doing so
     // 400s every guest read that populates a user relation (and the
-    // notification visibility filter). See the guest matrix OPEN ISSUE
-    // note above.
+    // notification visibility filter). See the guest matrix note above.
     "api::kudos.kudos.find",
     "api::kudos.kudos.findOne",
     "api::kudos.kudos.celebrations",
@@ -489,8 +489,8 @@ export interface RoleAction {
 /** The inputs of the set computations below; the constants above by default. */
 export interface PermissionConstants {
   matrix: Readonly<Record<string, Readonly<Partial<Record<string, readonly string[]>>>>>;
+  /** Granted to EVERY role of `matrix` (user.find/findOne/me). */
   userReadActions: readonly string[];
-  userReadExcludedRoles: readonly string[];
   customActionGrants: Readonly<Record<string, readonly string[] | "*">>;
   revoked: Readonly<Record<string, readonly string[]>>;
 }
@@ -498,7 +498,6 @@ export interface PermissionConstants {
 export const PERMISSION_CONSTANTS: PermissionConstants = {
   matrix: PERMISSION_MATRIX,
   userReadActions: USER_READ_ACTIONS,
-  userReadExcludedRoles: USER_READ_EXCLUDED_ROLES,
   customActionGrants: CUSTOM_ACTION_GRANTS,
   revoked: REVOKED_PERMISSIONS,
 };
@@ -526,9 +525,7 @@ export function computeDesiredGrants(
     for (const [uid, actions] of Object.entries(matrix)) {
       for (const action of actions ?? []) add(role, `${uid}.${action}`, "matrix");
     }
-    if (!constants.userReadExcludedRoles.includes(role)) {
-      for (const action of constants.userReadActions) add(role, `${USER_UID}.${action}`, "user_read");
-    }
+    for (const action of constants.userReadActions) add(role, `${USER_UID}.${action}`, "user_read");
   }
   for (const { role, action } of computeRevocations(constants)) grants.delete(`${role} ${action}`);
   const allRoles = Object.keys(constants.matrix);

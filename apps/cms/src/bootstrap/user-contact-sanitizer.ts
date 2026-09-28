@@ -34,9 +34,8 @@ function roleTypeOf(ctx: unknown): string | undefined {
  * directReports, team.members, …). Issue #10 / P1.2.
  *
  * WHY output-side and role-aware instead of revoking guest's `user.find` or
- * marking the fields schema-`private`: see the OPEN ISSUE note on the guest
- * matrix in bootstrap/permission-matrix.ts and
- * `utils/sanitize-user-contact.ts`. Revoking `user.find` 400s every guest
+ * marking the fields schema-`private`: see the note on the guest matrix in
+ * bootstrap/permission-matrix.ts and `utils/sanitize-user-contact.ts`. Revoking `user.find` 400s every guest
  * read that populates/filters a user relation; `private` would hide the
  * fields from the member+ directory and /people too.
  *

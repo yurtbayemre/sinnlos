@@ -37,7 +37,6 @@ export {
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
   USER_READ_ACTIONS,
-  USER_READ_EXCLUDED_ROLES,
   USER_UID,
 } from "./bootstrap/permission-matrix";
 export { ROLES, type RoleSeed } from "./bootstrap/roles";

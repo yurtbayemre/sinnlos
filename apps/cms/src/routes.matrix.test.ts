@@ -121,8 +121,8 @@ const READ_ACTIONS = ["find", "findOne"];
 
 /**
  * Users-permissions reads every role receives on top of PERMISSION_MATRIX
- * (USER_READ_ACTIONS in bootstrap/permission-matrix.ts; USER_READ_EXCLUDED_ROLES
- * is empty on purpose — see the guest OPEN ISSUE note there).
+ * (USER_READ_ACTIONS in bootstrap/permission-matrix.ts; no role is excluded,
+ * guest included — see the note on the guest matrix there).
  */
 const USER_READ_GRANTS = [
   "plugin::users-permissions.user.find",

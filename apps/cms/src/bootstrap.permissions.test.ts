@@ -347,7 +347,6 @@ describe("computeDesiredGrants / computeRevocations (B01)", () => {
         authenticated: { "api::a.a": ["find"] },
       },
       userReadActions: ["me"],
-      userReadExcludedRoles: [],
       customActionGrants: {
         "api::a.a.find": ["member"],
         "api::a.a.delete": "*",

@@ -726,13 +726,14 @@ an admin or editor opened to them (poll guest access above, in the poll's
 audience like everyone else; a rollback to a cms from before guest access
 removes the vote grant first). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
-`REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
+`REVOKED_PERMISSIONS` mechanism in the same file (the boot sync only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
-existing databases).
+existing databases; any other grant the code does not want is only reported
+by the boot's `[bootstrap] permission drift` line).
 
 Every role in the matrix — **including `guest`** — additionally gets
-`user.find`/`findOne` (so populated relations like author/lead/head survive);
-this also powers the people directory. `USER_READ_EXCLUDED_ROLES` is empty:
+`user.find`/`findOne`/`me` (so populated relations like author/lead/head
+survive); this also powers the people directory. No role is excluded:
 an earlier audit attempt to revoke the grant from `guest` turned every guest
 read that populates a user relation (and the notification visibility
 filter) into a 400, because Strapi's core controllers run
