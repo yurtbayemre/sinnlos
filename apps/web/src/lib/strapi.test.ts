@@ -204,7 +204,8 @@ describe("api.polls (decision 02)", () => {
     const [url] = fetchMock.mock.calls[0]!;
     expect(url).toContain("http://cms.test/api/polls?");
     expect(url).not.toContain("departments");
-    expect(url).toContain("populate[author][fields][0]=displayName");
+    // WD05: no poll consumer renders the author.
+    expect(url).not.toContain("populate[author]");
   });
 });
 

@@ -110,7 +110,8 @@ export const api = {
     // contact field. Field-limit the `head` user relation to non-sensitive
     // columns so NO sensitive field (email/phone/hireDate/officeLocation/
     // microsoftOid) is in the payload: data minimisation, the list never
-    // needs them (issue #10 / F1).
+    // needs them (issue #10 / F1). No headerImage (WD05): no page renders
+    // it, here or on the detail page.
     // Walks every page: without an explicit pageSize Strapi serves only
     // `api.rest.defaultLimit` = 25 rows, so department #26 silently vanished
     // from the index, the dashboard count and the search preload (issue #26).
@@ -120,7 +121,7 @@ export const api = {
       walkAllPages<any>(
         (page) =>
           strapi<StrapiListResponse<any>>(
-            `/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&populate[headerImage]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+            `/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
           ),
         { maxPages: 10, label: "departments" },
       ),
@@ -136,7 +137,7 @@ export const api = {
     // relations (teams/members arrive in full).
     one: (slug: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/departments?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true&populate[headerImage]=true`,
+        `/api/departments?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true`,
       ),
   },
   teams: {
@@ -222,10 +223,10 @@ export const api = {
     // needs a COUNT must read `meta.pagination.total` (the count() pattern
     // from manage/analytics), never `data.length` — the total is correct
     // per user because the visibility policy filters the query before the
-    // count.
+    // count. No department populate (WD05): no card renders it.
     list: () =>
       strapi<StrapiListResponse<any>>(
-        "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&populate[department]=true&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20",
+        "/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20",
       ),
     // Mandatory-read announcements for the ack banner and the pinned
     // "open confirmations" section on /announcements — same visibility
@@ -257,20 +258,20 @@ export const api = {
     // The `organizer` user relation is field-limited to displayName — the only
     // organizer field any events consumer renders (`organizedBy { name }`). No
     // sensitive user field enters the payload (data minimisation, issue #10 /
-    // F1).
+    // F1). No departments populate (WD05): no events consumer renders them.
     //
     // Upcoming events (start >= from), soonest first. pageSize=50 is a
     // deliberate feed/render cap (issue #26) — counts must come from
     // `meta.pagination.total`, never `data.length` (see the dashboard).
     upcoming: (fromIso: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
+        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
       ),
     // The most recent past events (start < before), newest first — the
     // list view shows only this small tail of history.
     past: (beforeIso: string, limit = 10) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=${limit}`,
+        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=${limit}`,
       ),
     // Events overlapping the half-open window [from, to) for the month
     // grid — multi-day spans included: start < window end AND
@@ -280,7 +281,7 @@ export const api = {
     // signal on this path — accepted as far beyond realistic volume.
     window: (fromIso: string, toIso: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100`,
+        `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100`,
       ),
     // RSVP summaries for a set of events (FX21): the CMS aggregates the
     // counts, the "yes" names and the caller's own answer
@@ -313,16 +314,12 @@ export const api = {
     // endpoint, which also says whether the caller may vote and which
     // departments a poll targets, so the list populates no departments.
     //
-    // The `author` user relation is field-limited to displayName: no poll
-    // consumer renders an author contact field, so no sensitive user field
-    // enters the payload (data minimisation, issue #10 / F1).
+    // No `author` populate (WD05): no poll consumer renders the author.
     //
     // pageSize=20 is a deliberate feed/render cap (issue #26) — counts must
     // come from `meta.pagination.total`, never `data.length`.
     list: () =>
-      strapi<StrapiListResponse<any>>(
-        "/api/polls?populate[author][fields][0]=displayName&sort=createdAt:desc&pagination[pageSize]=20",
-      ),
+      strapi<StrapiListResponse<any>>("/api/polls?sort=createdAt:desc&pagination[pageSize]=20"),
     results: (id: number) => strapi<PollResults>(`/api/polls/${id}/results`),
   },
   documents: {

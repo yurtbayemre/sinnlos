@@ -71,7 +71,7 @@ export default async function AcknowledgementReportPage() {
         walkAllPages<ReportAnnouncement>(
           (page) =>
             strapi<StrapiListResponse<ReportAnnouncement>>(
-              `/api/announcements?filters[requiresAck][$eq]=true&populate[department]=true&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+              `/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
             ),
           { maxPages: 50, label: "ack-report announcements" },
         ),

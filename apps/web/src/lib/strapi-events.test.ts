@@ -64,3 +64,38 @@ describe("api.events.rsvpSummaries (FX21)", () => {
     await expect(api.events.rsvpSummaries(ids(1))).resolves.toEqual({ data: [] });
   });
 });
+
+describe("unused populates are gone (WD05)", () => {
+  const onePage = {
+    data: [],
+    meta: { pagination: { page: 1, pageSize: 100, pageCount: 1, total: 0 } },
+  };
+  const iso = "2026-09-24T00:00:00.000Z";
+
+  it.each([
+    ["events.upcoming", () => api.events.upcoming(iso), "populate[departments]"],
+    ["events.past", () => api.events.past(iso), "populate[departments]"],
+    ["events.window", () => api.events.window(iso, iso), "populate[departments]"],
+    ["announcements.list", () => api.announcements.list(), "populate[department]"],
+    ["departments.list", () => api.departments.list(), "populate[headerImage]"],
+    ["departments.one", () => api.departments.one("engineering"), "populate[headerImage]"],
+    ["polls.list", () => api.polls.list(), "populate[author]"],
+  ] as const)("%s sends no %s", async (_label, read, populate) => {
+    fetchMock.mockImplementation(async () => json(onePage));
+    await read();
+    expect(paths().length).toBeGreaterThan(0);
+    for (const path of paths()) expect(path).not.toContain(populate);
+  });
+
+  it("keeps what the pages render: the organizer name, the author, the head and teams", async () => {
+    fetchMock.mockImplementation(async () => json(onePage));
+    await api.events.upcoming(iso);
+    await api.announcements.list();
+    await api.departments.list();
+    const [events, announcements, departments] = paths();
+    expect(events).toContain("populate[organizer][fields][0]=displayName");
+    expect(announcements).toContain("populate[author][fields][2]=displayName");
+    expect(departments).toContain("populate[head][fields][0]=displayName");
+    expect(departments).toContain("populate[teams]=true");
+  });
+});
