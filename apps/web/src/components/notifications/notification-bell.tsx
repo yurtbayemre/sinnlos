@@ -52,14 +52,20 @@ export function NotificationBell({
     };
   }, [open]);
 
+  // A failed mark-read keeps the page (FX28): the bell lives in the layout,
+  // so an uncaught rejection here replaced the whole app with the global
+  // error page. The error shows in the open panel until the next attempt.
+  const [failed, setFailed] = useState(false);
+
+  // Opening the panel clears an old error: a click-through closes the panel
+  // before its mark-read settles, and the bell stays mounted across pages,
+  // so the error would describe an earlier click. The notification that
+  // failed stays unread, which is the lasting signal.
   const handleOpen = () => {
+    if (!open) setFailed(false);
     setOpen(!open);
   };
 
-  // A failed mark-read keeps the page (FX28): the bell lives in the layout,
-  // so an uncaught rejection here replaced the whole app with the global
-  // error page. The error shows in the panel until the next attempt.
-  const [failed, setFailed] = useState(false);
   const runAction = (action: () => Promise<void>) => {
     setFailed(false);
     startTransition(async () => {
