@@ -25,9 +25,10 @@ export async function Topbar() {
   const email = session?.user?.email ?? "";
 
   // The same getNotifications() the bell refetches with (WD10): the newest
-  // 20 plus the true unread total. It answers the empty feed on any cms
-  // failure (notifications are non-critical — the topbar still renders) and
-  // lets strapi()'s NEXT_REDIRECT to /sign-in escape, so an expired session
+  // 20 plus the true unread total. A cms failure never breaks the topbar
+  // (notifications are non-critical): a failed list gives the empty feed, a
+  // failed unread count alone the unread among the loaded items. Only
+  // strapi()'s NEXT_REDIRECT to /sign-in escapes, so an expired session
   // navigates the whole page. DEMO_MODE has no Strapi session to ask.
   const notifications: NotificationFeed =
     session?.user && !DEMO_MODE ? await getNotifications() : { items: [], unreadTotal: 0 };
