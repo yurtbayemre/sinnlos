@@ -9,7 +9,13 @@ import { mediaUrl } from "@/lib/config";
 import { parseRowId } from "@/lib/entry-id";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
-import { AD_CATEGORY_KEYS, isClassifiedExpired } from "@/lib/classified-shared";
+import { appTimeZone } from "@/lib/app-time-zone";
+import {
+  AD_CATEGORY_KEYS,
+  classifiedToday,
+  formatAdExpiry,
+  isClassifiedExpired,
+} from "@/lib/classified-shared";
 import { isAdmin } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { initials } from "@/lib/utils";
@@ -59,7 +65,8 @@ export default async function ClassifiedDetailPage({ params }: Params) {
   // Editing is owner/admin only (editors keep only the delete takedown,
   // enforced CMS-side) — mirrors the update-route policy config.
   const canManage = isOwner || isAdmin(viewer.role);
-  const expired = isClassifiedExpired(ad.expiresAt);
+  const timeZone = appTimeZone();
+  const expired = isClassifiedExpired(ad.expiresAt, classifiedToday(timeZone));
   const images = (ad.images ?? [])
     .map((img) => {
       // Medium rendition preferred; carry its dimensions so the browser
@@ -156,8 +163,8 @@ export default async function ClassifiedDetailPage({ params }: Params) {
               <span className="inline-flex items-center gap-1.5">
                 <CalendarClock className="h-4 w-4" aria-hidden="true" />
                 {expired
-                  ? t("expiredOn", { date: new Date(ad.expiresAt).toLocaleDateString(locale) })
-                  : t("expiresOn", { date: new Date(ad.expiresAt).toLocaleDateString(locale) })}
+                  ? t("expiredOn", { date: formatAdExpiry(ad.expiresAt, locale) })
+                  : t("expiresOn", { date: formatAdExpiry(ad.expiresAt, locale) })}
               </span>
             )}
           </div>

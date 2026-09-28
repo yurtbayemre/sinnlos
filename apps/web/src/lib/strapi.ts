@@ -397,14 +397,17 @@ export const api = {
     // its pageSize, so a busy board would silently lose every ad past the
     // first 100 (issue #14). Secondary sort on id keeps the walk stable
     // when many ads share a createdAt. Hard cap: 50 pages x 100 = 5000 ads.
-    list: (todayIso: string, category?: string): Promise<WalkResult<any>> => {
+    // `today` is the calendar date 'YYYY-MM-DD' in APP_TIME_ZONE
+    // (classified-shared.classifiedToday): expiresAt is a date column, and an
+    // ad expiring today stays listed for the rest of that day.
+    list: (today: string, category?: string): Promise<WalkResult<any>> => {
       const categoryFilter = category
         ? `&filters[category][$eq]=${encodeURIComponent(category)}`
         : "";
       return walkAllPages<any>(
         (page) =>
           strapi<StrapiListResponse<any>>(
-            `/api/classifieds?filters[expiresAt][$gte]=${encodeURIComponent(todayIso)}${categoryFilter}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
+            `/api/classifieds?filters[expiresAt][$gte]=${encodeURIComponent(today)}${categoryFilter}&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
           ),
         { maxPages: 50, label: "marketplace ads" },
       );
