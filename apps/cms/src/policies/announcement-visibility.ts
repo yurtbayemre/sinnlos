@@ -1,15 +1,6 @@
-import { MODERATORS, hasRole } from "../bootstrap/roles";
-import {
-  isAnnouncementVisible,
-  type AudienceScope,
-  type AnnouncementTargeting,
-} from "../utils/announcement-audience";
-import {
-  forcePublishedStatus,
-  getMutableQuery,
-  narrowFilters,
-  restrictiveIdFilter,
-} from "../utils/policy-query";
+import { MODERATORS } from "../bootstrap/roles";
+import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
+import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
 import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
 
 /**
@@ -22,71 +13,51 @@ import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
  *
  * Visibility rules and their edge cases live in
  * `utils/announcement-audience.ts` (pure + unit tested); this policy only
- * resolves the inputs. admin_role / editor bypass the filter entirely.
+ * resolves the inputs. admin_role / editor bypass the filter entirely and
+ * keep draft reads (they author the drafts and work in the admin panel).
  *
- * HOW IT WORKS — id-based filtering, no relation traversal (same pattern
- * as `document-visibility.ts`, see there for the full rationale):
- *   Filters must go through `getMutableQuery` — writing to
- *   `policyContext.query` is a silent no-op (Koa prototype-getter trap).
- *   And a REST filter traversing `department` / `team` / `audienceRoles`
- *   would 400 via `validateQuery` → `throwRestrictedRelations` for every
- *   role lacking that relation's `.find` scope: `role.find` is granted to
- *   admin_role ONLY, so a filter on `audienceRoles` would break the
- *   announcement list for literally every normal employee.
- *   Instead we resolve the visible primary-key ids SERVER-SIDE via
- *   `strapi.db.query` (which bypasses permission gating and relation
- *   restrictions) and inject a single non-relational
- *   `{ id: { $in: [...] } }` clause, which validates for every role.
+ * HOW IT WORKS — visibleIdsPolicy (utils/policy-factories.ts): the visible
+ * primary-key ids are resolved SERVER-SIDE via `strapi.db.query` and
+ * injected as a non-relational `{ id: { $in } }` clause, $and-composed
+ * with the client filter, then the status is pinned to published. A REST
+ * filter traversing `department` / `team` / `audienceRoles` would 400 via
+ * `validateQuery` → `throwRestrictedRelations` for every role lacking that
+ * relation's `.find` scope: `role.find` is granted to admin_role ONLY, so a
+ * filter on `audienceRoles` would break the announcement list for literally
+ * every normal employee. The ids span draft and published rows, so the
+ * status pin (`?status=draft` trap, §5.24) is what keeps drafts out.
  *
- * The clause is `$and`-wrapped with any incoming client filter so a
- * caller-supplied filter can only narrow the result set, never widen it.
- * An empty id list must NOT become `{ id: { $in: [] } }` — sanitizeQuery
- * strips empty array operands, which would drop the filter entirely
- * (fail-open); `restrictiveIdFilter` injects `{ id: { $eq: -1 } }` instead.
- *
- * Draft & publish note: `strapi.db.query` returns both draft and published
- * rows, so the id list is a superset spanning BOTH publication states.
- * Which of them the caller gets is decided by the client-supplied `status`
- * param, so the policy pins it to "published" — otherwise `?status=draft`
- * would hand unpublished announcements to every role holding
- * `announcement.find`. See `forcePublishedStatus` for the full trap.
- * admin_role / editor keep draft access via the bypass above (they author
- * the drafts and work in the admin panel).
+ * Anonymous callers get a null scope → only untargeted announcements. (No
+ * role currently reads announcements anonymously — guest has no
+ * `announcement.find` — but the policy must not depend on that.)
  */
 
 type AnnouncementRow = AnnouncementTargeting & { id: number };
 
-export default async (policyContext: any, _config: unknown, { strapi }: any) => {
-  const user = policyContext.state?.user;
+const ANNOUNCEMENT_UID = "api::announcement.announcement";
 
-  // admin_role / editor see everything, no filter needed.
-  if (hasRole(user, MODERATORS)) return true;
-
-  // Anonymous callers get a null scope → only untargeted announcements.
-  // (No role currently reads announcements anonymously — guest has no
-  // `announcement.find` — but the policy must not depend on that.)
+async function visibleAnnouncementIds({
+  strapi,
+  user,
+}: VisibleIdsInput<unknown>): Promise<number[]> {
   // Team targeting covers members AND the team lead — a lead is not
   // automatically listed in `team.members` (toAudienceScope).
-  const scope: AudienceScope | null = user
-    ? toAudienceScope(await loadUserScope(strapi, user.id))
-    : null;
+  const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
+  const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    select: ["id", "audience"],
+    populate: {
+      department: { select: ["id"] },
+      team: { select: ["id"] },
+      audienceRoles: { select: ["id"] },
+    },
+  })) as AnnouncementRow[];
+  return rows.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
+}
 
-  const rows: AnnouncementRow[] = await strapi.db
-    .query("api::announcement.announcement")
-    .findMany({
-      select: ["id", "audience"],
-      populate: {
-        department: { select: ["id"] },
-        team: { select: ["id"] },
-        audienceRoles: { select: ["id"] },
-      },
-    });
-
-  const idList = rows.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
-
-  const query = getMutableQuery(policyContext);
-  narrowFilters(query, restrictiveIdFilter(idList));
-  forcePublishedStatus(query);
-
-  return true;
-};
+export default visibleIdsPolicy({
+  uid: ANNOUNCEMENT_UID,
+  bypass: MODERATORS,
+  anonymous: "filter",
+  pinPublished: true,
+  loadVisibleIds: visibleAnnouncementIds,
+});

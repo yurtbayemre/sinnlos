@@ -1,10 +1,11 @@
 import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
-  forcePublishedStatus,
-  getMutableQuery,
-  narrowFilters,
-  restrictiveIdFilter,
-} from "../utils/policy-query";
+  rowIds,
+  visibleIdsPolicy,
+  type Policy,
+  type VisibleIdsInput,
+} from "../utils/policy-factories";
+import { forcePublishedStatus, getMutableQuery } from "../utils/policy-query";
 
 /**
  * Read guard for the training module (issue #29, admin-authoring
@@ -20,36 +21,46 @@ import {
  *     (§5.24 — the client-supplied `?status=draft` would otherwise hand
  *     unpublished courses to every role with `course.find`).
  *   - lesson: a lesson is visible only when its OWNING COURSE has a
- *     published row. Resolved server-side via `strapi.db.query` (no
- *     relation traversal in the REST filter → validates for every role,
- *     no validateQuery 400) and injected as a non-relational id clause.
- *     Lessons without a course fail closed. Empty list stays restrictive
- *     via `restrictiveIdFilter` (an empty `$in` would be stripped by
- *     sanitizeQuery — fail-open, §5.15).
+ *     published row (visibleIdsPolicy, utils/policy-factories.ts). Resolved
+ *     server-side via `strapi.db.query` (no relation traversal in the REST
+ *     filter → validates for every role, no validateQuery 400) and injected
+ *     as a non-relational id clause. Lessons without a course fail closed.
+ *     Empty list stays restrictive via `restrictiveIdFilter` (an empty `$in`
+ *     would be stripped by sanitizeQuery — fail-open, §5.15).
  */
 
 type TrainingLevel = "course" | "lesson";
+type TrainingConfig = { level?: TrainingLevel } | undefined;
 
-export default async (
-  policyContext: any,
-  config: { level?: TrainingLevel } | undefined,
-  { strapi }: any,
-) => {
-  const user = policyContext.state?.user;
+const LESSON_UID = "api::lesson.lesson";
 
-  if (hasRole(user, MODERATORS)) return true;
-
-  const query = getMutableQuery(policyContext);
-  const level: TrainingLevel = config?.level ?? "course";
-
-  if (level === "lesson") {
-    const rows: { id: number }[] = await strapi.db.query("api::lesson.lesson").findMany({
+async function lessonsOfPublishedCourses({
+  strapi,
+}: VisibleIdsInput<TrainingConfig>): Promise<number[]> {
+  return rowIds(
+    await strapi.db.query(LESSON_UID).findMany({
       where: { course: { publishedAt: { $notNull: true } } },
       select: ["id"],
-    });
-    narrowFilters(query, restrictiveIdFilter(rows.map((r) => r.id)));
-  }
+    }),
+  );
+}
 
-  forcePublishedStatus(query);
+const lessonVisibility = visibleIdsPolicy<TrainingConfig>({
+  uid: LESSON_UID,
+  bypass: MODERATORS,
+  anonymous: "filter",
+  pinPublished: true,
+  loadVisibleIds: lessonsOfPublishedCourses,
+});
+
+const trainingVisibility: Policy<TrainingConfig> = async (policyContext, config, deps) => {
+  if ((config?.level ?? "course") === "lesson") {
+    return lessonVisibility(policyContext, config, deps);
+  }
+  // Course level: the status pin after the bypass, no row filter.
+  if (hasRole(policyContext.state?.user, MODERATORS)) return true;
+  forcePublishedStatus(getMutableQuery(policyContext));
   return true;
 };
+
+export default trainingVisibility;

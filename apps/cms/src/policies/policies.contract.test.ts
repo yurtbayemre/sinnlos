@@ -466,22 +466,6 @@ const CONTRACTS: Record<string, PolicyContract> = {
   },
 };
 
-/**
- * KNOWN: the ownership policies compare `row.<owner>?.id === user.id`
- * without checking that the caller has a numeric id, so a caller without an
- * id would "own" a row whose owner is gone (a deleted user leaves the
- * relation null). Unreachable today: users-permissions always puts a
- * database user with an id on ctx.state.user. Listed as `it.fails`, so the
- * fix (PL02 policy factories) must remove the entry; the FX07 write gates
- * already refuse such a caller.
- */
-const KNOWN_IDLESS_OWNERS = new Set([
-  "is-classified-author",
-  "is-event-rsvp-owner",
-  "is-notification-recipient",
-  "is-reaction-author",
-]);
-
 /** The member who owns the positive branch; for department/team writes the head/lead. */
 const OWN_CALLER: Partial<Record<string, RoleType>> = {
   "can-edit-department": "department_head",
@@ -687,9 +671,10 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
 
   if (contract.kind === "ownership" || contract.kind === "write-allowlist") {
     // Without a numeric id the caller owns nothing, not even a row whose
-    // owner is gone. users-permissions always sets a database user, so this
-    // is defence in depth.
-    (KNOWN_IDLESS_OWNERS.has(name) ? it.fails : it)(
+    // owner is gone (a deleted user leaves the relation null). The ownership
+    // gates got this with the PL02 factories (ownerGate); users-permissions
+    // always sets a database user, so it is defence in depth.
+    it(
       "never lets a caller without an id own a row",
       async () => {
         const { strapi, ids } = fixture();
