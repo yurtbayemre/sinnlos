@@ -12,12 +12,14 @@ import reactionController from "./reaction";
  *   2. unresolvable and invisible targets answer the byte-identical 400;
  *   3. the lookup where: target anchor + emoji + the caller as author;
  *   4. without `reacted`: the toggle (existing → delete, else create);
- *      a remove deletes EVERY matching row (duplicates from concurrent
- *      creates, no unique index: DA04), with one live ping;
+ *      a remove deletes EVERY matching row (duplicates from older
+ *      releases, no unique index: DA04), with one live ping;
  *   5. with `reacted` (FX28, the desired end state): true + existing is a
  *      no-op answering the reaction, true + none creates, false + existing
  *      deletes, false + none is a no-op; a repeated request never flips;
- *   6. PL01: DELETE /api/reactions/:id translates a numeric row id to the
+ *   6. DA04: concurrent creates that both missed the lookup leave exactly
+ *      one row, the oldest; the request whose row went answers the kept one;
+ *   7. PL01: DELETE /api/reactions/:id translates a numeric row id to the
  *      documentId before the core delete; malformed or unknown ids are 404.
  *
  * resolveWriteTarget runs for real against the db stub; isTargetVisible and
@@ -26,7 +28,11 @@ import reactionController from "./reaction";
  */
 
 const mocks = vi.hoisted(() => ({
-  superCreate: vi.fn(async (_ctx: unknown) => ({ data: { id: 900 } })),
+  superCreate: vi.fn(
+    async (_ctx: unknown): Promise<{ data: { id: number; documentId?: string } }> => ({
+      data: { id: 900 },
+    }),
+  ),
   superDelete: vi.fn(async (_ctx: unknown) => undefined),
   sanitizeOutput: vi.fn(async (entity: unknown, _ctx: unknown) => ({ sanitized: entity })),
   transformResponse: vi.fn((data: unknown) => ({ data, meta: {} })),
@@ -90,15 +96,27 @@ function setup(body: unknown, reactions: Row[] = []) {
       calls.push({ uid, op: "findOne", where });
       return (tables[uid] ?? []).find((row) => matches(row, where)) ?? null;
     }),
-    findMany: vi.fn(async ({ where }: { where: Where }) => {
-      calls.push({ uid, op: "findMany", where });
-      return (tables[uid] ?? [])
-        .filter((row) => matches(row, where))
-        .map((row) => ({ id: row.id }));
-    }),
+    findMany: vi.fn(
+      async ({
+        where,
+        select = ["id"],
+        orderBy,
+      }: {
+        where: Where;
+        select?: string[];
+        orderBy?: { id: "asc" };
+      }) => {
+        calls.push({ uid, op: "findMany", where });
+        const found = (tables[uid] ?? []).filter((row) => matches(row, where));
+        if (orderBy) found.sort((a, b) => Number(a.id) - Number(b.id));
+        return found.map((row) => Object.fromEntries(select.map((key) => [key, row[key]])));
+      },
+    ),
+    // In place, so two controllers set up on the same array share the table.
     delete: vi.fn(async ({ where }: { where: Where }) => {
       calls.push({ uid, op: "delete", where });
-      tables[uid] = (tables[uid] ?? []).filter((row) => !matches(row, where));
+      const table = tables[uid] ?? [];
+      for (let i = table.length - 1; i >= 0; i--) if (matches(table[i], where)) table.splice(i, 1);
       return null;
     }),
   });
@@ -345,6 +363,78 @@ describe("reaction create: desired end state `reacted` (FX28)", () => {
     expect(s.ctx.unauthorized).toHaveBeenCalled();
     expect(s.calls).toEqual([]);
   });
+});
+
+describe("reaction create: concurrent creates collapse to one row (DA04)", () => {
+  const where = {
+    targetType: "announcement",
+    targetDocumentId: ANN_DOC,
+    emoji: "heart",
+    author: MEMBER.id,
+  };
+  const row = (id: number): Row => ({ ...mine(), id, documentId: `reaction-${id}` });
+
+  it("a create that finds only its own row answers it unchanged, without a delete", async () => {
+    const reactions: Row[] = [];
+    mocks.superCreate.mockImplementationOnce(async () => {
+      reactions.push(row(70));
+      return { data: { id: 70, documentId: "reaction-70" } };
+    });
+    const s = setup({ data: { ...target, emoji: "heart", reacted: true } }, reactions);
+    const result = await s.controller.create(s.ctx);
+    expect(result).toEqual({ data: { id: 70, documentId: "reaction-70" } });
+    expect(s.calls.filter((c) => c.op === "findMany").map((c) => c.where)).toEqual([where]);
+    expect(writes(s.calls)).toEqual([]);
+    expect(mocks.emitLiveEvent).not.toHaveBeenCalled();
+    expect(reactions).toEqual([row(70)]);
+  });
+
+  it.each([true, undefined])(
+    "two requests (reacted=%s) that both missed the lookup leave the oldest row only",
+    async (reacted) => {
+      // Two tabs or two devices: the core create is held until both
+      // requests have passed the lookup, then each inserts its own row.
+      const reactions: Row[] = [];
+      let nextId = 70;
+      let arrived = 0;
+      let release = () => {};
+      const bothLookedUp = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const insert = async () => {
+        arrived += 1;
+        if (arrived === 2) release();
+        await bothLookedUp;
+        const inserted = row(nextId++);
+        reactions.push(inserted);
+        return { data: { id: Number(inserted.id), documentId: String(inserted.documentId) } };
+      };
+      mocks.superCreate.mockImplementationOnce(insert).mockImplementationOnce(insert);
+      const body = { data: { ...target, emoji: "heart", reacted } };
+      const first = setup(body, reactions);
+      const second = setup(body, reactions);
+      const [firstResult, secondResult] = await Promise.all([
+        first.controller.create(first.ctx),
+        second.controller.create(second.ctx),
+      ]);
+
+      expect(mocks.superCreate).toHaveBeenCalledTimes(2);
+      expect(reactions).toEqual([row(70)]);
+      const deletes = [...writes(first.calls), ...writes(second.calls)];
+      expect(deletes.length).toBeGreaterThan(0);
+      for (const call of deletes) expect(call.where).toEqual({ id: 71 });
+      // The request whose row stayed answers the core create's result; the
+      // other one answers the kept reaction, like a request that finds it.
+      expect(firstResult).toEqual({ data: { id: 70, documentId: "reaction-70" } });
+      expect(second.ctx.status).toBe(200);
+      expect(secondResult).toEqual({ data: { sanitized: row(70) }, meta: {} });
+      expect(mocks.emitLiveEvent).toHaveBeenCalledWith({
+        kind: "content",
+        targetType: "announcement",
+        targetDocumentId: ANN_DOC,
+      });
+    },
+  );
 });
 
 describe("reaction delete: numeric id or documentId (PL01)", () => {

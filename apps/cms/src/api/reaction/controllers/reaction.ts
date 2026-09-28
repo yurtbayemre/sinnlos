@@ -27,8 +27,10 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
    * publishing an announcement/wiki page in Strapi 5 is delete+recreate, so
    * an id-anchored reaction detaches on the next "Publish" (issue #11, see
    * utils/comment-target.ts). Author is server-authoritative (§5.21).
-   * A remove deletes every matching row: concurrent creates can leave
-   * duplicates (no unique index, DA04).
+   * There is no unique index (DA04), so two concurrent creates can both
+   * miss the lookup and insert. A create therefore collapses the matching
+   * rows to the oldest one right after its insert, and a remove still
+   * deletes every matching row (duplicates from older releases).
    * Only the documentId anchor is accepted (#25 removed the targetId
    * migration bridge): a targetId-only payload is answered with 400.
    *
@@ -82,9 +84,10 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
 
     if (existing) {
       // Delete EVERY matching row, not just the one found above: reactions
-      // have no unique index (DA04), so two concurrent creates can both miss
-      // the lookup and insert a duplicate. "false" (and the toggle's remove)
-      // must leave none behind. One entity-manager delete per row, not
+      // have no unique index (DA04), so duplicates from older releases, or
+      // from concurrent creates that have not collapsed them yet (below),
+      // can match. "false" (and the toggle's remove) must leave none
+      // behind. One entity-manager delete per row, not
       // deleteMany: the latter is a bare query-builder delete in
       // @strapi/database 5.55.1 and would leave the author link rows behind.
       const rows: Array<{ id: number }> = await strapi.db.query(REACTION_UID).findMany({
@@ -113,7 +116,42 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     ctx.request.body = {
       data: { emoji, targetType, targetDocumentId, author: user.id },
     };
-    return super.create(ctx);
+    const created = await super.create(ctx);
+
+    // DA04: a concurrent create (two tabs, two devices) can have missed the
+    // lookup above as well and inserted the same reaction. Keep the oldest
+    // matching row and delete the rest. Every create checks AFTER its own
+    // insert, so the one that checks last sees every row and leaves exactly
+    // one; the oldest row is never deleted here, so at least one stays.
+    const rows: Array<{ id: number; documentId: string }> = await strapi.db
+      .query(REACTION_UID)
+      .findMany({
+        where: {
+          ...targetMatchWhere(targetType, targetDocumentId),
+          emoji,
+          author: user.id,
+        },
+        select: ["id", "documentId"],
+        orderBy: { id: "asc" },
+      });
+    if (rows.length <= 1) return created;
+    const [kept, ...extra] = rows;
+    // Entity-manager delete per row, so the author link rows go too (see
+    // the remove branch above).
+    for (const row of extra) {
+      await strapi.db.query(REACTION_UID).delete({ where: { id: row.id } });
+    }
+    emitLiveEvent({ kind: "content", targetType, targetDocumentId });
+    if ((created as { data?: { documentId?: unknown } })?.data?.documentId === kept.documentId) {
+      return created;
+    }
+    // This request's row was the extra one: answer with the kept reaction,
+    // as a request that finds it already there does.
+    const survivor = await strapi.db.query(REACTION_UID).findOne({ where: { id: kept.id } });
+    // Gone in between: a concurrent remove came last and wins.
+    if (!survivor) return created;
+    ctx.status = 200;
+    return this.transformResponse(await this.sanitizeOutput(survivor, ctx));
   },
 
   /**
