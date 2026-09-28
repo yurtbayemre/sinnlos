@@ -1083,6 +1083,14 @@ step 4 reads `[bootstrap] granted N permission(s) across intranet roles`
 with N ≤ 6 (6 after the cleanup, else one per boot of the previous cms),
 and step 5's check is clean afterwards.
 
+On the Postgres 16 rehearsal (this branch against `997bf7f`, the cleanup
+taken verbatim from above): two boots of the previous cms left four rows,
+listed as four `EXTRA_IN_DB` rows by its `prod-perm-diff.sql`, and a
+roll-forward logged `granted 2`; the cleanup under a running previous cms
+removed `5 | 5`, a second run `0 | 0`, the previous cms stayed healthy and
+recreated nothing on its next boot, and the roll-forward after the cleanup
+logged `granted 6` with no `event-rsvp` row in the diff.
+
 #### Upgrading to the cms input hardening (2026-09-28)
 
 This release (branch `fix/cms-input-hardening`, on `main` `afc1506`, which
