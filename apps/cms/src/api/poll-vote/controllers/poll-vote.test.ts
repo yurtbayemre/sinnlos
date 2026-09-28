@@ -3,14 +3,18 @@ import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.t
 import pollVoteController from "./poll-vote";
 
 /**
- * The custom vote/results handlers (decision 02 + FX06 + FX20). They look
- * polls up by the NUMERIC id of the published row through strapi.db.query,
- * which spans draft AND published rows, so:
- *   - a missing id, a malformed id, a draft row and a poll outside the
- *     caller's department audience answer the same 404; a malformed id
- *     (anything `parseRowId` in utils/entry-id.ts refuses, a documentId
- *     included) never reaches the poll query, which fails like Postgres
- *     on an id an int4 column cannot hold,
+ * The custom vote/results handlers (decision 02 + FX06 + FX20 + DA01). They
+ * look polls up by documentId (the web's address) or by the numeric id of
+ * the published row (the fallback) through strapi.db.query, which spans
+ * draft AND published rows, so:
+ *   - both addresses resolve to the PUBLISHED row: a documentId whose
+ *     document has a draft and a published row votes on and counts the
+ *     published one (the stubs hold both twins);
+ *   - a missing id, a malformed id, a draft row, a draft-only document and
+ *     a poll outside the caller's department audience answer the same 404;
+ *     a malformed id (anything `parseEntryRef` in utils/entry-id.ts
+ *     refuses) never reaches the poll query, which fails like Postgres on
+ *     an id an int4 column cannot hold,
  *   - admin_role/editor read every poll and its results but vote only in
  *     the audience (403 outside it),
  *   - a guest (owner decision 2026-09-27) gets the same 404 for a poll that
@@ -142,7 +146,27 @@ const GUEST_NULL: PollRow = {
 const ENG_GUESTS: PollRow = { ...ENG_ONLY, id: 10, documentId: "p-eng-guests", visibleToGuests: true, guestsCanVote: true };
 /** Engineering only, visible to guests (of Engineering) without voting. */
 const ENG_GUESTS_READ: PollRow = { ...ENG_GUESTS, id: 11, documentId: "p-eng-guests-read", guestsCanVote: false };
+/**
+ * DA01: one poll document with both rows, addressed by its documentId. The
+ * draft row comes first (lower id), as Strapi writes them; only the
+ * published one may be voted on or counted.
+ */
+const TWIN_DOCUMENT_ID = "k3m9x0000000000000000001";
+const TWIN_DRAFT: PollRow = { ...OPEN, id: 20, documentId: TWIN_DOCUMENT_ID, question: "Twin (draft)", publishedAt: null };
+const TWIN_PUBLISHED: PollRow = { ...OPEN, id: 21, documentId: TWIN_DOCUMENT_ID, question: "Twin" };
+/** A document that was never published: a draft row only. */
+const DRAFT_ONLY_DOCUMENT_ID = "k3m9x0000000000000000002";
+const DRAFT_ONLY: PollRow = { ...DRAFT, id: 22, documentId: DRAFT_ONLY_DOCUMENT_ID };
+/** The Engineering-only poll as a document with both rows. */
+const ENG_TWIN_DOCUMENT_ID = "k3m9x0000000000000000003";
+const ENG_TWIN_DRAFT: PollRow = { ...ENG_ONLY, id: 23, documentId: ENG_TWIN_DOCUMENT_ID, publishedAt: null };
+const ENG_TWIN_PUBLISHED: PollRow = { ...ENG_ONLY, id: 24, documentId: ENG_TWIN_DOCUMENT_ID };
 const POLLS = [
+  TWIN_DRAFT,
+  TWIN_PUBLISHED,
+  DRAFT_ONLY,
+  ENG_TWIN_DRAFT,
+  ENG_TWIN_PUBLISHED,
   DRAFT,
   OPEN,
   CLOSING,
@@ -157,10 +181,10 @@ const POLLS = [
 ];
 
 /**
- * Route ids that name no poll row: the routes take the numeric id of the
- * published row only, so a documentId in Strapi's shape is refused too.
+ * Route ids that name no poll: neither a row id nor a documentId in
+ * Strapi's shape (utils/entry-id.ts parseEntryRef).
  */
-const MALFORMED_POLL_IDS = [...MALFORMED_ENTRY_IDS, "lj5n10lqpweysvb5m9hmiv8p"];
+const MALFORMED_POLL_IDS = [...MALFORMED_ENTRY_IDS, `${TWIN_DOCUMENT_ID}x`, TWIN_DOCUMENT_ID.toUpperCase()];
 
 /** Row 1 of the Engineering document: the poll links the same documentId. */
 const ENGINEER: UserRow = { id: 5, role: { type: "member" }, department: { id: 1, documentId: "d-eng" } };
@@ -349,6 +373,13 @@ describe("vote", () => {
       { id: "abc", user: ENGINEER },
       { id: "2147483648", user: ENGINEER },
       { id: DRAFT.id, user: ENGINEER },
+      // DA01: a documentId nobody has, a draft-only document, the draft
+      // twin's row id, and a targeted document outside the audience.
+      { id: "k3m9x0000000000000000999", user: ENGINEER },
+      { id: DRAFT_ONLY_DOCUMENT_ID, user: ENGINEER },
+      { id: TWIN_DRAFT.id, user: ENGINEER },
+      { id: ENG_TWIN_DOCUMENT_ID, user: DESIGNER },
+      { id: ENG_TWIN_DOCUMENT_ID, user: GUEST_ENG },
       { id: ENG_ONLY.id, user: DESIGNER },
       { id: ENG_ONLY.id, user: GUEST },
       // Guest access: a poll not visible to guests is as missing as any.
@@ -368,7 +399,7 @@ describe("vote", () => {
     }
   });
 
-  it("answers a malformed id, a documentId included, with that 404 and no poll query", async () => {
+  it("answers a malformed id with that 404 and no poll query", async () => {
     for (const id of MALFORMED_POLL_IDS) {
       const { controller, ctx, votes, pollFindOne } = setup({ id });
       await controller.vote(ctx);
@@ -386,6 +417,53 @@ describe("vote", () => {
     expect(pollFindOne).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: DRAFT.id, publishedAt: { $notNull: true } } }),
     );
+  });
+
+  it("addresses a poll by documentId and stores the vote on its PUBLISHED row (DA01)", async () => {
+    const { controller, ctx, votes, pollFindOne } = setup({
+      id: TWIN_DOCUMENT_ID,
+      user: ENGINEER,
+      body: { optionIndex: 1 },
+    });
+    await controller.vote(ctx);
+    expect(pollFindOne).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { documentId: TWIN_DOCUMENT_ID, publishedAt: { $notNull: true } },
+      }),
+    );
+    // Never the draft twin (id 20), whatever row the document has first.
+    expect(votes.create).toHaveBeenCalledWith({
+      data: { poll: TWIN_PUBLISHED.id, optionIndex: 1, voter: ENGINEER.id },
+    });
+    expect(votes.findOne).toHaveBeenCalledWith({
+      where: { poll: TWIN_PUBLISHED.id, voter: ENGINEER.id },
+      select: ["id"],
+    });
+    for (const spy of errorSpies) expect(ctx[spy], spy).not.toHaveBeenCalled();
+  });
+
+  it("refuses a second vote whichever address the first one used", async () => {
+    for (const id of [TWIN_DOCUMENT_ID, TWIN_PUBLISHED.id]) {
+      const { controller, ctx, votes } = setup({
+        id,
+        votes: [{ poll: TWIN_PUBLISHED.id, voter: ENGINEER.id, optionIndex: 0 }],
+      });
+      await controller.vote(ctx);
+      expect(ctx.badRequest, String(id)).toHaveBeenCalledWith("Already voted");
+      expect(votes.create, String(id)).not.toHaveBeenCalled();
+    }
+  });
+
+  it("applies the audience rules to a documentId like to a row id", async () => {
+    const member = setup({ id: ENG_TWIN_DOCUMENT_ID, user: ENGINEER });
+    await member.controller.vote(member.ctx);
+    expect(member.votes.create).toHaveBeenCalledWith({
+      data: { poll: ENG_TWIN_PUBLISHED.id, optionIndex: 0, voter: ENGINEER.id },
+    });
+    const editor = setup({ id: ENG_TWIN_DOCUMENT_ID, user: EDITOR_OUTSIDE });
+    await editor.controller.vote(editor.ctx);
+    expect(editor.ctx.forbidden).toHaveBeenCalledWith("Not in poll audience");
+    expect(editor.votes.create).not.toHaveBeenCalled();
   });
 
   it("answers 403 to admin_role/editor outside the audience (they see it, they do not vote)", async () => {
@@ -628,6 +706,10 @@ describe("results", () => {
       { id: 999, user: ENGINEER },
       { id: "abc", user: ENGINEER },
       { id: DRAFT.id, user: ENGINEER },
+      { id: "k3m9x0000000000000000999", user: ENGINEER },
+      { id: DRAFT_ONLY_DOCUMENT_ID, user: ENGINEER },
+      { id: TWIN_DRAFT.id, user: ENGINEER },
+      { id: ENG_TWIN_DOCUMENT_ID, user: DESIGNER },
       { id: ENG_ONLY.id, user: DESIGNER },
       { id: ENG_ONLY.id, user: GUEST },
       // Guest access: question, options and counts of a poll not visible
@@ -647,7 +729,7 @@ describe("results", () => {
     }
   });
 
-  it("answers a malformed id, a documentId included, with that 404 and no poll query", async () => {
+  it("answers a malformed id with that 404 and no poll query", async () => {
     for (const id of MALFORMED_POLL_IDS) {
       const { controller, ctx, votes, pollFindOne } = setup({ id });
       await controller.results(ctx);
@@ -702,6 +784,37 @@ describe("results", () => {
     // One query: the caller's own vote comes from the same rows.
     expect(votes.findMany).toHaveBeenCalledOnce();
     expect(votes.findOne).not.toHaveBeenCalled();
+  });
+
+  it("gives the same results for the documentId and the published row id, counting the published row (DA01)", async () => {
+    const votes: VoteRow[] = [
+      { poll: TWIN_PUBLISHED.id, voter: 11, optionIndex: 1 },
+      { poll: TWIN_PUBLISHED.id, voter: ENGINEER.id, optionIndex: 0 },
+      // A row pointing at the draft twin never counts (the vote handler
+      // only ever stores the published row's id).
+      { poll: TWIN_DRAFT.id, voter: 12, optionIndex: 1 },
+    ];
+    const bodies: Record<string, unknown>[] = [];
+    for (const id of [TWIN_DOCUMENT_ID, TWIN_PUBLISHED.id]) {
+      const { controller, ctx, pollFindOne } = setup({ id, user: ENGINEER, votes });
+      await controller.results(ctx);
+      expect(pollFindOne, String(id)).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where:
+            id === TWIN_DOCUMENT_ID
+              ? { documentId: TWIN_DOCUMENT_ID, publishedAt: { $notNull: true } }
+              : { id: TWIN_PUBLISHED.id, publishedAt: { $notNull: true } },
+        }),
+      );
+      bodies.push(sent(ctx));
+    }
+    expect(bodies[0]).toEqual(bodies[1]);
+    expect(bodies[0]).toMatchObject({
+      poll: { id: TWIN_PUBLISHED.id, question: "Twin" },
+      counts: [1, 1],
+      total: 2,
+      myVoteIndex: 0,
+    });
   });
 
   it("counts one ballot per voter: the first stored ballot (lowest id) wins, also for the caller", async () => {

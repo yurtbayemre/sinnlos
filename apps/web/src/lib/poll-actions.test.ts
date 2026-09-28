@@ -178,4 +178,23 @@ describe("votePoll", () => {
     });
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
+
+  it("addresses the poll by its documentId (DA01)", async () => {
+    await votePoll("k3m9x0000000000000000001", 0);
+    expect(strapiMock).toHaveBeenCalledWith("/api/polls/k3m9x0000000000000000001/vote", {
+      method: "POST",
+      body: JSON.stringify({ optionIndex: 0 }),
+    });
+  });
+
+  it("refuses a reference that is neither a documentId nor a row id, without a request", async () => {
+    for (const ref of ["../polls", "1/vote", "abc", "0", "1.5", "", "K3M9X0000000000000000001"]) {
+      await expect(votePoll(ref, 0), ref).rejects.toThrow("invalid poll reference");
+    }
+    for (const ref of [0, -1, 1.5, Number.NaN]) {
+      await expect(votePoll(ref, 0), String(ref)).rejects.toThrow("invalid poll reference");
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
 });

@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
 import { appTimeZone } from "@/lib/app-time-zone";
+import { parseEntryRef } from "@/lib/entry-id";
 import { pollClosesAtForDay } from "@/lib/poll-close";
 import { normalizeGuestAccess } from "@/lib/poll-guest-access";
 import { canCreatePolls } from "@/lib/roles";
@@ -96,8 +97,18 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
   return { ok: true };
 }
 
-export async function votePoll(pollId: number, optionIndex: number) {
-  const result = await strapi<any>(`/api/polls/${pollId}/vote`, {
+/**
+ * Casts the caller's vote. `pollRef` is the poll's documentId (DA01, the
+ * address that survives a republish) or, from a card rendered before DA01,
+ * the published row's numeric id; the cms accepts both and stores the vote
+ * on the published row. A Server Action's arguments come from the client,
+ * so anything else is refused before a request.
+ */
+export async function votePoll(pollRef: string | number, optionIndex: number) {
+  const ref = parseEntryRef(pollRef);
+  if (!ref) throw new Error("invalid poll reference");
+  const address = "documentId" in ref ? ref.documentId : String(ref.id);
+  const result = await strapi<unknown>(`/api/polls/${address}/vote`, {
     method: "POST",
     body: JSON.stringify({ optionIndex }),
   });

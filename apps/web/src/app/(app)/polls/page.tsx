@@ -3,7 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { canCreatePolls } from "@/lib/roles";
-import { api } from "@/lib/strapi";
+import { api, pollRef } from "@/lib/strapi";
 import { StrapiError } from "@/lib/strapi-error";
 import { getViewer } from "@/lib/viewer";
 import { isPollClosed } from "@/lib/poll-close";
@@ -34,11 +34,14 @@ export default async function PollsPage() {
   // Per poll (FX47): an expired session's redirect (NEXT_REDIRECT) must
   // reach Next.js; a 404 is a race (the poll was deleted, unpublished or
   // retargeted after the list read, decision 02) and just drops the card;
-  // any other failure also shows the error banner.
+  // any other failure also shows the error banner. Each poll is addressed
+  // by its documentId (DA01), which a republish between the list read and
+  // this request does not change; the cms decides visibility, canVote, the
+  // audience and the guest flags per poll and caller.
   let resultsFailed = false;
   const resultsArr = await Promise.all(
     polls.map((p) =>
-      api.polls.results(p.id).catch((e: unknown): PollResults | null => {
+      api.polls.results(pollRef(p)).catch((e: unknown): PollResults | null => {
         unstable_rethrow(e);
         if (!(e instanceof StrapiError && e.status === 404)) {
           console.error("[polls] results fetch failed", e);
@@ -62,7 +65,9 @@ export default async function PollsPage() {
   // A poll without results (404 race or failed read) renders no card.
   const card = (p: Poll) => {
     const results = resultsMap.get(p.id);
-    return results ? <PollCard key={p.id} results={results} viewerRole={viewer.role} /> : null;
+    return results ? (
+      <PollCard key={p.id} results={results} pollRef={pollRef(p)} viewerRole={viewer.role} />
+    ) : null;
   };
 
   return (

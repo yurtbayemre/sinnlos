@@ -14,10 +14,11 @@ import {
  * query, so the pins that matter are asserted on the query itself: the
  * published-only `where` and the documentId-based department lookup. They
  * also fail like Postgres on an `id` an int4 column cannot hold, so a
- * route id that slips past `parseRowId` fails here as it did in production.
+ * route id that slips past `parseEntryRef` fails here as it did in
+ * production.
  */
 
-/** A documentId in Strapi's shape: poll routes take row ids only. */
+/** A documentId in Strapi's shape: the poll address the web sends (DA01). */
 const POLL_DOCUMENT_ID = "lj5n10lqpweysvb5m9hmiv8p";
 
 function host(rows: Partial<Record<string, unknown>>) {
@@ -84,8 +85,16 @@ describe("loadPollViewer", () => {
   });
 });
 
-describe("loadPublishedPoll: the route id (parseRowId, utils/entry-id.ts)", () => {
-  it("looks up a plain positive decimal row id, as a string or a number", async () => {
+describe("loadPublishedPoll: the route reference (parseEntryRef, utils/entry-id.ts)", () => {
+  it("looks up a documentId, pinned to the published row (DA01)", async () => {
+    const { strapi, queries } = host({});
+    await loadPublishedPoll(strapi, POLL_DOCUMENT_ID);
+    expect(queries.map((query) => query.params.where)).toEqual([
+      { documentId: POLL_DOCUMENT_ID, publishedAt: { $notNull: true } },
+    ]);
+  });
+
+  it("looks up a plain positive decimal row id, as a string or a number (the fallback)", async () => {
     const accepted: [unknown, number][] = [
       ["1", 1],
       ["2147483647", 2147483647],
@@ -101,7 +110,7 @@ describe("loadPublishedPoll: the route id (parseRowId, utils/entry-id.ts)", () =
     }
   });
 
-  it("answers null without a query for anything else, a documentId included", async () => {
+  it("answers null without a query for anything else", async () => {
     for (const raw of [
       "0",
       "-1",
@@ -114,7 +123,9 @@ describe("loadPublishedPoll: the route id (parseRowId, utils/entry-id.ts)", () =
       "2147483648",
       "99999999999",
       "k3x9documentid",
-      POLL_DOCUMENT_ID,
+      POLL_DOCUMENT_ID.toUpperCase(),
+      `${POLL_DOCUMENT_ID}x`,
+      ` ${POLL_DOCUMENT_ID}`,
       undefined,
       null,
       0,
@@ -183,9 +194,23 @@ describe("loadPublishedPoll", () => {
     });
   });
 
-  it("answers null when no published row matches (missing or draft id)", async () => {
+  it("answers null when no published row matches (missing, draft id, draft-only document)", async () => {
     const { strapi } = host({});
     await expect(loadPublishedPoll(strapi, "12")).resolves.toBeNull();
+    await expect(loadPublishedPoll(strapi, POLL_DOCUMENT_ID)).resolves.toBeNull();
+  });
+
+  it("returns the published row's id for a documentId, the id a vote stores", async () => {
+    const published = { ...row, id: 31, documentId: POLL_DOCUMENT_ID };
+    const { strapi, queries } = host({ [POLL_UID]: published });
+    await expect(loadPublishedPoll(strapi, POLL_DOCUMENT_ID)).resolves.toMatchObject({
+      id: 31,
+      documentId: POLL_DOCUMENT_ID,
+    });
+    expect(queries[0]?.params).toMatchObject({
+      where: { documentId: POLL_DOCUMENT_ID, publishedAt: { $notNull: true } },
+      select: expect.arrayContaining(["id", "documentId"]),
+    });
   });
 
   it("normalises a legacy row (NULL flag, no departments, no guest columns)", async () => {

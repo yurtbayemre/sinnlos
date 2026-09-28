@@ -13,7 +13,12 @@ import { isPollClosed } from "../../../utils/poll-close";
 /**
  * The only interface to poll votes (the generic /api/poll-votes routes do
  * not exist, routes/poll-vote.ts): POST /polls/:id/vote and
- * GET /polls/:id/results, `:id` = the numeric id of the PUBLISHED poll row.
+ * GET /polls/:id/results. `:id` addresses the poll by its documentId (DA01:
+ * the address the web sends, stable across publishes) or, as the fallback
+ * for older callers, by the numeric id of its PUBLISHED row
+ * (utils/poll-access.ts loadPublishedPoll). Either way the handlers work
+ * with the published row: the vote stores its id, the results count its
+ * votes.
  *
  * Department targeting (decision 02) and guest access (owner decision
  * 2026-09-27), rules in utils/poll-audience.ts, are checked here, not by a

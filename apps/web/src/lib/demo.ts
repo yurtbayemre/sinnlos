@@ -789,8 +789,13 @@ export function demo(path: string): unknown {
   }
 
   // /api/polls/:id/results is a custom route with its own (non-list) shape.
-  const resultsMatch = path.match(/^\/api\/polls\/(\d+)\/results/);
-  if (resultsMatch) return pollResults[Number(resultsMatch[1])] ?? pollResults[1];
+  // `:id` is the poll's documentId (DA01) or its numeric id (the fallback).
+  const resultsMatch = path.match(/^\/api\/polls\/([^/?]+)\/results/);
+  if (resultsMatch) {
+    const ref = decodeURIComponent(resultsMatch[1]!);
+    const poll = polls.find((p) => p.documentId === ref || String(p.id) === ref);
+    return pollResults[poll?.id ?? 1] ?? pollResults[1];
+  }
   if (path.startsWith("/api/polls")) return pack(polls);
 
   if (path.startsWith("/api/kudos-entries")) return pack(kudosEntries);

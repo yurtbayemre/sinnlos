@@ -38,6 +38,7 @@
 import { redirect } from "next/navigation";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { demo } from "@/lib/demo";
+import { isDocumentId } from "@/lib/entry-id";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import { getStrapiToken } from "@/lib/session";
 import { StrapiError } from "@/lib/strapi-error";
@@ -97,6 +98,18 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
 
 /** Most event documentIds per RSVP summary request (the cms caps it at 50). */
 const RSVP_SUMMARY_CHUNK = 50;
+
+/**
+ * A poll's address in POST /api/polls/:id/vote and GET /api/polls/:id/results
+ * (DA01): its documentId, which stays the same across publishes, or, for a
+ * row without one in Strapi's shape (never from Strapi 5 itself), the
+ * published row's numeric id, the address the routes took before.
+ */
+export type PollRef = string | number;
+
+export function pollRef(poll: Pick<Poll, "id" | "documentId">): PollRef {
+  return isDocumentId(poll.documentId) ? poll.documentId : poll.id;
+}
 
 /**
  * The /events list split (FX49). "Running": a timed event whose end is
@@ -359,7 +372,11 @@ export const api = {
     // come from `meta.pagination.total`, never `data.length`.
     list: () =>
       strapi<StrapiListResponse<Poll>>("/api/polls?sort=createdAt:desc&pagination[pageSize]=20"),
-    results: (id: number) => strapi<PollResults>(`/api/polls/${id}/results`),
+    // Per poll and per user: the cms decides canSeePoll (404 otherwise),
+    // canVote, the audience and the guest flags for this poll and caller
+    // (decision 02). Addressed by documentId (pollRef, DA01).
+    results: (ref: PollRef) =>
+      strapi<PollResults>(`/api/polls/${encodeURIComponent(String(ref))}/results`),
   },
   documents: {
     // Per-user: document-visibility filters per caller (department scoping)

@@ -9,18 +9,23 @@ import type { PollResults } from "@/lib/types";
  * so an expired session's redirect (NEXT_REDIRECT) reaches Next.js instead
  * of an empty card list; a 404 (the poll was deleted, unpublished or
  * retargeted after the list read, decision 02) drops only that card and
- * shows no banner; any other failure shows the FetchErrorBanner. A later
- * rewrite of these reads (batch 4C, DA01/WD04) has to keep this.
+ * shows no banner; any other failure shows the FetchErrorBanner. DA01
+ * (batch 4C) addresses each poll by its documentId, for the results read
+ * and for the card's vote, and keeps all of this.
  *
  * `next/navigation` is the real module (redirect's own error and
- * unstable_rethrow); the CMS client, viewer and translations are mocked,
- * and the poll card and the banner are markers.
+ * unstable_rethrow); the CMS client, viewer and translations are mocked
+ * (`pollRef` as in lib/strapi.ts, which strapi.test.ts pins), and the poll
+ * card and the banner are markers.
  */
 const listMock = vi.fn<() => Promise<unknown>>();
-const resultsMock = vi.fn<(id: number) => Promise<PollResults>>();
+const resultsMock = vi.fn<(ref: string | number) => Promise<PollResults>>();
 
 vi.mock("@/lib/strapi", () => ({
-  api: { polls: { list: () => listMock(), results: (id: number) => resultsMock(id) } },
+  api: {
+    polls: { list: () => listMock(), results: (ref: string | number) => resultsMock(ref) },
+  },
+  pollRef: (poll: { id: number; documentId?: string }) => poll.documentId ?? poll.id,
 }));
 vi.mock("@/lib/viewer", () => ({
   getViewer: async () => ({ id: 1, displayName: "M", role: "member", department: null }),
@@ -29,8 +34,8 @@ vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: string) => (key: string) => `${namespace}.${key}`,
 }));
 vi.mock("@/components/polls/poll-card", () => ({
-  PollCard: ({ results }: { results: PollResults }) =>
-    createElement("div", { "data-poll-card": results.poll.id }),
+  PollCard: ({ results, pollRef }: { results: PollResults; pollRef?: string | number }) =>
+    createElement("div", { "data-poll-card": results.poll.id, "data-poll-ref": pollRef }),
 }));
 vi.mock("@/components/fetch-error", () => ({
   FetchErrorBanner: () => createElement("div", { "data-fetch-error": "" }),
@@ -61,7 +66,7 @@ const results = (id: number): PollResults => ({
 function failSecond(error: unknown) {
   resultsMock.mockImplementation(async (id) => {
     if (id === 2) throw error;
-    return results(id);
+    return results(Number(id));
   });
 }
 
@@ -77,7 +82,7 @@ beforeEach(() => {
 
 describe("/polls results reads (FX47)", () => {
   it("renders a card per poll and no banner when every read answers", async () => {
-    resultsMock.mockImplementation(async (id) => results(id));
+    resultsMock.mockImplementation(async (id) => results(Number(id)));
     const html = await render();
     expect(cards(html)).toEqual(["1", "2"]);
     expect(html).not.toContain("data-fetch-error");
@@ -107,5 +112,28 @@ describe("/polls results reads (FX47)", () => {
   it("shows the banner for a failure that is no CMS answer", async () => {
     failSecond(new TypeError("fetch failed"));
     expect(await render()).toContain("data-fetch-error");
+  });
+});
+
+describe("/polls poll addresses (DA01)", () => {
+  it("reads each poll's results and votes by its documentId", async () => {
+    listMock.mockResolvedValue({
+      data: [
+        { ...poll(1), documentId: "k3m9x0000000000000000001" },
+        { ...poll(2), documentId: "k3m9x0000000000000000002" },
+      ],
+    });
+    resultsMock.mockImplementation(async (ref) =>
+      results(ref === "k3m9x0000000000000000001" ? 1 : 2),
+    );
+    const html = await render();
+    expect(resultsMock.mock.calls.map(([ref]) => ref)).toEqual([
+      "k3m9x0000000000000000001",
+      "k3m9x0000000000000000002",
+    ]);
+    expect([...html.matchAll(/data-poll-ref="([^"]+)"/g)].map((m) => m[1])).toEqual([
+      "k3m9x0000000000000000001",
+      "k3m9x0000000000000000002",
+    ]);
   });
 });
