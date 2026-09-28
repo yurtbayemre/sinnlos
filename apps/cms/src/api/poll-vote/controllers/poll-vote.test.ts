@@ -23,7 +23,9 @@ import pollVoteController from "./poll-vote";
  *   - results count one ballot per voter: the voter's first ballot (the
  *     lowest row id), whatever duplicates a parallel race stored, and a
  *     vote deletes the voter's later rows for the poll right after its
- *     insert (answering "Already voted" when its own row was the later one).
+ *     insert (answering "Already voted" when its own row was the later one,
+ *     or when a parallel vote's cleanup deleted it before create read it
+ *     back).
  *
  * The db stub evaluates the `where` it receives, so dropping the published
  * pin or the voter filter fails the tests. Its vote `findMany` also returns
@@ -241,6 +243,12 @@ function setup(options: {
    * inserted first, one above it later.
    */
   concurrent?: StoredVoteRow[];
+  /**
+   * A parallel vote's cleanup deletes this request's row after create()
+   * committed its relation links and before it reads the row back
+   * (@strapi/database entity-manager create), so create returns null.
+   */
+  deletedBeforeReadback?: boolean;
 }) {
   const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
@@ -270,6 +278,10 @@ function setup(options: {
     ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
       votesTable.push({ id: CREATED_ID, ...data }, ...(options.concurrent ?? []));
+      if (options.deletedBeforeReadback) {
+        votesTable.splice(votesTable.findIndex((row) => row.id === CREATED_ID), 1);
+        return null;
+      }
       return { id: CREATED_ID, optionIndex: data.optionIndex };
     }),
     delete: vi.fn(async ({ where }: { where: { id: number } }) => {
@@ -531,6 +543,29 @@ describe("vote: one ballot per voter after a parallel race", () => {
     expect(ctx.badRequest).toHaveBeenCalledWith("Already voted");
     expect(ctx.send).not.toHaveBeenCalled();
     // The first ballot (option 1) is the one that stays and counts.
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID - 7]);
+  });
+
+  it('answers "Already voted" when a parallel cleanup deleted its ballot before create read it back', async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      body: { optionIndex: 0 },
+      concurrent: [
+        { id: CREATED_ID - 7, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { id: CREATED_ID + 2, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+      deletedBeforeReadback: true,
+    });
+    // No TypeError from the missing row: the 400 a second vote gets.
+    await expect(controller.vote(ctx)).resolves.toBeUndefined();
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already voted");
+    expect(ctx.send).not.toHaveBeenCalled();
+    // The cleanup still runs: the later ballot goes, the missing one is not
+    // deleted again, and the first ballot stays.
+    expect(votes.delete.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: CREATED_ID + 2 } },
+    ]);
     expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID - 7]);
   });
 

@@ -83,9 +83,13 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     });
     if (existing) return ctx.badRequest("Already voted");
 
+    // Null when this ballot is already gone: create() inserts the row,
+    // commits its relation links, then reads the row back
+    // (@strapi/database 5.55.1 entity-manager create), and a parallel vote
+    // of the same voter can run the cleanup below in between and delete it.
     const vote = (await votes.create({
       data: { poll: poll.id, optionIndex, voter: user.id },
-    })) as IdRow;
+    })) as IdRow | null;
 
     // Keep the voter's first ballot for this poll (the lowest id, the one the
     // results count, utils/poll-ballots.ts) and delete the later ones. Every
@@ -102,9 +106,10 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     // query-builder delete in @strapi/database 5.55.1 and would leave the
     // poll and voter link rows behind.
     for (const row of later) await votes.delete({ where: { id: row.id } });
-    // This request's ballot came second: it does not count, the answer a
-    // vote gets that finds the first ballot already there.
-    if (first && first.id !== vote.id) return ctx.badRequest("Already voted");
+    // This request's ballot came second (or a parallel cleanup already
+    // deleted it, see create above): it does not count, the answer a vote
+    // gets that finds the first ballot already there.
+    if (!vote || (first && first.id !== vote.id)) return ctx.badRequest("Already voted");
     return ctx.send({ data: vote });
   },
 
