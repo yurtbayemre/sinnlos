@@ -4,7 +4,9 @@
  *   1. every service logs through the json-file driver with rotation
  *      (IN05), so a chatty container cannot fill the host's disk;
  *   2. the internal URLs use the unique aliases sinnlos-db, sinnlos-cms and
- *      sinnlos-web, defined on the project's own network only (IN04).
+ *      sinnlos-web, defined on the project's own network only (IN04);
+ *   3. the cms gets CRON_ENABLED (default true) for its cron registry
+ *      (LF03) and runs without Strapi telemetry (B05).
  *
  * Line-based like container-start.test.ts: the repo has no YAML parser at
  * the root, and the checks only need the service blocks as written.
@@ -90,11 +92,21 @@ describe("internal service names (IN04)", () => {
   });
 
   // The Traefik overlay adds `frontend` and must not put an alias there.
+  // (See also the `infra` CI job, which checks the merged render.)
   it("keeps the aliases off the shared frontend network", () => {
     const overlay = readFileSync(
       new URL("./docker-compose.traefik.yml", import.meta.url),
       "utf8",
     ).replace(/\r\n/g, "\n");
     expect(overlay).not.toMatch(/aliases:/);
+  });
+});
+
+describe("cms runtime switches (LF03, B05)", () => {
+  it.each([
+    "      CRON_ENABLED: ${CRON_ENABLED:-true}",
+    "      STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}",
+  ])("passes %s to the cms", (line) => {
+    expect(block("  cms:")).toContain(line);
   });
 });
