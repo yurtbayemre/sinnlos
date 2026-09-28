@@ -19,10 +19,16 @@
  * No per-department visibility on file bytes (deliberate, see the
  * architecture record): any signed-in employee who knows a hash URL can
  * fetch the bytes. Before this route, ANYONE could.
+ *
+ * Revocation (FX41): the session must also still hold a Strapi JWT that
+ * Strapi accepts. A blocked or deleted account (or a rejected token) gets a
+ * 401 within the 60 s of lib/upload-block-cache.ts instead of the files for
+ * the rest of its session; while Strapi cannot say, the route answers 503.
  */
 import { NextResponse, type NextRequest } from "next/server";
-import { getSession } from "@/lib/session";
+import { getSession, getStrapiToken } from "@/lib/session";
 import { STRAPI_URL } from "@/lib/config";
+import { checkUploadAccess } from "@/lib/upload-block-cache";
 // Segment regex, header allowlists, identity encoding and the internal token
 // header live in lib/upload-proxy.ts (unit-tested there, S06).
 import {
@@ -44,6 +50,23 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
   const { path } = await params;
   if (!isValidUploadPath(path)) {
     return new NextResponse("Not found", { status: 404 });
+  }
+
+  // FX41: no Strapi JWT, or one Strapi refuses (blocked, deleted, invalid).
+  const jwt = await getStrapiToken();
+  if (!jwt) {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+  const access = await checkUploadAccess({
+    userId: typeof session.user?.id === "number" ? session.user.id : undefined,
+    jwt,
+    strapiUrl: STRAPI_URL,
+  });
+  if (access === "blocked") {
+    return new NextResponse("Unauthorized", { status: 401 });
+  }
+  if (access === "unavailable") {
+    return new NextResponse("Service unavailable", { status: 503 });
   }
 
   const upstreamHeaders = upstreamRequestHeaders(req.headers, process.env.INTERNAL_UPLOAD_TOKEN);
