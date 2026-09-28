@@ -1042,12 +1042,44 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
   duplicate row of one user was counted twice.
 
 **Rollback.** Follow the hint `infra/deploy.sh` prints; it retags and
-re-ups web and cms together. Nothing in the database needs undoing: the
-previous cms removes the six `summary` permission rows on its first boot by
-itself (users-permissions deletes permissions whose action its code does not
-have), and rolling forward adds them again (the grant line from step 4
-appears again). After a rollback the raw RSVP reads return every row again,
-with the older name stripping, and the older web counts them as before.
+re-ups web and cms together. After a rollback the raw RSVP reads return
+every row again, with the older name stripping, and the older web counts
+them as before. Nothing in the database has to be undone, but the six
+`api::event-rsvp.event-rsvp.summary` permission rows do not all go away:
+each boot of the previous cms deletes only ONE of them (users-permissions'
+`syncPermissions` deletes one row per action its code does not have, per
+boot). The others are inert, because the previous cms has no such route,
+and the rolled-back checkout's `prod-perm-diff.sql` lists them as
+`EXTRA_IN_DB | <role> | api::event-rsvp.event-rsvp.summary` (five after its
+first boot, one fewer after each further boot). Optional cleanup, with
+`COMPOSE` and `psql_db` from above, while the previous cms runs (it never
+grants them again):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN;
+WITH stale AS (
+  SELECT id FROM up_permissions
+   WHERE action = 'api::event-rsvp.event-rsvp.summary'
+), unlinked AS (
+  DELETE FROM up_permissions_role_lnk l USING stale s
+   WHERE l.permission_id = s.id RETURNING l.id
+), removed AS (
+  DELETE FROM up_permissions p USING stale s
+   WHERE p.id = s.id RETURNING p.id
+)
+SELECT (SELECT count(*) FROM unlinked) AS links_removed,
+       (SELECT count(*) FROM removed) AS permission_rows_removed;
+COMMIT;
+SQL
+```
+
+It removes each leftover row with its role link (a second run removes
+nothing), and `prod-perm-diff.sql` then lists no `event-rsvp` row. Rolling
+forward again grants only the rows that are missing, so the line from
+step 4 reads `[bootstrap] granted N permission(s) across intranet roles`
+with N ≤ 6 (6 after the cleanup, else one per boot of the previous cms),
+and step 5's check is clean afterwards.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 
