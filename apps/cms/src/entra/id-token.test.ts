@@ -105,7 +105,7 @@ describe("verifyIdToken", () => {
       () => sign(claims({ iat: nowSec() - 7200, nbf: nowSec() - 7200, exp: nowSec() - 3600 })),
     ],
     [
-      "an iat older than 10 minutes",
+      "an iat older than 15 minutes (10 minutes plus the 5-minute clock tolerance)",
       () => sign(claims({ iat: nowSec() - 16 * 60, nbf: nowSec() - 16 * 60 })),
     ],
     ["a missing oid", () => sign(claims({ oid: undefined }))],
@@ -138,6 +138,12 @@ describe("verifyIdToken", () => {
   it.each(invalid)("refuses %s as invalid", async (_name, token) => {
     const result = await verifyIdToken(await token(), config, { keys: keys() });
     expect(result).toMatchObject({ ok: false, reason: "invalid" });
+  });
+
+  it("accepts an iat up to 15 minutes old: jose takes the clock tolerance off the age check", async () => {
+    const old = nowSec() - 14 * 60;
+    const token = await sign(claims({ iat: old, nbf: old }));
+    expect(await verifyIdToken(token, config, { keys: keys() })).toMatchObject({ ok: true });
   });
 
   it("allows five minutes of clock skew", async () => {

@@ -296,7 +296,8 @@ With `ENTRA_ENABLED=1`, a Microsoft sign-in works like this (D-ENTRA-01,
 2. The web POSTs the ID token and the Graph access token to the cms
    (`POST /api/auth/entra/exchange`, authenticated by
    `ENTRA_EXCHANGE_SECRET`). The cms verifies the ID token itself (the
-   tenant's signing keys, issuer, audience, at most 10 minutes old), reads
+   tenant's signing keys, issuer, audience, issued at most 10 minutes ago
+   plus 5 minutes of clock tolerance, so effectively 15), reads
    Graph `/me`, and finds the user by **tenant id + object id** (never by
    e-mail), backed by a unique database index.
 3. A new user is created on the spot (username `entra-<object id>`,

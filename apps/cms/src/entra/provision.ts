@@ -10,7 +10,8 @@
  *   1. the shared secret (x-entra-exchange-secret), compared in constant
  *      time over sha256 digests;
  *   2. the cms's own verification of the ID token (id-token.ts): only a
- *      real, at most 10-minute-old token of THIS tenant and app gets through.
+ *      real token of THIS tenant and app gets through, its iat at most 10
+ *      minutes old plus 5 minutes of clock tolerance (effectively 15).
  *
  * Then, in this order:
  *   - Graph /me (and checkMemberGroups, /me/manager when configured) in

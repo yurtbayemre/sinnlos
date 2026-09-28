@@ -10,8 +10,10 @@
  *   - iss = https://login.microsoftonline.com/<tenant>/v2.0 and tid = the
  *     tenant (a token of another tenant never passes);
  *   - aud = MS_CLIENT_ID;
- *   - iat at most 10 minutes old (the exchange runs right after the sign-in),
- *     exp not passed, 5 minutes of clock tolerance;
+ *   - iat at most 10 minutes old plus the 5 minutes of clock tolerance, so
+ *     effectively 15 minutes (jose subtracts the tolerance from the age
+ *     check; the exchange runs right after the sign-in); exp not passed,
+ *     with the same tolerance;
  *   - oid, tid and iat present, oid a GUID.
  *
  * Result: `invalid` for every token problem, `unavailable` only when the
