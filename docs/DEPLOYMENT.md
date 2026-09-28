@@ -1398,8 +1398,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    The drift line checks 119 managed actions (batch 8: 117; the two
    revoked `public` actions are managed now). The `revoked` line appears
    on the first boot only (with a smaller number if an admin had removed
-   either action before). A drift warning lists `<role> <action>` pairs
-   added in the admin panel, as since batch 8. `[entra] enabled …` or an
+   either action before). `[bootstrap] users-permissions providers synced
+   (email=on, microsoft=off)` may also appear once, when Strapi's own
+   Microsoft provider was on or still held a client id or secret (from the
+   Strapi 5.49 era); they are now off and cleared, which is expected. A
+   drift warning lists `<role> <action>` pairs added in the admin panel,
+   as since batch 8. `[entra] enabled …` or an
    `[entra] … invalid` error would mean `ENTRA_ENABLED=1` reached the cms:
    roll back (below) and check `infra/.env`.
 
@@ -1871,7 +1875,10 @@ the first boot changes, by itself:
 1. The cms log (`docker logs infra-cms-1 2>&1 | grep -E '\[entra\]|\[bootstrap\]'`):
    `[entra] disabled`, `[bootstrap] revoked 2 obsolete permission(s)` (first
    boot only) and `[bootstrap] permission drift: none (report-only check of
-   119 managed actions)`.
+   119 managed actions)`. `[bootstrap] users-permissions providers synced
+   (email=on, microsoft=off)` may also appear once, when Strapi's own
+   Microsoft provider was on or still held a client id or secret (from the
+   Strapi 5.49 era); they are now off and cleared, which is expected.
 2. The columns and the index (4 rows, then 1):
 
    ```bash
