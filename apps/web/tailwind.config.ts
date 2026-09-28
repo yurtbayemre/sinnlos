@@ -96,7 +96,14 @@ const config: Config = {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         shimmer: "shimmer 1.8s ease-in-out infinite",
-        "fade-in-up": "fade-in-up 0.3s ease-out both",
+        // Fill mode `backwards`, not `both` (UI01): `both` kept the final
+        // translateY(0) on the element after the animation, and any
+        // transform makes an element the containing block of its `fixed`
+        // descendants. On PageFade's wrapper (every page) that pinned
+        // modals and overlays to the content column. `backwards` still
+        // applies the first keyframe from the first frame (no flash) and
+        // leaves no style behind once the animation ends.
+        "fade-in-up": "fade-in-up 0.3s ease-out backwards",
         "fade-in": "fade-in 0.2s ease-out both",
         "scale-in": "scale-in 0.15s ease-out both",
         indeterminate: "indeterminate 1.2s ease-in-out infinite",

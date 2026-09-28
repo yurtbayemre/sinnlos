@@ -125,9 +125,13 @@
 }
 
 @layer utilities {
-  /* Staggered entrance for grid/list children. Apply to the container. */
+  /* Staggered entrance for grid/list children. Apply to the container.
+     `backwards` (UI01, see the fade-in-up animation in tailwind.config.ts):
+     hidden during the delay, and no transform left on the children after
+     the animation, which would make each card the containing block of any
+     `fixed` descendant. */
   .stagger > * {
-    animation: fade-in-up 0.35s ease-out both;
+    animation: fade-in-up 0.35s ease-out backwards;
   }
   .stagger > *:nth-child(1) {
     animation-delay: 0ms;

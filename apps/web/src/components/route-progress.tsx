@@ -10,11 +10,13 @@ import { useHydrated } from "@/lib/use-hydrated";
  * whenever Next.js is loading a new route segment. Used from the route
  * loading.tsx files so it shows on every navigation between app pages.
  *
- * Portaled to <body>: loading.tsx renders inside PageFade, whose
- * persistent transform (animate-fade-in-up with fill both) makes it the
- * containing block for fixed descendants — without the portal the bar
- * sticks to the content column instead of the viewport. Renders null
- * before mount (SSR has no document to portal into).
+ * Portaled to <body> (defense in depth): loading.tsx renders inside
+ * PageFade, and a transformed ancestor is the containing block of `fixed`
+ * descendants. Since UI01 PageFade's fade-in-up leaves no transform behind
+ * (fill mode `backwards`), but the transform still exists while the
+ * animation runs, which is exactly when a loading state shows; without the
+ * portal the bar would stick to the content column instead of the
+ * viewport. Renders null before mount (SSR has no document to portal into).
  */
 export function RouteProgress() {
   const tCommon = useTranslations("common");
