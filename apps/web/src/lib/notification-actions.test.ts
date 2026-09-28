@@ -9,9 +9,10 @@ import { StrapiError } from "@/lib/strapi-error";
  *     the session user, actor populated) and, since WD10, the caller's
  *     unread total (meta.pagination.total of a readAt=null query with
  *     pageSize 1) as { items, unreadTotal }; no session user = the empty
- *     feed without a request; any cms failure = the empty feed (the bell
- *     polls on), EXCEPT strapi()'s 401 sign-in redirect, which propagates
- *     (otherwise the bell would poll an expired session forever);
+ *     feed without a request; a failed list = the empty feed (the bell
+ *     polls on), a failed count alone keeps the list and counts the unread
+ *     among it; strapi()'s 401 sign-in redirect from either request
+ *     propagates (otherwise the bell would poll an expired session forever);
  *   - markNotificationsRead / markAllNotificationsRead have no catch: a 400
  *     rejects with the StrapiError, a 401 redirect propagates. Neither
  *     refreshes (the bell refetches itself).
@@ -117,23 +118,48 @@ describe("getNotifications", () => {
     await expect(getNotifications()).resolves.toEqual(EMPTY);
   });
 
-  it("answers the empty feed when only the unread count fails", async () => {
+  it.each([
+    ["a 400", cmsError(400)],
+    ["a 500", cmsError(500)],
+    ["a network error", new TypeError("fetch failed")],
+  ])("keeps the loaded list when only the unread count fails with %s", async (_label, error) => {
     strapiMock.mockImplementation(async (path: string) => {
-      if (path === UNREAD_PATH) throw cmsError(500);
+      if (path === UNREAD_PATH) throw error;
       return { data: ROWS };
+    });
+    // The fallback: the unread among the loaded items (ROWS holds one).
+    await expect(getNotifications()).resolves.toEqual({ items: ROWS, unreadTotal: 1 });
+  });
+
+  it("answers the empty feed when only the list fails", async () => {
+    strapiMock.mockImplementation(async (path: string) => {
+      if (path === UNREAD_PATH) {
+        return { data: [{ id: 2 }], meta: { pagination: { total: 25 } } };
+      }
+      throw cmsError(500);
     });
     await expect(getNotifications()).resolves.toEqual(EMPTY);
   });
 
   it("lets strapi()'s 401 sign-in redirect propagate, from either request", async () => {
     const redirectError = signInRedirect();
-    strapiMock.mockRejectedValue(redirectError);
-    await expect(getNotifications()).rejects.toBe(redirectError);
-    strapiMock.mockImplementation(async (path: string) => {
-      if (path === UNREAD_PATH) throw redirectError;
-      return { data: ROWS };
-    });
-    await expect(getNotifications()).rejects.toBe(redirectError);
+    const cases: [unknown, unknown][] = [
+      [redirectError, redirectError],
+      [redirectError, null],
+      [null, redirectError],
+      [redirectError, cmsError(500)],
+      [cmsError(500), redirectError],
+    ];
+    for (const [listError, unreadError] of cases) {
+      strapiMock.mockImplementation(async (path: string) => {
+        const error = path === UNREAD_PATH ? unreadError : listError;
+        if (error) throw error;
+        return path === UNREAD_PATH
+          ? { data: [{ id: 2 }], meta: { pagination: { total: 25 } } }
+          : { data: ROWS };
+      });
+      await expect(getNotifications()).rejects.toBe(redirectError);
+    }
   });
 });
 

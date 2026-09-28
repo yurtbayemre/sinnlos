@@ -24,16 +24,17 @@ const EMPTY_FEED: NotificationFeed = { items: [], unreadTotal: 0 };
  * notification-visibility policy (analytics counts platform-wide), and the
  * bell must show the caller's own notifications only. The unread count is
  * one extra request that returns a single row (pageSize 1). No session user
- * = the empty feed without a request; any cms failure = the empty feed (the
- * bell polls on), EXCEPT strapi()'s 401 sign-in redirect, which propagates
- * (otherwise the bell would poll an expired session forever).
+ * = the empty feed without a request. A failed list = the empty feed (the
+ * bell polls on); a failed count alone keeps the loaded list and counts the
+ * unread among it. strapi()'s 401 sign-in redirect from EITHER request
+ * propagates (otherwise the bell would poll an expired session forever).
  */
 export async function getNotifications(): Promise<NotificationFeed> {
   const session = await getSession();
   const userId = session?.user?.id;
   if (!userId) return EMPTY_FEED;
   try {
-    const [list, unread] = await Promise.all([
+    const [list, unread] = await Promise.allSettled([
       strapi<StrapiListResponse<Notification>>(
         `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
       ),
@@ -41,12 +42,16 @@ export async function getNotifications(): Promise<NotificationFeed> {
         `/api/notifications?filters[recipient][id][$eq]=${userId}&filters[readAt][$null]=true&fields[0]=id&pagination[pageSize]=1`,
       ),
     ]);
-    const items = Array.isArray(list?.data) ? list.data : [];
-    const total = unread?.meta?.pagination?.total;
+    // The redirect of either request wins; a failed count alone must not
+    // cost the loaded list, a failed list is the empty feed (catch below).
+    if (unread.status === "rejected") unstable_rethrow(unread.reason);
+    if (list.status === "rejected") throw list.reason;
+    const items = Array.isArray(list.value?.data) ? list.value.data : [];
+    const total = unread.status === "fulfilled" ? unread.value?.meta?.pagination?.total : undefined;
     return {
       items,
-      // A response without a total (DEMO_MODE fixtures, a proxy mangling
-      // the body) falls back to the unread among the loaded items.
+      // No usable total (the count failed, DEMO_MODE fixtures, a proxy
+      // mangling the body): the unread among the loaded items.
       unreadTotal:
         typeof total === "number" && Number.isInteger(total) && total >= 0
           ? total
