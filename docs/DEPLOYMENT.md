@@ -287,6 +287,18 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
    `ENTRA_SYNC_MODE=dry-run` (the default); run `infra/deploy.sh --check`
    until it prints `Preflight OK`, then deploy. The cms logs
    `[entra] enabled … mode=dry-run`.
+   `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
+   a local demo account. Without `AUTH_LOCAL_ENABLED=1` (Entra only) that
+   sign-in fails after an otherwise good deploy whenever the demo
+   credentials file (`PASSWORDS_FILE`) is readable: `live-smoke: FAIL —
+   sign-in … produced no session cookie`, then `live-smoke failed — the
+   SSE pipeline is NOT delivering pings` and exit code 1. Either keep
+   `AUTH_LOCAL_ENABLED=1` (the break-glass account, see
+   [the rollback notes](#rolling-back-after-switching-microsoft-sign-in-on),
+   step 3), or deploy with `PASSWORDS_FILE=/nonexistent infra/deploy.sh`
+   (it logs `live-smoke SKIPPED`) and check the live pings in a browser: a
+   comment from a second session refreshes the card in the first. This
+   holds for every deploy of an Entra-only instance, step 5 included.
 2. Let a few users sign in: an app-role user, a user in an
    `ENTRA_GROUP_ROLES` group (if used), a B2B guest without and then with
    `Intranet.Guest`, a user without a manager, a user whose Entra department
@@ -1943,6 +1955,8 @@ these Entra steps:
    Their roles stay as they are (*manual*) until an admin hands them to
    Entra.
 4. Deploy, review the `[entra]` lines in dry-run, then switch to `on`.
+   Without `AUTH_LOCAL_ENABLED=1`, `infra/deploy.sh`'s live-smoke cannot
+   sign in ([Staging dry-run, then on](#staging-dry-run-then-on), step 1).
 5. Rollback: prefer switching back in `infra/.env` (`ENTRA_ENABLED=0` or
    `AUTH_LOCAL_ENABLED=1`) over an image rollback. An image rollback needs
    `AUTH_LOCAL_ENABLED=1` in `infra/.env` before the old images start (a
