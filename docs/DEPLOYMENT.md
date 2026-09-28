@@ -966,12 +966,24 @@ points at the end of this list:
   web's comment sections) checks only that target instead of resolving
   every visible announcement and wiki page. A caller's role, department and
   teams are read once per request.
-- **Bind-parameter guard (PL04).** A policy whose list of visible ids would
-  exceed what one SQL statement can bind (65535 parameters on Postgres,
-  32766 on SQLite, minus 1000 headroom) answers with an empty result and
-  logs `[policy] <policy>: <count> values exceed ...` at error level, where
-  the request used to fail with a 500. Nothing near that size exists on an
-  intranet; the log line is the signal to change that policy.
+- **Bind-parameter guard (PL04).** One SQL statement binds at most 65535
+  values on Postgres and 32766 on SQLite. A policy that binds a list of
+  visible ids without reading a whole table first (wiki pages and
+  revisions, lessons, the wiki-page anchors of comment and reaction lists)
+  now checks the list against that limit minus 1000 values of headroom,
+  which the request's own filters, status and pagination need. A longer
+  list answers with an empty result and logs
+  `[policy] <policy>: <count> values exceed ...` at error level. Past the
+  engine limit, where such a list used to fail with a 500, the answer is
+  now an empty 200; in the window of about 1000 values just below the
+  limit, where the previous release still returned the rows, it is empty
+  too (an accepted trade-off). The announcement, document, quick-link and
+  poll policies, the wiki spaces and the team lookup read whole tables
+  with `populate`: past the engine limit they still fail with a 500 inside
+  Strapi, before any guard runs, with no data returned and no `[policy]`
+  line ([architecture.md §5.63](./architecture.md)). Nothing near either
+  size exists on an intranet; the log line, or a 500 with a database
+  bind-parameter error, is the signal to change that policy.
 - **Wiki threads follow the published space.** Comment and reaction lists
   now judge a wiki page the way a single thread and the page itself are
   judged: by its published row. A wiki space whose visibility was widened
@@ -999,8 +1011,12 @@ schema, env, edge or grant change, nothing to migrate.
 
    Expect no output (a policy that throws shows up as an `error` line, and
    its request as a 500). A `[policy]` line names the policy and the list
-   size that did not fit; the affected list is empty for everyone without
-   the admin/editor bypass until that policy is changed.
+   size that did not fit; that list reads empty for every caller whose
+   visible ids exceed the limit (admin and editor bypass it) until that
+   policy is changed. For the policies that read whole tables with
+   `populate` (announcements, documents, quick links, polls, wiki spaces,
+   the team lookup) the signal is a 500 with a database bind-parameter
+   error in the log instead, and no `[policy]` line.
 
 **Rollback:** the batch 8 image runs on the same database as it is (no
 schema or data change), with the commands `infra/deploy.sh` prints.
@@ -1012,11 +1028,15 @@ statements instead of 27, without loading every announcement and page; a
 wiki space widened only in its draft opened its page's thread before and
 does not now, on both the thread and the list; numeric id and documentId on
 comment delete, classified update and RSVP update answered exactly as
-before (owner 204/200, stranger 403, missing or malformed id 404); one
-visible wiki page more than a statement can bind (31,767 on SQLite, 64,536
-on Postgres) turned the member's page list and full comment list from a 500
-into an empty 200 with the log line, while a single thread and the admin
-list were unaffected.
+before (owner 204/200, stranger 403, missing or malformed id 404); past the
+engine limit (33,000 visible wiki pages on SQLite and 66,000 on Postgres in
+the rehearsal, 32,767 and 65,536 in the integration test) the previous
+release answered the member's page list and full comment list with a 500
+and this one answers an empty 200 with the log line, while a single thread
+and the admin list were unaffected. The guard already answers the page list
+empty from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
+comment list from one page fewer plus an announcement, where the previous
+release still served the rows.
 
 #### Deploying batch 8 (2026-09-28)
 

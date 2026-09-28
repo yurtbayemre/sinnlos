@@ -570,9 +570,17 @@ with the client filter, never spread-merged, so a client filter can only
 narrow the result) and `restrictiveIdFilter` (an empty id allow-list is
 injected as `{ id: { $eq: -1 } }` because Strapi's query sanitizer strips an
 empty `$in: []`, which would fail **open**), `boundedIdFilter` (the same for
-a list longer than one SQL statement can bind — 65535 parameters on
-Postgres, 32766 on SQLite, minus 1000 headroom: the policy answers with
-nothing and logs a `[policy]` error line instead of failing with a 500), and
+a list longer than the guard admits — one SQL statement binds at most 65535
+parameters on Postgres and 32766 on SQLite, and the guard keeps 1000 of
+them as headroom for the rest of the statement: the policy answers with
+nothing and logs a `[policy]` error line; past the engine limit that
+replaces a 500, and in the headroom window just below it the list is now
+empty where it used to be served. It covers the loaders that bind only an
+id list: wiki pages and revisions, lessons and the comment and reaction
+wiki anchors. The announcement, document, quick-link, poll, wiki-space and
+team loaders read whole tables with `populate` and still fail with a 500
+past the engine limit, with no data returned and no `[policy]` line; see
+[architecture.md §5.63](./docs/architecture.md)), and
 `forcePublishedStatus` (after the `admin_role`/`editor` bypass: pins
 `status=published` and drops the
 publication-cohort keys `publicationFilter`/`hasPublishedVersion` and the
