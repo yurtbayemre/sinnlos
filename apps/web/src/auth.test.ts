@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { decode, encode, type JWT } from "next-auth/jwt";
 
@@ -199,6 +199,14 @@ beforeEach(() => {
   stub.exchangeStatus = 200;
   fetchMock.mockClear();
 });
+
+// The first import of @/auth transforms next-auth and @auth/core (inlined,
+// see vitest.config.ts). Under a full parallel run that cold import alone
+// took 3–4.6 s of the first test's 5 s budget and sometimes all of it; pay
+// it once here, under the hook timeout. load() then re-evaluates cheaply.
+beforeAll(async () => {
+  await load();
+}, 30_000);
 
 afterAll(() => {
   vi.unstubAllEnvs();
