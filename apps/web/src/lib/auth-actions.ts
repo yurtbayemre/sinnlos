@@ -11,7 +11,7 @@ import { redirect } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { signIn, signOut } from "@/auth";
-import { REGISTRATION_ENABLED } from "@/lib/auth-config";
+import { ENTRA, REGISTRATION_ENABLED, entraLogoutUrl } from "@/lib/auth-config";
 import { isRateLimitedSignIn } from "@/lib/auth-errors";
 import { STRAPI_URL } from "@/lib/config";
 import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
@@ -133,20 +133,6 @@ export async function registerLocalAccount(
 }
 
 /**
- * Build the Microsoft Entra ID `end_session_endpoint` URL from the
- * OIDC issuer we configured for the provider.
- *
- * Entra issuer format:  https://login.microsoftonline.com/<tenant>/v2.0
- * End-session endpoint: https://login.microsoftonline.com/<tenant>/oauth2/v2.0/logout
- */
-function entraEndSessionUrl(issuer: string, postLogoutRedirectUri: string): string {
-  const base = issuer.replace(/\/v2\.0\/?$/, "");
-  const url = new URL(`${base}/oauth2/v2.0/logout`);
-  url.searchParams.set("post_logout_redirect_uri", postLogoutRedirectUri);
-  return url.toString();
-}
-
-/**
  * Provider-aware sign-out:
  *
  *  1. Read the session BEFORE clearing it to learn which provider the
@@ -154,17 +140,19 @@ function entraEndSessionUrl(issuer: string, postLogoutRedirectUri: string): stri
  *  2. Clear the local Auth.js session cookie (signOut with redirect:false
  *     returns a URL but does NOT throw the NEXT_REDIRECT sentinel, which
  *     lets us chain a second redirect below).
- *  3. Microsoft sessions only: redirect the browser to Microsoft's
- *     end_session endpoint with `post_logout_redirect_uri` pointing back
- *     at /sign-in. Microsoft will clear its own tenant cookie before
+ *  3. Microsoft sessions only: redirect the browser to the tenant's
+ *     end-session endpoint (https://login.microsoftonline.com/<tenant
+ *     GUID>/oauth2/v2.0/logout, built from the configured tenant, lib/
+ *     auth-config.ts) with `post_logout_redirect_uri` pointing back at
+ *     /sign-in. Microsoft will clear its own tenant cookie before
  *     bouncing the user back, so the next "Sign in with Microsoft" click
  *     will actually prompt for credentials instead of silently
  *     auto-authenticating. Local users skip this — they'd otherwise get
  *     bounced to a Microsoft logout page.
  *
- * If `AUTH_MICROSOFT_ENTRA_ID_ISSUER` is not configured (e.g. running
- * against a different IdP or in DEMO_MODE), we fall back to a local
- * redirect to /sign-in — the local session is still cleared.
+ * With Microsoft sign-in off (ENTRA_ENABLED is not '1', e.g. in DEMO_MODE
+ * or after it was switched off), we fall back to a local redirect to
+ * /sign-in — the local session is still cleared.
  *
  * Note: the `post_logout_redirect_uri` value MUST be registered in the
  * Entra app registration under **Authentication → Front-channel logout
@@ -178,7 +166,6 @@ export async function signOutAction() {
 
   await signOut({ redirect: false });
 
-  const issuer = process.env.AUTH_MICROSOFT_ENTRA_ID_ISSUER;
   // Prefer AUTH_URL, otherwise reconstruct the public origin from the
   // request headers (Traefik sets x-forwarded-*) — the old hardcoded
   // http://localhost:3000 fallback sent Microsoft users to a dead
@@ -193,10 +180,10 @@ export async function signOutAction() {
 
   // Federated logout only applies to Microsoft sessions — local users
   // would otherwise get bounced to a Microsoft logout page.
-  if (provider === "microsoft-entra-id" && issuer) {
+  if (provider === "microsoft-entra-id" && ENTRA) {
     // External Microsoft end-session URL — typedRoutes only models
     // internal routes, the cast is the documented escape hatch.
-    redirect(entraEndSessionUrl(issuer, postLogoutRedirect) as Route);
+    redirect(entraLogoutUrl(ENTRA.tenantId, postLogoutRedirect) as Route);
   }
 
   redirect("/sign-in");

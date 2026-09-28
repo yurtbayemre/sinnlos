@@ -73,7 +73,14 @@
     "demoMode": "Demo-Modus",
     "registrationDisabled": "Die Registrierung ist derzeit deaktiviert.",
     "sessionExpired": "Ihre Sitzung ist abgelaufen – bitte melden Sie sich erneut an.",
-    "rateLimited": "Zu viele Anmeldeversuche – bitte warten Sie eine Minute und versuchen Sie es erneut."
+    "rateLimited": "Zu viele Anmeldeversuche – bitte warten Sie eine Minute und versuchen Sie es erneut.",
+    "signInFailed": "Die Anmeldung ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+    "entra_tenant": "Dieses Microsoft-Konto gehört zu einer anderen Organisation. Bitte melden Sie sich mit Ihrem Firmenkonto an.",
+    "entra_account_exists": "Es gibt bereits ein Intranet-Konto mit Ihrer E-Mail-Adresse. Bitten Sie einen Administrator, es mit Ihrem Microsoft-Konto zu verknüpfen.",
+    "entra_not_assigned": "Ihr Microsoft-Konto hat keinen Zugang zum Intranet. Bitten Sie Ihre IT-Administration, es zuzuweisen.",
+    "entra_blocked": "Ihr Intranet-Konto ist gesperrt. Bitte wenden Sie sich an einen Administrator.",
+    "entra_invalid": "Die Microsoft-Anmeldung konnte nicht bestätigt werden. Bitte versuchen Sie es erneut.",
+    "entra_unavailable": "Die Microsoft-Anmeldung ist gerade nicht verfügbar. Bitte versuchen Sie es gleich noch einmal."
   },
   "dashboard": {
     "welcomeBack": "Willkommen zurück",

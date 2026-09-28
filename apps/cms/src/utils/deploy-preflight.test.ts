@@ -235,10 +235,9 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
 describe("Microsoft sign-in gate (Strapi 5.51+)", () => {
   const GUID = "0b9d6c3e-4a1f-4c2b-9e8d-7f6a5b4c3d2e";
 
-  it("keys on the same pair the web enables Microsoft sign-in with", () => {
-    expect(WEB_AUTH_CONFIG).toContain(
-      "process.env.AUTH_MICROSOFT_ENTRA_ID_ID && process.env.AUTH_MICROSOFT_ENTRA_ID_SECRET",
-    );
+  it("keys on the pair compose hands the web (which also needs ENTRA_ENABLED=1 now)", () => {
+    // Stricter than the web until the preflight learns ENTRA_ENABLED.
+    expect(WEB_AUTH_CONFIG).toContain('env.ENTRA_ENABLED !== "1"');
     expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}");
     expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}");
   });

@@ -3,11 +3,13 @@ import { NextRequest } from "next/server";
 import { decode, encode, type JWT } from "next-auth/jwt";
 
 /**
- * D-SESSION-01 regression suite (deep-dive decisions/01-microsoft-signin.md
- * spec C/M, investigations.md #1/#2). Runs the REAL apps/web/src/auth.ts
- * through the REAL Auth.js route handlers (GET/POST /api/auth/*) and the real
- * server-side auth(); only Strapi (global fetch) and `next/headers` (the
- * request headers auth() and the token reader see) are stubbed. Pins:
+ * Auth.js regression suite: D-SESSION-01 and the Entra sign-in of
+ * D-ENTRA-01 (deep-dive decisions/01-microsoft-signin.md spec C/M,
+ * investigations.md #1/#2). Runs the REAL apps/web/src/auth.ts through the
+ * REAL Auth.js route handlers (GET/POST /api/auth/*) and the real
+ * server-side auth(); only the network (global fetch: Strapi, and a mock
+ * Microsoft identity platform) and `next/headers` (the request headers
+ * auth() and the token reader see) are stubbed. Pins:
  *   1. GET /api/auth/session — reachable by any script on the origin — never
  *      carries the Strapi JWT, a role or a department, for either provider.
  *   2. The Auth.js session ends with the Strapi JWT: the jwt callback records
@@ -18,17 +20,40 @@ import { decode, encode, type JWT } from "next-auth/jwt";
  *      behind an https AUTH_URL or x-forwarded-proto (lib/strapi-token.ts).
  *   4. Server-side auth() yields null (fails closed) when Auth.js answers the
  *      session read with a configuration error.
+ *   5. The Microsoft sign-in end to end through @auth/core 0.41.3 with a
+ *      mock tenant: the authorize request (tenant endpoint, scope without
+ *      offline_access), the claims-only profile (no Graph photo request),
+ *      the GUID issuer (a token of another tenant fails Auth.js' own iss
+ *      check), the signIn callback (tenant check, POST exchange, entra_*
+ *      redirects) and the WeakMap hand-off to the jwt callback.
+ * Fake GUIDs and secrets only.
  */
 const SECRET = "vitest-auth-secret-0123456789-abcdefghijklmnop";
 const STRAPI = "http://strapi.test";
 const DAY = 24 * 60 * 60;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
+const TENANT = "11111111-2222-4333-8444-555555555555";
+const OTHER_TENANT = "99999999-8888-4777-8666-555555555555";
+const CLIENT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const OID = "0f0f0f0f-1e1e-4d2d-8c3c-4b4b4b4b4b4b";
+const EXCHANGE_SECRET = "web-exchange-secret-0123456789abcdef";
+const LOGIN = "https://login.microsoftonline.com";
+const EXCHANGE_URL = `${STRAPI}/api/auth/entra/exchange`;
+
 /** A Strapi-shaped JWT (unsigned for the web: only `exp` is ever decoded). */
 function fakeStrapiJwt(exp: number, id = 7): string {
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
   return `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ id, iat: exp - 7 * DAY, exp })}.sig-${id}-${exp}`;
 }
+
+/** An RS256-shaped ID token (Auth.js checks its claims; the cms checks the signature). */
+function fakeIdToken(claims: Record<string, unknown>): string {
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "RS256", kid: "mock-key", typ: "JWT" })}.${b64(claims)}.bW9jay1zaWduYXR1cmU`;
+}
+
+type ExchangeAnswer = { status: number; body: unknown } | "network-error";
 
 const stub = vi.hoisted(() => ({
   /** Headers the server-side auth()/getStrapiJwt() read via next/headers. */
@@ -37,10 +62,14 @@ const stub = vi.hoisted(() => ({
   localStatus: 200,
   localExp: 0,
   localJwt: "",
-  exchangeExp: 0,
-  exchangeJwt: "",
-  /** HTTP status of the Microsoft callback exchange (400 = Strapi 5.51+). */
-  exchangeStatus: 200,
+  /** The mock tenant: the next ID token's claims (nonce added from the authorize request). */
+  idClaims: {} as Record<string, unknown>,
+  nonce: undefined as string | undefined,
+  idToken: "",
+  accessToken: "graph-access-token-VALUE",
+  /** Answers of POST /api/auth/entra/exchange, in order (the last one repeats). */
+  exchangeAnswers: [] as ({ status: number; body: unknown } | "network-error")[],
+  exchangeCalls: [] as { headers: Headers; body: string }[],
 }));
 
 vi.mock("next/headers", () => ({
@@ -56,10 +85,26 @@ vi.mock("next/headers", () => ({
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
+const discovery = (tenant: string) => ({
+  issuer: `${LOGIN}/${tenant}/v2.0`,
+  authorization_endpoint: `${LOGIN}/${tenant}/oauth2/v2.0/authorize`,
+  token_endpoint: `${LOGIN}/${tenant}/oauth2/v2.0/token`,
+  jwks_uri: `${LOGIN}/${tenant}/discovery/v2.0/keys`,
+  end_session_endpoint: `${LOGIN}/${tenant}/oauth2/v2.0/logout`,
+  // Auth.js requires one in the metadata; an OIDC sign-in never calls it
+  // (the profile comes from the ID token).
+  userinfo_endpoint: "https://graph.microsoft.com/oidc/userinfo",
+  response_types_supported: ["code", "id_token", "code id_token"],
+  subject_types_supported: ["pairwise"],
+  id_token_signing_alg_values_supported: ["RS256"],
+  scopes_supported: ["openid", "profile", "email", "offline_access"],
+});
+
 // Strapi answers WITH role and department everywhere, so the assertions
 // below prove the web drops them rather than never receiving them.
-const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
-  const url = input instanceof Request ? input.url : String(input);
+const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  const request = input instanceof Request ? input : new Request(input, init);
+  const url = request.url;
   if (url === `${STRAPI}/api/auth/local`) {
     if (stub.localStatus !== 200) {
       return json({ error: { status: stub.localStatus } }, stub.localStatus);
@@ -79,36 +124,27 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
       department: { id: 3, name: "Engineering", slug: "engineering" },
     });
   }
-  if (url.startsWith(`${STRAPI}/api/auth/microsoft/callback?access_token=`)) {
-    if (stub.exchangeStatus === 400) {
-      // What @strapi/plugin-users-permissions 5.51+ answers a callback that
-      // did not come through its own OAuth (grant) session.
-      return json(
-        {
-          data: null,
-          error: {
-            status: 400,
-            name: "ApplicationError",
-            message: "OAuth authentication requires a completed provider session",
-            details: {},
-          },
-        },
-        400,
-      );
-    }
+  if (url === `${LOGIN}/${TENANT}/v2.0/.well-known/openid-configuration`) {
+    return json(discovery(TENANT));
+  }
+  if (url === `${LOGIN}/${TENANT}/oauth2/v2.0/token` && request.method === "POST") {
+    stub.idToken = fakeIdToken({ ...stub.idClaims, ...(stub.nonce ? { nonce: stub.nonce } : {}) });
     return json({
-      jwt: stub.exchangeJwt,
-      user: {
-        id: 42,
-        username: "grace",
-        email: "grace@example.test",
-        displayName: "Grace",
-        role: { id: 1, type: "admin_role", name: "Admin" },
-        department: { id: 3, name: "Engineering", slug: "engineering" },
-      },
+      token_type: "Bearer",
+      scope: "openid profile email User.Read",
+      expires_in: 3600,
+      access_token: stub.accessToken,
+      id_token: stub.idToken,
     });
   }
-  throw new Error(`unexpected fetch ${url}`);
+  if (url === EXCHANGE_URL && request.method === "POST") {
+    stub.exchangeCalls.push({ headers: request.headers, body: await request.text() });
+    const answer =
+      stub.exchangeAnswers.length > 1 ? stub.exchangeAnswers.shift()! : stub.exchangeAnswers[0];
+    if (!answer || answer === "network-error") throw new TypeError("fetch failed");
+    return json(answer.body, answer.status);
+  }
+  throw new Error(`unexpected fetch ${request.method} ${url}`);
 });
 vi.stubGlobal("fetch", fetchMock);
 
@@ -120,9 +156,24 @@ const BASE_ENV: Env = {
   NEXTAUTH_URL: undefined,
   STRAPI_URL: STRAPI,
   AUTH_LOCAL_ENABLED: "1",
+  ENTRA_ENABLED: undefined,
+  ENTRA_EXCHANGE_SECRET: undefined,
+  ENTRA_SYNC_MANAGER: undefined,
   AUTH_MICROSOFT_ENTRA_ID_ID: undefined,
   AUTH_MICROSOFT_ENTRA_ID_SECRET: undefined,
+  AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: undefined,
+  AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
+  NEXT_PHASE: undefined,
   DEMO_MODE: undefined,
+};
+
+/** Microsoft sign-in switched on (next to local sign-in). */
+const ENTRA_ENV: Env = {
+  ENTRA_ENABLED: "1",
+  AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: TENANT.toUpperCase(),
+  AUTH_MICROSOFT_ENTRA_ID_ID: CLIENT,
+  AUTH_MICROSOFT_ENTRA_ID_SECRET: "web-client-secret-value",
+  ENTRA_EXCHANGE_SECRET: EXCHANGE_SECRET,
 };
 
 /** Fresh auth.ts (+ session/token modules) under the given env. */
@@ -175,6 +226,39 @@ async function signInLocal(mod: Loaded, base: string) {
   return { jar, res };
 }
 
+/**
+ * The browser side of a Microsoft sign-in: csrf → POST signin (Auth.js
+ * redirects to the tenant's authorize endpoint) → the IdP "redirects back"
+ * with a code → GET callback (Auth.js redeems the code at the mock token
+ * endpoint and runs the callbacks).
+ */
+async function signInMicrosoft(mod: Loaded, base = "http://localhost:3000") {
+  const jar = cookieJar();
+  const csrfRes = await mod.handlers.GET(new NextRequest(`${base}/api/auth/csrf`));
+  jar.absorb(csrfRes);
+  const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+  const start = await mod.handlers.POST(
+    new NextRequest(`${base}/api/auth/signin/microsoft-entra-id`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie: jar.header() },
+      body: new URLSearchParams({ csrfToken, callbackUrl: `${base}/wiki` }),
+    }),
+  );
+  jar.absorb(start);
+  const authorize = new URL(start.headers.get("location") ?? "about:blank");
+  stub.nonce = authorize.searchParams.get("nonce") ?? undefined;
+  const params = new URLSearchParams({ code: "mock-authorization-code" });
+  const state = authorize.searchParams.get("state");
+  if (state) params.set("state", state);
+  const callback = await mod.handlers.GET(
+    new NextRequest(`${base}/api/auth/callback/microsoft-entra-id?${params}`, {
+      headers: { cookie: jar.header() },
+    }),
+  );
+  jar.absorb(callback);
+  return { jar, start, authorize, callback };
+}
+
 async function getSessionJson(mod: Loaded, base: string, cookie: string): Promise<Response> {
   return mod.handlers.GET(new NextRequest(`${base}/api/auth/session`, { headers: { cookie } }));
 }
@@ -189,14 +273,49 @@ function expectNoStrapiSecrets(body: unknown, jwt: string) {
   }
 }
 
+const idClaims = (overrides: Record<string, unknown> = {}) => {
+  const iat = nowSec() - 5;
+  return {
+    iss: `${LOGIN}/${TENANT}/v2.0`,
+    aud: CLIENT,
+    sub: "pairwise-subject-of-grace",
+    oid: OID,
+    tid: TENANT,
+    iat,
+    nbf: iat,
+    exp: iat + 3600,
+    name: "Grace Entra",
+    preferred_username: "Grace@Example.test",
+    ...overrides,
+  };
+};
+
+let exchangeExp = 0;
+let exchangeJwt = "";
+const exchangeOk = () => ({
+  status: 200,
+  body: {
+    jwt: exchangeJwt,
+    expiresAt: exchangeExp,
+    user: { id: 42, displayName: "Grace", email: "grace@example.test" },
+  },
+});
+
+const graphCalls = () =>
+  fetchMock.mock.calls.filter(([input]) => String(input instanceof Request ? input.url : input).includes("graph.microsoft.com"));
+
 beforeEach(() => {
   stub.headers = new Headers();
   stub.localStatus = 200;
   stub.localExp = nowSec() + 7 * DAY;
   stub.localJwt = fakeStrapiJwt(stub.localExp);
-  stub.exchangeExp = nowSec() + 7 * DAY - 5;
-  stub.exchangeJwt = fakeStrapiJwt(stub.exchangeExp, 42);
-  stub.exchangeStatus = 200;
+  stub.idClaims = idClaims();
+  stub.nonce = undefined;
+  stub.idToken = "";
+  exchangeExp = nowSec() + 12 * 60 * 60;
+  exchangeJwt = fakeStrapiJwt(exchangeExp, 42);
+  stub.exchangeAnswers = [exchangeOk()];
+  stub.exchangeCalls = [];
   fetchMock.mockClear();
 });
 
@@ -246,47 +365,22 @@ describe("GET /api/auth/session never exposes the Strapi JWT", () => {
     expect(token).not.toHaveProperty("strapiDepartment");
   });
 
-  // Contract of the jwt callback for a SUCCESSFUL exchange. The CMS no longer
-  // produces one (Strapi 5.51+ answers 400, pinned in the Microsoft describe
-  // below); this stays as the D-SESSION-01 pin for the Microsoft branch until
-  // the Entra exchange (D-ENTRA-01) replaces it.
-  it("Microsoft sign-in: the jwt callback stores JWT + exp, and the session omits them", async () => {
-    const mod = await load();
-    const token = await mod.callbacks.jwt({
-      token: { name: "Entra Name", email: "entra@example.test", sub: "entra-oid" },
-      user: { id: "entra-oid", name: "Entra Name", email: "entra@example.test" },
-      account: {
-        provider: "microsoft-entra-id",
-        type: "oidc",
-        providerAccountId: "entra-oid",
-        access_token: "graph-access-token",
-      },
-    });
-    // The current exchange path (D-ENTRA-01 replaces it).
-    expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-      `${STRAPI}/api/auth/microsoft/callback?access_token=graph-access-token`,
-    );
-    expect(token).toMatchObject({
-      strapiJwt: stub.exchangeJwt,
-      strapiUserId: 42,
-      strapiJwtExp: stub.exchangeExp,
-      name: "Grace",
-      email: "grace@example.test",
-      provider: "microsoft-entra-id",
-    });
-    expect(token).not.toHaveProperty("strapiRole");
-    expect(token).not.toHaveProperty("strapiDepartment");
-
-    if (!token) throw new Error("the Microsoft sign-in produced no token");
-    const cookie = await encode({ token, secret: SECRET, salt: "authjs.session-token" });
-    const sRes = await getSessionJson(
-      mod,
-      "http://localhost:3000",
-      `authjs.session-token=${cookie}`,
-    );
+  it("Microsoft sign-in: only id, provider and the display fields reach the browser", async () => {
+    const mod = await load(ENTRA_ENV);
+    const { jar, callback } = await signInMicrosoft(mod);
+    expect(callback.status).toBe(302);
+    expect(jar.names()).toContain("authjs.session-token");
+    const sRes = await getSessionJson(mod, "http://localhost:3000", jar.header());
     const body = (await sRes.json()) as Record<string, unknown>;
-    expect(body).toMatchObject({ provider: "microsoft-entra-id", user: { id: 42, name: "Grace" } });
-    expectNoStrapiSecrets(body, stub.exchangeJwt);
+    expect(body).toMatchObject({
+      provider: "microsoft-entra-id",
+      user: { id: 42, name: "Grace", email: "grace@example.test" },
+    });
+    expect(Object.keys(body).sort()).toEqual(["expires", "provider", "user"]);
+    expect(JSON.stringify(body)).not.toContain('"image"');
+    expectNoStrapiSecrets(body, exchangeJwt);
+    expect(JSON.stringify(body)).not.toContain(stub.accessToken);
+    expect(JSON.stringify(body)).not.toContain(stub.idToken.split(".")[1]!);
   });
 
   it("a session cookie from before D-SESSION-01 (role/department on the token) leaks neither", async () => {
@@ -314,58 +408,180 @@ describe("GET /api/auth/session never exposes the Strapi JWT", () => {
   });
 });
 
-describe("Microsoft sign-in against Strapi 5.51+ (the exchange is rejected)", () => {
-  const microsoftAccount = {
-    token: { name: "Entra Name", email: "entra@example.test", sub: "entra-oid" },
-    user: { id: "entra-oid", name: "Entra Name", email: "entra@example.test" },
-    account: {
-      provider: "microsoft-entra-id",
-      type: "oidc" as const,
-      providerAccountId: "entra-oid",
-      access_token: "graph-access-token",
-    },
-  };
-
-  it("the 400 fails the sign-in closed, after one attempt and without a session", async () => {
-    const mod = await load();
-    stub.exchangeStatus = 400;
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
-    try {
-      await expect(mod.callbacks.jwt(microsoftAccount)).rejects.toThrow(
-        /Could not exchange Microsoft access token.*Strapi 5\.51\+ rejects this exchange/,
-      );
-      // A 4xx is not retried: one call, to the users-permissions callback.
-      expect(fetchMock).toHaveBeenCalledTimes(1);
-      expect(String(fetchMock.mock.calls[0]?.[0])).toBe(
-        `${STRAPI}/api/auth/microsoft/callback?access_token=graph-access-token`,
-      );
-      // Strapi's reason reaches the log for the operator.
-      expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining("Strapi JWT exchange failed (attempt 1/3)"),
-        400,
-        expect.stringContaining("OAuth authentication requires a completed provider session"),
-      );
-    } finally {
-      consoleError.mockRestore();
-    }
+describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
+  it("asks the tenant's authorize endpoint for openid profile email User.Read, never offline_access", async () => {
+    const mod = await load(ENTRA_ENV);
+    const { authorize } = await signInMicrosoft(mod);
+    expect(`${authorize.origin}${authorize.pathname}`).toBe(`${LOGIN}/${TENANT}/oauth2/v2.0/authorize`);
+    expect(authorize.searchParams.get("client_id")).toBe(CLIENT);
+    expect(authorize.searchParams.get("scope")).toBe("openid profile email User.Read");
+    expect(authorize.searchParams.get("code_challenge")).toBeTruthy();
+    expect(authorize.searchParams.get("redirect_uri")).toBe(
+      "http://localhost:3000/api/auth/callback/microsoft-entra-id",
+    );
   });
 
-  it("a configured Microsoft sign-in logs an error at boot; none without it", async () => {
+  it("adds User.Read.All with ENTRA_SYNC_MANAGER=1 (the cms reads /me/manager)", async () => {
+    const mod = await load({ ...ENTRA_ENV, ENTRA_SYNC_MANAGER: "1" });
+    const { authorize } = await signInMicrosoft(mod);
+    expect(authorize.searchParams.get("scope")).toBe("openid profile email User.Read User.Read.All");
+  });
+
+  it("exchanges the tokens by POST, hands the result to the jwt callback, and never fetches a photo", async () => {
+    const mod = await load(ENTRA_ENV);
+    const { jar, callback } = await signInMicrosoft(mod);
+    expect(callback.headers.get("location")).toBe("http://localhost:3000/wiki");
+
+    expect(stub.exchangeCalls).toHaveLength(1);
+    const [call] = stub.exchangeCalls;
+    expect(call.headers.get("x-entra-exchange-secret")).toBe(EXCHANGE_SECRET);
+    expect(call.headers.get("content-type")).toBe("application/json");
+    expect(JSON.parse(call.body)).toEqual({ idToken: stub.idToken, accessToken: stub.accessToken });
+    // The tokens travel in the body only: no query string anywhere.
+    const exchangeUrls = fetchMock.mock.calls
+      .map(([input]) => String(input instanceof Request ? input.url : input))
+      .filter((url) => url.startsWith(`${STRAPI}/`));
+    expect(exchangeUrls).toEqual([EXCHANGE_URL]);
+    // The claims-only profile(): no Graph request at all from the web.
+    expect(graphCalls()).toEqual([]);
+
+    const cookie = jar.header().match(/authjs\.session-token=([^;]+)/)?.[1];
+    const token = await decode({ token: cookie, secret: SECRET, salt: "authjs.session-token" });
+    expect(token).toMatchObject({
+      strapiJwt: exchangeJwt,
+      strapiUserId: 42,
+      strapiJwtExp: exchangeExp,
+      name: "Grace",
+      email: "grace@example.test",
+      provider: "microsoft-entra-id",
+    });
+    expect(token).not.toHaveProperty("picture");
+    expect(JSON.stringify(token)).not.toContain(stub.accessToken);
+  });
+
+  it("with a GUID issuer, a token of another tenant fails Auth.js' own iss check (no exchange)", async () => {
+    const mod = await load(ENTRA_ENV);
+    stub.idClaims = idClaims({ iss: `${LOGIN}/${OTHER_TENANT}/v2.0`, tid: OTHER_TENANT });
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
-      await load({
-        AUTH_MICROSOFT_ENTRA_ID_ID: "entra-client-id",
-        AUTH_MICROSOFT_ENTRA_ID_SECRET: "entra-client-secret",
-      });
-      expect(consoleError).toHaveBeenCalledWith(
-        expect.stringContaining("[auth] Microsoft sign-in is configured but cannot complete"),
-      );
-      consoleError.mockClear();
-      await load();
-      expect(consoleError).not.toHaveBeenCalled();
+      const { jar, callback } = await signInMicrosoft(mod);
+      const location = new URL(callback.headers.get("location") ?? "about:blank");
+      expect(location.pathname).toBe("/sign-in");
+      expect(location.searchParams.get("error")).toBeTruthy();
+      expect(location.searchParams.get("error")).not.toMatch(/^entra_/);
+      expect(jar.names()).not.toContain("authjs.session-token");
     } finally {
       consoleError.mockRestore();
     }
+    expect(stub.exchangeCalls).toHaveLength(0);
+    // The provider's tenant rewrite never fetched the other tenant's metadata.
+    const urls = fetchMock.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input));
+    expect(urls.some((url) => url.includes(OTHER_TENANT))).toBe(false);
+  });
+
+  it("redirects a tid of another tenant to /sign-in?error=entra_tenant (signIn callback)", async () => {
+    const mod = await load(ENTRA_ENV);
+    stub.idClaims = idClaims({ tid: OTHER_TENANT });
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { jar, callback } = await signInMicrosoft(mod);
+      expect(callback.headers.get("location")).toBe("http://localhost:3000/sign-in?error=entra_tenant");
+      expect(jar.names()).not.toContain("authjs.session-token");
+    } finally {
+      consoleWarn.mockRestore();
+    }
+    expect(stub.exchangeCalls).toHaveLength(0);
+  });
+
+  const refusals: [string, string, ExchangeAnswer[], number][] = [
+    ["409 account_exists", "entra_account_exists", [{ status: 409, body: { error: "account_exists" } }], 1],
+    ["403 not_assigned", "entra_not_assigned", [{ status: 403, body: { error: "not_assigned" } }], 1],
+    ["403 blocked", "entra_blocked", [{ status: 403, body: { error: "blocked" } }], 1],
+    ["401 invalid", "entra_invalid", [{ status: 401, body: { error: "invalid" } }], 1],
+    ["401 unauthorized (secret mismatch)", "entra_unavailable", [{ status: 401, body: { error: "unauthorized" } }], 1],
+    ["404 (Entra off in the cms)", "entra_unavailable", [{ status: 404, body: { data: null, error: { status: 404 } } }], 1],
+    ["500, not retried", "entra_unavailable", [{ status: 500, body: {} }], 1],
+    ["503 twice", "entra_unavailable", [{ status: 503, body: { error: "unavailable" } }], 2],
+    ["a network error twice", "entra_unavailable", ["network-error"], 2],
+  ];
+
+  it.each(refusals)("maps %s to /sign-in?error=%s without a session", async (_name, code, answers, calls) => {
+    const mod = await load(ENTRA_ENV);
+    stub.exchangeAnswers = answers;
+    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn")].map((spy) =>
+      spy.mockImplementation(() => {}),
+    );
+    try {
+      const { jar, callback } = await signInMicrosoft(mod);
+      expect(callback.headers.get("location")).toBe(`http://localhost:3000/sign-in?error=${code}`);
+      expect(jar.names()).not.toContain("authjs.session-token");
+      // No log line carries a token.
+      const logged = JSON.stringify(quiet.map((spy) => spy.mock.calls));
+      expect(logged).not.toContain(stub.accessToken);
+      expect(logged).not.toContain(stub.idToken.split(".")[1]!);
+    } finally {
+      for (const spy of quiet) spy.mockRestore();
+    }
+    expect(stub.exchangeCalls).toHaveLength(calls);
+  }, 15_000);
+
+  it("retries once after a 503 and signs in when the second attempt succeeds", async () => {
+    const mod = await load(ENTRA_ENV);
+    stub.exchangeAnswers = [{ status: 503, body: { error: "unavailable" } }, exchangeOk()];
+    const { jar, callback } = await signInMicrosoft(mod);
+    expect(callback.headers.get("location")).toBe("http://localhost:3000/wiki");
+    expect(stub.exchangeCalls).toHaveLength(2);
+    expect(jar.names()).toContain("authjs.session-token");
+  });
+
+  it("the jwt callback refuses a Microsoft account the signIn callback did not exchange", async () => {
+    const mod = await load(ENTRA_ENV);
+    await expect(
+      mod.callbacks.jwt({
+        token: { sub: "x" },
+        user: { id: "x" },
+        account: { provider: "microsoft-entra-id", type: "oidc", providerAccountId: OID },
+      }),
+    ).rejects.toThrow(/without an exchange result/);
+  });
+
+  it("profile() keeps the claims only: no request, no image, lower-cased e-mail", async () => {
+    const mod = await load(ENTRA_ENV);
+    fetchMock.mockClear();
+    const profile = mod.entraProfile({
+      ...idClaims({ email: "Grace.Entra@Example.test" }),
+    } as unknown as Parameters<typeof mod.entraProfile>[0]);
+    expect(profile).toEqual({ id: OID, name: "Grace Entra", email: "grace.entra@example.test", image: null });
+    expect(
+      mod.entraProfile({ ...idClaims({ name: undefined }) } as unknown as Parameters<typeof mod.entraProfile>[0]),
+    ).toEqual({ id: OID, name: "Grace@Example.test", email: "grace@example.test", image: null });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("offers no Microsoft provider while ENTRA_ENABLED is not 1, whatever AUTH_MICROSOFT_* holds", async () => {
+    for (const flag of [undefined, "0", "true"]) {
+      const mod = await load({ ...ENTRA_ENV, ENTRA_ENABLED: flag });
+      const res = await mod.handlers.GET(new NextRequest("http://localhost:3000/api/auth/providers"));
+      expect(Object.keys((await res.json()) as object)).toEqual(["local"]);
+    }
+    const entraOnly = await load({ ...ENTRA_ENV, AUTH_LOCAL_ENABLED: undefined });
+    const res = await entraOnly.handlers.GET(new NextRequest("http://localhost:3000/api/auth/providers"));
+    expect(Object.keys((await res.json()) as object)).toEqual(["microsoft-entra-id"]);
+  });
+
+  it("refuses to load with ENTRA_ENABLED=1 and an invalid configuration, except during next build", async () => {
+    await expect(load({ ...ENTRA_ENV, AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: "common" })).rejects.toThrow(
+      /AUTH_MICROSOFT_ENTRA_ID_TENANT_ID/,
+    );
+    await expect(load({ ...ENTRA_ENV, ENTRA_EXCHANGE_SECRET: "short" })).rejects.toThrow(
+      /ENTRA_EXCHANGE_SECRET/,
+    );
+    const build = await load({
+      ...ENTRA_ENV,
+      AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: "common",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(build.handlers).toBeDefined();
   });
 });
 
@@ -402,6 +618,16 @@ describe("the Auth.js session ends with the Strapi JWT", () => {
     });
     expect(await mod.auth()).toBeNull();
     expect(await mod.getStrapiToken()).toBeNull();
+  });
+
+  it("a Microsoft session ends at the exchange's expiresAt (ENTRA_SESSION_TTL)", async () => {
+    const mod = await load(ENTRA_ENV);
+    exchangeExp = nowSec() - 1;
+    exchangeJwt = fakeStrapiJwt(exchangeExp, 42);
+    stub.exchangeAnswers = [exchangeOk()];
+    const { jar } = await signInMicrosoft(mod);
+    // The jwt callback refused the already-expired session at sign-in.
+    expect(jar.names()).not.toContain("authjs.session-token");
   });
 
   it("a pre-D-SESSION-01 token without strapiJwtExp ends at the embedded JWT's exp", async () => {

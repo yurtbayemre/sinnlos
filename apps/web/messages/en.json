@@ -73,7 +73,14 @@
     "demoMode": "Demo mode",
     "registrationDisabled": "Registration is currently disabled.",
     "sessionExpired": "Your session has expired — please sign in again.",
-    "rateLimited": "Too many sign-in attempts — please wait a minute and try again."
+    "rateLimited": "Too many sign-in attempts — please wait a minute and try again.",
+    "signInFailed": "Sign-in failed. Please try again.",
+    "entra_tenant": "This Microsoft account belongs to another organisation. Sign in with your company account.",
+    "entra_account_exists": "An intranet account with your e-mail address already exists. Ask an administrator to link it to your Microsoft account.",
+    "entra_not_assigned": "Your Microsoft account has no access to the intranet. Ask your IT administrator to assign it.",
+    "entra_blocked": "Your intranet account is blocked. Please contact an administrator.",
+    "entra_invalid": "The Microsoft sign-in could not be verified. Please try again.",
+    "entra_unavailable": "Microsoft sign-in is unavailable right now. Please try again in a moment."
   },
   "dashboard": {
     "welcomeBack": "Welcome back",

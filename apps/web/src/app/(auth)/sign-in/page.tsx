@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { LocalSignInForm } from "@/components/auth/local-sign-in-form";
 import { LOCAL_ENABLED, MICROSOFT_ENABLED, REGISTRATION_ENABLED } from "@/lib/auth-config";
 import { signInWithMicrosoft } from "@/lib/auth-actions";
+import { signInErrorKey } from "@/lib/entra-exchange";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function generateMetadata() {
@@ -23,10 +24,11 @@ export const dynamic = "force-dynamic";
 export default async function SignInPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; expired?: string }>;
+  searchParams: Promise<{ from?: string; expired?: string; error?: string | string[] }>;
 }) {
-  const { from: rawFrom, expired } = await searchParams;
+  const { from: rawFrom, expired, error } = await searchParams;
   const from = safeInternalPath(rawFrom);
+  const errorKey = signInErrorKey(error);
 
   // Already signed in? Skip the form — except when we were sent here
   // because the Strapi JWT expired (?expired=1): the Auth.js cookie may
@@ -64,6 +66,11 @@ export default async function SignInPage({
         </CardHeader>
         <CardContent className="space-y-4">
           {expired && <p className="text-center text-sm text-destructive">{t("sessionExpired")}</p>}
+          {errorKey && (
+            <p role="alert" className="text-center text-sm text-destructive">
+              {t(errorKey)}
+            </p>
+          )}
           {MICROSOFT_ENABLED && (
             <form action={signInWithMicrosoft}>
               <input type="hidden" name="from" value={from} />
