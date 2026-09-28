@@ -370,6 +370,17 @@ export const PERMISSION_MATRIX: Record<string, Partial<Record<ContentTypeUid, Cr
  */
 export const CUSTOM_ACTION_GRANTS: Record<string, string[] | "*"> = {
   "api::event.event.ics": "*",
+  // The RSVP summary for the events list (FX21): exactly the roles that
+  // hold event-rsvp find in the matrix above. Never guest: guests read the
+  // calendar but see no attendee names (routes.matrix.test.ts pins both).
+  "api::event-rsvp.event-rsvp.summary": [
+    "admin_role",
+    "editor",
+    "department_head",
+    "team_lead",
+    "member",
+    "authenticated",
+  ],
   // guest and the `authenticated` fallback are excluded: even with email
   // dropped from the payload, years + daysUntil still reconstruct every
   // user's exact hireDate, so this stays limited to the mapped staff roles.

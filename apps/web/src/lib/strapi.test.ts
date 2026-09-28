@@ -71,7 +71,7 @@ const READS: Record<string, () => Promise<unknown>> = {
   "events.upcoming": () => api.events.upcoming(iso),
   "events.past": () => api.events.past(iso),
   "events.window": () => api.events.window(iso, iso),
-  "events.rsvps": () => api.events.rsvps(["doc-1"]),
+  "events.rsvpSummaries": () => api.events.rsvpSummaries(["doc-1"]),
   "polls.list": () => api.polls.list(),
   "polls.results": () => api.polls.results(1),
   "documents.list": () => api.documents.list(),
@@ -204,7 +204,8 @@ describe("api.polls (decision 02)", () => {
     const [url] = fetchMock.mock.calls[0]!;
     expect(url).toContain("http://cms.test/api/polls?");
     expect(url).not.toContain("departments");
-    expect(url).toContain("populate[author][fields][0]=displayName");
+    // WD05: no poll consumer renders the author.
+    expect(url).not.toContain("populate[author]");
   });
 });
 

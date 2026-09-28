@@ -6,8 +6,9 @@ import { useTranslations } from "next-intl";
 import { Award, Send, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sendKudos } from "@/lib/kudos-actions";
-import type { UserLite, KudosValue } from "@/lib/types";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import type { KudosRecipient } from "@/lib/people-dto";
+import type { KudosValue } from "@/lib/types";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
 
 const VALUES: {
@@ -22,12 +23,17 @@ const VALUES: {
   { value: "excellence", labelKey: "excellence", emoji: "\u{1F3C6}" },
 ];
 
-export function GiveKudos({ people }: { people: UserLite[] }) {
+/**
+ * `people` is the lean picker DTO (lib/people-dto.ts, WD05): name, job
+ * title and avatar thumbnail of every other active colleague — the page
+ * sends nothing else to the browser.
+ */
+export function GiveKudos({ people }: { people: KudosRecipient[] }) {
   const t = useTranslations("kudos");
   const tCommon = useTranslations("common");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<UserLite | null>(null);
+  const [selected, setSelected] = useState<KudosRecipient | null>(null);
   const [message, setMessage] = useState("");
   const [value, setValue] = useState<KudosValue>("teamwork");
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +59,7 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
     const q = search.toLowerCase();
     return people
       .filter((p) => {
-        const hay = [p.displayName, p.email, p.jobTitle].filter(Boolean).join(" ").toLowerCase();
+        const hay = [p.displayName, p.jobTitle].filter(Boolean).join(" ").toLowerCase();
         return hay.includes(q);
       })
       .slice(0, 5);
@@ -135,13 +141,14 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                   {selected ? (
                     <div className="flex items-center gap-2 rounded-xl border bg-muted/40 px-3 py-2">
                       <Avatar className="h-7 w-7">
+                        {selected.avatarUrl ? (
+                          <AvatarImage src={selected.avatarUrl} alt="" />
+                        ) : null}
                         <AvatarFallback className="text-xs">
                           {initials(selected.displayName)}
                         </AvatarFallback>
                       </Avatar>
-                      <span className="text-sm font-medium">
-                        {selected.displayName ?? selected.email}
-                      </span>
+                      <span className="text-sm font-medium">{selected.displayName}</span>
                       <button
                         type="button"
                         onClick={() => {
@@ -179,12 +186,15 @@ export function GiveKudos({ people }: { people: UserLite[] }) {
                               className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                             >
                               <Avatar className="h-7 w-7">
+                                {p.avatarUrl ? (
+                                  <AvatarImage src={p.avatarUrl} alt="" loading="lazy" />
+                                ) : null}
                                 <AvatarFallback className="text-xs">
                                   {initials(p.displayName)}
                                 </AvatarFallback>
                               </Avatar>
                               <div>
-                                <div className="font-medium">{p.displayName ?? p.email}</div>
+                                <div className="font-medium">{p.displayName}</div>
                                 {p.jobTitle && (
                                   <div className="text-xs text-muted-foreground">{p.jobTitle}</div>
                                 )}

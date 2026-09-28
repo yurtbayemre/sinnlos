@@ -1,36 +1,38 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getNotifications } from "@/lib/notification-actions";
+import { useCallback, useEffect, useState } from "react";
+import { getNotifications, type NotificationFeed } from "@/lib/notification-actions";
+import { applyLatest, createSeqGuard } from "@/lib/optimistic";
 import { useLiveChannel } from "@/components/live/live-events-provider";
 import { NotificationBell } from "./notification-bell";
-import type { Notification } from "@/lib/types";
 
 /**
  * Notification bell data owner. Live SSE pings (delivered only to this
  * user's connections) trigger refetches; polling stays as the backstop —
  * 120s while the stream is healthy, today's 30s when degraded (issue #17
  * fallback contract). markRead in one tab pings the user's other tabs.
+ * Each refetch brings the newest items AND the true unread total (WD10).
  */
 const POLL_MS_DEGRADED = 30_000;
 const POLL_MS_HEALTHY = 120_000;
 
-export function LiveNotificationBell({ initial }: { initial: Notification[] }) {
-  const [notifications, setNotifications] = useState(initial);
+export function LiveNotificationBell({ initial }: { initial: NotificationFeed }) {
+  const [feed, setFeed] = useState(initial);
 
-  // Monotonic request counter — an out-of-order snapshot would flip the
-  // badge back to unread right after markAllRead.
-  const seqRef = useRef(0);
+  // Overlapping refetches are applied newest-first by lastAppliedSeq
+  // (lib/optimistic.ts, as in the comment section): an older snapshot never
+  // overwrites a newer one (it would flip the badge back to unread right
+  // after "Mark all read"), and the snapshot of a mark-read is no longer
+  // dropped just because a live ping's refetch started meanwhile.
+  const [guard] = useState(createSeqGuard);
 
   const refetch = useCallback(async () => {
-    const seq = ++seqRef.current;
     try {
-      const fresh = await getNotifications();
-      if (seq === seqRef.current) setNotifications(fresh);
+      await applyLatest(guard, () => getNotifications(), setFeed);
     } catch {
       // Keep showing current state until next poll
     }
-  }, []);
+  }, [guard]);
 
   const healthy = useLiveChannel("notifications", refetch);
 
@@ -46,5 +48,11 @@ export function LiveNotificationBell({ initial }: { initial: Notification[] }) {
     };
   }, [refetch, healthy]);
 
-  return <NotificationBell notifications={notifications} onChanged={refetch} />;
+  return (
+    <NotificationBell
+      notifications={feed.items}
+      unreadTotal={feed.unreadTotal}
+      onChanged={refetch}
+    />
+  );
 }

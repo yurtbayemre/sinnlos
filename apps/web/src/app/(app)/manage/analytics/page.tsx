@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect, unstable_rethrow } from "next/navigation";
 import Link from "next/link";
 import {
@@ -20,6 +21,7 @@ import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export async function generateMetadata() {
   const t = await getTranslations("analytics");
@@ -40,15 +42,16 @@ async function count(path: string): Promise<number> {
  * /api/users is a users-permissions route, not a content-type route: it
  * returns a bare array without `meta.pagination` and ignores the
  * `pagination[...]` params entirely — so there is no total to read.
- * Count by actually fetching the (id-only) directory.
+ * Count by actually fetching the (id-only) directory. null = the walk
+ * failed (the card shows "–", not a misleading 0).
  */
-async function countUsers(): Promise<number> {
+async function countUsers(): Promise<number | null> {
   try {
     const { users } = await fetchAllUsers("fields[0]=id");
     return users.length;
   } catch (e) {
     unstable_rethrow(e);
-    return 0;
+    return null;
   }
 }
 
@@ -112,7 +115,6 @@ export default async function AnalyticsPage() {
     documentCount,
     pollCount,
     commentCount,
-    userCount,
     activity,
     search,
   ] = await Promise.all([
@@ -123,7 +125,6 @@ export default async function AnalyticsPage() {
     count("/api/documents?"),
     count("/api/polls?"),
     count("/api/comments?"),
-    countUsers(),
     recentActivity(),
     searchSummary(),
   ]);
@@ -132,7 +133,6 @@ export default async function AnalyticsPage() {
     search && search.total > 0 ? Math.round((search.zeroResultCount / search.total) * 100) : 0;
 
   const stats = [
-    { label: t("users"), value: userCount, icon: Users, color: "text-blue-500" },
     {
       label: t("announcements"),
       value: announcementCount,
@@ -176,20 +176,23 @@ export default async function AnalyticsPage() {
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">{t("contentOverview")}</h2>
         <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5">
+          {/* The user count walks the whole directory (no total on
+              /api/users), so it streams in its own Suspense boundary
+              instead of holding back the page (WD10). */}
+          <Suspense
+            fallback={
+              <StatTile
+                label={t("users")}
+                value={<Skeleton aria-hidden="true" className="mt-1 h-7 w-12 rounded-md" />}
+                icon={Users}
+                color="text-blue-500"
+              />
+            }
+          >
+            <UsersStatTile label={t("users")} />
+          </Suspense>
           {stats.map((s) => (
-            <Card key={s.label}>
-              <CardContent className="flex items-center gap-4 p-4">
-                <div
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${s.color}`}
-                >
-                  <s.icon className="h-5 w-5" aria-hidden="true" />
-                </div>
-                <div>
-                  <div className="text-2xl font-semibold tracking-tight">{s.value}</div>
-                  <div className="text-xs text-muted-foreground">{s.label}</div>
-                </div>
-              </CardContent>
-            </Card>
+            <StatTile key={s.label} {...s} />
           ))}
         </div>
       </section>
@@ -315,5 +318,39 @@ export default async function AnalyticsPage() {
         </section>
       )}
     </div>
+  );
+}
+
+/** The streamed user count (WD10): "–" when the directory walk failed. */
+async function UsersStatTile({ label }: { label: string }) {
+  const userCount = await countUsers();
+  return <StatTile label={label} value={userCount ?? "–"} icon={Users} color="text-blue-500" />;
+}
+
+function StatTile({
+  label,
+  value,
+  icon: Icon,
+  color,
+}: {
+  label: string;
+  value: React.ReactNode;
+  icon: typeof Users;
+  color: string;
+}) {
+  return (
+    <Card>
+      <CardContent className="flex items-center gap-4 p-4">
+        <div
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-muted ${color}`}
+        >
+          <Icon className="h-5 w-5" aria-hidden="true" />
+        </div>
+        <div>
+          <div className="text-2xl font-semibold tracking-tight">{value}</div>
+          <div className="text-xs text-muted-foreground">{label}</div>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

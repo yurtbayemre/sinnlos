@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { unstable_rethrow } from "next/navigation";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -7,9 +6,8 @@ import { LocaleSwitcher } from "@/components/locale-switcher";
 import { SearchCommand } from "@/components/search-command";
 import { signOutAction } from "@/lib/auth-actions";
 import { initials } from "@/lib/utils";
+import { getNotifications, type NotificationFeed } from "@/lib/notification-actions";
 import { getSession } from "@/lib/session";
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
-import type { Notification } from "@/lib/types";
 import { LiveNotificationBell } from "@/components/notifications/live-notification-bell";
 import { getTranslations } from "next-intl/server";
 
@@ -26,27 +24,14 @@ export async function Topbar() {
   const name = session?.user?.name ?? tCommon("signedOut");
   const email = session?.user?.email ?? "";
 
-  let notifications: Notification[] = [];
-  if (session?.user && !DEMO_MODE) {
-    try {
-      // `session` here is the real getSession() one (the DEMO_MODE literal,
-      // which lacks `id`, is excluded by `!DEMO_MODE`). The `in` guard
-      // narrows the union so we read the numeric Strapi id type-safely.
-      const userId = "id" in session.user ? session.user.id : undefined;
-      if (userId) {
-        const res = await strapi<StrapiListResponse<Notification>>(
-          `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
-        );
-        notifications = (res as any).data ?? [];
-      }
-    } catch (e) {
-      // strapi() redirects (NEXT_REDIRECT) to /sign-in on an expired
-      // session — let that escape so the whole page navigates instead of
-      // silently rendering a topbar with no notifications.
-      unstable_rethrow(e);
-      // Notifications are non-critical — don't break the topbar
-    }
-  }
+  // The same getNotifications() the bell refetches with (WD10): the newest
+  // 20 plus the true unread total. A cms failure never breaks the topbar
+  // (notifications are non-critical): a failed list gives the empty feed, a
+  // failed unread count alone the unread among the loaded items. Only
+  // strapi()'s NEXT_REDIRECT to /sign-in escapes, so an expired session
+  // navigates the whole page. DEMO_MODE has no Strapi session to ask.
+  const notifications: NotificationFeed =
+    session?.user && !DEMO_MODE ? await getNotifications() : { items: [], unreadTotal: 0 };
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur sm:gap-4 sm:px-6">

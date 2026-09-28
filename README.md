@@ -294,7 +294,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **kudos** | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id |
 | **notification** | Per-user notification rows (recipient, actor, link), written by the lifecycles through `apps/cms/src/utils/notify.ts` (one row per recipient, titles at most 255 characters, shortened with `…`). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (`announcement.find` / `event.find`, read from the permissions table at runtime) and who are not blocked, after the publish is saved, with the title and audience of the entry as saved at that moment; one failing row costs that recipient only, and the next publish delivers it. Admins and editors get strictly the targeted audience. Comment and kudos notifications are also written after the comment or kudos is saved, so a failing notification never discards it. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
-| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
+| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
 | **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
@@ -517,6 +517,13 @@ Read-side filters:
   `status=published`; admin/editor bypass (drafts included)
 - `acknowledgement-visibility` — reads restricted to the caller's own read
   receipts; `admin_role` bypasses for the `/manage/acknowledgements` report
+- `event-rsvp-own-rows` — raw RSVP reads restricted to the caller's own
+  answers (`$and`-ed onto the request, so a client filter only narrows);
+  a client filter on the `user` relation answers 400. `admin_role`
+  bypasses (corrections); editors do not. The event-rsvp controller also
+  answers 400 to a `Strapi-Response-Format` header from anyone but
+  `admin_role`. The events page reads everyone else's answers only through
+  the aggregated `summary` action
 - `announcement-visibility` — server-side audience targeting (#9):
   department AND team AND audienceRoles, resolved to a non-relational id
   filter; pins `status=published`
@@ -710,7 +717,8 @@ leak hire dates), **no classifieds** (the flea market is internal and ads
 populate author contact data), **no announcements and therefore no
 acknowledgements** (a guest can never see a mandatory announcement, so ack
 grants were dead attack surface), **no event-rsvp** (guests read the
-calendar but neither respond nor see attendee names), and **no training**
+calendar but neither respond nor see attendee names, and hold no RSVP
+`summary` grant either), and **no training**
 (no course/lesson/lesson-progress grants at all — while `search-log.create`
 IS granted to guest: search telemetry is anonymous by design). Guests hold
 the poll read, results and vote grants, but see and vote only on the polls
@@ -739,7 +747,9 @@ sanitizer (#10), and filtering or sorting by them is refused query-side
 actions (ICS export, celebrations — staff roles only, not `guest` or
 `authenticated` —, poll `vote` and `results` — every role, `guest`
 included, narrowed per poll by the department targeting and the guest
-access —,
+access —, the RSVP `summary` behind `/events` — exactly the roles that
+hold event-rsvp `find` (the staff roles and `authenticated`), never
+`guest`; `routes.matrix.test.ts` pins that —,
 mark-read/mark-all-read, `/api/me`, `changePassword`,
 `role.find` for the admin ack
 report, the classified `cleanupUploads` endpoint, the admin-only
@@ -795,7 +805,7 @@ never pass, and exclusion checks such as `role !== "guest"` are not allowed:
 | --- | --- | --- |
 | `isAdmin` | `admin_role` | sidebar *Admin* link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
 | `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards |
-| `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP fetch on `/events` |
+| `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant) |
 | `canPostAds` | the five staff roles | *New ad* button, `/marketplace/new` |
 | `isGuest` | `guest` | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint |
 
@@ -1022,6 +1032,18 @@ Safety nets for refactors (roadmap S03–S06, S09):
       is an all-day entry
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
+- [ ] `/events` shows each upcoming RSVP event's counts, the names of the
+      "yes" answers and your own answer (never who answered maybe or no);
+      as a member, `GET /api/event-rsvps` returns only your own answers,
+      and a `filters[user]…` query or a `Strapi-Response-Format` header
+      answers 400
+- [ ] `/manage/acknowledgements` shows a percentage per mandatory
+      announcement (not "–") while the directory is complete, also with
+      more than 2000 confirmations in total
+- [ ] The kudos picker lists neither you nor blocked accounts; `/people`
+      renders 48 cards and a *+ N people* button when more match; the bell
+      badge counts every unread notification (99+ above 99), not only the
+      20 in the panel
 - [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
       real domain, since localhost can hide the Referer effect
 - [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`

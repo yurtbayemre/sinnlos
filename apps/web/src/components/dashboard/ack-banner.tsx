@@ -2,7 +2,7 @@ import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
-import { fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
+import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Acknowledgement, Announcement } from "@/lib/types";
 
@@ -22,18 +22,12 @@ export async function AckBanner() {
   ]);
   if (announcementsResult.failed || acksResult.failed) return null;
 
-  // Re-check requiresAck: DEMO_MODE's fixture answers announcement paths
-  // unfiltered, and it keeps the count honest if the query ever changes.
-  // Matching runs on documentId (stable across re-publishes; the numeric
-  // id changes on every publish cycle). The Set also dedupes accidental
-  // duplicate ack rows (accepted check-then-insert race in the CMS).
-  const required = ((announcementsResult.data?.data ?? []) as Announcement[]).filter(
-    (a) => a.requiresAck && a.documentId,
-  );
-  const acked = new Set(
-    ((acksResult.data?.acks ?? []) as Acknowledgement[]).map((a) => a.targetDocumentId),
-  );
-  const openCount = required.filter((a) => !acked.has(a.documentId!)).length;
+  // Same rule as the pinned "open confirmations" on /announcements
+  // (computeOpenAcks: requiresAck re-checked, matched on documentId).
+  const openCount = computeOpenAcks(
+    (announcementsResult.data?.data ?? []) as Announcement[],
+    (acksResult.data?.acks ?? []) as Acknowledgement[],
+  ).length;
   if (openCount === 0) return null;
 
   const t = await getTranslations("dashboard");

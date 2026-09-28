@@ -1,6 +1,17 @@
 import { factories } from "@strapi/strapi";
 
 import { parseEntryRef } from "../../../utils/entry-id";
+import {
+  capacityDecision,
+  distinctYesUsers,
+  isRsvpStatus,
+  newestFirst,
+  parseSummaryTargets,
+  requestsLegacyFormat,
+  stripPrivateUsers,
+  summarizeRsvps,
+  type RsvpRow,
+} from "../../../utils/rsvp";
 
 /**
  * Event RSVPs follow the acknowledgement pattern (server-authoritative
@@ -20,38 +31,12 @@ import { parseEntryRef } from "../../../utils/entry-id";
 const RSVP_UID = "api::event-rsvp.event-rsvp";
 const EVENT_UID = "api::event.event";
 
-const STATUSES = ["yes", "no", "maybe"] as const;
-type RsvpStatus = (typeof STATUSES)[number];
-
-function isRsvpStatus(value: unknown): value is RsvpStatus {
-  return typeof value === "string" && (STATUSES as readonly string[]).includes(value);
-}
-
-/**
- * Read privacy for find/findOne: attendance ("yes") is public inside the
- * intranet, but WHO declined or is unsure is not. Strip the user relation
- * from every row that is neither status=yes nor the caller's own answer
- * (admin_role sees everything) — maybe/no stay countable, the names of
- * decliners don't leak. The web summaries keep working: they need `user`
- * only for the yes-names list and the caller's own status.
- */
-function stripPrivateUsers(rows: any[], caller: any): void {
-  if (caller?.role?.type === "admin_role") return;
-  for (const row of rows) {
-    if (!row || typeof row !== "object") continue;
-    if (row.status === "yes") continue;
-    if (caller && row.user?.id === caller.id) continue;
-    delete row.user;
-  }
-}
-
 /**
  * Count how many DISTINCT users currently answer "yes" for the event,
  * excluding `excludeUserId` (the caller — their own switch to "yes" must
  * not count against themselves). Distinct users, not rows: the accepted
  * check-then-insert race (below) can leave duplicate rows per user until
- * the next upsert heals them, and counting rows would then overstate the
- * occupancy.
+ * the next upsert heals them (utils/rsvp.ts distinctYesUsers).
  */
 async function countYesUsers(
   strapi: any,
@@ -62,12 +47,7 @@ async function countYesUsers(
     where: { targetDocumentId, status: "yes" },
     populate: { user: true },
   });
-  const userIds = new Set<number>();
-  for (const row of rows) {
-    const id = row.user?.id;
-    if (id != null && id !== excludeUserId) userIds.add(id);
-  }
-  return userIds.size;
+  return distinctYesUsers(rows, excludeUserId);
 }
 
 /**
@@ -83,16 +63,76 @@ async function countYesUsers(
  * photo-finish is acceptable; the UI always renders the authoritative
  * server counts after refresh.
  */
+const LEGACY_FORMAT_MESSAGE = "Strapi-Response-Format is not supported here";
+
+/**
+ * The raw reads refuse the Strapi-Response-Format header for every role but
+ * admin_role (FX21), so they only ever answer in the response shape the
+ * backstop post-filter below is written for (utils/rsvp.ts
+ * requestsLegacyFormat).
+ */
+function refusesLegacyFormat(ctx: {
+  headers?: unknown;
+  state?: { user?: { role?: { type?: unknown } | null } | null };
+}): boolean {
+  if (ctx.state?.user?.role?.type === "admin_role") return false;
+  return requestsLegacyFormat(ctx.headers);
+}
+
 async function isAtCapacity(strapi: any, event: any, userId: number): Promise<boolean> {
-  const capacity = event.capacity;
-  if (!Number.isInteger(capacity) || capacity <= 0) return false;
+  // Without a limit no user count can fill the event: skip the query.
+  if (capacityDecision(event.capacity, Number.MAX_SAFE_INTEGER) === "open") return false;
   const yesUsers = await countYesUsers(strapi, event.documentId, userId);
-  return yesUsers >= capacity;
+  return capacityDecision(event.capacity, yesUsers) === "full";
 }
 
 export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
-  /** Core find, post-filtered: see stripPrivateUsers above. */
+  /**
+   * GET /api/event-rsvps/summary?targets=<documentIds> (FX21): per event the
+   * counts, the names of the "yes" answers and the caller's own answer,
+   * aggregated here instead of shipping every row to the web (which walked
+   * up to 3000 rows per view). Decliners stay private: no maybe/no name
+   * ever leaves the CMS (utils/rsvp.ts summarizeRsvps).
+   *
+   * Only PUBLISHED events are summarised; a missing or draft-only target is
+   * left out of the answer, identically, so the endpoint is no existence
+   * oracle for draft documentIds. Granted like event-rsvp find
+   * (CUSTOM_ACTION_GRANTS, never guest); no route policy, the rows are
+   * read through strapi.db.query and only the aggregate is returned.
+   */
+  async summary(ctx) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+
+    const parsed = parseSummaryTargets(ctx.query?.targets);
+    if ("error" in parsed) return ctx.badRequest(parsed.error);
+
+    const events: { documentId: string }[] = await strapi.db.query(EVENT_UID).findMany({
+      where: { documentId: { $in: parsed.targets }, publishedAt: { $notNull: true } },
+      select: ["documentId"],
+    });
+    const published = new Set(events.map((event) => event.documentId));
+    const targets = parsed.targets.filter((target) => published.has(target));
+    if (targets.length === 0) return ctx.send({ data: [] });
+
+    const rows: RsvpRow[] = await strapi.db.query(RSVP_UID).findMany({
+      where: { targetDocumentId: { $in: targets } },
+      select: ["id", "targetDocumentId", "status", "respondedAt"],
+      populate: { user: { select: ["id", "displayName"] } },
+    });
+    const callerId = typeof user.id === "number" ? user.id : null;
+    return ctx.send({ data: summarizeRsvps(rows, targets, callerId) });
+  },
+
+  /**
+   * Core find. The route policy (global::event-rsvp-own-rows) already
+   * narrowed it to the caller's own rows (admin_role: all rows) and refused
+   * a user filter; the legacy v4 response shape is refused here, and other
+   * people's maybe/no users are still stripped as a backstop
+   * (stripPrivateUsers in utils/rsvp.ts).
+   */
   async find(ctx) {
+    if (refusesLegacyFormat(ctx)) return ctx.badRequest(LEGACY_FORMAT_MESSAGE);
     const response = await super.find(ctx);
     if (Array.isArray(response?.data)) {
       stripPrivateUsers(response.data, ctx.state.user);
@@ -100,8 +140,9 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     return response;
   },
 
-  /** Core findOne, post-filtered the same way as find. */
+  /** Core findOne, guarded and post-filtered the same way as find. */
   async findOne(ctx) {
+    if (refusesLegacyFormat(ctx)) return ctx.badRequest(LEGACY_FORMAT_MESSAGE);
     const response = await super.findOne(ctx);
     if (response?.data) {
       stripPrivateUsers([response.data], ctx.state.user);
@@ -142,14 +183,12 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     // can leave more than one row per (user, targetDocumentId). Heal on
     // the next upsert — keep the newest row (respondedAt, then id) and
     // delete the surplus before updating.
-    const existingRows = await strapi.db.query(RSVP_UID).findMany({
-      where: { user: user.id, targetDocumentId },
-    });
-    existingRows.sort((a: any, b: any) => {
-      const aTime = a.respondedAt ? new Date(a.respondedAt).getTime() : 0;
-      const bTime = b.respondedAt ? new Date(b.respondedAt).getTime() : 0;
-      return bTime - aTime || b.id - a.id;
-    });
+    // (utils/rsvp.ts pickSurvivor's order).
+    const existingRows: RsvpRow[] = newestFirst(
+      await strapi.db.query(RSVP_UID).findMany({
+        where: { user: user.id, targetDocumentId },
+      }),
+    );
     const existing = existingRows[0] ?? null;
     for (const stale of existingRows.slice(1)) {
       await strapi.db.query(RSVP_UID).delete({ where: { id: stale.id } });

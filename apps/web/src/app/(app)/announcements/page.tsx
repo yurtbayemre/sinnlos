@@ -2,7 +2,7 @@ import { CheckCircle2, Megaphone, Pin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
-import { fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
+import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import type { Acknowledgement, Announcement } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/empty-state";
@@ -68,9 +68,10 @@ export default async function AnnouncementsPage() {
   // deduplicated against the top 20 by documentId (the top-20 copy wins,
   // it carries the fuller populate).
   const byDocId = new Map(items.filter((a) => a.documentId).map((a) => [a.documentId!, a]));
-  const openAck = ((requiringAckResult.data?.data ?? []) as Announcement[])
-    .filter((a) => a.requiresAck && a.documentId && !myAcks.has(a.documentId))
-    .map((a) => byDocId.get(a.documentId!) ?? a);
+  const openAck = computeOpenAcks(
+    (requiringAckResult.data?.data ?? []) as Announcement[],
+    acksResult.data?.acks ?? [],
+  ).map((a) => byDocId.get(a.documentId) ?? a);
   const openDocIds = new Set(openAck.map((a) => a.documentId));
   const remaining = items.filter((a) => !a.documentId || !openDocIds.has(a.documentId));
 

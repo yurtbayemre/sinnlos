@@ -4,13 +4,17 @@ import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-re
 import { getLocale, getTranslations } from "next-intl/server";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
-import { walkAllPages } from "@/lib/paginate";
-import { fetchCourses } from "@/lib/training";
-import { courseCompletion, sortLessons } from "@/lib/training-shared";
+import { fetchCourseProgress, fetchCourses } from "@/lib/training";
+import {
+  courseLessons,
+  trainingReport,
+  trainingStaff,
+  type CourseProgress,
+  type TrainingReportUser,
+} from "@/lib/training-report";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { LessonProgress, UserLite } from "@/lib/types";
+import type { UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,15 +24,13 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-type ReportUser = UserLite & {
-  role?: { id: number; type?: string } | null;
-  blocked?: boolean;
-};
+type ReportUser = UserLite & TrainingReportUser;
 
 /**
  * Role types holding `course.find` in the CMS permission matrix — only
  * they can take a training, so only they belong in the denominator.
  * `guest` deliberately has NO training grants (issue #29).
+ * infra/contracts.test.ts pins this copy against the matrix.
  */
 const TRAINING_ROLES = new Set([
   "admin_role",
@@ -43,10 +45,10 @@ const TRAINING_ROLES = new Set([
  * Completion report per mandatory course (issue #29; clone of
  * /manage/acknowledgements). admin_role bypasses both training policies,
  * so courses include drafts — filtered out here — and progress rows span
- * ALL users. Progress is walked PER COURSE via `targetDocumentId $in
- * <lesson ids>` (the events.rsvps pattern) so the walk cap scales with
- * course size, not with the global row count. Fail-closed: any
- * truncated/failed input suppresses the numbers ("–"), never false-green.
+ * ALL users. Progress is walked PER COURSE (lib/training.ts
+ * fetchCourseProgress) so the walk cap scales with course size, not with
+ * the global row count. Fail-closed: any truncated/failed input suppresses
+ * the numbers ("–"), never false-green (lib/training-report.ts).
  */
 export default async function TrainingReportPage() {
   if (!isAdmin((await getViewer()).role)) {
@@ -79,65 +81,36 @@ export default async function TrainingReportPage() {
   const courses = coursesResult.data!.courses.filter((c) => c.mandatory);
   const coursesTruncated = coursesResult.data!.truncated;
 
-  const staff = (usersResult.data!.users as ReportUser[]).filter(
-    (u) => u.blocked !== true && TRAINING_ROLES.has(u.role?.type ?? ""),
-  );
+  const staff = trainingStaff(usersResult.data!.users as ReportUser[], TRAINING_ROLES);
   const usersTruncated = usersResult.data!.truncated;
 
-  // Per-course progress walk, keyed by the course's lesson documentIds.
-  const rows = await Promise.all(
-    courses.map(async (course) => {
-      const lessons = sortLessons(course.lessons ?? []);
-      const lessonIds = lessons
-        .map((l) => l.documentId)
-        .filter((id): id is string => typeof id === "string" && id !== "");
-      if (lessonIds.length === 0) {
-        return { course, lessonCount: 0, completedUsers: 0, truncated: false };
-      }
-      const filter = lessonIds
-        .map((id, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(id)}`)
-        .join("&");
-      const progressResult = await tryFetch(
-        () =>
-          walkAllPages<LessonProgress>(
-            (page) =>
-              strapi<StrapiListResponse<LessonProgress>>(
-                `/api/lesson-progresses?${filter}&fields[0]=targetDocumentId&populate[user][fields][0]=id&pagination[page]=${page}&pagination[pageSize]=100`,
-              ),
-            { maxPages: 20, label: `training-report:${course.slug}` },
-          ),
-        "training-report",
-      );
-      if (progressResult.failed) {
-        return { course, lessonCount: lessonIds.length, completedUsers: null, truncated: true };
-      }
-
-      // userId → set of completed lesson ids; a user counts as done when
-      // the set covers the course's CURRENT lessons (same derivation as
-      // the learner UI — inherently idempotent against duplicate rows).
-      const byUser = new Map<number, Set<string>>();
-      for (const row of progressResult.data!.data) {
-        const uid = row.user?.id;
-        if (typeof uid !== "number" || typeof row.targetDocumentId !== "string") continue;
-        if (!byUser.has(uid)) byUser.set(uid, new Set());
-        byUser.get(uid)!.add(row.targetDocumentId);
-      }
-      let completedUsers = 0;
-      for (const u of staff) {
-        const set = byUser.get(u.id) ?? new Set<string>();
-        if (courseCompletion(lessons, set).done) completedUsers++;
-      }
-      return {
-        course,
-        lessonCount: lessonIds.length,
-        completedUsers,
-        truncated: progressResult.data!.truncated,
-      };
-    }),
+  // Per-course progress walk, keyed by the course's lesson documentIds
+  // (only for courses that have lessons).
+  const progress = new Map<number, CourseProgress>(
+    await Promise.all(
+      courses
+        .map((course) => ({ course, lessonIds: courseLessons(course).lessonIds }))
+        .filter(({ lessonIds }) => lessonIds.length > 0)
+        .map(async ({ course, lessonIds }): Promise<[number, CourseProgress]> => {
+          const result = await tryFetch(
+            () => fetchCourseProgress(lessonIds, `training-report:${course.slug}`),
+            "training-report",
+          );
+          return [
+            course.id,
+            result.failed ? null : { rows: result.data!.data, truncated: result.data!.truncated },
+          ];
+        }),
+    ),
   );
 
-  const anyTruncated = coursesTruncated || usersTruncated || rows.some((r) => r.truncated);
-  const denominator = staff.length;
+  const { rows, anyTruncated, denominator } = trainingReport({
+    courses,
+    coursesTruncated,
+    staff,
+    usersTruncated,
+    progressOf: (course) => progress.get(course.id) ?? null,
+  });
 
   return (
     <div className="space-y-8">
@@ -161,12 +134,7 @@ export default async function TrainingReportPage() {
         <EmptyState icon={GraduationCap} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="space-y-4">
-          {rows.map(({ course, lessonCount, completedUsers, truncated }) => {
-            const unknown = truncated || completedUsers === null || anyTruncated;
-            const pct =
-              !unknown && denominator > 0
-                ? Math.round(((completedUsers as number) / denominator) * 100)
-                : null;
+          {rows.map(({ course, lessonCount, completedUsers, unknown, pct }) => {
             return (
               <Card key={course.id}>
                 <CardHeader className="pb-2">
