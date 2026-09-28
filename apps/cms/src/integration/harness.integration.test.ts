@@ -18,9 +18,10 @@ import {
 
 /**
  * The contract test boots in its body (it asserts on the process before
- * and after the boot, so the boot cannot move to beforeAll). It is the
- * file's first boot: a cold @strapi/* require in a fresh fork, schema
- * creation and the first permission sync on a new database. It gets the
+ * and after the boot, so the boot cannot move to beforeAll). On the first
+ * engine it is the file's cold boot (a cold @strapi/* require in a fresh
+ * fork), on every engine a first boot with schema creation and the first
+ * permission sync on a new database. It gets the
  * hook budget of vitest.integration.config.ts, not the 60 s test budget:
  * a timed-out body keeps running (vitest does not abort it) and leaks its
  * env and the running boot into the next case.
