@@ -1,7 +1,18 @@
+# Container logs (IN05): Docker's json-file driver with rotation, at most
+# 5 files of 10 MB per container. `docker logs` and `docker compose logs`
+# read across the rotated files; only the oldest lines beyond 50 MB go (the
+# cms boot line infra/live-smoke.sh checks right after a deploy stays).
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${DATABASE_NAME:-sinnlos}
       POSTGRES_USER: ${DATABASE_USERNAME:-sinnlos}
@@ -30,6 +41,7 @@ services:
       context: ..
       dockerfile: apps/cms/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     # docker-init as PID 1: it forwards SIGTERM to Strapi (which shuts down
     # gracefully on its own) and reaps zombies. Without it node is PID 1, and
     # a SIGTERM that arrives before Strapi installs its handler (the first
@@ -148,6 +160,7 @@ services:
       context: ..
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       cms:
         condition: service_healthy
@@ -217,6 +230,7 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - web
       - cms
