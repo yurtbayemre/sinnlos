@@ -961,6 +961,12 @@ Safety nets for refactors (roadmap S03–S06, S09):
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
   schema. After changing a union in `apps/web/src/lib/types.ts`, run both.
+- `infra/sensitive-queries.test.ts` runs the web's user and search query
+  builders through the cms's own `sensitive-query-guard` walk (real schemas,
+  Strapi's query parser) for guest, the `authenticated` fallback and a
+  role-less caller, and scans `apps/web/src` for any other filter or sort
+  on a contact field (or a `_q`): a web query that the guard would refuse
+  for guests fails here, not on a guest's page.
 - The server actions in `apps/web/src/lib` have characterisation tests next
   to them: the event, classified, acknowledgement, kudos, training and
   notification actions (S09), and the auth, comment, poll and profile
