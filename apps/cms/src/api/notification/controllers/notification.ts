@@ -2,6 +2,9 @@ import { factories } from "@strapi/strapi";
 import { parseRowId } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
 
+/** Most ids one mark-read call takes (the web marks one at a time). */
+const MARK_READ_MAX_IDS = 200;
+
 export default factories.createCoreController("api::notification.notification", ({ strapi }) => ({
   async markRead(ctx) {
     const user = ctx.state.user;
@@ -9,31 +12,28 @@ export default factories.createCoreController("api::notification.notification", 
 
     const raw = ((ctx.request.body ?? {}) as { ids?: unknown }).ids;
     if (!Array.isArray(raw) || raw.length === 0) return ctx.badRequest("ids required");
+    if (raw.length > MARK_READ_MAX_IDS) {
+      return ctx.badRequest(`at most ${MARK_READ_MAX_IDS} ids per call`);
+    }
     // Row ids only (numbers or decimal strings within int4), checked before
     // any query: anything else made the Postgres lookup fail with a 500
     // (utils/entry-id.ts).
-    const ids = raw.map(parseRowId);
-    if (ids.includes(null)) return ctx.badRequest("ids must be notification ids");
+    const parsed = raw.map(parseRowId);
+    if (parsed.includes(null)) return ctx.badRequest("ids must be notification ids");
+    const ids = [...new Set(parsed as number[])];
 
-    const now = new Date().toISOString();
-    let updated = 0;
-    for (const id of ids) {
-      const notif = await strapi.db.query("api::notification.notification").findOne({
-        where: { id, recipient: user.id },
-      });
-      if (notif && !notif.readAt) {
-        await strapi.db.query("api::notification.notification").update({
-          where: { id },
-          data: { readAt: now },
-        });
-        updated++;
-      }
-    }
-    // Emit here, not via lifecycle: db.query updates fire per-row events
-    // whose result rows don't populate the recipient relation. This
-    // handler already knows the recipient — it is the caller.
-    if (updated > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
-    return ctx.send({ updated });
+    // ONE statement, bound to the caller (FX27): only the caller's own
+    // unread rows among `ids` change, whatever else the list names. The
+    // count is the number of rows that were actually unread.
+    const { count } = await strapi.db.query("api::notification.notification").updateMany({
+      where: { id: { $in: ids }, recipient: user.id, readAt: null },
+      data: { readAt: new Date().toISOString() },
+    });
+    // Emit here, not via lifecycle: updateMany fires afterUpdateMany, which
+    // carries only the where clause and a count. This handler already knows
+    // the recipient — it is the caller.
+    if (count > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
+    return ctx.send({ updated: count });
   },
 
   async markAllRead(ctx) {
