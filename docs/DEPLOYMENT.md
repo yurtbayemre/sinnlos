@@ -897,8 +897,10 @@ and a few pages cheaper:
   moved into tested modules; nothing else changes.
 - **Smaller pages (WD05).** Relations no page renders are no longer loaded
   (announcement department, event departments, department header image,
-  poll author). The kudos picker receives only name, job title and avatar
-  thumbnail of the other active colleagues; `/people` and the org chart
+  poll author, and the notification actor: the bell's feed is part of every
+  page, so each notification used to carry the actor's whole user row).
+  The kudos picker receives only name, job title and avatar thumbnail of
+  the other active colleagues; `/people` and the org chart
   receive only the fields their cards show, and `/people` renders 48 cards
   at a time.
 - **Counts (WD10).** The dashboard people count and the user count on

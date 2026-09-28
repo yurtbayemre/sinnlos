@@ -6,7 +6,7 @@ import { StrapiError } from "@/lib/strapi-error";
 /**
  * Notification action characterisation (S09, WD10):
  *   - getNotifications reads the caller's newest 20 (recipient filter from
- *     the session user, actor populated) and, since WD10, the caller's
+ *     the session user, no relation populated) and, since WD10, the caller's
  *     unread total (meta.pagination.total of a readAt=null query with
  *     pageSize 1) as { items, unreadTotal }; no session user = the empty
  *     feed without a request; a failed list = the empty feed (the bell
@@ -45,7 +45,7 @@ const ROWS = [
   { id: 3, type: "event", title: "Event", readAt: "2026-09-28T09:00:00.000Z" },
 ];
 const LIST_PATH =
-  "/api/notifications?filters[recipient][id][$eq]=7&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20";
+  "/api/notifications?filters[recipient][id][$eq]=7&sort=createdAt:desc&pagination[pageSize]=20";
 const UNREAD_PATH =
   "/api/notifications?filters[recipient][id][$eq]=7&filters[readAt][$null]=true&fields[0]=id&pagination[pageSize]=1";
 const EMPTY = { items: [], unreadTotal: 0 };
@@ -71,12 +71,14 @@ beforeEach(() => {
 });
 
 describe("getNotifications", () => {
-  it("reads the caller's newest 20 with the actor, and the caller's unread total", async () => {
+  it("reads the caller's newest 20 and the caller's unread total", async () => {
     await expect(getNotifications()).resolves.toEqual({ items: ROWS, unreadTotal: 25 });
     expect(strapiMock).toHaveBeenCalledTimes(2);
-    expect(strapiMock.mock.calls.map((call) => call[0]).sort()).toEqual(
-      [LIST_PATH, UNREAD_PATH].sort(),
-    );
+    const paths = strapiMock.mock.calls.map((call) => String(call[0]));
+    expect([...paths].sort()).toEqual([LIST_PATH, UNREAD_PATH].sort());
+    // The feed becomes the bell's props on every page (WD05): no populate,
+    // so no actor's user row ends up in the page payload.
+    for (const path of paths) expect(path).not.toContain("populate");
   });
 
   it("counts unread notifications beyond the 20 loaded ones", async () => {

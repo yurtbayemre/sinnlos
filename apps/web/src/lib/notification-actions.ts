@@ -22,12 +22,15 @@ const EMPTY_FEED: NotificationFeed = { items: [], unreadTotal: 0 };
  * The bell's data, for the topbar's first render and every refetch. The
  * recipient filter is explicit: admin_role bypasses the
  * notification-visibility policy (analytics counts platform-wide), and the
- * bell must show the caller's own notifications only. The unread count is
- * one extra request that returns a single row (pageSize 1). No session user
- * = the empty feed without a request. A failed list = the empty feed (the
- * bell polls on); a failed count alone keeps the loaded list and counts the
- * unread among it. strapi()'s 401 sign-in redirect from EITHER request
- * propagates (otherwise the bell would poll an expired session forever).
+ * bell must show the caller's own notifications only. No relation is
+ * populated (WD05): no component renders the actor, and the feed is
+ * serialised into every page's payload as the bell's props. The unread
+ * count is one extra request that returns a single row (pageSize 1). No
+ * session user = the empty feed without a request. A failed list = the
+ * empty feed (the bell polls on); a failed count alone keeps the loaded
+ * list and counts the unread among it. strapi()'s 401 sign-in redirect from
+ * EITHER request propagates (otherwise the bell would poll an expired
+ * session forever).
  */
 export async function getNotifications(): Promise<NotificationFeed> {
   const session = await getSession();
@@ -36,7 +39,7 @@ export async function getNotifications(): Promise<NotificationFeed> {
   try {
     const [list, unread] = await Promise.allSettled([
       strapi<StrapiListResponse<Notification>>(
-        `/api/notifications?filters[recipient][id][$eq]=${userId}&populate[actor]=true&sort=createdAt:desc&pagination[pageSize]=20`,
+        `/api/notifications?filters[recipient][id][$eq]=${userId}&sort=createdAt:desc&pagination[pageSize]=20`,
       ),
       strapi<StrapiListResponse<Notification>>(
         `/api/notifications?filters[recipient][id][$eq]=${userId}&filters[readAt][$null]=true&fields[0]=id&pagination[pageSize]=1`,
