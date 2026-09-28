@@ -1230,9 +1230,14 @@ change:
   was just removed as a separate vote.
 - **Live events (LF04, LF01).** The cms and the web share one definition of
   the live events and channel names. The cms sends at most 1000 events per
-  POST to the web: a bigger burst (for example an announcement with more
-  than about 1000 recipients) used to be refused by the web with 400 and
-  lost, notification pings included. A split burst logs
+  POST to the web, which refuses a bigger body with 400. That cap only
+  matters for more than 1000 distinct events committed together (a bulk
+  script, an import, anything writing them in one transaction): such a
+  burst used to be refused and lost as a whole, notification pings
+  included. An ordinary announcement fan-out writes one notification per
+  transaction, so it already reached the web in small POSTs and was not
+  affected (rehearsed with 1210 recipients: 31 to 34 POSTs of at most 54
+  events each, before and after this release). A split burst logs
   `[live-emit] N events in K POSTs (at most 1000 each)`.
 - **Comment sections (WD04).** `/announcements` loads the comments and
   reactions of all cards in one batch (10 cards: 11 cms requests instead of
@@ -1322,12 +1327,35 @@ random polls with duplicates and deleted accounts, ran as one statement,
 and parallel votes of one voter never showed as more than one vote; the
 baseline query of step 1 gave exactly the results' counts on Postgres 16,
 a stored duplicate vote included. 1200 notification rows for 1200
-recipients, written through the real lifecycle subscriber of a booted cms,
-reached a stand-in web ingest (400 above 1000 events, like the web) in
-POSTs of at most 1000 events, all 1200 delivered. The comment-section
-batching and the refresh of only the pinged card are pinned by unit tests;
-the browser check of step 4 and `infra/live-smoke.sh` were not run against
-a deployed stack.
+recipients, written in one transaction through the real lifecycle
+subscriber of a booted cms, reached a stand-in web ingest (400 above 1000
+events, like the web) in POSTs of 1000 and 200 events, all 1200 delivered
+(batch 8 sent them in one POST, which the 400 lost); an ordinary fan-out
+to 1210 recipients, one notification per transaction, arrived in 31 POSTs
+of at most 54 events (batch 8: 34 of at most 48), all accepted. Against
+the built cms and web images of this branch on Postgres 16:
+`infra/live-smoke.sh` passed; on `/announcements` with 10 cards the page
+sent one `POST /live/subscribe` instead of 10, a comment on card 3
+refreshed card 3 only, the server render made 17 cms requests instead of
+26, and a tab regain 16 cms requests and 4 Server Actions instead of 45
+and 23 (headless browser). Not exercised: real tab switching (the regain
+was simulated by switching the page's visibility state) and the
+Traefik/Caddy edge on a public domain.
+
+Fix round after review (2026-09-28, the same setup, a headless browser
+against the built images): a `/polls` card rendered before an admin-panel
+republish that reordered the answers (`Alpha, Beta, Gamma` to
+`Gamma, Alpha, Beta`) and then clicked on `Alpha` got 400
+`Poll options changed`, stored nothing, showed its error and reloaded with
+the new order; the next click stored `Alpha` (index 1) on the new published
+row. The web from before the fix stored that stale click as `Gamma`
+(index 0), which is what this check prevents; a vote body without the
+answer text (that older web) is still accepted. With
+`LIVE_EVENTS_DISABLED=1` a regained `/announcements` tab showed a comment
+posted while it was hidden after 0.2-0.3 s, in one batched read of all
+sections (before the fix: 3.6-6.6 s, at the next 10 s tick); with live
+events on, a regain still made exactly one batched read (the stream's
+catch-up), no second one. `infra/live-smoke.sh` passed.
 
 #### Upgrading to the cms bootstrap split (batch 8, lane 3B)
 
