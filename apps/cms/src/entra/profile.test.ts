@@ -1,9 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { PROFILE_TEXT_MAX } from "../api/profile/controllers/profile";
 import { matchWhere } from "../test/strapi-stub.test.helper";
 import type { GraphMe } from "./graph";
 import {
   ENTRA_MANAGED_PROFILE_FIELDS,
+  USER_TEXT_MAX,
   buildProfileUpdate,
+  capUserText,
   decideEmailSync,
   decideManagerSync,
   departmentName,
@@ -50,6 +53,33 @@ describe("buildProfileUpdate", () => {
     expect(
       buildProfileUpdate(me({ jobTitle: null, officeLocation: "  ", businessPhones: [] })),
     ).toEqual({ displayName: "Ada Lovelace", jobTitle: null, officeLocation: null, phone: null });
+  });
+
+  it("cuts every text to 255 code points: Entra allows a 256-character displayName, varchar(255) does not", () => {
+    // The same limit as PUT /api/me: both write the same varchar(255) columns.
+    expect(USER_TEXT_MAX).toBe(255);
+    expect(USER_TEXT_MAX).toBe(PROFILE_TEXT_MAX);
+    const update = buildProfileUpdate(
+      me({
+        displayName: "N".repeat(256),
+        jobTitle: ` ${"J".repeat(300)} `,
+        officeLocation: "\u{1F3E2}".repeat(256),
+        businessPhones: ["1".repeat(256)],
+      }),
+    );
+    expect(update).toEqual({
+      displayName: "N".repeat(255),
+      jobTitle: "J".repeat(255),
+      // Code points, as Postgres counts them: 255 emoji, 510 UTF-16 units.
+      officeLocation: "\u{1F3E2}".repeat(255),
+      phone: "1".repeat(255),
+    });
+    // Exactly 255 stays; a cut that ends in a space drops it.
+    expect(buildProfileUpdate(me({ displayName: "N".repeat(255) })).displayName).toBe(
+      "N".repeat(255),
+    );
+    expect(capUserText(`${"a".repeat(254)} b`)).toBe("a".repeat(254));
+    expect(capUserText("short")).toBe("short");
   });
 
   it("never clears the display name with an empty value", () => {

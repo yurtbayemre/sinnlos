@@ -18,7 +18,9 @@
  *   - manager (ENTRA_SYNC_MANAGER=1): the provisioned user with that object
  *     id, or pending (entraManagerOid kept, back-filled when the manager
  *     signs in for the first time). Managers grant no permissions.
- * Nothing is applied without a successful /me.
+ * Nothing is applied without a successful /me. The four texts are cut to
+ * USER_TEXT_MAX (Entra allows a 256-character displayName, the column takes
+ * 255).
  */
 import type { GraphMe, GraphResult } from "./graph";
 
@@ -37,6 +39,24 @@ export function isEntraBound(row: { entraTenantId?: unknown } | null | undefined
   return typeof row?.entraTenantId === "string" && row.entraTenantId.trim() !== "";
 }
 
+/**
+ * The longest profile text the users table takes: displayName, jobTitle,
+ * officeLocation and phone are `string` attributes, varchar(255) on
+ * Postgres, and db.query writes skip Strapi's validation, so a longer value
+ * fails the whole INSERT or UPDATE (a new user could never sign in, an
+ * existing one never got a profile sync). Counted in code points, as
+ * Postgres counts characters. Equal to PROFILE_TEXT_MAX of PUT /api/me
+ * (pinned in profile.test.ts).
+ */
+export const USER_TEXT_MAX = 255;
+
+/** `value` cut to USER_TEXT_MAX code points (then trimmed at the end). */
+export function capUserText(value: string): string {
+  const points = Array.from(value);
+  if (points.length <= USER_TEXT_MAX) return value;
+  return points.slice(0, USER_TEXT_MAX).join("").trimEnd();
+}
+
 export interface ProfileScalars {
   displayName?: string;
   jobTitle: string | null;
@@ -50,14 +70,20 @@ const clean = (value: string | null): string | null => {
   return trimmed === "" ? null : trimmed;
 };
 
+/** A profile text as stored: clean(), at most USER_TEXT_MAX code points. */
+const cleanText = (value: string | null): string | null => {
+  const cleaned = clean(value);
+  return cleaned === null ? null : capUserText(cleaned);
+};
+
 /** The scalar fields to write from /me. */
 export function buildProfileUpdate(me: GraphMe): ProfileScalars {
   const update: ProfileScalars = {
-    jobTitle: clean(me.jobTitle),
-    officeLocation: clean(me.officeLocation),
-    phone: clean(me.businessPhones[0] ?? null),
+    jobTitle: cleanText(me.jobTitle),
+    officeLocation: cleanText(me.officeLocation),
+    phone: cleanText(me.businessPhones[0] ?? null),
   };
-  const displayName = clean(me.displayName);
+  const displayName = cleanText(me.displayName);
   if (displayName !== null) update.displayName = displayName;
   return update;
 }

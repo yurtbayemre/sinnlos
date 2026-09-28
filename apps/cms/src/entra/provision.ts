@@ -59,6 +59,7 @@ import {
 import { verifyIdToken, type EntraIdClaims, type IdTokenResult } from "./id-token";
 import {
   buildProfileUpdate,
+  capUserText,
   decideEmailSync,
   decideManagerSync,
   departmentName,
@@ -527,7 +528,7 @@ async function createIdentity(
           entraTenantId: claims.tid,
           microsoftOid: claims.oid,
           ...(scalars ?? {}),
-          displayName: scalars?.displayName ?? claims.name ?? email,
+          displayName: scalars?.displayName ?? capUserText(claims.name ?? email),
         },
       }),
     );

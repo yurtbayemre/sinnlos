@@ -253,7 +253,9 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
   role* on the user; the next sign-in applies Entra's role.
 - **Profile**: display name (only overwritten with a non-empty value), job
   title, phone (first business phone) and office location are copied from
-  Entra at every sign-in (an empty value clears them) and are read-only on
+  Entra at every sign-in (an empty value clears them; a value over 255
+  characters is cut to 255, the column size, e.g. Entra's 256-character
+  display names) and are read-only on
   `/profile` (`PUT /api/me` ignores them). Accounts the sign-in created also
   get their e-mail from Entra, unless another account uses that address.
 - **Department** and **manager** only with `ENTRA_SYNC_DEPARTMENT=1` /

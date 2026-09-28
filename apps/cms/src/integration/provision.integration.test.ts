@@ -479,6 +479,27 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(relation(row?.role, "type")).toBe("member");
   });
 
+  it("stores a 256-character Entra displayName cut to 255 (varchar(255) on Postgres), and still syncs", async () => {
+    // Entra allows 256 characters; uncut, the INSERT failed on Postgres and
+    // every sign-in of this user answered 503.
+    const who = persona(62, { name: "D".repeat(256), jobTitle: "T".repeat(300) });
+    const first = await signIn(t, who);
+    expect(first.status).toBe(200);
+    expect(first.body.user?.displayName).toBe("D".repeat(255));
+    let row = await userRow(t, { id: first.body.user?.id });
+    expect([row?.displayName, row?.jobTitle]).toEqual(["D".repeat(255), "T".repeat(255)]);
+
+    // An existing user's profile UPDATE is cut the same way.
+    const again = await signIn(t, {
+      ...who,
+      name: "E".repeat(256),
+      officeLocation: "O".repeat(256),
+    });
+    expect(again.status).toBe(200);
+    row = await userRow(t, { id: first.body.user?.id });
+    expect([row?.displayName, row?.officeLocation]).toEqual(["E".repeat(255), "O".repeat(255)]);
+  });
+
   it("refuses a new identity whose e-mail a local account uses (409), then signs in as the admin-bound row", async () => {
     const member = t.fixtures.users.member;
     const who = persona(13, { mail: member.email.toUpperCase() });
