@@ -11,7 +11,16 @@ const REACTION_UID = "api::reaction.reaction";
 
 export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
   /**
-   * Toggle: POST the same emoji twice and the reaction is removed again.
+   * Sets or toggles the caller's reaction with one emoji on one target.
+   *
+   * `reacted` (optional boolean, FX28) is the desired end state, which makes
+   * a repeated request harmless (a double click, a retry):
+   *   - true:  the reaction exists afterwards; an existing one is returned
+   *            unchanged (200), otherwise it is created;
+   *   - false: the reaction is gone afterwards; an existing one is deleted,
+   *            otherwise nothing happens;
+   *   - absent: toggle, as before: POST the same emoji twice and the
+   *            reaction is removed again (older web builds).
    *
    * The target is anchored by documentId, never by the numeric row id —
    * publishing an announcement/wiki page in Strapi 5 is delete+recreate, so
@@ -19,6 +28,9 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
    * utils/comment-target.ts). Author is server-authoritative (§5.21).
    * Only the documentId anchor is accepted (#25 removed the targetId
    * migration bridge): a targetId-only payload is answered with 400.
+   *
+   * Order: payload guards, then target resolution, then visibility, then
+   * the lookup of the existing reaction.
    */
   async create(ctx) {
     const user = ctx.state.user;
@@ -31,6 +43,10 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     // target. The enum itself is still validated by the core create. Checked
     // before the target lookup so a malformed payload costs no query.
     if (typeof emoji !== "string" || emoji === "") return ctx.badRequest("emoji required");
+    const reacted: unknown = body?.reacted;
+    if (reacted !== undefined && typeof reacted !== "boolean") {
+      return ctx.badRequest("reacted must be a boolean");
+    }
 
     const target = await resolveWriteTarget(strapi, body);
     if (target.status === "rejected") return ctx.badRequest(WRITE_TARGET_ERRORS[target.reason]);
@@ -55,6 +71,12 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
       },
     });
 
+    if (existing && reacted === true) {
+      // Already in the desired state: answer with the reaction, no write.
+      ctx.status = 200;
+      return this.transformResponse(await this.sanitizeOutput(existing, ctx));
+    }
+
     if (existing) {
       await strapi.db.query(REACTION_UID).delete({
         where: { id: existing.id },
@@ -66,8 +88,11 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
       return ctx.send({ data: null, toggled: "removed" });
     }
 
+    // Already in the desired state (no reaction): nothing to delete.
+    if (reacted === false) return ctx.send({ data: null });
+
     // Rebuilding the data object also implicitly strips a client-sent
-    // targetId — it is no longer a schema attribute.
+    // targetId (no longer a schema attribute) and `reacted`.
     ctx.request.body = {
       data: { emoji, targetType, targetDocumentId, author: user.id },
     };
