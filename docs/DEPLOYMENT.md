@@ -754,10 +754,13 @@ systemctl start docker
 >
 > **Deploying the notification pipeline fixes (2026-09-28)?** A normal
 > deploy of cms and web (`infra/deploy.sh`): no env, schema or permission
-> change, order does not matter. Guests and blocked users stop getting
-> announcement bells and digests, live pings and notifications follow the
-> save, a failing notification no longer discards a comment or kudos, and
-> weekly digests missed on a Monday are caught up the next morning.
+> change of its own; batch 7 ships it with the RSVP summary (lane 2B), so
+> deploy and roll back cms and web together (see
+> [Deploying batch 7](#deploying-batch-7-2026-09-28)). Guests and blocked
+> users stop getting announcement bells and digests, live pings and
+> notifications follow the save, a failing notification no longer discards
+> a comment or kudos, and weekly digests missed on a Monday are caught up
+> the next morning.
 > Optional read-only checks first, and the next morning the 07:30
 > `[digest] run complete` line: see
 > [Upgrading to the notification pipeline fixes (2026-09-28)](#upgrading-to-the-notification-pipeline-fixes-2026-09-28).
@@ -1276,9 +1279,12 @@ together:
   watches.
 
 **Nothing else is needed: a normal deploy of cms and web.** No env change,
-no migration, no schema or permission change, and the order of web and
-cms does not matter (an older web shows guests the digest options, which
-the new cms ignores; the new web works with an older cms).
+no migration, and no schema or permission change of its own. On its own
+the order of web and cms would not matter (an older web shows guests the
+digest options, which the new cms ignores; the new web works with an older
+cms), but batch 7 ships this lane with the RSVP summary (lane 2B), so
+deploy and roll back cms and web together: see
+[Deploying batch 7](#deploying-batch-7-2026-09-28).
 
 Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
 checks below (on a standalone Caddy box, drop the second `-f`):
@@ -1397,7 +1403,8 @@ the same shape. After a rollback the fixed errors are back (bells for
 guests and blocked users, long titles failing the publish, pings before
 the save, comments and kudos lost when their notification fails, weekly
 digests only on Mondays). Follow the rollback hint
-`infra/deploy.sh` prints.
+`infra/deploy.sh` prints; it rolls back cms and web together, which batch 7
+needs (see [Deploying batch 7](#deploying-batch-7-2026-09-28)).
 
 #### Upgrading to the user data and search hardening (batch 7, lane 2C)
 
