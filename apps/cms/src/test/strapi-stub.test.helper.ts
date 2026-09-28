@@ -17,7 +17,12 @@
  *     populated, like the real query engine), `orderBy`, `limit`, `offset`.
  *     An operator it does not know throws, so a test cannot pass by accident,
  *     and so does `$not` over a relation (SQL applies NOT per joined row,
- *     which an in-memory "not any" gets wrong). SQL semantics where they
+ *     which an in-memory "not any" gets wrong). `orderBy` takes asc/desc in
+ *     either case; with a known schema a column that is neither an attribute
+ *     nor an implicit one (id, documentId, createdAt, updatedAt, publishedAt,
+ *     locale) throws, like the engine, and so do a "field:dir" string (a
+ *     Document Service sort), a sort through a relation and the engine's
+ *     virtual `status` rank (not modelled). SQL semantics where they
  *     differ from JavaScript: `$ne`, `$lt` and friends never match NULL,
  *     `$eq: null` / `$ne: null` mean IS (NOT) NULL, `$in: []` matches
  *     nothing, `$notIn: []` everything, an array value means "any of", ids
@@ -32,7 +37,11 @@
  *     real Document Service (the REST core service defaults to "published").
  *     `update` of a document without a draft row writes a draft from the
  *     payload only, like Strapi 5.55.1 (the FX38 root cause, pinned in
- *     framework-contract.test.ts).
+ *     framework-contract.test.ts). `sort` is converted the way the Document
+ *     Service converts it ("title:desc", "a,b:desc", lists, objects; a
+ *     relation path throws), `start` / `limit` page the reads, and any other
+ *     param (locale, pagination, page, publicationFilter, …) throws instead
+ *     of being dropped.
  *   - `plugin(name).service(name)` and `service(uid)` from a map the test
  *     passes; an unstubbed service throws.
  *   - `log.{debug,info,warn,error}` as vi.fn() spies.
@@ -74,10 +83,13 @@ export type Where = Record<string, unknown>;
 
 type Direction = "asc" | "desc";
 
+/** A sort direction as knex takes it: asc or desc in either case. */
+export type SortDirection = Direction | "ASC" | "DESC";
+
 export type OrderBy =
   | string
-  | Record<string, Direction>
-  | ReadonlyArray<string | Record<string, Direction>>;
+  | Record<string, SortDirection>
+  | ReadonlyArray<string | Record<string, SortDirection>>;
 
 /** Nested populate options, as the query engine takes them. */
 export interface PopulateOptions {
@@ -118,7 +130,10 @@ export interface DocumentParams {
   filters?: Where;
   fields?: readonly string[];
   populate?: Populate;
+  /** "title", "title:desc", "a:asc,b:desc", a list of those, or { title: "desc" }. */
   sort?: OrderBy;
+  limit?: number;
+  start?: number;
   data?: Record<string, unknown>;
 }
 
@@ -397,9 +412,22 @@ export interface Evaluator {
     select: string | readonly string[] | undefined,
     populate: Populate | undefined,
   ): Row;
-  sortRows(rows: Row[], orderBy: OrderBy | undefined): Row[];
+  sortRows(uid: string | null, rows: Row[], orderBy: OrderBy | undefined): Row[];
   relationKeys(uid: string): Set<string> | null;
 }
+
+/** Columns Strapi adds to every content type beyond its schema.json attributes. */
+const IMPLICIT_COLUMNS = new Set([
+  "id",
+  "documentId",
+  "createdAt",
+  "updatedAt",
+  "publishedAt",
+  "locale",
+]);
+
+/** Attribute types the engine orders through a join or refuses to order on. */
+const UNSORTABLE_TYPES = new Set(["relation", "media", "component", "dynamiczone"]);
 
 /** Finds a stored row of a relation's target table (the stub's tables). */
 export type RowLookup = (uid: string, id: number) => Row | undefined;
@@ -579,7 +607,7 @@ export function createEvaluator(
         let related = relatedRows(target, value);
         if (options.where)
           related = related.filter((item) => matchWhere(target, item, options.where));
-        if (options.orderBy) related = sortRows(related, options.orderBy);
+        if (options.orderBy) related = sortRows(target, related, options.orderBy);
         out[key] = related.map((item) => project(target, item, options.select, options.populate));
       } else {
         const [related] = relatedRows(target, value);
@@ -589,22 +617,69 @@ export function createEvaluator(
     return out;
   }
 
-  const orderEntries = (orderBy: OrderBy): Array<[string, Direction]> => {
-    const entries: Array<[string, Direction]> = [];
-    const items: readonly unknown[] = isList(orderBy) ? orderBy : [orderBy];
-    for (const item of items) {
-      if (typeof item === "string") entries.push([item, "asc"]);
-      else if (isPlainObject(item)) {
-        for (const [key, direction] of Object.entries(item))
-          entries.push([key, direction === "desc" ? "desc" : "asc"]);
-      }
+  /**
+   * A column the engine orders by, checked like @strapi/database's
+   * processOrderBy: with a known schema, an attribute or an implicit column
+   * (anything else throws "Attribute … not found" there); relation, media,
+   * component and dynamic zone keys are not modelled (the engine joins or
+   * refuses), nor is its virtual `status` rank: `status` sorts by
+   * draft/modified/published even on a type with a `status` attribute such
+   * as event-rsvp (order-by.js tests the key before the attributes).
+   */
+  const assertSortable = (uid: string | null, key: string): void => {
+    if (key.includes(":")) {
+      throw new Error(
+        `strapi-stub: orderBy "${key}" is a Document Service sort string; db.query takes { field: "asc" | "desc" }`,
+      );
     }
-    return entries;
+    if (key === "status") {
+      throw new Error(
+        "strapi-stub: orderBy status (the engine's draft/published rank, not the column) is not modelled",
+      );
+    }
+    const schema = uid ? schemas[uid] : undefined;
+    if (!schema || IMPLICIT_COLUMNS.has(key)) return;
+    const attribute = schema.attributes[key];
+    if (!attribute) throw new Error(`strapi-stub: orderBy on unknown column ${key} (${uid})`);
+    if (UNSORTABLE_TYPES.has(attribute.type)) {
+      throw new Error(
+        `strapi-stub: orderBy on the ${attribute.type} ${key} is not modelled (${uid})`,
+      );
+    }
   };
 
-  function sortRows(rows: Row[], orderBy: OrderBy | undefined): Row[] {
+  /** asc or desc in either case, as knex takes it; a nested object sorts through a relation. */
+  const directionOf = (key: string, direction: unknown): Direction => {
+    if (isPlainObject(direction)) {
+      throw new Error(`strapi-stub: orderBy through the relation ${key} is not modelled`);
+    }
+    const lower = typeof direction === "string" ? direction.toLowerCase() : "";
+    if (lower !== "asc" && lower !== "desc") {
+      throw new Error(
+        `strapi-stub: orderBy direction ${JSON.stringify(direction)} for ${key} is not modelled`,
+      );
+    }
+    return lower;
+  };
+
+  const orderEntries = (uid: string | null, orderBy: unknown): Array<[string, Direction]> => {
+    if (typeof orderBy === "string") {
+      assertSortable(uid, orderBy);
+      return [[orderBy, "asc"]];
+    }
+    if (isList(orderBy)) return orderBy.flatMap((item) => orderEntries(uid, item));
+    if (isPlainObject(orderBy)) {
+      return Object.entries(orderBy).map(([key, direction]): [string, Direction] => {
+        assertSortable(uid, key);
+        return [key, directionOf(key, direction)];
+      });
+    }
+    throw new Error(`strapi-stub: orderBy ${JSON.stringify(orderBy)} is not modelled`);
+  };
+
+  function sortRows(uid: string | null, rows: Row[], orderBy: OrderBy | undefined): Row[] {
     const entries: Array<[string, Direction]> =
-      orderBy === undefined ? [["id", "asc"]] : orderEntries(orderBy);
+      orderBy === undefined ? [["id", "asc"]] : orderEntries(uid, orderBy);
     return [...rows].sort((a, b) => {
       for (const [key, direction] of entries) {
         const x = comparable(a[key]);
@@ -646,6 +721,114 @@ function copyTables(tables: Tables | undefined): Tables {
 }
 
 const isPublishedRow = (row: Row) => !isNull(row.publishedAt);
+
+/** The Document Service params each documents() method models; any other key throws. */
+const DOCUMENT_READ_KEYS = new Set([
+  "documentId",
+  "status",
+  "filters",
+  "fields",
+  "populate",
+  "sort",
+  "limit",
+  "start",
+]);
+const DOCUMENT_WRITE_KEYS = new Set(["documentId", "status", "fields", "populate", "data"]);
+const DOCUMENT_ID_KEYS = new Set(["documentId"]);
+
+/**
+ * A key the stub does not model (locale, pagination, page, publicationFilter,
+ * …) would change the real result, so it throws instead of being dropped.
+ * An undefined value counts as absent.
+ */
+function assertDocumentKeys(method: string, params: object, modelled: Set<string>): void {
+  const unknown = Object.entries(params)
+    .filter(([key, value]) => value !== undefined && !modelled.has(key))
+    .map(([key]) => key);
+  if (unknown.length > 0) {
+    throw new Error(`strapi-stub: documents().${method} does not model ${unknown.join(", ")}`);
+  }
+}
+
+/** asc or desc in either case (@strapi/utils validateOrder); anything else throws there too. */
+function sortOrder(field: string, order: string): Direction {
+  const lower = order.trim().toLowerCase();
+  if (lower !== "asc" && lower !== "desc")
+    throw new Error(`strapi-stub: sort order ${JSON.stringify(order)} for ${field} is invalid`);
+  return lower;
+}
+
+/** One sort field; a dotted path sorts through a relation (not modelled). */
+function sortField(field: string, order: string): Record<string, SortDirection> {
+  const name = field.trim();
+  if (name.includes(".") || name.includes("[")) {
+    throw new Error(`strapi-stub: sort through the relation path ${name} is not modelled`);
+  }
+  return { [name]: sortOrder(name, order) };
+}
+
+/** "a", "a:desc", "a:asc,b:desc" (convert-query-params getMeaningfulSortSegments). */
+function sortSegments(text: string): Array<Record<string, SortDirection>> {
+  return text
+    .split(",")
+    .map((segment) => segment.trim())
+    .filter((segment) => segment.split(":")[0].trim().length > 0)
+    .map((segment) => {
+      const [field, order = "asc"] = segment.split(":");
+      return sortField(field, order);
+    });
+}
+
+/** { title: "desc" }; a nested object sorts through a relation (not modelled). */
+function sortObject(sort: Record<string, unknown>): Record<string, SortDirection> {
+  const out: Record<string, SortDirection> = {};
+  for (const [field, order] of Object.entries(sort)) {
+    if (typeof order !== "string") {
+      throw new Error(`strapi-stub: sort ${field}: ${JSON.stringify(order)} is not modelled`);
+    }
+    if (order.trim().length > 0) Object.assign(out, sortField(field, order));
+  }
+  return out;
+}
+
+/**
+ * The Document Service's `sort` as the query engine's orderBy, the way
+ * @strapi/utils convert-query-params turns it (the Document Service never
+ * hands "field:dir" strings to the engine). Empty sorts are dropped.
+ */
+export function documentSort(sort: unknown): OrderBy | undefined {
+  if (sort === undefined || sort === null) return undefined;
+  let entries: Array<Record<string, SortDirection>>;
+  if (typeof sort === "string") entries = sortSegments(sort);
+  else if (isList(sort) && sort.every((item) => typeof item === "string"))
+    entries = sort.flatMap((item) => sortSegments(item as string));
+  else if (isList(sort))
+    entries = sort.map((item) => {
+      if (!isPlainObject(item))
+        throw new Error(`strapi-stub: sort item ${JSON.stringify(item)} is not modelled`);
+      return sortObject(item);
+    });
+  else if (isPlainObject(sort)) entries = [sortObject(sort)];
+  else throw new Error(`strapi-stub: sort ${JSON.stringify(sort)} is not modelled`);
+  const kept = entries.filter((entry) => Object.keys(entry).length > 0);
+  return kept.length > 0 ? kept : undefined;
+}
+
+/** start / limit as the query engine's offset / limit (limit -1 = none), validated like Strapi. */
+function documentPage(params: DocumentParams): Pick<QueryParams, "limit" | "offset"> {
+  const page: Pick<QueryParams, "limit" | "offset"> = {};
+  if (params.start !== undefined) {
+    if (!Number.isInteger(params.start) || params.start < 0)
+      throw new Error(`strapi-stub: start ${params.start} is not a non-negative integer`);
+    page.offset = params.start;
+  }
+  if (params.limit !== undefined && params.limit !== -1) {
+    if (!Number.isInteger(params.limit) || params.limit < 0)
+      throw new Error(`strapi-stub: limit ${params.limit} is not a non-negative integer or -1`);
+    page.limit = params.limit;
+  }
+  return page;
+}
 
 export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   const schemas: Record<string, ContentTypeSchema> = { ...CMS_SCHEMAS, ...options.schemas };
@@ -692,7 +875,7 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
 
   const selectRows = (uid: string, params: QueryParams | undefined): Row[] => {
     let rows = rowsOf(uid).filter((row) => evaluator.matchWhere(uid, row, params?.where));
-    rows = evaluator.sortRows(rows, params?.orderBy);
+    rows = evaluator.sortRows(uid, rows, params?.orderBy);
     if (params?.offset) rows = rows.slice(params.offset);
     if (params?.limit !== undefined) rows = rows.slice(0, params.limit);
     return rows;
@@ -792,6 +975,13 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     ],
   });
 
+  /** A read: where + the converted sort + start/limit. */
+  const documentQuery = (uid: string, params: DocumentParams): QueryParams => ({
+    where: documentWhere(uid, params),
+    orderBy: documentSort(params.sort),
+    ...documentPage(params),
+  });
+
   const documentProjection = (params: DocumentParams): QueryParams => ({
     select: params.fields ? [...params.fields, "id", "documentId"] : undefined,
     populate: params.populate,
@@ -822,26 +1012,33 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   const documents = (uid: string): StubDocuments => ({
     async findOne(params) {
       record("documents", uid, "findOne", params);
-      const [row] = selectRows(uid, { where: documentWhere(uid, params) });
+      assertDocumentKeys("findOne", params, DOCUMENT_READ_KEYS);
+      const [row] = selectRows(uid, documentQuery(uid, params));
       return row ? project(uid, row, documentProjection(params)) : null;
     },
     async findFirst(params = {}) {
       record("documents", uid, "findFirst", params);
-      const [row] = selectRows(uid, { where: documentWhere(uid, params), orderBy: params.sort });
+      assertDocumentKeys("findFirst", params, DOCUMENT_READ_KEYS);
+      const [row] = selectRows(uid, documentQuery(uid, params));
       return row ? project(uid, row, documentProjection(params)) : null;
     },
     async findMany(params = {}) {
       record("documents", uid, "findMany", params);
-      return selectRows(uid, { where: documentWhere(uid, params), orderBy: params.sort }).map(
-        (row) => project(uid, row, documentProjection(params)),
+      assertDocumentKeys("findMany", params, DOCUMENT_READ_KEYS);
+      return selectRows(uid, documentQuery(uid, params)).map((row) =>
+        project(uid, row, documentProjection(params)),
       );
     },
     async count(params = {}) {
       record("documents", uid, "count", params);
+      assertDocumentKeys("count", params, DOCUMENT_READ_KEYS);
+      // The engine's count reads only the where (entity-manager count picks
+      // _q, where and filters), so sort/start/limit change nothing, as here.
       return selectRows(uid, { where: documentWhere(uid, params) }).length;
     },
     async create(params) {
       record("documents", uid, "create", params);
+      assertDocumentKeys("create", params, DOCUMENT_WRITE_KEYS);
       const seeded = seedDocument(uid, params.data, { status: params.status });
       const row =
         params.status === "published" || !hasDraftAndPublish(uid) ? seeded.published : seeded.draft;
@@ -850,6 +1047,7 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async update(params) {
       record("documents", uid, "update", params);
+      assertDocumentKeys("update", params, DOCUMENT_WRITE_KEYS);
       if (documentRows(uid, params.documentId).length === 0) return null;
       if (!hasDraftAndPublish(uid)) {
         const [row] = documentRows(uid, params.documentId);
@@ -879,6 +1077,7 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async delete(params) {
       record("documents", uid, "delete", params);
+      assertDocumentKeys("delete", params, DOCUMENT_ID_KEYS);
       return {
         documentId: params.documentId,
         entries: remove(uid, (row) => row.documentId === params.documentId),
@@ -886,10 +1085,12 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async publish(params) {
       record("documents", uid, "publish", params);
+      assertDocumentKeys("publish", params, DOCUMENT_ID_KEYS);
       return { documentId: params.documentId, entries: publishDocument(uid, params.documentId) };
     },
     async unpublish(params) {
       record("documents", uid, "unpublish", params);
+      assertDocumentKeys("unpublish", params, DOCUMENT_ID_KEYS);
       const entries = remove(
         uid,
         (row) => row.documentId === params.documentId && isPublishedRow(row),
@@ -898,6 +1099,7 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async discardDraft(params) {
       record("documents", uid, "discardDraft", params);
+      assertDocumentKeys("discardDraft", params, DOCUMENT_ID_KEYS);
       const published = publishedOf(uid, params.documentId);
       if (!published) return { documentId: params.documentId, entries: [] };
       remove(uid, (row) => row.documentId === params.documentId && !isPublishedRow(row));

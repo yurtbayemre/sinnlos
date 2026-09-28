@@ -7,6 +7,7 @@ import {
   policyContext,
   stubDocumentId,
   type ContentTypeSchema,
+  type DocumentParams,
   type Row,
   type Where,
 } from "./strapi-stub.test.helper";
@@ -226,6 +227,11 @@ describe("strapi-stub projection = the query engine's", () => {
       { orderBy: { rank: "desc" }, select: ["id"] },
       { orderBy: [{ note: "asc" }, { id: "desc" }], select: ["id"] },
       { orderBy: { id: "asc" }, limit: 2, offset: 1, select: ["id"] },
+      // knex takes the direction in either case; a bare string sorts ascending.
+      { orderBy: { name: "DESC" }, select: ["id"] },
+      { orderBy: "rank", select: ["id"] },
+      { orderBy: ["note", { id: "desc" }], select: ["id"] },
+      { where: { id: 1 }, populate: { tags: { orderBy: { label: "DESC" } } } },
     ]) {
       const real = await engine.db.query(THING).findMany(params);
       const fake = await stub()
@@ -233,6 +239,53 @@ describe("strapi-stub projection = the query engine's", () => {
         .findMany(params as never);
       expect(fake, JSON.stringify(params)).toEqual(real);
     }
+  });
+
+  it("throws on an orderBy the engine refuses: unknown column, a 'field:dir' string", async () => {
+    for (const orderBy of [
+      { nope: "desc" },
+      "nope",
+      "rank:desc",
+      [{ rank: "asc" }, { nope: "asc" }],
+      { tags: "asc" },
+    ]) {
+      const params = { orderBy, select: ["id"] } as never;
+      await expect(
+        engine.db.query(THING).findMany(params),
+        JSON.stringify(orderBy),
+      ).rejects.toThrow(/not found on model/);
+      await expect(
+        stub().db.query(THING).findMany(params),
+        JSON.stringify(orderBy),
+      ).rejects.toThrow(/strapi-stub: orderBy/);
+    }
+    const nested = { where: { id: 1 }, populate: { tags: { orderBy: { nope: "asc" } } } } as never;
+    await expect(engine.db.query(THING).findMany(nested)).rejects.toThrow(/nope not found/);
+    await expect(stub().db.query(THING).findMany(nested)).rejects.toThrow(/unknown column nope/);
+  });
+
+  it("throws on an orderBy it does not model instead of keeping insertion order", async () => {
+    // The engine joins and orders by the related column; the stub does not model that.
+    const throughRelation = { orderBy: { group: { name: "desc" } }, select: ["id"] } as never;
+    expect(await engine.db.query(THING).findMany(throughRelation)).toHaveLength(4);
+    await expect(stub().db.query(THING).findMany(throughRelation)).rejects.toThrow(
+      /relation group is not modelled/,
+    );
+    for (const orderBy of [{ rank: "sideways" }, { status: "asc" }, 42]) {
+      await expect(
+        stub()
+          .db.query(THING)
+          .findMany({ orderBy } as never),
+        JSON.stringify(orderBy),
+      ).rejects.toThrow(/strapi-stub: orderBy/);
+    }
+    // The implicit columns every content type has are known without a schema entry.
+    const { sortRows } = createEvaluator(SCHEMAS);
+    const rows: Row[] = [
+      { id: 1, createdAt: "2026-01-02" },
+      { id: 2, createdAt: "2026-01-03" },
+    ];
+    expect(sortRows(THING, rows, { createdAt: "desc" }).map((row) => row.id)).toEqual([2, 1]);
   });
 
   it("counts and misses like the engine", async () => {
@@ -417,6 +470,64 @@ describe("strapi-stub documents(): draft & publish twins", () => {
     await documents.unpublish({ documentId: a.documentId });
     expect(await documents.findOne({ documentId: a.documentId, status: "published" })).toBeNull();
     expect((await documents.delete({ documentId: a.documentId })).entries).toHaveLength(1);
+  });
+
+  it("converts a Document Service sort and pages with start/limit", async () => {
+    let second = 0;
+    const strapi = createStrapiStub({
+      now: () => new Date(Date.UTC(2026, 8, 28, 8, 0, second++)).toISOString(),
+    });
+    for (const title of ["b", "a", "c"]) strapi.seedDocument(ANNOUNCEMENT, { title });
+    const documents = strapi.documents(ANNOUNCEMENT);
+    const titles = async (params: DocumentParams) =>
+      (await documents.findMany(params)).map((row) => row.title);
+
+    expect(await titles({ sort: "createdAt:desc" })).toEqual(["c", "a", "b"]);
+    expect(await titles({ sort: "createdAt" })).toEqual(["b", "a", "c"]);
+    expect(await titles({ sort: { title: "DESC" } })).toEqual(["c", "b", "a"]);
+    expect(await titles({ sort: ["title:asc"] })).toEqual(["a", "b", "c"]);
+    expect(await titles({ sort: " title:desc , createdAt " })).toEqual(["c", "b", "a"]);
+    expect(await titles({ sort: "title:desc", start: 1, limit: 1 })).toEqual(["b"]);
+    expect(await titles({ sort: "title", limit: -1 })).toEqual(["a", "b", "c"]);
+    expect((await documents.findFirst({ sort: "createdAt:desc" }))?.title).toBe("c");
+    // The engine's count reads only the where.
+    expect(await documents.count({ sort: "title", limit: 1 })).toBe(3);
+  });
+
+  it("throws on Document Service params and sorts it does not model", async () => {
+    const strapi = createStrapiStub();
+    strapi.seedDocument(ANNOUNCEMENT, { title: "a" });
+    const documents = strapi.documents(ANNOUNCEMENT);
+    const withKeys = (params: Record<string, unknown>) => params as DocumentParams;
+
+    await expect(documents.findMany({ sort: "nope:desc" })).rejects.toThrow(/unknown column nope/);
+    await expect(documents.findMany({ sort: "title:sideways" })).rejects.toThrow(/invalid/);
+    await expect(documents.findMany({ sort: "author.username:asc" })).rejects.toThrow(
+      /relation path author.username is not modelled/,
+    );
+    await expect(
+      documents.findMany(withKeys({ sort: { author: { username: "asc" } } })),
+    ).rejects.toThrow(/not modelled/);
+    await expect(documents.findMany({ sort: "author" })).rejects.toThrow(
+      /relation author is not modelled/,
+    );
+    await expect(documents.findMany({ limit: 1.5 })).rejects.toThrow(/limit 1.5/);
+    await expect(documents.findMany({ start: -1 })).rejects.toThrow(/start -1/);
+    for (const extra of [
+      { locale: "de" },
+      { pagination: { page: 1, pageSize: 10 } },
+      { page: 2 },
+      { publicationFilter: "never-published" },
+    ]) {
+      await expect(documents.findMany(withKeys(extra)), JSON.stringify(extra)).rejects.toThrow(
+        /documents\(\)\.findMany does not model/,
+      );
+    }
+    await expect(
+      documents.update({ documentId: "x", data: { title: "b" }, sort: "title" }),
+    ).rejects.toThrow(/documents\(\)\.update does not model sort/);
+    // An undefined value counts as absent.
+    expect(await documents.findMany(withKeys({ locale: undefined }))).toHaveLength(1);
   });
 
   it("mints documentIds in the shape Strapi 5 generates", () => {
