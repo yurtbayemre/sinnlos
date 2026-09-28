@@ -933,7 +933,12 @@ config. Nobody's permissions change:
   `REVOKED_PERMISSIONS`.
 - **Config (B05).** The cms no longer sends `X-Powered-By`. `CORS_ORIGIN`
   is read through Strapi's `env()` (same values; blanks around commas are
-  ignored). An absolute SQLite `DATABASE_FILENAME` is used as given. SMTP on
+  ignored). An absolute SQLite `DATABASE_FILENAME` is used as given. Until
+  this release an absolute value was placed under `apps/cms` (`/data/x.db`
+  became `apps/cms/data/x.db`); on an existing SQLite install, move that
+  file to the absolute path, or switch to the equivalent relative value,
+  before upgrading, otherwise the cms starts on a new, empty database.
+  Relative values and Postgres (production) are unaffected. SMTP on
   port 465 now uses implicit TLS; any other port, the default 587 included,
   still requires STARTTLS as before. `DIGESTS_DISABLED` also accepts
   `true`, `yes` and `on` (`infra/deploy.sh --check` still only knows `1`).
@@ -954,6 +959,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    nothing changes. With `465` the digests could not be sent before (the
    connection timed out waiting for a plain-text greeting); from this
    deploy on they are, so the next 07:30 run mails the users who opted in.
+   Also run `grep -E '^DIGESTS_DISABLED=' infra/.env`. Unset, empty, `0`
+   and a plain `1` behave as before. `true`, `yes` or `on` (any case), and
+   `1` with blanks around it, used to leave the digests on and switch them
+   off from this deploy on: set `0` to keep them, or `1` to switch them off.
+   `infra/deploy.sh --check` still only understands `1` until batch 5.
 2. **Deploy:** `infra/deploy.sh`.
 3. **Boot log:** `"${COMPOSE[@]}" logs cms | grep '\[bootstrap\]'`. On a
    database that booted batch 7, expect no `granted` or `revoked` line and
@@ -971,7 +981,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 **Rollback:** the batch 7 image runs on the same database as it is (no
 schema or data change; its sync finds nothing to do), with the commands
-`infra/deploy.sh` prints. With `SMTP_PORT=465` the digests stop again.
+`infra/deploy.sh` prints. With `SMTP_PORT=465` the digests stop again, and
+a `DIGESTS_DISABLED` of `true`/`yes`/`on` no longer switches them off.
 
 **Rehearsal (Postgres 16 stand-in, database first booted by the batch 7
 code `0ea7107`):** the branch boot left `up_permissions` identical (515

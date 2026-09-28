@@ -202,7 +202,12 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   may call the cms API, comma-separated (compose sets it to
   `WEB_PUBLIC_URL`; unset or empty means `http://localhost:3000`).
   `DATABASE_FILENAME` (SQLite only) is relative to `apps/cms`, or an
-  absolute path. The cms sends no `X-Powered-By` header.
+  absolute path. Releases before batch 8 placed an absolute value under
+  `apps/cms` (`/data/x.db` became `apps/cms/data/x.db`); on an existing
+  SQLite install, move that file to the absolute path, or switch to the
+  equivalent relative value, before upgrading, otherwise the cms starts on a
+  new, empty database. Relative values and Postgres are unaffected. The cms
+  sends no `X-Powered-By` header.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
   enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
