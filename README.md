@@ -900,6 +900,29 @@ Strapi's Vite 5. File snapshots (`toMatchFileSnapshot`, e.g.
 `infra/diagnostics/prod-perm-diff.sql`) are compared verbatim, with no
 trimming.
 
+Safety nets for refactors (roadmap S03–S06, S09):
+
+- `apps/cms/src/test/strapi-stub.test.helper.ts` is the shared, typed Strapi
+  stub for cms unit tests: `db.query` with a where evaluator, select and
+  populate like the query engine, a `documents()` service with draft and
+  published twins, stubbed services, log spies and transactions with
+  `onCommit`. `strapi-stub.test.ts` checks it against the real
+  `@strapi/database` on SQLite.
+- `apps/cms/src/policies/policies.contract.test.ts` holds every policy in
+  `src/policies` to strict booleans, its bypass table and the
+  `request.query` rules, and fails for a policy without a table entry.
+- `apps/cms/src/framework-contract.test.ts` pins the Strapi behaviour the
+  cms relies on, against the installed packages. **Run it before every
+  `@strapi/*` bump** (`pnpm vitest run apps/cms/src/framework-contract.test.ts`);
+  its version pin fails first on purpose.
+- `infra/contracts.test.ts` pins what the cms and the web both state: the
+  announcement audience rule, the YouTube parser, comment anchors, schema
+  enums against the web unions and constants, relation pairs, and the web
+  role sets against the permission matrix. Known gaps are listed in the file
+  and asserted as they are, so closing one means removing its entry.
+- The web server actions and `/api/live/emit` (logic in
+  `apps/web/src/lib/live-emit.ts`) have characterisation tests next to them.
+
 ## 8. Verification checklist
 
 - [ ] `pnpm install` completes cleanly

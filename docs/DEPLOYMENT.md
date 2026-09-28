@@ -3100,6 +3100,11 @@ the cms and the database, phase 2 the web):
   `docker run --rm -d -p 127.0.0.1:55432:5432 -e POSTGRES_PASSWORD=test postgres:16-alpine`
   with `SINNLOS_TEST_PG_URL=postgres://postgres:test@127.0.0.1:55432/postgres`.
   CI's `datetime` job runs both; rerun it for every Strapi, knex or pg upgrade.
+  Before any `@strapi/*` bump, also run
+  `pnpm vitest run apps/cms/src/framework-contract.test.ts` against the new
+  packages: it pins the naive-column, `.alter()` and migration-order traps
+  (and the other Strapi behaviour the cms relies on), and its version pin
+  fails first on purpose.
 - **New fields.** Instants are `"type": "datetime"`, calendar days
   `"type": "date"`, durations numbers with the unit in the name. Never put a
   `column` or `columnType` override on a `datetime` attribute: Strapi then
@@ -3619,6 +3624,13 @@ pings; if the secret is unset on the web, `/api/live/emit` answers 503 (and
 open pages only refresh through the polling fallback. From outside, `/api/live/emit`
 is unreachable: the edge sends every `/api/*` path except `/api/auth/*` to
 the cms.
+
+The receiver's logic lives in `apps/web/src/lib/live-emit.ts` (the route
+file only delegates to it) and is pinned by `live-emit.test.ts`: 503 without
+the secret, 401 for a missing, wrong or length-mismatched header, and with
+`LIVE_EVENTS_DISABLED=1` a 204 without publishing, after the secret check.
+The move there (2026-09-28) changed no behaviour: it ships with a normal
+deploy; run `infra/live-smoke.sh` afterwards as usual.
 
 ---
 
