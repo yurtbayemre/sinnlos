@@ -1314,9 +1314,13 @@ joined select; the counting statement equalled the batch 8 rule on seeded
 random polls with duplicates and deleted accounts, ran as one statement,
 and parallel votes of one voter never showed as more than one vote; the
 baseline query of step 1 gave exactly the results' counts on Postgres 16,
-a stored duplicate vote included. The comment-section batching, the refresh of only the pinged card and the
-chunked emit are pinned by unit tests; the browser check of step 4 and
-`infra/live-smoke.sh` were not run against a deployed stack.
+a stored duplicate vote included. 1200 notification rows for 1200
+recipients, written through the real lifecycle subscriber of a booted cms,
+reached a stand-in web ingest (400 above 1000 events, like the web) in
+POSTs of at most 1000 events, all 1200 delivered. The comment-section
+batching and the refresh of only the pinged card are pinned by unit tests;
+the browser check of step 4 and `infra/live-smoke.sh` were not run against
+a deployed stack.
 
 #### Upgrading to the cms bootstrap split (batch 8, lane 3B)
 
