@@ -17,6 +17,11 @@
  * bulk paths fire the DB lifecycle subscriber too — without batching
  * that would be N POSTs instead of one.
  *
+ * Event shapes and channel names come from the live contract
+ * (./live-contract.ts, byte-identical to the web's lib/live-contract.ts,
+ * LF04). A content event whose target has no valid channel is dropped here:
+ * no connection can subscribe to it.
+ *
  * Post-commit (LF02): the DB subscriber runs inside the write's
  * transaction, so it queues a ping only once that transaction commits
  * (utils/after-commit.ts); a rollback pings nothing, and a client that
@@ -25,11 +30,9 @@
  * controllers call it after their writes returned.
  */
 import { afterCommit, type CommitAwareDb } from "./after-commit";
+import { channelFor, type LiveEvent } from "./live-contract";
 
-export type LiveEvent =
-  | { kind: "content"; targetType: string; targetDocumentId: string }
-  | { kind: "notification"; recipientId: number }
-  | { kind: "announcements" };
+export type { LiveEvent } from "./live-contract";
 
 const BATCH_WINDOW_MS = 100;
 
@@ -39,7 +42,7 @@ let timer: NodeJS.Timeout | null = null;
 function dedupeKey(event: LiveEvent): string {
   switch (event.kind) {
     case "content":
-      return `c:${event.targetType}:${event.targetDocumentId}`;
+      return `c:${channelFor(event)}`;
     case "notification":
       return `n:${event.recipientId}`;
     case "announcements":
@@ -98,6 +101,7 @@ async function flush(): Promise<void> {
  */
 export function emitLiveEvent(event: LiveEvent): void {
   if (!liveEventsEnabled()) return;
+  if (event.kind === "content" && channelFor(event) === null) return;
   pending.set(dedupeKey(event), event);
   if (!timer) {
     timer = setTimeout(() => {

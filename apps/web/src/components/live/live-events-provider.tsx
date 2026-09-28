@@ -39,8 +39,20 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  ANNOUNCEMENTS_CHANNEL,
+  NOTIFICATIONS_CHANNEL,
+  frameChannel,
+  isContentChannel,
+  parseLiveFrame,
+  type LiveChannel,
+  type LiveFrame,
+} from "@/lib/live-contract";
 
-export type LiveChannel = string; // "announcement:<docId>" | "wiki-page:<docId>" | "notifications" | "announcements"
+// Channel names, frames and "which channels need a subscription" come from
+// the live contract (LF04): content channels "<targetType>:<documentId>" and
+// the global "notifications" / "announcements".
+export type { LiveChannel } from "@/lib/live-contract";
 
 type Listener = () => void | Promise<void>;
 
@@ -68,16 +80,11 @@ const COALESCE_NOTIFICATIONS_JITTER_MS = 3_000;
 const COALESCE_ANNOUNCEMENTS_JITTER_MS = 10_000;
 const CATCHUP_CONCURRENCY = 2;
 
-/** Channels that require a server-side subscription on the bus. */
-function isSubscribedChannel(channel: string): boolean {
-  return channel.includes(":");
-}
-
 function coalesceDelay(channel: LiveChannel): number {
-  if (channel === "announcements") {
+  if (channel === ANNOUNCEMENTS_CHANNEL) {
     return COALESCE_CONTENT_MS + Math.random() * COALESCE_ANNOUNCEMENTS_JITTER_MS;
   }
-  if (channel === "notifications") {
+  if (channel === NOTIFICATIONS_CHANNEL) {
     return COALESCE_CONTENT_MS + Math.random() * COALESCE_NOTIFICATIONS_JITTER_MS;
   }
   return COALESCE_CONTENT_MS;
@@ -177,7 +184,9 @@ export function LiveEventsProvider({
     const channels = [...listenersRef.current.keys()].filter(
       (ch) => (listenersRef.current.get(ch)?.size ?? 0) > 0,
     );
-    channels.sort((a, b) => (a === "notifications" ? -1 : b === "notifications" ? 1 : 0));
+    channels.sort((a, b) =>
+      a === NOTIFICATIONS_CHANNEL ? -1 : b === NOTIFICATIONS_CHANNEL ? 1 : 0,
+    );
     const queue = catchupQueueRef.current;
     for (const ch of channels) if (!queue.includes(ch)) queue.push(ch);
     pumpCatchup();
@@ -185,8 +194,10 @@ export function LiveEventsProvider({
 
   const syncSubscriptions = useCallback((add: LiveChannel[], remove: LiveChannel[] = []) => {
     const connId = connIdRef.current;
-    const wanted = add.filter(isSubscribedChannel);
-    const dropped = remove.filter(isSubscribedChannel);
+    // Only content channels are subscribed on the bus; the global ones
+    // reach every connection that may receive them.
+    const wanted = add.filter(isContentChannel);
+    const dropped = remove.filter(isContentChannel);
     if (!connId || (wanted.length === 0 && dropped.length === 0)) return;
     void fetch("/live/subscribe", {
       method: "POST",
@@ -253,17 +264,14 @@ export function LiveEventsProvider({
 
     source.addEventListener("ping", (ev) => {
       lastBeatRef.current = Date.now();
+      let frame: LiveFrame | null = null;
       try {
-        const frame = JSON.parse((ev as MessageEvent).data) as
-          | { type: "content"; channel: string }
-          | { type: "notification" }
-          | { type: "announcements" };
-        if (frame.type === "content") scheduleChannel(frame.channel);
-        else if (frame.type === "notification") scheduleChannel("notifications");
-        else scheduleChannel("announcements");
+        frame = parseLiveFrame(JSON.parse((ev as MessageEvent).data));
       } catch {
-        // Malformed frame — ignore; the poll backstop covers.
+        // Not JSON: handled like any malformed frame below.
       }
+      // Malformed frame: ignore it; the poll backstop covers.
+      if (frame) scheduleChannel(frameChannel(frame));
     });
 
     source.onerror = () => {
@@ -397,7 +405,7 @@ export function LiveEventsProvider({
  * the push path is alive (see plan: healthy 60s/120s, degraded = today's
  * 10s/30s).
  */
-export function useLiveChannel(channel: LiveChannel, refetch: Listener): boolean {
+export function useLiveChannel(channel: LiveChannel | null, refetch: Listener): boolean {
   const { register, healthy } = useContext(LiveEventsContext);
   // Effect Event instead of the latest-ref pattern (issue #36): always
   // calls the latest refetch without re-registering, and without the
@@ -406,6 +414,8 @@ export function useLiveChannel(channel: LiveChannel, refetch: Listener): boolean
   const onLiveEvent = useEffectEvent(refetch);
 
   useEffect(() => {
+    // No channel (e.g. a target without a documentId): nothing to listen to.
+    if (channel === null) return;
     return register(channel, () => onLiveEvent());
   }, [register, channel]);
 

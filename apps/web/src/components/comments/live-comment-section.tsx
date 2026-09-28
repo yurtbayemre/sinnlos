@@ -3,6 +3,7 @@
 import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { getCommentSection } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
+import { channelFor } from "@/lib/live-contract";
 import { applyLatest, createSeqGuard } from "@/lib/optimistic";
 import type { CommentSectionData } from "@/lib/reaction-summary";
 import { useLiveChannel } from "@/components/live/live-events-provider";
@@ -63,7 +64,10 @@ export function LiveCommentSection({
     }
   }, [guard, stableTarget]);
 
-  const healthy = useLiveChannel(`${type}:${documentId}`, refetch);
+  // The target's content channel (lib/live-contract.ts); a target without a
+  // usable documentId has none and gets no pings.
+  const channel = channelFor({ targetType: type, targetDocumentId: documentId });
+  const healthy = useLiveChannel(channel, refetch);
 
   useEffect(() => {
     const tick = () => {

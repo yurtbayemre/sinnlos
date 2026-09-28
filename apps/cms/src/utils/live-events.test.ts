@@ -45,6 +45,18 @@ describe("emitLiveEvent batching", () => {
     expect(events).toHaveLength(4);
   });
 
+  it("drops a content event whose target has no channel (nobody could subscribe to it)", async () => {
+    emitLiveEvent({ kind: "content", targetType: "event", targetDocumentId: "abc" });
+    emitLiveEvent({ kind: "content", targetType: "announcement", targetDocumentId: "a b" });
+    emitLiveEvent({ kind: "content", targetType: "wiki-page", targetDocumentId: "doc-w" });
+    await __flushLiveEventsForTest();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const { events } = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(events).toEqual([
+      { kind: "content", targetType: "wiki-page", targetDocumentId: "doc-w" },
+    ]);
+  });
+
   it("no-ops when WEB_INTERNAL_URL is unset (local dev)", async () => {
     delete process.env.WEB_INTERNAL_URL;
     emitLiveEvent({ kind: "announcements" });
