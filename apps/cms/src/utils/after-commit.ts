@@ -29,6 +29,13 @@
  *    finished transaction's callback list, so a later sibling commit runs
  *    the earlier siblings' callbacks again. Every registered task is
  *    therefore wrapped to run at most once.
+ *
+ * Not absorbed, so every task must re-read committed state: a failure AT
+ * COMMIT (a deferred constraint) is not surfaced by knex 3.0.1 — trx.commit()
+ * resolves — so the transaction resolves and the commit callbacks run
+ * although nothing was committed (pinned on Postgres). The fan-out re-reads
+ * its source and notifies nobody when it is gone; a live ping carries no
+ * content, a phantom one only makes clients refetch.
  */
 
 /** The slice of `strapi.db` this needs; both members are optional for test doubles. */

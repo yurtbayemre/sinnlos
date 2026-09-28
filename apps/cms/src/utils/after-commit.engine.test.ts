@@ -17,7 +17,10 @@
  *  - the @strapi/database quirk afterCommit guards against: a transaction
  *    started after a commit in the same async context inherits the finished
  *    transaction's callback list, so sibling commits run earlier callbacks
- *    again (the raw count), while afterCommit's tasks run once each.
+ *    again (the raw count), while afterCommit's tasks run once each;
+ *  - Postgres only: a failure AT COMMIT (deferred constraint) resolves the
+ *    transaction and runs the commit callbacks anyway (knex 3.0.1), which is
+ *    why post-commit tasks re-read committed state.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -106,6 +109,9 @@ interface Engine {
 
 interface Opened {
   engine: Engine;
+  /** Raw SQL on the test schema (Postgres only). */
+  sql?: (text: string) => Promise<unknown>;
+  schema?: string;
   close(): Promise<void>;
 }
 
@@ -141,6 +147,8 @@ async function openPostgres(): Promise<Opened> {
   vi.stubGlobal("strapi", { db });
   return {
     engine: db as unknown as Engine,
+    sql: (text) => knex.raw(text),
+    schema,
     async close() {
       await db.destroy();
       vi.unstubAllGlobals();
@@ -366,6 +374,32 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
           }),
         ).rejects.toMatchObject({ code: "25P02" });
         expect(await engine.query(ANNOUNCEMENT_UID).count()).toBe(0);
+      }, 30_000);
+
+      it("Postgres: a failure AT COMMIT is not surfaced and still runs the commit callbacks", async () => {
+        // knex 3.0.1 resolves trx.commit() when COMMIT fails (the error goes
+        // to the transaction's own promise), so @strapi/database resolves the
+        // transaction and runs onCommit although nothing was committed. A
+        // post-commit task therefore re-reads committed state: the fan-out
+        // re-reads its source and notifies nobody when it is gone.
+        const { sql, schema } = opened;
+        if (!sql || !schema) throw new Error("no raw SQL on this engine");
+        await sql(`CREATE FUNCTION "${schema}".refuse_at_commit() RETURNS trigger AS $$
+          BEGIN RAISE EXCEPTION 'refused at commit'; END $$ LANGUAGE plpgsql`);
+        await sql(`CREATE CONSTRAINT TRIGGER refuse_at_commit AFTER INSERT ON "${schema}".announcements
+          DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION "${schema}".refuse_at_commit()`);
+        const task = vi.fn();
+        await expect(
+          engine.transaction(async () => {
+            await engine.query(ANNOUNCEMENT_UID).create({
+              data: { documentId: "doc-z", title: "z", publishedAt: new Date().toISOString() },
+            });
+            await afterCommit(engine, task, () => undefined);
+          }),
+        ).resolves.toBeUndefined();
+        await vi.waitFor(() => expect(task).toHaveBeenCalledTimes(1));
+        expect(await engine.query(ANNOUNCEMENT_UID).count()).toBe(0);
+        await sql(`DROP TRIGGER refuse_at_commit ON "${schema}".announcements`);
       }, 30_000);
     }
   });
