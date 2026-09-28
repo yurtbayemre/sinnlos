@@ -15,6 +15,7 @@ import {
   openSqliteEngine,
   requirePackageFile,
   strapiPackageDir,
+  type EngineQuery,
   type SqliteEngine,
 } from "../test/sqlite-engine.test.helper";
 import {
@@ -22,6 +23,7 @@ import {
   SENSITIVE_USER_FIELDS,
   USER_UID,
 } from "../utils/sanitize-user-contact";
+import { NOT_BLOCKED } from "../utils/visible-ids";
 
 /**
  * FX22: the query side of the contact-field protection. Pinned:
@@ -41,7 +43,9 @@ import {
  *      instantiated at boot before the routes, and every content-API
  *      controller resolves `strapi.contentAPI.validate.query` at call time,
  *   4. the schema-private user fields are no `_q` target for any role:
- *      `searchable: false`, checked on the installed @strapi/database,
+ *      `searchable: false`, checked on the installed @strapi/database; and
+ *      db.query still filters, reads and writes them (the digest cron,
+ *      /api/me and the sign-in extension rely on that),
  *   5. config/middlewares.ts registers the guard (and the other global
  *      guards): every other test here would still pass if a merge dropped
  *      that line, and the boot check only fires once the factory runs.
@@ -391,11 +395,8 @@ describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
     engine = undefined;
   });
 
-  it("finds no user by microsoftOid or digestFrequency (below every role check)", async () => {
-    // The users-permissions user service (fetchAll) passes `_q`, one of
-    // ALLOWED_QUERY_PARAM_KEYS, on to db.query().findMany, and the core
-    // validator never checks it: the schema flag is the only stop. The user
-    // model as the core builds it, without its relations.
+  /** The user model as the core builds it, without its relations, on a fresh SQLite file. */
+  async function openUserEngine(): Promise<SqliteEngine> {
     const { transformContentTypesToModels } = requirePackageFile<{
       transformContentTypesToModels(contentTypes: unknown[], identifiers: unknown): unknown[];
     }>(strapiPackageDir("@strapi/core"), "dist/utils/transform-content-types-to-models.js");
@@ -410,9 +411,16 @@ describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
       globalId: "UsersPermissionsUser",
       attributes: scalar,
     };
-    engine = await openSqliteEngine((identifiers) =>
+    return openSqliteEngine((identifiers) =>
       transformContentTypesToModels([userType], identifiers),
     );
+  }
+
+  it("finds no user by microsoftOid or digestFrequency (below every role check)", async () => {
+    // The users-permissions user service (fetchAll) passes `_q`, one of
+    // ALLOWED_QUERY_PARAM_KEYS, on to db.query().findMany, and the core
+    // validator never checks it: the schema flag is the only stop.
+    engine = await openUserEngine();
     const users = engine.db.query(USER_UID);
     await users.create({
       data: {
@@ -431,6 +439,71 @@ describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
     expect(await search("7b7d-4c1e")).toEqual([]);
     expect(await search("oid000004711")).toEqual([]);
     expect(await search("daily")).toEqual([]);
+  }, 30_000);
+
+  it("db.query still filters, reads and writes the schema-private digest fields (batch 7 coupling)", async () => {
+    // FX22 made the digest opt-ins, digestFrequency and microsoftOid
+    // private; the digest cron (send-digests.ts candidates: NOT_BLOCKED AND
+    // an opt-in, these columns selected, lastDigestAt written back after a
+    // send), /api/me (profile.ts) and the sign-in extension read and write
+    // them through db.query, which applies no `private` rule. The
+    // candidate read below has the digest's where and select.
+    engine = await openUserEngine();
+    const users = engine.db.query(USER_UID) as EngineQuery & {
+      update(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+    };
+    const base = { email: "x@example.com", digestFrequency: "weekly" };
+    await users.create({
+      data: { ...base, documentId: "u-ada", username: "ada", digestAnnouncements: true },
+    });
+    await users.create({
+      data: { ...base, documentId: "u-bob", username: "bob", digestKudos: true, blocked: true },
+    });
+    await users.create({ data: { ...base, documentId: "u-cy", username: "cy" } });
+    await users.create({
+      data: {
+        ...base,
+        documentId: "u-dee",
+        username: "dee",
+        digestMentions: true,
+        digestFrequency: "daily",
+        blocked: null,
+        microsoftOid: "oid-dee",
+      },
+    });
+    const candidates = await users.findMany({
+      where: {
+        $and: [
+          NOT_BLOCKED,
+          {
+            $or: [{ digestAnnouncements: true }, { digestMentions: true }, { digestKudos: true }],
+          },
+        ],
+      },
+      select: [
+        "id",
+        "username",
+        "digestAnnouncements",
+        "digestMentions",
+        "digestKudos",
+        "digestFrequency",
+        "lastDigestAt",
+        "microsoftOid",
+      ],
+      orderBy: { id: "asc" },
+    });
+    expect(candidates.map((row) => row.username)).toEqual(["ada", "dee"]);
+    expect(candidates[1]).toMatchObject({
+      digestMentions: true,
+      digestFrequency: "daily",
+      microsoftOid: "oid-dee",
+    });
+
+    const sentAt = new Date("2026-09-29T05:30:00.000Z");
+    await users.update({ where: { id: candidates[0].id }, data: { lastDigestAt: sentAt } });
+    const ada = await users.findOne({ where: { username: "ada" } });
+    expect(new Date(String(ada?.lastDigestAt)).toISOString()).toBe(sentAt.toISOString());
+    expect(ada).toMatchObject({ digestAnnouncements: true, digestFrequency: "weekly" });
   }, 30_000);
 });
 
