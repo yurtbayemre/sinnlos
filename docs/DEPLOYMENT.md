@@ -735,6 +735,14 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the RSVP summary and reports (batch 7, lane 2B)?** A normal
+> deploy of cms and web **together** (`infra/deploy.sh` does both): no env,
+> schema or edge change. The first boot adds one permission (the RSVP
+> summary, logged as `[bootstrap] granted 6 permission(s) across intranet
+> roles`). Never deploy or roll back the cms alone: an older web against
+> the new cms shows every user only their own RSVP. See
+> [Upgrading to the RSVP summary and reports (batch 7, lane 2B)](#upgrading-to-the-rsvp-summary-and-reports-batch-7-lane-2b).
+>
 > **Deploying batch 6 (2026-09-28)?** The test safety nets, the web
 > correctness fixes and the cms input hardening (the two notes below and
 > the "Uploads gate" and live-event notes further down) ship as one normal
@@ -858,6 +866,188 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the RSVP summary and reports (batch 7, lane 2B)
+
+This release (branch `feat/rsvp-summary-and-reports`, on `batch/6`
+`997bf7f`) moves the RSVP counting into the cms and makes the admin reports
+and a few pages cheaper:
+
+- **RSVP summary (FX21).** The events list used to download every RSVP row
+  of the listed events (up to 3000) and count them in the web. The cms now
+  answers `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50
+  published events per request) with the yes/maybe/no counts, the names of
+  the "yes" answers and the caller's own answer; who answered maybe or no
+  never leaves the cms. `/events` makes one such request. The raw reads
+  (`GET /api/event-rsvps`, `GET /api/event-rsvps/:id`) now return only the
+  caller's own answers (an admin still sees all of them); a filter on the
+  `user` relation and the `Strapi-Response-Format` header answer 400 for
+  everyone but an admin. The new action is granted on boot to exactly the
+  roles that read RSVPs (admin, editor, department head, team lead, member
+  and the `authenticated` fallback), never to guests.
+- **Acknowledgement report beyond 2000 confirmations (FX32).**
+  `/manage/acknowledgements` read every announcement acknowledgement of the
+  intranet and stopped at 2000 rows, after which the report stayed
+  "incomplete" for good. It now asks only for the acknowledgements of the
+  mandatory announcements it lists, 20 announcements per request, each with
+  its own cap. It still shows "–" whenever an input is incomplete.
+- **Stable page walks (WD02).** The training report and the learner's own
+  progress page through lesson progress sorted by id; without an order
+  Postgres could skip or repeat rows between pages. The page arithmetic
+  moved into tested modules; nothing else changes.
+- **Smaller pages (WD05).** Relations no page renders are no longer loaded
+  (announcement department, event departments, department header image,
+  poll author). The kudos picker receives only name, job title and avatar
+  thumbnail of the other active colleagues; `/people` and the org chart
+  receive only the fields their cards show, and `/people` renders 48 cards
+  at a time.
+- **Counts (WD10).** The dashboard people count and the user count on
+  `/manage/analytics` load after the rest of the page instead of holding it
+  back. The bell badge shows the number of all unread notifications (99+),
+  not only of the unread among the newest 20. Image URLs of the local upload
+  provider stay relative (`/uploads/...`), so they always load through the
+  web's session-gated proxy, also when the cms has a host of its own.
+
+**Nothing else is needed: a normal deploy of cms and web together.** No env,
+schema, edge or Traefik change. The one permission change is added by the
+first boot. `infra/deploy.sh` rebuilds and restarts both; never deploy the
+cms alone, and roll both back together:
+
+- an older web against the new cms reads RSVPs row by row and now gets only
+  the caller's own rows, so every event shows at most the caller's answer;
+- the new web against an older cms asks for a summary route that does not
+  exist there (404), so `/events` shows the error banner and no RSVP counts.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Optional, read-only: permissions before.** After the `git pull` the
+   permission diff describes this release, so section 1 lists six new rows
+   `MISSING_IN_DB | <role> | api::event-rsvp.event-rsvp.summary` (for
+   `admin_role`, `authenticated`, `department_head`, `editor`, `member` and
+   `team_lead`) next to what it listed before:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+**Deploy**
+
+3. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/` (it rebuilds cms and web together).
+
+**After the deploy**
+
+4. **The new grant.** The first boot logs it once:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep '\[bootstrap\] granted'
+   # [bootstrap] granted 6 permission(s) across intranet roles
+   ```
+
+   A later boot grants nothing new and logs no such line.
+
+5. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+   lists no `event-rsvp` row any more. The only rows left should be the two
+   known informational `MISSING_IN_DB` rows for `authenticated`
+   (`plugin::users-permissions.auth.getSessions` and `…auth.revokeSession`,
+   Strapi first-boot defaults; see step 9 of
+   [Upgrading to the Strapi 5.55.1 release](#upgrading-to-the-strapi-5551-release-2026-09-25)).
+
+6. **RSVPs through the API.** This signs in as the demo account
+   `infra/live-smoke.sh` uses (password from the same file, or set
+   `SMOKE_PASSWORD` yourself) and prints what the raw reads and the summary
+   answer:
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
+   const [identifier, password] = process.argv.slice(2);
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password }),
+   });
+   const { jwt, user } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const get = (path, headers = {}) =>
+     fetch(`${base}${path}`, { headers: { authorization: `Bearer ${jwt}`, ...headers } });
+   const me = await (await get("/api/me")).json();
+   console.log("role:", me.data?.role?.type);
+   const raw = await (await get("/api/event-rsvps?populate[user][fields][0]=id&pagination[pageSize]=100")).json();
+   const others = raw.data.filter((row) => row.user?.id !== user.id).length;
+   console.log(`raw read: ${raw.data.length} row(s), ${others} of someone else`);
+   console.log("user filter:", (await get(`/api/event-rsvps?filters[user][id][$eq]=${user.id}`)).status);
+   console.log("format header:", (await get("/api/event-rsvps", { "strapi-response-format": "v4" })).status);
+   const events = await (await get("/api/events?filters[rsvpEnabled][$eq]=true&fields[0]=title&sort=start:desc&pagination[pageSize]=50")).json();
+   const targets = events.data.map((event) => event.documentId);
+   if (targets.length === 0) {
+     console.log("summary: no RSVP event to ask for");
+   } else {
+     const res = await get(`/api/event-rsvps/summary?targets=${targets.join(",")}`);
+     const body = await res.json();
+     console.log("summary:", res.status, `${body.data?.length} event(s)`, JSON.stringify(body.data?.[0] ?? null));
+   }
+   NODE
+   ```
+
+   Expected for a role other than `admin_role`: `raw read: … 0 of someone
+   else`, `user filter: 400`, `format header: 400`, and `summary: 200` with
+   one entry per published RSVP event (`yesCount`, `maybeCount`, `noCount`,
+   `yesNames`, `myStatus`; no names of maybe or no answers). For an
+   `admin_role` account the raw read includes everyone's rows and both
+   checks answer 200, by design.
+
+7. **Pages** (`deploy.sh`'s smoke and live-smoke pass as before):
+    - as a member, `/events` shows the same counts and "yes" names on the
+      upcoming RSVP events as before the deploy, and answering yes, maybe
+      or no updates them; a user who had two rows for one event (the known
+      double-click race) now counts once in maybe and no as well;
+    - as an admin, `/manage/acknowledgements` and `/manage/training` show
+      their percentages (a "–" only where an input is really incomplete);
+    - the kudos picker lists neither you nor blocked accounts; `/people`
+      shows 48 cards and a *+ N people* button when more people match; the
+      org chart and the avatars load;
+    - the dashboard's people count appears a moment after the page; the
+      bell badge counts every unread notification.
+
+**What users notice** (worth a short release note):
+
+- *Give kudos* no longer offers yourself or blocked colleagues, shows
+  avatars, and its search matches names and job titles (no longer e-mail
+  addresses).
+- `/people` shows the first 48 people and a button for the next ones.
+- The bell badge shows all unread notifications (up to 99+), not just the
+  unread among the newest 20.
+- Nothing else changes for readers; the RSVP counts can only drop where a
+  duplicate row of one user was counted twice.
+
+**Rollback.** Follow the hint `infra/deploy.sh` prints; it retags and
+re-ups web and cms together. Nothing in the database needs undoing: the
+previous cms removes the six `summary` permission rows on its first boot by
+itself (users-permissions deletes permissions whose action its code does not
+have), and rolling forward adds them again (the grant line from step 4
+appears again). After a rollback the raw RSVP reads return every row again,
+with the older name stripping, and the older web counts them as before.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 
