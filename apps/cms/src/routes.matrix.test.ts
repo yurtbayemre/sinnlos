@@ -704,8 +704,21 @@ describe("route → policy matrix (S01)", async () => {
       expect(overlaps).toEqual([]);
     });
 
-    it("only names roles of the matrix", () => {
-      expect(Object.keys(REVOKED_PERMISSIONS).filter((r) => !matrixRoles.includes(r))).toEqual([]);
+    it("only names roles of the matrix, plus the anonymous `public` role", () => {
+      expect(Object.keys(REVOKED_PERMISSIONS).filter((r) => !matrixRoles.includes(r))).toEqual([
+        "public",
+      ]);
+    });
+
+    it("D-ENTRA-01: revokes the anonymous forgot/reset-password flow", () => {
+      // Neither users-permissions action checks the account's provider, so
+      // the e-mail reset would give an Entra-only account a local password.
+      expect(REVOKED_PERMISSIONS.public).toEqual([
+        "plugin::users-permissions.auth.forgotPassword",
+        "plugin::users-permissions.auth.resetPassword",
+      ]);
+      const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
+      for (const action of REVOKED_PERMISSIONS.public) expect(granted.has(action), action).toBe(false);
     });
   });
 

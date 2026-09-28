@@ -458,17 +458,37 @@ const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
 
 const MATRIX_ROLES = Object.keys(PERMISSION_MATRIX) as MatrixRoleType[];
 
-export const REVOKED_PERMISSIONS: Record<string, string[]> = Object.fromEntries(
-  MATRIX_ROLES.map((roleType) => [
-    roleType,
-    [
-      ...(LEGACY_REVOKED_PERMISSIONS[roleType] ?? []),
-      ...Object.entries(REMOVED_CORE_ACTIONS).flatMap(([uid, actions]) =>
-        (actions ?? []).map((action) => `${uid}.${action}`),
-      ),
-    ],
-  ]),
-);
+/** users-permissions' built-in role for anonymous callers (no JWT). */
+export const PUBLIC = "public";
+
+/**
+ * Revoked from the `public` role, which PERMISSION_MATRIX does not manage
+ * (anonymous callers get no content grants at all). users-permissions seeds
+ * these two on its first boot (DEFAULT_PERMISSIONS), and neither checks the
+ * account's provider: with them, the e-mail reset flow would hand an
+ * Entra-only account a local password around the single sign-on
+ * (D-ENTRA-01). The web has no UI for either; an admin sets passwords in
+ * the admin panel. Pinned by routes.matrix.test.ts and prod-perm-diff.sql.
+ */
+const PUBLIC_REVOKED_PERMISSIONS = [
+  "plugin::users-permissions.auth.forgotPassword",
+  "plugin::users-permissions.auth.resetPassword",
+];
+
+export const REVOKED_PERMISSIONS: Record<string, string[]> = {
+  ...Object.fromEntries(
+    MATRIX_ROLES.map((roleType) => [
+      roleType,
+      [
+        ...(LEGACY_REVOKED_PERMISSIONS[roleType] ?? []),
+        ...Object.entries(REMOVED_CORE_ACTIONS).flatMap(([uid, actions]) =>
+          (actions ?? []).map((action) => `${uid}.${action}`),
+        ),
+      ],
+    ]),
+  ),
+  [PUBLIC]: PUBLIC_REVOKED_PERMISSIONS,
+};
 
 /** Where a desired grant comes from (prod-perm-diff.sql's `source` column). */
 export type GrantSource = "matrix" | "user_read" | "custom";
