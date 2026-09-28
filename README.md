@@ -432,12 +432,19 @@ one is older than this week's Monday, so a missed Monday is caught up the
 next morning.
 
 Six roles are created automatically on Strapi boot (see
-[`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
+[`apps/cms/src/bootstrap/roles.ts`](./apps/cms/src/bootstrap/roles.ts), the
+one role vocabulary the cms code decides by):
 `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
 The same bootstrap grants each role sensible default REST permissions on
 every intranet content type (broad reads, writes scoped per role — with the
 deliberate `guest` exceptions listed under the permission matrix below).
 Writes are then further gated by the route-level policies listed below.
+The boot refuses to start when a granted action matches no controller
+action it loaded (a typo or a renamed action, listed in the error), writes
+all missing grants and revocations in one transaction, and logs one
+`[bootstrap] permission drift` line: `none`, or the grants on actions the
+code manages that it does not want (report-only, e.g. added in the admin
+panel).
 
 Policies at `apps/cms/src/policies/` enforce scoped access.
 
@@ -576,7 +583,8 @@ byte-identical copy).
 
 Global guards that apply to **every** content-API route, not per route:
 
-- **Relation guard** (`registerRestrictedRelationGuard` in `src/index.ts`,
+- **Relation guard** (`registerRestrictedRelationGuard` in
+  `src/bootstrap/restricted-relation-guard.ts`,
   rules in `utils/restricted-relations.ts`) — a relation into a
   visibility-filtered type is only followed from that type's own filter
   domain. Today this protects wiki pages: `department.pages`/`team.pages`
@@ -679,7 +687,7 @@ an admin (or an older version) put there. Its permissions mirror
 `member`-level read access so the dashboard still works for such accounts.
 
 **Strapi role capabilities** (REST API permissions seeded by
-`PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
+`PERMISSION_MATRIX` in `apps/cms/src/bootstrap/permission-matrix.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
 | Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos | Notifications | Courses · Lessons / Progress | Search-log |
@@ -958,6 +966,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
   (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
   pin fails first on purpose.
+- `apps/cms/src/bootstrap.permissions.test.ts` runs the real permission
+  sync against the stub: the role|action set it writes on a fresh database
+  is a file snapshot (`src/__snapshots__/bootstrap.permissions.txt`), a
+  second run writes nothing, revocations, the one-transaction rollback, the
+  unknown-action refusal and the advanced settings are pinned.
+  `index.lifecycle.test.ts` pins the order of `register()` and
+  `bootstrap()`. After a deliberate grant change, rewrite both snapshots:
+  `pnpm vitest run apps/cms/src/bootstrap.permissions.test.ts apps/cms/src/prod-perm-diff.test.ts -u`.
 - `apps/cms/src/middlewares/sensitive-query-guard.test.ts` also reads
   `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
   global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)
