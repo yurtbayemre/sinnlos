@@ -5,7 +5,7 @@ import {
   EVENT_FIND,
   KUDOS_FIND,
   announcementRecipients,
-  audienceScopeOf,
+  toAudienceScope,
   holdsGrant,
   loadAllUserScopes,
   loadRoleGrants,
@@ -377,7 +377,7 @@ describe("the announcement recipient filter (FX19)", () => {
     ]);
   });
 
-  it("holdsGrant and audienceScopeOf", () => {
+  it("holdsGrant and toAudienceScope", () => {
     const scope: UserScope = {
       roleId: ROLE.member,
       departmentId: 1,
@@ -387,10 +387,11 @@ describe("the announcement recipient filter (FX19)", () => {
     expect(holdsGrant(scope, new Set([ROLE.member]))).toBe(true);
     expect(holdsGrant(scope, new Set([ROLE.guest]))).toBe(false);
     expect(holdsGrant({ ...scope, roleId: undefined }, new Set([ROLE.member]))).toBe(false);
-    expect(audienceScopeOf(scope)).toEqual({
+    expect(toAudienceScope(scope)).toEqual({
       roleId: ROLE.member,
       departmentId: 1,
       teamIds: [2, 3],
     });
+    expect(toAudienceScope(null)).toBeNull();
   });
 });

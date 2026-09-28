@@ -22,8 +22,8 @@
  */
 
 import { MODERATORS, hasRole } from "../bootstrap/roles";
-import { isAnnouncementVisible, type AudienceScope } from "./announcement-audience";
-import { loadUserScope, visibleWikiSpaceIds, type UserScope } from "./visible-ids";
+import { isAnnouncementVisible } from "./announcement-audience";
+import { loadUserScope, toAudienceScope, visibleWikiSpaceIds } from "./visible-ids";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 
 interface CallerUser {
@@ -31,15 +31,11 @@ interface CallerUser {
   role?: { type?: string } | null;
 }
 
-/** Announcement targeting covers members AND leads (unlike wiki spaces). */
-function toAudienceScope(raw: UserScope | null): AudienceScope | null {
-  if (!raw) return null;
-  return {
-    roleId: raw.roleId,
-    departmentId: raw.departmentId,
-    teamIds: [...raw.teamIds, ...raw.ledTeamIds],
-  };
-}
+/**
+ * Announcement targeting covers members AND leads (unlike wiki spaces); one
+ * mapping for every announcement audience check (visible-ids.ts).
+ */
+export { toAudienceScope };
 
 type AnnouncementRow = {
   documentId?: string | null;

@@ -10,7 +10,7 @@ import {
   narrowFilters,
   restrictiveIdFilter,
 } from "../utils/policy-query";
-import { loadUserScope } from "../utils/visible-ids";
+import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
 
 /**
  * Enforces announcement targeting on reads of the `announcement` content
@@ -65,17 +65,11 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   // Anonymous callers get a null scope → only untargeted announcements.
   // (No role currently reads announcements anonymously — guest has no
   // `announcement.find` — but the policy must not depend on that.)
-  let scope: AudienceScope | null = null;
-  if (user) {
-    const userScope = await loadUserScope(strapi, user.id);
-    scope = {
-      roleId: userScope.roleId,
-      departmentId: userScope.departmentId,
-      // Team targeting covers members AND the team lead — a lead is not
-      // automatically listed in `team.members`.
-      teamIds: [...userScope.teamIds, ...userScope.ledTeamIds],
-    };
-  }
+  // Team targeting covers members AND the team lead — a lead is not
+  // automatically listed in `team.members` (toAudienceScope).
+  const scope: AudienceScope | null = user
+    ? toAudienceScope(await loadUserScope(strapi, user.id))
+    : null;
 
   const rows: AnnouncementRow[] = await strapi.db
     .query("api::announcement.announcement")

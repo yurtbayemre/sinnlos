@@ -61,10 +61,10 @@ import {
   ANNOUNCEMENT_FIND,
   KUDOS_FIND,
   NOT_BLOCKED,
-  audienceScopeOf,
   holdsGrant,
   loadAllUserScopes,
   loadRoleGrants,
+  toAudienceScope,
   type RecipientScope,
   type RoleGrants,
   type ScopeStrapi,
@@ -196,7 +196,7 @@ export function selectAnnouncements(
   },
 ): { items: DigestContent["announcements"]; more: number } {
   const sinceMs = options.since.getTime();
-  const audience = audienceScopeOf(options.scope);
+  const audience = toAudienceScope(options.scope);
   const seen = new Set<string>();
   const selected: DigestAnnouncement[] = [];
   for (const row of rows) {

@@ -197,8 +197,19 @@ export async function loadAllUserScopes(strapi: ScopeStrapi): Promise<RecipientS
   }));
 }
 
-/** Announcement targeting reads a team as "member OR lead" (announcement-audience.ts). */
-export function audienceScopeOf(scope: UserScope): AudienceScope {
+/**
+ * The announcement audience scope of a user scope (PL01): announcement
+ * targeting reads a team as "member OR lead" (announcement-audience.ts),
+ * unlike wiki team spaces (membership only). An anonymous caller (null)
+ * stays null, which sees untargeted announcements only. The one mapping for
+ * the announcement read policy, the comment/reaction targets
+ * (target-visibility.ts re-exports it) and the fan-out and digest
+ * recipients.
+ */
+export function toAudienceScope(scope: UserScope): AudienceScope;
+export function toAudienceScope(scope: UserScope | null): AudienceScope | null;
+export function toAudienceScope(scope: UserScope | null): AudienceScope | null {
+  if (!scope) return null;
   return {
     roleId: scope.roleId,
     departmentId: scope.departmentId,
@@ -262,7 +273,7 @@ export function announcementRecipients(
 ): RecipientScope[] {
   return scopes.filter(
     (scope) =>
-      holdsGrant(scope, readers) && isAnnouncementVisible(announcement, audienceScopeOf(scope)),
+      holdsGrant(scope, readers) && isAnnouncementVisible(announcement, toAudienceScope(scope)),
   );
 }
 
