@@ -486,6 +486,33 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(await userRow(t, { id: reportId })).toMatchObject({ entraManagerOid: null, manager: null });
   });
 
+  it("locks the Entra-owned profile fields: PUT /api/me drops them, GET lists them", async () => {
+    const res = await signIn(t, persona(50, { name: "Locked Name" }));
+    const jwt = res.body.jwt ?? "";
+    type Me = { data?: Record<string, unknown> };
+    const put = await t.api<Me>({ jwt }, "/api/me", {
+      method: "PUT",
+      json: { data: { displayName: "Self-chosen", jobTitle: "Self-promoted", phone: "0", locale: "de" } },
+    });
+    expect(put.status).toBe(200);
+    expect(put.body.data).toMatchObject({
+      displayName: "Locked Name",
+      jobTitle: "Title 50",
+      phone: "+49 30 555 50",
+      locale: "de",
+      entraManagedFields: ["displayName", "jobTitle", "phone", "officeLocation"],
+    });
+    for (const key of ["microsoftOid", "entraTenantId", "roleSource", "entraAppliedRole", "entraManagerOid"]) {
+      expect(put.body.data, key).not.toHaveProperty(key);
+    }
+    // Only locked fields: nothing to write, still 200.
+    const onlyLocked = await t.api<Me>({ jwt }, "/api/me", { method: "PUT", json: { data: { displayName: "x" } } });
+    expect([onlyLocked.status, onlyLocked.body.data?.displayName]).toEqual([200, "Locked Name"]);
+    // A local account edits everything, as before.
+    const local = await t.api<Me>("editor", "/api/me", { method: "PUT", json: { data: { jobTitle: "Local Title" } } });
+    expect(local.body.data).toMatchObject({ jobTitle: "Local Title", entraManagedFields: [] });
+  });
+
   it("writes one audit line per exchange and never a token, JWT or secret", () => {
     const audit = logs.filter((line) => line.startsWith("info [entra] user="));
     expect(audit.length).toBeGreaterThan(10);

@@ -366,6 +366,7 @@
     "jobTitle": "Job title",
     "phone": "Phone",
     "officeLocation": "Office location",
+    "entraManagedHint": "Your name, job title, phone and office location come from your Microsoft account and are updated at every sign-in.",
     "birthday": "Birthday",
     "birthdayVisible": "Show my birthday to colleagues",
     "birthdayVisibleHint": "Opt-in: your birthday appears (without the year) on the kudos page. Leave unchecked to keep it private.",

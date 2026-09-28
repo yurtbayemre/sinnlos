@@ -366,6 +366,7 @@
     "jobTitle": "Jobtitel",
     "phone": "Telefon",
     "officeLocation": "Bürostandort",
+    "entraManagedHint": "Name, Position, Telefon und Bürostandort stammen aus Ihrem Microsoft-Konto und werden bei jeder Anmeldung aktualisiert.",
     "birthday": "Geburtsdatum",
     "birthdayVisible": "Geburtstag für Kolleg:innen anzeigen",
     "birthdayVisibleHint": "Freiwillig: Ihr Geburtstag erscheint (ohne Jahr) auf der Kudos-Seite. Ohne Häkchen bleibt er privat.",
