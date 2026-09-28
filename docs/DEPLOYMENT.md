@@ -25,7 +25,11 @@ All methods share the same [prerequisites](#prerequisites) and
 (the Entra setup is only needed for Microsoft sign-in, which this release
 cannot offer; see the note there).
 
-> **Upgrading an existing instance?** On an instance that runs `main`
+> **Upgrading an existing instance?** Batch 9 lane 4C (live contract and
+> poll documentIds) is one normal deploy of cms and web together once
+> batch 8 runs: see
+> [Upgrading to the live contract and poll documentIds (batch 9, lane 4C)](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c).
+> On an instance that runs `main`
 > `c219034` (batch 7; the owner instance since 2026-09-28 15:03 CEST),
 > batch 8 is one normal deploy of cms and web together, with read-only
 > checks before and after it: follow
@@ -749,6 +753,16 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the live contract and poll documentIds (batch 9, lane 4C)?**
+> A normal deploy of cms and web **together** (`infra/deploy.sh`): no
+> schema, permission, env, route or edge change. Polls are addressed by
+> documentId, poll results are counted in one SQL statement (same totals),
+> the cms sends live events in POSTs of at most 1000, and `/announcements`
+> loads its comment sections in one batch. Note the poll results before,
+> run `infra/live-smoke.sh` after, then have a member vote and compare. A
+> rollback takes back both images, never the cms alone. See
+> [Upgrading to the live contract and poll documentIds (batch 9, lane 4C)](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c).
+>
 > **Deploying batch 8 (2026-09-28)?** The cms bootstrap split, the web
 > datetime port and one fix to poll results (the two notes below; the
 > integration suite is test-only) ship as one normal deploy of cms and web
@@ -1189,6 +1203,120 @@ switches them off, and `X-Powered-By` is back. Roll forward with
 runs in UTC again. Custom orchestrators (the Azure Container Apps recipe):
 do not set `TZ` for the new web (the image sets `TZ=UTC`); a web image
 from before this release needs `TZ` equal to `APP_TIME_ZONE`.
+
+#### Upgrading to the live contract and poll documentIds (batch 9, lane 4C)
+
+This release (branch `feat/live-contract-and-poll-ids`, on `batch/8`
+`5f2eac0`) changes how the cms and the web address polls and talk about
+live events, and how the web loads comment sections. Nobody's permissions
+change:
+
+- **Polls by documentId (DA01).** `POST /api/polls/:id/vote` and
+  `GET /api/polls/:id/results` take the poll's documentId, which the web now
+  sends, or, as before, the numeric id of its published row. The vote still
+  lands on the published row. An editor republishing a poll while someone
+  has `/polls` open no longer breaks that person's vote. A draft row's id
+  and a poll that was never published answer 404, like a missing poll.
+- **Poll results in one SQL statement (FX20).** The database counts the
+  results with one `GROUP BY` statement. The rule is the one of batch 8
+  (each voter's first vote counts; votes of a deleted account count on
+  their own), so every total stays what it is. What changes: a results read
+  that races a parallel vote's cleanup can no longer count a duplicate that
+  was just removed as a separate vote.
+- **Live events (LF04, LF01).** The cms and the web share one definition of
+  the live events and channel names. The cms sends at most 1000 events per
+  POST to the web: a bigger burst (for example an announcement with more
+  than about 1000 recipients) used to be refused by the web with 400 and
+  lost, notification pings included. A split burst logs
+  `[live-emit] N events in K POSTs (at most 1000 each)`.
+- **Comment sections (WD04).** `/announcements` loads the comments and
+  reactions of all cards in one batch (10 cards: 11 cms requests instead of
+  20), shows the cards first and the sections as they arrive, and keeps
+  them fresh with one poll interval and one live subscription request per
+  page. A comment on one card refreshes that card only.
+
+**A normal deploy of cms and web together with `infra/deploy.sh`.** No
+schema, permission, env, route or edge change; `infra/diagnostics/prod-perm-diff.sql`
+and the routes golden are unchanged. Deploy both together: the new web
+addresses polls by documentId, which a batch 8 cms answers with 404 (no
+poll cards until the new cms runs), while the new cms still accepts the
+numeric ids of a web that has not restarted yet. The checks use the helpers
+of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+1. **Before: the poll baseline** (read-only). The counted votes per option
+   of every published poll, by the rule the results use (it never shows
+   who voted):
+
+   ```bash
+   psql_db -X <<'SQL' | tee poll-baseline-before.txt
+   BEGIN TRANSACTION READ ONLY;
+   WITH ranked AS (
+     SELECT vp.poll_id, v.option_index, vv.user_id,
+            row_number() OVER (PARTITION BY vp.poll_id, vv.user_id ORDER BY v.id) AS nth
+     FROM poll_votes v
+     JOIN poll_votes_poll_lnk vp ON vp.poll_vote_id = v.id
+     LEFT JOIN poll_votes_voter_lnk vv ON vv.poll_vote_id = v.id
+   )
+   SELECT p.document_id, p.question AS poll, r.option_index, count(*) AS votes
+   FROM ranked r
+   JOIN polls p ON p.id = r.poll_id
+   WHERE p.published_at IS NOT NULL AND (r.nth = 1 OR r.user_id IS NULL)
+   GROUP BY p.document_id, p.question, r.option_index
+   ORDER BY p.document_id, r.option_index;
+   ROLLBACK;
+   SQL
+   ```
+
+   `option_index` 0 is a poll's first answer. The numbers equal what the
+   poll cards on `/polls` show now.
+2. **Deploy:** `infra/deploy.sh`. It runs `infra/live-smoke.sh` when the
+   demo credentials file is readable; otherwise (`live-smoke SKIPPED`) run
+   `infra/live-smoke.sh` by hand. It must pass: it proves the cms still
+   reaches the web's live ingest and a ping reaches an open stream.
+3. **After: the same totals.** Run the query of step 1 again into
+   `poll-baseline-after.txt`; `diff poll-baseline-before.txt
+   poll-baseline-after.txt` shows nothing unless someone voted meanwhile.
+   Then have a member vote on an open poll on `/polls`: the vote succeeds,
+   the card shows the new count, and a third run of the query differs from
+   the second in exactly that poll's option, by one. The cards on `/polls`
+   show the query's numbers.
+4. **After: logs.**
+   `"${COMPOSE[@]}" logs --since 30m cms | grep -E '\[live-emit\] (status|failed)|\[poll-results\]'`
+   prints nothing. A `[poll-results] the tables of api::poll-vote.poll-vote
+   are unknown to the query engine` error would mean the results cannot be
+   counted (every `/polls` card missing): roll back and report it.
+   Optionally open `/announcements` with the browser's network panel: after
+   the stream's `hello` there is one `POST /live/subscribe` for all cards,
+   and a comment from a second session refreshes only its card.
+
+**Rollback:** re-up both previous images with the commands
+`infra/deploy.sh` prints (the web one with
+`-f infra/docker-compose.web-legacy-tz.yml` only if it predates batch 8).
+Never roll back the cms alone: the new web's documentId addresses would get
+404 from the batch 8 cms. Nothing in the database changes, so the previous
+images run on it as they are.
+
+**Rehearsal (2026-09-28, Postgres 16 in a throwaway container and SQLite,
+the real cms booted in process by the integration harness):** a vote by
+documentId landed on the published row before and after a republish, the
+earlier vote followed the republish, a second vote was refused, results by
+documentId equalled those by the published row id, and a draft row id, the
+replaced published id and a never-published poll answered like a missing
+poll; on company-wide, anonymous, guest-visible, targeted and empty polls
+the results equalled `SELECT count(*)` per option and the query engine's
+joined select; the counting statement equalled the batch 8 rule on seeded
+random polls with duplicates and deleted accounts, ran as one statement,
+and parallel votes of one voter never showed as more than one vote; the
+baseline query of step 1 gave exactly the results' counts on Postgres 16,
+a stored duplicate vote included. The comment-section batching, the refresh of only the pinged card and the
+chunked emit are pinned by unit tests; the browser check of step 4 and
+`infra/live-smoke.sh` were not run against a deployed stack.
 
 #### Upgrading to the cms bootstrap split (batch 8, lane 3B)
 

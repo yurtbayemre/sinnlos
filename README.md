@@ -310,7 +310,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
 | **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
-| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), and a vote removes the voter's later rows right after it is stored (parallel votes) |
+| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes; `:id` is the poll's documentId (what the web sends; it survives a republish) or its published row id. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), in one SQL statement with a GROUP BY, and a vote removes the voter's later rows right after it is stored (parallel votes) |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
 | **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
@@ -578,8 +578,8 @@ the Strapi admin panel have no such context).
 
 Every custom handler and policy that looks an entry up by an id from the
 request (a route `:id`, or ids in a request body) checks it first with
-`apps/cms/src/utils/entry-id.ts` (poll vote/results take the row id only,
-through `parseRowId`): a positive row id within the int4
+`apps/cms/src/utils/entry-id.ts` (poll vote/results take either form,
+the documentId from the web): a positive row id within the int4
 range, or a documentId in the shape Strapi generates (the FX07 write policies keep
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
@@ -836,7 +836,9 @@ Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
 departments, the guest-access fields), so an admin or editor outside a
 poll's departments, and a guest on a poll without guest voting, see its
-results with the vote buttons disabled.
+results with the vote buttons disabled. The page and the card address each
+poll by its documentId, so a republish while the page is open does not
+break the vote.
 
 The marketplace detail/edit pages show the edit/delete controls to the ad's
 owner and to `admin_role` (editors can still delete through the API, but the
@@ -1017,8 +1019,11 @@ Safety nets for refactors (roadmap S03–S06, S09):
   or names a `global::` middleware without its file in `src/middlewares`.
 - `infra/contracts.test.ts` pins what the cms and the web both state: the
   announcement audience rule, the YouTube parser, comment anchors, schema
-  enums against the web unions and constants, relation pairs, and the web
-  role sets against the permission matrix. Known gaps are listed in the file
+  enums against the web unions and constants (the live channel pattern from
+  `apps/web/src/lib/live-contract.ts`), relation pairs, and the web
+  role sets against the permission matrix. The live contract itself (event,
+  frame and channel shapes of the SSE pipeline) is one file kept
+  byte-identical in both apps (`apps/web/src/lib/live-contract-mirror.test.ts`). Known gaps are listed in the file
   and asserted as they are, so closing one means removing its entry. A web
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
@@ -1077,7 +1082,9 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two
-      seconds without a reload (SSE) — or run `infra/live-smoke.sh`
+      seconds without a reload (SSE) — or run `infra/live-smoke.sh`; on
+      `/announcements` the network panel shows one `POST /live/subscribe`
+      for all cards, and a comment on one card refreshes that card only
 - [ ] `/training` lists published courses; on a `quizGate` course the
       completion button stays locked until every quiz answer is correct;
       `/manage/training` shows the completion report (admin)
