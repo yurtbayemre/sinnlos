@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import wikiVisibility from "./wiki-visibility";
 
 /**
@@ -290,5 +290,53 @@ describe("wiki-visibility policy", () => {
       await run(ctx, "page");
       expect(ctx.request.query.filters).toEqual({ id: { $in: [200, 201] } });
     });
+  });
+});
+
+describe("wiki-visibility: bind limit (PL04)", () => {
+  const SPACE_COUNT = 40_000;
+
+  function bigStub() {
+    const lookups: string[] = [];
+    const error = vi.fn<(message: string) => void>();
+    const strapi = {
+      db: {
+        query: (uid: string) => ({
+          findOne: async () => null,
+          findMany: async () => {
+            lookups.push(uid);
+            if (uid !== "api::wiki-space.wiki-space") return [];
+            return Array.from({ length: SPACE_COUNT }, (_, index) => ({
+              id: index + 1,
+              visibility: "public",
+            }));
+          },
+        }),
+      },
+      log: { error },
+    };
+    return { strapi, lookups, error };
+  }
+
+  it("never binds more space ids than one statement may carry", async () => {
+    for (const level of ["page", "revision"] as const) {
+      const { strapi, lookups, error } = bigStub();
+      const ctx = { state: {}, request: { query: {} as Record<string, unknown> } };
+      await expect(wikiVisibility(ctx, { level }, { strapi })).resolves.toBe(true);
+      expect(ctx.request.query.filters, level).toEqual({ id: { $eq: -1 } });
+      // The page/revision lookup with the oversized list never ran.
+      expect(lookups, level).toEqual(["api::wiki-space.wiki-space"]);
+      expect(String(error.mock.calls[0]?.[0]), level).toContain(
+        `wiki-visibility ${level} spaces: ${SPACE_COUNT} values`,
+      );
+    }
+  });
+
+  it("fails the space level itself closed too (the injected list)", async () => {
+    const { strapi, error } = bigStub();
+    const ctx = { state: {}, request: { query: {} as Record<string, unknown> } };
+    await expect(wikiVisibility(ctx, { level: "space" }, { strapi })).resolves.toBe(true);
+    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+    expect(error).toHaveBeenCalledTimes(1);
   });
 });

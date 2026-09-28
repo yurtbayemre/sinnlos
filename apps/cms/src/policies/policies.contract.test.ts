@@ -674,33 +674,30 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     // owner is gone (a deleted user leaves the relation null). The ownership
     // gates got this with the PL02 factories (ownerGate); users-permissions
     // always sets a database user, so it is defence in depth.
-    it(
-      "never lets a caller without an id own a row",
-      async () => {
-        const { strapi, ids } = fixture();
-        const own = contract.ownRequest?.(ids) ?? {};
-        const passed: string[] = [];
-        for (const { config, bypass } of contract.cases) {
-          for (const caller of IDLESS) {
-            if (bypass.includes(caller.user?.role?.type as RoleType)) continue;
-            for (const param of targetParams(ids)) {
-              const ctx = policyContext(caller.user, {
-                query: CLIENT_QUERY,
-                params: param,
-                body: own.body,
-              });
-              const outcome = await run(name, config, ctx, strapi);
-              if ("result" in outcome && outcome.result === true) {
-                passed.push(
-                  `${caller.label} params=${JSON.stringify(param)} config=${JSON.stringify(config)}`,
-                );
-              }
+    it("never lets a caller without an id own a row", async () => {
+      const { strapi, ids } = fixture();
+      const own = contract.ownRequest?.(ids) ?? {};
+      const passed: string[] = [];
+      for (const { config, bypass } of contract.cases) {
+        for (const caller of IDLESS) {
+          if (bypass.includes(caller.user?.role?.type as RoleType)) continue;
+          for (const param of targetParams(ids)) {
+            const ctx = policyContext(caller.user, {
+              query: CLIENT_QUERY,
+              params: param,
+              body: own.body,
+            });
+            const outcome = await run(name, config, ctx, strapi);
+            if ("result" in outcome && outcome.result === true) {
+              passed.push(
+                `${caller.label} params=${JSON.stringify(param)} config=${JSON.stringify(config)}`,
+              );
             }
           }
         }
-        expect(passed).toEqual([]);
-      },
-    );
+      }
+      expect(passed).toEqual([]);
+    });
   }
 
   it.each(contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const))(

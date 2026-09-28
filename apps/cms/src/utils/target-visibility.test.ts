@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
@@ -300,6 +300,37 @@ describe("wiki pages: the list and the single check agree (published row first)"
         select: ["documentId"],
       },
     ]);
+  });
+});
+
+describe("wiki page anchors: bind limit (PL04)", () => {
+  it("drops the draft-only pages when their lookup would exceed the bind limit", async () => {
+    const count = 40_000;
+    const error = vi.fn<(message: string) => void>();
+    const pageQueries: unknown[] = [];
+    const strapi = {
+      db: {
+        query: (uid: string) => ({
+          findOne: async () => null,
+          findMany: async (params: unknown) => {
+            if (uid === "api::wiki-space.wiki-space") return [{ id: 1, visibility: "public" }];
+            if (uid !== "api::wiki-page.wiki-page") return [];
+            pageQueries.push(params);
+            // Every page has only a draft in the visible space.
+            return Array.from({ length: count }, (_, index) => ({
+              documentId: `p${String(index).padStart(23, "0")}`,
+              publishedAt: null,
+            }));
+          },
+        }),
+      },
+      log: { error },
+    };
+    const anchors = await visibleTargetAnchors(strapi, null);
+    expect(anchors["wiki-page"]).toEqual([]);
+    // The second lookup (published rows elsewhere) with 40000 ids never ran.
+    expect(pageQueries).toHaveLength(1);
+    expect(String(error.mock.calls[0]?.[0])).toContain(`comment targets: drafts: ${count} values`);
   });
 });
 

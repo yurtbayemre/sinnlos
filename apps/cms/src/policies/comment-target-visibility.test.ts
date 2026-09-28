@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createStrapiStub,
@@ -319,6 +319,41 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
     const full = await read(eng, { targetType: { $eq: "announcement" } });
     expect(full.ids).toEqual([1, 2, 3]);
     expect(full.calls.some((call) => call.uid === "api::wiki-space.wiki-space")).toBe(true);
+  });
+
+  it("fails closed with a log when the anchors exceed the bind limit (PL04)", async () => {
+    const count = 40_000;
+    const error = vi.fn<(message: string) => void>();
+    const strapi = {
+      db: {
+        query: (uid: string) => ({
+          findOne: async () => null,
+          findMany: async () =>
+            uid === "api::announcement.announcement"
+              ? Array.from({ length: count }, (_, index) => ({
+                  id: index + 1,
+                  documentId: `a${String(index).padStart(23, "0")}`,
+                  publishedAt: PUBLISHED,
+                }))
+              : [],
+        }),
+      },
+      log: { error },
+    };
+    const ctx = policyContext(null, { query: { filters: { body: { $contains: "x" } } } });
+    await expect(commentTargetVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
+    expect(ctx.request.query.filters).toEqual({
+      $and: [{ body: { $contains: "x" } }, { id: { $eq: -1 } }],
+    });
+    expect(String(error.mock.calls[0]?.[0])).toContain(
+      `comment-target-visibility anchors: ${count} values`,
+    );
+    // A single pinned anchor binds one value: the fast path is unaffected.
+    const pinned = policyContext(null, {
+      query: { filters: pin("announcement", "a" + "0".repeat(23)) },
+    });
+    await expect(commentTargetVisibility(pinned, undefined, { strapi })).resolves.toBe(true);
+    expect(error).toHaveBeenCalledTimes(1);
   });
 
   it("lets admin_role and editor through untouched on the fast path too", async () => {

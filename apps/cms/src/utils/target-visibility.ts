@@ -30,7 +30,8 @@
 import { MODERATORS, hasRole, type RoleHolder } from "../bootstrap/roles";
 import { isAnnouncementVisible } from "./announcement-audience";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
-import type { PolicyDb } from "./policy-factories";
+import type { PolicyStrapi } from "./policy-factories";
+import { fitsBindLimit } from "./policy-query";
 import { loadUserScope, toAudienceScope, visibleWikiSpaceIds } from "./visible-ids";
 
 /** A signed-in caller with a row id (the scope is loaded by it). */
@@ -96,10 +97,12 @@ export interface VisibleTargetAnchors {
  *      lookup for those documentIds.
  *
  * Neither query populates anything, so the only bind parameters are the
- * two id lists.
+ * two id lists; either beyond the bind limit fails closed (PL04): no pages
+ * for the first, none of the draft-only pages for the second.
  */
-async function visibleWikiPageAnchors(strapi: PolicyDb, spaceIds: number[]): Promise<string[]> {
+async function visibleWikiPageAnchors(strapi: PolicyStrapi, spaceIds: number[]): Promise<string[]> {
   if (spaceIds.length === 0) return [];
+  if (!fitsBindLimit(strapi, spaceIds.length, "comment targets: wiki spaces")) return [];
   const rows = listOf<{ documentId?: string | null; publishedAt?: string | null }>(
     await strapi.db.query(WIKI_PAGE_UID).findMany({
       where: { space: { id: { $in: spaceIds } } },
@@ -115,6 +118,9 @@ async function visibleWikiPageAnchors(strapi: PolicyDb, spaceIds: number[]): Pro
     if (typeof row.documentId === "string" && !published.has(row.documentId)) {
       draftOnly.add(row.documentId);
     }
+  }
+  if (draftOnly.size > 0 && !fitsBindLimit(strapi, draftOnly.size, "comment targets: drafts")) {
+    draftOnly.clear();
   }
   if (draftOnly.size > 0) {
     const elsewhere = listOf<{ documentId?: string | null }>(
@@ -142,7 +148,7 @@ async function visibleWikiPageAnchors(strapi: PolicyDb, spaceIds: number[]): Pro
  * this function always evaluates the restrictive rules.
  */
 export async function visibleTargetAnchors(
-  strapi: PolicyDb,
+  strapi: PolicyStrapi,
   user: CallerUser | null | undefined,
 ): Promise<VisibleTargetAnchors> {
   const raw = user ? await loadUserScope(strapi, user.id) : null;
@@ -171,7 +177,7 @@ export async function visibleTargetAnchors(
  * filter (PL04).
  */
 export async function isTargetVisible(
-  strapi: PolicyDb,
+  strapi: PolicyStrapi,
   targetType: CommentTargetType,
   targetDocumentId: string,
   user: CallerUser | null | undefined,

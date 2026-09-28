@@ -1,10 +1,10 @@
 import { hasRole, isRoleType, type RoleType } from "../bootstrap/roles";
 import { isRowId, parseEntryRef } from "./entry-id";
 import {
+  boundedIdFilter,
   forcePublishedStatus,
   getMutableQuery,
   narrowFilters,
-  restrictiveIdFilter,
 } from "./policy-query";
 
 /**
@@ -26,7 +26,9 @@ import {
  *   4. the clause goes onto the REAL request query (getMutableQuery),
  *      $and-composed with the client filter (narrowFilters), an empty id
  *      list as restrictiveIdFilter's `{ id: { $eq: -1 } }` (an empty `$in`
- *      is stripped by sanitizeQuery and fails open);
+ *      is stripped by sanitizeQuery and fails open), and a list beyond the
+ *      database's bind-parameter limit the same way, with an error log
+ *      (boundedIdFilter: fail closed instead of an SQL error);
  *   5. draft & publish types get status=published AFTER the bypass
  *      (forcePublishedStatus);
  *   6. every branch returns a strict boolean: Strapi counts `undefined` as
@@ -41,13 +43,14 @@ import {
  * is-classified-author takes its bypass from the route config.
  */
 
-/** The slice of `strapi` a lookup reads (a db.query, nothing else). */
+/** The slice of `strapi` a lookup reads (a db.query; the dialect for the bind limit). */
 export interface PolicyDb {
   db: {
     query(uid: string): {
       findOne(params: object): Promise<unknown>;
       findMany(params: object): Promise<unknown>;
     };
+    dialect?: { client?: unknown };
   };
 }
 
@@ -257,7 +260,7 @@ export function visibleIdsPolicy<Config = unknown>(
     const ids = await options.loadVisibleIds({ strapi, user: caller, config, uid });
 
     const query = getMutableQuery(policyContext);
-    narrowFilters(query, restrictiveIdFilter([...ids]));
+    narrowFilters(query, boundedIdFilter(strapi, ids, `${uid} read policy`));
     if (options.pinPublished) forcePublishedStatus(query);
     return true;
   };

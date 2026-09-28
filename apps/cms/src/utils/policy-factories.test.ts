@@ -268,6 +268,35 @@ describe("visibleIdsPolicy (PL02)", () => {
     }
   });
 
+  it("fails closed beyond the bind limit, with an error log (PL04)", async () => {
+    const many = Array.from({ length: 40_000 }, (_, index) => index + 1);
+    const policy = visibleIdsPolicy({
+      uid: "api::document.document",
+      bypass: MODERATORS,
+      anonymous: "filter",
+      pinPublished: true,
+      loadVisibleIds: async () => many,
+    });
+
+    // SQLite (the stub names no dialect: the lower limit applies).
+    const sqlite = createStrapiStub();
+    const ctx = policyContext(as("member"));
+    await expect(policy(ctx, undefined, { strapi: sqlite })).resolves.toBe(true);
+    expect(ctx.request.query).toEqual({ filters: { id: { $eq: -1 } }, status: "published" });
+    expect(sqlite.log.error).toHaveBeenCalledTimes(1);
+    expect(String(sqlite.log.error.mock.calls[0][0])).toContain(
+      "api::document.document read policy: 40000 values",
+    );
+
+    // Postgres binds 40000 ids in one statement.
+    const pg = createStrapiStub();
+    const pgStrapi = { ...pg, db: { ...pg.db, dialect: { client: "postgres" } } };
+    const pgCtx = policyContext(as("member"));
+    await expect(policy(pgCtx, undefined, { strapi: pgStrapi })).resolves.toBe(true);
+    expect(pgCtx.request.query.filters).toEqual({ id: { $in: many } });
+    expect(pg.log.error).not.toHaveBeenCalled();
+  });
+
   it("refuses anonymous callers and callers without an id ('deny')", async () => {
     for (const user of [undefined, null, { role: { type: "member" } }]) {
       const { policy, loads, strapi } = setup({ anonymous: "deny" });

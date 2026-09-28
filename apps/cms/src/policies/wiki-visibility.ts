@@ -1,5 +1,6 @@
 import { MODERATORS } from "../bootstrap/roles";
 import { rowIds, visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
+import { fitsBindLimit } from "../utils/policy-query";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 
 /**
@@ -69,6 +70,8 @@ async function visibleWikiIds({
   if (level === "space") return spaceIds;
   // No visible space → no visible page/revision either. Skip the join.
   if (spaceIds.length === 0) return [];
+  // The space ids are bound into the lookup below (PL04): fail closed.
+  if (!fitsBindLimit(strapi, spaceIds.length, `wiki-visibility ${level} spaces`)) return [];
   const where =
     level === "page"
       ? { space: { id: { $in: spaceIds } } }

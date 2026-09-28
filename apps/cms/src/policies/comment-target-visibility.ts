@@ -1,7 +1,12 @@
 import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { isCommentTargetType } from "../utils/comment-target";
 import { identifiedCaller, type PolicyContext, type PolicyStrapi } from "../utils/policy-factories";
-import { getMutableQuery, narrowFilters, restrictiveIdFilter } from "../utils/policy-query";
+import {
+  fitsBindLimit,
+  getMutableQuery,
+  narrowFilters,
+  restrictiveIdFilter,
+} from "../utils/policy-query";
 import {
   isTargetVisible,
   pinnedTargetAnchor,
@@ -36,6 +41,10 @@ import {
  * [anchor] } }`; an invisible one `restrictiveIdFilter([])`. Since the
  * client filter already restricts the rows to that anchor, both paths
  * return the same rows; any other filter shape takes the full path.
+ *
+ * Bind limit (PL04): more anchors than one statement may bind (Postgres
+ * 65535, SQLite 32766 parameters, utils/policy-query.ts) answer with
+ * nothing and an error log instead of an SQL error.
  *
  * Empty-list trap: `$in: []` operands are stripped by sanitizeQuery
  * (fail-open!), so a branch is only emitted when its list is non-empty;
@@ -72,6 +81,12 @@ export default async (
   }
 
   const anchors = await visibleTargetAnchors(strapi, caller);
+  // Both anchor lists are bound into the one statement (PL04): fail closed.
+  const bound = anchors.announcement.length + anchors["wiki-page"].length;
+  if (!fitsBindLimit(strapi, bound, "comment-target-visibility anchors")) {
+    narrowFilters(query, restrictiveIdFilter([]));
+    return true;
+  }
 
   const branches: Record<string, unknown>[] = [];
   if (anchors.announcement.length > 0) {
