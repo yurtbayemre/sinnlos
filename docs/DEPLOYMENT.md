@@ -25,7 +25,10 @@ All methods share the same [prerequisites](#prerequisites) and
 (the Entra setup is only needed for Microsoft sign-in, which this release
 cannot offer; see the note there).
 
-> **Upgrading an existing instance?** On an instance that already runs the
+> **Upgrading an existing instance?** On an instance that runs `main`
+> `afc1506` (the owner instance since 2026-09-28), the
+> [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28)
+> is a normal deploy (one optional read-only query first). On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
 > what the instance does not run yet, newest first:
@@ -727,6 +730,13 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the cms input hardening (2026-09-28)?** A normal deploy: no
+> env, schema or permission change. One optional read-only query lists the
+> polls whose answers the new check refuses; after the deploy, download the
+> calendar file of an event with a non-ASCII title (it answered 500 before)
+> and re-link the authorless polls. See
+> [Upgrading to the cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28).
+>
 > **Deploying poll department targeting?** A normal deploy (cms and web
 > together, as `infra/deploy.sh` does). Run the read-only checks of
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
@@ -805,6 +815,199 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the cms input hardening (2026-09-28)
+
+This release (branch `fix/cms-input-hardening`, on `main` `afc1506`, which
+production runs since 2026-09-28) hardens what the cms accepts from the
+admin panel and the content API:
+
+- **Lesson quizzes can be edited in the admin panel again (FX08).** The
+  admin panel's JSON field sends the typed text, and `''` when the field is
+  cleared; the lesson check expected an array and refused every quiz edit or
+  clear with `quiz muss ein JSON-Array sein` (400). The text is now parsed
+  and stored as the array, a cleared quiz is stored as `null`, and text that
+  is not JSON answers `quiz ist kein gültiges JSON`.
+- **The calendar download works for every event title (FX12).** A title with
+  characters beyond Latin-1 (an en dash, `€`, an emoji, German quotes) made
+  `GET /api/events/:id/ics` answer 500 (`ERR_INVALID_CHAR` in the cms log).
+  The file name is now sent per RFC 6266: an ASCII `filename` fallback plus
+  `filename*=UTF-8''<percent-encoded>`. The file itself escapes text
+  correctly (also line breaks), folds long lines at 75 octets, carries the
+  description as plain text (its first 10 000 characters, then `…`, so a
+  very long description with unbalanced Markdown converts quickly), a URL
+  only when it is an http(s) link, and
+  `SEQUENCE` plus `LAST-MODIFIED` from the event's last change, so a calendar
+  that imports an updated event again can tell that it is newer. `UID`, the
+  dates and the published-only lookup are unchanged.
+- **Poll answers are checked for every writer, and polls get their author
+  (FX20).** Creating or saving a poll, in the admin panel as well, needs 2 to
+  10 answers, each non-empty and different from the others after trimming;
+  otherwise it answers 400 (the admin panel shows the reason). Typed JSON in
+  the admin panel's Options field is accepted. `POST /api/polls` sets the
+  author to the signed-in user, so polls created on `/polls/new` are no
+  longer authorless. The admin panel still lets an editor pick the author.
+- **Tighter input checks (FX27).** Marking notifications read takes at most
+  200 ids per call and changes only the caller's own unread ones, in one
+  statement; an announcement can be acknowledged only by its audience
+  (everyone else gets the same 400 as for a missing one); kudos need a
+  recipient other than the sender; a target type or quick-link icon named
+  like a built-in object property (`constructor`) answers 400 instead of
+  500 or a crashed dashboard.
+- **Reactions accept the desired state (FX28, cms part).** `POST
+  /api/reactions` takes an optional `reacted` (true or false), so a double
+  click or a retry can no longer add and remove the same reaction. Without
+  it the request toggles, as before. Removing a reaction (`reacted: false`
+  or the toggle) now removes every copy of it: two requests at the same
+  moment can still store the same reaction twice, and before only one copy
+  was removed, so the reaction stayed.
+- **Deleting an ad on SQLite (local development)** no longer hangs for about
+  60 s and now removes the ad's images right away (FX45). Postgres was not
+  affected.
+- **Numeric ids (PL01).** `DELETE /api/notifications/:id` and
+  `DELETE /api/reactions/:id` by the numeric id now delete the entry;
+  before, every caller the policy let through (the recipient or author, an
+  admin, or an editor for reactions) got 204 and nothing was deleted. For an
+  admin (and an editor on reactions) an unknown id now answers 404 instead
+  of 204; everyone else still gets 403 from the policy.
+  `PUT /api/departments/:id` and
+  `PUT /api/teams/:id` by the numeric id now update the entry (they answered
+  404). The web uses neither form.
+
+**Nothing else is needed: a normal deploy.** No env change, no migration, no
+schema or permission change.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Optional, read-only: polls whose answers the new check refuses.** They
+   stay readable and can still be voted on, but saving or publishing them
+   fails until their answers are fixed:
+
+   ```bash
+   psql_db -X <<'SQL'
+   -- trim_re strips exactly what the cms strips (String.prototype.trim):
+   -- tab, line feed, vertical tab, form feed, carriage return, space, the
+   -- Unicode space separators (e.g. the no-break space), the BOM and the
+   -- line/paragraph separators. Not \s: that also strips U+0085.
+   WITH trim_re(re) AS (
+     SELECT '^' || ws || '+|' || ws || '+$'
+     FROM (VALUES ('[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]')) AS c(ws)
+   )
+   SELECT id, document_id, published_at IS NOT NULL AS published,
+          left(question, 60) AS question, options::text AS options
+   FROM polls, trim_re
+   WHERE CASE
+     WHEN options IS NULL THEN false
+     WHEN jsonb_typeof(options) <> 'array' THEN true
+     WHEN jsonb_array_length(options) NOT BETWEEN 2 AND 10 THEN true
+     ELSE EXISTS (
+            SELECT 1 FROM jsonb_array_elements(options) AS e
+            WHERE jsonb_typeof(e) <> 'string'
+               OR regexp_replace(e #>> '{}', re, '', 'g') = '')
+       OR (SELECT count(DISTINCT regexp_replace(e #>> '{}', re, '', 'g'))
+           FROM jsonb_array_elements(options) AS e) <> jsonb_array_length(options)
+   END
+   ORDER BY id;
+   SQL
+   ```
+
+   Expected: `(0 rows)`. For a listed poll, fix its answers in the admin
+   panel after the deploy. Votes point at an answer by its position, so keep
+   the positions: rename a duplicate or empty answer instead of deleting it.
+
+**Deploy**
+
+3. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup
+   and tags the running images `:rollback`). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`.
+
+**After the deploy**
+
+4. **A calendar download with a non-ASCII title.** This signs in as the demo
+   account `infra/live-smoke.sh` uses (password from the same file, or set
+   `SMOKE_PASSWORD` yourself) and downloads the calendar file of the newest
+   published event whose title is not plain ASCII, or of the newest event
+   when there is none:
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
+   const [identifier, password] = process.argv.slice(2);
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password }),
+   });
+   const { jwt } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const auth = { authorization: `Bearer ${jwt}` };
+   const list = await (await fetch(`${base}/api/events?sort=id:desc&pagination[pageSize]=100`, { headers: auth })).json();
+   const event = list.data.find((e) => !/^[\x20-\x7e]*$/.test(e.title ?? "")) ?? list.data[0];
+   const res = await fetch(`${base}/api/events/${event.documentId}/ics`, { headers: auth });
+   const lines = (await res.text()).split("\r\n");
+   const longest = Math.max(...lines.map((l) => Buffer.byteLength(l)));
+   console.log(res.status, JSON.stringify(event.title));
+   console.log(res.headers.get("content-disposition"));
+   console.log(`longest line ${longest} octets;`, lines.find((l) => l.startsWith("SEQUENCE:")));
+   NODE
+   ```
+
+   Expected: `200`, the title, a `Content-Disposition` with
+   `filename*=UTF-8''`, the longest line at most 75 octets, and a `SEQUENCE`
+   line. The cms log has no `ERR_INVALID_CHAR`:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -c ERR_INVALID_CHAR
+   # 0
+   ```
+
+5. **In the admin panel:** open a lesson, type a quiz in the Quiz field (for
+   example `[{"question":"2+2?","options":["3","4"],"correctIndex":1}]`),
+   save and publish; then clear the field and save again. Both succeed.
+   Undo the test afterwards.
+6. **Re-link the authorless polls by hand** (the owner's 2026-09-27 check
+   found 2): in the admin panel, open each poll without an author and set
+   **Author**. New polls from `/polls/new` get their author automatically.
+
+**What users notice** (worth a short release note):
+
+- Calendar downloads work for every event (before: an error page for titles
+  with a dash, `€` or an emoji). Calendar apps that honour `SEQUENCE` update
+  an event that is imported again after a change.
+- Editors can edit and clear lesson quizzes in the admin panel again; a poll
+  needs 2 to 10 different answers there, too.
+- Picking yourself in "Give kudos" now fails with the dialog's error
+  message (the list still offers you).
+- Nothing else changes for readers.
+
+**Rollback.** The previous images run unchanged on this database: nothing in
+the schema changed, and what this release writes (quizzes and poll answers
+as arrays, poll authors) is valid for the previous cms as well. After a
+rollback the fixed errors are back (the 500 for non-ASCII calendar titles,
+refused quiz edits, authorless web polls, numeric-id deletes that delete
+nothing). A web that already sends `reacted` (see the web release of the
+same batch) works with the previous cms, which ignores the field and
+toggles. Follow the rollback hint `infra/deploy.sh` prints; it knows whether
+the `:rollback` image predates poll guest access.
 
 #### Upgrading to poll department targeting
 
@@ -1619,7 +1822,9 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
    A 500 with `ERR_INVALID_CHAR` in the cms log for an event whose title has
    characters beyond Latin-1 (en dash, €, emoji) is the known FX12a filename
    issue, not a failed deploy. The check picks a plain-ASCII title to avoid
-   it and falls back to the newest event only when there is none.
+   it and falls back to the newest event only when there is none. **Since
+   the cms input hardening (2026-09-28) a non-ASCII title works** (200 with
+   an RFC 6266 file name); step 4 there checks exactly that.
 
 5. **No id errors in the cms log** since the deploy (the check above sent
    three malformed ids):
@@ -1645,7 +1850,7 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
   the older one. After that, importing a re-published event no longer adds
   a second entry; whether the existing entry is updated depends on the
   calendar app (the file carries no `SEQUENCE` or `LAST-MODIFIED` yet,
-  FX12).
+  FX12; both since the cms input hardening of 2026-09-28).
 - Nothing else changes for readers or editors.
 
 **Rollback.** The previous images run unchanged on this database: nothing in

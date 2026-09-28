@@ -1,5 +1,12 @@
 import { factories } from "@strapi/strapi";
 
+import {
+  hasAudienceBypass,
+  isAnnouncementVisible,
+  type AnnouncementTargeting,
+} from "../../../utils/announcement-audience";
+import { loadUserScope } from "../../../utils/visible-ids";
+
 /**
  * Acknowledgements follow the poll-vote integrity pattern: the caller can
  * NEVER pick the acknowledging user — it is always taken from
@@ -19,6 +26,43 @@ const TARGET_UIDS: Record<string, string> = {
   document: "api::document.document",
 };
 
+/** The announcement relations its targeting rules read (announcement-audience.ts). */
+const ANNOUNCEMENT_TARGETING = {
+  department: { select: ["id"] },
+  team: { select: ["id"] },
+  audienceRoles: { select: ["id"] },
+};
+
+interface AckCaller {
+  id: number;
+  role?: { type?: string } | null;
+}
+
+/**
+ * May the caller see the target (FX27)? An announcement only its audience
+ * may acknowledge, decided by the rules every announcement read uses
+ * (utils/announcement-audience.ts: admin_role/editor bypass, else department
+ * AND team (member or lead) AND role over whatever is set). The scope mapping
+ * is the one of target-visibility.ts toAudienceScope. Any other target type
+ * fails closed: documents have no requiresAck yet, and would need their own
+ * visibility rules here once they do.
+ */
+async function isInAudience(
+  strapi: unknown,
+  targetType: string,
+  target: AnnouncementTargeting,
+  user: AckCaller,
+): Promise<boolean> {
+  if (targetType !== "announcement") return false;
+  if (hasAudienceBypass(user.role?.type)) return true;
+  const scope = await loadUserScope(strapi, user.id);
+  return isAnnouncementVisible(target, {
+    roleId: scope.roleId,
+    departmentId: scope.departmentId,
+    teamIds: [...scope.teamIds, ...scope.ledTeamIds],
+  });
+}
+
 export default factories.createCoreController(
   "api::acknowledgement.acknowledgement",
   ({ strapi }) => ({
@@ -31,7 +75,13 @@ export default factories.createCoreController(
       const targetType = data?.targetType as string | undefined;
       const targetDocumentId = data?.targetDocumentId;
 
-      const targetUid = targetType ? TARGET_UIDS[targetType] : undefined;
+      // Own keys only (FX27): a plain index also found inherited keys, so
+      // "constructor" or "__proto__" reached the query and failed with a 500.
+      const targetUid =
+        typeof targetType === "string" &&
+        Object.prototype.hasOwnProperty.call(TARGET_UIDS, targetType)
+          ? TARGET_UIDS[targetType]
+          : undefined;
       if (!targetUid) return ctx.badRequest("Invalid targetType");
       if (typeof targetDocumentId !== "string" || targetDocumentId.length === 0) {
         return ctx.badRequest("targetDocumentId required");
@@ -43,12 +93,17 @@ export default factories.createCoreController(
       // enum value is only prepared.
       const target = await strapi.db.query(targetUid).findOne({
         where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
+        ...(targetType === "announcement" ? { populate: ANNOUNCEMENT_TARGETING } : {}),
       });
-      // Deliberately ONE identical error (message + status) for all three
-      // failure modes — "does not exist", "draft only" and
-      // "requiresAck=false" — so the endpoint is no existence oracle for
-      // draft documentIds.
-      if (!target || !target.requiresAck) {
+      // Deliberately ONE identical error (message + status) for all four
+      // failure modes — "does not exist", "draft only", "requiresAck=false"
+      // and "not in the caller's audience" (FX27) — so the endpoint is no
+      // existence oracle for draft documentIds or hidden announcements.
+      if (
+        !target ||
+        !target.requiresAck ||
+        !(await isInAudience(strapi, targetType, target, user))
+      ) {
         return ctx.badRequest("Target not available for acknowledgement");
       }
 

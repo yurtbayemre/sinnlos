@@ -1,14 +1,24 @@
 import { factories } from "@strapi/strapi";
 
 import { parseWindowDays, planCelebrations } from "../../../utils/celebrations";
+import { isRowId } from "../../../utils/entry-id";
 import { todayIn } from "../../../utils/time";
 
 export default factories.createCoreController("api::kudos.kudos", ({ strapi }) => ({
+  /**
+   * `from` is always the caller (§5.21). `to` must be a user's row id (an
+   * integer, which is what the web's sendKudos sends) and not the caller
+   * (FX27): a missing `to` created kudos for nobody, and kudos to oneself
+   * were stored and listed.
+   */
   async create(ctx) {
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
 
     const body = ((ctx.request.body as any)?.data ?? ctx.request.body) as any;
+    const to: unknown = body?.to;
+    if (!isRowId(to)) return ctx.badRequest("to must be a user id");
+    if (to === user.id) return ctx.badRequest("Kudos cannot be sent to yourself");
     ctx.request.body = {
       data: { ...body, from: user.id },
     };

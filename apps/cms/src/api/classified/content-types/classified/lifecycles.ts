@@ -55,12 +55,26 @@ export default {
     try {
       const where = event.params?.where;
       if (!where) return;
-      const rows = await strapi.db
-        .query("api::classified.classified")
-        .findMany({ where, select: ["id"] });
-      event.state.imageFileIds = await classifiedImageFileIds(
-        strapi,
-        rows.map((row: any) => row.id),
+      // FX45: both reads join the delete's own transaction. A nested
+      // strapi.db.transaction hands out the ambient trx (and commits nothing);
+      // db.query joins it by itself, the raw join-table read needs the trx
+      // passed on. On SQLite, whose pool holds exactly one connection, a read
+      // on the pool waited 60 s behind this very transaction and failed open.
+      // With no ambient transaction the nested one simply wraps the reads.
+      // Trade-off: on Postgres a failing statement here aborts the delete's
+      // transaction despite the catch below (the classifieds read always ran
+      // in it); both are plain selects on tables Strapi owns.
+      event.state.imageFileIds = await strapi.db.transaction(
+        async ({ trx }: { trx: unknown }) => {
+          const rows = await strapi.db
+            .query("api::classified.classified")
+            .findMany({ where, select: ["id"] });
+          return classifiedImageFileIds(
+            strapi,
+            rows.map((row: { id: number }) => row.id),
+            trx,
+          );
+        },
       );
     } catch (err) {
       // Fail open: a broken pre-scan must not block the delete; the

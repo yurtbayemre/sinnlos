@@ -39,8 +39,14 @@ export const TARGET_UIDS: Record<CommentTargetType, string> = {
   "wiki-page": "api::wiki-page.wiki-page",
 };
 
+/**
+ * Own keys only (FX27): `value in TARGET_UIDS` also found inherited keys such
+ * as "constructor" or "__proto__", so such a targetType passed this check and
+ * failed later with a 500. hasOwnProperty.call, not Object.hasOwn: the cms
+ * compiles against the ES2020 lib.
+ */
 export function isCommentTargetType(value: unknown): value is CommentTargetType {
-  return typeof value === "string" && value in TARGET_UIDS;
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(TARGET_UIDS, value);
 }
 
 /** Content-type uid for a targetType, or `null` for an unknown value. */

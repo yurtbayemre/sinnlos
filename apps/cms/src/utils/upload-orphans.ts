@@ -28,20 +28,30 @@ export function uploadedByOf(file: any): number | null {
 /**
  * File ids attached to the given classifieds' `images` field. Used by the
  * delete lifecycle BEFORE the row (and its relation rows) disappears.
+ *
+ * `trx` (FX45): the knex transaction the read must join. The delete
+ * lifecycle runs inside the Document Service's transaction; a read on a
+ * separate pool connection waits for that transaction to end, and on SQLite
+ * (pool of exactly one connection) that never happens before knex's
+ * acquireConnectionTimeout (60 s): the delete hung for a minute, the scan
+ * failed open and the images stayed behind. Without `trx` the read uses the
+ * pool, as before.
  */
 export async function classifiedImageFileIds(
   strapi: any,
   classifiedIds: number[],
+  trx?: unknown,
 ): Promise<number[]> {
   if (classifiedIds.length === 0) return [];
   // getConnection(tableName) — NOT getConnection()(tableName): with a
   // configured schema the no-arg variant returns a withSchema()-wrapped
   // builder that is not callable.
-  const fileIds: number[] = await strapi.db
+  let query = strapi.db
     .getConnection("files_related_mph")
     .where({ related_type: "api::classified.classified", field: "images" })
-    .whereIn("related_id", classifiedIds)
-    .pluck("file_id");
+    .whereIn("related_id", classifiedIds);
+  if (trx) query = query.transacting(trx);
+  const fileIds: number[] = await query.pluck("file_id");
   return [...new Set(fileIds)];
 }
 

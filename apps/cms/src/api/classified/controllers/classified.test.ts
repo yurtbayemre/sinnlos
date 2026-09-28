@@ -170,3 +170,79 @@ describe("classified image ids", () => {
     expect(mocks.removeUploadFile).toHaveBeenCalledOnce();
   });
 });
+
+/**
+ * S09: the price payload (resolvePrice, private to the controller, pinned
+ * through create and update): empty means no price, a finite non-negative
+ * number or numeric string is rounded to cents, anything else is a 400
+ * before the core write. A giveaway never has a price.
+ */
+describe("classified price", () => {
+  const priceOf = (ctx: Ctx) => (ctx.request.body as { data: { price: unknown } }).data.price;
+
+  it.each<[unknown, number | null]>([
+    [undefined, null],
+    [null, null],
+    ["", null],
+    [0, 0],
+    ["0", 0],
+    [12, 12],
+    ["12.5", 12.5],
+    [12.345, 12.35],
+    ["12.344", 12.34],
+    ["1e3", 1000],
+    [" 7 ", 7],
+  ])("create stores %j as %j", async (price, expected) => {
+    const { controller, ctx } = setup(undefined, {
+      data: { title: "Bike", category: "sale", price },
+    });
+    await controller.create(ctx);
+    expect(ctx.badRequest).not.toHaveBeenCalled();
+    expect(priceOf(ctx)).toBe(expected);
+  });
+
+  it("answers an invalid price with 400 on create and update, before the core write", async () => {
+    for (const price of [
+      "abc",
+      -1,
+      "-0.01",
+      Number.NaN,
+      Infinity,
+      "Infinity",
+      {},
+      [1, 2],
+      "1,50",
+    ]) {
+      const create = setup(undefined, { data: { title: "Bike", category: "sale", price } });
+      await create.controller.create(create.ctx);
+      expect(create.ctx.badRequest, String(price)).toHaveBeenCalledWith("Invalid price");
+
+      const update = setup("7", { data: { price } });
+      await update.controller.update(update.ctx);
+      expect(update.ctx.badRequest, String(price)).toHaveBeenCalledWith("Invalid price");
+    }
+    expect(mocks.superCreate).not.toHaveBeenCalled();
+    expect(mocks.superUpdate).not.toHaveBeenCalled();
+  });
+
+  it("update rounds a new price and leaves the price alone when the payload has none", async () => {
+    const withPrice = setup("7", { data: { price: "19.999" } });
+    await withPrice.controller.update(withPrice.ctx);
+    expect(priceOf(withPrice.ctx)).toBe(20);
+
+    const withoutPrice = setup("7", { data: { title: "Bike" } });
+    await withoutPrice.controller.update(withoutPrice.ctx);
+    expect("price" in (withoutPrice.ctx.request.body as { data: object }).data).toBe(false);
+  });
+
+  it("a giveaway has no price and is not negotiable", async () => {
+    const { controller, ctx } = setup(undefined, {
+      data: { title: "Sofa", category: "giveaway", price: 50, priceNegotiable: true },
+    });
+    await controller.create(ctx);
+    expect((ctx.request.body as { data: Record<string, unknown> }).data).toMatchObject({
+      price: null,
+      priceNegotiable: false,
+    });
+  });
+});

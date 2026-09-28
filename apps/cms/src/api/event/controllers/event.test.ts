@@ -1,3 +1,4 @@
+import { validateHeaderValue } from "node:http";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
 import eventController from "./event";
 
@@ -16,6 +17,9 @@ import eventController from "./event";
  *  3. The UID is built from the documentId, so a re-published event (new
  *     published row id) keeps its UID and calendar clients update it
  *     instead of importing it twice.
+ *  4. FX12: the file comes from utils/ics.ts (its rules are pinned in
+ *     ics.test.ts); a title outside Latin-1 gets an RFC 6266 header instead
+ *     of the 500 Node's header check caused.
  *
  * The db stub evaluates the `where` it receives (id / documentId + the
  * `$notNull` pin), so the test fails if the pin is dropped, not only if it
@@ -230,12 +234,32 @@ describe("event ics: output", () => {
     expect(body).toMatch(/\r\nDTSTAMP:\d{8}T\d{6}Z\r\n/);
     expect(body).toContain("\r\nDTSTART:20261001T100000Z\r\nDTEND:20261001T100000Z\r\n");
     expect(body).toContain("\r\nLOCATION:Roof\\; terrace\\, Berlin\r\n");
-    expect(body.endsWith("\r\nEND:VEVENT\r\nEND:VCALENDAR")).toBe(true);
+    expect(body).toMatch(/\r\nSEQUENCE:\d+\r\n/);
+    expect(body.endsWith("\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n")).toBe(true);
     expect(ctx.set).toHaveBeenCalledWith("Content-Type", "text/calendar; charset=utf-8");
     expect(ctx.set).toHaveBeenCalledWith(
       "Content-Disposition",
-      'attachment; filename="Summer party.ics"',
+      "attachment; filename=\"Summer party.ics\"; filename*=UTF-8''Summer%20party.ics",
     );
+  });
+
+  it("exports a non-ASCII title with a header value Node accepts (FX12: was a 500)", async () => {
+    const title = "Sommerfest – 5 € 🎉";
+    // What the handler used to send: Node refuses the value (ERR_INVALID_CHAR),
+    // which Strapi answered with a 500.
+    expect(() =>
+      validateHeaderValue("Content-Disposition", `attachment; filename="${title}.ics"`),
+    ).toThrow(expect.objectContaining({ code: "ERR_INVALID_CHAR" }));
+
+    const { ctx } = await ics(PARTY_DOC, [{ ...PARTY_PUBLISHED, title }]);
+    expect(ctx.notFound).not.toHaveBeenCalled();
+    const disposition = ctx.set.mock.calls.find(([name]) => name === "Content-Disposition")?.[1];
+    expect(disposition).toBe(
+      "attachment; filename=\"Sommerfest - 5 EUR.ics\"; " +
+        "filename*=UTF-8''Sommerfest%20%E2%80%93%205%20%E2%82%AC%20%F0%9F%8E%89.ics",
+    );
+    expect(() => validateHeaderValue("Content-Disposition", disposition)).not.toThrow();
+    expect(String(ctx.body)).toContain(`\r\nSUMMARY:${title}\r\n`);
   });
 
   it("keeps all-day events as calendar days (VALUE=DATE)", async () => {
