@@ -244,4 +244,13 @@ describe("comment delete: numeric id or documentId, nothing else", () => {
     expect(ctx.forbidden).toHaveBeenCalled();
     expect(mocks.superDelete).not.toHaveBeenCalled();
   });
+
+  it("lets no caller without a numeric id own a comment whose author is gone", async () => {
+    const idless = { role: { type: "member" } } as unknown as DeleteCtx["state"]["user"];
+    const { controller, ctx, findOne } = setupDelete("7", idless);
+    findOne.mockResolvedValueOnce({ id: 7, documentId: COMMENT_DOC, author: null });
+    await controller.delete(ctx);
+    expect(ctx.forbidden).toHaveBeenCalled();
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
 });

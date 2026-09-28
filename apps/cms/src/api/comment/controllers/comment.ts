@@ -1,7 +1,7 @@
 import { factories } from "@strapi/strapi";
 import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
-import { findByRef, type EntryRow } from "../../../utils/policy-factories";
+import { findByRef, identifiedCaller, type EntryRow } from "../../../utils/policy-factories";
 import { isTargetVisible } from "../../../utils/target-visibility";
 
 const COMMENT_UID = "api::comment.comment";
@@ -70,7 +70,10 @@ export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
     });
     if (!entity) return ctx.notFound();
     const user = ctx.state.user;
-    const isOwner = entity.author?.id === user?.id;
+    // Without a numeric id the caller owns nothing, not even a comment whose
+    // author is gone (ownerGate's rule, utils/policy-factories.ts).
+    const caller = identifiedCaller(user);
+    const isOwner = caller !== null && entity.author?.id === caller.id;
     const isPrivileged = hasRole(user, MODERATORS);
     if (!isOwner && !isPrivileged) return ctx.forbidden();
     // The v5 core controller resolves by documentId — a numeric id deletes

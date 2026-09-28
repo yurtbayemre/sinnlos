@@ -56,7 +56,7 @@ export interface PolicyDb {
 
 /** What the factories read from `strapi`: the db, and the log when there is one. */
 export interface PolicyStrapi extends PolicyDb {
-  log?: { error(message: string): void; warn?(message: string): void };
+  log?: { error(message: string): void };
 }
 
 /** The caller as users-permissions puts it on ctx.state.user. */
