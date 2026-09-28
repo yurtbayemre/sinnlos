@@ -6,22 +6,23 @@ import {
   CUSTOM_ACTION_GRANTS,
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
-  USER_READ_ACTIONS,
-  USER_READ_EXCLUDED_ROLES,
-  USER_UID,
-} from "./index";
+  computeDesiredGrants,
+  computeRevocations,
+} from "./bootstrap/permission-matrix";
 
 /**
  * Generates infra/diagnostics/prod-perm-diff.sql, a read-only query that
  * compares a live database's users-permissions rows with what this code's
- * bootstrap sync (syncRolePermissions in ./index.ts) converges to.
+ * bootstrap sync (bootstrap/sync-permissions.ts) converges to.
  *
- * The expected set mirrors the sync order: matrix grants and the user-read
- * grants are ensured, REVOKED_PERMISSIONS is deleted, then
- * CUSTOM_ACTION_GRANTS is ensured, so a pair that is both revoked and a
- * custom grant ends up present. The users-permissions plugin seeds its own
- * DEFAULT_PERMISSIONS only on the very first boot; those rows are listed
- * with source `plugin_default_first_boot` and are informational.
+ * The expected set is computeDesiredGrants (bootstrap/permission-matrix.ts),
+ * the set the sync itself applies: matrix grants and the user-read grants,
+ * minus REVOKED_PERMISSIONS, plus CUSTOM_ACTION_GRANTS, so a pair that is
+ * both revoked and a custom grant ends up present. The users-permissions
+ * plugin seeds its own DEFAULT_PERMISSIONS only on the very first boot;
+ * those rows are listed with source `plugin_default_first_boot` and are
+ * informational. The constants are re-exported by src/index.ts, which the
+ * generated header names as the source.
  *
  * The SQL is a file snapshot: after changing the permission constants or
  * upgrading Strapi, regenerate it with
@@ -51,31 +52,14 @@ function pluginDefaultPermissions(): { role: string; action: string }[] {
 
 function expectedRows(): Row[] {
   const rows = new Map<string, Row>();
-  const add = (role: string, action: string, source: string) => {
-    const key = `${role} ${action}`;
-    const row = rows.get(key) ?? { role, action, sources: new Set<string>() };
-    row.sources.add(source);
-    rows.set(key, row);
-  };
-  const drop = (role: string, action: string) => rows.delete(`${role} ${action}`);
-
-  for (const [role, matrix] of Object.entries(PERMISSION_MATRIX)) {
-    for (const [uid, actions] of Object.entries(matrix)) {
-      for (const action of actions ?? []) add(role, `${uid}.${action}`, "matrix");
-    }
-    if (!USER_READ_EXCLUDED_ROLES.includes(role)) {
-      for (const action of USER_READ_ACTIONS) add(role, `${USER_UID}.${action}`, "user_read");
-    }
-  }
-  for (const [role, actions] of Object.entries(REVOKED_PERMISSIONS)) {
-    for (const action of actions) drop(role, action);
-  }
-  const allRoles = Object.keys(PERMISSION_MATRIX);
-  for (const [action, grant] of Object.entries(CUSTOM_ACTION_GRANTS)) {
-    for (const role of grant === "*" ? allRoles : grant) add(role, action, "custom");
+  for (const { role, action, sources } of computeDesiredGrants()) {
+    rows.set(`${role} ${action}`, { role, action, sources: new Set<string>(sources) });
   }
   for (const { role, action } of pluginDefaultPermissions()) {
-    add(role, action, "plugin_default_first_boot");
+    const key = `${role} ${action}`;
+    const row = rows.get(key) ?? { role, action, sources: new Set<string>() };
+    row.sources.add("plugin_default_first_boot");
+    rows.set(key, row);
   }
   return [...rows.values()].sort(
     (a, b) => a.role.localeCompare(b.role) || a.action.localeCompare(b.action),
@@ -86,9 +70,9 @@ const sqlString = (value: string) => `'${value.replace(/'/g, "''")}'`;
 
 function buildSql(): string {
   const expected = expectedRows();
-  const revoked = Object.entries(REVOKED_PERMISSIONS)
-    .flatMap(([role, actions]) => actions.map((action) => ({ role, action })))
-    .sort((a, b) => a.role.localeCompare(b.role) || a.action.localeCompare(b.action));
+  const revoked = computeRevocations().sort(
+    (a, b) => a.role.localeCompare(b.role) || a.action.localeCompare(b.action),
+  );
   const knownRoles = [...new Set([...Object.keys(PERMISSION_MATRIX), "authenticated", "public"])];
 
   const expectedValues = expected

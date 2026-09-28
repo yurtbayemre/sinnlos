@@ -1,12 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { nextAdvancedSettings, syncAdvancedSettings } from "./bootstrap/advanced-settings";
 import {
   CUSTOM_ACTION_GRANTS,
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
-  ROLES,
-  syncAdvancedSettings,
-  syncRolePermissions,
-} from "./index";
+  computeDesiredGrants,
+  computeRevocations,
+  type PermissionConstants,
+} from "./bootstrap/permission-matrix";
+import { ROLES } from "./bootstrap/roles";
+import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
 import { PERMISSION_SCHEMAS, PERMISSION_UID, ROLE_UID } from "./test/org-fixtures.test.helper";
 import { createStrapiStub, type Row, type StrapiStub } from "./test/strapi-stub.test.helper";
 import { PRIVILEGED_ROLE_TYPES } from "./utils/sanitize-user-contact";
@@ -259,5 +262,90 @@ describe("syncAdvancedSettings (S02)", () => {
     await syncAdvancedSettings(strapi);
     expect(sets).toEqual([]);
     expect(strapi.log.info).not.toHaveBeenCalled();
+  });
+});
+
+describe("nextAdvancedSettings (B01)", () => {
+  it("applies the four managed keys over the stored ones", () => {
+    expect(nextAdvancedSettings({ a: 1, allow_register: true }, {})).toEqual({
+      a: 1,
+      unique_email: true,
+      allow_register: false,
+      email_confirmation: false,
+      default_role: "member",
+    });
+    expect(nextAdvancedSettings(null, { LOCAL_REGISTRATION: "1" }).allow_register).toBe(true);
+  });
+});
+
+describe("ensureRoles (B01)", () => {
+  it("creates the missing intranet roles once, in seed order", async () => {
+    const strapi = permissionStub([], roleRows(["authenticated", "public", "editor"]));
+    await ensureRoles(strapi);
+    const types = (strapi.tables[ROLE_UID] ?? []).map((role) => role.type);
+    expect(types).toEqual([
+      "authenticated",
+      "public",
+      "editor",
+      ...ROLES.map((role) => role.type).filter((type) => type !== "editor"),
+    ]);
+    const created = (strapi.tables[ROLE_UID] ?? []).find((role) => role.type === "admin_role");
+    expect(created).toMatchObject({ name: "Admin", description: ROLES[0].description });
+    expect(strapi.log.info).toHaveBeenCalledWith("[bootstrap] created role admin_role");
+    expect(strapi.log.info).not.toHaveBeenCalledWith("[bootstrap] created role editor");
+
+    strapi.calls.length = 0;
+    await ensureRoles(strapi);
+    expect(strapi.calls.filter((call) => call.method === "create")).toEqual([]);
+  });
+});
+
+describe("computeDesiredGrants / computeRevocations (B01)", () => {
+  it("is the set the sync converges to on a fresh database", async () => {
+    const strapi = permissionStub();
+    await syncRolePermissions(strapi);
+    const desired = computeDesiredGrants().map((grant) => `${grant.role}|${grant.action}`);
+    expect(desired.sort()).toEqual(pairsOf(strapi));
+  });
+
+  it("drops revoked matrix pairs, keeps revoked custom pairs, expands `*` and merges sources", () => {
+    const constants: PermissionConstants = {
+      matrix: {
+        member: { "api::a.a": ["find", "delete"] },
+        authenticated: { "api::a.a": ["find"] },
+      },
+      userReadActions: ["me"],
+      userReadExcludedRoles: [],
+      customActionGrants: {
+        "api::a.a.find": ["member"],
+        "api::a.a.delete": "*",
+        "api::b.b.x": "*",
+      },
+      revoked: { member: ["api::a.a.delete", "api::gone.gone.find"] },
+    };
+    const grants = computeDesiredGrants(constants).map(
+      (grant) => `${grant.role}|${grant.action}|${[...grant.sources].sort().join("+")}`,
+    );
+    expect(grants.sort()).toEqual([
+      "authenticated|api::a.a.delete|custom",
+      "authenticated|api::a.a.find|matrix",
+      "authenticated|api::b.b.x|custom",
+      "authenticated|plugin::users-permissions.user.me|user_read",
+      // revoked, but a custom grant re-adds it after the revocation
+      "member|api::a.a.delete|custom",
+      "member|api::a.a.find|custom+matrix",
+      "member|api::b.b.x|custom",
+      "member|plugin::users-permissions.user.me|user_read",
+    ]);
+    expect(computeRevocations(constants)).toEqual([
+      { role: "member", action: "api::a.a.delete" },
+      { role: "member", action: "api::gone.gone.find" },
+    ]);
+  });
+
+  it("lists every REVOKED_PERMISSIONS pair", () => {
+    expect(computeRevocations().map(({ role, action }) => `${role}|${action}`)).toEqual(
+      revokedPairs(),
+    );
   });
 });

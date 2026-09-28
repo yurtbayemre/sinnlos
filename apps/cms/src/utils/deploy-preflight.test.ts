@@ -539,7 +539,7 @@ describe("rollback hint: the guest vote permission of poll guest access", () => 
         "(SELECT count(*) FROM removed) AS permission_rows_removed",
     );
     // The action the cms grants every role, guest included.
-    expect(read("apps", "cms", "src", "index.ts")).toContain('"api::poll-vote.poll-vote.vote": "*"');
+    expect(read("apps", "cms", "src", "bootstrap", "permission-matrix.ts")).toContain('"api::poll-vote.poll-vote.vote": "*"');
   });
 
   it.skipIf(!HAS_BASH)("prints the whole sequence for a :rollback cms from before guest access", () => {

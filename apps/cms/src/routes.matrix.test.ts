@@ -1,7 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CUSTOM_ACTION_GRANTS, PERMISSION_MATRIX, REVOKED_PERMISSIONS } from "./index";
+import {
+  CUSTOM_ACTION_GRANTS,
+  PERMISSION_MATRIX,
+  REVOKED_PERMISSIONS,
+} from "./bootstrap/permission-matrix";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
 
@@ -10,9 +14,10 @@ import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils
  *
  * Every content-API call passes two independent gates (docs/architecture.md
  * §5.8): the users-permissions GRANT (a permission row `<uid>.<action>`,
- * seeded by src/index.ts) and the route's POLICIES (`config.policies` in
- * src/api/*\/routes/*.ts). The shipped authorization defects sat in the seam
- * between the two — router config that the pure unit suite never sees:
+ * seeded from bootstrap/permission-matrix.ts) and the route's POLICIES
+ * (`config.policies` in src/api/*\/routes/*.ts). The shipped authorization
+ * defects sat in the seam between the two — router config that the pure
+ * unit suite never sees:
  *   - an action left out of a `createCoreRouter` config still EXISTS and
  *     runs WITHOUT policies unless the router uses `only:` (the forged
  *     POST /api/poll-votes hole),
@@ -108,8 +113,8 @@ const READ_ACTIONS = ["find", "findOne"];
 
 /**
  * Users-permissions reads every role receives on top of PERMISSION_MATRIX
- * (USER_READ_ACTIONS in src/index.ts, USER_READ_EXCLUDED_ROLES is empty on
- * purpose — see the guest OPEN ISSUE note there).
+ * (USER_READ_ACTIONS in bootstrap/permission-matrix.ts; USER_READ_EXCLUDED_ROLES
+ * is empty on purpose — see the guest OPEN ISSUE note there).
  */
 const USER_READ_GRANTS = [
   "plugin::users-permissions.user.find",
@@ -425,13 +430,14 @@ const KNOWN_DRAFT_READS = new Set<string>([]);
 // policy domain hands the filtered rows out through populate, filters or
 // sort. It works from every route whose model reaches that relation, at any
 // depth, on writes as well as reads. So the check is per RELATION, not per
-// route: the global guard (registerRestrictedRelationGuard in src/index.ts,
-// pinned in index.register.test.ts) applies RESTRICTED_RELATION_TARGETS on
-// every content-api query, and this block derives every such relation from
-// the schemas (src/api + the users-permissions user extension). Coverage is
-// transitive: a path into a filtered type either crosses one of these
-// relations or starts at a root that the type's own policy narrows, and
-// every trusted source must itself sit in the target's policy domain.
+// route: the global guard (registerRestrictedRelationGuard in
+// bootstrap/restricted-relation-guard.ts, pinned in index.register.test.ts)
+// applies RESTRICTED_RELATION_TARGETS on every content-api query, and this
+// block derives every such relation from the schemas (src/api + the
+// users-permissions user extension). Coverage is transitive: a path into a
+// filtered type either crosses one of these relations or starts at a root
+// that the type's own policy narrows, and every trusted source must itself
+// sit in the target's policy domain.
 // ---------------------------------------------------------------------------
 
 /** Read policies that decide WHICH rows a caller may see. */
