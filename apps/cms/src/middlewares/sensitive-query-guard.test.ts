@@ -325,6 +325,12 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
     "digestMentions",
     "digestKudos",
     "digestFrequency",
+    // The Entra identity columns (batch 9, D-ENTRA-01): only the Entra
+    // exchange and /api/me read them, through db.query.
+    "entraTenantId",
+    "roleSource",
+    "entraAppliedRole",
+    "entraManagerOid",
   ] as const;
 
   it.each(PRIVATE)("%s is private in the user schema", (field) => {
@@ -345,7 +351,15 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
       return isPrivate === true && (isString(type) || isNumber(type));
     });
     expect(privateSearchTargets.map(([name]) => name)).toEqual(
-      expect.arrayContaining(["microsoftOid", "digestFrequency", "resetPasswordToken"]),
+      expect.arrayContaining([
+        "microsoftOid",
+        "digestFrequency",
+        "resetPasswordToken",
+        "entraTenantId",
+        "roleSource",
+        "entraAppliedRole",
+        "entraManagerOid",
+      ]),
     );
     for (const [name, attribute] of privateSearchTargets) {
       expect({ name, searchable: (attribute as { searchable?: boolean }).searchable }).toEqual({
@@ -378,6 +392,10 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
         digestMentions: true,
         digestKudos: false,
         digestFrequency: "daily",
+        entraTenantId: "tenant-ada",
+        roleSource: "entra",
+        entraAppliedRole: "member",
+        entraManagerOid: "oid-manager",
         blocked: false,
       },
       user(),
