@@ -3,44 +3,43 @@
 import { useState, useMemo } from "react";
 import { useTranslations } from "next-intl";
 import Link from "next/link";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { initials } from "@/lib/utils";
 import { avatarThumbUrl } from "@/lib/config";
+import { buildOrgTree, type OrgNode } from "@/lib/org-tree";
 import type { UserLite } from "@/lib/types";
 
-type PersonNode = UserLite & { managerId?: number | null; children: PersonNode[] };
+type OrgPersonLite = UserLite & { manager?: { id: number } | null };
+type PersonNode = OrgNode<OrgPersonLite>;
 
-function buildTree(people: (UserLite & { manager?: { id: number } | null })[]) {
-  const map = new Map<number, PersonNode>();
-  for (const p of people) {
-    map.set(p.id, { ...p, managerId: p.manager?.id ?? null, children: [] });
-  }
-  const roots: PersonNode[] = [];
-  for (const node of map.values()) {
-    if (node.managerId && map.has(node.managerId)) {
-      map.get(node.managerId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
-  }
-  return roots;
-}
-
-export function OrgTree({
-  people,
-}: {
-  people: (UserLite & { manager?: { id: number } | null })[];
-}) {
-  const roots = useMemo(() => buildTree(people), [people]);
+/**
+ * The org chart. The tree comes from lib/org-tree.ts (FX49): every person
+ * appears once; people whose manager chain loops back, and people set as
+ * their own manager, are extra roots with a warning, so an admin can fix
+ * the manager field instead of the chart losing them (or never finishing
+ * rendering).
+ */
+export function OrgTree({ people }: { people: OrgPersonLite[] }) {
+  const t = useTranslations("people");
+  const { roots, issues } = useMemo(() => buildOrgTree(people), [people]);
 
   if (roots.length === 0) return null;
 
   return (
     <div className="space-y-2">
+      {issues > 0 && (
+        <div
+          role="status"
+          className="flex items-start gap-2 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300"
+        >
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{t("orgChartIssues", { count: issues })}</span>
+        </div>
+      )}
       {roots.map((node) => (
-        <TreeNode key={node.id} node={node} level={0} />
+        <TreeNode key={node.person.id} node={node} level={0} />
       ))}
     </div>
   );
@@ -50,8 +49,9 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
   const t = useTranslations("people");
   const [expanded, setExpanded] = useState(level < 2);
   const hasChildren = node.children.length > 0;
-  const name = node.displayName ?? node.username ?? node.email ?? "Unknown";
-  const avatarUrl = avatarThumbUrl(node.avatar);
+  const person = node.person;
+  const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
+  const avatarUrl = avatarThumbUrl(person.avatar);
 
   return (
     <div style={{ marginLeft: level > 0 ? 24 : 0 }}>
@@ -74,7 +74,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
             <div className="w-6" />
           )}
           <Link
-            href={`/people/${node.id}`}
+            href={`/people/${person.id}`}
             className="flex items-center gap-3 rounded-lg outline-none transition-opacity hover:opacity-80 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <Avatar className="h-9 w-9">
@@ -83,14 +83,20 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
             </Avatar>
             <div className="min-w-0">
               <div className="truncate text-sm font-medium">{name}</div>
-              {node.jobTitle && (
-                <div className="truncate text-xs text-muted-foreground">{node.jobTitle}</div>
+              {person.jobTitle && (
+                <div className="truncate text-xs text-muted-foreground">{person.jobTitle}</div>
+              )}
+              {node.issue && (
+                <div className="flex items-center gap-1 text-xs text-amber-700 dark:text-amber-300">
+                  <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  {node.issue === "cycle" ? t("orgCycle") : t("orgSelfManager")}
+                </div>
               )}
             </div>
           </Link>
-          {node.department?.name && (
+          {person.department?.name && (
             <span className="ml-auto hidden text-xs text-muted-foreground sm:inline">
-              {node.department.name}
+              {person.department.name}
             </span>
           )}
         </CardContent>
@@ -98,7 +104,7 @@ function TreeNode({ node, level }: { node: PersonNode; level: number }) {
       {hasChildren && expanded && (
         <div className="border-l border-border/50 ml-3 pl-0">
           {node.children.map((child) => (
-            <TreeNode key={child.id} node={child} level={level + 1} />
+            <TreeNode key={child.person.id} node={child} level={level + 1} />
           ))}
         </div>
       )}
