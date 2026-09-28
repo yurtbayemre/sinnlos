@@ -13,8 +13,10 @@ import {
  * the published row and creates a new one (new numeric id, same
  * documentId; draft and published rows never share an id):
  *   - comment and reaction anchors (targetType + targetDocumentId, issue #11)
- *     survive REST and Document Service republishes, an unpublish hides the
- *     thread like a missing target, and the next publish brings it back;
+ *     survive REST and Document Service republishes; an unpublish keeps the
+ *     thread readable and writable through the draft fallback of
+ *     findCommentTarget (KNOWN, pinned as it is today; docs/architecture.md
+ *     §7b, owner decision pending), and the next publish keeps it;
  *   - a poll vote follows the poll to its new published row (the
  *     unidirectional re-link, §5.17), an RSVP follows its event (documentId
  *     anchor);
