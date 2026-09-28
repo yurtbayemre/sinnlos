@@ -4,6 +4,7 @@ import {
   resolveWriteTarget,
   targetMatchWhere,
 } from "../../../utils/comment-target";
+import { parseEntryRef } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
 import { isTargetVisible } from "../../../utils/target-visibility";
 
@@ -97,5 +98,26 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
       data: { emoji, targetType, targetDocumentId, author: user.id },
     };
     return super.create(ctx);
+  },
+
+  /**
+   * DELETE /api/reactions/:id, behind global::is-reaction-author (author,
+   * or admin_role/editor). `:id` is a documentId or a numeric row id (PL01,
+   * owner default "translate"): the v5 core controller resolves only
+   * documentIds, so a numeric id deleted nothing and still answered 204 —
+   * for moderators, whose policy bypass never looks the row up. It is
+   * translated here; a malformed id or a missing row answers 404
+   * (utils/entry-id.ts).
+   */
+  async delete(ctx) {
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
+    const entity = await strapi.db.query(REACTION_UID).findOne({
+      where,
+      select: ["id", "documentId"],
+    });
+    if (!entity) return ctx.notFound();
+    ctx.params.id = entity.documentId;
+    return super.delete(ctx);
   },
 }));

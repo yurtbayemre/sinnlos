@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { failLikePostgres } from "../../../utils/entry-id.test.helper";
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
 import notificationController from "./notification";
 
 /**
@@ -15,16 +15,24 @@ import notificationController from "./notification";
  * so foreign ids change nothing. The live event is emitted only when a row
  * changed. The db stub evaluates that where clause against its rows, so a
  * dropped recipient or readAt pin fails the test.
+ *
+ * PL01: DELETE /api/notifications/:id takes a documentId or a numeric row
+ * id; a numeric one is translated before the core delete (which resolves
+ * documentIds only and answered 204 without deleting), and a malformed id or
+ * a missing row answers 404. `super.delete` is a prototype spy.
  */
 
-const mocks = vi.hoisted(() => ({ emitLiveEvent: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  emitLiveEvent: vi.fn(),
+  superDelete: vi.fn(async (_ctx: unknown) => undefined),
+}));
 
 vi.mock("@strapi/strapi", () => ({
   factories: {
     createCoreController:
       (_uid: string, cfg: (deps: { strapi: unknown }) => object) =>
       ({ strapi }: { strapi: unknown }) =>
-        cfg({ strapi }),
+        Object.setPrototypeOf(cfg({ strapi }), { delete: mocks.superDelete }),
   },
 }));
 
@@ -92,6 +100,7 @@ function setup(body: unknown) {
 
 beforeEach(() => {
   mocks.emitLiveEvent.mockClear();
+  mocks.superDelete.mockClear();
 });
 
 describe("notification mark-read", () => {
@@ -195,5 +204,70 @@ describe("notification mark-read", () => {
     await controller.markRead(ctx);
     expect(ctx.unauthorized).toHaveBeenCalled();
     expect(updateMany).not.toHaveBeenCalled();
+  });
+});
+
+const NOTIFICATION_DOC = "k3v9q2m8x7c4b1n6p5z0r2t8";
+
+interface DeleteCtx {
+  params: { id?: unknown };
+  notFound: ReturnType<typeof vi.fn>;
+}
+
+function setupDelete(id: unknown) {
+  const rows = [{ id: 7, documentId: NOTIFICATION_DOC }];
+  const findOne = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+    failLikePostgres(where);
+    return (
+      rows.find(
+        (r) =>
+          r.id === where.id ||
+          (where.documentId !== undefined && r.documentId === where.documentId),
+      ) ?? null
+    );
+  });
+  const strapi = { db: { query: vi.fn(() => ({ findOne })) } };
+  const controller = (
+    notificationController as unknown as (deps: { strapi: unknown }) => {
+      delete(ctx: DeleteCtx): Promise<unknown>;
+    }
+  )({ strapi });
+  const ctx: DeleteCtx = { params: { id }, notFound: vi.fn(() => ({ status: 404 })) };
+  return { controller, ctx, findOne };
+}
+
+describe("notification delete: numeric id or documentId (PL01)", () => {
+  it("translates a numeric row id to the documentId before the core delete", async () => {
+    const { controller, ctx, findOne } = setupDelete("7");
+    await controller.delete(ctx);
+    expect(findOne).toHaveBeenCalledWith({ where: { id: 7 }, select: ["id", "documentId"] });
+    expect(ctx.params.id).toBe(NOTIFICATION_DOC);
+    expect(mocks.superDelete).toHaveBeenCalledWith(ctx);
+  });
+
+  it("passes a known documentId on", async () => {
+    const { controller, ctx } = setupDelete(NOTIFICATION_DOC);
+    await controller.delete(ctx);
+    expect(ctx.params.id).toBe(NOTIFICATION_DOC);
+    expect(mocks.superDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 404 for an unknown row id or documentId, without the core delete", async () => {
+    for (const id of ["8", "zzzzzzzzzzzzzzzzzzzzzzzz"]) {
+      const { controller, ctx } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound, id).toHaveBeenCalled();
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
+  });
+
+  it("answers a malformed or out-of-range id with 404, without a lookup", async () => {
+    for (const id of [...MALFORMED_ENTRY_IDS, undefined, ""]) {
+      const { controller, ctx, findOne } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound, String(id)).toHaveBeenCalled();
+      expect(findOne, String(id)).not.toHaveBeenCalled();
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
   });
 });

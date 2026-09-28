@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
 import reactionController from "./reaction";
 
 /**
@@ -13,7 +14,9 @@ import reactionController from "./reaction";
  *   4. without `reacted`: the toggle (existing → delete, else create);
  *   5. with `reacted` (FX28, the desired end state): true + existing is a
  *      no-op answering the reaction, true + none creates, false + existing
- *      deletes, false + none is a no-op; a repeated request never flips.
+ *      deletes, false + none is a no-op; a repeated request never flips;
+ *   6. PL01: DELETE /api/reactions/:id translates a numeric row id to the
+ *      documentId before the core delete; malformed or unknown ids are 404.
  *
  * resolveWriteTarget runs for real against the db stub; isTargetVisible and
  * emitLiveEvent are mocked (their rules are tested where they live). The core
@@ -22,6 +25,7 @@ import reactionController from "./reaction";
 
 const mocks = vi.hoisted(() => ({
   superCreate: vi.fn(async (_ctx: unknown) => ({ data: { id: 900 } })),
+  superDelete: vi.fn(async (_ctx: unknown) => undefined),
   sanitizeOutput: vi.fn(async (entity: unknown, _ctx: unknown) => ({ sanitized: entity })),
   transformResponse: vi.fn((data: unknown) => ({ data, meta: {} })),
   isTargetVisible: vi.fn(
@@ -37,6 +41,7 @@ vi.mock("@strapi/strapi", () => ({
       ({ strapi }: { strapi: unknown }) =>
         Object.setPrototypeOf(cfg({ strapi }), {
           create: mocks.superCreate,
+          delete: mocks.superDelete,
           sanitizeOutput: mocks.sanitizeOutput,
           transformResponse: mocks.transformResponse,
         }),
@@ -299,5 +304,57 @@ describe("reaction create: desired end state `reacted` (FX28)", () => {
     await s.controller.create(s.ctx);
     expect(s.ctx.unauthorized).toHaveBeenCalled();
     expect(s.calls).toEqual([]);
+  });
+});
+
+describe("reaction delete: numeric id or documentId (PL01)", () => {
+  const REACTION_DOC = "r0r1r2r3r4r5r6r7r8r9s0s1";
+
+  function setupDelete(id: unknown) {
+    const findOne = vi.fn(async ({ where }: { where: Record<string, unknown> }) => {
+      failLikePostgres(where);
+      return where.id === 70 || where.documentId === REACTION_DOC
+        ? { id: 70, documentId: REACTION_DOC }
+        : null;
+    });
+    const strapi = { db: { query: vi.fn(() => ({ findOne })) } };
+    const controller = (
+      reactionController as unknown as (deps: { strapi: unknown }) => {
+        delete(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi });
+    const ctx = { params: { id }, notFound: vi.fn(() => ({ status: 404 })) };
+    return { controller, ctx, findOne, strapi };
+  }
+
+  it("translates a numeric row id to the documentId before the core delete", async () => {
+    const { controller, ctx, findOne, strapi } = setupDelete("70");
+    await controller.delete(ctx);
+    expect(strapi.db.query).toHaveBeenCalledWith(REACTION_UID);
+    expect(findOne).toHaveBeenCalledWith({ where: { id: 70 }, select: ["id", "documentId"] });
+    expect(ctx.params.id).toBe(REACTION_DOC);
+    expect(mocks.superDelete).toHaveBeenCalledWith(ctx);
+  });
+
+  it("passes a known documentId on", async () => {
+    const { controller, ctx } = setupDelete(REACTION_DOC);
+    await controller.delete(ctx);
+    expect(ctx.params.id).toBe(REACTION_DOC);
+    expect(mocks.superDelete).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers 404 for unknown, malformed or out-of-range ids, without the core delete", async () => {
+    for (const id of ["71", "zzzzzzzzzzzzzzzzzzzzzzzz"]) {
+      const { controller, ctx } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound, id).toHaveBeenCalled();
+    }
+    for (const id of [...MALFORMED_ENTRY_IDS, undefined, ""]) {
+      const { controller, ctx, findOne } = setupDelete(id);
+      await controller.delete(ctx);
+      expect(ctx.notFound, String(id)).toHaveBeenCalled();
+      expect(findOne, String(id)).not.toHaveBeenCalled();
+    }
+    expect(mocks.superDelete).not.toHaveBeenCalled();
   });
 });

@@ -606,14 +606,19 @@ export function hasTargetId(idParam: unknown): boolean {
 }
 
 /**
- * The `where` for the row a write route targets. v5 routes carry a
- * documentId; a numeric id is accepted too so direct API consumers keep
- * working (same gotcha as in the comment controller). Both follow the
- * relation refs above: a row id within the int4 range, or a documentId
- * parseInt cannot read. null = no usable target: no id at all, or a
- * malformed or out-of-range one. The policies refuse the latter like an
- * unknown row, and it never reaches the query (a row id beyond int4 made
+ * The `where` for the row a write route targets, as the policy looks it up.
+ * v5 routes carry a documentId; a numeric row id is accepted here too. Both
+ * follow the relation refs above: a row id within the int4 range, or a
+ * documentId parseInt cannot read. null = no usable target: no id at all,
+ * or a malformed or out-of-range one. The policies refuse the latter like
+ * an unknown row, and it never reaches the query (a row id beyond int4 made
  * the Postgres lookup fail with a 500, utils/entry-id.ts).
+ *
+ * Accepting a numeric id in the POLICY does not make the route take one:
+ * the v5 core update resolves documentIds only. The department and team
+ * controllers translate a numeric id to the documentId before the core
+ * update (PL01); the wiki-page update does not, so a numeric id passes
+ * can-edit-wiki and the core update then answers 404.
  */
 export function targetRowWhere(idParam: unknown): RelationRef | null {
   if (!hasTargetId(idParam)) return null;

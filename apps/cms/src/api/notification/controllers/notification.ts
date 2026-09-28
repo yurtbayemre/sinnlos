@@ -1,5 +1,5 @@
 import { factories } from "@strapi/strapi";
-import { parseRowId } from "../../../utils/entry-id";
+import { parseEntryRef, parseRowId } from "../../../utils/entry-id";
 import { emitLiveEvent } from "../../../utils/live-events";
 
 /** Most ids one mark-read call takes (the web marks one at a time). */
@@ -50,5 +50,25 @@ export default factories.createCoreController("api::notification.notification", 
     // tabs sync their unread badge without waiting for the backstop poll.
     if (count > 0) emitLiveEvent({ kind: "notification", recipientId: user.id });
     return ctx.send({ updated: count });
+  },
+
+  /**
+   * DELETE /api/notifications/:id, behind global::is-notification-recipient
+   * (recipient or admin_role). `:id` is a documentId or a numeric row id
+   * (PL01, owner default "translate"): the v5 core controller resolves only
+   * documentIds, so a numeric id deleted nothing and still answered 204 —
+   * for admins, whose policy bypass never looks the row up. It is translated
+   * here; a malformed id or a missing row answers 404 (utils/entry-id.ts).
+   */
+  async delete(ctx) {
+    const where = parseEntryRef(ctx.params.id);
+    if (!where) return ctx.notFound();
+    const entity = await strapi.db.query("api::notification.notification").findOne({
+      where,
+      select: ["id", "documentId"],
+    });
+    if (!entity) return ctx.notFound();
+    ctx.params.id = entity.documentId;
+    return super.delete(ctx);
   },
 }));
