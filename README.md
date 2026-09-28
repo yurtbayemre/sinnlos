@@ -402,15 +402,17 @@ the same rules module): polls are **hidden from guests** (role type exactly
   fails when a new module starts reading polls).
 
 The users-permissions **User** is extended with `department`, `teams`,
-`manager` (self-relation, drives the org chart), `microsoftOid`, and the
+`manager` (self-relation, drives the org chart; paired with its inverse
+`directReports`, which the person page shows as *Direct reports*), the
+schema-`private` `microsoftOid` (read only by the sign-in extension), and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
 **opt-in** (maintained via `/api/me`, never exposed through user reads) and
 only surface — without the year of birth — in the celebrations feed when
 `birthdayVisible` is set. Since the e-mail digests (#18) the user also
 carries `digestAnnouncements` / `digestMentions` / `digestKudos` (booleans),
-`digestFrequency` (`daily` | `weekly`, default weekly) and the
-schema-`private`, cron-owned `lastDigestAt` — the opt-ins are maintained on
-the profile page via the same `/api/me` whitelist.
+`digestFrequency` (`daily` | `weekly`, default weekly) and the cron-owned
+`lastDigestAt`, all schema-`private` — the opt-ins are maintained on the
+profile page via the same `/api/me` whitelist.
 
 Six roles are created automatically on Strapi boot (see
 [`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
@@ -572,9 +574,18 @@ Global guards that apply to **every** content-API route, not per route:
   removes email/phone/hireDate/officeLocation/microsoftOid from every
   response to callers outside the five staff roles (guest, the
   `authenticated` fallback, unknown roles).
+- **`global::sensitive-query-guard`** (FX22) — the query side of the same
+  rule: for those callers a filter, sort, nested populate filter/sort or
+  users `_q` on one of these fields answers 400 `Invalid key`, on
+  `/api/users*` and through every user relation. Staff roles and the admin
+  panel are unaffected. Its factory wraps `strapi.contentAPI.validate.query`
+  at boot (global middlewares run before authentication); each refusal is
+  logged as `[sensitive-query-guard] 400 …`.
 - **`global::uploads-auth`** middleware — `/uploads/*` file bytes only for
   requests carrying `INTERNAL_UPLOAD_TOKEN` (i.e. the web's session-gated
-  proxy); everything else gets 404, whatever the encoding of the path.
+  proxy); everything else gets 404, whatever the encoding of the path. The
+  web proxy itself also asks Strapi whether the session's JWT is still
+  accepted (a blocked account loses the files within 60 s, FX41).
 - **`global::auth-path-guard`** middleware — any spelling of `/api/auth/*`
   other than the literal lowercase one (`/api/Auth/local`, `%61uth`, `//`,
   `..`) gets 404. Traefik's `/api/auth` rule is case-sensitive but Strapi's
@@ -714,7 +725,8 @@ which would still strip every author and uploader name from guest pages;
 filters through a user relation still answer 400.)
 The contact fields a guest could read that way (email, phone, hireDate,
 officeLocation, microsoftOid) are removed output-side by the contact-field
-sanitizer (#10, see the global guards above). Custom (non-CRUD) route
+sanitizer (#10), and filtering or sorting by them is refused query-side
+(`global::sensitive-query-guard`, FX22; see the global guards above). Custom (non-CRUD) route
 actions (ICS export, celebrations — staff roles only, not `guest` or
 `authenticated` —, poll `vote` and `results` — every role, `guest`
 included, narrowed per poll by the department targeting and the guest
@@ -929,8 +941,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - The server actions in `apps/web/src/lib` have characterisation tests next
   to them: the event, classified, acknowledgement, kudos, training and
   notification actions (S09), and the auth, comment, poll and profile
-  actions. `announcement-live-actions.ts`, `locale-actions.ts` and
-  `search-action.ts` have none yet (search: roadmap WD06).
+  actions. `announcement-live-actions.ts` and `locale-actions.ts` have
+  none yet. The ⌘K search is no Server Action any more: it runs through
+  `GET /search` (`apps/web/src/app/search/route.ts`), covered by
+  `apps/web/src/lib/search.test.ts`.
   `/api/live/emit` is covered by `apps/web/src/lib/live-emit.test.ts`; its
   logic lives in `live-emit.ts`.
 
@@ -978,6 +992,11 @@ Safety nets for refactors (roadmap S03–S06, S09):
       `/manage/training` shows the completion report (admin)
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)
+- [ ] ⌘K as a guest finds a colleague by name but not by e-mail; while a new
+      term loads, the previous term's results are not shown
+- [ ] `/people/<id>` of a manager shows *Direct reports*
+- [ ] A user blocked in the Strapi admin loses `/uploads` files within a
+      minute (401) and is sent to sign-in on the next page load
 - [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
       logs `[digest] skipped` (dark mode)
 - [ ] On Postgres the cms log shows `[datetime] process time zone UTC,
