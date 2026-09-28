@@ -792,6 +792,21 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
     );
   });
 
+  it("search CONTACT_SEARCH_ROLES = the cms contact-field roles (FX22)", async () => {
+    // Only these roles may filter users by e-mail: the cms guard
+    // (middlewares/sensitive-query-guard.ts) refuses the clause for every
+    // other role, so a drift makes the web search 400 or hide results.
+    const { PRIVILEGED_ROLE_TYPES } = await cms<{ PRIVILEGED_ROLE_TYPES: ReadonlySet<string> }>(
+      "utils/sanitize-user-contact.ts",
+    );
+    const web = sourceStrings(
+      "apps/web/src/lib/search-action.ts",
+      /CONTACT_SEARCH_ROLES: ReadonlySet<string> = new Set\(\[([^\]]*)\]\)/,
+    );
+    expect(sorted(web)).toEqual(sorted(PRIVILEGED_ROLE_TYPES));
+    expect(web.every((role) => MATRIX_ROLES.includes(role))).toBe(true);
+  });
+
   it("GUEST_ROLES: a real matrix role", () => {
     expect(sorted(webRoles.GUEST_ROLES)).toEqual(["guest"]);
     expect(MATRIX_ROLES).toContain("guest");
