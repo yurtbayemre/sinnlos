@@ -51,7 +51,8 @@ const POLL_REFERENCE = /api::poll\.poll\b|api::poll-vote\.poll-vote\b|\bPOLL_UID
  * "internal, no response".
  */
 const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
-  "api/poll/controllers/poll.ts": "core controller behind global::poll-visibility (canSeePoll)",
+  "api/poll/controllers/poll.ts":
+    "core find/findOne behind global::poll-visibility (canSeePoll); create (admin/editor) pins the author",
   "api/poll/routes/poll.ts": "find/findOne: global::poll-visibility; writes: admin/editor only",
   "api/poll/services/poll.ts": "core service, reached only through the routes above",
   "api/poll-vote/controllers/poll-vote.ts": "vote/results: canSeePoll 404, canVoteOnPoll 403",
