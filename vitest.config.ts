@@ -40,7 +40,15 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["apps/**/*.test.ts", "infra/**/*.test.ts"],
-    exclude: ["**/node_modules/**", "**/dist/**", "**/.next/**", "**/build/**"],
+    // The Strapi-in-process suite runs on its own: pnpm test:integration
+    // (vitest.integration.config.ts).
+    exclude: [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/.next/**",
+      "**/build/**",
+      "**/*.integration.test.ts",
+    ],
     server: { deps: { inline: [/[\\/]next-auth[\\/]/, /[\\/]@auth[\\/]core[\\/]/] } },
   },
 });
