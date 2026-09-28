@@ -21,10 +21,22 @@ function selectors(config: string): string[] {
   return [...config.matchAll(/selector:\s*\n?\s*"((?:[^"\\]|\\.)*)"/g)].map((m) => m[1]!);
 }
 
-describe("web ESLint datetime ban", () => {
-  const cmsDatetime = selectors(CMS.slice(CMS.indexOf("// Datetime contract")));
+/**
+ * The cms's datetime entry alone: from its comment to the `},` that closes
+ * the entry (two-space indent), so later cms lint entries with selectors of
+ * their own do not count.
+ */
+function cmsDatetimeEntry(): string {
+  const start = CMS.indexOf("// Datetime contract");
+  const end = CMS.indexOf("\n  },\n", start);
+  expect(start).toBeGreaterThan(-1);
+  expect(end).toBeGreaterThan(start);
+  return CMS.slice(start, end);
+}
 
+describe("web ESLint datetime ban", () => {
   it("carries every local-Date selector of the cms config", () => {
+    const cmsDatetime = selectors(cmsDatetimeEntry());
     expect(cmsDatetime).toHaveLength(4);
     const web = selectors(WEB);
     for (const selector of cmsDatetime) expect(web, selector).toContain(selector);
