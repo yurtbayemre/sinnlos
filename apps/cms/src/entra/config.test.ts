@@ -228,6 +228,10 @@ describe("parseEntraConfig: enabled", () => {
     const warnings = entraConfigWarnings(parseEntraConfig(enabled({ LOCAL_REGISTRATION: "1" })));
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toMatch(/^\[entra\] LOCAL_REGISTRATION=1/);
+    // A self-registered address is not verified: the warning sends the
+    // admin to check the account before binding it, never to bind it outright.
+    expect(warnings[0]).toContain("check who registered that account before an admin binds it");
+    expect(warnings[0]).not.toContain("until an admin binds");
   });
 });
 

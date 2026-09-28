@@ -18,7 +18,8 @@
  *     parallel; a /me id other than the token's oid is refused (401);
  *   - the identity is (tid, oid): a row with that pair, never an e-mail
  *     match. A new identity whose address a row already uses gets 409
- *     entra_account_exists (an admin binds that row instead). Concurrent
+ *     entra_account_exists (an admin binds that row once its owner is
+ *     confirmed, or deletes it: docs/DEPLOYMENT.md, the 409 procedure). Concurrent
  *     first sign-ins race on up_users_entra_identity_uq: the loser re-reads
  *     and continues with the winner's row, and so does one whose e-mail
  *     check already sees the winner's row (409 only when the identity is
@@ -405,7 +406,8 @@ async function provision(
       return { kind: "refused", status: 503, error: "unavailable" };
     }
     // No automatic linking by e-mail (the nOAuth risk class): an admin binds
-    // the existing row by entering tenant and object id on it.
+    // the existing row by entering tenant and object id on it, after checking
+    // whose it is (a self-registered address is not verified).
     const taken = await users.findOne({ where: { email: { $eqi: email } }, select: ["id"] });
     if (taken) {
       // The row with this address can be this very identity: a concurrent

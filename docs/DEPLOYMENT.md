@@ -247,7 +247,7 @@ bare-metal development put the cms keys into `apps/cms/.env` and the web keys
 | `ENTRA_SYNC_MANAGER` | 0 | cms and web. `1` requests `User.Read.All` (admin consent) and syncs the manager from `/me/manager`; a manager who has not signed in yet is linked on their first sign-in. |
 | `ENTRA_SESSION_TTL` | 12h | cms. Lifetime of an Entra sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`. Local sign-ins keep 7 days. |
 | `AUTH_LOCAL_ENABLED` | 0 | Web and cms. `1` keeps local e-mail + password sign-in next to Microsoft (break-glass admin account). Without Entra, local sign-in is always on. |
-| `LOCAL_REGISTRATION` | 0 | Unchanged: local self-registration only; it does not affect Entra users. Next to Entra it logs one warning at boot. |
+| `LOCAL_REGISTRATION` | 0 | Unchanged: local self-registration only; it does not affect Entra users. Next to Entra it logs one warning at boot: a registered address is not verified, so check such an account before binding it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)). |
 
 The cms logs one line at every boot: `[entra] disabled`, or
 `[entra] enabled tenant=<guid> mode=<on|dry-run> default=<role> groupRules=<n>
@@ -343,20 +343,36 @@ A new Microsoft identity whose e-mail address (case-insensitive) an existing
 account already uses is **not** linked automatically (that would let
 whoever controls the address take the account over). The sign-in page says
 *"An intranet account with your e-mail address already exists"*, and the
-cms logs `result=conflict`. To bind the existing account, an admin:
+cms logs `result=conflict`. Binding hands that account, with everything
+it holds, to the Microsoft user. An admin:
 
-1. looks up the user's **Object ID** in the Entra admin center (*Users* →
+1. **checks whose account it is.** Bind only an account you know belongs
+   to this person: one an admin created for them, or one they have used
+   themselves. The cms never verifies the address of a self-registered
+   account: with `LOCAL_REGISTRATION=1`, now or at any earlier time,
+   anyone could have registered the address first. Do not bind such an
+   account while you cannot confirm its owner; **delete it** instead
+   (**Content Manager → User** → the user → *Delete*). The cms refuses
+   the sessions of a deleted user at their next request, and the next
+   Microsoft sign-in creates a fresh account;
+2. looks up the user's **Object ID** in the Entra admin center (*Users* →
    the user → *Overview*) and the tenant's **Directory (tenant) ID**;
-2. opens the existing user in the Strapi admin (**Content Manager → User**)
+3. opens the existing user in the Strapi admin (**Content Manager → User**)
    and sets **entraTenantId** and **microsoftOid** to those two GUIDs, in
    **lower case**, then saves;
-3. asks the user to sign in with Microsoft again.
+4. asks the user to sign in with Microsoft again.
 
 User id, password, provider, e-mail and role stay as they were; the role
 stays **manual** until an admin sets *Role source* = `entra`, and the
 Entra-owned profile fields are synced from then on (and read-only on
-`/profile`). A row with a `microsoftOid` but no `entraTenantId` (from an old
-release or a self-registration) is never trusted.
+`/profile`). The binding ends nothing that existed before it: the kept
+password still signs in while `AUTH_LOCAL_ENABLED=1`, and sessions issued
+earlier stay valid until they expire (7 days; a password change does not
+end them either). So when anyone else might know the password, set a new
+one on the user in the same Content Manager form (or have the owner change
+it on `/profile` after a local sign-in). A row with a `microsoftOid` but
+no `entraTenantId` (from an old release or a self-registration) is never
+trusted.
 
 ### Sign-in errors
 
@@ -1892,7 +1908,7 @@ these Entra steps:
    are **not** adopted: they carry no tenant id, so the new sign-in answers
    *"already exists"* for their e-mail. List them
    (`SELECT id, username, email FROM up_users WHERE provider = 'microsoft' ORDER BY id;`)
-   and bind each one ([the 409 procedure](#microsoft-entra-id-sign-in):
+   and bind each one ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409):
    tenant id and object id, lower case), or delete the ones nobody needs.
    Their roles stay as they are (*manual*) until an admin hands them to
    Entra.
@@ -6438,7 +6454,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | cms stops at boot with `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: …`, or every web request answers 500 with `[auth] ENTRA_ENABLED=1, but …` in the web log | The named Entra setting is invalid (a tenant `common` or a non-GUID, a short `ENTRA_EXCHANGE_SECRET`, …). Fix it in `infra/.env` (`infra/deploy.sh --check` names the keys) or unset `ENTRA_ENABLED` |
 | `infra/deploy.sh` stops with `ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: …` | The same check before the deploy ([§3.6](#36-deploy)) |
 | Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |
-| Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; bind it ([the 409 procedure](#microsoft-entra-id-sign-in)) |
+| Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; check whose it is, then bind or delete it ([the 409 procedure](#an-e-mail-address-that-already-has-an-account-409)) |
 | Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
 | Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that does not help: re-enable the Email provider in the Strapi admin panel ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on)) |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |

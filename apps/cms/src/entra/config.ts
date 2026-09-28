@@ -252,7 +252,9 @@ export function parseEntraConfig(env: Env = process.env): EntraSettings {
 /**
  * Boot warnings for a valid, enabled configuration. LOCAL_REGISTRATION=1
  * next to Entra is allowed (nothing links accounts by e-mail, so a
- * pre-registered address only produces a 409), but worth one line.
+ * pre-registered address only produces a 409), but worth one line: the
+ * registered address is not verified, so the admin binding of the 409
+ * procedure must first check whose account it is.
  */
 export function entraConfigWarnings(settings: EntraSettings): string[] {
   if (!settings.enabled) return [];
@@ -260,7 +262,8 @@ export function entraConfigWarnings(settings: EntraSettings): string[] {
   if (settings.localRegistration) {
     warnings.push(
       "[entra] LOCAL_REGISTRATION=1 next to Entra sign-in: anyone can register a local account. " +
-        "An Entra user whose e-mail was registered first gets 409 entra_account_exists until an admin binds the account.",
+        "An Entra user whose e-mail was registered first gets 409 entra_account_exists; " +
+        "check who registered that account before an admin binds it (docs/DEPLOYMENT.md, the 409 procedure).",
     );
   }
   return warnings;

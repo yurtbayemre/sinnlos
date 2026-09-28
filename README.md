@@ -303,7 +303,8 @@ With `ENTRA_ENABLED=1`, a Microsoft sign-in works like this (D-ENTRA-01,
 3. A new user is created on the spot (username `entra-<object id>`,
    independent of `LOCAL_REGISTRATION`) with the role of their Entra **app
    role**; a local account with the same e-mail is never taken over (the
-   sign-in answers "account exists" until an admin binds it).
+   sign-in answers "account exists" until an admin who has confirmed the
+   account is theirs binds it).
 4. Display name, job title, phone and office location are synced from Entra
    at every sign-in and are read-only on `/profile`; the department
    (`ENTRA_SYNC_DEPARTMENT=1`) and the manager (`ENTRA_SYNC_MANAGER=1`)
@@ -444,8 +445,9 @@ The users-permissions **User** is extended with `department`, `teams`,
 `directReports`, which the person page shows as *Direct reports*), the
 schema-`private` Entra columns `microsoftOid` and `entraTenantId` (the
 identity of a Microsoft user; an admin sets both, lower-case, to bind an
-existing account), `roleSource` (`entra` | `manual`, empty = manual: who owns
-the role), `entraAppliedRole` and `entraManagerOid` (all read only by the
+existing account once its owner is confirmed), `roleSource` (`entra` |
+`manual`, empty = manual: who owns the role), `entraAppliedRole` and
+`entraManagerOid` (all read only by the
 Entra exchange; like `digestFrequency` also `searchable: false`, so no `_q`
 finds them), and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
