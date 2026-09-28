@@ -41,7 +41,7 @@ import { demo } from "@/lib/demo";
 import { walkAllPages, type WalkResult } from "@/lib/paginate";
 import { getStrapiToken } from "@/lib/session";
 import { StrapiError } from "@/lib/strapi-error";
-import type { PollResults } from "@/lib/types";
+import type { Poll, PollResults } from "@/lib/types";
 
 export type StrapiListResponse<T> = {
   data: T[];
@@ -319,7 +319,7 @@ export const api = {
     // pageSize=20 is a deliberate feed/render cap (issue #26) — counts must
     // come from `meta.pagination.total`, never `data.length`.
     list: () =>
-      strapi<StrapiListResponse<any>>("/api/polls?sort=createdAt:desc&pagination[pageSize]=20"),
+      strapi<StrapiListResponse<Poll>>("/api/polls?sort=createdAt:desc&pagination[pageSize]=20"),
     results: (id: number) => strapi<PollResults>(`/api/polls/${id}/results`),
   },
   documents: {
