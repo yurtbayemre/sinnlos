@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { __flushLiveEventsForTest, emitLiveEvent } from "./live-events";
+import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
+import {
+  __flushLiveEventsForTest,
+  emitLiveEvent,
+  registerLiveEventSubscriber,
+  type LiveEvent,
+} from "./live-events";
 
 const fetchMock = vi.fn();
 
@@ -71,5 +77,202 @@ describe("emitLiveEvent batching", () => {
     await expect(__flushLiveEventsForTest()).resolves.toBeUndefined();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("ECONNREFUSED"));
     warn.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The DB lifecycle subscriber (S08 characterisation)
+// ---------------------------------------------------------------------------
+
+/** What registerLiveEventSubscriber hands to strapi.db.lifecycles.subscribe. */
+type SubscriberHandler = (event: Record<string, unknown>) => unknown;
+type Subscriber = SubscriberHandler | ({ models?: string[] } & Record<string, unknown>);
+
+/**
+ * Dispatches one lifecycle event the way @strapi/database 5.55.1 does
+ * (lifecycles/index.js run): a function subscriber sees every event, an
+ * object subscriber only the actions it defines, on its `models` if set.
+ */
+async function dispatch(
+  subscriber: Subscriber,
+  action: string,
+  uid: string,
+  properties: Record<string, unknown> = {},
+): Promise<void> {
+  const event = { action, model: { uid }, state: {}, ...properties };
+  if (typeof subscriber === "function") {
+    await subscriber(event);
+    return;
+  }
+  if (!(action in subscriber)) return;
+  if (subscriber.models && !subscriber.models.includes(uid)) return;
+  const handler = subscriber[action];
+  if (typeof handler === "function") await (handler as SubscriberHandler)(event);
+}
+
+interface SubscriberHarness {
+  strapi: StrapiStub;
+  fire(action: string, uid: string, properties?: Record<string, unknown>): Promise<void>;
+  /** Flushes the batch and returns every event POSTed so far. */
+  emitted(): Promise<LiveEvent[]>;
+}
+
+function subscriberHarness(tables: StrapiStub["tables"] = {}): SubscriberHarness {
+  const strapi = createStrapiStub({ tables });
+  let subscriber: Subscriber | undefined;
+  // Delegates at call time, so a test can swap strapi.db.query afterwards.
+  registerLiveEventSubscriber({
+    log: strapi.log,
+    db: {
+      query: (uid: string) => strapi.db.query(uid),
+      transaction: strapi.db.transaction,
+      inTransaction: strapi.db.inTransaction,
+      lifecycles: { subscribe: (s: Subscriber) => (subscriber = s) },
+    },
+  });
+  return {
+    strapi,
+    async fire(action, uid, properties) {
+      if (!subscriber) throw new Error("no subscriber registered");
+      await dispatch(subscriber, action, uid, properties);
+    },
+    async emitted() {
+      await __flushLiveEventsForTest();
+      return fetchMock.mock.calls.flatMap(
+        ([, init]) =>
+          (JSON.parse((init as { body: string }).body) as { events: LiveEvent[] }).events,
+      );
+    },
+  };
+}
+
+const COMMENT = "api::comment.comment";
+const REACTION = "api::reaction.reaction";
+const NOTIFICATION = "api::notification.notification";
+const ANNOUNCEMENT = "api::announcement.announcement";
+const ANCHOR = { targetType: "announcement", targetDocumentId: "a0000000000000000000000b" };
+const PUBLISHED = "2026-09-28T08:00:00.000Z";
+
+describe("live subscriber: comments and reactions", () => {
+  it("pings the content channel on create, update and delete", async () => {
+    const h = subscriberHarness();
+    await h.fire("afterCreate", COMMENT, { result: { id: 1, ...ANCHOR } });
+    await h.fire("afterUpdate", COMMENT, { result: { id: 1, ...ANCHOR } });
+    await h.fire("afterDelete", REACTION, { result: null, params: { data: ANCHOR } });
+    expect(await h.emitted()).toEqual([{ kind: "content", ...ANCHOR }]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores other actions and rows without an anchor", async () => {
+    const h = subscriberHarness();
+    for (const action of ["beforeCreate", "afterCreateMany", "afterDeleteMany", "afterFindMany"]) {
+      await h.fire(action, COMMENT, { result: { id: 1, ...ANCHOR } });
+    }
+    await h.fire("afterCreate", REACTION, { result: { id: 2, targetType: "announcement" } });
+    expect(await h.emitted()).toEqual([]);
+  });
+});
+
+describe("live subscriber: notifications", () => {
+  it("pings the recipient of a created notification, in every relation shape", async () => {
+    const h = subscriberHarness();
+    await h.fire("afterCreate", NOTIFICATION, {
+      result: { id: 1 },
+      params: { data: { recipient: 7 } },
+    });
+    await h.fire("afterCreate", NOTIFICATION, {
+      result: { id: 2 },
+      params: { data: { recipient: { set: [{ id: 8 }] } } },
+    });
+    await h.fire("afterCreate", NOTIFICATION, {
+      result: { id: 3 },
+      params: { data: { recipient: { connect: [{ id: 9 }] } } },
+    });
+    await h.fire("afterCreate", NOTIFICATION, { result: { id: 4, recipient: { id: 10 } } });
+    expect(await h.emitted()).toEqual(
+      [7, 8, 9, 10].map((recipientId) => ({ kind: "notification", recipientId })),
+    );
+    expect(h.strapi.calls).toEqual([]);
+  });
+
+  it("re-reads the recipient when the write did not carry it", async () => {
+    const h = subscriberHarness({
+      [NOTIFICATION]: [{ id: 5, title: "x", recipient: { id: 11 } }],
+    });
+    await h.fire("afterCreate", NOTIFICATION, { result: { id: 5 }, params: { data: {} } });
+    await h.fire("afterCreate", NOTIFICATION, { result: { id: 6 }, params: { data: {} } });
+    expect(await h.emitted()).toEqual([{ kind: "notification", recipientId: 11 }]);
+    expect(h.strapi.calls.map((call) => call.method)).toEqual(["findOne", "findOne"]);
+  });
+
+  it("ignores updates and deletes (markRead emits from the controller)", async () => {
+    const h = subscriberHarness();
+    await h.fire("afterUpdate", NOTIFICATION, {
+      result: { id: 1 },
+      params: { data: { recipient: 7 } },
+    });
+    await h.fire("afterDelete", NOTIFICATION, { result: { id: 1, recipient: { id: 7 } } });
+    await h.fire("afterUpdateMany", NOTIFICATION, { result: { count: 3 } });
+    expect(await h.emitted()).toEqual([]);
+  });
+});
+
+describe("live subscriber: announcements", () => {
+  it("pings the list only when a PUBLISHED row is created", async () => {
+    const h = subscriberHarness();
+    await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 1, publishedAt: null } });
+    await h.fire("afterUpdate", ANNOUNCEMENT, { result: { id: 1, publishedAt: PUBLISHED } });
+    await h.fire("afterDelete", ANNOUNCEMENT, { result: { id: 1, publishedAt: PUBLISHED } });
+    expect(await h.emitted()).toEqual([]);
+    await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
+    expect(await h.emitted()).toEqual([{ kind: "announcements" }]);
+  });
+});
+
+describe("live subscriber: filtering and failure", () => {
+  it("unwatched models never ping and never query", async () => {
+    const h = subscriberHarness();
+    for (const uid of ["api::poll.poll", "api::kudos.kudos", "api::wiki-page.wiki-page"]) {
+      await h.fire("afterCreate", uid, {
+        result: { id: 1, publishedAt: PUBLISHED, recipient: { id: 3 }, ...ANCHOR },
+      });
+    }
+    expect(await h.emitted()).toEqual([]);
+    expect(h.strapi.calls).toEqual([]);
+  });
+
+  it("does nothing while live events are off (no lookup either)", async () => {
+    delete process.env.WEB_INTERNAL_URL;
+    const h = subscriberHarness();
+    await h.fire("afterCreate", NOTIFICATION, { result: { id: 5 }, params: { data: {} } });
+    await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
+    expect(await h.emitted()).toEqual([]);
+    expect(h.strapi.calls).toEqual([]);
+  });
+
+  it("never throws into the write: a failing lookup is a warning", async () => {
+    const h = subscriberHarness();
+    h.strapi.db.query = () => {
+      throw new Error("db down");
+    };
+    await expect(
+      h.fire("afterCreate", NOTIFICATION, { result: { id: 5 }, params: { data: {} } }),
+    ).resolves.toBeUndefined();
+    expect(h.strapi.log.warn).toHaveBeenCalledWith("[live-emit] subscriber error: db down");
+  });
+});
+
+describe("live subscriber: pings and the write transaction", () => {
+  it("queues the ping while the write is still open, so a rollback pings anyway", async () => {
+    const h = subscriberHarness();
+    let queuedBeforeCommit: LiveEvent[] = [];
+    await expect(
+      h.strapi.db.transaction(async () => {
+        await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
+        queuedBeforeCommit = await h.emitted();
+        throw new Error("validation failed");
+      }),
+    ).rejects.toThrow("validation failed");
+    expect(queuedBeforeCommit).toEqual([{ kind: "announcements" }]);
   });
 });
