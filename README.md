@@ -186,12 +186,13 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   anniversaries, digest days, the cron times, all-day events and poll
   deadlines. Spell it as the tz database does (`Europe/Berlin`; no UTC
   offset such as `+02:00`). With an unknown value or an offset the cms does
-  not start and the web answers every request with an error (both log why);
-  the web also does when its container's `TZ` (compose sets it from
-  `APP_TIME_ZONE`) is a name Node cannot find. The cms process
-  and its database sessions run in UTC and every instant is stored as
-  `timestamptz`; do not set `TZ` for the containers (compose does). With a
-  local Postgres, add `TZ=UTC` to `apps/cms/.env`; SQLite needs nothing.
+  not start and the web answers every request with an error (both log why).
+  Both app processes and the database sessions run in UTC and every instant
+  is stored as `timestamptz`; the web formats every date in `APP_TIME_ZONE`
+  (next-intl for instants, `plain-date.ts` for calendar dates; ESLint rejects
+  process-zone date APIs in both apps). Do not set `TZ` for the containers
+  (the images and compose do). With a local Postgres, add `TZ=UTC` to
+  `apps/cms/.env`; SQLite needs nothing.
   `DATETIME_LEGACY_ZONE` / `DATETIME_LEGACY_UTC_UNTIL` are only for a
   database written by a cms before this contract: its first boot repairs
   the stored times once
@@ -873,7 +874,11 @@ only this step) → pre-deploy DB backup → tag the running images `:rollback`
 → rebuild + restart (a failed `up` prints the rollback commands) → curl
 smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
 from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
-on top (it runs that cms in `DATETIME_LEGACY_ZONE`). TLS, the security
+on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
+image from before the web datetime port needs
+`infra/docker-compose.web-legacy-tz.yml` (it runs that web in `APP_TIME_ZONE`,
+which its start check requires); the rollback commands `deploy.sh` prints
+include whichever is needed. TLS, the security
 response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must
@@ -1036,6 +1041,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
       APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
       (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
       is an all-day entry
+- [ ] The web log shows `[datetime] web process time zone UTC, APP_TIME_ZONE …`;
+      on `/events` an event that is running today is under *Upcoming* and a
+      multi-day event shows its end day; relative times say "yesterday"
+      for something from late last night
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
 - [ ] `/events` shows each upcoming RSVP event's counts, the names of the
