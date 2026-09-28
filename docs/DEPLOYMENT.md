@@ -727,6 +727,17 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the web correctness fixes (2026-09-28)?** A normal deploy of
+> web and cms together (`infra/deploy.sh`): no env, schema or permission
+> change. The cms part is the stricter `PUT /api/me` (trimmed strings, 400
+> above 255 characters, `locale` `en` or `de` only); the web sends the
+> desired reaction state as `data.reacted`, which a cms without that
+> support ignores (it toggles as before), so the order of web and cms does
+> not matter. After the deploy, play the video of a lesson on production:
+> YouTube refused to play embedded videos without the Referer ("Error
+> 153"), and localhost can hide that effect. This change leaves nothing to
+> undo in the database; for a rollback follow the hint `deploy.sh` prints.
+>
 > **Deploying poll department targeting?** A normal deploy (cms and web
 > together, as `infra/deploy.sh` does). Run the read-only checks of
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
