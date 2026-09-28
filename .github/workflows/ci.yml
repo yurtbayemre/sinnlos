@@ -1,9 +1,17 @@
 name: CI
 
+# Pull requests (any branch) and pushes to main. A branch without a pull
+# request runs CI through "Run workflow" (workflow_dispatch).
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# The jobs only read the repository. The buildx layer cache (type=gha) uses
+# the runner's own cache token, not GITHUB_TOKEN.
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -14,6 +22,7 @@ jobs:
   build:
     name: typecheck · lint · build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +67,7 @@ jobs:
   datetime:
     name: datetime · TZ matrix · Postgres 16
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
