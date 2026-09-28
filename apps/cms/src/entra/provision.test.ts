@@ -64,20 +64,43 @@ interface FakeOptions {
   failProfileUpdate?: Error;
   /** Rejects users.create with this error. */
   failCreate?: Error;
+  /**
+   * What identity lookups (outside a transaction) see instead of the row's
+   * role fields: a concurrent exchange's half-written row.
+   */
+  torn?: Partial<Row>;
+  /** strapi.db.dialect.client (default sqlite). */
+  dialect?: string;
 }
 
 interface FakeHost extends ExchangeHost {
   log: { info: LogSpy; warn: LogSpy; error: LogSpy };
   users: Row[];
-  calls: { create: number; update: { where: Where; data: Record<string, unknown> }[] };
+  calls: {
+    create: number;
+    /** Every users.update, and whether it ran inside a transaction. */
+    update: { where: Where; data: Record<string, unknown>; inTransaction: boolean }[];
+    /** users.create calls inside a transaction. */
+    createInTransaction: number;
+    transactions: number;
+    /** Row ids locked FOR UPDATE. */
+    locks: unknown[];
+  };
 }
 
 /** The slice of Strapi the exchange uses, over an array of user rows. */
 function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
   const users = seed.map((row) => ({ ...row }));
-  const calls: FakeHost["calls"] = { create: 0, update: [] };
+  const calls: FakeHost["calls"] = {
+    create: 0,
+    update: [],
+    createInTransaction: 0,
+    transactions: 0,
+    locks: [],
+  };
   let identityMisses = options.identityMisses ?? 0;
   let nextId = 100;
+  let depth = 0;
 
   const shape = (row: Row, params: Record<string, unknown>): Row => {
     const out: Row = { ...row };
@@ -97,7 +120,9 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
         return null;
       }
       const row = users.find((candidate) => matches(candidate, where));
-      return row ? shape(row, params) : null;
+      if (!row) return null;
+      const torn = "microsoftOid" in where && depth === 0 ? options.torn : undefined;
+      return shape(torn ? { ...row, ...torn } : row, params);
     },
     async findMany(params: Record<string, unknown>) {
       const where = (params.where ?? {}) as Where;
@@ -105,6 +130,7 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
     },
     async create({ data }: { data: Record<string, unknown> }) {
       calls.create += 1;
+      if (depth > 0) calls.createInTransaction += 1;
       if (options.failCreate) throw options.failCreate;
       const clash = users.find(
         (row) => row.entraTenantId === data.entraTenantId && row.microsoftOid === data.microsoftOid,
@@ -115,7 +141,7 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
       return row;
     },
     async update({ where, data }: { where: Where; data: Record<string, unknown> }) {
-      calls.update.push({ where, data });
+      calls.update.push({ where, data, inTransaction: depth > 0 });
       const roleWrite = "role" in data || "roleSource" in data || "entraAppliedRole" in data;
       if (options.failProfileUpdate && !roleWrite) throw options.failProfileUpdate;
       const row = users.find((candidate) => matches(candidate, where));
@@ -143,6 +169,38 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
         if (uid === ROLE_UID) return roleQuery;
         throw new Error(`fake db: no model ${uid}`);
       },
+      async transaction<T>(callback: () => Promise<T>): Promise<T> {
+        calls.transactions += 1;
+        depth += 1;
+        try {
+          return await callback();
+        } finally {
+          depth -= 1;
+        }
+      },
+      queryBuilder(uid: string) {
+        if (uid !== USER_UID) throw new Error(`fake queryBuilder: ${uid}`);
+        let id: unknown;
+        let lock = false;
+        const builder = {
+          select: () => builder,
+          where: (where: Where) => {
+            id = where.id;
+            return builder;
+          },
+          forUpdate: () => {
+            lock = true;
+            return builder;
+          },
+          execute: async () => {
+            if (depth === 0) throw new Error("fake queryBuilder: a lock outside a transaction");
+            if (lock) calls.locks.push(id);
+            return [];
+          },
+        };
+        return builder;
+      },
+      dialect: { client: options.dialect ?? "sqlite" },
     },
     documents(uid: string) {
       if (uid !== DEPARTMENT_UID && uid !== USER_UID) throw new Error(`fake documents: ${uid}`);
@@ -309,5 +367,70 @@ describe("runEntraExchange: concurrent first sign-ins (spec F)", () => {
     expect(host.calls.create).toBe(1);
     expect(host.users).toHaveLength(1);
     expect(auditLine(host)).toMatch(/user=7 .*result=existing/);
+  });
+});
+
+describe("runEntraExchange: role writes are atomic (spec I)", () => {
+  it("creates a new identity inside one transaction (row and role link commit together)", async () => {
+    const host = fakeHost();
+    const outcome = await run(host);
+    expect(outcome.status).toBe(200);
+    expect([host.calls.create, host.calls.createInTransaction]).toEqual([1, 1]);
+    expect(host.users[0]).toMatchObject({
+      role: roleId("member"),
+      roleSource: "entra",
+      entraAppliedRole: "member",
+    });
+  });
+
+  it("decides on a fresh read inside the transaction, not on a half-written row", async () => {
+    // A concurrent promotion committed entraAppliedRole but not yet the role
+    // link when this exchange first read the row. Decided on that read, the
+    // user would have flipped to manual for good.
+    const host = fakeHost(
+      [entraRow({ role: roleId("admin_role"), entraAppliedRole: "admin_role" })],
+      { torn: { role: roleId("member") } },
+    );
+    const outcome = await run(host, { ...PERSON, roles: ["Intranet.Admin"] });
+    expect(outcome.status).toBe(200);
+    expect(auditLine(host)).toMatch(/result=existing role=keep /);
+    expect(host.users[0]).toMatchObject({
+      role: roleId("admin_role"),
+      roleSource: "entra",
+      entraAppliedRole: "admin_role",
+    });
+    expect(host.calls.update.filter((call) => "roleSource" in call.data)).toEqual([]);
+  });
+
+  it("writes a role change inside the transaction, with the row locked on Postgres only", async () => {
+    for (const dialect of ["postgres", "sqlite"]) {
+      const host = fakeHost([entraRow()], { dialect });
+      const outcome = await run(host, { ...PERSON, roles: ["Intranet.Editor"] });
+      expect(outcome.status, dialect).toBe(200);
+      const roleWrites = host.calls.update.filter((call) => "role" in call.data);
+      expect(roleWrites, dialect).toEqual([
+        {
+          where: { id: 7 },
+          data: { role: roleId("editor"), entraAppliedRole: "editor" },
+          inTransaction: true,
+        },
+      ]);
+      expect(host.calls.locks, dialect).toEqual(dialect === "postgres" ? [7] : []);
+      // The profile sync stays outside (no aborted-transaction trap).
+      expect(host.calls.update.filter((call) => !call.inTransaction).length).toBeGreaterThan(0);
+    }
+  });
+
+  it("still flips a real admin change to manual, inside the transaction", async () => {
+    const host = fakeHost([entraRow({ role: roleId("guest") })]);
+    const outcome = await run(host, { ...PERSON, roles: ["Intranet.Admin"] });
+    expect(outcome.status).toBe(200);
+    expect(auditLine(host)).toMatch(/role=manual-override/);
+    expect(host.users[0]).toMatchObject({
+      role: roleId("guest"),
+      roleSource: "manual",
+      entraAppliedRole: null,
+    });
+    expect(host.calls.update.find((call) => "roleSource" in call.data)?.inTransaction).toBe(true);
   });
 });

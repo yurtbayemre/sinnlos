@@ -33,8 +33,15 @@
  * One audit line per exchange (`[entra] user=… oid=… result=…`); no token,
  * no Graph payload and no JWT is ever logged or stored.
  *
- * No enclosing transaction (spec: the identity insert is its own statement,
- * so no Postgres aborted-transaction trap can take the optional writes down).
+ * No enclosing transaction, only two short ones: around the identity insert
+ * (row and role link commit together) and around an existing user's role
+ * decision and write (a fresh, on Postgres locked read of the row). Strapi's
+ * db.query create() and update() commit a row and its relations separately,
+ * so spec F's "the insert is its own statement" does not hold on its own,
+ * and a concurrent exchange could otherwise read a half-written role as an
+ * admin's change. The profile, department and manager writes stay outside
+ * any transaction, so no Postgres aborted-transaction trap can take them, or
+ * the sign-in, down.
  */
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { EntraConfig } from "./config";
@@ -102,9 +109,28 @@ interface Query {
   }): Promise<Row | null>;
 }
 
+/** The query builder slice that locks a user row (Postgres). */
+interface LockQuery {
+  select(columns: string[]): LockQuery;
+  where(where: Record<string, unknown>): LockQuery;
+  forUpdate(): LockQuery;
+  execute(): Promise<unknown>;
+}
+
 /** The slice of the Strapi instance the exchange uses. */
 export interface ExchangeHost {
-  db: { query(uid: string): Query };
+  db: {
+    query(uid: string): Query;
+    /**
+     * One transaction around `callback`: every query inside joins it
+     * (@strapi/database keeps it in AsyncLocalStorage, and a nested
+     * transaction() reuses it), commit on return, rollback on a throw.
+     */
+    transaction<T>(callback: () => Promise<T>): Promise<T>;
+    queryBuilder(uid: string): LockQuery;
+    /** 'postgres' or 'sqlite'. */
+    dialect: { client: string };
+  };
   documents(uid: string): {
     findMany(params: Record<string, unknown>): Promise<{ documentId: string }[]>;
     update(params: { documentId: string; data: Record<string, unknown> }): Promise<unknown>;
@@ -378,36 +404,11 @@ async function provision(
       audit.role = "keep";
       return { kind: "refused", status: 403, error: "blocked" };
     }
-    const decision = decideRoleWrite(
-      {
-        roleType: isRecord(user.role) ? stringOf(user.role.type) : null,
-        roleSource: stringOf(user.roleSource),
-        entraAppliedRole: stringOf(user.entraAppliedRole),
-      },
-      resolution,
-      settings.syncMode,
-    );
-    audit.role = decision.audit;
-    if (decision.kind === "reject") {
-      audit.result = decision.status === 403 ? "denied" : "unavailable";
-      return { kind: "refused", status: decision.status, error: decision.error };
-    }
-    if (decision.kind === "update") {
-      const data: Record<string, unknown> = { ...decision.data };
-      if (decision.data.role !== undefined) {
-        const roleId = await roleIdOf(strapi, decision.data.role);
-        if (roleId === null) {
-          strapi.log.error(
-            `[entra] role ${decision.data.role} does not exist; refusing the sign-in`,
-          );
-          audit.result = "unavailable";
-          return { kind: "refused", status: 503, error: "unavailable" };
-        }
-        data.role = roleId;
-      }
-      // Not optional: a role Entra no longer grants must not survive a
-      // failed write, so this one fails the sign-in (503 via the controller).
-      await users.update({ where: { id: user.id }, data });
+    const step = await writeRole(strapi, user.id, resolution, settings.syncMode);
+    audit.role = step.audit;
+    if (step.kind === "refused") {
+      audit.result = step.status === 403 ? "denied" : "unavailable";
+      return { kind: "refused", status: step.status, error: step.error };
     }
     audit.result = "existing";
   } else {
@@ -476,22 +477,30 @@ async function createIdentity(
   }
   const scalars = me ? buildProfileUpdate(me) : null;
   try {
-    await users.create({
-      data: {
-        username: `entra-${claims.oid}`,
-        email,
-        provider: "microsoft",
-        confirmed: true,
-        blocked: false,
-        role: roleId,
-        roleSource: "entra",
-        entraAppliedRole: decision.role,
-        entraTenantId: claims.tid,
-        microsoftOid: claims.oid,
-        ...(scalars ?? {}),
-        displayName: scalars?.displayName ?? claims.name ?? email,
-      },
-    });
+    // One transaction: db.query create() inserts the row and links its role
+    // in two separate commits (@strapi/database entity-manager create), and a
+    // concurrent exchange reading between them would see roleSource 'entra'
+    // and entraAppliedRole without a role, i.e. an admin's change. The
+    // entity manager's own transaction() joins this one, so both commit
+    // together. The unique-violation handling below runs after the rollback.
+    await strapi.db.transaction(() =>
+      users.create({
+        data: {
+          username: `entra-${claims.oid}`,
+          email,
+          provider: "microsoft",
+          confirmed: true,
+          blocked: false,
+          role: roleId,
+          roleSource: "entra",
+          entraAppliedRole: decision.role,
+          entraTenantId: claims.tid,
+          microsoftOid: claims.oid,
+          ...(scalars ?? {}),
+          displayName: scalars?.displayName ?? claims.name ?? email,
+        },
+      }),
+    );
     return { kind: "row", created: true };
   } catch (err) {
     // A concurrent first sign-in of the same person won the unique index.
@@ -505,6 +514,79 @@ async function createIdentity(
     );
     return { kind: "row", created: false };
   }
+}
+
+type RoleStep =
+  | { kind: "ok"; audit: string }
+  | { kind: "refused"; status: 403 | 503; error: ExchangeError; audit: string };
+
+/**
+ * Spec I for an existing user: the role decision and its write in ONE short
+ * transaction, decided on a fresh read of the row, which is locked on
+ * Postgres (FOR UPDATE; SQLite runs every transaction on its single
+ * connection, one at a time). db.query update() commits a row's columns and
+ * its relations separately, and create() inserts before it links the role:
+ * a decision on a read outside the lock could see a concurrent exchange's
+ * new entraAppliedRole next to the old role (or none) and take that for an
+ * admin's change, flipping the user to manual for good. Not optional: a
+ * role Entra no longer grants must not survive a failed write, so a failure
+ * here fails the sign-in (503 via the controller).
+ */
+async function writeRole(
+  strapi: ExchangeHost,
+  userId: number,
+  resolution: RoleResolution,
+  mode: EntraConfig["syncMode"],
+): Promise<RoleStep> {
+  return strapi.db.transaction(async () => {
+    if (strapi.db.dialect.client === "postgres") {
+      await strapi.db
+        .queryBuilder(USER_UID)
+        .select(["id"])
+        .where({ id: userId })
+        .forUpdate()
+        .execute();
+    }
+    const users = strapi.db.query(USER_UID);
+    const row = await users.findOne({
+      where: { id: userId },
+      select: ["id", "roleSource", "entraAppliedRole"],
+      populate: { role: { select: ["id", "type"] } },
+    });
+    if (!row) throw new Error("the user row vanished during the sign-in");
+    const decision = decideRoleWrite(
+      {
+        roleType: isRecord(row.role) ? stringOf(row.role.type) : null,
+        roleSource: stringOf(row.roleSource),
+        entraAppliedRole: stringOf(row.entraAppliedRole),
+      },
+      resolution,
+      mode,
+    );
+    if (decision.kind === "reject") {
+      return {
+        kind: "refused",
+        status: decision.status,
+        error: decision.error,
+        audit: decision.audit,
+      };
+    }
+    if (decision.kind === "update") {
+      const data: Record<string, unknown> = { ...decision.data };
+      if (decision.data.role !== undefined) {
+        const roleId = await roleIdOf(strapi, decision.data.role);
+        if (roleId === null) {
+          strapi.log.error(
+            `[entra] role ${decision.data.role} does not exist; refusing the sign-in`,
+          );
+          return { kind: "refused", status: 503, error: "unavailable", audit: decision.audit };
+        }
+        data.role = roleId;
+      }
+      await users.update({ where: { id: userId }, data });
+    }
+    return { kind: "ok", audit: decision.audit };
+  });
 }
 
 async function roleIdOf(strapi: ExchangeHost, type: string): Promise<number | null> {

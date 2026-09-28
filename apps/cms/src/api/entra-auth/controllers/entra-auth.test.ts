@@ -52,7 +52,12 @@ function host(): ExchangeHost & { log: { info: LogSpy; warn: LogSpy; error: LogS
     throw new Error("no database access expected in this test");
   };
   return {
-    db: { query: unexpected },
+    db: {
+      query: unexpected,
+      transaction: unexpected,
+      queryBuilder: unexpected,
+      dialect: { client: "sqlite" },
+    },
     documents: unexpected,
     plugin: unexpected,
     log: {

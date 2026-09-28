@@ -442,6 +442,43 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     ).toBe(1);
   });
 
+  it("keeps the role fields consistent for eight concurrent first sign-ins", async () => {
+    // create() links the role after the insert; outside one transaction a
+    // concurrent exchange could read the row without its role and flip the
+    // user to manual.
+    const who = persona(60, { roles: ["Intranet.Editor"], holdMe: lineUp(8) });
+    const results = await Promise.all(Array.from({ length: 8 }, () => signIn(t, who)));
+    expect(results.map((r) => r.status)).toEqual(Array<number>(8).fill(200));
+    const rows = await t.strapi.db.query(USER).findMany({
+      where: { entraTenantId: TENANT, microsoftOid: who.oid },
+      populate: { role: { select: ["type"] } },
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ roleSource: "entra", entraAppliedRole: "editor" });
+    expect(relation(rows[0].role, "type")).toBe("editor");
+  });
+
+  it("keeps a user Entra-managed through concurrent sign-ins during a promotion, then applies a demotion", async () => {
+    const who = persona(61, { roles: ["Intranet.Member"] });
+    const first = await signIn(t, who);
+    expect(first.status).toBe(200);
+    const id = first.body.user?.id;
+    // update() commits entraAppliedRole before the role link: a concurrent
+    // exchange deciding on that half-written row would take it for an
+    // admin's change and make the user manual (keeping admin_role for good).
+    const promoted = { ...who, roles: ["Intranet.Admin"], holdMe: lineUp(6) };
+    const results = await Promise.all(Array.from({ length: 6 }, () => signIn(t, promoted)));
+    expect(results.map((r) => r.status)).toEqual(Array<number>(6).fill(200));
+    let row = await userRow(t, { id });
+    expect(row).toMatchObject({ roleSource: "entra", entraAppliedRole: "admin_role" });
+    expect(relation(row?.role, "type")).toBe("admin_role");
+
+    expect((await signIn(t, who)).status).toBe(200);
+    row = await userRow(t, { id });
+    expect(row).toMatchObject({ roleSource: "entra", entraAppliedRole: "member" });
+    expect(relation(row?.role, "type")).toBe("member");
+  });
+
   it("refuses a new identity whose e-mail a local account uses (409), then signs in as the admin-bound row", async () => {
     const member = t.fixtures.users.member;
     const who = persona(13, { mail: member.email.toUpperCase() });
