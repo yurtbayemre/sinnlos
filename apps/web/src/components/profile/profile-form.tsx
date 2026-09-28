@@ -41,15 +41,31 @@ export const DIGEST_ROLES: ReadonlySet<string> = new Set([
 /** The digest checkboxes (the frequency is the fourth digest field). */
 const DIGEST_OPT_INS = ["digestAnnouncements", "digestMentions", "digestKudos"] as const;
 
+/** The free-text fields; the Microsoft Entra sign-in may own them (managedFields). */
+const TEXT_INPUTS = [
+  { name: "displayName", type: "text" },
+  { name: "jobTitle", type: "text" },
+  { name: "phone", type: "tel" },
+  { name: "officeLocation", type: "text" },
+] as const;
+
 export function ProfileForm({
   initial,
   viewerRole,
+  managedFields = [],
 }: {
   initial: ProfileInitial;
   /** The viewer's role type from GET /api/me; decides whether the digest options show. */
   viewerRole?: string | null;
+  /**
+   * GET /api/me `entraManagedFields` (D-ENTRA-01): the fields the Microsoft
+   * Entra sign-in keeps in sync. They render read-only; a disabled input is
+   * not submitted, and PUT /api/me ignores them for such a user anyway.
+   */
+  managedFields?: readonly string[];
 }) {
   const showDigest = typeof viewerRole === "string" && DIGEST_ROLES.has(viewerRole);
+  const managed = new Set(managedFields);
   const tProfile = useTranslations("profile");
   const tCommon = useTranslations("common");
   const [state, formAction, isPending] = useActionState<ProfileFormState, FormData>(
@@ -63,54 +79,32 @@ export function ProfileForm({
 
   return (
     <form action={formAction} className="space-y-4">
-      <div>
-        <label htmlFor="displayName" className="mb-1 block text-sm font-medium">
-          {tProfile("displayName")}
-        </label>
-        <input
-          id="displayName"
-          name="displayName"
-          type="text"
-          defaultValue={v?.displayName ?? initial.displayName ?? ""}
-          className={inputClass}
-        />
-      </div>
-      <div>
-        <label htmlFor="jobTitle" className="mb-1 block text-sm font-medium">
-          {tProfile("jobTitle")}
-        </label>
-        <input
-          id="jobTitle"
-          name="jobTitle"
-          type="text"
-          defaultValue={v?.jobTitle ?? initial.jobTitle ?? ""}
-          className={inputClass}
-        />
-      </div>
-      <div>
-        <label htmlFor="phone" className="mb-1 block text-sm font-medium">
-          {tProfile("phone")}
-        </label>
-        <input
-          id="phone"
-          name="phone"
-          type="tel"
-          defaultValue={v?.phone ?? initial.phone ?? ""}
-          className={inputClass}
-        />
-      </div>
-      <div>
-        <label htmlFor="officeLocation" className="mb-1 block text-sm font-medium">
-          {tProfile("officeLocation")}
-        </label>
-        <input
-          id="officeLocation"
-          name="officeLocation"
-          type="text"
-          defaultValue={v?.officeLocation ?? initial.officeLocation ?? ""}
-          className={inputClass}
-        />
-      </div>
+      {TEXT_INPUTS.some(({ name }) => managed.has(name)) && (
+        <p id="entra-managed-hint" className="text-xs text-muted-foreground">
+          {tProfile("entraManagedHint")}
+        </p>
+      )}
+      {TEXT_INPUTS.map(({ name, type }) => {
+        const locked = managed.has(name);
+        return (
+          <div key={name}>
+            <label htmlFor={name} className="mb-1 block text-sm font-medium">
+              {tProfile(name)}
+            </label>
+            <input
+              id={name}
+              name={name}
+              type={type}
+              // A locked field always shows the stored value: the echo of a
+              // failed save carries "" for it (a disabled input is not sent).
+              defaultValue={(locked ? initial[name] : (v?.[name] ?? initial[name])) ?? ""}
+              disabled={locked}
+              aria-describedby={locked ? "entra-managed-hint" : undefined}
+              className={`${inputClass} disabled:cursor-not-allowed disabled:opacity-70`}
+            />
+          </div>
+        );
+      })}
       <div>
         <label htmlFor="birthday" className="mb-1 block text-sm font-medium">
           {tProfile("birthday")}

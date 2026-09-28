@@ -21,7 +21,9 @@ import {
  * both revoked and a custom grant ends up present. The users-permissions
  * plugin seeds its own DEFAULT_PERMISSIONS only on the very first boot;
  * those rows are listed with source `plugin_default_first_boot` and are
- * informational. The constants are re-exported by src/index.ts, which the
+ * informational, except the ones REVOKED_PERMISSIONS deletes (the public
+ * forgot/reset-password pair since D-ENTRA-01), which are listed as
+ * revoked instead. The constants are re-exported by src/index.ts, which the
  * generated header names as the source.
  *
  * The SQL is a file snapshot: after changing the permission constants or
@@ -55,8 +57,12 @@ function expectedRows(): Row[] {
   for (const { role, action, sources } of computeDesiredGrants()) {
     rows.set(`${role} ${action}`, { role, action, sources: new Set<string>(sources) });
   }
+  // A first-boot default the code revokes (the public forgot/reset-password
+  // flow, D-ENTRA-01) is deleted by the next boot's sync: not expected.
+  const revoked = new Set(computeRevocations().map(({ role, action }) => `${role} ${action}`));
   for (const { role, action } of pluginDefaultPermissions()) {
     const key = `${role} ${action}`;
+    if (revoked.has(key) && !rows.has(key)) continue;
     const row = rows.get(key) ?? { role, action, sources: new Set<string>() };
     row.sources.add("plugin_default_first_boot");
     rows.set(key, row);

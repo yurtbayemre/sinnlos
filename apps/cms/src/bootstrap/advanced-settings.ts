@@ -4,8 +4,11 @@
  *   - default_role: new local registrations land on `member` (a real
  *     intranet role) instead of the bare `authenticated` fallback.
  *   - allow_register: controlled by LOCAL_REGISTRATION=1 (default off —
- *     admins create accounts in the Strapi panel). It also gates the
- *     first-time creation of OAuth users (users-permissions providers.js).
+ *     admins create accounts in the Strapi panel). It only gates local
+ *     self-registration: Entra users are provisioned by the exchange
+ *     (src/entra/provision.ts) regardless of it (FX14), and Strapi's own
+ *     OAuth providers, which it would gate too, stay disabled
+ *     (bootstrap/auth-providers.ts).
  *   - email_confirmation: off; self-hosted installs rarely have SMTP.
  *   - unique_email: on.
  * These four keys are OVERWRITTEN on every boot (an admin-panel change to

@@ -1,20 +1,15 @@
 /**
  * Strapi plugin configuration.
  *
- * The users-permissions plugin ships with a built-in Microsoft provider
- * (login.microsoftonline.com). We enable it here and provide redirect URIs
- * that point at Strapi's connect callback route. The provider is
- * auto-disabled when MS_CLIENT_ID is unset, so standalone (local
- * username/password) deployments don't advertise a dead provider.
- *
- * Entra ID (Azure AD) app registration:
- *   - Redirect URI: ${PUBLIC_URL}/api/connect/microsoft/callback
- *   - API permissions: openid, profile, email, User.Read, GroupMember.Read.All
- *     GroupMember.Read.All is a delegated Graph permission that REQUIRES
- *     tenant admin consent. Without it (in the scope below AND consented in
- *     the app registration) `/me/memberOf` returns 403, the group-based
- *     role mapping (config/ms-role-map.ts) never matches, and every
- *     Microsoft login falls back to the `member` role.
+ * users-permissions: Strapi JWTs of local sign-ins last 7 days; Entra
+ * sign-ins get ENTRA_SESSION_TTL (12h by default) from the exchange
+ * (src/entra/provision.ts). There is no `providers` block: Strapi's own
+ * Microsoft provider is not used (Entra sign-in runs through Auth.js and
+ * POST /api/auth/entra/exchange, D-ENTRA-01), provider enablement lives in
+ * the plugin store's grant key, and src/bootstrap/auth-providers.ts forces
+ * grant.microsoft off on every boot. Self-registration (LOCAL_REGISTRATION=1)
+ * accepts displayName as its only extra field: microsoftOid, jobTitle and
+ * avatar are not the registrant's to set (FX14).
  */
 type Env = ((key: string, def?: unknown) => any) & {
   int: (key: string, def?: number) => number;
@@ -41,19 +36,8 @@ export default ({ env }: { env: Env }) => ({
         expiresIn: "7d",
       },
       jwtSecret: env("JWT_SECRET"),
-      providers: {
-        microsoft: {
-          enabled: !!env("MS_CLIENT_ID", ""),
-          icon: "microsoft",
-          key: env("MS_CLIENT_ID", ""),
-          secret: env("MS_CLIENT_SECRET", ""),
-          callback: `${env("PUBLIC_URL", "http://localhost:1337")}/api/connect/microsoft/callback`,
-          scope: ["openid", "profile", "email", "User.Read", "GroupMember.Read.All"],
-          tenant: env("MS_TENANT_ID", "common"),
-        },
-      },
       register: {
-        allowedFields: ["microsoftOid", "displayName", "jobTitle", "avatar"],
+        allowedFields: ["displayName"],
       },
     },
   },

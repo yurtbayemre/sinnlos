@@ -20,15 +20,19 @@ This guide walks through every supported deployment method for **Sinnlos Intrane
 After deploying, run the [post-deployment verification](#post-deployment-verification)
 and set up [backup & restore](#backup--restore) for any production environment.
 
-All methods share the same [prerequisites](#prerequisites) and
-[Microsoft Entra ID setup](#microsoft-entra-id-app-registration) — do those first
-(the Entra setup is only needed for Microsoft sign-in, which this release
-cannot offer; see the note there).
+All methods share the same [prerequisites](#prerequisites); the optional
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) is off by default
+(`ENTRA_ENABLED=1` switches it on) and set up the same way for each.
 
 > **Upgrading an existing instance?** Batch 9 lane 4C (live contract and
 > poll documentIds) is one normal deploy of cms and web together once
 > batch 8 runs: see
 > [Upgrading to the live contract and poll documentIds (batch 9, lane 4C)](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c).
+> Batch 9's Entra sign-in (lane 4A) is a
+> normal deploy with `ENTRA_ENABLED` unset: the first boot adds four empty
+> user columns and one index and revokes the anonymous forgot/reset-password
+> endpoints; nothing else changes until Microsoft sign-in is configured
+> ([Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)).
 > On an instance that runs `main`
 > `c219034` (batch 7; the owner instance since 2026-09-28 15:03 CEST),
 > batch 8 is one normal deploy of cms and web together, with read-only
@@ -79,7 +83,8 @@ cannot offer; see the note there).
 > database with department or team drafts needs a one-time migration first),
 > [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
 > (additive database changes; **Microsoft sign-in stops working**, so an
-> instance that uses it must stay on its current release) and
+> instance that uses it must stay on its current release until it moves to
+> the [Entra sign-in](#microsoft-entra-id-sign-in) of batch 9) and
 > [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24)
 > (stricter env contract, one `JWT_SECRET` rotation).
 
@@ -115,79 +120,261 @@ openssl version  # OpenSSL 3.x.x
 
 ---
 
-## Microsoft Entra ID App Registration
+## Microsoft Entra ID sign-in
 
-Sinnlos uses **Microsoft Entra ID (formerly Azure AD)** for SSO. You need one
-app registration and you'll reference it in every deployment method.
+Sinnlos signs users in with e-mail and password (local sign-in) by default.
+**Microsoft Entra ID** (formerly Azure AD) single sign-on is optional and
+**off unless `ENTRA_ENABLED=1`** is set; without it every `MS_*` and
+`ENTRA_*` value is ignored (leftover `MS_*` lines in `infra/.env` only earn
+a note from `infra/deploy.sh`, or a warning when they are a real app
+registration; see [the upgrade notes](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)).
+The owner's instance runs without it.
 
-> **Microsoft sign-in is unavailable in this release.** Strapi's
-> users-permissions 5.51+ (this release runs Strapi 5.55.1) completes
-> `/api/auth/:provider/callback` only from its own OAuth session, so it
-> answers the web's server-side access-token exchange with a 400 and every
-> Microsoft sign-in fails. Until the planned Entra exchange ships, leave every
-> `MS_*` / `AUTH_MICROSOFT_*` value empty and use local e-mail + password
-> sign-in ([README → standalone mode](../README.md#running-without-microsoft-standalone-mode)).
-> With a real app registration configured, the web logs an `[auth]` error at
-> boot and `infra/deploy.sh` refuses to deploy (see
-> [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)).
-> The steps below stay for reference.
+How it works (D-ENTRA-01): Auth.js runs the OIDC code flow against exactly
+one tenant. The web then POSTs the ID token and the Graph access token to the
+cms (`POST /api/auth/entra/exchange`, server to server, authenticated by
+`ENTRA_EXCHANGE_SECRET`). The cms verifies the ID token itself against the
+tenant's signing keys, reads Graph `/me`, finds the user by **tenant id +
+object id** (backed by a unique index, never by e-mail), creates new users on
+the spot with the role of their **app role**, syncs the Entra-owned profile,
+and answers with a Strapi JWT that lasts `ENTRA_SESSION_TTL` (12 hours by
+default). The web session ends with that JWT, and every sign-in re-syncs
+roles and profile. The cms therefore needs outbound HTTPS to
+`login.microsoftonline.com` (signing keys) and `graph.microsoft.com`;
+without it Microsoft sign-ins fail with *entra_unavailable* and local
+sign-in is unaffected.
 
 ### Step 1 — Create the app registration
 
-1. Open [portal.azure.com](https://portal.azure.com) → search **App registrations** → **New registration**.
-2. **Name**: `Sinnlos Intranet` (or any name you prefer).
-3. **Supported account types**: *Accounts in this organizational directory only* (single-tenant).
-   - Choose **single-tenant** for a company intranet so only your org's users can sign in.
-   - Choose **multi-tenant** only if you want any Microsoft work/school account to sign in.
-4. Leave Redirect URI blank for now → **Register**.
+1. Open the [Microsoft Entra admin center](https://entra.microsoft.com) →
+   **App registrations** → **New registration**.
+2. **Name**: `Sinnlos Intranet` (or any name).
+3. **Supported account types**: *Accounts in this organizational directory
+   only* (single tenant). Multi-tenant registrations are not supported: the
+   apps refuse `common`, `organizations` and `consumers`.
+4. **Redirect URI** (platform *Web*):
+   `${WEB_PUBLIC_URL}/api/auth/callback/microsoft-entra-id`, for example
+   `https://intranet.example.com/api/auth/callback/microsoft-entra-id` (and
+   `http://localhost:3000/...` for local development). There is **no** cms
+   redirect URI: Strapi's own Microsoft provider is not used and is forced
+   off at every boot.
+5. **Register**. On the overview page copy the **Directory (tenant) ID**
+   (`MS_TENANT_ID`) and the **Application (client) ID** (`MS_CLIENT_ID`),
+   both GUIDs.
 
-### Step 2 — Copy the IDs
+### Step 2 — Sign-out redirect URI
 
-On the app overview page, copy:
+**Authentication** → platform **Web** → **Add URI**:
+`${WEB_PUBLIC_URL}/sign-in`, a second redirect URI next to the callback of
+step 1 (and `http://localhost:3000/sign-in` for local development). *Sign
+out* ends the intranet session, then sends Microsoft users to
+`https://login.microsoftonline.com/<tenant>/oauth2/v2.0/logout` with
+`post_logout_redirect_uri=${WEB_PUBLIC_URL}/sign-in`, which ends their
+Microsoft session as well. Microsoft only sends them back to that address
+when it is one of the app's registered redirect URIs; without it they stay
+on Microsoft's generic "You signed out" page (the intranet session is gone
+either way).
 
-- **Application (client) ID** → this is `MS_CLIENT_ID`
-- **Directory (tenant) ID** → this is `MS_TENANT_ID`
+Leave the **Front-channel logout URL** empty. It is a different mechanism
+(single sign-out: Microsoft calls it when the user signs out of *another*
+app), which Sinnlos does not implement: signing out elsewhere does not end
+an intranet session, `ENTRA_SESSION_TTL` does.
 
-> **MS_TENANT_ID tip:** Use the actual tenant GUID (not `common` or `organizations`)
-> for a single-tenant company intranet. Using `common` would let any MS account
-> in the world attempt to sign in — Strapi would still reject unauthorized users,
-> but it's cleaner to scope the token issuer to your tenant at the OIDC layer.
+### Step 3 — Client secret
 
-### Step 3 — Create a client secret
-
-**Certificates & secrets** → **New client secret** → set an expiry → **Add**.
-Copy the **Value** immediately (it is shown only once) → this is `MS_CLIENT_SECRET`.
+**Certificates & secrets** → **New client secret** → set an expiry → copy the
+**Value** (shown only once) → `MS_CLIENT_SECRET`. Only the web uses it; the cms
+never needs it. Note the expiry date: an expired secret makes every Microsoft
+sign-in fail at the token step.
 
 ### Step 4 — API permissions
 
-**API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated**:
+**API permissions** → **Add a permission** → **Microsoft Graph** →
+**Delegated**:
 
 | Permission | Why |
 |---|---|
-| `openid` | Basic OIDC login |
-| `profile` | Read display name and photo |
-| `email` | Read email address |
-| `User.Read` | Pull job title and department from Graph `/me` |
-| `GroupMember.Read.All` | Map Entra groups → intranet roles |
+| `openid`, `profile`, `email` | The OIDC sign-in and its ID token |
+| `User.Read` | Graph `/me` (display name, job title, department, office, phone, member or guest) and `/me/checkMemberGroups` for `ENTRA_GROUP_ROLES` |
+| `User.Read.All` | **Only with `ENTRA_SYNC_MANAGER=1`**: `/me/manager` |
 
-Click **Grant admin consent for \<tenant\>** → **Yes**.
+Then **Grant admin consent for \<tenant\>**. `GroupMember.Read.All` (the old
+group-name mapping) is not needed; remove it from existing registrations.
 
-### Step 5 — Redirect URIs
+### Step 5 — App roles and assignment
 
-**Authentication** → **Add a platform** → **Web** — add all URIs you'll use:
+**App roles** → **Create app role**, six times, *Allowed member types*:
+*Users/Groups*:
 
-| Deployment | Next.js (Auth.js) | Strapi |
+| Value | Intranet role |
+|---|---|
+| `Intranet.Admin` | `admin_role` |
+| `Intranet.Editor` | `editor` |
+| `Intranet.DepartmentHead` | `department_head` |
+| `Intranet.TeamLead` | `team_lead` |
+| `Intranet.Member` | `member` |
+| `Intranet.Guest` | `guest` |
+
+Then **Enterprise applications** → the app → **Properties** → *Assignment
+required?* = **Yes** (recommended: without it every member of the tenant can
+sign in, with `ENTRA_DEFAULT_ROLE`) → **Users and groups** → assign the roles
+to users, or to security groups (needs Entra ID P1; nested groups are **not**
+expanded). Never assign public Microsoft 365 groups or Teams to a privileged
+role: their members can add themselves. The roles arrive in the signed ID
+token; a user with several gets the highest. Use `ENTRA_GROUP_ROLES` only for
+nested groups or tenants without P1 (it asks Graph `/me/checkMemberGroups`
+for up to 20 group object ids; group names never count).
+
+### Step 6 — Configuration
+
+Set these in `infra/.env` (compose hands each app the keys it reads); for
+bare-metal development put the cms keys into `apps/cms/.env` and the web keys
+(`AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
+`AUTH_MICROSOFT_ENTRA_ID_SECRET`, `ENTRA_ENABLED`, `ENTRA_EXCHANGE_SECRET`,
+`ENTRA_SYNC_MANAGER`) into `apps/web/.env.local`:
+
+| Name | Default | Effect |
 |---|---|---|
-| Local bare-metal | `http://localhost:3000/api/auth/callback/microsoft-entra-id` | `http://localhost:1337/api/connect/microsoft/callback` |
-| Local Docker | `http://localhost:3000/api/auth/callback/microsoft-entra-id` | `http://localhost/api/connect/microsoft/callback` |
-| VPS / Azure VM | `https://intranet.example.com/api/auth/callback/microsoft-entra-id` | `https://intranet.example.com/api/connect/microsoft/callback` |
+| `ENTRA_ENABLED` | 0 | Master switch for cms and web. With anything but `1`, Entra is fully off and `MS_*` values are ignored. With `1`, the config is validated and an invalid one refuses the start (the cms at boot, the web on its first request) and the deploy (`infra/deploy.sh --check`), naming the variable. |
+| `MS_TENANT_ID` | (unset) | Tenant GUID (required). Web: `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`; the issuer is computed from it. |
+| `MS_CLIENT_ID` | (unset) | Application (client) GUID (required); the cms checks the ID token's audience against it. Web: `AUTH_MICROSOFT_ENTRA_ID_ID`. |
+| `MS_CLIENT_SECRET` | (unset) | Web only (`AUTH_MICROSOFT_ENTRA_ID_SECRET`, required). |
+| `ENTRA_EXCHANGE_SECRET` | (unset) | At least 32 characters, the same for web and cms (`openssl rand -hex 32`); distinct from every other secret. |
+| `ENTRA_SYNC_MODE` | dry-run | cms. `on` applies Entra's roles and departments. `dry-run` logs them, never changes an existing user, and creates new users at most as `member`. |
+| `ENTRA_DEFAULT_ROLE` | member | cms. Role of tenant members with no recognised app role or group: `member`, `guest` or `deny`. Unassigned B2B guests are always refused. |
+| `ENTRA_GROUP_ROLES` | (empty) | cms, optional. `<roleType>:<groupObjectId>,…`, at most 20 groups (see step 5). |
+| `ENTRA_SYNC_DEPARTMENT` | 0 | cms. `1` sets the user's department to the one published department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it, so access does not survive a move. Only admins and editors can rename departments. |
+| `ENTRA_SYNC_MANAGER` | 0 | cms and web. `1` requests `User.Read.All` (admin consent) and syncs the manager from `/me/manager`; a manager who has not signed in yet is linked on their first sign-in. |
+| `ENTRA_SESSION_TTL` | 12h | cms. Lifetime of an Entra sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`. Local sign-ins keep 7 days. |
+| `AUTH_LOCAL_ENABLED` | 0 | Web and cms. `1` keeps local e-mail + password sign-in next to Microsoft (break-glass admin account). Without Entra, local sign-in is always on. |
+| `LOCAL_REGISTRATION` | 0 | Unchanged: local self-registration only; it does not affect Entra users. Next to Entra it logs one warning at boot. |
 
-You can add all of them up front so a single registration covers every environment.
+The cms logs one line at every boot: `[entra] disabled`, or
+`[entra] enabled tenant=<guid> mode=<on|dry-run> default=<role> groupRules=<n>
+syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
 
-The Strapi column (`/api/connect/microsoft/callback`) is not used by the
-current sign-in flow: the web exchanges the Entra access token server-side at
-`/api/auth/microsoft/callback` and never sends the browser through Strapi's
-own OAuth redirect. Registering it is harmless.
+### What Entra owns
+
+- **Identity**: tenant id + object id, stored in the private user fields
+  `entraTenantId` and `microsoftOid`. A new user's username is
+  `entra-<object id>`, the e-mail is `mail` (else the UPN), and `provider` is
+  `microsoft`; such accounts have no password.
+- **Role**, per user (`roleSource`, private): users the sign-in created are
+  `entra` and follow Entra at every sign-in (also downwards). Every account
+  that existed before is `manual`, and so is every account whose role an
+  admin changes in the admin panel (detected at the next sign-in): the
+  sign-in never touches a manual role, and a manual user is not refused for
+  a missing assignment. A Graph failure never changes any role. To hand a
+  user back to Entra, set *Role source* = `entra` and clear *Entra applied
+  role* on the user; the next sign-in applies Entra's role.
+- **Profile**: display name (only overwritten with a non-empty value), job
+  title, phone (first business phone) and office location are copied from
+  Entra at every sign-in (an empty value clears them; a value over 255
+  characters is cut to 255, the column size, e.g. Entra's 256-character
+  display names) and are read-only on
+  `/profile` (`PUT /api/me` ignores them). Accounts the sign-in created also
+  get their e-mail from Entra, unless another account uses that address.
+- **Department** and **manager** only with `ENTRA_SYNC_DEPARTMENT=1` /
+  `ENTRA_SYNC_MANAGER=1` (table above).
+- **Blocking** a user in the admin panel takes effect on their next request
+  (Strapi refuses a blocked user's JWT) and refuses their next sign-in
+  (*entra_blocked*). Offboarding in Entra takes effect at the latest when
+  the session ends (`ENTRA_SESSION_TTL`).
+
+### Staging dry-run, then on
+
+1. Configure a staging instance with `ENTRA_ENABLED=1` and
+   `ENTRA_SYNC_MODE=dry-run` (the default); run `infra/deploy.sh --check`
+   until it prints `Preflight OK`, then deploy. The cms logs
+   `[entra] enabled … mode=dry-run`.
+2. Let a few users sign in: an app-role user, a user in an
+   `ENTRA_GROUP_ROLES` group (if used), a B2B guest without and then with
+   `Intranet.Guest`, a user without a manager, a user whose Entra department
+   matches no published department (with `ENTRA_SYNC_DEPARTMENT=1`).
+3. Review the audit lines, one per sign-in, without tokens:
+
+   ```bash
+   docker logs infra-cms-1 2>&1 | grep '\[entra\]'
+   ```
+
+   `[entra] user=<id|new> oid=<first 8> result=<created|existing|conflict|denied|blocked|unavailable> role=<…> via=<approle:X|group:<guid>|default> mode=dry-run graph=me:ok,groups:…,manager:…`,
+   plus `department=` / `manager=` when those syncs are on. In dry-run,
+   `role=would member->editor` or `role=new->member would new->admin_role`
+   shows what `on` would do; nothing is changed for existing users.
+4. Sign out as a Microsoft user: the browser passes Microsoft's sign-out and
+   lands on `/sign-in`. Staying on Microsoft's "You signed out" page means
+   `${WEB_PUBLIC_URL}/sign-in` is missing from the redirect URIs (step 2).
+5. Switch to `ENTRA_SYNC_MODE=on` and deploy. The next sign-in of each user
+   applies the role (`role=member->editor`); new users get their full role.
+6. Check a manual override: change a user's role in the admin panel, sign
+   them in again: `role=manual-override`, and the role stays.
+7. Then production, the same way (dry-run first if it holds existing users).
+
+### Rolling back after switching Microsoft sign-in on
+
+Every cms boot of this release writes the sign-in providers into Strapi's
+database (the users-permissions *grant* store): e-mail sign-in on exactly
+when local sign-in is (`AUTH_LOCAL_ENABLED=1`, or Entra off), and Strapi's
+own Microsoft provider off with its client id and secret cleared. An older
+cms image does not write them back.
+
+1. **Prefer the env rollback.** Set `ENTRA_ENABLED=0` (Microsoft off, local
+   sign-in on) or `AUTH_LOCAL_ENABLED=1` (both) in `infra/.env` and deploy
+   again (`infra/deploy.sh`). The cms of this release restores e-mail
+   sign-in at its next boot.
+2. **An image rollback to a cms from before batch 9** after running with
+   `ENTRA_ENABLED=1` and `AUTH_LOCAL_ENABLED` unset keeps e-mail sign-in
+   **off** (`This provider is disabled`): nobody can sign in, and the old
+   5.49 Microsoft flow is off as well, its client id and secret cleared.
+   Re-enable them in the Strapi admin panel (its admin accounts are not
+   affected): **Settings → Users & Permissions plugin → Providers →
+   Email** → *Enable* on → *Save*. For the old Microsoft flow of a 5.49
+   image also open **Microsoft** there, turn it on and enter its client id
+   and secret again.
+3. For the first rollout (the employer migration) keep a break-glass local
+   account: `AUTH_LOCAL_ENABLED=1` and one local admin user whose password
+   is known, until Microsoft sign-in has worked for a while. Then the
+   provider store keeps e-mail sign-in on, and step 2 is only needed for
+   the old Microsoft flow.
+
+### An e-mail address that already has an account (409)
+
+A new Microsoft identity whose e-mail address (case-insensitive) an existing
+account already uses is **not** linked automatically (that would let
+whoever controls the address take the account over). The sign-in page says
+*"An intranet account with your e-mail address already exists"*, and the
+cms logs `result=conflict`. To bind the existing account, an admin:
+
+1. looks up the user's **Object ID** in the Entra admin center (*Users* →
+   the user → *Overview*) and the tenant's **Directory (tenant) ID**;
+2. opens the existing user in the Strapi admin (**Content Manager → User**)
+   and sets **entraTenantId** and **microsoftOid** to those two GUIDs, in
+   **lower case**, then saves;
+3. asks the user to sign in with Microsoft again.
+
+User id, password, provider, e-mail and role stay as they were; the role
+stays **manual** until an admin sets *Role source* = `entra`, and the
+Entra-owned profile fields are synced from then on (and read-only on
+`/profile`). A row with a `microsoftOid` but no `entraTenantId` (from an old
+release or a self-registration) is never trusted.
+
+### Sign-in errors
+
+| The sign-in page says | Cause |
+|---|---|
+| *belongs to another organisation* (`entra_tenant`) | An account of another tenant; Auth.js' own issuer check usually refuses it earlier |
+| *already exists* (`entra_account_exists`) | See the 409 procedure above |
+| *has no access* (`entra_not_assigned`) | No app role and `ENTRA_DEFAULT_ROLE=deny`, or a B2B guest without `Intranet.Guest` |
+| *is blocked* (`entra_blocked`) | The account is blocked in the admin panel |
+| *could not be verified* (`entra_invalid`) | The ID token was refused (clock skew over 5 minutes, another app's token) or Graph `/me` is another user |
+| *unavailable right now* (`entra_unavailable`) | The cms is unreachable or cannot reach Microsoft, the two `ENTRA_EXCHANGE_SECRET` values differ (the web logs it), `ENTRA_ENABLED` is not `1` for the cms, or a new user's role could not be decided because the Graph group check failed |
+
+A failed database write shows in the cms log as `[entra] exchange failed (<code>)`
+(the sign-in answered *unavailable*) or `[entra] user=<id>: <step> failed (<code>)`
+(an optional profile, department or manager write; the sign-in went on).
+`<code>` is a Postgres SQLSTATE such as `22001` (value too long), a SQLite or
+Node error code, or an error class name; the SQL and the profile values are
+never logged.
 
 ---
 
@@ -229,11 +416,13 @@ ENCRYPTION_KEY=               # openssl rand -base64 32
 
 PUBLIC_URL=http://localhost:1337
 
-# Microsoft sign-in cannot complete on this release (Strapi 5.51+, see the
-# Entra section above): leave these empty and use local sign-in.
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
-MS_TENANT_ID=<your-tenant-id>
+# Optional Microsoft sign-in (off unless ENTRA_ENABLED=1; see "Microsoft
+# Entra ID sign-in" above). The cms never needs the client secret.
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32, same as the web>
+# ENTRA_SYNC_MODE=dry-run
 
 # Optional locally — authenticates the live-event pings the cms sends to
 # Next.js (POST /api/live/emit, see "Live-event ingest" below). Must match
@@ -301,11 +490,14 @@ AUTH_SECRET=<openssl rand -base64 32>
 # the server-side Strapi token reader derives the name the same way.
 AUTH_URL=http://localhost:3000
 AUTH_TRUST_HOST=true
-# Leave the three Entra values empty on this release (Microsoft sign-in
-# cannot complete on Strapi 5.51+); local sign-in then switches on by itself.
-AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-id>
-AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
-AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<your-tenant-id>/v2.0
+# Optional Microsoft sign-in (off unless ENTRA_ENABLED=1; local sign-in is
+# on by itself without it). The issuer is computed from the tenant GUID.
+# ENTRA_ENABLED=1
+# AUTH_MICROSOFT_ENTRA_ID_TENANT_ID=<your-tenant-guid>
+# AUTH_MICROSOFT_ENTRA_ID_ID=<your-client-guid>
+# AUTH_MICROSOFT_ENTRA_ID_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<same value as the cms>
+# AUTH_LOCAL_ENABLED=1   # keep e-mail + password next to Microsoft
 
 # Must match REVALIDATE_SECRET in apps/cms/.env (or leave both unset
 # to disable the live-event pings locally).
@@ -358,9 +550,9 @@ pnpm dev
 1. Open **http://localhost:3000** → you are redirected to `/sign-in`.
 2. Sign in with e-mail + password. Create the account first in the Strapi
    admin (**Content Manager → User**: e-mail, password, confirmed = true), or
-   boot once with `SEED_DEMO_DATA=1` for demo users. Microsoft sign-in cannot
-   complete on this release (see the
-   [Entra section](#microsoft-entra-id-app-registration)).
+   boot once with `SEED_DEMO_DATA=1` for demo users. With `ENTRA_ENABLED=1`
+   (both apps), *Sign in with Microsoft* works too (see
+   [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)).
 3. You land on the dashboard with your name in the top-right corner.
 
 ### 1.6 Demo mode (no Microsoft account needed)
@@ -416,11 +608,13 @@ REVALIDATE_SECRET=<openssl rand -hex 32>
 # Without it every uploaded file answers 404 (fail closed).
 INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>
 
-# Microsoft sign-in: leave empty on this release (it cannot complete on
-# Strapi 5.51+); both apps then offer local sign-in.
-MS_TENANT_ID=<your-tenant-id>
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
+# Optional Microsoft sign-in: off unless ENTRA_ENABLED=1 (both apps then
+# offer local sign-in only). See "Microsoft Entra ID sign-in" above.
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# MS_CLIENT_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32>
 
 # --- Optional features (safe to leave unset) --------------------------
 # First Strapi super-admin on an empty database (else: register at /admin).
@@ -598,11 +792,15 @@ AUTH_SECRET=<secret>
 REVALIDATE_SECRET=<secret>
 INTERNAL_UPLOAD_TOKEN=<secret>
 
-# Microsoft sign-in: leave empty on this release. It cannot complete on
-# Strapi 5.51+, and infra/deploy.sh refuses a real app registration here.
-MS_TENANT_ID=<your-tenant-id>
-MS_CLIENT_ID=<your-client-id>
-MS_CLIENT_SECRET=<your-client-secret>
+# Optional Microsoft sign-in: off unless ENTRA_ENABLED=1, then validated by
+# infra/deploy.sh --check and at start ("Microsoft Entra ID sign-in" above;
+# start with ENTRA_SYNC_MODE=dry-run).
+# ENTRA_ENABLED=1
+# MS_TENANT_ID=<your-tenant-guid>
+# MS_CLIENT_ID=<your-client-guid>
+# MS_CLIENT_SECRET=<your-client-secret>
+# ENTRA_EXCHANGE_SECRET=<openssl rand -hex 32>
+# ENTRA_SYNC_MODE=dry-run
 
 # --- Optional features (safe to leave unset) --------------------------
 # Business time zone (IANA): "today", expiry, birthdays, digests, cron
@@ -636,12 +834,13 @@ DIGESTS_DISABLED=0
 > Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a
 > template placeholder (`<…>`, `change-me…`, `toBeModified…`).
 
-Update Entra ID redirect URIs (only once Microsoft sign-in is usable again;
-the second one is not used by the current flow):
+With Microsoft sign-in, register both production redirect URIs (platform
+*Web*) in the app registration (no cms redirect URI, no front-channel logout
+URL):
 
 ```
 https://intranet.example.com/api/auth/callback/microsoft-entra-id
-https://intranet.example.com/api/connect/microsoft/callback
+https://intranet.example.com/sign-in   (where sign-out returns to)
 ```
 
 ### 3.6 Deploy
@@ -723,12 +922,17 @@ The preflight fails (naming keys, never values) when:
   2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
   be deployed equals the one the running cms uses. A fresh install (no
   running web/cms) skips this check;
-- Microsoft sign-in is configured: `MS_CLIENT_ID` and `MS_CLIENT_SECRET` are
-  both set and the client id is a GUID (a real app registration). Strapi
-  5.51+ rejects the web's access-token exchange, so every Microsoft sign-in
-  would fail, and with `AUTH_LOCAL_ENABLED=0` nobody could sign in. A
-  non-GUID client id (template text) only warns. The rule goes away with the
-  Entra exchange;
+- `ENTRA_ENABLED=1` and an Entra setting the cms or the web would refuse to
+  start with: `MS_TENANT_ID` or `MS_CLIENT_ID` not a GUID (`common` and
+  domain names included), `MS_CLIENT_SECRET` empty, `ENTRA_EXCHANGE_SECRET`
+  under 32 characters or a template placeholder, `ENTRA_SYNC_MODE` not
+  `on`/`dry-run`, `ENTRA_DEFAULT_ROLE` not `member`/`guest`/`deny`,
+  `ENTRA_SESSION_TTL` not `<n>m|h|d` up to `7d`, or `ENTRA_GROUP_ROLES`
+  malformed or over 20 groups. It prints the key names, never the values.
+  Without `ENTRA_ENABLED=1`, leftover `MS_CLIENT_ID`/`MS_CLIENT_SECRET` lines
+  only earn a note (they are ignored), or a warning when they are a real app
+  registration (a GUID client id plus a secret: Microsoft sign-in of the
+  running release, if any, is off after the deploy); neither stops it;
 - the running database still holds datetime columns in the pre-contract
   format (`timestamp without time zone` outside Strapi's bookkeeping tables)
   and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
@@ -737,9 +941,10 @@ The preflight fails (naming keys, never values) when:
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
-`send-digests.ts`), and the Microsoft rule to the web's `MICROSOFT_ENABLED`
-and the compose mapping, so the preflight cannot silently drift from what
-the apps do at boot.
+`send-digests.ts`), and the Entra rules to the cms's `parseEntraConfig`
+(`apps/cms/src/entra/config.ts`), the web's `auth-config.ts` and the compose
+mapping, so the preflight cannot silently drift from what the apps do at
+boot.
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -762,6 +967,18 @@ systemctl start docker
 > run `infra/live-smoke.sh` after, then have a member vote and compare. A
 > rollback takes back both images, never the cms alone. See
 > [Upgrading to the live contract and poll documentIds (batch 9, lane 4C)](#upgrading-to-the-live-contract-and-poll-documentids-batch-9-lane-4c).
+>
+> **Deploying the Entra sign-in (batch 9, lane 4A)?** A normal deploy of cms
+> and web together with `ENTRA_ENABLED` unset: the first boot adds four
+> empty, private user columns and one unique index, forces Strapi's own
+> Microsoft provider off and revokes the anonymous forgot/reset-password
+> endpoints (`[bootstrap] revoked 2 obsolete permission(s)`); the cms logs
+> `[entra] disabled`. Leftover `MS_*` lines in `infra/.env` become inert
+> (`deploy.sh` notes them, or warns when they are a real app registration
+> whose Microsoft sign-in goes off; optional cleanup). Run
+> `infra/diagnostics/prod-perm-diff.sql` afterwards. A rollback needs no
+> database step. Switching Microsoft sign-in on is a separate, later step.
+> See [Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a).
 >
 > **Deploying batch 8 (2026-09-28)?** The cms bootstrap split, the web
 > datetime port and one fix to poll results (the two notes below; the
@@ -922,7 +1139,8 @@ systemctl start docker
 > **Upgrading from before 2026-09-25 (Strapi 5.55.1)?** Follow
 > [Upgrading to the Strapi 5.55.1 release (2026-09-25)](#upgrading-to-the-strapi-5551-release-2026-09-25)
 > as well: take the pre-deploy backup, and do not deploy an instance that
-> signs users in with Microsoft. Coming from a release before 2026-09-24,
+> signs users in with the old Microsoft flow before it can move to the
+> [Entra sign-in](#microsoft-entra-id-sign-in) (batch 9). Coming from a release before 2026-09-24,
 > also follow [Upgrading from a release before 2026-09-24](#upgrading-from-a-release-before-2026-09-24):
 > that deploy needs env changes and one `JWT_SECRET` rotation.
 >
@@ -1062,6 +1280,140 @@ admin list were unaffected. The guard already answers the page list empty
 from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
 comment list from one page fewer plus an announcement, where the previous
 release still served the rows.
+
+#### Upgrading to the Entra sign-in (batch 9, lane 4A)
+
+Lane 4A (D-ENTRA-01) adds the optional Microsoft
+Entra ID sign-in ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in))
+and replaces the old, non-working Microsoft path. **With `ENTRA_ENABLED`
+unset** (the owner instance) it is a normal deploy of cms and web together;
+the first boot changes, by itself:
+
+- **Schema:** four nullable, private columns on `up_users`
+  (`entra_tenant_id`, `role_source`, `entra_applied_role`,
+  `entra_manager_oid`) and the unique index `up_users_entra_identity_uq`
+  on (`entra_tenant_id`, `microsoft_oid`). Every existing row keeps NULL
+  there: its role is *manual* and never touched by a sign-in.
+- **Permissions:** the anonymous `auth.forgotPassword` and
+  `auth.resetPassword` (users-permissions' first-boot defaults of the
+  `public` role) are revoked; the web has no UI for either, and they would
+  hand an Entra-only account a local password. The boot logs
+  `[bootstrap] revoked 2 obsolete permission(s)` once (fewer if an admin
+  removed them before), and the drift line now checks 119 managed actions
+  (117 before).
+- **Providers:** Strapi's own Microsoft provider (`/api/connect/microsoft`)
+  is forced off with its key and secret cleared (it was off); e-mail
+  sign-in stays on. The cms logs `[entra] disabled`.
+- **Self-registration** (`LOCAL_REGISTRATION=1` only) accepts `displayName`
+  as its only extra field; the web sends nothing else.
+- **Web:** unchanged for local users. The sign-in page explains Microsoft
+  error codes, `/api/me` answers an empty `entraManagedFields`.
+- **Env:** compose passes the new `ENTRA_*` keys with their defaults; the
+  cms no longer gets `MS_CLIENT_SECRET` and the web no longer gets
+  `AUTH_MICROSOFT_ENTRA_ID_ISSUER`. `MS_*` lines left in `infra/.env` are
+  ignored; `infra/deploy.sh` notes them (`NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET
+  are set …`), and they can be deleted. When they are a real app
+  registration (a GUID `MS_CLIENT_ID` plus `MS_CLIENT_SECRET`) it warns
+  instead (`WARNING: infra/.env holds a Microsoft app registration …`):
+  if Microsoft sign-in works with the running release, it is **off** after
+  this deploy until `ENTRA_ENABLED=1`, see the last paragraph of this
+  section. Both only inform (exit code 0). The old refusal ("Microsoft
+  sign-in is configured …") is gone.
+
+**Before the deploy**
+
+1. `infra/deploy.sh --check` prints `Preflight OK` (a note about leftover
+   `MS_*` lines is fine; the *app registration* warning is fine only if
+   nobody signs in with Microsoft on this instance, otherwise follow the
+   last paragraph of this section first).
+2. Optional, read-only: accounts from the old Microsoft flow, which the new
+   sign-in would not adopt (expected 0 and 0 on the owner instance):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT count(*) FILTER (WHERE provider = 'microsoft') AS microsoft_rows,
+          count(*) FILTER (WHERE microsoft_oid IS NOT NULL) AS rows_with_oid
+     FROM up_users;
+   SQL
+   ```
+
+**Deploy:** `infra/deploy.sh` (cms and web together; it runs live-smoke).
+
+**After the deploy**
+
+1. The cms log (`docker logs infra-cms-1 2>&1 | grep -E '\[entra\]|\[bootstrap\]'`):
+   `[entra] disabled`, `[bootstrap] revoked 2 obsolete permission(s)` (first
+   boot only) and `[bootstrap] permission drift: none (report-only check of
+   119 managed actions)`.
+2. The columns and the index (4 rows, then 1):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT column_name FROM information_schema.columns
+    WHERE table_name = 'up_users'
+      AND column_name IN ('entra_tenant_id', 'role_source', 'entra_applied_role', 'entra_manager_oid');
+   SELECT indexname FROM pg_indexes WHERE indexname = 'up_users_entra_identity_uq';
+   SQL
+   ```
+
+3. The exchange is off and the anonymous reset flow closed, asked from
+   inside the stack (the edge sends `/api/auth/*` to the web): `404` and
+   `403`:
+
+   ```bash
+   docker exec infra-web-1 node -e "fetch('http://cms:1337/api/auth/entra/exchange',{method:'POST'}).then(r=>console.log(r.status))"
+   docker exec infra-web-1 node -e "fetch('http://cms:1337/api/auth/forgot-password',{method:'POST',headers:{'content-type':'application/json'},body:'{\"email\":\"nobody@example.com\"}'}).then(r=>console.log(r.status))"
+   ```
+
+4. `infra/diagnostics/prod-perm-diff.sql` (§3.8 intro): nothing new; the
+   two public rows are gone and no longer expected.
+5. Sign in locally, change a password on `/profile`, sign out; no Microsoft
+   button on `/sign-in`.
+
+**Rollback:** follow the hint `deploy.sh` prints (both images together). The
+previous cms ignores the four columns (they stay, NULL) and the index
+(harmless; Strapi never drops an index it did not create); its permission
+sync does not grant the public forgot/reset-password actions again, so they
+stay revoked. Nothing needs undoing in the database. This holds with
+`ENTRA_ENABLED` unset; after Microsoft sign-in was switched on, see
+[Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on).
+
+**Switching Microsoft sign-in on** (later, and only after the owner's Entra
+questions are answered) is a separate change of `infra/.env`: follow
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in): the tenant setup,
+`ENTRA_SYNC_MODE=dry-run` on staging, review the `[entra]` audit lines, then
+`on`.
+
+**An instance that still signs users in with the old Microsoft flow** (the
+Strapi 5.49 image from before PR #39) must leave it now; it cannot stay on
+that image. `infra/deploy.sh` warns about it (`WARNING: infra/.env holds a
+Microsoft app registration …`) while `ENTRA_ENABLED` is unset: deployed like
+that, Microsoft sign-in is off and only local accounts can sign in, which
+the old flow's accounts are not (no password). Work through the upgrade
+notes it does not run yet (newest first, see the top of this guide), with
+these Entra steps:
+
+1. Tenant: add the app roles, set *Assignment required*, assign the roles,
+   and remove the `…/api/connect/microsoft/callback` redirect URI and the
+   `GroupMember.Read.All` permission
+   ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), steps 1-5).
+2. `infra/.env`: `ENTRA_ENABLED=1`, the `MS_*` keys (tenant GUID, not
+   `common`), `ENTRA_EXCHANGE_SECRET`, `ENTRA_SYNC_MODE=dry-run`, and
+   `AUTH_LOCAL_ENABLED=1` if a local admin account must keep working.
+3. Accounts the old flow created (`provider = microsoft`, e-mail = the UPN)
+   are **not** adopted: they carry no tenant id, so the new sign-in answers
+   *"already exists"* for their e-mail. List them
+   (`SELECT id, username, email FROM up_users WHERE provider = 'microsoft' ORDER BY id;`)
+   and bind each one ([the 409 procedure](#microsoft-entra-id-sign-in):
+   tenant id and object id, lower case), or delete the ones nobody needs.
+   Their roles stay as they are (*manual*) until an admin hands them to
+   Entra.
+4. Deploy, review the `[entra]` lines in dry-run, then switch to `on`.
+5. Rollback: prefer switching back in `infra/.env` (`ENTRA_ENABLED=0` or
+   `AUTH_LOCAL_ENABLED=1`) over an image rollback. Going back to the 5.49
+   image needs the providers re-enabled in the Strapi admin panel first,
+   the Microsoft one with its client id and secret
+   ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on)).
 
 #### Deploying batch 8 (2026-09-28)
 
@@ -4513,6 +4865,12 @@ with the ones below; both releases then go out in one deploy.
 > sign-in is unaffected. An instance whose users sign in with Microsoft must
 > stay on its current (Strapi 5.49) images until the planned Entra exchange
 > ships. `infra/deploy.sh` enforces this (step 2).
+>
+> *Since batch 9 (lane 4A):* the Entra exchange has shipped, and this
+> refusal is gone; `infra/deploy.sh` now checks the Entra settings instead.
+> Such an instance moves straight to the new sign-in:
+> [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in) and
+> [Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a).
 
 **Before the deploy**
 
@@ -4629,7 +4987,8 @@ No data is rewritten, and there are no new tables or indexes.
 **What users and editors notice** (worth a short release note):
 
 - Nobody is signed out.
-- Microsoft sign-in is unavailable until the Entra exchange ships (see above).
+- Microsoft sign-in is unavailable until the Entra exchange ships (see above;
+  it shipped with batch 9).
 - A `%` or `_` in a search term now matches literally (Strapi escapes them in
   `$contains`/`$containsi` filters, which the web search uses).
 - A text field longer than 255 characters is rejected with a 400 validation
@@ -5195,7 +5554,8 @@ On the VM:
 git clone https://github.com/yurtbayemre/sinnlos.git /opt/sinnlos
 cd /opt/sinnlos/infra
 cp .env.example .env
-# Edit .env with your domain and secrets; leave MS_* empty on this release (see §3.5)
+# Edit .env with your domain and secrets; Microsoft sign-in is optional
+# (ENTRA_ENABLED=1, see "Microsoft Entra ID sign-in")
 docker compose up -d --build
 ```
 
@@ -5403,9 +5763,7 @@ az containerapp create \
       "ENCRYPTION_KEY=<secret>" \
       "REVALIDATE_SECRET=<openssl rand -hex 32>" \
       "INTERNAL_UPLOAD_TOKEN=<openssl rand -hex 32>" \
-      "MS_CLIENT_ID=<client-id>" \
-      "MS_CLIENT_SECRET=<client-secret>" \
-      "MS_TENANT_ID=<tenant-id>" \
+      "ENTRA_ENABLED=0" \
       "LIVE_EVENTS_DISABLED=0" \
       "APP_TIME_ZONE=Europe/Berlin" \
       "SMTP_HOST=<mail.example.com>" \
@@ -5495,9 +5853,7 @@ az containerapp create \
       "AUTH_SECRET=<secret>" \
       "REVALIDATE_SECRET=<same-value-as-cms>" \
       "INTERNAL_UPLOAD_TOKEN=<same-value-as-cms>" \
-      "AUTH_MICROSOFT_ENTRA_ID_ID=<client-id>" \
-      "AUTH_MICROSOFT_ENTRA_ID_SECRET=<client-secret>" \
-      "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
+      "ENTRA_ENABLED=0" \
       "LIVE_EVENTS_DISABLED=0" \
       "APP_TIME_ZONE=Europe/Berlin" \
       "TZ=UTC"
@@ -5531,15 +5887,19 @@ az containerapp update \
   --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN" "PUBLIC_WEB_URL=https://$WEB_FQDN"
 ```
 
-**Add the Entra redirect URI.** Go to your App registration →
-**Authentication** → **Redirect URIs** and add:
-
-```
-https://<web-fqdn>/api/auth/callback/microsoft-entra-id
-```
-
-Where `<web-fqdn>` is the value `$WEB_FQDN` printed above. Without this,
-Microsoft sign-in will fail with `AADSTS50011`.
+**Optional: Microsoft sign-in.** Both apps above run with `ENTRA_ENABLED=0`.
+To switch it on, follow [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in):
+register `https://<web-fqdn>/api/auth/callback/microsoft-entra-id` and
+`https://<web-fqdn>/sign-in` (where sign-out returns to) as Web redirect URIs
+(`<web-fqdn>` is `$WEB_FQDN` above; without the first Microsoft answers
+`AADSTS50011`), then set on the cms `ENTRA_ENABLED=1`,
+`MS_TENANT_ID`, `MS_CLIENT_ID`, `ENTRA_EXCHANGE_SECRET` and
+`ENTRA_SYNC_MODE=dry-run`, and on the web `ENTRA_ENABLED=1`,
+`AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
+`AUTH_MICROSOFT_ENTRA_ID_SECRET` and the same `ENTRA_EXCHANGE_SECRET`
+(`az containerapp update --set-env-vars …`, secrets as Container Apps
+secrets). The cms needs outbound HTTPS to `login.microsoftonline.com` and
+`graph.microsoft.com`.
 
 The web app gets a public FQDN (`*.azurecontainerapps.io`). Add a custom domain
 via **Container Apps → Custom domains** and Azure will provision a managed TLS
@@ -5642,29 +6002,22 @@ docker exec infra-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tAc "S
 
 ### 6.3 Microsoft sign-in flow
 
-> **Skip this on the current release.** Microsoft sign-in cannot complete on
-> Strapi 5.51+ (see the [Entra section](#microsoft-entra-id-app-registration));
-> check local sign-in instead: `<URL>/` redirects to `/sign-in`, and e-mail +
-> password lands on the dashboard with your display name in the top-right.
-> The steps below apply once the Entra exchange ships.
+Without `ENTRA_ENABLED=1` there is no Microsoft button: check local sign-in
+instead (`<URL>/` redirects to `/sign-in`, e-mail + password lands on the
+dashboard with your display name in the top-right), and that
+`POST <cms>/api/auth/entra/exchange` answers 404. With Microsoft sign-in
+configured ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)):
 
 1. Open `<URL>/` → you should be redirected to `/sign-in`.
-2. Click **Sign in with Microsoft** → complete the OIDC flow.
-3. You should land on the dashboard with your display name in the top-right.
-4. In Strapi admin → **Content Manager → User** — confirm your account was
-   auto-created (e-mail = your lowercased user principal name, role
-   `member`).
-
-> **Current state (verified 2026-09-25):** on Strapi 5.55.1 step 2 already
-> fails: the cms answers the web's token exchange with a 400, and the web
-> shows the Auth.js error page. On Strapi 5.49 (the previous release) the
-> sign-in completed, but the Graph enrichment and group → role mapping did
-> not run (the users-permissions extension is inert, see the README note
-> under step 4), so `microsoftOid` and `displayName` stayed empty and roles
-> were assigned in the Strapi admin. A new user's first Microsoft sign-in
-> there also needs `LOCAL_REGISTRATION=1` on the cms, and the Microsoft
-> provider must be enabled in the Strapi admin (**Settings → Providers**);
-> the `MS_*` env alone does not enable it.
+2. Click **Sign in with Microsoft** → complete the Microsoft sign-in.
+3. You land on the dashboard with your display name in the top-right.
+4. The cms log has one `[entra] user=<id> … result=created role=new->…` line
+   (`docker logs infra-cms-1 2>&1 | grep '\[entra\]'`), without any token.
+5. In the Strapi admin → **Content Manager → User**, your account exists:
+   username `entra-<object id>`, provider `microsoft`, the role of your app
+   role (at most `member` in dry-run), *Role source* `entra`.
+6. `/profile` shows name, job title, phone and office as read-only; *Sign
+   out* goes through Microsoft and returns to `/sign-in`.
 
 ### 6.4 Role enforcement (optional)
 
@@ -5745,11 +6098,14 @@ curl -s <URL>/api/polls/<poll-id>/results \
 |---|---|
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
-| MS login `AADSTS50011` | Redirect URI missing in Entra app registration — go back to Step 5 and add it |
-| Every MS login fails; the web log shows `Could not exchange Microsoft access token…` and the cms answered `400 OAuth authentication requires a completed provider session` | Expected on Strapi 5.51+ (this release): Microsoft sign-in is unavailable until the Entra exchange ships. Clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` for local sign-in (Microsoft-created accounts also need a password and `provider = local`, [upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)), or roll back ([Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)) |
-| `infra/deploy.sh` stops with `ERROR: Microsoft sign-in is configured …` | The preflight's Microsoft rule ([§3.6](#36-deploy)): keep the running release, or clear `MS_CLIENT_ID`/`MS_CLIENT_SECRET` in `infra/.env` and convert Microsoft-created accounts ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
+| MS login `AADSTS50011` | Redirect URI missing in the Entra app registration — add `<WEB_PUBLIC_URL>/api/auth/callback/microsoft-entra-id` ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 1) |
+| Microsoft sign-out ends on Microsoft's "You signed out" page instead of `/sign-in` | `<WEB_PUBLIC_URL>/sign-in` is not a registered Web redirect URI of the app ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 2); the intranet session is already gone |
+| cms stops at boot with `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: …`, or every web request answers 500 with `[auth] ENTRA_ENABLED=1, but …` in the web log | The named Entra setting is invalid (a tenant `common` or a non-GUID, a short `ENTRA_EXCHANGE_SECRET`, …). Fix it in `infra/.env` (`infra/deploy.sh --check` names the keys) or unset `ENTRA_ENABLED` |
+| `infra/deploy.sh` stops with `ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: …` | The same check before the deploy ([§3.6](#36-deploy)) |
+| Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |
+| Microsoft sign-in lands on `/sign-in` with *"already exists"* | A local account uses the e-mail address; bind it ([the 409 procedure](#microsoft-entra-id-sign-in)) |
 | Local sign-in answers "Invalid email or password" for an account created through Microsoft sign-in, although an admin set its password | The account still has `provider = microsoft`; Strapi's local login only matches `provider = local`. Change **Provider** to `local` in **Content Manager → User** ([upgrade step 2](#upgrading-to-the-strapi-5551-release-2026-09-25)) |
-| MS login succeeds but lands on a Strapi error page (Strapi 5.49 images only) | Microsoft provider not enabled in the Strapi admin (**Settings → Providers**; the `MS_*` env does not enable it on Strapi 5.49), or a new user's first sign-in while `LOCAL_REGISTRATION` is not `1` on the cms |
+| Local sign-in answers "This provider is disabled" | `ENTRA_ENABLED=1` without `AUTH_LOCAL_ENABLED=1`: the cms refuses password sign-ins (Entra only). Set `AUTH_LOCAL_ENABLED=1` for a break-glass account. After an image rollback to a cms from before batch 9 that does not help: re-enable the Email provider in the Strapi admin panel ([Rolling back after switching Microsoft sign-in on](#rolling-back-after-switching-microsoft-sign-in-on)) |
 | Dashboard shows "0 departments" even after creating one | Strapi permissions — confirm `public` role has `find` access to departments, OR you're signed in |
 | cms restarts in a loop, log says `[env-guard] placeholder value in … Refusing to start in production` | A secret in the env still holds a template placeholder — generate real values (`infra/deploy.sh --check` names the keys) |
 | cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
@@ -6221,13 +6577,10 @@ automatically.
 **Microsoft sign-in returns "AADSTS50011: The redirect URI does not match"**
 
 The redirect URI in your Entra app registration must match exactly (including
-trailing slash) what Auth.js sends:
-- `<WEB_URL>/api/auth/callback/microsoft-entra-id`
-- `<CMS_URL>/api/connect/microsoft/callback` (Strapi's own OAuth redirect;
-  not used by the current flow, harmless to keep)
-
-On this release Microsoft sign-in fails later anyway, at the token exchange
-(see the [Entra section](#microsoft-entra-id-app-registration)).
+trailing slash) what Auth.js sends: `<WEB_URL>/api/auth/callback/microsoft-entra-id`
+(`AUTH_URL`, compose: `WEB_PUBLIC_URL`). An old
+`<CMS_URL>/api/connect/microsoft/callback` entry is unused and can go (see
+[Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in)).
 
 **Strapi admin blank / 502 after first deploy**
 

@@ -70,9 +70,26 @@ services:
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?DATABASE_PASSWORD must be set}
       PUBLIC_URL: ${CMS_PUBLIC_URL}
       CORS_ORIGIN: ${WEB_PUBLIC_URL}
-      MS_CLIENT_ID: ${MS_CLIENT_ID}
-      MS_CLIENT_SECRET: ${MS_CLIENT_SECRET}
-      MS_TENANT_ID: ${MS_TENANT_ID}
+      # Microsoft Entra ID sign-in (D-ENTRA-01, docs/DEPLOYMENT.md "Microsoft
+      # Entra ID sign-in"): off unless ENTRA_ENABLED=1, and then validated at
+      # boot (an invalid value refuses the start; deploy.sh --check says which).
+      # The cms verifies the ID token itself (tenant + client id) and never
+      # needs the client secret. Without ENTRA_ENABLED=1 every MS_*/ENTRA_*
+      # value is ignored.
+      ENTRA_ENABLED: ${ENTRA_ENABLED:-0}
+      MS_TENANT_ID: ${MS_TENANT_ID:-}
+      MS_CLIENT_ID: ${MS_CLIENT_ID:-}
+      ENTRA_EXCHANGE_SECRET: ${ENTRA_EXCHANGE_SECRET:-}
+      ENTRA_SYNC_MODE: ${ENTRA_SYNC_MODE:-dry-run}
+      ENTRA_DEFAULT_ROLE: ${ENTRA_DEFAULT_ROLE:-member}
+      ENTRA_GROUP_ROLES: ${ENTRA_GROUP_ROLES:-}
+      ENTRA_SYNC_DEPARTMENT: ${ENTRA_SYNC_DEPARTMENT:-0}
+      ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
+      ENTRA_SESSION_TTL: ${ENTRA_SESSION_TTL:-12h}
+      # Local e-mail + password sign-in next to Entra (break-glass). The cms
+      # mirrors it into users-permissions' grant.email; with Entra off local
+      # sign-in is always on.
+      AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
       LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
       SEED_DEMO_DATA: ${SEED_DEMO_DATA:-0}
       # Admin seed — auto-create first Strapi admin on fresh database.
@@ -160,13 +177,21 @@ services:
       AUTH_TRUST_HOST: "true"
       # Default UI language (en or de); users can override in their profile
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
-      # Standalone mode: enable local credentials alongside Microsoft
+      # Local credentials next to Microsoft (break-glass); with ENTRA_ENABLED
+      # not 1, local sign-in is always on.
       AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}
       # Standalone mode: enable the self-registration form (default off)
       LOCAL_REGISTRATION: ${LOCAL_REGISTRATION:-0}
-      AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}
-      AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}
-      AUTH_MICROSOFT_ENTRA_ID_ISSUER: https://login.microsoftonline.com/${MS_TENANT_ID}/v2.0
+      # Microsoft Entra ID sign-in (D-ENTRA-01): off unless ENTRA_ENABLED=1,
+      # then validated at start. The issuer is computed from the tenant GUID
+      # (AUTH_MICROSOFT_ENTRA_ID_ISSUER is gone); ENTRA_EXCHANGE_SECRET must
+      # equal the cms's; ENTRA_SYNC_MANAGER=1 adds the User.Read.All scope.
+      ENTRA_ENABLED: ${ENTRA_ENABLED:-0}
+      AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: ${MS_TENANT_ID:-}
+      AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID:-}
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET:-}
+      ENTRA_EXCHANGE_SECRET: ${ENTRA_EXCHANGE_SECRET:-}
+      ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}
       # Shared secret for the /api/live/emit live-event ingest called from
       # the CMS (its only use since D-DC01; the name is historical).
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}

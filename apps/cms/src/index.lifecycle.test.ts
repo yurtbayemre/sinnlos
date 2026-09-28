@@ -8,7 +8,7 @@ import lifecycle from "./index";
  * (index.register.test.ts wires the real register() hooks).
  */
 
-const { calls, step, failing } = vi.hoisted(() => {
+const { calls, step, syncStep, failing } = vi.hoisted(() => {
   const calls: string[] = [];
   const failing = new Set<string>();
   const step =
@@ -17,7 +17,14 @@ const { calls, step, failing } = vi.hoisted(() => {
       calls.push(name);
       if (failing.has(name)) throw new Error(`${name} failed`);
     };
-  return { calls, step, failing };
+  /** A step the lifecycle calls without awaiting (a synchronous function). */
+  const syncStep =
+    (name: string) =>
+    (): void => {
+      calls.push(name);
+      if (failing.has(name)) throw new Error(`${name} failed`);
+    };
+  return { calls, step, syncStep, failing };
 });
 
 vi.mock("./utils/org-dp-guard", () => ({ assertNoOrgDrafts: step("assertNoOrgDrafts") }));
@@ -46,6 +53,14 @@ vi.mock("./bootstrap/sync-permissions", () => ({
 vi.mock("./bootstrap/advanced-settings", () => ({
   syncAdvancedSettings: step("syncAdvancedSettings"),
 }));
+vi.mock("./bootstrap/auth-providers", () => ({
+  checkEntraConfig: syncStep("checkEntraConfig"),
+  syncAuthProviders: step("syncAuthProviders"),
+  reportEntraStatus: syncStep("reportEntraStatus"),
+}));
+vi.mock("./bootstrap/entra-identity-index", () => ({
+  ensureEntraIdentityIndex: step("ensureEntraIdentityIndex"),
+}));
 vi.mock("./utils/poll-audience-backfill", () => ({
   backfillPollAudience: step("backfillPollAudience"),
 }));
@@ -69,6 +84,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "prepareDatetimeContract",
       "registerTimestamptzGuard",
       "enforceSecretGuard",
+      "checkEntraConfig",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
       "registerPollAudienceGuard",
@@ -83,6 +99,9 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "ensureRoles",
       "syncRolePermissions",
       "syncAdvancedSettings",
+      "ensureEntraIdentityIndex",
+      "syncAuthProviders",
+      "reportEntraStatus",
       "backfillPollAudience",
       "seedAdminUser",
       "reportDigestConfig",
@@ -96,6 +115,19 @@ describe("src/index.ts lifecycle order (B01)", () => {
     await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("syncRolePermissions failed");
     expect(calls[calls.length - 1]).toBe("syncRolePermissions");
     expect(calls).not.toContain("syncAdvancedSettings");
+  });
+
+  it("an invalid Entra configuration stops register() before the content-API hooks", async () => {
+    failing.add("checkEntraConfig");
+    await expect(lifecycle.register({ strapi })).rejects.toThrow("checkEntraConfig failed");
+    expect(calls[calls.length - 1]).toBe("checkEntraConfig");
+    expect(calls).not.toContain("registerUserContactSanitizer");
+  });
+
+  it("a failing identity index (Entra on) stops bootstrap() before the provider sync", async () => {
+    failing.add("ensureEntraIdentityIndex");
+    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("ensureEntraIdentityIndex failed");
+    expect(calls).not.toContain("syncAuthProviders");
   });
 
   it("a failing org draft guard stops register() before anything else", async () => {

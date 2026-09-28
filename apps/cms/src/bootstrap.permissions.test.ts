@@ -199,13 +199,20 @@ describe("role vocabulary of the permission constants (S02)", () => {
     expect(Object.keys(PERMISSION_MATRIX).filter((role) => !allowed.has(role))).toEqual([]);
   });
 
-  it("custom grants and revocations only name roles of the matrix", () => {
+  it("custom grants and revocations only name roles of the matrix, plus public revocations", () => {
     const matrixRoles = new Set(Object.keys(PERMISSION_MATRIX));
     const named = [
       ...Object.values(CUSTOM_ACTION_GRANTS).flatMap((grant) => (grant === "*" ? [] : grant)),
       ...Object.keys(REVOKED_PERMISSIONS),
     ];
-    expect(named.filter((role) => !matrixRoles.has(role))).toEqual([]);
+    // `public` (anonymous callers) is never granted anything by the code; it
+    // only loses the users-permissions defaults REVOKED_PERMISSIONS lists
+    // (D-ENTRA-01: the forgot/reset-password flow).
+    expect(named.filter((role) => !matrixRoles.has(role))).toEqual(["public"]);
+    expect(REVOKED_PERMISSIONS.public).toEqual([
+      "plugin::users-permissions.auth.forgotPassword",
+      "plugin::users-permissions.auth.resetPassword",
+    ]);
   });
 
   it("PRIVILEGED_ROLE_TYPES equals ROLES minus guest", () => {
