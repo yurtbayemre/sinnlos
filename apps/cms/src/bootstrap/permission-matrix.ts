@@ -272,13 +272,12 @@ export const PERMISSION_MATRIX: Record<
   },
   /**
    * `authenticated` is the users-permissions built-in role for a signed-in
-   * user without an intranet role. New local and OAuth accounts do NOT land
-   * here: users-permissions creates them with the advanced setting
-   * `default_role`, which the bootstrap pins to `member`
-   * (bootstrap/advanced-settings.ts). A user holds `authenticated` only when
-   * an admin assigned it by hand or the account predates that setting; no
-   * code re-maps roles at sign-in today (the Microsoft callback extension is
-   * inert, and the Entra sign-in of decision 01 replaces it). Such a user
+   * user without an intranet role. New accounts do NOT land here: local
+   * registrations get the advanced setting `default_role`, which the
+   * bootstrap pins to `member` (bootstrap/advanced-settings.ts), and the
+   * Entra exchange creates its users with an intranet role
+   * (src/entra/roles.ts). A user holds `authenticated` only when an admin
+   * assigned it by hand or the account predates that setting. Such a user
    * still gets baseline reads, so the dashboard works instead of 403ing on
    * every `/api/*` call, but none of the staff-only grants (celebrations,
    * uploads, ads) — and the contact fields stay hidden (not a STAFF_ROLE).
