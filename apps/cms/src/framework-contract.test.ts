@@ -35,6 +35,10 @@ import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
  * (src/test/sqlite-engine.test.helper.ts), like
  * utils/poll-audience-backfill-sqlite.test.ts.
  *
+ * Every test that opens an engine in its body has a 30 s budget: the first
+ * one loads @strapi/database and the SQLite driver cold, which can pass the
+ * 5 s test default under a full parallel run (§5.40).
+ *
  * RUN THIS BEFORE EVERY @strapi/* BUMP. The version pin below fails first on
  * purpose: bump it only after every other block here passes against the new
  * packages, or after the code that relies on a changed behaviour (and its
@@ -580,7 +584,7 @@ describe("@strapi/core: turning draft & publish off deletes drafts in beforeSync
     expect(statements.map((event) => event.sql)).toEqual([
       "delete from `notes` where (`published_at` is null)",
     ]);
-  });
+  }, 30_000);
 
   it("is wired to beforeSync, which Strapi calls before db.schema.sync()", () => {
     const registries = readFileSync(join(coreDir(), "dist/providers/registries.js"), "utf8");
@@ -699,14 +703,14 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     expect(rows[0].publishedAt).toBeNull();
     expect(rows[1]).toMatchObject({ id: published.id, title: "T", body: "B" });
     expect(rows[0].id).not.toBe(rows[1].id);
-  });
+  }, 30_000);
 
   it("a status taken from the client params reads the draft rows", async () => {
     const { docs } = await documents();
     const created = await docs.create({ data: { title: "Draft only" } });
     expect(await docs.findMany({ status: "published" })).toEqual([]);
     expect((await docs.findMany({ status: "draft" })).map((row) => row.id)).toEqual([created.id]);
-  });
+  }, 30_000);
 
   it("updating a published-only document writes a draft from the payload ONLY (FX38 root cause)", async () => {
     const { docs, db } = await documents();
@@ -730,7 +734,7 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
       { title: "T", body: "B" },
       { title: "T2", body: null },
     ]);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
@@ -813,13 +817,13 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
     } finally {
       await pg.destroy();
     }
-  });
+  }, 30_000);
 
   it("re-syncs an unchanged model without touching the column", async () => {
     engine = await openSqliteEngine([thingModel()], { schema: "sync" });
     const db = await engine.reopen([thingModel()]);
     expect(await db.schema.sync()).toBe("UNCHANGED");
-  });
+  }, 30_000);
 
   it("a `column` override on a datetime attribute forces .alter(), which recreates the column naive", async () => {
     engine = await openSqliteEngine([thingModel()], { schema: "sync" });
@@ -866,7 +870,7 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
     } finally {
       await pg.destroy();
     }
-  });
+  }, 30_000);
 
   it("runs pending user migrations BEFORE the schema diff of the same boot", async () => {
     engine = await openSqliteEngine([thingModel()], { schema: "sync" });
@@ -890,7 +894,7 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
     // The migration saw the table WITHOUT the new column; the sync added it after.
     expect(await db.connection.raw("select seen from probe_order")).toEqual([{ seen: "missing" }]);
     expect(await db.connection.schema.hasColumn("things", "added_later")).toBe(true);
-  });
+  }, 30_000);
 });
 
 describe("@strapi/database query engine: a joined select adds DISTINCT without the id (the poll results bug)", () => {
@@ -955,7 +959,7 @@ describe("@strapi/database query engine: a joined select adds DISTINCT without t
         .findMany({ select: ["optionIndex"], where: { optionIndex: { $gte: 0 } } }),
     ).toHaveLength(4);
     expect(await db.query(VOTE).count({ where: { poll: { id: 1 } } })).toBe(3);
-  });
+  }, 30_000);
 });
 
 // ---------------------------------------------------------------------------
