@@ -946,8 +946,10 @@ guard, the removed generic routes, `?status=draft` on every draft & publish
 type, relation side channels, contact-field filters, guest polls, RSVP
 privacy, publish cycles (comment/reaction anchors, votes, RSVPs,
 notifications after the commit) and concurrent votes, RSVPs and reactions.
-The run is hermetic: loopback only, temp files and schemas removed, and the
-process pinned to `TZ=UTC` like the container. A run on both engines takes
+The run needs no network: `fetch` to anything but loopback is refused while a
+cms runs, no `.env` file is read (the harness points Strapi's `ENV_PATH` at a
+file that does not exist), temp files and schemas are removed, and the
+process is pinned to `TZ=UTC` like the container. A run on both engines takes
 about one and a half minutes on a fast local machine and about 2.5-4 minutes
 (plus about 45 s install) on a 4-vCPU CI-sized machine, most of it the
 per-suite boots. New suites use

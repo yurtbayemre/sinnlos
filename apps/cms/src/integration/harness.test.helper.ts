@@ -48,10 +48,16 @@
  *   - the env of a boot is a fixed base (random secrets, no SMTP, no
  *     WEB_INTERNAL_URL, no Microsoft, no STRAPI_ADMIN_*, telemetry off) plus
  *     `env`; stop() restores process.env;
+ *   - no dotenv file refills that base: @strapi/core loads dotenv from
+ *     ENV_PATH (default `<cwd>/.env`) once per process, at the first
+ *     Strapi require, which boot() does after setting the env; ENV_PATH
+ *     points at a file that does not exist then;
  *   - `fetch` to anything but loopback is refused while a Strapi runs, and
  *     stop() fails when the cms tried one. `outbound` serves such requests
  *     from the test instead (a stubbed IdP or Graph for the Entra
- *     provisioning suite, batch 4);
+ *     provisioning suite, batch 4). Only `fetch` is guarded, not
+ *     http/https/net; the base env leaves SMTP, WEB_INTERNAL_URL and
+ *     Microsoft unset;
  *   - the crons are off (`server.cron.enabled`), so no 03:30 janitor or
  *     07:30 digest fires mid-run;
  *   - temp files and schemas are removed by stop() and the global teardown.
@@ -603,7 +609,17 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
   const database = options.database ?? (await createTestDatabase(engine));
   const ownsDatabase = options.database === undefined;
 
-  const restoreEnv = applyEnv({ ...hermeticEnv(), ...database.env, ...options.env });
+  // @strapi/core's configuration module calls dotenv.config({ path:
+  // process.env.ENV_PATH }) once, at load: on the first boot of this fork,
+  // in the require below. A shell ENV_PATH or a <cwd>/.env would refill the
+  // keys the base deletes (dotenv sets only unset keys), so ENV_PATH points
+  // at a file that does not exist (dotenv skips it silently).
+  const restoreEnv = applyEnv({
+    ...hermeticEnv(),
+    ENV_PATH: join(root, "no-such.env"),
+    ...database.env,
+    ...options.env,
+  });
   const realFetch = globalThis.fetch;
   const network = guardNetwork(realFetch, options.outbound);
   const listeners = snapshotProcessListeners();
