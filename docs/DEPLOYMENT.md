@@ -31,11 +31,15 @@ cannot offer; see the note there).
 > [3.8 Updates](#38-updates)): the test safety nets, the web correctness
 > fixes and the
 > [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28).
+> The
+> [user data and search hardening (batch 7, lane 2C)](#upgrading-to-the-user-data-and-search-hardening-batch-7-lane-2c)
+> on top of it is one more normal deploy (checks after it only).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 6 (the first
-> note of [3.8 Updates](#38-updates)),
+> what the instance does not run yet, newest first: the user data and
+> search hardening, batch 6 (the batch 6 note at the top of
+> [3.8 Updates](#38-updates)),
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
