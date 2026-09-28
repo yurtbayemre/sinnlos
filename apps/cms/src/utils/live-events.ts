@@ -146,8 +146,16 @@ export interface LiveLifecycleEvent {
   params?: { data?: Record<string, unknown> | null } | null;
 }
 
-/** A function subscriber (every event of every model). */
-export type LiveSubscriber = (event: LiveLifecycleEvent) => Promise<void>;
+/** One lifecycle action handler of the subscriber. */
+export type LiveHandler = (event: LiveLifecycleEvent) => Promise<void>;
+
+/** The object-form subscriber: only `models`, only these actions (LF06). */
+export type LiveSubscriber = {
+  models: string[];
+  afterCreate: LiveHandler;
+  afterUpdate: LiveHandler;
+  afterDelete: LiveHandler;
+};
 
 /** The slice of the Strapi instance the subscriber needs. */
 export interface LiveSubscriberStrapi {
@@ -174,7 +182,7 @@ export function registerLiveEventSubscriber(strapi: LiveSubscriberStrapi): void 
         strapi.log?.warn?.(`[live-emit] post-commit ping failed: ${(err as Error)?.message}`),
     );
 
-  strapi.db.lifecycles.subscribe(async (event: LiveLifecycleEvent) => {
+  const handle: LiveHandler = async (event) => {
     try {
       const uid = event?.model?.uid;
       if (!uid || !WATCHED_UIDS.has(uid)) return;
@@ -226,6 +234,16 @@ export function registerLiveEventSubscriber(strapi: LiveSubscriberStrapi): void 
     } catch (err) {
       strapi.log?.warn?.(`[live-emit] subscriber error: ${(err as Error).message}`);
     }
+  };
+
+  // Object form (LF06): @strapi/database calls it only for these models and
+  // actions, instead of for every action of every model as a function
+  // subscriber (lifecycles/index.js run).
+  strapi.db.lifecycles.subscribe({
+    models: [...WATCHED_UIDS],
+    afterCreate: handle,
+    afterUpdate: handle,
+    afterDelete: handle,
   });
   strapi.log?.info?.("[live-emit] DB lifecycle subscriber registered");
 }

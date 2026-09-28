@@ -262,6 +262,34 @@ describe("live subscriber: filtering and failure", () => {
   });
 });
 
+describe("live subscriber registration (LF06)", () => {
+  it("subscribes in object form: the watched models, three actions", () => {
+    const strapi = createStrapiStub();
+    let registered: Subscriber | undefined;
+    registerLiveEventSubscriber({
+      log: strapi.log,
+      db: {
+        query: (uid: string) => strapi.db.query(uid),
+        lifecycles: { subscribe: (s: Subscriber) => (registered = s) },
+      },
+    });
+    if (typeof registered !== "object") throw new Error("expected an object subscriber");
+    expect(Object.keys(registered).sort()).toEqual([
+      "afterCreate",
+      "afterDelete",
+      "afterUpdate",
+      "models",
+    ]);
+    expect([...(registered.models ?? [])].sort()).toEqual([
+      ANNOUNCEMENT,
+      COMMENT,
+      NOTIFICATION,
+      REACTION,
+    ]);
+    expect(strapi.log.info).toHaveBeenCalledWith("[live-emit] DB lifecycle subscriber registered");
+  });
+});
+
 describe("live subscriber: pings go out after the commit (LF02)", () => {
   it("nothing is queued while the write is open; the commit queues the ping", async () => {
     const h = subscriberHarness();
