@@ -53,6 +53,11 @@ describe.each(testEngines())("integration harness on %s", (engine) => {
     const dotenvFile = join(inject("sinnlosCmsBuild"), `shell-${engine}-${process.pid}.env`);
     writeFileSync(dotenvFile, "SMTP_HOST=smtp.dotenv.invalid\n");
     vi.stubEnv("ENV_PATH", dotenvFile);
+    // A shell that exports the Entra switch (an invalid config: no tenant,
+    // no secret) must neither refuse the boot nor turn local sign-in off.
+    vi.stubEnv("ENTRA_ENABLED", "1");
+    vi.stubEnv("ENTRA_EXCHANGE_SECRET", "short");
+    vi.stubEnv("AUTH_LOCAL_ENABLED", "0");
     onTestFinished(() => {
       vi.unstubAllEnvs();
       rmSync(dotenvFile, { force: true });
@@ -76,6 +81,12 @@ describe.each(testEngines())("integration harness on %s", (engine) => {
     });
     expect(process.env.DATABASE_CLIENT).toBe(engine === "sqlite" ? "sqlite" : "postgres");
     expect(process.env.SMTP_HOST).toBeUndefined();
+    expect(process.env.ENTRA_ENABLED).toBeUndefined();
+    expect(process.env.ENTRA_EXCHANGE_SECRET).toBeUndefined();
+    expect(process.env.AUTH_LOCAL_ENABLED).toBeUndefined();
+    // Entra off: the exchange answers like a missing route.
+    const exchange = await t.api(null, "/api/auth/entra/exchange", { json: {} });
+    expect(exchange.status).toBe(404);
     await expect(createTestStrapi({ engine })).rejects.toThrow("already running");
 
     const served = await fetch("https://graph.stub.invalid/v1.0/me");
@@ -88,6 +99,7 @@ describe.each(testEngines())("integration harness on %s", (engine) => {
     );
     expect(process.env.DATABASE_CLIENT).toBe(envBefore);
     expect(process.env.ENV_PATH).toBe(dotenvFile);
+    expect(process.env.ENTRA_ENABLED).toBe("1");
     expect(globalThis.fetch).toBe(fetchBefore);
     expect(process.eventNames().map((event) => [event, process.listenerCount(event)])).toEqual(
       listenersBefore,
