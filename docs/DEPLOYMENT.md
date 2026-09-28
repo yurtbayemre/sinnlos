@@ -899,7 +899,9 @@ The preflight fails (naming keys, never values) when:
   `ENTRA_SESSION_TTL` not `<n>m|h|d` up to `7d`, or `ENTRA_GROUP_ROLES`
   malformed or over 20 groups. It prints the key names, never the values.
   Without `ENTRA_ENABLED=1`, leftover `MS_CLIENT_ID`/`MS_CLIENT_SECRET` lines
-  only earn a note (they are ignored);
+  only earn a note (they are ignored), or a warning when they are a real app
+  registration (a GUID client id plus a secret: Microsoft sign-in of the
+  running release, if any, is off after the deploy); neither stops it;
 - the running database still holds datetime columns in the pre-contract
   format (`timestamp without time zone` outside Strapi's bookkeeping tables)
   and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
@@ -931,7 +933,8 @@ systemctl start docker
 > Microsoft provider off and revokes the anonymous forgot/reset-password
 > endpoints (`[bootstrap] revoked 2 obsolete permission(s)`); the cms logs
 > `[entra] disabled`. Leftover `MS_*` lines in `infra/.env` become inert
-> (`deploy.sh` notes them; optional cleanup). Run
+> (`deploy.sh` notes them, or warns when they are a real app registration
+> whose Microsoft sign-in goes off; optional cleanup). Run
 > `infra/diagnostics/prod-perm-diff.sql` afterwards. A rollback needs no
 > database step. Switching Microsoft sign-in on is a separate, later step.
 > See [Upgrading to the Entra sign-in (batch 9, lane 4A)](#upgrading-to-the-entra-sign-in-batch-9-lane-4a).
