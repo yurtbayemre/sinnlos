@@ -28,6 +28,9 @@
  *  - Repeated instant closes (5×) mean a terminal condition (kill
  *    switch, auth) → stop retrying until the next visibility regain;
  *    polling fallback covers from t=0.
+ *  - Subscriptions are synced in one POST per tick (WD04): every channel
+ *    registered or dropped in the same commit (a page mounting 20 comment
+ *    sections) goes out together, at most MAX_SUBSCRIBE_LIST per list.
  */
 
 import {
@@ -41,10 +44,12 @@ import {
 } from "react";
 import {
   ANNOUNCEMENTS_CHANNEL,
+  MAX_SUBSCRIBE_LIST,
   NOTIFICATIONS_CHANNEL,
   frameChannel,
   isContentChannel,
   parseLiveFrame,
+  type ContentChannel,
   type LiveChannel,
   type LiveFrame,
 } from "@/lib/live-contract";
@@ -56,7 +61,8 @@ export type { LiveChannel } from "@/lib/live-contract";
 
 type Listener = () => void | Promise<void>;
 
-type LiveContextValue = {
+export type LiveContextValue = {
+  /** Adds a listener on `channel`; returns its removal. */
   register: (channel: LiveChannel, listener: Listener) => () => void;
   healthy: boolean;
 };
@@ -114,6 +120,11 @@ export function LiveEventsProvider({
   const inflightRef = useRef(new Map<LiveChannel, { dirty: boolean }>());
   const catchupQueueRef = useRef<LiveChannel[]>([]);
   const catchupActiveRef = useRef(0);
+  const pendingSyncRef = useRef({
+    add: new Set<ContentChannel>(),
+    remove: new Set<ContentChannel>(),
+    scheduled: false,
+  });
 
   /** Single-flight refetch with dirty-flag per channel. */
   const runChannel = useCallback(async (channel: LiveChannel) => {
@@ -193,18 +204,44 @@ export function LiveEventsProvider({
   }, [pumpCatchup]);
 
   const syncSubscriptions = useCallback((add: LiveChannel[], remove: LiveChannel[] = []) => {
-    const connId = connIdRef.current;
     // Only content channels are subscribed on the bus; the global ones
-    // reach every connection that may receive them.
-    const wanted = add.filter(isContentChannel);
-    const dropped = remove.filter(isContentChannel);
-    if (!connId || (wanted.length === 0 && dropped.length === 0)) return;
-    void fetch("/live/subscribe", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ connId, add: wanted, remove: dropped }),
-    }).catch(() => {
-      // Stream eviction/rotation races are resolved by the next hello.
+    // reach every connection that may receive them. Changes of one tick
+    // are merged (the last one per channel wins) and sent together.
+    const pending = pendingSyncRef.current;
+    for (const channel of add) {
+      if (!isContentChannel(channel)) continue;
+      pending.remove.delete(channel);
+      pending.add.add(channel);
+    }
+    for (const channel of remove) {
+      if (!isContentChannel(channel)) continue;
+      pending.add.delete(channel);
+      pending.remove.add(channel);
+    }
+    if (pending.scheduled || (pending.add.size === 0 && pending.remove.size === 0)) return;
+    pending.scheduled = true;
+    queueMicrotask(() => {
+      pending.scheduled = false;
+      const wanted = [...pending.add];
+      const dropped = [...pending.remove];
+      pending.add.clear();
+      pending.remove.clear();
+      // No stream yet: the next hello subscribes every registered channel.
+      const connId = connIdRef.current;
+      if (!connId) return;
+      for (let i = 0; i < Math.max(wanted.length, dropped.length); i += MAX_SUBSCRIBE_LIST) {
+        void fetch("/live/subscribe", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            connId,
+            add: wanted.slice(i, i + MAX_SUBSCRIBE_LIST),
+            remove: dropped.slice(i, i + MAX_SUBSCRIBE_LIST),
+          }),
+        }).catch(() => {
+          // Stream eviction/rotation races are resolved by the next hello.
+        });
+      }
     });
   }, []);
 
@@ -317,8 +354,10 @@ export function LiveEventsProvider({
         attemptRef.current = 0;
         if (!sourceRef.current) {
           connect();
-          // The hello handler runs the catch-up; if the stream can't open,
-          // the wrappers' own visibilitychange tick already refetched.
+          // The hello handler runs the catch-up. If the stream can't open,
+          // the owners' poll backstop covers: the page-level comment
+          // provider's next tick (WD04, 10 s while degraded) and the
+          // bell's own visibility refetch.
         }
       } else {
         // Zero background load: no stream, no pending reconnects, no
@@ -397,6 +436,15 @@ export function LiveEventsProvider({
       {children}
     </LiveEventsContext.Provider>
   );
+}
+
+/**
+ * The provider itself, for a component that listens on many channels at
+ * once (the page-level comment provider, WD04): `register` per channel,
+ * `healthy` for its poll interval.
+ */
+export function useLiveRegistry(): LiveContextValue {
+  return useContext(LiveEventsContext);
 }
 
 /**

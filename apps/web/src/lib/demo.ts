@@ -710,6 +710,17 @@ function param(path: string, key: string): string | null {
   return m ? decodeURIComponent(m[1]!) : null;
 }
 
+/**
+ * The documentIds a comment/reaction read asks for: the `$eq` of one
+ * section, or the `$in` list of the batched read (WD04); null = no filter.
+ */
+function targetDocumentIds(path: string): Set<string> | null {
+  const one = param(path, "filters[targetDocumentId][$eq]");
+  if (one !== null) return new Set([one]);
+  const many = [...path.matchAll(/[?&]filters\[targetDocumentId\]\[\$in\]\[\d+\]=([^&]*)/g)];
+  return many.length > 0 ? new Set(many.map((m) => decodeURIComponent(m[1]!))) : null;
+}
+
 function findBy<T extends AnyEntry>(items: T[], slug: string): T | undefined {
   return items.find((i) => i.slug === slug);
 }
@@ -832,13 +843,15 @@ export function demo(path: string): unknown {
   if (path.startsWith("/api/acknowledgements")) return pack([]);
 
   if (path.startsWith("/api/comments")) {
-    const target = param(path, "filters[targetDocumentId][$eq]");
-    return pack(target ? demoComments.filter((c) => c.targetDocumentId === target) : demoComments);
+    const targets = targetDocumentIds(path);
+    return pack(
+      targets ? demoComments.filter((c) => targets.has(c.targetDocumentId)) : demoComments,
+    );
   }
   if (path.startsWith("/api/reactions")) {
-    const target = param(path, "filters[targetDocumentId][$eq]");
+    const targets = targetDocumentIds(path);
     return pack(
-      target ? demoReactions.filter((r) => r.targetDocumentId === target) : demoReactions,
+      targets ? demoReactions.filter((r) => targets.has(r.targetDocumentId)) : demoReactions,
     );
   }
 
