@@ -865,9 +865,12 @@ admin panel and the content API:
   60 s and now removes the ad's images right away (FX45). Postgres was not
   affected.
 - **Numeric ids (PL01).** `DELETE /api/notifications/:id` and
-  `DELETE /api/reactions/:id` by the numeric id now delete the entry (an
-  admin, or an editor for reactions, got 204 and nothing was deleted); an
-  unknown id answers 404 instead of 204. `PUT /api/departments/:id` and
+  `DELETE /api/reactions/:id` by the numeric id now delete the entry;
+  before, every caller the policy let through (the recipient or author, an
+  admin, or an editor for reactions) got 204 and nothing was deleted. For an
+  admin (and an editor on reactions) an unknown id now answers 404 instead
+  of 204; everyone else still gets 403 from the policy.
+  `PUT /api/departments/:id` and
   `PUT /api/teams/:id` by the numeric id now update the entry (they answered
   404). The web uses neither form.
 

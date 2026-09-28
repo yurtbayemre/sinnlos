@@ -121,9 +121,11 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
    * or admin_role/editor). `:id` is a documentId or a numeric row id (PL01,
    * owner default "translate"): the v5 core controller resolves only
    * documentIds, so a numeric id deleted nothing and still answered 204 —
-   * for moderators, whose policy bypass never looks the row up. It is
-   * translated here; a malformed id or a missing row answers 404
-   * (utils/entry-id.ts).
+   * for every caller the policy admitted (the policy itself accepts a
+   * numeric id). It is translated here; a malformed id or a missing row
+   * answers 404 (utils/entry-id.ts). That 404 is reachable only for the
+   * bypass roles: for everyone else the policy looks the row up first and
+   * answers 403.
    */
   async delete(ctx) {
     const where = parseEntryRef(ctx.params.id);

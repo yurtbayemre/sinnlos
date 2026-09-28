@@ -57,8 +57,11 @@ export default factories.createCoreController("api::notification.notification", 
    * (recipient or admin_role). `:id` is a documentId or a numeric row id
    * (PL01, owner default "translate"): the v5 core controller resolves only
    * documentIds, so a numeric id deleted nothing and still answered 204 —
-   * for admins, whose policy bypass never looks the row up. It is translated
-   * here; a malformed id or a missing row answers 404 (utils/entry-id.ts).
+   * for every caller the policy admitted (the policy itself accepts a
+   * numeric id). It is translated here; a malformed id or a missing row
+   * answers 404 (utils/entry-id.ts). That 404 is reachable only for the
+   * bypass role: for everyone else the policy looks the row up first and
+   * answers 403.
    */
   async delete(ctx) {
     const where = parseEntryRef(ctx.params.id);
