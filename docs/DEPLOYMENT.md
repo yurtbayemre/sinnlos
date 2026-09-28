@@ -907,7 +907,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    -- line/paragraph separators. Not \s: that also strips U+0085.
    WITH trim_re(re) AS (
      SELECT '^' || ws || '+|' || ws || '+$'
-     FROM (VALUES ('[\t\n\v\f\r    -     　﻿]')) AS c(ws)
+     FROM (VALUES ('[\t\n\v\f\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]')) AS c(ws)
    )
    SELECT id, document_id, published_at IS NOT NULL AS published,
           left(question, 60) AS question, options::text AS options
