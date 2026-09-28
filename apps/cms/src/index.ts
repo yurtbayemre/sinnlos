@@ -35,13 +35,13 @@ import { shouldSanitizeForRole, stripSensitiveUserFields } from "./utils/sanitiz
  * Without this, Strapi's users-permissions plugin returns 403 on every
  * `/api/*` call, because a freshly-created role has zero permissions.
  */
-type RoleSeed = {
+export type RoleSeed = {
   name: string;
   type: string;
   description: string;
 };
 
-const ROLES: RoleSeed[] = [
+export const ROLES: RoleSeed[] = [
   {
     name: "Admin",
     type: "admin_role",
@@ -660,6 +660,9 @@ async function syncAdvancedSettings(strapi: any) {
     );
   }
 }
+
+// Exported (with ROLES) for bootstrap.permissions.test.ts (roadmap S02).
+export { syncAdvancedSettings, syncRolePermissions };
 
 /**
  * Register a role-aware `content-api.output` sanitizer that removes employee
