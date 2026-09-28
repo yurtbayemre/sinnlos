@@ -735,6 +735,15 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the notification pipeline fixes (2026-09-28)?** A normal
+> deploy of cms and web (`infra/deploy.sh`): no env, schema or permission
+> change, order does not matter. Guests and blocked users stop getting
+> announcement bells and digests, live pings and notifications follow the
+> save, and weekly digests missed on a Monday are caught up the next
+> morning. Optional read-only checks first, and the next morning the 07:30
+> `[digest] run complete` line: see
+> [Upgrading to the notification pipeline fixes (2026-09-28)](#upgrading-to-the-notification-pipeline-fixes-2026-09-28).
+>
 > **Deploying batch 6 (2026-09-28)?** The test safety nets, the web
 > correctness fixes and the cms input hardening (the two notes below and
 > the "Uploads gate" and live-event notes further down) ship as one normal
@@ -858,6 +867,169 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the notification pipeline fixes (2026-09-28)
+
+This release (branch `fix/notification-pipeline`, on `batch/6` `997bf7f`)
+changes who is notified and when, and how the e-mail digest is put
+together:
+
+- **Notification titles fit their column (FX18).** A title is at most 255
+  characters; a long announcement or event title is shortened with `…`
+  (the "New announcement: " prefix and the quotes around a commented title
+  stay). Before, a title of about 237 characters or more made the
+  notification insert fail on Postgres, which failed the whole publish.
+- **Only readers are notified (FX19).** The bell for an announcement goes to
+  the targeted users whose role holds `announcement.find` and who are not
+  blocked; for an event, to the users of its departments (everyone without
+  departments) whose role holds `event.find` and who are not blocked. The
+  roles are read from the permissions table at runtime, so a grant changed
+  in the admin panel applies to the next publish. Guests (no
+  `announcement.find`) and blocked users no longer get announcement bells;
+  guests keep the event bell. Admins and editors get strictly the targeted
+  audience, as before. If the published entry cannot be read back, nobody
+  is notified (before: everyone).
+- **Digests (FX19, FX48).** Only users whose role holds
+  `announcement.find` get digests: never guests, never blocked users; the
+  kudos section needs `kudos.find`. `/profile` offers the digest options
+  only to those roles, and `PUT /api/me` ignores a guest's digest settings.
+  Each user's announcements are filtered to the window and the user's
+  audience first and then capped at 25, with "+N more" (before, the cap of
+  25 ran first and could hide every announcement the user may read). An
+  announcement that was edited and published again is not repeated for a
+  user whose bell announced it before the digest window. Weekly digests
+  are due whenever the last one is older than the start of the week
+  (Monday 00:00 in `APP_TIME_ZONE`): a Monday whose send failed, or that
+  had nothing to send, is caught up the next morning, still at most once a
+  week. A run reads users, permissions and announcements once instead of
+  once per user.
+- **After the commit (LF02, LF06).** Live pings and the announcement and
+  event notifications are sent after the publish is saved: a publish that
+  fails notifies and pings nobody, the bell's refetch finds the new rows,
+  and one failing notification insert costs that one recipient (logged,
+  delivered by the next publish) instead of the publish. The live-event
+  subscriber now runs only for the four content types it watches.
+
+**Nothing else is needed: a normal deploy of cms and web.** No env change,
+no migration, no schema or permission change, and the order of web and
+cms does not matter (an older web shows guests the digest options, which
+the new cms ignores; the new web works with an older cms).
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy**
+
+1. **Pull and validate**, deploying nothing:
+
+   ```bash
+   git pull
+   infra/deploy.sh --check
+   ```
+
+2. **Optional, read-only: who is affected.** The roles that hold the read
+   grants (the new audience), the guests, blocked users and digest opt-ins
+   per role, and the weekly subscribers who will get a catch-up digest the
+   next morning (replace `Europe/Berlin` with your `APP_TIME_ZONE`):
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT p.action, string_agg(r.type, ', ' ORDER BY r.type) AS roles
+   FROM up_permissions p
+   JOIN up_permissions_role_lnk pr ON pr.permission_id = p.id
+   JOIN up_roles r ON r.id = pr.role_id
+   WHERE p.action IN ('api::announcement.announcement.find',
+                      'api::event.event.find',
+                      'api::kudos.kudos.find')
+   GROUP BY p.action
+   ORDER BY p.action;
+
+   SELECT coalesce(r.type, '(no role)') AS role,
+          count(*) AS users,
+          count(*) FILTER (WHERE u.blocked) AS blocked,
+          count(*) FILTER (WHERE u.digest_announcements OR u.digest_mentions OR u.digest_kudos) AS digest_opt_ins
+   FROM up_users u
+   LEFT JOIN up_users_role_lnk rl ON rl.user_id = u.id
+   LEFT JOIN up_roles r ON r.id = rl.role_id
+   GROUP BY 1
+   ORDER BY 1;
+
+   SELECT count(*) AS weekly_due_next_morning
+   FROM up_users
+   WHERE coalesce(blocked, false) = false
+     AND digest_frequency = 'weekly'
+     AND (digest_announcements OR digest_mentions OR digest_kudos)
+     AND (last_digest_at IS NULL
+          OR last_digest_at < date_trunc('week', now() AT TIME ZONE 'Europe/Berlin') AT TIME ZONE 'Europe/Berlin');
+   SQL
+   ```
+
+   Expected on a default install: `announcement.find` and `kudos.find` for
+   `admin_role, authenticated, department_head, editor, member, team_lead`,
+   `event.find` for those plus `guest`. Guests with `digest_opt_ins` stop
+   getting digests; tell them if that matters. The owner instance had no
+   guests and no opt-ins at the 2026-09-28 deploy, so nothing visible
+   changes there apart from the live pings arriving after the save.
+
+**Deploy**
+
+3. Run `infra/deploy.sh` on the Traefik host (it takes the pre-deploy backup,
+   tags the running images `:rollback` and runs `infra/live-smoke.sh` when
+   the demo credentials exist; the live pings are part of this change, so
+   run it by hand otherwise). On a standalone Caddy box, run
+   `infra/backup/pg-backup.sh`, then `docker compose up -d --build` from
+   `infra/`.
+
+**After the deploy**
+
+4. **Publish something** (or wait for the next announcement or event). The
+   cms log shows one line per publish, and an error line per recipient
+   whose notification could not be written:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep '\[notifications\]'
+   # [notifications] created 9 notification(s) for announcement 42 (source <documentId>)
+   ```
+
+   `could not create the notification for user <id>` names the recipient;
+   on Postgres its reason is often Strapi's follow-up statement (`delete
+   from "public"."notifications" … current transaction is aborted`) rather
+   than the original error, which the Postgres log has. The publish itself
+   is saved either way, and the next publish of that entry delivers the
+   missing notification.
+5. **The next morning**, check the 07:30 digest run (with SMTP configured;
+   in dark mode the line is `[digest] skipped: …`):
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 24h cms | grep '\[digest\]'
+   # [digest] run complete: sent=… empty=… skipped=… failed=… of … candidate(s)
+   ```
+
+   Guests and users whose role lacks `announcement.find` count as
+   `skipped`. `[digest] could not load the announcements` or `could not
+   load the recipients` means those users failed this run and keep their
+   window; the next run covers it.
+
+**What users notice** (worth a short release note):
+
+- Guests no longer see e-mail digest options on `/profile` and get no
+  digests or announcement bells; blocked accounts get no bells.
+- Digests list at most 25 announcements plus "+N more", and a weekly
+  digest missed on Monday arrives the next morning.
+- Very long titles show shortened in the bell.
+
+**Rollback.** The previous images run unchanged on this database: nothing
+in the schema changed, and the notification rows this release writes are
+the same shape. After a rollback the fixed errors are back (bells for
+guests and blocked users, long titles failing the publish, pings before
+the save, weekly digests only on Mondays). Follow the rollback hint
+`infra/deploy.sh` prints.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 
