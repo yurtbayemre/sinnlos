@@ -739,8 +739,9 @@ systemctl start docker
 > deploy of cms and web (`infra/deploy.sh`): no env, schema or permission
 > change, order does not matter. Guests and blocked users stop getting
 > announcement bells and digests, live pings and notifications follow the
-> save, and weekly digests missed on a Monday are caught up the next
-> morning. Optional read-only checks first, and the next morning the 07:30
+> save, a failing notification no longer discards a comment or kudos, and
+> weekly digests missed on a Monday are caught up the next morning.
+> Optional read-only checks first, and the next morning the 07:30
 > `[digest] run complete` line: see
 > [Upgrading to the notification pipeline fixes (2026-09-28)](#upgrading-to-the-notification-pipeline-fixes-2026-09-28).
 >
@@ -897,7 +898,10 @@ together:
   audience first and then capped at 25, with "+N more" (before, the cap of
   25 ran first and could hide every announcement the user may read). An
   announcement that was edited and published again is not repeated for a
-  user whose bell announced it before the digest window. Weekly digests
+  user whose bell announced it before the digest window, nor for its
+  author once it was first published before the author's window (the bell
+  never notifies the author, so before, the author got every republish of
+  their own announcement again). Weekly digests
   are due whenever the last one is older than the start of the week
   (Monday 00:00 in `APP_TIME_ZONE`): a Monday whose send failed, or that
   had nothing to send, is caught up the next morning, still at most once a
@@ -907,8 +911,16 @@ together:
   event notifications are sent after the publish is saved: a publish that
   fails notifies and pings nobody, the bell's refetch finds the new rows,
   and one failing notification insert costs that one recipient (logged,
-  delivered by the next publish) instead of the publish. The live-event
-  subscriber now runs only for the four content types it watches.
+  delivered by the next publish) instead of the publish. The title and
+  the audience both come from the entry as saved when the notifications
+  go out: if an announcement is renamed, retargeted and published again
+  before its first notifications were sent (they queue behind larger
+  ones), everyone gets the current title, never the replaced one. Comment
+  and kudos notifications are written after the comment or kudos is
+  saved as well: before, on Postgres, a failing notification insert
+  discarded the comment or kudos although the API answered 201. The
+  live-event subscriber now runs only for the four content types it
+  watches.
 
 **Nothing else is needed: a normal deploy of cms and web.** No env change,
 no migration, no schema or permission change, and the order of web and
@@ -1002,7 +1014,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    from "public"."notifications" … current transaction is aborted`) rather
    than the original error, which the Postgres log has. The publish itself
    is saved either way, and the next publish of that entry delivers the
-   missing notification.
+   missing notification. `[notifications] failed for comment: …` or
+   `failed for kudos: …` means that one notification is missing; the
+   comment or kudos itself is saved.
 5. **The next morning**, check the 07:30 digest run (with SMTP configured;
    in dark mode the line is `[digest] skipped: …`):
 
@@ -1028,7 +1042,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 in the schema changed, and the notification rows this release writes are
 the same shape. After a rollback the fixed errors are back (bells for
 guests and blocked users, long titles failing the publish, pings before
-the save, weekly digests only on Mondays). Follow the rollback hint
+the save, comments and kudos lost when their notification fails, weekly
+digests only on Mondays). Follow the rollback hint
 `infra/deploy.sh` prints.
 
 #### Upgrading to the cms input hardening (2026-09-28)
