@@ -224,8 +224,9 @@ PROBE_TIMEOUT=(timeout -k 5 15)
 
 # Datetime phase 2: a web image that renders every date in APP_TIME_ZONE by
 # itself runs in UTC and says so with this label (apps/web/Dockerfile). An
-# older web image renders in its process zone and refuses to start under
-# compose's TZ=UTC; it runs only with COMPOSE_WEB_LEGACY_TZ on top.
+# older web image renders in its process zone: under compose's TZ=UTC it
+# refuses to start (from the datetime release on) or quietly shows UTC
+# times (before it); it runs only with COMPOSE_WEB_LEGACY_TZ on top.
 WEB_DATETIME_LABEL="org.sinnlos.datetime"
 WEB_DATETIME_VALUE="zone-explicit"
 
@@ -303,8 +304,10 @@ print_guest_vote_recheck_hint() {
 # or one that cannot be checked, gets the guest vote row removed before the
 # retag and once more after the start (print_guest_vote_revoke_hint).
 # A :rollback web from before the web's datetime port, or one that cannot
-# be checked, gets the web legacy-zone override: that web refuses to start
-# in UTC, and the override is harmless for a newer one (it only warns).
+# be checked, gets the web legacy-zone override: that web must run in
+# APP_TIME_ZONE (in UTC it refuses to start, or, before the datetime
+# release, quietly shows UTC times), and the override is harmless for a
+# newer one (it only warns).
 # Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
 # prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
@@ -330,10 +333,10 @@ print_rollback_hint() {
     rollback+=(-f "${COMPOSE_WEB_LEGACY_TZ}")
     if [[ "${web_zone}" == "1" ]]; then
       echo "       (${PROJECT}-web:rollback predates the web's datetime port: it renders dates in its process" >&2
-      echo "       zone and refuses to start in UTC, hence the web override, which runs it in APP_TIME_ZONE)" >&2
+      echo "       zone, so in UTC it fails to start or shows UTC times; hence the web override, which runs it in APP_TIME_ZONE)" >&2
     else
       echo "       (${PROJECT}-web:rollback could not be checked for the web's datetime port, so the web" >&2
-      echo "       override is included: a web from before it refuses to start in UTC, a newer one only" >&2
+      echo "       override is included: in UTC a web from before it fails to start or shows UTC times, a newer one only" >&2
       echo "       warns. Check: docker image inspect -f '{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}' ${PROJECT}-web:rollback" >&2
       echo "       prints ${WEB_DATETIME_VALUE} for a web that needs no override)" >&2
     fi

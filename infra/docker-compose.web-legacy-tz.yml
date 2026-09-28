@@ -8,12 +8,15 @@
 #     -f infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms
 #
 # That image renders dates in its process zone (events, the month grid, ad
-# expiry, relative times) and checks at start that Node runs in
-# APP_TIME_ZONE: under docker-compose.yml's TZ=UTC it answers every request
-# with 500 (web log: "The web process runs in UTC …, not in APP_TIME_ZONE
-# …"). This override runs it in APP_TIME_ZONE again, exactly as the compose
-# file before the port did. infra/deploy.sh prints it in its rollback hint
-# when the :rollback web image lacks the org.sinnlos.datetime label.
+# expiry, relative times), so it must run in APP_TIME_ZONE. Under
+# docker-compose.yml's TZ=UTC, one from the datetime release (2026-09-27)
+# up to batch 7 fails its start check and answers every request with 500
+# (web log: "The web process runs in UTC …, not in APP_TIME_ZONE …"); an
+# older one (such as :pre-datetime) has no such check and quietly shows
+# every date and time in UTC. This override runs it in APP_TIME_ZONE again,
+# exactly as the compose file before the port did. infra/deploy.sh prints
+# it in its rollback hint when the :rollback web image lacks the
+# org.sinnlos.datetime label.
 #
 # Harmless but unneeded for a web image from the port on (label
 # org.sinnlos.datetime=zone-explicit): it renders in APP_TIME_ZONE in any

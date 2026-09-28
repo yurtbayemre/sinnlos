@@ -745,7 +745,9 @@ systemctl start docker
 > now in UTC; the cms, the database and `infra/.env` stay as they are. From
 > then on, a rollback of the web to an image from before it needs
 > `-f infra/docker-compose.web-legacy-tz.yml` (`deploy.sh` prints it);
-> without it that web answers every request with 500. See
+> without it that web answers every request with 500, or, if it predates
+> the datetime release of 2026-09-27 (such as `:pre-datetime`), shows every
+> date and time in UTC. See
 > [Upgrading to the web datetime port (batch 8, lane 3A)](#upgrading-to-the-web-datetime-port-batch-8-lane-3a).
 >
 > **Deploying batch 7 (2026-09-28)?** The notification pipeline fixes, the
@@ -982,12 +984,21 @@ behaviour, schema and permissions are unchanged.
    their own manager; the marked people are listed at the top level. Fix
    their Manager field in the admin panel (Content Manager → User).
 
-**Rollback.** Every web image from before this release (the `:rollback`
-image this deploy tags, any older tag such as `:pre-datetime`) checks at
-start that Node runs **in** `APP_TIME_ZONE`; under the current compose file
-(`TZ: UTC`) it answers every request with 500 and logs `An error occurred
-while loading instrumentation hook: The web process runs in UTC …, not in
-APP_TIME_ZONE …`. Re-up such an image **only with the override**
+**Rollback.** Every web image from before this release renders dates in
+its process zone, so it must run **in** `APP_TIME_ZONE`, and the current
+compose file runs the web in UTC (`TZ: UTC`). How such an image fails there
+depends on its age:
+
+- Images from the datetime release (live since 2026-09-27) up to batch 7,
+  including the `:rollback` image this deploy tags, check the zone at
+  start: in UTC they answer every request with 500 and log `An error
+  occurred while loading instrumentation hook: The web process runs in UTC
+  …, not in APP_TIME_ZONE …`.
+- Older images, such as `:pre-datetime`, have no such check: in UTC they
+  start normally and quietly show every date and time in UTC, one or two
+  hours off in Berlin.
+
+Re-up any of them **only with the override**
 `infra/docker-compose.web-legacy-tz.yml`, which gives the web the `TZ` it
 had before (`${APP_TIME_ZONE:-Europe/Berlin}`):
 
@@ -998,7 +1009,15 @@ docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.trae
   -f infra/docker-compose.web-legacy-tz.yml up -d --no-build web
 ```
 
-(Standalone Caddy box: leave out the Traefik file.) When a deploy fails,
+(Standalone Caddy box: leave out the Traefik file.) Check afterwards:
+`docker exec infra-web-1 sh -c 'echo "$TZ"'` prints your `APP_TIME_ZONE`
+(an old image without the start check gives no other sign). Whether an
+image needs the override:
+`docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`
+prints `zone-explicit` for a web from this release on (no override); an
+empty line or `<no value>` means it needs it. The same holds for every
+other rollback recipe in this document that re-ups an older web image: see
+the [update procedure](#74-update-procedure-production-safe). When a deploy fails,
 `deploy.sh` prints the rollback commands with this override whenever
 `infra-web:rollback` lacks the `org.sinnlos.datetime` label, or when it
 cannot check the image (the override is harmless for a newer web image: it
@@ -4295,10 +4314,11 @@ the cms and the database, phase 2 the web):
   in its image and in compose) and renders every date in `APP_TIME_ZONE`
   explicitly; it only warns (`[datetime] The web process runs in …, not
   UTC`) when its `TZ` is set to something else. A web image from before
-  phase 2 still renders in its process zone and refuses to serve unless Node
-  runs in `APP_TIME_ZONE` (`The web process runs in UTC …, not in
-  APP_TIME_ZONE …`): run it only with `infra/docker-compose.web-legacy-tz.yml`
-  ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)).
+  phase 2 still renders in its process zone: run it only with
+  `infra/docker-compose.web-legacy-tz.yml`
+  ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)). In UTC
+  one from phase 1 on refuses to serve (`The web process runs in UTC …, not
+  in APP_TIME_ZONE …`); an older one serves and shows every time in UTC.
   `DATETIME_LEGACY_ZONE` follows the same rules.
 - **The guard.** Strapi creates every new `datetime` column as
   `timestamp without time zone`. At each boot the cms converts every such
@@ -4840,7 +4860,8 @@ az containerapp create \
 # TZ: the web image runs in UTC by itself (like the cms) and renders every
 # date in APP_TIME_ZONE; TZ=UTC here only makes that explicit. A web image
 # from before the web datetime port (batch 8) needs TZ equal to
-# APP_TIME_ZONE instead, or it answers every request with 500.
+# APP_TIME_ZONE instead: without it, one from 2026-09-27 on answers every
+# request with 500, and an older one quietly shows every time in UTC.
 
 # Now read the FQDN assigned to the web app
 WEB_FQDN=$(az containerapp show \
@@ -5102,6 +5123,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
 | cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (an IANA name such as `Europe/Berlin`, no UTC offset) or leave it empty |
 | every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | A web image from before the web datetime port (batch 8) runs with the current compose file's `TZ=UTC`, usually a rollback without the override: add `-f infra/docker-compose.web-legacy-tz.yml` ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)). With that override (or an older compose file) it also appears when Node cannot find the zone: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`) |
+| after a web rollback every page shows times one or two hours early (Berlin), no error | A web image from before the datetime release of 2026-09-27 (such as `:pre-datetime`) runs with the current compose file's `TZ=UTC`: it has no start check and renders in its process zone. Re-up it with `-f infra/docker-compose.web-legacy-tz.yml` ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)) |
 | web log: `[datetime] The web process runs in …, not UTC` | The current web image runs with a `TZ` other than UTC (a leftover `infra/docker-compose.web-legacy-tz.yml`, or an orchestrator setting): dates are unaffected, but remove it so the web runs in UTC |
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
 | `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
@@ -5232,8 +5254,11 @@ docker compose -p infra logs -f --tail=50 cms web
 and `infra-cms:rollback` before each build, so a bad deploy can be reverted
 **without** rebuilding — retag and re-up just the affected service (rolling
 back the datetime release needs an extra override file, see
-[Rolling back this release](#rolling-back-this-release); rolling back poll
-guest access needs a step **before** the retag, see
+[Rolling back this release](#rolling-back-this-release); rolling back the
+web to an image from before the web datetime port (batch 8) needs
+`-f infra/docker-compose.web-legacy-tz.yml` on top of the live compose
+files, see below; rolling back poll guest access needs a step **before**
+the retag, see
 [Rolling back poll department targeting](#rolling-back-poll-department-targeting)):
 
 ```bash
@@ -5243,6 +5268,33 @@ docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   up -d --no-build web cms
 ```
+
+Since the web datetime port (batch 8) the compose file runs the web in UTC.
+A web image from before it renders dates in its process zone and must run
+in `APP_TIME_ZONE`; check the image before the re-up:
+
+```bash
+docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback
+```
+
+`zone-explicit` means no override (the command above). An empty line or
+`<no value>` means the image predates the port: re-up with the web
+override after the live compose files:
+
+```bash
+docker compose -p infra \
+  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  -f infra/docker-compose.web-legacy-tz.yml \
+  up -d --no-build web cms
+```
+
+Without it, a web from the datetime release (2026-09-27) up to batch 7
+answers every request with 500, and an older one (such as `:pre-datetime`)
+quietly shows every date and time in UTC. This applies to every recipe in
+this document that re-ups a web image from before batch 8, also where its
+command lists only the live compose files (it was written before the
+port); add the override next to any other override file there. Details:
+[Upgrading to the web datetime port](#upgrading-to-the-web-datetime-port-batch-8-lane-3a).
 
 A cms image from before the ICS and cms start fixes, whose
 `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
@@ -5324,7 +5376,12 @@ its own: its compose file ran it in `Europe/Berlin`, and it wrote naive
 columns as Berlin wall clocks. The current `infra/docker-compose.yml` runs
 the cms in UTC. **Always re-up the previous cms with the override
 `infra/docker-compose.cms-legacy-tz.yml`**, which sets the cms's `TZ` to
-`DATETIME_LEGACY_ZONE`, using the images pinned in step 7:
+`DATETIME_LEGACY_ZONE`, using the images pinned in step 7. Since the web
+datetime port (batch 8) the compose file also runs the web in UTC, and the
+previous web image predates that port: it renders dates in its process
+zone and has no start check, so in UTC it would quietly show every date
+and time in UTC. Add `infra/docker-compose.web-legacy-tz.yml` as well,
+which runs it in `APP_TIME_ZONE` as its own compose file did:
 
 ```bash
 cd /opt/sinnlos
@@ -5333,13 +5390,16 @@ docker tag infra-web:pre-datetime infra-web:latest
 docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   -f infra/docker-compose.cms-legacy-tz.yml \
+  -f infra/docker-compose.web-legacy-tz.yml \
   up -d --no-build web cms
 ```
 
 (Standalone Caddy box: leave out the Traefik file. Without the step 7 tags,
 `:rollback` is only right if `deploy.sh` ran once for this release: every
 run tags whatever is running then.) `docker logs infra-cms-1` must not show
-`[datetime]` lines (those come from the new image only).
+`[datetime]` lines (those come from the new image only), and
+`docker exec infra-web-1 sh -c 'echo "$TZ"'` must print your
+`APP_TIME_ZONE` (`Europe/Berlin` by default).
 
 Whether the repair has run on the database the previous cms will use:
 

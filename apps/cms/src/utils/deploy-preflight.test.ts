@@ -753,6 +753,8 @@ describe("datetime phase 2: the web in UTC, and the web legacy-zone override for
     expectInOrder(hint, [
       "To roll back:",
       "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
+      // Both kinds of old web: one with the start check (500), one without (UTC times).
+      "zone, so in UTC it fails to start or shows UTC times; hence the web override",
       `${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`,
     ]);
     expect(hint).not.toContain("could not be checked for the web's datetime port");
@@ -762,6 +764,7 @@ describe("datetime phase 2: the web in UTC, and the web legacy-zone override for
     for (const probes of [{ webLabel: null }, { hang: ["image"] }]) {
       const hint = rollbackHint(STRAPI_CMD, "0", probes);
       expect(hint).toContain("(infra-web:rollback could not be checked for the web's datetime port, so the web");
+      expect(hint).toContain("in UTC a web from before it fails to start or shows UTC times, a newer one only");
       expect(hint).toContain(
         `docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`,
       );

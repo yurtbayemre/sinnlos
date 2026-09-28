@@ -877,7 +877,8 @@ from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
 on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
 image from before the web datetime port needs
 `infra/docker-compose.web-legacy-tz.yml` (it runs that web in `APP_TIME_ZONE`,
-which its start check requires); the rollback commands `deploy.sh` prints
+the zone it renders dates in; in UTC a web from 2026-09-27 on answers 500,
+an older one shows UTC times); the rollback commands `deploy.sh` prints
 include whichever is needed. TLS, the security
 response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
