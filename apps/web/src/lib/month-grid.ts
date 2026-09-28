@@ -2,119 +2,154 @@
  * Month grid of /events?view=month (WD02: moved out of
  * components/events/events-month-view.tsx, where the grid arithmetic existed
  * twice: once for the events page's fetch window, once for the cells).
- * buildMonthGrid is now the one source of both, so the window the page
- * fetches always covers exactly the cells the view renders.
+ * buildMonthGrid is the one source of both, so the window the page fetches
+ * always covers exactly the cells the view renders.
  *
- * Week starts on MONDAY (ISO 8601 / DIN 1355). Dates are resolved in the
- * SERVER time zone with local Date construction, consistent with the list
- * view (the container runs in the users' zone, TZ in
- * infra/docker-compose.yml). Local construction keeps every cell at local
- * midnight across a DST switch, where fixed 24-hour steps would drift.
- * Datetime phase 2 (batch 3) makes this zone-explicit in APP_TIME_ZONE, in
- * this file only.
+ * Week starts on MONDAY (ISO 8601 / DIN 1355). Datetime contract (decision
+ * 04, phase 2): every day is a calendar date 'YYYY-MM-DD' in APP_TIME_ZONE,
+ * never a local Date of the process. Cells are calendar-day keys
+ * (plain-date.addDaysToKey: no DST involved), an event lands on the days
+ * zonedDateKey gives for its start and end in the zone, and the fetch
+ * window is half-open [first instant of the first cell, first instant of the
+ * day after the last cell) in the zone (plain-date.zonedDayStart: 23- and
+ * 25-hour days included). The process zone (UTC in the container) plays no
+ * part.
  */
 
+import {
+  addDaysToKey,
+  daysBetweenKeys,
+  instantEpochMs,
+  isoWeekdayOfKey,
+  isPlainDate,
+  zonedDateKey,
+  zonedDayStart,
+} from "@/lib/plain-date";
 import type { Event } from "@/lib/types";
 
-/** Local YYYY-MM-DD key (toISOString would shift across UTC midnight). */
-export function dayKey(d: Date): string {
-  const month = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${d.getFullYear()}-${month}-${day}`;
+/**
+ * 'YYYY-MM' with a year from 1900 to 2999: the grid and its neighbours stay
+ * four-digit calendar dates (Date.UTC maps the years 0-99 to 1900-1999).
+ */
+const MONTH_PARAM_RE = /^(19\d\d|2\d\d\d)-(0[1-9]|1[0-2])$/;
+
+/** The first day ('YYYY-MM-01') of the month `offset` months after year/month. */
+function firstOfMonth(year: number, month: number, offset = 0): string {
+  const index = year * 12 + (month - 1) + offset;
+  const y = Math.floor(index / 12);
+  const m = index - y * 12 + 1;
+  return `${String(y).padStart(4, "0")}-${String(m).padStart(2, "0")}-01`;
 }
 
-/** The `month` search param (YYYY-MM) of the month containing `d`. */
-export function monthParamOf(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-}
-
-/** Resolve the displayed month; malformed params fall back to `now`. */
+/**
+ * The displayed month (1-based) of the `month` param; a missing or
+ * malformed param falls back to the month of `today` ('YYYY-MM-DD' in
+ * APP_TIME_ZONE).
+ */
 export function resolveMonth(
   monthParam: string | undefined,
-  now: Date,
-): { year: number; monthIdx: number } {
-  let year = now.getFullYear();
-  let monthIdx = now.getMonth();
-  if (monthParam && /^\d{4}-(0[1-9]|1[0-2])$/.test(monthParam)) {
-    year = Number(monthParam.slice(0, 4));
-    monthIdx = Number(monthParam.slice(5, 7)) - 1;
-  }
-  return { year, monthIdx };
+  today: string,
+): { year: number; month: number } {
+  const match = monthParam ? MONTH_PARAM_RE.exec(monthParam) : null;
+  if (match) return { year: Number(match[1]), month: Number(match[2]) };
+  if (!isPlainDate(today)) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${today}`);
+  return { year: Number(today.slice(0, 4)), month: Number(today.slice(5, 7)) };
 }
 
 export interface MonthGrid {
   year: number;
-  /** 0-based month index. */
-  monthIdx: number;
-  firstOfMonth: Date;
+  /** 1-based month. */
+  month: number;
+  /** 'YYYY-MM' of the displayed month (a cell outside it starts differently). */
+  monthParam: string;
+  /** 'YYYY-MM-01' of the displayed month. */
+  firstOfMonth: string;
   /** Days of the previous month before the 1st (Monday-first, 0..6). */
   leading: number;
-  /** Every visible day at local midnight, whole weeks (35 or 42 cells). */
-  cells: Date[];
-  /** Start of the half-open fetch window [from, until) = the first cell. */
+  /** Every visible day as 'YYYY-MM-DD', whole weeks (28, 35 or 42 cells). */
+  cells: string[];
+  /** Start of the half-open fetch window [from, until): the first cell's first instant. */
   from: Date;
-  /** Local midnight AFTER the last cell (exclusive end of the fetch window). */
+  /** The first instant of the day AFTER the last cell (exclusive end). */
   until: Date;
+  /** `month` params of the previous and the next month (navigation). */
+  prevMonthParam: string;
+  nextMonthParam: string;
 }
 
 /**
- * The visible grid of the month named by `monthParam` (or of `now`): the
+ * The visible grid of the month named by `monthParam` (or of `today`): the
  * Monday-aligned leading days, the month, and the trailing fill of the last
- * week. The events page fetches exactly [from, until), so events on visible
+ * week. `from`/`until` are instants of `timeZone` (APP_TIME_ZONE): the
+ * events page fetches exactly [from, until), so events on visible
  * adjacent-month days appear too.
  */
-export function buildMonthGrid(monthParam: string | undefined, now: Date): MonthGrid {
-  const { year, monthIdx } = resolveMonth(monthParam, now);
-  const firstOfMonth = new Date(year, monthIdx, 1);
-  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
-  // Monday-first offset: JS getDay() is Sunday=0 → shift so Monday=0.
-  const leading = (firstOfMonth.getDay() + 6) % 7;
+export function buildMonthGrid(
+  monthParam: string | undefined,
+  today: string,
+  timeZone: string,
+): MonthGrid {
+  const { year, month } = resolveMonth(monthParam, today);
+  const first = firstOfMonth(year, month);
+  const daysInMonth = daysBetweenKeys(first, firstOfMonth(year, month, 1));
+  // Monday-first offset: ISO weekday 1 (Monday) → 0 leading days.
+  const leading = isoWeekdayOfKey(first) - 1;
   const totalCells = Math.ceil((leading + daysInMonth) / 7) * 7;
-  const cells = Array.from(
-    { length: totalCells },
-    (_, i) => new Date(year, monthIdx, i - leading + 1),
-  );
+  const gridStart = addDaysToKey(first, -leading);
+  const cells = Array.from({ length: totalCells }, (_, i) => addDaysToKey(gridStart, i));
   return {
     year,
-    monthIdx,
-    firstOfMonth,
+    month,
+    monthParam: first.slice(0, 7),
+    firstOfMonth: first,
     leading,
     cells,
-    from: new Date(year, monthIdx, 1 - leading),
-    until: new Date(year, monthIdx, 1 - leading + totalCells),
+    from: zonedDayStart(gridStart, timeZone),
+    until: zonedDayStart(addDaysToKey(gridStart, totalCells), timeZone),
+    prevMonthParam: firstOfMonth(year, month, -1).slice(0, 7),
+    nextMonthParam: firstOfMonth(year, month, 1).slice(0, 7),
   };
 }
 
 /**
- * Bucket events per visible day (dayKey → events, each bucket sorted by
- * start). A multi-day event lands on EVERY day of its span, clamped to the
- * grid; an end before the start, or an unparseable end, counts as a one-day
- * event, and an unparseable start drops the event.
+ * Bucket events per visible day (day key → events, each bucket sorted by
+ * start). An event covers the days of its start through its end in
+ * `timeZone` (for all-day events the decision's rule, C7: zonedDateOf(start)
+ * through zonedDateOf(end ?? start), inclusive), clamped to the grid. An end
+ * before the start, or one that is no instant, counts as a one-day event; a
+ * start that is no instant (garbage, or a date-time without Z or an offset)
+ * drops the event.
  */
-export function bucketEventsByDay(events: Event[], grid: MonthGrid): Map<string, Event[]> {
+export function bucketEventsByDay(
+  events: Event[],
+  grid: MonthGrid,
+  timeZone: string,
+): Map<string, Event[]> {
   const gridStart = grid.cells[0];
   const gridEnd = grid.cells[grid.cells.length - 1];
   const byDay = new Map<string, Event[]>();
+  const startMs = new Map<Event, number>();
   if (!gridStart || !gridEnd) return byDay;
   for (const event of events) {
-    const start = new Date(event.start);
-    const end = event.end ? new Date(event.end) : start;
-    if (Number.isNaN(start.getTime())) continue;
-    const spanEnd = Number.isNaN(end.getTime()) || end < start ? start : end;
-    let cursor = new Date(start.getFullYear(), start.getMonth(), start.getDate());
-    if (cursor < gridStart) cursor = new Date(gridStart);
-    const last = new Date(spanEnd.getFullYear(), spanEnd.getMonth(), spanEnd.getDate());
-    const stop = last < gridEnd ? last : gridEnd;
+    const start = instantEpochMs(event.start);
+    if (start === null) continue;
+    startMs.set(event, start);
+    const end = event.end ? instantEpochMs(event.end) : null;
+    const spanEnd = end === null || end < start ? start : end;
+    const firstDay = zonedDateKey(new Date(start), timeZone);
+    const lastDay = zonedDateKey(new Date(spanEnd), timeZone);
+    // 'YYYY-MM-DD' keys compare like the days they name.
+    let cursor = firstDay < gridStart ? gridStart : firstDay;
+    const stop = lastDay < gridEnd ? lastDay : gridEnd;
     while (cursor <= stop) {
-      const key = dayKey(cursor);
-      const bucket = byDay.get(key);
+      const bucket = byDay.get(cursor);
       if (bucket) bucket.push(event);
-      else byDay.set(key, [event]);
-      cursor = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate() + 1);
+      else byDay.set(cursor, [event]);
+      cursor = addDaysToKey(cursor, 1);
     }
   }
   for (const bucket of byDay.values()) {
-    bucket.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    bucket.sort((a, b) => (startMs.get(a) ?? 0) - (startMs.get(b) ?? 0));
   }
   return byDay;
 }

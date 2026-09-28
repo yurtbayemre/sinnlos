@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
 import { ArrowRight, Megaphone, Pin } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,7 +39,9 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
   const tDashboard = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
   const tRel = await getTranslations("relativeTime");
-  const relative = (d: Date | null) => relativeTime(d, tRel, { longDate: true });
+  const locale = await getLocale();
+  const timeZone = appTimeZone();
+  const relative = (d: Date | null) => relativeTime(d, tRel, { longDate: true, locale, timeZone });
   const normalised = items.map(normalise);
   const featured = normalised.find((n) => n.pinned) ?? normalised[0];
   const rest = normalised.filter((n) => n.id !== featured?.id).slice(0, 4);

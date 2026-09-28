@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
+import { formatInstant, SHORT_DAY } from "@/lib/date-format";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { fetchCourseProgress, fetchCourses } from "@/lib/training";
@@ -55,11 +56,12 @@ export default async function TrainingReportPage() {
     redirect("/");
   }
 
-  const [t, tAdmin, tTraining, locale] = await Promise.all([
+  // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
+  const [t, tAdmin, tTraining, format] = await Promise.all([
     getTranslations("trainingReport"),
     getTranslations("admin"),
     getTranslations("training"),
-    getLocale(),
+    getFormatter(),
   ]);
 
   const [coursesResult, usersResult] = await Promise.all([
@@ -135,6 +137,7 @@ export default async function TrainingReportPage() {
       ) : (
         <div className="space-y-4">
           {rows.map(({ course, lessonCount, completedUsers, unknown, pct }) => {
+            const updated = formatInstant(format, course.updatedAt, SHORT_DAY);
             return (
               <Card key={course.id}>
                 <CardHeader className="pb-2">
@@ -157,15 +160,9 @@ export default async function TrainingReportPage() {
                         {t("completedOf", { done: completedUsers as number, total: denominator })}
                       </span>
                       <span className="text-muted-foreground">({pct}%)</span>
-                      {course.updatedAt && (
+                      {updated && (
                         <span className="text-xs text-muted-foreground">
-                          {t("updatedAt", {
-                            date: new Date(course.updatedAt).toLocaleDateString(locale, {
-                              year: "numeric",
-                              month: "short",
-                              day: "numeric",
-                            }),
-                          })}
+                          {t("updatedAt", { date: updated })}
                         </span>
                       )}
                     </>

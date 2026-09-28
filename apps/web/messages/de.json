@@ -121,7 +121,10 @@
     "expand": "Ausklappen",
     "emptyTitle": "Noch keine Personen",
     "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden.",
-    "filterByDepartment": "Nach Abteilung filtern"
+    "filterByDepartment": "Nach Abteilung filtern",
+    "orgChartIssues": "{count, plural, one {# Person steht} other {# Personen stehen}} ganz oben, weil eine Manager-Zuordnung nicht stimmt (ein Kreis, oder jemand ist sich selbst als Manager zugeordnet). Ein Admin kann das Feld „Manager“ im Admin-Panel korrigieren.",
+    "orgCycle": "Manager-Kette führt hierher zurück",
+    "orgSelfManager": "Sich selbst als Manager zugeordnet"
   },
   "events": {
     "title": "Termine",

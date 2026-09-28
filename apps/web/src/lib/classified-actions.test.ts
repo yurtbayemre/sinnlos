@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { appTimeZone } from "@/lib/app-time-zone";
 import { AD_DEFAULT_DURATION_DAYS, MAX_AD_IMAGE_BYTES, dateInDays } from "@/lib/classified-shared";
 import { StrapiError } from "@/lib/strapi-error";
 
@@ -179,7 +180,7 @@ describe("createClassified: form parsing (parseAdForm)", () => {
   ])("expires after %s", async (_label, days, expected) => {
     await expect(createClassified({}, form({ days }))).rejects.toThrow("NEXT_REDIRECT");
     const [, , body] = strapiCalls()[0];
-    expect((body as { data: { expiresAt: unknown } }).data.expiresAt).toBe(dateInDays(expected));
+    expect((body as { data: { expiresAt: unknown } }).data.expiresAt).toBe(dateInDays(expected, appTimeZone()));
   });
 
   it("ignores empty file inputs and malformed kept ids", async () => {
@@ -226,7 +227,7 @@ describe("createClassified: the two-step write", () => {
             priceNegotiable: true,
             location: "HQ",
             images: [],
-            expiresAt: dateInDays(7),
+            expiresAt: dateInDays(7, appTimeZone()),
           },
         },
       ],
@@ -324,7 +325,7 @@ describe("updateClassified", () => {
       [
         "/api/classifieds/9",
         "PUT",
-        { data: expect.objectContaining({ images: [3, 11, 12], expiresAt: dateInDays(30) }) },
+        { data: expect.objectContaining({ images: [3, 11, 12], expiresAt: dateInDays(30, appTimeZone()) }) },
       ],
       ["/api/classifieds/cleanup-uploads", "POST", { imageIds: [4, 5] }],
     ]);
@@ -416,7 +417,7 @@ describe("deleteClassified / renewClassified", () => {
   it("renews for the default lifetime and refreshes", async () => {
     await expect(renewClassified(4)).resolves.toEqual({});
     expect(strapiCalls()).toEqual([
-      ["/api/classifieds/4", "PUT", { data: { expiresAt: dateInDays(AD_DEFAULT_DURATION_DAYS) } }],
+      ["/api/classifieds/4", "PUT", { data: { expiresAt: dateInDays(AD_DEFAULT_DURATION_DAYS, appTimeZone()) } }],
     ]);
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });

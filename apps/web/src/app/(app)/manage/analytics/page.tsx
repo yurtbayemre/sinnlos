@@ -15,7 +15,8 @@ import {
   Search as SearchIcon,
   SearchX,
 } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
+import { formatInstant, type DateTimeFields } from "@/lib/date-format";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
@@ -95,16 +96,20 @@ async function recentActivity() {
   }
 }
 
+/** A recent comment's time, "Sep 30, 14:05", in APP_TIME_ZONE. */
+const COMMENT_TIME: DateTimeFields = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+
 export default async function AnalyticsPage() {
   if (!isAdmin((await getViewer()).role)) {
     redirect("/");
   }
 
-  const [t, tAdmin, tCommon, locale] = await Promise.all([
+  // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
+  const [t, tAdmin, tCommon, format] = await Promise.all([
     getTranslations("analytics"),
     getTranslations("admin"),
     getTranslations("common"),
-    getLocale(),
+    getFormatter(),
   ]);
 
   const [
@@ -302,12 +307,7 @@ export default async function AnalyticsPage() {
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{c.body}</p>
                     {c.createdAt && (
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {new Date(c.createdAt).toLocaleDateString(locale, {
-                          month: "short",
-                          day: "numeric",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {formatInstant(format, c.createdAt, COMMENT_TIME)}
                       </div>
                     )}
                   </div>

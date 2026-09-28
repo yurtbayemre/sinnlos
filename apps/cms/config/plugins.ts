@@ -22,6 +22,18 @@ type Env = ((key: string, def?: unknown) => any) & {
   array: (key: string, def?: string[]) => string[];
 };
 
+/**
+ * The nodemailer transport security for SMTP_PORT (B05): port 465 is
+ * implicit TLS (SMTPS, the connection is encrypted from the first byte);
+ * every other port, 587 submission included, starts in plain text and must
+ * upgrade with STARTTLS — requireTLS makes nodemailer refuse to send when
+ * the server does not offer it.
+ */
+export function smtpTransportSecurity(port: number): { secure: boolean; requireTLS: boolean } {
+  const implicitTls = port === 465;
+  return { secure: implicitTls, requireTLS: !implicitTls };
+}
+
 export default ({ env }: { env: Env }) => ({
   "users-permissions": {
     config: {
@@ -91,17 +103,18 @@ export default ({ env }: { env: Env }) => ({
   // (SMTP-only) in infra/.env; without SMTP_* the digest cron no-ops.
   // Sender/reply-to come from env only (FX13, no owner-domain defaults);
   // without DIGEST_FROM the digest cron skips with a warning.
+  // SMTP_PORT=465 uses implicit TLS, any other port STARTTLS
+  // (smtpTransportSecurity above).
   email: {
     config: {
       provider: "nodemailer",
       providerOptions: {
         host: env("SMTP_HOST", ""),
         port: env.int("SMTP_PORT", 587),
-        secure: false,
         auth: env("SMTP_USER", "")
           ? { user: env("SMTP_USER", ""), pass: env("SMTP_PASS", "") }
           : undefined,
-        requireTLS: true,
+        ...smtpTransportSecurity(env.int("SMTP_PORT", 587)),
       },
       settings: {
         defaultFrom: env("DIGEST_FROM", "") || undefined,

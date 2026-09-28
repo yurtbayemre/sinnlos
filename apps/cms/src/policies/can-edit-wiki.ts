@@ -1,3 +1,4 @@
+import { GUEST } from "../bootstrap/roles";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 import { editablePageSpace, wikiRelationChecks } from "../utils/wiki-write-targets";
 import {
@@ -69,7 +70,7 @@ export default async (
   const roleType = user?.role?.type;
   if (!user || typeof user.id !== "number" || !roleType) return false;
   if (isWriteBypassRole(roleType)) return true;
-  if (roleType === "guest") return false;
+  if (roleType === GUEST) return false;
 
   if (!hasTargetId(policyContext.params?.id)) {
     const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);

@@ -1,5 +1,6 @@
 import { Award, PartyPopper } from "lucide-react";
-import { getTranslations } from "next-intl/server";
+import { getLocale, getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
 import { api } from "@/lib/strapi";
 import { kudosRecipientQuery, toKudosRecipients } from "@/lib/people-dto";
 import { getSession } from "@/lib/session";
@@ -40,7 +41,9 @@ export default async function KudosPage() {
   const t = await getTranslations("kudos");
   const tCommon = await getTranslations("common");
   const tRel = await getTranslations("relativeTime");
-  const relative = (d: string | undefined) => relativeTime(d, tRel);
+  const locale = await getLocale();
+  const timeZone = appTimeZone();
+  const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
   const session = await getSession();
   const selfId = typeof session?.user?.id === "number" ? session.user.id : null;
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([

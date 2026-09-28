@@ -1,15 +1,17 @@
+import { MODERATORS } from "../bootstrap/roles";
 import { parseEntryRef } from "../utils/entry-id";
 
 /**
  * Write-side guard for marketplace ads: only the author may update or
  * delete their classified. Which roles bypass ownership is configurable
  * per route via `config.bypassRoles`:
- *   - update: ["admin_role"] — editing someone's ad text/price is an
+ *   - update: [ADMIN] — editing someone's ad text/price is an
  *     owner/admin matter, not moderation.
- *   - delete: ["admin_role", "editor"] — taking down an inappropriate ad
+ *   - delete: MODERATORS — taking down an inappropriate ad
  *     stays an editor moderation tool (same semantics as
  *     is-reaction-author / comment delete).
- * Default (no config) keeps the historical admin+editor bypass.
+ * Default (no config) keeps the historical admin+editor bypass (MODERATORS,
+ * bootstrap/roles.ts).
  */
 export default async (
   policyContext: any,
@@ -19,7 +21,7 @@ export default async (
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  const bypassRoles = config?.bypassRoles ?? ["admin_role", "editor"];
+  const bypassRoles: readonly string[] = config?.bypassRoles ?? MODERATORS;
   if (bypassRoles.includes(user.role?.type)) return true;
 
   // v5 routes carry a documentId; the web app sends numeric ids — accept

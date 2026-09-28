@@ -45,8 +45,8 @@
  * registered), and returns a pass-through for the request chain. The
  * wrapper runs the core validation first (a malformed query keeps its own
  * 400) and then this walk, with the role read from the request context, the
- * same source as the output sanitizer. src/index.ts wraps
- * `contentAPI.sanitize.query` for FX05; this guard leaves it alone.
+ * same source as the output sanitizer. bootstrap/restricted-relation-guard.ts
+ * wraps `contentAPI.sanitize.query` for FX05; this guard leaves it alone.
  * sensitive-query-guard.test.ts pins the Strapi behaviour this relies on.
  *
  * Fails loudly: if a Strapi upgrade moves `contentAPI.validate.query`, boot

@@ -19,12 +19,19 @@ import pollVoteController from "./poll-vote";
  *     results carry both flags and `canVote` from the same rule,
  *   - the voter is always the caller, whatever the body says,
  *   - results never carry voter identities, but do carry the caller's own
- *     vote even on anonymous polls.
+ *     vote even on anonymous polls,
+ *   - results count one ballot per voter: the voter's first ballot (the
+ *     lowest row id), whatever duplicates a parallel race stored, and a
+ *     vote deletes the voter's later rows for the poll right after its
+ *     insert (answering "Already voted" when its own row was the later one,
+ *     or when a parallel vote's cleanup deleted it before create read it
+ *     back).
  *
  * The db stub evaluates the `where` it receives, so dropping the published
  * pin or the voter filter fails the tests. Its vote `findMany` also returns
  * what @strapi/database returns for a relation filter: only the selected
- * columns, DISTINCT (see `distinctProjection`).
+ * columns, DISTINCT (see `distinctProjection`), then the populated voter
+ * with only the selected fields.
  */
 
 vi.mock("@strapi/strapi", () => ({
@@ -52,7 +59,8 @@ interface PollRow {
 
 interface VoteRow {
   poll: number;
-  voter: number;
+  /** null: the voter's account is gone (the link row went with it). */
+  voter: number | null;
   optionIndex: number;
 }
 
@@ -198,13 +206,49 @@ function distinctProjection(rows: StoredVoteRow[], select: string[] | undefined)
   return projected;
 }
 
+type VotePopulate = { voter?: { select?: string[] } };
+
+/**
+ * The populate step, after the DISTINCT select: a populated `voter` is the
+ * user with only the selected fields (the stub knows only `id`), or null
+ * when the voter is gone. It needs the row's id, as the real one does.
+ */
+function populateVoter(projected: object[], table: StoredVoteRow[], populate: VotePopulate | undefined): object[] {
+  if (!populate?.voter) return projected;
+  const fields = populate.voter.select ?? ["id"];
+  return projected.map((picked) => {
+    const id = (picked as { id?: unknown }).id;
+    if (typeof id !== "number") throw new Error("populate needs the primary key in the select");
+    const voter = table.find((row) => row.id === id)?.voter ?? null;
+    return {
+      ...picked,
+      voter: voter === null ? null : Object.fromEntries(fields.map((key) => [key, key === "id" ? voter : undefined])),
+    };
+  });
+}
+
 type Handler = (ctx: unknown) => Promise<unknown>;
+
+/** The id the stub's create gives this request's vote. */
+const CREATED_ID = 77;
 
 function setup(options: {
   id: unknown;
   user?: UserRow | null;
   body?: unknown;
   votes?: VoteRow[];
+  /**
+   * Rows that land while this request runs, after its "Already voted" check
+   * and together with its insert: parallel votes. An id below CREATED_ID was
+   * inserted first, one above it later.
+   */
+  concurrent?: StoredVoteRow[];
+  /**
+   * A parallel vote's cleanup deletes this request's row after create()
+   * committed its relation links and before it reads the row back
+   * (@strapi/database entity-manager create), so create returns null.
+   */
+  deletedBeforeReadback?: boolean;
 }) {
   const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
@@ -215,16 +259,36 @@ function setup(options: {
     findOne: vi.fn(async ({ where }: { where: Where }) =>
       votesTable.find((row) => matches(row, where)) ?? null,
     ),
-    findMany: vi.fn(async ({ where, select }: { where: Where; select?: string[] }) =>
-      distinctProjection(
-        votesTable.filter((row) => matches(row, where)),
+    findMany: vi.fn(
+      async ({
+        where,
         select,
-      ),
+        populate,
+        orderBy,
+      }: {
+        where: Where;
+        select?: string[];
+        populate?: VotePopulate;
+        orderBy?: { id: "asc" };
+      }) => {
+        const found = votesTable.filter((row) => matches(row, where));
+        if (orderBy) found.sort((a, b) => a.id - b.id);
+        return populateVoter(distinctProjection(found, select), votesTable, populate);
+      },
     ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
-      votesTable.push({ id: 77, ...data });
-      return { id: 77, optionIndex: data.optionIndex };
+      votesTable.push({ id: CREATED_ID, ...data }, ...(options.concurrent ?? []));
+      if (options.deletedBeforeReadback) {
+        votesTable.splice(votesTable.findIndex((row) => row.id === CREATED_ID), 1);
+        return null;
+      }
+      return { id: CREATED_ID, optionIndex: data.optionIndex };
     }),
+    delete: vi.fn(async ({ where }: { where: { id: number } }) => {
+      const index = votesTable.findIndex((row) => row.id === where.id);
+      return index < 0 ? null : votesTable.splice(index, 1)[0];
+    }),
+    deleteMany: vi.fn(),
   };
   const users = {
     findOne: vi.fn(async ({ where }: { where: { id: number } }) => USERS.find((u) => u.id === where.id) ?? null),
@@ -255,7 +319,7 @@ function setup(options: {
     forbidden: vi.fn(),
     send: vi.fn(),
   };
-  return { controller, ctx, pollFindOne, votes };
+  return { controller, ctx, pollFindOne, votes, votesTable };
 }
 
 /** The ctx error spies a handler must NOT have touched on the happy path. */
@@ -425,6 +489,108 @@ describe("vote", () => {
   });
 });
 
+describe("vote: one ballot per voter after a parallel race", () => {
+  const ballotsOf = (table: StoredVoteRow[], poll: number, voter: number) =>
+    table.filter((row) => row.poll === poll && row.voter === voter).map((row) => row.id);
+
+  it("looks for the voter's rows of this poll after the insert and deletes nothing when it is the only one", async () => {
+    const { controller, ctx, votes, votesTable } = setup({ id: OPEN.id, user: ENGINEER });
+    await controller.vote(ctx);
+    expect(votes.findMany).toHaveBeenCalledWith({
+      where: { poll: OPEN.id, voter: ENGINEER.id },
+      select: ["id"],
+      orderBy: { id: "asc" },
+    });
+    expect(votes.create.mock.invocationCallOrder[0]).toBeLessThan(
+      votes.findMany.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(votes.delete).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith({ data: { id: CREATED_ID, optionIndex: 0 } });
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID]);
+  });
+
+  it("deletes the voter's later ballots and answers with its own, the first", async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      concurrent: [
+        { id: CREATED_ID + 3, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { id: CREATED_ID + 5, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: CREATED_ID + 3 } },
+      { where: { id: CREATED_ID + 5 } },
+    ]);
+    // Row by row through the entity manager, so the link rows go too.
+    expect(votes.deleteMany).not.toHaveBeenCalled();
+    for (const spy of errorSpies) expect(ctx[spy], spy).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledWith({ data: { id: CREATED_ID, optionIndex: 0 } });
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID]);
+  });
+
+  it('deletes its own ballot and answers "Already voted" when an earlier one landed first', async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      body: { optionIndex: 0 },
+      concurrent: [{ id: CREATED_ID - 7, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 }],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete).toHaveBeenCalledOnce();
+    expect(votes.delete).toHaveBeenCalledWith({ where: { id: CREATED_ID } });
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already voted");
+    expect(ctx.send).not.toHaveBeenCalled();
+    // The first ballot (option 1) is the one that stays and counts.
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID - 7]);
+  });
+
+  it('answers "Already voted" when a parallel cleanup deleted its ballot before create read it back', async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      body: { optionIndex: 0 },
+      concurrent: [
+        { id: CREATED_ID - 7, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { id: CREATED_ID + 2, poll: OPEN.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+      deletedBeforeReadback: true,
+    });
+    // No TypeError from the missing row: the 400 a second vote gets.
+    await expect(controller.vote(ctx)).resolves.toBeUndefined();
+    expect(ctx.badRequest).toHaveBeenCalledWith("Already voted");
+    expect(ctx.send).not.toHaveBeenCalled();
+    // The cleanup still runs: the later ballot goes, the missing one is not
+    // deleted again, and the first ballot stays.
+    expect(votes.delete.mock.calls.map(([params]) => params)).toEqual([
+      { where: { id: CREATED_ID + 2 } },
+    ]);
+    expect(ballotsOf(votesTable, OPEN.id, ENGINEER.id)).toEqual([CREATED_ID - 7]);
+  });
+
+  it("never touches other voters' ballots or the voter's ballots on other polls", async () => {
+    const { controller, ctx, votes, votesTable } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      concurrent: [
+        { id: CREATED_ID - 1, poll: OPEN.id, voter: DESIGNER.id, optionIndex: 1 },
+        { id: CREATED_ID + 1, poll: OPEN.id, voter: DESIGNER.id, optionIndex: 1 },
+        { id: CREATED_ID - 2, poll: CLOSING.id, voter: ENGINEER.id, optionIndex: 0 },
+      ],
+    });
+    await controller.vote(ctx);
+    expect(votes.delete).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledOnce();
+    expect(votesTable.map((row) => row.id).sort((a, b) => a - b)).toEqual([
+      CREATED_ID - 2,
+      CREATED_ID - 1,
+      CREATED_ID,
+      CREATED_ID + 1,
+    ]);
+  });
+});
+
 describe("vote: close rule (datetime contract)", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -528,7 +694,46 @@ describe("results", () => {
       canVote: true,
       audience: { targeted: false, departments: [] },
     });
-    expect(votes.findMany).toHaveBeenCalledWith({ where: { poll: OPEN.id }, select: ["id", "optionIndex"] });
+    expect(votes.findMany).toHaveBeenCalledWith({
+      where: { poll: OPEN.id },
+      select: ["id", "optionIndex"],
+      populate: { voter: { select: ["id"] } },
+    });
+    // One query: the caller's own vote comes from the same rows.
+    expect(votes.findMany).toHaveBeenCalledOnce();
+    expect(votes.findOne).not.toHaveBeenCalled();
+  });
+
+  it("counts one ballot per voter: the first stored ballot (lowest id) wins, also for the caller", async () => {
+    // Rows get ids 100, 101, ... in this order: the caller's first ballot is
+    // option 0, a parallel duplicate of it option 1.
+    const { controller, ctx } = setup({
+      id: OPEN.id,
+      user: ENGINEER,
+      votes: [
+        { poll: OPEN.id, voter: ENGINEER.id, optionIndex: 0 },
+        { poll: OPEN.id, voter: 12, optionIndex: 1 },
+        { poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { poll: OPEN.id, voter: 12, optionIndex: 0 },
+        { poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 },
+        { poll: OPEN.id, voter: 13, optionIndex: 1 },
+      ],
+    });
+    await controller.results(ctx);
+    expect(sent(ctx)).toMatchObject({ counts: [1, 2], total: 3, myVoteIndex: 0 });
+  });
+
+  it("counts each vote of a deleted account on its own", async () => {
+    const { controller, ctx } = setup({
+      id: OPEN.id,
+      votes: [
+        { poll: OPEN.id, voter: null, optionIndex: 1 },
+        { poll: OPEN.id, voter: null, optionIndex: 1 },
+        { poll: OPEN.id, voter: 12, optionIndex: 0 },
+      ],
+    });
+    await controller.results(ctx);
+    expect(sent(ctx)).toMatchObject({ counts: [1, 2], total: 3, myVoteIndex: null });
   });
 
   it("counts identical votes one by one: the vote query selects the primary key", async () => {
@@ -577,12 +782,9 @@ describe("results", () => {
     expect(body.myVoteIndex).toBe(1);
     expect((body.poll as { anonymous: boolean }).anonymous).toBe(true);
     expect(JSON.stringify(body)).not.toContain("voter");
-    expect(votes.findOne).toHaveBeenCalledWith({
-      where: { poll: ENG_ONLY.id, voter: ENGINEER.id },
-      select: ["optionIndex"],
-    });
+    // The voter is read for counting only, and then its id alone.
     for (const call of votes.findMany.mock.calls) {
-      expect(call[0]).not.toHaveProperty("populate");
+      expect(call[0].populate).toEqual({ voter: { select: ["id"] } });
     }
   });
 

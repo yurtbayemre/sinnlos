@@ -8,7 +8,9 @@
  *   1. POST /api/upload (multipart, user JWT) → media ids. The CMS
  *      enforces JPEG/PNG/WebP magic bytes, 5 MB and max 4 files per
  *      request on that route.
- *   2. POST/PUT /api/classifieds with data.images = ids. The CMS pins the
+ *   2. POST/PUT /api/classifieds with data.images = ids and expiresAt =
+ *      today + the chosen lifetime, today being the APP_TIME_ZONE day
+ *      (classified-shared.dateInDays). The CMS pins the
  *      author server-side and clamps expiresAt to [today, +90 days].
  *
  * Error contract: actions return machine codes (ClassifiedErrorCode); the
@@ -25,6 +27,7 @@
  */
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
+import { appTimeZone } from "@/lib/app-time-zone";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { getStrapiToken } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
@@ -219,7 +222,7 @@ export async function createClassified(
         data: {
           ...parsed.fields,
           images: imageIds,
-          expiresAt: dateInDays(parsed.days ?? AD_DEFAULT_DURATION_DAYS),
+          expiresAt: dateInDays(parsed.days ?? AD_DEFAULT_DURATION_DAYS, appTimeZone()),
         },
       }),
     });
@@ -257,7 +260,7 @@ export async function updateClassified(
       images: [...parsed.keepImageIds, ...newImageIds],
     };
     // Only touch the expiry when the user explicitly picked a new lifetime.
-    if (parsed.days !== null) data.expiresAt = dateInDays(parsed.days);
+    if (parsed.days !== null) data.expiresAt = dateInDays(parsed.days, appTimeZone());
 
     await strapi(`/api/classifieds/${id}`, {
       method: "PUT",
@@ -298,7 +301,7 @@ export async function renewClassified(id: number): Promise<{ error?: "failed" }>
     await strapi(`/api/classifieds/${id}`, {
       method: "PUT",
       body: JSON.stringify({
-        data: { expiresAt: dateInDays(AD_DEFAULT_DURATION_DAYS) },
+        data: { expiresAt: dateInDays(AD_DEFAULT_DURATION_DAYS, appTimeZone()) },
       }),
     });
   } catch (e) {

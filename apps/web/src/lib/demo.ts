@@ -3,6 +3,14 @@
  * previewed without a running Strapi instance. The shapes match what
  * Strapi v5 flat responses return.
  */
+import { appTimeZone } from "@/lib/app-time-zone";
+import {
+  DEFAULT_APP_TIME_ZONE,
+  addDaysToKey,
+  zonedDateKey,
+  zonedWallTimeToInstant,
+} from "@/lib/plain-date";
+
 type AnyEntry = { id: number; [key: string]: any };
 type ListResponse = { data: AnyEntry[]; meta: { pagination: any } };
 
@@ -55,6 +63,31 @@ const users: Record<string, AnyEntry> = {
     jobTitle: "Head of Marketing",
   },
 };
+
+/**
+ * Fixture dates relative to today in APP_TIME_ZONE (datetime contract,
+ * phase 2): iso(3, 17) is 17:00 there three days from now, whatever zone
+ * the process runs in (the local setHours before gave 17:00 of the process
+ * zone, 19:00 Berlin time in a UTC container), and dateOnly(n) is a
+ * calendar date. Resolved once at import, like the fixtures; this module is
+ * imported by strapi.ts in every mode, so an invalid APP_TIME_ZONE falls
+ * back to the default here (instrumentation.ts refuses to serve with it).
+ */
+const DEMO_ZONE = (() => {
+  try {
+    return appTimeZone();
+  } catch {
+    return DEFAULT_APP_TIME_ZONE;
+  }
+})();
+const DEMO_TODAY = zonedDateKey(new Date(), DEMO_ZONE);
+const iso = (offsetDays: number, hour = 10) =>
+  zonedWallTimeToInstant(
+    addDaysToKey(DEMO_TODAY, offsetDays),
+    `${String(hour).padStart(2, "0")}:00`,
+    DEMO_ZONE,
+  ).toISOString();
+const dateOnly = (offsetDays: number) => addDaysToKey(DEMO_TODAY, offsetDays);
 
 const departments: AnyEntry[] = [
   {
@@ -167,7 +200,8 @@ const announcements: AnyEntry[] = [
     documentId: "demo-ann-1",
     title: "Q2 All-hands this Friday",
     requiresAck: true,
-    ackDeadline: new Date(Date.now() + 7 * 86400000).toISOString(),
+    // A calendar date, like the cms's `date` field.
+    ackDeadline: dateOnly(7),
     body: "Join us at 15:00 CET in the main auditorium or on Teams. Agenda: quarterly numbers, product roadmap, and a live demo of the new intranet.",
     pinned: true,
     createdAt: new Date().toISOString(),
@@ -224,16 +258,9 @@ const announcements: AnyEntry[] = [
  * Fixtures for the modules added after the original demo set (issue #15):
  * kudos, polls, events + RSVPs, documents, notifications, quick links,
  * marketplace, celebrations. Shapes mirror the real API responses the
- * pages consume — dates are computed relative to "now" so the events
- * month view and expiry filters always show content.
+ * pages consume — dates are computed relative to "now" (iso/dateOnly
+ * above) so the events month view and expiry filters always show content.
  */
-const day = 86400000;
-const iso = (offsetDays: number, hour = 10) => {
-  const d = new Date(Date.now() + offsetDays * day);
-  d.setHours(hour, 0, 0, 0);
-  return d.toISOString();
-};
-const dateOnly = (offsetDays: number) => iso(offsetDays).slice(0, 10);
 
 const events: AnyEntry[] = [
   {

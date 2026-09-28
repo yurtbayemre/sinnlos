@@ -186,6 +186,23 @@ export function addDaysToKey(key: string, days: number): string {
   return `${pad(shifted.getUTCFullYear(), 4)}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}`;
 }
 
+/** Epoch ms of UTC midnight of a calendar date: a day number, never an instant. */
+function keyToUtcMs(key: string): number {
+  if (!isPlainDate(key)) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${key}`);
+  const [year, month, day] = key.split("-").map(Number);
+  return Date.UTC(year, month - 1, day);
+}
+
+/** Whole calendar days from `from` to `to` (negative when `to` is earlier). */
+export function daysBetweenKeys(from: string, to: string): number {
+  return Math.round((keyToUtcMs(to) - keyToUtcMs(from)) / DAY_MS);
+}
+
+/** ISO weekday of a calendar date: 1 = Monday ... 7 = Sunday. */
+export function isoWeekdayOfKey(key: string): number {
+  return new Date(keyToUtcMs(key)).getUTCDay() || 7;
+}
+
 /**
  * Human-readable calendar date. Formats in UTC on purpose: the key is a day,
  * not an instant, so no zone may move it (30 Sep stays 30 Sep everywhere).
@@ -233,4 +250,19 @@ export function zonedWallTimeToInstant(key: string, time: string, timeZone: stri
   if (candidates.length > 0) return new Date(Math.min(...candidates));
   // The wall time does not exist (spring forward): shift it by the gap.
   return new Date(wallAsUtc - offsetBefore);
+}
+
+/**
+ * The first instant of calendar day `key` in `timeZone`, like Temporal's
+ * ZonedDateTime.startOfDay(): midnight there, or the first wall time after a
+ * midnight that DST skips. Day windows are half-open:
+ * [zonedDayStart(D), zonedDayStart(D + 1)).
+ */
+export function zonedDayStart(key: string, timeZone: string): Date {
+  return zonedWallTimeToInstant(key, "00:00", timeZone);
+}
+
+/** The hour (0-23) the wall clock in `timeZone` shows at an instant. */
+export function zonedHour(instant: Date | string, timeZone: string): number {
+  return wallClockAt(toEpochMs(instant), timeZone).hour;
 }

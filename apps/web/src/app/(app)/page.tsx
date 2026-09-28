@@ -3,6 +3,8 @@ import type { Route } from "next";
 import { Suspense } from "react";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
+import { zonedDateKey, zonedDayStart, zonedHour } from "@/lib/plain-date";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
@@ -15,14 +17,13 @@ import { TrainingBanner } from "@/components/training/training-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 
-/** Local start of today — events that began earlier today still count as upcoming. */
-function startOfToday(): Date {
-  const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
-}
-
 export default async function DashboardPage() {
   const session = await getSession();
+  // Today in APP_TIME_ZONE (datetime contract, phase 2): events that began
+  // earlier today, or are still running, count as upcoming.
+  const timeZone = appTimeZone();
+  const now = new Date();
+  const startOfToday = zonedDayStart(zonedDateKey(now, timeZone), timeZone).toISOString();
 
   // In a fresh install these may be empty — we render a friendly empty state.
   // When a fetch fails (e.g. Strapi is unreachable), we flag it so the user
@@ -38,7 +39,7 @@ export default async function DashboardPage() {
     tryFetch(() => api.announcements.list(), "dashboard"),
     // Upcoming only — the stat card counts events that still matter, not
     // the 50 oldest history entries (api.events is time-window based now).
-    tryFetch(() => api.events.upcoming(startOfToday().toISOString()), "dashboard"),
+    tryFetch(() => api.events.upcoming(startOfToday, now.toISOString()), "dashboard"),
     tryFetch(() => api.quickLinks.list(), "dashboard"),
   ]);
 
@@ -68,7 +69,7 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <header>
         <p className="text-sm text-muted-foreground">
-          {greeting(t)}, {session?.user?.name ?? t("friendFallback")}
+          {greeting(t, zonedHour(now, timeZone))}, {session?.user?.name ?? t("friendFallback")}
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">{t("welcomeBack")}</h1>
       </header>
@@ -194,8 +195,8 @@ function StatCard({
   );
 }
 
-function greeting(t: (key: string) => string) {
-  const h = new Date().getHours();
+/** The greeting of the wall-clock hour `h` (0-23) in APP_TIME_ZONE, not the process zone. */
+function greeting(t: (key: string) => string, h: number) {
   if (h < 12) return t("goodMorning");
   if (h < 18) return t("goodAfternoon");
   return t("goodEvening");

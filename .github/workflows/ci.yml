@@ -95,3 +95,50 @@ jobs:
       # UTC, Europe/Berlin, Pacific/Auckland (scripts/test-tz.mjs).
       - name: Test under three process time zones, with Postgres 16
         run: pnpm test:tz
+
+  # Strapi-in-process integration suite (roadmap S11, `pnpm test:integration`,
+  # apps/cms/src/integration/): the real cms, compiled once, booted per suite
+  # with its real register()/bootstrap() on a fresh SQLite file and, through
+  # SINNLOS_TEST_PG_URL, a fresh Postgres 16 schema, and driven over HTTP
+  # with one account per role. Separate from the TZ matrix: the suite pins
+  # TZ=UTC itself (vitest.integration.config.ts), as the container does.
+  integration:
+    name: integration · SQLite + Postgres 16
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: sinnlos
+          POSTGRES_PASSWORD: sinnlos
+          POSTGRES_DB: sinnlos
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sinnlos"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack (pnpm 9.12.0)
+        run: |
+          corepack enable
+          corepack prepare pnpm@9.12.0 --activate
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Strapi integration suite (SQLite + Postgres 16)
+        run: pnpm test:integration

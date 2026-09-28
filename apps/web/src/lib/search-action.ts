@@ -33,7 +33,9 @@ import "server-only";
 import type { Route } from "next";
 import { unstable_rethrow } from "next/navigation";
 import { getLocale, getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
 import { walkAllPages } from "@/lib/paginate";
+import { instantEpochMs, zonedDateKey, zonedDayStart } from "@/lib/plain-date";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export const SEARCH_KINDS = [
@@ -332,26 +334,59 @@ export function toSearchItems(kind: SearchKind, rows: unknown, format: SearchFor
 // Loading (server)
 // ---------------------------------------------------------------------------
 
+/**
+ * Snippet dates in APP_TIME_ZONE (datetime contract, phase 2), with the
+ * same fields as before the port: an event's day, and a poll's closing day
+ * in the locale's numeric date (a web-form poll closes at 23:59:59 there,
+ * so the day shown is the day chosen). Instants without Z or an offset are
+ * no dates (plain-date.instantEpochMs).
+ */
+export function searchFormatFor(
+  locale: string,
+  timeZone: string,
+  labels: { pollCloses: (date: string) => string; pollOpen: string; unknown: string },
+): SearchFormat {
+  const eventDay = new Intl.DateTimeFormat(locale, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone,
+  });
+  const closingDay = new Intl.DateTimeFormat(locale, {
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    timeZone,
+  });
+  const valid = (iso: string) => {
+    const ms = instantEpochMs(iso);
+    return ms === null ? undefined : new Date(ms);
+  };
+  return {
+    eventDate: (iso) => {
+      const date = valid(iso);
+      return date ? eventDay.format(date) : undefined;
+    },
+    pollCloses: (iso) => {
+      const date = valid(iso);
+      return date ? labels.pollCloses(closingDay.format(date)) : undefined;
+    },
+    pollOpen: labels.pollOpen,
+    unknown: labels.unknown,
+  };
+}
+
 async function searchFormat(): Promise<SearchFormat> {
   const [locale, tSearch, tCommon] = await Promise.all([
     getLocale(),
     getTranslations("search"),
     getTranslations("common"),
   ]);
-  const valid = (iso: string) => {
-    const date = new Date(iso);
-    return Number.isNaN(date.getTime()) ? undefined : date;
-  };
-  return {
-    eventDate: (iso) =>
-      valid(iso)?.toLocaleDateString(locale, { month: "short", day: "numeric", year: "numeric" }),
-    pollCloses: (iso) => {
-      const date = valid(iso);
-      return date ? tSearch("pollCloses", { date: date.toLocaleDateString(locale) }) : undefined;
-    },
+  return searchFormatFor(locale, appTimeZone(), {
+    pollCloses: (date) => tSearch("pollCloses", { date }),
     pollOpen: tSearch("pollOpen"),
     unknown: tCommon("unknown"),
-  };
+  });
 }
 
 /**
@@ -373,9 +408,10 @@ export async function loadPreload(
   kind: PreloadKind,
   now: Date = new Date(),
 ): Promise<SearchItem[]> {
-  // Upcoming events from the start of the server's local day (the old
-  // palette's window; the business-zone port is datetime phase 2, D-DT3).
-  const fromIso = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+  // Upcoming events from the start of today in APP_TIME_ZONE (datetime
+  // contract, phase 2; the process zone is UTC in the container).
+  const timeZone = appTimeZone();
+  const fromIso = zonedDayStart(zonedDateKey(now, timeZone), timeZone).toISOString();
   const maxPages = WALKED[kind];
   const [format, rows] = await Promise.all([
     searchFormat(),

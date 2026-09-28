@@ -24,6 +24,7 @@ import {
   DIGEST_EXCLUDED_ROLE_TYPES,
   digestsEnabled,
   isDigestRecipient,
+  parseEnvFlag,
   reportDigestConfig,
   selectAnnouncements,
   sendDigests,
@@ -48,6 +49,20 @@ describe("digestsEnabled", () => {
       kind: "skip",
       reason: "DIGESTS_DISABLED=1",
     });
+  });
+
+  it("reads DIGESTS_DISABLED as a boolean, '1' included (B05)", () => {
+    for (const on of ["1", "true", "TRUE", " yes ", "on"]) {
+      expect(digestsEnabled({ ...FULL, DIGESTS_DISABLED: on }).kind, on).toBe("skip");
+    }
+    for (const off of ["0", "false", "no", "off", "", " ", "2"]) {
+      expect(digestsEnabled({ ...FULL, DIGESTS_DISABLED: off }).kind, off).toBe("send");
+    }
+    expect(digestsEnabled({ ...FULL, DIGESTS_DISABLED: " true " })).toEqual({
+      kind: "skip",
+      reason: "DIGESTS_DISABLED=true",
+    });
+    expect(parseEnvFlag(undefined)).toBe(false);
   });
 
   it("is misconfigured (not silently defaulted) without PUBLIC_WEB_URL or DIGEST_FROM", () => {

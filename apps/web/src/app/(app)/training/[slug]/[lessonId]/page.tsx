@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
@@ -11,6 +11,7 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
 import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
@@ -28,7 +29,7 @@ export default async function LessonPage({
   params: Promise<{ slug: string; lessonId: string }>;
 }) {
   const { slug, lessonId } = await params;
-  const [t, locale] = await Promise.all([getTranslations("training"), getLocale()]);
+  const [t, format] = await Promise.all([getTranslations("training"), getFormatter()]);
 
   const [lessonResult, courseResult, progressResult] = await Promise.all([
     tryFetch(() => fetchLessonByDocumentId(lessonId), "training"),
@@ -55,13 +56,8 @@ export default async function LessonPage({
   const index = lessons.findIndex((l) => l.documentId === lesson.documentId);
   const next = index >= 0 ? lessons[index + 1] : undefined;
   const completedAtIso = progressResult.data?.completed.get(lessonId) ?? null;
-  const completedAtLabel = completedAtIso
-    ? new Date(completedAtIso).toLocaleDateString(locale, {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-      })
-    : null;
+  // An instant, shown as its day in APP_TIME_ZONE (next-intl's formatter).
+  const completedAtLabel = formatInstant(format, completedAtIso, LONG_DAY);
   const quiz = parseQuiz(lesson.quiz);
 
   return (

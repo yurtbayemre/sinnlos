@@ -29,13 +29,20 @@ const MAX_OPTIONS = 10;
  * Guest access (owner decision 2026-09-27): "Visible to guests" and
  * "Guests can vote" start unchecked (polls are hidden from guests by
  * default); the vote switch is disabled until the poll is visible to guests
- * and is cleared when visibility is switched off again. */
+ * and is cleared when visibility is switched off again.
+ *
+ * `minDate`: today in APP_TIME_ZONE ('YYYY-MM-DD'), from the server
+ * (datetime contract, C6): the earliest closing day the date picker offers.
+ * The browser's own day, or the UTC day this used to take, differs from it
+ * around midnight. The server action still decides (poll-actions.ts). */
 export function PollForm({
   departments,
   departmentsUnavailable = false,
+  minDate,
 }: {
   departments: { id: number; name: string }[];
   departmentsUnavailable?: boolean;
+  minDate: string;
 }) {
   const t = useTranslations("polls");
   const router = useRouter();
@@ -67,8 +74,6 @@ export function PollForm({
   // normalizeGuestAccess clears the vote switch whenever visibility is off.
   const changeGuestAccess = (change: Partial<PollGuestAccess>) =>
     setGuestAccess((prev) => normalizeGuestAccess({ ...prev, ...change }));
-
-  const today = new Date().toISOString().slice(0, 10);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -159,7 +164,7 @@ export function PollForm({
           id="poll-closes"
           type="date"
           value={closesAt}
-          min={today}
+          min={minDate}
           onChange={(e) => setClosesAt(e.target.value)}
           className={cn(inputClass, "sm:max-w-56")}
         />

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { errors, strings } from "@strapi/utils";
+import { MODERATORS } from "../bootstrap/roles";
 import { parseRowId } from "./entry-id";
 import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 
@@ -75,8 +76,11 @@ export const DEPARTMENT_UID = "api::department.department";
 export const TEAM_UID = "api::team.team";
 export const WIKI_PAGE_UID = "api::wiki-page.wiki-page";
 
-/** Roles that skip the allowlist entirely (they also author in the admin panel). */
-export const WRITE_BYPASS_ROLES: readonly string[] = ["admin_role", "editor"];
+/**
+ * Roles that skip the allowlist entirely (they also author in the admin
+ * panel): the MODERATORS of the role vocabulary (bootstrap/roles.ts).
+ */
+export const WRITE_BYPASS_ROLES: readonly string[] = MODERATORS;
 
 export const isWriteBypassRole = (roleType: unknown): boolean =>
   typeof roleType === "string" && WRITE_BYPASS_ROLES.includes(roleType);

@@ -1,5 +1,6 @@
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { isAbsolute, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import databaseConfig from "./database";
 
@@ -98,5 +99,29 @@ describe("config/database: UTC session pin (datetime contract)", () => {
   it("ignores DATABASE_URL entirely on SQLite", () => {
     const env = makeEnv({ DATABASE_CLIENT: "sqlite", DATABASE_URL: "postgres://u:p@db/x?options=-c%20x%3Dy" });
     expect(databaseConfig({ env }).connection.client).toBe("sqlite");
+  });
+});
+
+describe("config/database: SQLite filename (B05)", () => {
+  const filenameFor = (store: EnvStore) =>
+    (
+      databaseConfig({ env: makeEnv({ DATABASE_CLIENT: "sqlite", ...store }) }).connection
+        .connection as { filename: string }
+    ).filename;
+
+  it("resolves a relative DATABASE_FILENAME (and the default) against the app root", () => {
+    // __dirname of config/database.ts is config/ here and dist/config at
+    // runtime; either way the base is two levels up.
+    const base = resolve(__dirname, "..", "..");
+    expect(filenameFor({})).toBe(join(base, ".tmp", "data.db"));
+    expect(filenameFor({ DATABASE_FILENAME: "data/sinnlos.db" })).toBe(
+      join(base, "data", "sinnlos.db"),
+    );
+  });
+
+  it("uses an absolute DATABASE_FILENAME as given", () => {
+    const absolute = join(tmpdir(), "sinnlos-b05", "sinnlos.db");
+    expect(isAbsolute(absolute)).toBe(true);
+    expect(filenameFor({ DATABASE_FILENAME: absolute })).toBe(absolute);
   });
 });

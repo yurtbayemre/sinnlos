@@ -26,6 +26,12 @@
     "typeRoots": ["./apps/cms/node_modules/@types", "./apps/cms/node_modules"],
     "types": ["node", "@strapi/strapi"]
   },
-  "include": ["apps/cms/src/**/*.test.ts", "apps/cms/config/**/*.test.ts"],
+  // The integration helpers are listed on their own: vitest loads the global
+  // setup directly (vitest.integration.config.ts), no test imports it.
+  "include": [
+    "apps/cms/src/**/*.test.ts",
+    "apps/cms/config/**/*.test.ts",
+    "apps/cms/src/integration/*.test.helper.ts"
+  ],
   "exclude": ["**/node_modules/**"]
 }

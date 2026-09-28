@@ -37,6 +37,7 @@
  * `apps/web/Dockerfile`: only `apps/web` is copied), so the module cannot
  * be shared by import; both files carry the same tests.
  */
+import { MODERATORS } from "../bootstrap/roles";
 
 /**
  * The caller's organisational scope, resolved from the database. All row
@@ -64,9 +65,9 @@ export interface AnnouncementTargeting {
  * Roles that read every announcement regardless of targeting: they
  * author and moderate them, so a filtered list would hide their own work.
  * Mirrors the bypass of the other visibility policies (document, wiki,
- * quick-link).
+ * quick-link): the MODERATORS of the role vocabulary (bootstrap/roles.ts).
  */
-const BYPASS_ROLE_TYPES = ["admin_role", "editor"];
+const BYPASS_ROLE_TYPES: readonly string[] = MODERATORS;
 
 export function hasAudienceBypass(roleType?: string | null): boolean {
   return roleType != null && BYPASS_ROLE_TYPES.includes(roleType);

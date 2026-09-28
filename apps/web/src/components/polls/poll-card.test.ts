@@ -165,16 +165,20 @@ describe("PollCard: guest access (owner decision 2026-09-27)", () => {
 
 describe("PollForm", () => {
   const departments = [{ id: 1, name: "Engineering" }];
+  /** Today in APP_TIME_ZONE as the server passes it (polls/new/page.tsx). */
+  const MIN_DATE = "2026-10-01";
   const submitButton = (html: string) => html.match(/<button[^>]*type="submit"[^>]*>/)?.[0] ?? "";
 
   it("disables submit and says why when the departments could not be loaded", () => {
-    const html = render(createElement(PollForm, { departments: [], departmentsUnavailable: true }));
+    const html = render(
+      createElement(PollForm, { departments: [], departmentsUnavailable: true, minDate: MIN_DATE }),
+    );
     expect(isDisabled(submitButton(html))).toBe(true);
     expect(html).toContain(en.polls.departmentsUnavailable);
   });
 
   it("offers the department picker with the restriction copy otherwise", () => {
-    const html = render(createElement(PollForm, { departments }));
+    const html = render(createElement(PollForm, { departments, minDate: MIN_DATE }));
     expect(isDisabled(submitButton(html))).toBe(false);
     expect(html).toContain(en.polls.formDepartments);
     expect(html).toContain(en.polls.formDepartmentsHint);
@@ -186,7 +190,10 @@ describe("PollForm", () => {
   const isChecked = (tag: string) => /\schecked=""/.test(tag);
 
   it("offers both guest switches unchecked, the vote switch disabled until the poll is visible to guests", () => {
-    for (const props of [{ departments }, { departments: [] }]) {
+    for (const props of [
+      { departments, minDate: MIN_DATE },
+      { departments: [], minDate: MIN_DATE },
+    ]) {
       const html = render(createElement(PollForm, props));
       const visible = inputById(html, "poll-visible-to-guests");
       const vote = inputById(html, "poll-guests-can-vote");
@@ -201,5 +208,13 @@ describe("PollForm", () => {
       expect(html).toContain(en.polls.formVisibleToGuests);
       expect(html).toContain(en.polls.formGuestsCanVote);
     }
+  });
+
+  it("offers closing days from the server's today in APP_TIME_ZONE, not the UTC or browser day", () => {
+    // At 22:30Z on 30 Sep it is 1 Oct in Berlin: the page passes 2026-10-01.
+    const html = render(createElement(PollForm, { departments, minDate: MIN_DATE }));
+    const closes = inputById(html, "poll-closes");
+    expect(closes).toContain('type="date"');
+    expect(closes).toContain(`min="${MIN_DATE}"`);
   });
 });

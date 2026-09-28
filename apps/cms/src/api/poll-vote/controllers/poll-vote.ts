@@ -7,6 +7,7 @@ import {
   isInPollAudience,
   isPollTargeted,
 } from "../../../utils/poll-audience";
+import { isOptionIndex, tallyBallots, type BallotRow } from "../../../utils/poll-ballots";
 import { isPollClosed } from "../../../utils/poll-close";
 
 /**
@@ -29,14 +30,21 @@ import { isPollClosed } from "../../../utils/poll-close";
  *     read.
  * Results never name a voter. They include the caller's own vote even on
  * anonymous polls (FX20: the card needs it to show "you voted").
+ *
+ * One ballot per voter (utils/poll-ballots.ts): a vote cannot be changed, so
+ * a voter's first accepted ballot (the row with the lowest id) is the one
+ * the results count, whatever duplicates a parallel race stored. The vote
+ * handler also deletes a voter's later rows right after its insert, so
+ * stored duplicates converge to that ballot.
  */
 
 interface OptionIndexRow {
   optionIndex?: unknown;
 }
 
-const isOptionIndex = (value: unknown): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0;
+interface IdRow {
+  id: number;
+}
 
 const pollOptions = (options: unknown): unknown[] => (Array.isArray(options) ? options : []);
 
@@ -66,8 +74,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     if (isPollClosed(poll.closesAt)) return ctx.badRequest("Poll is closed");
 
     // Check-then-insert without a DB unique constraint (voter is a link-table
-    // relation): two truly parallel votes by one user can both land. Accepted
-    // race, as for acks and RSVPs (#16).
+    // relation, #16, DA04): truly parallel votes by one user can all pass
+    // this check and insert. The cleanup below collapses them.
     const votes = strapi.db.query("api::poll-vote.poll-vote");
     const existing = await votes.findOne({
       where: { poll: poll.id, voter: user.id },
@@ -75,9 +83,33 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     });
     if (existing) return ctx.badRequest("Already voted");
 
-    const vote = await votes.create({
+    // Null when this ballot is already gone: create() inserts the row,
+    // commits its relation links, then reads the row back
+    // (@strapi/database 5.55.1 entity-manager create), and a parallel vote
+    // of the same voter can run the cleanup below in between and delete it.
+    const vote = (await votes.create({
       data: { poll: poll.id, optionIndex, voter: user.id },
-    });
+    })) as IdRow | null;
+
+    // Keep the voter's first ballot for this poll (the lowest id, the one the
+    // results count, utils/poll-ballots.ts) and delete the later ones. Every
+    // vote checks AFTER its own insert, so the one that checks last sees
+    // every row and leaves exactly one; the first ballot is never deleted
+    // here, so one always stays. The same pattern as the reaction create.
+    const mine = (await votes.findMany({
+      where: { poll: poll.id, voter: user.id },
+      select: ["id"],
+      orderBy: { id: "asc" },
+    })) as IdRow[];
+    const [first, ...later] = mine;
+    // One entity-manager delete per row, not deleteMany: the latter is a bare
+    // query-builder delete in @strapi/database 5.55.1 and would leave the
+    // poll and voter link rows behind.
+    for (const row of later) await votes.delete({ where: { id: row.id } });
+    // This request's ballot came second (or a parallel cleanup already
+    // deleted it, see create above): it does not count, the answer a vote
+    // gets that finds the first ballot already there.
+    if (!vote || (first && first.id !== vote.id)) return ctx.badRequest("Already voted");
     return ctx.send({ data: vote });
   },
 
@@ -91,19 +123,21 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     ]);
     if (!poll || !canSeePoll(poll, viewer)) return ctx.notFound();
 
-    // Never populate `voter`: the response carries counts and the caller's
-    // own vote only, whatever `anonymous` says.
+    // The voter's id only, to count one ballot per voter (tallyBallots) and
+    // find the caller's own: it never leaves this handler. The response
+    // carries counts and the caller's own vote only, whatever `anonymous`
+    // says.
     // id must stay in the select: a relation filter makes @strapi/database
     // add DISTINCT (query-builder.js shouldUseDistinct), and without the
     // primary key identical votes collapse into one row.
-    const votes = strapi.db.query("api::poll-vote.poll-vote");
-    const [rows, mine] = (await Promise.all([
-      votes.findMany({ where: { poll: poll.id }, select: ["id", "optionIndex"] }),
-      votes.findOne({ where: { poll: poll.id, voter: user.id }, select: ["optionIndex"] }),
-    ])) as [OptionIndexRow[], OptionIndexRow | null];
+    const rows = (await strapi.db.query("api::poll-vote.poll-vote").findMany({
+      where: { poll: poll.id },
+      select: ["id", "optionIndex"],
+      populate: { voter: { select: ["id"] } },
+    })) as BallotRow[];
 
     const options = pollOptions(poll.options);
-    const counts = options.map((_, i) => rows.filter((row) => row.optionIndex === i).length);
+    const { counts, total, myVoteIndex } = tallyBallots(rows, options.length, user.id);
 
     return ctx.send({
       poll: {
@@ -118,8 +152,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
         guestsCanVote: poll.guestsCanVote,
       },
       counts,
-      total: rows.length,
-      myVoteIndex: isOptionIndex(mine?.optionIndex) ? mine.optionIndex : null,
+      total,
+      myVoteIndex,
       canVote: canVoteOnPoll(poll, viewer),
       audience: {
         targeted: isPollTargeted(poll),

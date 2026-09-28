@@ -52,8 +52,9 @@ anonymous search analytics, and an **English/German UI**
 
 ## Prerequisites
 
-- Node.js 22.13+ or 24 LTS (root `engines`: `^22.13.0 || ^24.0.0`; CI and
-  the Docker images use Node 24; Node 20 is end-of-life)
+- Node.js 22.13+ or 24 LTS (root and `apps/cms` `engines`:
+  `^22.13.0 || ^24.0.0`; CI and the Docker images use Node 24; Node 20 is
+  end-of-life)
 - pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant with permission to register an app — only for
@@ -186,24 +187,37 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   anniversaries, digest days, the cron times, all-day events and poll
   deadlines. Spell it as the tz database does (`Europe/Berlin`; no UTC
   offset such as `+02:00`). With an unknown value or an offset the cms does
-  not start and the web answers every request with an error (both log why);
-  the web also does when its container's `TZ` (compose sets it from
-  `APP_TIME_ZONE`) is a name Node cannot find. The cms process
-  and its database sessions run in UTC and every instant is stored as
-  `timestamptz`; do not set `TZ` for the containers (compose does). With a
-  local Postgres, add `TZ=UTC` to `apps/cms/.env`; SQLite needs nothing.
+  not start and the web answers every request with an error (both log why).
+  Both app processes and the database sessions run in UTC and every instant
+  is stored as `timestamptz`; the web formats every date in `APP_TIME_ZONE`
+  (next-intl for instants, `plain-date.ts` for calendar dates; ESLint rejects
+  process-zone date APIs in both apps). Do not set `TZ` for the containers
+  (the images and compose do). With a local Postgres, add `TZ=UTC` to
+  `apps/cms/.env`; SQLite needs nothing.
   `DATETIME_LEGACY_ZONE` / `DATETIME_LEGACY_UTC_UNTIL` are only for a
   database written by a cms before this contract: its first boot repairs
   the stored times once
   ([runbook](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release));
   a fresh install leaves them empty.
+- **cms network and storage:** `CORS_ORIGIN` lists the browser origins that
+  may call the cms API, comma-separated (compose sets it to
+  `WEB_PUBLIC_URL`; unset or empty means `http://localhost:3000`).
+  `DATABASE_FILENAME` (SQLite only) is relative to `apps/cms`, or an
+  absolute path. Releases before batch 8 placed an absolute value under
+  `apps/cms` (`/data/x.db` became `apps/cms/data/x.db`); on an existing
+  SQLite install, move that file to the absolute path, or switch to the
+  equivalent relative value, before upgrading, otherwise the cms starts on a
+  new, empty database. Relative values and Postgres are unaffected. The cms
+  sends no `X-Powered-By` header.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
-  enable the e-mail digests (dark without them). Once SMTP is set,
+  enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
+  implicit TLS, any other port (default 587) must offer STARTTLS. Once SMTP is set,
   `DIGEST_FROM` is required too (there is no built-in sender any more;
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
-  `DIGESTS_DISABLED=1` is the kill switch.
+  `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
+  `yes` and `on`; `infra/deploy.sh --check` still only knows `1`).
 
 ## 4. Run locally (two terminals)
 
@@ -296,7 +310,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
 | **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
-| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
+| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), and a vote removes the voter's later rows right after it is stored (parallel votes) |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
 | **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
@@ -424,12 +438,19 @@ one is older than this week's Monday, so a missed Monday is caught up the
 next morning.
 
 Six roles are created automatically on Strapi boot (see
-[`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
+[`apps/cms/src/bootstrap/roles.ts`](./apps/cms/src/bootstrap/roles.ts), the
+one role vocabulary the cms code decides by):
 `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
 The same bootstrap grants each role sensible default REST permissions on
 every intranet content type (broad reads, writes scoped per role — with the
 deliberate `guest` exceptions listed under the permission matrix below).
 Writes are then further gated by the route-level policies listed below.
+The boot refuses to start when a granted action matches no controller
+action it loaded (a typo or a renamed action, listed in the error), writes
+all missing grants and revocations in one transaction, and logs one
+`[bootstrap] permission drift` line: `none`, or the grants on actions the
+code manages that it does not want (report-only, e.g. added in the admin
+panel).
 
 Policies at `apps/cms/src/policies/` enforce scoped access.
 
@@ -568,7 +589,8 @@ byte-identical copy).
 
 Global guards that apply to **every** content-API route, not per route:
 
-- **Relation guard** (`registerRestrictedRelationGuard` in `src/index.ts`,
+- **Relation guard** (`registerRestrictedRelationGuard` in
+  `src/bootstrap/restricted-relation-guard.ts`,
   rules in `utils/restricted-relations.ts`) — a relation into a
   visibility-filtered type is only followed from that type's own filter
   domain. Today this protects wiki pages: `department.pages`/`team.pages`
@@ -671,7 +693,7 @@ an admin (or an older version) put there. Its permissions mirror
 `member`-level read access so the dashboard still works for such accounts.
 
 **Strapi role capabilities** (REST API permissions seeded by
-`PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
+`PERMISSION_MATRIX` in `apps/cms/src/bootstrap/permission-matrix.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
 | Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos | Notifications | Courses · Lessons / Progress | Search-log |
@@ -726,13 +748,14 @@ an admin or editor opened to them (poll guest access above, in the poll's
 audience like everyone else; a rollback to a cms from before guest access
 removes the vote grant first). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
-`REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
+`REVOKED_PERMISSIONS` mechanism in the same file (the boot sync only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
-existing databases).
+existing databases; any other grant the code does not want is only reported
+by the boot's `[bootstrap] permission drift` line).
 
 Every role in the matrix — **including `guest`** — additionally gets
-`user.find`/`findOne` (so populated relations like author/lead/head survive);
-this also powers the people directory. `USER_READ_EXCLUDED_ROLES` is empty:
+`user.find`/`findOne`/`me` (so populated relations like author/lead/head
+survive); this also powers the people directory. No role is excluded:
 an earlier audit attempt to revoke the grant from `guest` turned every guest
 read that populates a user relation (and the notification visibility
 filter) into a 400, because Strapi's core controllers run
@@ -873,7 +896,12 @@ only this step) → pre-deploy DB backup → tag the running images `:rollback`
 → rebuild + restart (a failed `up` prints the rollback commands) → curl
 smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
 from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
-on top (it runs that cms in `DATETIME_LEGACY_ZONE`). TLS, the security
+on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
+image from before the web datetime port needs
+`infra/docker-compose.web-legacy-tz.yml` (it runs that web in `APP_TIME_ZONE`,
+the zone it renders dates in; in UTC a web from 2026-09-27 on answers 500,
+an older one shows UTC times); the rollback commands `deploy.sh` prints
+include whichever is needed. TLS, the security
 response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must
@@ -900,6 +928,8 @@ pnpm typecheck:tests   # type-check every *.test.ts: tsconfig.test.json (web + i
 pnpm test              # vitest 4 unit tests from the repo root (also run in CI)
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
                        # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
+pnpm test:integration  # the real cms booted in process, driven over HTTP per role, on
+                       # SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job `integration`
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
@@ -931,6 +961,30 @@ Strapi's Vite 5. File snapshots (`toMatchFileSnapshot`, e.g.
 `infra/diagnostics/prod-perm-diff.sql`) are compared verbatim, with no
 trimming.
 
+`pnpm test:integration` (roadmap S11, `vitest.integration.config.ts`) is kept
+out of `pnpm test`. It compiles the cms once into a temp directory, then each
+suite in `apps/cms/src/integration/*.integration.test.ts` boots the real cms
+in the test process: `createStrapi` without the admin panel, the real
+`register()`/`bootstrap()`, a fresh SQLite file and, when
+`SINNLOS_TEST_PG_URL` is set, also a fresh Postgres 16 schema (same
+throwaway container as above). One account per role signs in through
+`/api/auth/local`, and the suites call the API over HTTP. They cover the
+demo seed's draft/published pairs, restarts and the org draft/publish boot
+guard, the removed generic routes, `?status=draft` on every draft & publish
+type, relation side channels, contact-field filters, guest polls, RSVP
+privacy, publish cycles (comment/reaction anchors, votes, RSVPs,
+notifications after the commit) and concurrent votes, RSVPs and reactions.
+The run needs no network: `fetch` to anything but loopback is refused while a
+cms runs, no `.env` file is read (the harness points Strapi's `ENV_PATH` at a
+file that does not exist), temp files and schemas are removed, and the
+process is pinned to `TZ=UTC` like the container. A run on both engines takes
+about one and a half minutes on a fast local machine and about 2.5-4 minutes
+(plus about 45 s install) on a 4-vCPU CI-sized machine, most of it the
+per-suite boots. New suites use
+the harness in `apps/cms/src/integration/harness.test.helper.ts`
+(`createTestStrapi`, `loginAs`, `api`, `stop`; its header documents the
+fixtures and the stub seam for outbound calls).
+
 Safety nets for refactors (roadmap S03–S06, S09):
 
 - `apps/cms/src/test/strapi-stub.test.helper.ts` is the shared, typed Strapi
@@ -949,6 +1003,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
   (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
   pin fails first on purpose.
+- `apps/cms/src/bootstrap.permissions.test.ts` runs the real permission
+  sync against the stub: the role|action set it writes on a fresh database
+  is a file snapshot (`src/__snapshots__/bootstrap.permissions.txt`), a
+  second run writes nothing, revocations, the one-transaction rollback, the
+  unknown-action refusal and the advanced settings are pinned.
+  `index.lifecycle.test.ts` pins the order of `register()` and
+  `bootstrap()`. After a deliberate grant change, rewrite both snapshots:
+  `pnpm vitest run apps/cms/src/bootstrap.permissions.test.ts apps/cms/src/prod-perm-diff.test.ts -u`.
 - `apps/cms/src/middlewares/sensitive-query-guard.test.ts` also reads
   `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
   global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)
@@ -1036,6 +1098,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
       APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
       (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
       is an all-day entry
+- [ ] The web log shows `[datetime] web process time zone UTC, APP_TIME_ZONE …`;
+      on `/events` an event that is running today is under *Upcoming* and a
+      multi-day event shows its end day; relative times say "yesterday"
+      for something from late last night
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
 - [ ] `/events` shows each upcoming RSVP event's counts, the names of the

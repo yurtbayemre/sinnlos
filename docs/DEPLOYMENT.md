@@ -26,9 +26,17 @@ All methods share the same [prerequisites](#prerequisites) and
 cannot offer; see the note there).
 
 > **Upgrading an existing instance?** On an instance that runs `main`
-> `a88d45a` (batch 6; the owner instance since 2026-09-28), batch 7 is one
-> normal deploy of cms and web together, with read-only checks before and
-> after it: follow
+> `c219034` (batch 7; the owner instance since 2026-09-28 15:03 CEST),
+> batch 8 is one normal deploy of cms and web together, with read-only
+> checks before and after it: follow
+> [Deploying batch 8 (2026-09-28)](#deploying-batch-8-2026-09-28). No
+> schema or permission change; check `SMTP_PORT` and `DIGESTS_DISABLED`
+> in `infra/.env` first, and a rollback re-ups both images, the web with
+> `-f infra/docker-compose.web-legacy-tz.yml`. On an instance that runs
+> `main` `a88d45a` (batch 6), batch 7 comes first, in a deploy of its
+> own (the web's switch to UTC should not share a deploy with it), again
+> one normal deploy of cms and web together with read-only checks before
+> and after it: follow
 > [Deploying batch 7 (2026-09-28)](#deploying-batch-7-2026-09-28). Its first
 > boot adds one permission and one nullable column by itself; never deploy
 > or roll back the cms or the web alone. On an instance that runs `main`
@@ -39,7 +47,7 @@ cannot offer; see the note there).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 7, batch 6,
+> what the instance does not run yet, newest first: batch 8, batch 7, batch 6,
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
@@ -47,9 +55,10 @@ cannot offer; see the note there).
 > "Visible to guests" for it) and
 > [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
 > (the checks after the deploy and the rollback note). Deploying all of them
-> together is one normal deploy plus the read-only pre-deploy queries of the
-> poll targeting note, the optional poll query of the cms input hardening
-> and the checks of batch 7. Coming from an older release,
+> up to batch 7 together is one normal deploy plus the read-only pre-deploy
+> queries of the poll targeting note, the optional poll query of the cms
+> input hardening and the checks of batch 7; batch 8 follows once batch 7
+> runs. Coming from an older release,
 > work through the datetime runbook,
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release),
 > before you deploy: the datetime release introduces the
@@ -446,9 +455,10 @@ DIGESTS_DISABLED=0
 > **Time zone:** set `APP_TIME_ZONE` in `.env` if your company is not in
 > `Europe/Berlin` (the default). It is the zone of every business date: "today",
 > ad expiry, birthdays, digest days, the cron times, all-day events and poll
-> deadlines. Do not set the containers' `TZ`: compose runs the cms in UTC
-> (required, see the [datetime contract](#310-datetime-contract)) and the web
-> in `APP_TIME_ZONE` until its own datetime port.
+> deadlines. Do not set the containers' `TZ`: compose runs the cms and the
+> web in UTC (required for the cms, see the
+> [datetime contract](#310-datetime-contract)); both compute and show every
+> date in `APP_TIME_ZONE`.
 
 ### 2.2 Build and start
 
@@ -739,6 +749,39 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 8 (2026-09-28)?** The cms bootstrap split, the web
+> datetime port and one fix to poll results (the two notes below; the
+> integration suite is test-only) ship as one normal deploy of cms and web
+> **together** (`infra/deploy.sh`): no schema, permission, edge or Traefik
+> change. Read-only checks before it: the permission diff, `SMTP_PORT` and
+> `DIGESTS_DISABLED` in `infra/.env` (their meaning changes) and the polls
+> with votes stored more than once (their totals drop to one vote per
+> voter). After it: the cms boot's single drift line, the web's
+> `[datetime]` line, no `X-Powered-By`, `/events` and the poll results.
+> A rollback re-ups both images, the web with
+> `-f infra/docker-compose.web-legacy-tz.yml` (`deploy.sh` prints it).
+> Follow [Deploying batch 8 (2026-09-28)](#deploying-batch-8-2026-09-28).
+>
+> **Deploying the cms bootstrap split (batch 8, lane 3B)?** A normal
+> deploy: only the cms code changes, no schema, edge or grant change. Check
+> `SMTP_PORT` and `DIGESTS_DISABLED` in `infra/.env` first; afterwards
+> the boot logs one `[bootstrap] permission drift` line. Batch 8 ships it
+> with the web datetime port, so deploy and roll back cms and web together
+> (see [Deploying batch 8](#deploying-batch-8-2026-09-28)). See
+> [Upgrading to the cms bootstrap split (batch 8, lane 3B)](#upgrading-to-the-cms-bootstrap-split-batch-8-lane-3b).
+>
+> **Deploying the web datetime port (batch 8, lane 3A)?** A normal deploy
+> (`infra/deploy.sh`) once batch 7 runs: the web container is recreated,
+> now in UTC; the database and `infra/.env` stay as they are. Batch 8
+> ships it with the cms bootstrap split, so deploy and roll back cms and
+> web together (see [Deploying batch 8](#deploying-batch-8-2026-09-28)).
+> From then on, a rollback of the web to an image from before it needs
+> `-f infra/docker-compose.web-legacy-tz.yml` (`deploy.sh` prints it);
+> without it that web answers every request with 500, or, if it predates
+> the datetime release of 2026-09-27 (such as `:pre-datetime`), shows every
+> date and time in UTC. See
+> [Upgrading to the web datetime port (batch 8, lane 3A)](#upgrading-to-the-web-datetime-port-batch-8-lane-3a).
+>
 > **Deploying batch 7 (2026-09-28)?** The notification pipeline fixes, the
 > user data and search hardening and the RSVP summary and reports (the three
 > notes below) ship as one normal deploy of cms and web **together**
@@ -904,6 +947,461 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 8 (2026-09-28)
+
+Batch 8 (branch `batch/8`, on `main` `c219034`, which production runs since
+2026-09-28 15:03 CEST) ships three lanes and one fix from their integration
+in one deploy. The runbooks below explain each change in detail; **this
+section is the one sequence to follow**:
+
+- [the cms bootstrap split](#upgrading-to-the-cms-bootstrap-split-batch-8-lane-3b)
+  (lane 3B): the permission setup runs from modules with one role
+  vocabulary, as one set-based transaction; the cms refuses to start on a
+  grant for an action no loaded controller has, and every boot logs one
+  drift line. It no longer sends `X-Powered-By`, uses implicit TLS on SMTP
+  port 465 and reads `DIGESTS_DISABLED` as a boolean. Nobody's permissions
+  change;
+- the Strapi integration suite (lane 3C): tests and CI only, nothing to
+  deploy. Owner: once the CI job `integration · SQLite + Postgres 16` runs
+  stably, mark it as a required check in branch protection;
+- [the web datetime port](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)
+  (lane 3A): the web formats and computes every date in `APP_TIME_ZONE` and
+  runs in UTC; an event that is running stays under *Upcoming*; the org
+  chart shows people in a manager loop with a warning;
+- **one ballot per voter** (found by the integration suite, not in a
+  lane): parallel votes of one user could all be stored and were all
+  counted (up to 8 of 8 on Postgres 16). A vote cannot be changed, so the
+  results now count each voter's first vote only, and a vote removes the
+  voter's later rows for that poll right after it is stored.
+
+It is **one normal deploy of cms and web together** with `infra/deploy.sh`:
+no schema, permission, edge or Traefik change, nothing to migrate, and no
+env change unless step 3 says so. Do not add `TZ` to `infra/.env`;
+`APP_TIME_ZONE` stays as it is. The web container is recreated with
+`TZ=UTC` (image and compose) and the label
+`org.sinnlos.datetime=zone-explicit`, the cms container with the new
+bootstrap. `infra/diagnostics/prod-perm-diff.sql` is unchanged by this
+batch.
+
+Set these on the host, in your checkout (e.g. `/opt/sinnlos`), for the
+checks below (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (all read-only)
+
+1. **Fast-forward to the new `main` and validate**, deploying nothing:
+
+   ```bash
+   git pull --ff-only
+   git log -1 --oneline      # the batch 8 merge
+   infra/deploy.sh --check
+   ```
+
+2. **Permissions: the post-batch-7 state.**
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   Expected on production: only the two informational `MISSING_IN_DB`
+   rows for `authenticated` (`plugin::users-permissions.auth.getSessions`
+   and `…auth.revokeSession`), exactly as after the batch 7 deploy. Keep
+   the output for step 8. An `EXTRA_IN_DB` row on an action the code
+   manages (one someone granted in the admin panel) shows up in step 6 as a
+   drift warning instead of `none`.
+
+3. **Two env values whose meaning changes.** Print only these two lines of
+   `infra/.env` (the file holds secrets):
+
+   ```bash
+   grep -E '^(SMTP_PORT|DIGESTS_DISABLED)=' infra/.env
+   ```
+
+   - `SMTP_PORT`: unset (compose then uses `587`) or `587`: nothing
+     changes. `465` now uses implicit TLS: the digests could not be sent
+     before (the connection timed out waiting for a plain-text greeting)
+     and are sent from this deploy on, so the next 07:30 run mails the
+     users who opted in. Any other port still requires STARTTLS, as before.
+   - `DIGESTS_DISABLED`: unset, empty, `0` and a plain `1` behave as
+     before. `true`, `yes` or `on` (any case), or `1` with blanks around
+     it, used to leave the digests on and switch them off from this deploy
+     on: set `0` to keep them on, or `1` to switch them off, before you
+     deploy (`infra/deploy.sh --check` still only understands `1` until
+     batch 5).
+
+4. **Poll votes stored more than once.** The first query lists the voters
+   with more than one vote row on a poll (by numeric user id; it never
+   shows how anyone voted), the second what the results of those polls
+   show now and after this deploy:
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   SELECT vp.poll_id, p.question AS poll, vv.user_id AS voter_id, count(*) AS vote_rows
+   FROM poll_votes v
+   JOIN poll_votes_poll_lnk vp ON vp.poll_vote_id = v.id
+   JOIN polls p ON p.id = vp.poll_id
+   JOIN poll_votes_voter_lnk vv ON vv.poll_vote_id = v.id
+   GROUP BY vp.poll_id, p.question, vv.user_id
+   HAVING count(*) > 1
+   ORDER BY vp.poll_id, vv.user_id;
+
+   WITH ranked AS (
+     SELECT vp.poll_id, v.option_index, vv.user_id,
+            row_number() OVER (PARTITION BY vp.poll_id, vv.user_id ORDER BY v.id) AS nth
+     FROM poll_votes v
+     JOIN poll_votes_poll_lnk vp ON vp.poll_vote_id = v.id
+     LEFT JOIN poll_votes_voter_lnk vv ON vv.poll_vote_id = v.id
+   ), per_option AS (
+     SELECT poll_id, option_index,
+            count(*) AS votes_now,
+            count(*) FILTER (WHERE nth = 1 OR user_id IS NULL) AS votes_after
+     FROM ranked
+     GROUP BY poll_id, option_index
+   )
+   SELECT o.poll_id, p.question AS poll, o.option_index, o.votes_now, o.votes_after,
+          sum(o.votes_now) OVER w AS total_now, sum(o.votes_after) OVER w AS total_after
+   FROM per_option o
+   JOIN polls p ON p.id = o.poll_id
+   WHERE o.poll_id IN (SELECT poll_id FROM ranked WHERE nth > 1 AND user_id IS NOT NULL)
+   WINDOW w AS (PARTITION BY o.poll_id)
+   ORDER BY o.poll_id, o.option_index;
+   ROLLBACK;
+   SQL
+   ```
+
+   No rows: no poll result changes. Otherwise, from this deploy on, each
+   listed poll counts one vote per voter, the voter's first one (the
+   lowest row id; a vote cannot be changed, so the first accepted vote is
+   the voter's answer): its total drops from `total_now` to `total_after`,
+   and each option (`option_index` 0 is the first answer) from `votes_now`
+   to `votes_after`. A vote whose voter account was deleted still counts on
+   its own. The extra rows stay stored and count for nothing; nothing
+   needs to remove them. Keep the output for step 11.
+
+**Deploy**
+
+5. Run `infra/deploy.sh` on the Traefik host. It runs the preflight, takes
+   the pre-deploy backup, tags the running images `:rollback`, rebuilds and
+   restarts **cms and web together**, and runs `infra/live-smoke.sh` when
+   the demo credentials file is readable (otherwise it logs `live-smoke
+   SKIPPED`: run `infra/live-smoke.sh` by hand). On a
+   standalone Caddy box, run `infra/backup/pg-backup.sh`, then
+   `docker compose up -d --build` from `infra/`. If the new cms does not
+   start and its log shows `[bootstrap] N granted action(s) match no loaded
+   controller action: …`, the code and a plugin or controller disagree:
+   roll back (below) and report that line.
+
+**After the deploy**
+
+6. **cms boot.**
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep '\[bootstrap\]'
+   # [bootstrap] permission drift: none (report-only check of 117 managed actions)
+   ```
+
+   Expected: exactly this one line, and no `granted` or `revoked` line
+   (the new sync finds nothing to write on a database that booted batch 7).
+   A warning `[bootstrap] permission drift (report-only, nothing revoked):
+   N grant(s) on managed actions that the code does not grant: …` lists
+   `<role> <action>` pairs added in the admin panel: decide per pair (keep,
+   or remove in the admin panel); nothing is removed automatically.
+
+7. **Web zones.**
+
+   ```bash
+   "${COMPOSE[@]}" logs web | grep '\[datetime\]'
+   # [datetime] web process time zone UTC, APP_TIME_ZONE Europe/Berlin
+   "${COMPOSE[@]}" exec -T web sh -c 'echo "$TZ"'   # UTC
+   ```
+
+   A second line `[datetime] The web process runs in …, not UTC` means a
+   compose or orchestrator setting still overrides `TZ` (for example a
+   leftover `-f infra/docker-compose.web-legacy-tz.yml`): harmless for the
+   dates, but remove it.
+
+8. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+   gives the same result as step 2.
+
+9. **Edge.** `curl -sI https://<your web origin>/api/events | grep -i x-powered-by`
+   prints nothing (the edge sends `/api/*` to the cms, which sent the
+   header until this deploy).
+
+10. **Pages.** `/events` (list and month view): events show their usual
+    times, an event running now (a multi-day event after its first day, an
+    all-day event on its day) is under *Upcoming*, and a multi-day event
+    shows its end day. `/marketplace` and one ad: the expiry dates are
+    unchanged. `/people/org-chart`: normally unchanged. If a Manager field
+    forms a loop or points to the person themselves, every user sees a
+    warning banner that counts the people shown at the top level for that
+    reason; each of them is marked ("Manager chain loops back here" or
+    "Set as their own manager"), and the rest of a loop appears beneath
+    the marked person. Follow the Manager field from a marked person to
+    find the loop and fix it in the admin panel (Content Manager → User).
+
+11. **Poll results.** `/polls` shows the same results as before, except on
+    the polls step 4 listed: their totals and option counts now match
+    `total_after` and `votes_after`, and for a voter step 4 listed, the
+    option marked as their vote (the check mark) is their first vote,
+    which can be another option than the one marked before.
+
+**What users notice** (worth a short release note):
+
+- Dates and times read as before. An event that is running stays under
+  *Upcoming*, a multi-day event shows its end day, an event whose end
+  equals its start shows only its start, and "yesterday"/"today" follow
+  the calendar day, in the user's language. The org chart lists people in
+  a manager loop (or set as their own manager) with a warning instead of
+  leaving them out with everyone below them.
+- Where one person's vote on a poll was stored more than once, the result
+  counts it once (their first vote), and the poll marks that vote as
+  theirs.
+- With `SMTP_PORT=465`, users who opted in start receiving digests.
+
+**Rollback: both images together, with the web override.** Follow the
+hint `infra/deploy.sh` prints. The `:rollback` images are batch 7's: that
+web renders dates in its process zone and refuses to start in UTC, so the
+hint adds `-f infra/docker-compose.web-legacy-tz.yml`, which runs it in
+`APP_TIME_ZONE` as before:
+
+```bash
+docker tag infra-web:rollback infra-web:latest
+docker tag infra-cms:rollback infra-cms:latest
+"${COMPOSE[@]}" -f infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms
+"${COMPOSE[@]}" exec -T web sh -c 'echo "$TZ"'   # your APP_TIME_ZONE
+```
+
+Without the override, the batch 7 web answers every request with 500 and
+logs `The web process runs in UTC …, not in APP_TIME_ZONE …`. Nothing in
+the database needs undoing: no schema, permission or data change, and the
+batch 7 cms finds nothing to sync. After a rollback, poll results count
+every stored row again (step 4's polls show `total_now` again), digests
+on port 465 stop, a `DIGESTS_DISABLED` of `true`/`yes`/`on` no longer
+switches them off, and `X-Powered-By` is back. Roll forward with
+`infra/deploy.sh` as usual: it uses the live compose files only, so the web
+runs in UTC again. Custom orchestrators (the Azure Container Apps recipe):
+do not set `TZ` for the new web (the image sets `TZ=UTC`); a web image
+from before this release needs `TZ` equal to `APP_TIME_ZONE`.
+
+#### Upgrading to the cms bootstrap split (batch 8, lane 3B)
+
+This release (branch `refactor/cms-bootstrap`, on `batch/7` `0ea7107`)
+restructures how the cms seeds its roles and permissions and tidies its
+config. Nobody's permissions change:
+
+- **Bootstrap modules and one role vocabulary (S02, B01, B02).** The grant
+  tables moved from `apps/cms/src/index.ts` to
+  `apps/cms/src/bootstrap/permission-matrix.ts` (still re-exported by
+  `index.ts`), the role names to `bootstrap/roles.ts`. The boot order is
+  unchanged; `infra/diagnostics/prod-perm-diff.sql` regenerates
+  byte-identical.
+- **Unknown actions stop the boot (B04).** Before it writes anything, the
+  permission sync checks every granted action against the controllers
+  Strapi loaded. A mismatch (a typo, a renamed action, a changed plugin)
+  refuses to start with `[bootstrap] N granted action(s) match no loaded
+  controller action: <list>` instead of leaving the feature at 403.
+- **One transaction, far fewer queries (B03).** The sync reads the roles
+  and the permissions once, computes what is missing and what to revoke,
+  and writes only that, in one transaction; a failed write rolls the whole
+  sync back and stops the boot. A boot on an up-to-date database runs 3
+  statements on `up_permissions` instead of about 600.
+- **Drift line.** Every boot reports grants on actions the code manages
+  that it does not want, for example one added in the admin panel. It only
+  reports them; nothing is revoked that is not listed in
+  `REVOKED_PERMISSIONS`.
+- **Config (B05).** The cms no longer sends `X-Powered-By`. `CORS_ORIGIN`
+  is read through Strapi's `env()` (same values; blanks around commas are
+  ignored). An absolute SQLite `DATABASE_FILENAME` is used as given. Until
+  this release an absolute value was placed under `apps/cms` (`/data/x.db`
+  became `apps/cms/data/x.db`); on an existing SQLite install, move that
+  file to the absolute path, or switch to the equivalent relative value,
+  before upgrading, otherwise the cms starts on a new, empty database.
+  Relative values and Postgres (production) are unaffected. SMTP on
+  port 465 now uses implicit TLS; any other port, the default 587 included,
+  still requires STARTTLS as before. `DIGESTS_DISABLED` also accepts
+  `true`, `yes` and `on` (`infra/deploy.sh --check` still only knows `1`).
+  `apps/cms` declares `engines` `^22.13.0 || ^24.0.0` like the root.
+
+**A normal deploy with `infra/deploy.sh`.** Only the cms changes; no
+schema, edge or grant change, nothing to migrate. The checks use the
+helpers of the batch 7 section below (on a standalone Caddy box, drop the
+second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+1. **Before:** check `SMTP_PORT` in `infra/.env`. With `587` (or unset)
+   nothing changes. With `465` the digests could not be sent before (the
+   connection timed out waiting for a plain-text greeting); from this
+   deploy on they are, so the next 07:30 run mails the users who opted in.
+   Also run `grep -E '^DIGESTS_DISABLED=' infra/.env`. Unset, empty, `0`
+   and a plain `1` behave as before. `true`, `yes` or `on` (any case), and
+   `1` with blanks around it, used to leave the digests on and switch them
+   off from this deploy on: set `0` to keep them, or `1` to switch them off.
+   `infra/deploy.sh --check` still only understands `1` until batch 5.
+2. **Deploy:** `infra/deploy.sh`.
+3. **Boot log:** `"${COMPOSE[@]}" logs cms | grep '\[bootstrap\]'`. On a
+   database that booted batch 7, expect no `granted` or `revoked` line and
+   exactly one `[bootstrap] permission drift: none (report-only check of
+   117 managed actions)`. A drift warning instead lists
+   `<role> <action>` pairs: grants someone added in the admin panel on an
+   action the code manages; decide per pair (keep, or remove in the admin
+   panel). The two `authenticated` rows `auth.getSessions`/`revokeSession`
+   are plugin defaults, not managed, and never appear there. The line covers
+   only managed actions and never reports duplicate rows; the
+   `prod-perm-diff.sql` run of step 4 remains the complete check.
+4. **After:** `psql_db -X < infra/diagnostics/prod-perm-diff.sql` gives the
+   same result as after the batch 7 deploy (on production only the two
+   informational `MISSING_IN_DB` `authenticated` rows above).
+   `curl -sI https://<your web origin>/api/events | grep -i x-powered-by`
+   prints nothing (the edge sends `/api/*` to the cms).
+
+**Rollback:** the batch 7 image runs on the same database as it is (no
+schema or data change; its sync finds nothing to do), with the commands
+`infra/deploy.sh` prints. With `SMTP_PORT=465` the digests stop again, and
+a `DIGESTS_DISABLED` of `true`/`yes`/`on` no longer switches them off.
+
+**Rehearsal (Postgres 16 stand-in, database first booted by the batch 7
+code `0ea7107`):** the branch boot left `up_permissions` identical (515
+rows, the S02 snapshot plus the 13 plugin first-boot defaults), wrote no
+permission row and ran 152 SQL statements instead of 844 (3 instead of 598
+on `up_permissions`); a fresh database received the same 515 rows in one
+transaction; a leftover revoked grant was deleted and an admin-panel grant
+reported (the same pair `prod-perm-diff.sql` lists as `EXTRA_IN_DB`); a
+build with two bogus actions refused to start and named both; the CORS
+header for the configured origin was unchanged and `X-Powered-By` gone;
+against smtp4dev the new transport sent on 587 (STARTTLS) and 465
+(implicit TLS), the batch 7 transport failed on 465; SQLite booted with an
+absolute `DATABASE_FILENAME`.
+
+#### Upgrading to the web datetime port (batch 8, lane 3A)
+
+Phase 2 of the [datetime contract](#310-datetime-contract) (branch
+`feat/datetime-phase2-web`): the web now computes and renders every date
+explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
+
+- **Dates on pages.** Instants (created, updated, event times) are
+  formatted by next-intl in `APP_TIME_ZONE`; calendar dates (an ad's expiry,
+  an announcement's confirmation deadline) are shown as the day they name.
+  The formats are the ones you know: with `APP_TIME_ZONE=Europe/Berlin` the
+  pages show the same dates and times as before, apart from the display
+  fixes below (rehearsed page by page against the batch 7 web, also with
+  faked clocks around midnight and the October DST change). With a
+  zone west of UTC, such as `America/New_York`, the old web showed every
+  ad's expiry and every announcement confirmation deadline (on the
+  announcements page and `/manage/acknowledgements`) one day early; that
+  is fixed.
+- **"Today" and day windows** (the events list and month view, the
+  dashboard, the ⌘K event preload, ad expiry, the earliest closing day of
+  the poll form, the dashboard greeting) are `APP_TIME_ZONE` days; around
+  midnight the old web could be one day off where it used the UTC day.
+- **Small display fixes (FX49):** an event that has started but not ended
+  (a multi-day event on its second day, an all-day event on its last day)
+  stays under *Upcoming* instead of *Past*, and the dashboard's event count
+  includes it; an event that ends on a later day shows that day ("Mon, Oct
+  5, 2026, 09:00 – Wed, Oct 7, 2026, 17:00"); an event whose end equals its
+  start shows only the start time (no longer "03:01 PM – 03:01 PM"; the
+  demo seed has four such events); relative times count calendar
+  days ("yesterday" at 00:10 for a comment from 23:50) in the user's
+  language; the org chart no longer drops people whose manager assignments
+  form a loop or who are set as their own manager (until now they vanished
+  without a notice, together with everyone below them): one person per
+  loop, and everyone set as their own manager, appears at the top level
+  with a warning, the rest of the loop beneath them, so an admin can fix
+  the Manager field.
+- **Guardrails:** ESLint rejects process-zone date APIs in the web as
+  errors, and the web image carries `ENV TZ=UTC` and the label
+  `org.sinnlos.datetime=zone-explicit`.
+
+**Order.** Batch 7 must be live first (this lane is built on it): the web
+time zone switch should not share a deploy with batch 7's changes, so that
+a problem after the deploy points to one of them only.
+
+**Deploy.** A normal deploy, `infra/deploy.sh`: no env change
+(`APP_TIME_ZONE` stays as it is; do not add `TZ` to `infra/.env`), no
+schema or permission change, nothing in the database changes. The web
+container is recreated with `TZ=UTC`. The cms image is rebuilt as in every
+deploy (the calendar helper module it shares with the web gained functions
+only the web uses), so compose recreates the cms container too; this lane
+changes none of its behaviour, schema or permissions (batch 8's cms
+changes come from lane 3B).
+
+**After the deploy:**
+
+1. The web logs its zones once at start:
+
+   ```bash
+   docker logs infra-web-1 2>&1 | grep '\[datetime\]'
+   # [datetime] web process time zone UTC, APP_TIME_ZONE Europe/Berlin
+   docker exec infra-web-1 sh -c 'echo "$TZ"'   # UTC
+   ```
+
+   A second line `[datetime] The web process runs in …, not UTC` means a
+   compose or orchestrator setting still overrides `TZ` (for example a
+   leftover `-f infra/docker-compose.web-legacy-tz.yml`): harmless for the
+   dates, but remove it.
+2. Open `/events` (list and month view): events show their usual times; an
+   event running today is under *Upcoming*; a multi-day event shows its end
+   day.
+3. Open `/marketplace` and one ad: the expiry dates are unchanged; an ad
+   that expired yesterday is shown as expired.
+4. As an admin, open `/people/org-chart`: normally nothing changes. A warning
+   banner means some manager assignments form a loop or a person is set as
+   their own manager; the marked people are listed at the top level. Fix
+   their Manager field in the admin panel (Content Manager → User).
+
+**Rollback.** Every web image from before this release renders dates in
+its process zone, so it must run **in** `APP_TIME_ZONE`, and the current
+compose file runs the web in UTC (`TZ: UTC`). How such an image fails there
+depends on its age:
+
+- Images from the datetime release (live since 2026-09-27) up to batch 7,
+  including the `:rollback` image this deploy tags, check the zone at
+  start: in UTC they answer every request with 500 and log `An error
+  occurred while loading instrumentation hook: The web process runs in UTC
+  …, not in APP_TIME_ZONE …`.
+- Older images, such as `:pre-datetime`, have no such check: in UTC they
+  start normally and quietly show every date and time in UTC, one or two
+  hours off in Berlin.
+
+Re-up any of them **only with the override**
+`infra/docker-compose.web-legacy-tz.yml`, which gives the web the `TZ` it
+had before (`${APP_TIME_ZONE:-Europe/Berlin}`):
+
+```bash
+cd /opt/sinnlos
+docker tag infra-web:rollback infra-web:latest
+docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  -f infra/docker-compose.web-legacy-tz.yml up -d --no-build web
+```
+
+(Standalone Caddy box: leave out the Traefik file.) Check afterwards:
+`docker exec infra-web-1 sh -c 'echo "$TZ"'` prints your `APP_TIME_ZONE`
+(an old image without the start check gives no other sign). Whether an
+image needs the override:
+`docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`
+prints `zone-explicit` for a web from this release on (no override); an
+empty line or `<no value>` means it needs it. The same holds for every
+other rollback recipe in this document that re-ups an older web image: see
+the [update procedure](#74-update-procedure-production-safe). When a deploy fails,
+`deploy.sh` prints the rollback commands with this override whenever
+`infra-web:rollback` lacks the `org.sinnlos.datetime` label, or when it
+cannot check the image (the override is harmless for a newer web image: it
+only logs the warning above). This lane alone leaves the cms unchanged,
+but batch 8 ships it with the cms bootstrap split: roll back cms and web
+together as in [Deploying batch 8](#deploying-batch-8-2026-09-28). Roll
+forward with `infra/deploy.sh` as usual: it uses the live compose files
+only, so the web runs in UTC again. Nothing in the database needs undoing.
 
 #### Deploying batch 7 (2026-09-28)
 
@@ -3202,7 +3700,9 @@ cms stores and computes times:
   fields and plugins, and refuses to start while one is left.
 - The web changes only the poll close rule (below) and reads
   `APP_TIME_ZONE`; its container keeps rendering in `APP_TIME_ZONE`
-  (compose sets its `TZ` from it) until the web's own port (phase 2).
+  (compose sets its `TZ` from it) until the web's own port (phase 2,
+  [batch 8](#upgrading-to-the-web-datetime-port-batch-8-lane-3a); since then
+  the web runs in UTC).
 
 No change to secrets, no `JWT_SECRET` rotation, nobody is signed out.
 
@@ -3383,8 +3883,9 @@ ones that need it in the admin panel.
    Leave `APP_TIME_ZONE` unset (or `Europe/Berlin`) unless the company is
    elsewhere. Spell zones exactly as the tz database does (`Europe/Berlin`,
    not `europe/berlin`; never an offset such as `+02:00`): the cms refuses an
-   offset, and compose passes `APP_TIME_ZONE` to the web as `TZ`, which Node
-   only resolves in the exact spelling (the web then answers 500). Then
+   offset, and compose passed `APP_TIME_ZONE` to the web as `TZ` (until the
+   web's datetime port; since then the web runs in UTC), which Node only
+   resolves in the exact spelling (the web then answers 500). Then
    `infra/deploy.sh --check` prints `Preflight OK`.
 
 6. **Host backup time.** The nightly `pg-backup.sh` runs from the host
@@ -4185,13 +4686,17 @@ the cms and the database, phase 2 the web):
   opposite sign. With an unknown value or an offset the cms does not
   start, and the web answers every request with an error (Next.js logs `An
   error occurred while loading instrumentation hook: APP_TIME_ZONE must be
-  …`). Changing it later moves those boundaries, not stored instants. Until
-  the web's phase 2 the web container runs in `APP_TIME_ZONE` (compose
-  passes the value on as its `TZ`) and renders dates in its process zone;
-  when `TZ` is set, the web also refuses to serve if Node does not run in
-  `APP_TIME_ZONE`, e.g. with a wrong-case name Node cannot find (`The web
-  process runs in …, not in APP_TIME_ZONE …`). `DATETIME_LEGACY_ZONE`
-  follows the same rules.
+  …`). Changing it later moves those boundaries, not stored instants. Since
+  the web's phase 2 (batch 8) the web container runs in UTC as well (`TZ=UTC`
+  in its image and in compose) and renders every date in `APP_TIME_ZONE`
+  explicitly; it only warns (`[datetime] The web process runs in …, not
+  UTC`) when its `TZ` is set to something else. A web image from before
+  phase 2 still renders in its process zone: run it only with
+  `infra/docker-compose.web-legacy-tz.yml`
+  ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)). In UTC
+  one from phase 1 on refuses to serve (`The web process runs in UTC …, not
+  in APP_TIME_ZONE …`); an older one serves and shows every time in UTC.
+  `DATETIME_LEGACY_ZONE` follows the same rules.
 - **The guard.** Strapi creates every new `datetime` column as
   `timestamp without time zone`. At each boot the cms converts every such
   column of the app schema (`DATABASE_SCHEMA`, default `public`) to
@@ -4257,6 +4762,16 @@ the cms and the database, phase 2 the web):
   `TimeZone=UTC` itself). A pooler that drops startup options (PgBouncer in
   transaction mode, Azure's built-in PgBouncer on port 6432) breaks the pin:
   connect the cms directly (port 5432).
+- **The web** (phase 2). Instants are formatted with next-intl, whose zone
+  is `APP_TIME_ZONE` (`apps/web/src/i18n/request.ts`; client components get
+  it from the provider); calendar dates go through
+  `apps/web/src/lib/plain-date.ts` (`formatPlainDate`), never through a
+  midnight instant. "Today", day starts and month grids are `APP_TIME_ZONE`
+  days (`zonedDateKey`, `zonedDayStart`, `addDaysToKey`). ESLint rejects
+  local `Date` getters and setters, `new Date(y, m, d)`,
+  `toLocale{Date,Time}String` and `toISOString().slice(0, 10)` in the web as
+  errors (only `plain-date.ts` is exempt), and the web does not use
+  temporal-polyfill. The browser's own zone is never used.
 - **Admin panel.** Strapi's admin panel shows and takes times in the
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
@@ -4717,10 +5232,13 @@ az containerapp create \
       "AUTH_MICROSOFT_ENTRA_ID_ISSUER=https://login.microsoftonline.com/<tenant-id>/v2.0" \
       "LIVE_EVENTS_DISABLED=0" \
       "APP_TIME_ZONE=Europe/Berlin" \
-      "TZ=Europe/Berlin"
+      "TZ=UTC"
 
-# TZ: the web still renders dates in its process zone until its datetime
-# port (phase 2), so it must equal APP_TIME_ZONE (compose does the same).
+# TZ: the web image runs in UTC by itself (like the cms) and renders every
+# date in APP_TIME_ZONE; TZ=UTC here only makes that explicit. A web image
+# from before the web datetime port (batch 8) needs TZ equal to
+# APP_TIME_ZONE instead: without it, one from 2026-09-27 on answers every
+# request with 500, and an older one quietly shows every time in UTC.
 
 # Now read the FQDN assigned to the web app
 WEB_FQDN=$(az containerapp show \
@@ -4981,7 +5499,9 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | cms refuses to start: `DATABASE_URL sets its own \`options\` query parameter …` | Remove `options` from `DATABASE_URL` (or include `-c TimeZone=UTC` in it) |
 | `[datetime] N column(s) are still timestamp without time zone after two conversion attempts` | Another session held a lock on those tables (a long `psql` transaction, a dump). End it and restart the cms; the guard converts them then |
 | cms refuses to start, or every web page answers 500 with `An error occurred while loading instrumentation hook: APP_TIME_ZONE must be an IANA time zone name …` in the web log | Fix `APP_TIME_ZONE` in `infra/.env` (an IANA name such as `Europe/Berlin`, no UTC offset) or leave it empty |
-| every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | The web container's `TZ` is not the zone Node runs in: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`); with a custom orchestrator set `TZ` to the same name |
+| every web page answers 500, web log: `… instrumentation hook: The web process runs in …, not in APP_TIME_ZONE …` | A web image from before the web datetime port (batch 8) runs with the current compose file's `TZ=UTC`, usually a rollback without the override: add `-f infra/docker-compose.web-legacy-tz.yml` ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)). With that override (or an older compose file) it also appears when Node cannot find the zone: spell `APP_TIME_ZONE` exactly as the tz database does (`Europe/Berlin`, not `europe/berlin`) |
+| after a web rollback every page shows times one or two hours early (Berlin), no error | A web image from before the datetime release of 2026-09-27 (such as `:pre-datetime`) runs with the current compose file's `TZ=UTC`: it has no start check and renders in its process zone. Re-up it with `-f infra/docker-compose.web-legacy-tz.yml` ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)) |
+| web log: `[datetime] The web process runs in …, not UTC` | The current web image runs with a `TZ` other than UTC (a leftover `infra/docker-compose.web-legacy-tz.yml`, or an orchestrator setting): dates are unaffected, but remove it so the web runs in UTC |
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
 | `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
@@ -5111,8 +5631,11 @@ docker compose -p infra logs -f --tail=50 cms web
 and `infra-cms:rollback` before each build, so a bad deploy can be reverted
 **without** rebuilding — retag and re-up just the affected service (rolling
 back the datetime release needs an extra override file, see
-[Rolling back this release](#rolling-back-this-release); rolling back poll
-guest access needs a step **before** the retag, see
+[Rolling back this release](#rolling-back-this-release); rolling back the
+web to an image from before the web datetime port (batch 8) needs
+`-f infra/docker-compose.web-legacy-tz.yml` on top of the live compose
+files, see below; rolling back poll guest access needs a step **before**
+the retag, see
 [Rolling back poll department targeting](#rolling-back-poll-department-targeting)):
 
 ```bash
@@ -5122,6 +5645,33 @@ docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   up -d --no-build web cms
 ```
+
+Since the web datetime port (batch 8) the compose file runs the web in UTC.
+A web image from before it renders dates in its process zone and must run
+in `APP_TIME_ZONE`; check the image before the re-up:
+
+```bash
+docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback
+```
+
+`zone-explicit` means no override (the command above). An empty line or
+`<no value>` means the image predates the port: re-up with the web
+override after the live compose files:
+
+```bash
+docker compose -p infra \
+  -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+  -f infra/docker-compose.web-legacy-tz.yml \
+  up -d --no-build web cms
+```
+
+Without it, a web from the datetime release (2026-09-27) up to batch 7
+answers every request with 500, and an older one (such as `:pre-datetime`)
+quietly shows every date and time in UTC. This applies to every recipe in
+this document that re-ups a web image from before batch 8, also where its
+command lists only the live compose files (it was written before the
+port); add the override next to any other override file there. Details:
+[Upgrading to the web datetime port](#upgrading-to-the-web-datetime-port-batch-8-lane-3a).
 
 A cms image from before the ICS and cms start fixes, whose
 `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
@@ -5203,7 +5753,12 @@ its own: its compose file ran it in `Europe/Berlin`, and it wrote naive
 columns as Berlin wall clocks. The current `infra/docker-compose.yml` runs
 the cms in UTC. **Always re-up the previous cms with the override
 `infra/docker-compose.cms-legacy-tz.yml`**, which sets the cms's `TZ` to
-`DATETIME_LEGACY_ZONE`, using the images pinned in step 7:
+`DATETIME_LEGACY_ZONE`, using the images pinned in step 7. Since the web
+datetime port (batch 8) the compose file also runs the web in UTC, and the
+previous web image predates that port: it renders dates in its process
+zone and has no start check, so in UTC it would quietly show every date
+and time in UTC. Add `infra/docker-compose.web-legacy-tz.yml` as well,
+which runs it in `APP_TIME_ZONE` as its own compose file did:
 
 ```bash
 cd /opt/sinnlos
@@ -5212,13 +5767,16 @@ docker tag infra-web:pre-datetime infra-web:latest
 docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   -f infra/docker-compose.cms-legacy-tz.yml \
+  -f infra/docker-compose.web-legacy-tz.yml \
   up -d --no-build web cms
 ```
 
 (Standalone Caddy box: leave out the Traefik file. Without the step 7 tags,
 `:rollback` is only right if `deploy.sh` ran once for this release: every
 run tags whatever is running then.) `docker logs infra-cms-1` must not show
-`[datetime]` lines (those come from the new image only).
+`[datetime]` lines (those come from the new image only), and
+`docker exec infra-web-1 sh -c 'echo "$TZ"'` must print your
+`APP_TIME_ZONE` (`Europe/Berlin` by default).
 
 Whether the repair has run on the database the previous cms will use:
 
@@ -5274,9 +5832,12 @@ A first line `0` or a second line above `0` means it has not.
   again, or correct them by hand). Values written between the deploy and
   the restore are lost with the restore, as with any restore.
 - A web-only rollback brings back the old poll close rule (the card treats the
-  closing second as open) and nothing else. The web needs no override: both
-  compose files run it in `Europe/Berlin` (the new one through
-  `APP_TIME_ZONE`).
+  closing second as open) and nothing else. At that release the web needed
+  no override (both compose files ran it in `Europe/Berlin`); since the web
+  datetime port (batch 8) the compose file runs the web in UTC, and every
+  web image from before that port needs
+  `-f infra/docker-compose.web-legacy-tz.yml`
+  ([rollback](#upgrading-to-the-web-datetime-port-batch-8-lane-3a)).
 
 #### Rolling back the Strapi 5.55.1 release (2026-09-25)
 

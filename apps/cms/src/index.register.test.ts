@@ -1,6 +1,8 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
-import lifecycle, { registerRestrictedRelationGuard, registerUserContactSanitizer } from "./index";
+import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
+import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
+import lifecycle from "./index";
 import type { RelationModel } from "./utils/restricted-relations";
 import { SENSITIVE_USER_FIELDS, USER_UID, type ModelSchema } from "./utils/sanitize-user-contact";
 

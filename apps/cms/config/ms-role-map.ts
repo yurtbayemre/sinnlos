@@ -4,16 +4,15 @@
  * This file can be edited without a redeploy (mount it as a config volume
  * or bake it into the image). Order matters — the first match wins.
  *
- * Strapi role "type" values are lowercase identifiers. The bootstrap script
- * in src/index.ts guarantees that all six roles below exist.
+ * Strapi role "type" values are lowercase identifiers from the role
+ * vocabulary (src/bootstrap/roles.ts, B02); the bootstrap guarantees that all
+ * six exist. Rule order is privilege order (ROLE_PRIVILEGE_ORDER), pinned by
+ * ms-role-map.test.ts.
  */
-export type StrapiRoleType =
-  | "admin_role"
-  | "editor"
-  | "department_head"
-  | "team_lead"
-  | "member"
-  | "guest";
+// Cross-boundary type-only import into src/ (same pattern as config/server.ts).
+import type { RoleType } from "../src/bootstrap/roles";
+
+export type StrapiRoleType = RoleType;
 
 export interface MsRoleRule {
   /** Entra group objectId OR displayName (case-insensitive). */

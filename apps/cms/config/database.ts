@@ -42,12 +42,10 @@ export default ({ env }: { env: Env }) => {
     },
     sqlite: {
       connection: {
-        filename: path.join(
-          __dirname,
-          "..",
-          "..",
-          env("DATABASE_FILENAME", ".tmp/data.db"),
-        ),
+        // Relative to apps/cms (this file runs from dist/config); an
+        // absolute DATABASE_FILENAME is used as given (path.join would
+        // have glued it onto apps/cms).
+        filename: path.resolve(__dirname, "..", "..", env("DATABASE_FILENAME", ".tmp/data.db")),
       },
       useNullAsDefault: true,
     },

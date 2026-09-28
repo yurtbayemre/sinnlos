@@ -59,7 +59,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "api/poll-vote/routes/custom-poll-vote.ts": "the vote/results routes of the controller above",
   "api/poll-vote/routes/poll-vote.ts": "core router with `only: []`: no generic /api/poll-votes route",
   "api/poll-vote/services/poll-vote.ts": "core service without a route",
-  "index.ts": "permission matrix and grants (enforcement is in the rules, not the grants)",
+  "bootstrap/permission-matrix.ts":
+    "permission matrix and grants (enforcement is in the rules, not the grants)",
   "policies/poll-visibility.ts": "the list/detail filter: canSeePoll per published row",
   "seed-demo.ts": "internal demo seed, no response",
   "utils/poll-access.ts": "loaders for the policy and the controller",
