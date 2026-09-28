@@ -998,7 +998,8 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] After a few ⌘K searches, `/manage/analytics` shows the search section
       (totals, zero-result rate, top terms)
 - [ ] ⌘K as a guest finds a colleague by name but not by e-mail; while a new
-      term loads, the previous term's results are not shown
+      term loads, the previous term's results are not shown (nor the old
+      results of the same term typed again)
 - [ ] `/people/<id>` of a manager shows *Direct reports*
 - [ ] A user blocked in the Strapi admin loses `/uploads` files within a
       minute (401) and is sent to sign-in on the next page load

@@ -19,8 +19,9 @@ import type { SearchItem } from "@/lib/search-action";
  *   4. the palette's plain functions: response parsing, the session-expiry
  *      signal, the fire-and-forget log, and — with fake timers — the 300 ms
  *      debounce, aborting a superseded request, stale results never
- *      reported, and the settled-term log flush (2 s, selection/close,
- *      never the same term twice).
+ *      reported, the start signal that drops remembered results (also for
+ *      a repeated term), and the settled-term log flush (2 s,
+ *      selection/close, never the same term twice).
  *
  * `@/lib/strapi`, the session, the viewer, the config and next-intl/server
  * are mocked; next/navigation is real (its redirect error is the control
@@ -753,6 +754,40 @@ describe("palette: createSearchScheduler (fake timers)", () => {
     requests[1].resolve(items(2));
     await vi.advanceTimersByTimeAsync(0);
     expect(results).toEqual([["ada", 2]]);
+  });
+
+  it("signals every scheduled search, a repeated term included, before its results", async () => {
+    const events: string[] = [];
+    const pending: Deferred[] = [];
+    const scheduler = palette.createSearchScheduler({
+      search: () =>
+        new Promise<SearchItem[]>((resolve, reject) => pending.push({ resolve, reject })),
+      onStart: (term) => events.push(`start ${term}`),
+      onResults: (term, found) => events.push(`results ${term} ${found.length}`),
+      onSessionExpired: vi.fn(),
+      log: vi.fn(),
+    });
+    scheduler.query("a"); // under 2 characters: nothing scheduled
+    scheduler.query("ada");
+    await vi.advanceTimersByTimeAsync(300);
+    pending[0].resolve(items(3));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events).toEqual(["start ada", "results ada 3"]);
+
+    // "ada" → "ad" → "ada" inside the debounce: the palette drops the
+    // remembered "ada" items at once, not when the new answer arrives.
+    scheduler.query("ad");
+    scheduler.query("ada");
+    expect(events.slice(2)).toEqual(["start ad", "start ada"]);
+    await vi.advanceTimersByTimeAsync(300);
+    expect(pending).toHaveLength(2);
+    pending[1].resolve(items(2));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(events.slice(2)).toEqual(["start ad", "start ada", "results ada 2"]);
+
+    scheduler.query(""); // clearing the box schedules nothing
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(events).toHaveLength(5);
   });
 
   it("clearing the box below 2 characters cancels the pending search", async () => {

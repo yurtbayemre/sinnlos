@@ -30,7 +30,9 @@ import type { PreloadKind, SearchItem, SearchKind } from "@/lib/search-action";
  *   - live search from 2 characters, debounced by 300 ms; a newer term
  *     aborts the request in flight, and results are shown only for the term
  *     in the box: until that term settles the list shows "Loading…", never
- *     the previous term's results;
+ *     the previous term's results, nor the remembered results of the same
+ *     term typed again (every scheduled search and every selection drops
+ *     them);
  *   - telemetry: only SETTLED terms are logged (2 s stable, a selection, or
  *     closing the palette; the same term never twice in a row), sent as a
  *     keepalive POST that never throws — logging each debounced prefix
@@ -155,6 +157,11 @@ export function sendSearchLog(term: string, count: number, fetchImpl: Fetch = fe
 export interface SearchSchedulerDeps {
   /** Run the live search (fetchSearchItems in the palette). */
   search(term: string, signal: AbortSignal): Promise<SearchItem[]>;
+  /**
+   * A live search for `term` was scheduled (any term of 2+ characters,
+   * the same one again included): results shown so far are stale.
+   */
+  onStart?(term: string): void;
   /** The results of `term`, the newest term only; a failed search is []. */
   onResults(term: string, items: SearchItem[]): void;
   onSessionExpired(): void;
@@ -176,6 +183,7 @@ export interface SearchScheduler {
 /** Debounce, abort and settled-term telemetry of the live search, framework free. */
 export function createSearchScheduler({
   search,
+  onStart,
   onResults,
   onSessionExpired,
   log,
@@ -242,6 +250,7 @@ export function createSearchScheduler({
       if (disposed) return;
       cancel();
       if (term.length < MIN_QUERY_LENGTH) return;
+      onStart?.(term);
       debounce = setTimeout(() => run(term), debounceMs);
     },
     flushLog,
@@ -302,6 +311,9 @@ export function SearchCommand() {
   useEffect(() => {
     const scheduler = createSearchScheduler({
       search: (term, signal) => fetchSearchItems(searchUrl(term), signal),
+      // A new request makes the remembered results stale, even for the
+      // same term ("ada" → "ad" → "ada"): "Loading…" until it settles.
+      onStart: () => setResults(null),
       onResults: (term, items) => setResults({ term, items }),
       onSessionExpired: expireSession,
       log: (term, count) => sendSearchLog(term, count),
@@ -365,6 +377,7 @@ export function SearchCommand() {
       schedulerRef.current?.query("");
       setOpen(false);
       setQuery("");
+      setResults(null);
       router.push(href);
     },
     [router],
