@@ -45,7 +45,8 @@ export default {
  * event without departments, whose role holds event.find (the calendar's
  * read grant, which guest holds) and who are not blocked; the organizer is
  * excluded. Runs after the commit (LF02) and re-reads the document's
- * current published row, like the announcement fan-out. A row that cannot
+ * current published row, like the announcement fan-out: departments,
+ * organizer and title come from it. A row that cannot
  * be re-read has unknown targeting: nobody is notified (fail-closed; before
  * FX19 it notified everyone).
  */

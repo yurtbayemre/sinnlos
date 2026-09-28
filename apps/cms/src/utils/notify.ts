@@ -22,7 +22,9 @@
  *  - runSourceFanout: the audience-wide fan-out of a published announcement
  *    or event. Loads the audience, keeps the per-recipient re-publish dedup
  *    of resolveFanout (issue #12, §5.26) and fails open there; any error is
- *    logged and never thrown into the lifecycle. scheduleSourceFanout runs
+ *    logged and never thrown into the lifecycle. Title, audience and anchor
+ *    all come from the one re-read source row: a title that a later publish
+ *    replaced never reaches the audience of that later publish. scheduleSourceFanout runs
  *    it after the publish transaction commits (LF02, utils/after-commit.ts),
  *    so nothing it does can fail the publish, and a publish that rolls back
  *    notifies nobody.
@@ -216,7 +218,11 @@ export interface SourceFanoutOptions<TSource extends SourceRow> {
   /** The lifecycle's result row (the anchor when the re-read found nothing). */
   row: TSource;
   loadAudience: () => Promise<SourceAudience<TSource>>;
-  /** The title of the notification, from the lifecycle row. */
+  /**
+   * The title of the notification, from the re-read source row (the
+   * lifecycle row only when the re-read found nothing, and then there are
+   * no recipients).
+   */
   titleParts: (row: TSource) => readonly TitlePart[];
   link: string;
 }
@@ -241,7 +247,10 @@ export async function runSourceFanout<TSource extends SourceRow>(
       recipients,
       (id: number) => id,
     );
-    const titleParts = options.titleParts(row);
+    // The title from the row the audience came from: when a second publish
+    // committed before this fan-out ran (the fan-outs queue per process),
+    // the lifecycle row's title may be one the new audience must not see.
+    const titleParts = options.titleParts(source ?? row);
     const notificationSource: NotificationSource = {
       sourceType,
       sourceDocumentId: anchor?.sourceDocumentId ?? null,

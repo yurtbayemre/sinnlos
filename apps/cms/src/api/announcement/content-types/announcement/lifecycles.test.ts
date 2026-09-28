@@ -414,4 +414,36 @@ describe("announcement fan-out after the publish commits (LF02)", () => {
     await lifecycles.afterCreate({ result: first });
     expect(recipientsOf(strapi)).toEqual([USER.bob, USER.dave, USER.anna]);
   });
+
+  it("title and audience come from the same re-read row: a replaced title never widens", async () => {
+    const strapi = setup();
+    const first = publish(strapi, {
+      title: "Engineering reorg: 3 roles cut",
+      department: { id: DEPT.engineering },
+    });
+    // Before the first publish's fan-out runs (queued behind another one),
+    // the author retitles, drops the department and publishes again.
+    const draft = strapi.tables[ANNOUNCEMENT_UID].find(
+      (r) => r.documentId === first.documentId && r.publishedAt === null,
+    );
+    if (!draft) throw new Error("no draft");
+    draft.title = "Q4 all-hands";
+    draft.department = null;
+    const [second] = (
+      await strapi.documents(ANNOUNCEMENT_UID).publish({ documentId: String(first.documentId) })
+    ).entries;
+
+    await lifecycles.afterCreate({ result: first });
+    const everyone = [USER.alice, USER.bob, USER.dave, USER.anna];
+    expect(recipientsOf(strapi)).toEqual(everyone);
+    expect(new Set(notificationRows(strapi).map((n) => n.title))).toEqual(
+      new Set(["New announcement: Q4 all-hands"]),
+    );
+    // Nobody outside Engineering (nobody at all) got the replaced title.
+    expect(notificationRows(strapi).some((n) => String(n.title).includes("reorg"))).toBe(false);
+
+    // The second publish's own fan-out finds everyone served.
+    await lifecycles.afterCreate({ result: second });
+    expect(notificationRows(strapi)).toHaveLength(everyone.length);
+  });
 });

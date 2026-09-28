@@ -61,7 +61,9 @@ export default {
  *
  * The fan-out runs after the publish committed (LF02), so it re-reads the
  * document's CURRENT published row by documentId: a quicker second publish
- * may already have replaced the row id it was started for. A row that
+ * may already have replaced the row id it was started for. Targeting,
+ * author AND title come from that row (runSourceFanout), so a title the
+ * second publish replaced never reaches its wider audience. A row that
  * cannot be re-read (unpublished or deleted in between) has unknown
  * targeting: nobody is notified (fail-closed; before FX19 it targeted
  * everyone).

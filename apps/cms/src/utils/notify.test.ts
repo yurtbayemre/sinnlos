@@ -296,6 +296,24 @@ describe("runSourceFanout", () => {
     });
   });
 
+  it("takes the title from the re-read source, not from the lifecycle row", async () => {
+    const strapi = createStrapiStub();
+    const lifecycleRow = { id: 3, documentId: "e1", title: "Old title" };
+    const current = { id: 4, documentId: "e1", title: "Current title" };
+    await runSourceFanout({
+      strapi,
+      sourceType: "event",
+      row: lifecycleRow,
+      loadAudience: async () => ({ source: current, recipients: [7, 8], actorId: 1 }),
+      titleParts: (r) => ["New event: ", { value: r.title, fallback: "Untitled" }],
+      link: "/events",
+    });
+    expect(strapi.tables[NOTIFICATION_UID].map((n) => n.title)).toEqual([
+      "New event: Current title",
+      "New event: Current title",
+    ]);
+  });
+
   it("anchors on the lifecycle row when the re-read found nothing", async () => {
     const strapi = createStrapiStub();
     await runSourceFanout({

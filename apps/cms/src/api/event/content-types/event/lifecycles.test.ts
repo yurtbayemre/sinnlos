@@ -133,6 +133,29 @@ describe("event afterCreate", () => {
     expect(notificationRows(strapi)).toHaveLength(3);
   });
 
+  it("a republish before the fan-out ran: the current title for the current audience", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { title: "Sales kick-off", departments: [{ id: DEPT.sales }] });
+    const draft = strapi.tables[EVENT_UID].find(
+      (r) => r.documentId === row.documentId && r.publishedAt === null,
+    );
+    if (!draft) throw new Error("no draft");
+    draft.title = "Company kick-off";
+    draft.departments = [];
+    const [again] = (
+      await strapi.documents(EVENT_UID).publish({ documentId: String(row.documentId) })
+    ).entries;
+
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual(READERS.filter((id) => id !== USER.carol));
+    expect(new Set(notificationRows(strapi).map((n) => n.title))).toEqual(
+      new Set(["New event: Company kick-off"]),
+    );
+    const written = notificationRows(strapi).length;
+    await lifecycles.afterCreate({ result: again });
+    expect(notificationRows(strapi)).toHaveLength(written);
+  });
+
   it("a draft touches no data; afterUpdate with publishedAt fans out", async () => {
     const strapi = setup();
     await lifecycles.afterCreate({ result: { id: 1, publishedAt: null } });
