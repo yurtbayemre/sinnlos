@@ -2975,6 +2975,14 @@ extra steps):
   Strapi's own login past the web's login limiter. The cms middleware
   `global::auth-path-guard` answers every spelling other than the literal
   lowercase `/api/auth/…` (case variants, `%`-encoded, `//`, `..`) with 404.
+- **Uploads gate.** The cms middleware `global::uploads-auth` answers 404
+  to every request whose decoded, normalised path lies under `/uploads/`
+  unless it carries the web proxy's `x-internal-upload-token`, whatever its
+  position in `config/middlewares.ts`. Since 2026-09-28 it ignores case,
+  like Strapi's router, which matches `/uploads/(.*)` case-insensitively.
+  On the Linux images an upper-case `/UPLOADS/…` was a 404 before too; the
+  change matters only where `public/` sits on a case-insensitive file
+  system. It ships with a normal deploy, no env change.
 
 > For a standalone Caddy box (mode A) only part of this applies: the
 > Caddyfile sets `X-Content-Type-Options` and `Referrer-Policy` and removes
@@ -3103,8 +3111,9 @@ the cms and the database, phase 2 the web):
   Before any `@strapi/*` bump, also run
   `pnpm vitest run apps/cms/src/framework-contract.test.ts` against the new
   packages: it pins the naive-column, `.alter()` and migration-order traps
-  (and the other Strapi behaviour the cms relies on), and its version pin
-  fails first on purpose.
+  (and the other Strapi behaviour the cms relies on, `@strapi/upload`'s
+  `/uploads/(.*)` route included), and its version pin fails first on
+  purpose.
 - **New fields.** Instants are `"type": "datetime"`, calendar days
   `"type": "date"`, durations numbers with the unit in the name. Never put a
   `column` or `columnType` override on a `datetime` attribute: Strapi then
