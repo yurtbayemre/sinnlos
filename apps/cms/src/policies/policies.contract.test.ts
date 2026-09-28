@@ -22,8 +22,10 @@ import {
  *      framework-contract.test.ts), so every outcome must be exactly true or
  *      false, for callers without a user, a role, a role type or an id, for
  *      lookalike role spellings and for missing, malformed and foreign
- *      target ids. The only other outcome is the write allowlist's 400
- *      (a ValidationError), for the three FX07 write gates.
+ *      target ids. The only other outcome is a 400 (a ValidationError): the
+ *      write allowlist's, for the three FX07 write gates, and
+ *      event-rsvp-own-rows' refusal of a client filter on the user
+ *      relation (pinned in its own suite; the sweep below sends none).
  *   2. Fail closed without a caller: a policy that is not meant for
  *      anonymous callers returns false for them; role and write gates also
  *      refuse a caller without a role, and no gate lets a caller without a
@@ -336,6 +338,14 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [read(ADMIN_ONLY, false)],
   },
   "notification-visibility": {
+    kind: "read-filter",
+    anonymous: "deny",
+    cases: [read(ADMIN_ONLY, false)],
+  },
+  // FX21: raw RSVP rows are the caller's own (the summary route aggregates
+  // everyone else's). A client user filter is refused with 400; its own
+  // suite pins that, the sweep's client filter does not name the user.
+  "event-rsvp-own-rows": {
     kind: "read-filter",
     anonymous: "deny",
     cases: [read(ADMIN_ONLY, false)],

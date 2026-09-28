@@ -7,6 +7,7 @@ import {
   isRsvpStatus,
   newestFirst,
   parseSummaryTargets,
+  requestsLegacyFormat,
   stripPrivateUsers,
   summarizeRsvps,
   type RsvpRow,
@@ -62,6 +63,22 @@ async function countYesUsers(
  * photo-finish is acceptable; the UI always renders the authoritative
  * server counts after refresh.
  */
+const LEGACY_FORMAT_MESSAGE = "Strapi-Response-Format is not supported here";
+
+/**
+ * The raw reads refuse the Strapi-Response-Format header for every role but
+ * admin_role (FX21): the v4 shape nests `user` under `attributes`, where no
+ * post-filter written for the v5 shape looks (utils/rsvp.ts
+ * requestsLegacyFormat).
+ */
+function refusesLegacyFormat(ctx: {
+  headers?: unknown;
+  state?: { user?: { role?: { type?: unknown } | null } | null };
+}): boolean {
+  if (ctx.state?.user?.role?.type === "admin_role") return false;
+  return requestsLegacyFormat(ctx.headers);
+}
+
 async function isAtCapacity(strapi: any, event: any, userId: number): Promise<boolean> {
   // Without a limit no user count can fill the event: skip the query.
   if (capacityDecision(event.capacity, Number.MAX_SAFE_INTEGER) === "open") return false;
@@ -107,8 +124,15 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     return ctx.send({ data: summarizeRsvps(rows, targets, callerId) });
   },
 
-  /** Core find, post-filtered: see stripPrivateUsers in utils/rsvp.ts. */
+  /**
+   * Core find. The route policy (global::event-rsvp-own-rows) already
+   * narrowed it to the caller's own rows (admin_role: all rows) and refused
+   * a user filter; the legacy v4 response shape is refused here, and other
+   * people's maybe/no users are still stripped as a backstop
+   * (stripPrivateUsers in utils/rsvp.ts).
+   */
   async find(ctx) {
+    if (refusesLegacyFormat(ctx)) return ctx.badRequest(LEGACY_FORMAT_MESSAGE);
     const response = await super.find(ctx);
     if (Array.isArray(response?.data)) {
       stripPrivateUsers(response.data, ctx.state.user);
@@ -116,8 +140,9 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     return response;
   },
 
-  /** Core findOne, post-filtered the same way as find. */
+  /** Core findOne, guarded and post-filtered the same way as find. */
   async findOne(ctx) {
+    if (refusesLegacyFormat(ctx)) return ctx.badRequest(LEGACY_FORMAT_MESSAGE);
     const response = await super.findOne(ctx);
     if (response?.data) {
       stripPrivateUsers([response.data], ctx.state.user);

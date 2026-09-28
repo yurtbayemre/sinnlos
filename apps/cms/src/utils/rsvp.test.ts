@@ -5,10 +5,12 @@ import {
   capacityDecision,
   compareNewestFirst,
   distinctYesUsers,
+  filtersReferenceUser,
   isRsvpStatus,
   newestFirst,
   parseSummaryTargets,
   pickSurvivor,
+  requestsLegacyFormat,
   rowUserId,
   stripPrivateUsers,
   summarizeRsvps,
@@ -317,5 +319,59 @@ describe("summarizeRsvps", () => {
       null,
     );
     expect(summary).toMatchObject({ yesCount: 2, yesNames: [] });
+  });
+});
+
+describe("filtersReferenceUser", () => {
+  it.each([
+    { user: 7 },
+    { user: { id: { $eq: 7 } } },
+    { status: "no", user: { displayName: { $startsWith: "A" } } },
+    { $or: [{ status: "no" }, { user: { id: 7 } }] },
+    { $and: [{ $or: [{ $not: { user: { id: 7 } } }] }] },
+    { $or: { 0: { status: "no" }, 30: { user: { id: 7 } } } },
+    [{ user: { id: 7 } }],
+    { "user.id": 7 },
+  ])("finds the user relation in %j", (filters) => {
+    expect(filtersReferenceUser(filters)).toBe(true);
+  });
+
+  it.each([
+    undefined,
+    null,
+    "user",
+    7,
+    {},
+    { status: "no" },
+    { targetDocumentId: { $eq: "user" } },
+    { $or: [{ status: "no" }, { respondedAt: { $null: true } }] },
+    { users: 7 },
+    { username: "x" },
+  ])("finds none in %j", (filters) => {
+    expect(filtersReferenceUser(filters)).toBe(false);
+  });
+
+  it("terminates on a cyclic object", () => {
+    const cyclic: Record<string, unknown> = { status: "no" };
+    cyclic.$and = [cyclic];
+    expect(filtersReferenceUser(cyclic)).toBe(false);
+  });
+});
+
+describe("requestsLegacyFormat", () => {
+  it.each([
+    [{ "strapi-response-format": "v4" }, true],
+    [{ "strapi-response-format": "V4" }, true],
+    [{ "strapi-response-format": " v5 " }, true],
+    [{ "strapi-response-format": ["v4"] }, true],
+    [{ "strapi-response-format": "" }, false],
+    [{ "strapi-response-format": "  " }, false],
+    [{ "strapi-response-format": [] }, false],
+    [{ accept: "application/json" }, false],
+    [{}, false],
+    [undefined, false],
+    [null, false],
+  ])("reads %j as %s", (headers, expected) => {
+    expect(requestsLegacyFormat(headers)).toBe(expected);
   });
 });

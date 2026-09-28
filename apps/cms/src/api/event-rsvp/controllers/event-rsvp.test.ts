@@ -1,5 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createStrapiStub, type Row as StubRow } from "../../../test/strapi-stub.test.helper";
+import { errors } from "@strapi/utils";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import eventRsvpOwnRows from "../../../policies/event-rsvp-own-rows";
+import {
+  createStrapiStub,
+  matchWhere,
+  type Row as StubRow,
+} from "../../../test/strapi-stub.test.helper";
 import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
 import { MAX_SUMMARY_TARGETS } from "../../../utils/rsvp";
 import eventRsvpController from "./event-rsvp";
@@ -668,5 +674,134 @@ describe("event-rsvp summary (FX21)", () => {
     await controller.summary(c);
     expect(c.unauthorized).toHaveBeenCalled();
     expect(strapi.calls).toEqual([]);
+  });
+});
+
+/**
+ * FX21: the raw reads as a route runs them — the find/findOne policy
+ * (global::event-rsvp-own-rows, the real module) and then the controller.
+ * The core find is a spy that answers with the stored rows matching the
+ * filters the policy left on the REAL request query (the stub's where
+ * evaluator), so "own rows" is observed on the response, not assumed.
+ */
+describe("event-rsvp raw reads: own rows, no user filter, no v4 shape (FX21)", () => {
+  const STORED: Row[] = [
+    rsvp(1, 8, "yes", null),
+    rsvp(2, 9, "no", null),
+    rsvp(3, OWNER.id, "maybe", null),
+    rsvp(4, 10, "maybe", null),
+  ];
+  const ADMIN = { id: 78, role: { type: "admin_role" } };
+  const MEMBER = { id: OWNER.id, role: { type: "member" } };
+  const EDITOR = { id: 77, role: { type: "editor" } };
+
+  // route() installs a table-backed core find; the other suites expect the
+  // hoisted defaults back.
+  afterEach(() => {
+    mocks.superFind.mockImplementation(async () => ({ data: [] }));
+    mocks.superFindOne.mockImplementation(async () => ({ data: null }));
+  });
+
+  function route(
+    user: { id: number; role: { type: string } },
+    query: Record<string, unknown> = {},
+    headers: Record<string, string> = {},
+  ) {
+    const controller = (
+      eventRsvpController as unknown as (deps: { strapi: unknown }) => {
+        find(ctx: unknown): Promise<unknown>;
+        findOne(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi: {} });
+    const ctx = {
+      state: { user },
+      request: { query: JSON.parse(JSON.stringify(query)) as Record<string, unknown> },
+      headers,
+      badRequest: vi.fn((message: string) => ({ status: 400, message })),
+    };
+    const answer = (c: typeof ctx) =>
+      STORED.filter((row) =>
+        matchWhere(RSVP_UID, row as StubRow, c.request.query.filters as Where | undefined),
+      ).map((row) => ({ ...row, user: row.user ? { ...(row.user as object) } : row.user }));
+    mocks.superFind.mockImplementation(async (c) => ({ data: answer(c as typeof ctx) }));
+    mocks.superFindOne.mockImplementation(async (c) => ({
+      data: answer(c as typeof ctx)[0] ?? null,
+    }));
+    const run = async (action: "find" | "findOne") => {
+      const allowed = await eventRsvpOwnRows(ctx, undefined, { strapi: {} });
+      if (!allowed) return { status: 403 };
+      return controller[action](ctx);
+    };
+    return { ctx, run };
+  }
+
+  const ids = (response: unknown) =>
+    ((response as { data: Row[] }).data ?? []).map((row) => row.id);
+
+  it("serves a member only their own row", async () => {
+    const { ctx, run } = route(MEMBER);
+    expect(ids(await run("find"))).toEqual([3]);
+    expect(ctx.request.query.filters).toEqual({ user: { id: OWNER.id } });
+    // One route() per request: each request parses its own query.
+    const one = (await route(MEMBER).run("findOne")) as { data: Row };
+    expect(one.data).toMatchObject({ id: 3, user: { id: OWNER.id } });
+  });
+
+  it("gives editors no bypass: an RSVP is a personal statement", async () => {
+    const { run } = route(EDITOR);
+    expect(ids(await run("find"))).toEqual([]);
+  });
+
+  it("keeps a client filter, narrowed to the caller's rows", async () => {
+    const { ctx, run } = route(MEMBER, { filters: { status: { $eq: "maybe" } } });
+    expect(ids(await run("find"))).toEqual([3]);
+    expect(ctx.request.query.filters).toEqual({
+      $and: [{ status: { $eq: "maybe" } }, { user: { id: OWNER.id } }],
+    });
+  });
+
+  it("refuses a user.id filter with 400 before the core find runs", async () => {
+    const { run } = route(MEMBER, { filters: { user: { id: { $eq: 9 } }, status: "no" } });
+    await expect(run("find")).rejects.toBeInstanceOf(errors.ValidationError);
+    expect(mocks.superFind).not.toHaveBeenCalled();
+  });
+
+  it.each(["v4", "V4", "v5", "anything"])(
+    "refuses Strapi-Response-Format: %s with 400 for a non-admin",
+    async (format) => {
+      for (const action of ["find", "findOne"] as const) {
+        const { ctx, run } = route(MEMBER, {}, { "strapi-response-format": format });
+        expect(await run(action)).toEqual({
+          status: 400,
+          message: "Strapi-Response-Format is not supported here",
+        });
+        expect(ctx.badRequest).toHaveBeenCalledTimes(1);
+      }
+      expect(mocks.superFind).not.toHaveBeenCalled();
+      expect(mocks.superFindOne).not.toHaveBeenCalled();
+    },
+  );
+
+  it("lets admin_role through: every row and name, user filters and the v4 header", async () => {
+    const all = route(ADMIN);
+    const response = (await all.run("find")) as { data: Row[] };
+    expect(ids(response)).toEqual([1, 2, 3, 4]);
+    expect(response.data.map((row) => (row.user as { id: number }).id)).toEqual([
+      8,
+      9,
+      OWNER.id,
+      10,
+    ]);
+    expect(all.ctx.request.query).toEqual({});
+
+    const filtered = route(
+      ADMIN,
+      { filters: { user: { id: { $eq: 9 } } } },
+      {
+        "strapi-response-format": "v4",
+      },
+    );
+    expect(ids(await filtered.run("find"))).toEqual([2]);
+    expect(filtered.ctx.badRequest).not.toHaveBeenCalled();
   });
 });

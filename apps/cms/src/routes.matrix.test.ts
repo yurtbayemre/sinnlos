@@ -279,8 +279,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::event.event.delete": ADMIN_OR_EDITOR,
   "api::event.event.ics": [],
 
-  "api::event-rsvp.event-rsvp.find": [],
-  "api::event-rsvp.event-rsvp.findOne": [],
+  "api::event-rsvp.event-rsvp.find": ["global::event-rsvp-own-rows"],
+  "api::event-rsvp.event-rsvp.findOne": ["global::event-rsvp-own-rows"],
   "api::event-rsvp.event-rsvp.create": [],
   "api::event-rsvp.event-rsvp.update": ["global::is-event-rsvp-owner"],
   "api::event-rsvp.event-rsvp.delete": [],
@@ -440,6 +440,7 @@ const VISIBILITY_FILTER_POLICIES = new Set([
   "global::announcement-visibility",
   "global::comment-target-visibility",
   "global::document-visibility",
+  "global::event-rsvp-own-rows",
   "global::lesson-progress-visibility",
   "global::notification-visibility",
   "global::poll-visibility",
@@ -911,6 +912,15 @@ describe("route → policy matrix (S01)", async () => {
       expect(controllerMethods.get("api::poll-vote.poll-vote")).toEqual(
         expect.arrayContaining(["vote", "results"]),
       );
+    });
+
+    it("FX21: raw RSVP reads are narrowed to the caller's own rows", () => {
+      for (const action of [
+        "api::event-rsvp.event-rsvp.find",
+        "api::event-rsvp.event-rsvp.findOne",
+      ]) {
+        expect(policiesOf(action).map(policyName), action).toEqual(["global::event-rsvp-own-rows"]);
+      }
     });
 
     it("FX21: the RSVP summary is granted exactly like event-rsvp find, never to guest", () => {

@@ -115,6 +115,55 @@ export function stripPrivateUsers(rows: unknown[], caller: RsvpCaller | null | u
 }
 
 // ---------------------------------------------------------------------------
+// Raw reads: GET /api/event-rsvps and /api/event-rsvps/:id (FX21)
+// ---------------------------------------------------------------------------
+
+/**
+ * Whether a client `filters` tree names the `user` relation anywhere: at
+ * the root, inside $and/$or/$not, in list form or in the object form qs
+ * produces for long lists. The raw reads refuse such a filter for every
+ * role but admin_role (policies/event-rsvp-own-rows.ts): it can only
+ * narrow the caller's own rows, so it has no use, and before the own-rows
+ * restriction it was the way to learn who declined. Walks iteratively and
+ * visits each object once (a parsed query is a tree, but a hand-built one
+ * need not be).
+ */
+export function filtersReferenceUser(filters: unknown): boolean {
+  const pending: unknown[] = [filters];
+  const seen = new Set<object>();
+  while (pending.length > 0) {
+    const node = pending.pop();
+    if (node === null || typeof node !== "object" || seen.has(node)) continue;
+    seen.add(node);
+    if (Array.isArray(node)) {
+      pending.push(...node);
+      continue;
+    }
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "user" || key.startsWith("user.")) return true;
+      pending.push(value);
+    }
+  }
+  return false;
+}
+
+/**
+ * Whether the request asks for the Strapi v4 response shape (the
+ * `Strapi-Response-Format` header). @strapi/core 5.55.1 switches to
+ * `{ id, attributes: {...} }` for the value "v4" (core-api/controller
+ * transformResponse); the raw reads refuse the header outright for every
+ * role but admin_role, so no response shape other than the one the
+ * privacy filter was written for can ever be served. Koa lowercases
+ * header names.
+ */
+export function requestsLegacyFormat(headers: unknown): boolean {
+  if (headers === null || typeof headers !== "object") return false;
+  const value = (headers as Record<string, unknown>)["strapi-response-format"];
+  if (Array.isArray(value)) return value.some((item) => String(item).trim() !== "");
+  return value !== undefined && value !== null && String(value).trim() !== "";
+}
+
+// ---------------------------------------------------------------------------
 // The summary endpoint: GET /api/event-rsvps/summary?targets=<documentIds>
 // ---------------------------------------------------------------------------
 
