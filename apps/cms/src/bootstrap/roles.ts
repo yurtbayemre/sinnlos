@@ -7,10 +7,11 @@
  * The type strings are a contract with the web (lib/roles.ts reads
  * `role.type` from /api/users/me): the admin role is `admin_role`, not
  * `admin`. Pure data, no Strapi runtime and no side effects at load time
- * (config/ms-role-map.ts imports it while the config loads).
+ * (entra/config.ts imports it, and register() loads that before the
+ * bootstrap).
  *
- * Extend, never rename or remove an export: the Entra sign-in (batch 4)
- * imports RoleType and ROLE_PRIVILEGE_ORDER.
+ * Extend, never rename or remove an export: the Entra sign-in
+ * (entra/roles.ts) imports RoleType and ROLE_PRIVILEGE_ORDER.
  */
 
 /**

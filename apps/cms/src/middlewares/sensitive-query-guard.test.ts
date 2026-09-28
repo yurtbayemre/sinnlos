@@ -45,7 +45,7 @@ import { NOT_BLOCKED } from "../utils/visible-ids";
  *   4. the schema-private user fields are no `_q` target for any role:
  *      `searchable: false`, checked on the installed @strapi/database; and
  *      db.query still filters, reads and writes them (the digest cron,
- *      /api/me and the sign-in extension rely on that),
+ *      /api/me and the Entra exchange rely on that),
  *   5. config/middlewares.ts registers the guard (and the other global
  *      guards): every other test here would still pass if a merge dropped
  *      that line, and the boot check only fires once the factory runs.
@@ -445,8 +445,8 @@ describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
     // FX22 made the digest opt-ins, digestFrequency and microsoftOid
     // private; the digest cron (send-digests.ts candidates: NOT_BLOCKED AND
     // an opt-in, these columns selected, lastDigestAt written back after a
-    // send), /api/me (profile.ts) and the sign-in extension read and write
-    // them through db.query, which applies no `private` rule. The
+    // send), /api/me (profile.ts) and the Entra exchange (entra/provision.ts)
+    // read and write them through db.query, which applies no `private` rule. The
     // candidate read below has the digest's where and select.
     engine = await openUserEngine();
     const users = engine.db.query(USER_UID) as EngineQuery & {

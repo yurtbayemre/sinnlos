@@ -1,8 +1,7 @@
 // Cross-boundary import into src/ is fine: tsconfig rootDir is "." and the
-// compiled dist/ mirrors config/ + src/ side by side (same pattern in the
-// other direction: src/extensions/users-permissions imports
-// config/ms-role-map). The module runs no code at load time — config files
-// are loaded before the `strapi` global exists.
+// compiled dist/ mirrors config/ + src/ side by side (config/database.ts
+// imports src/database/session-zone the same way). The module runs no code
+// at load time — config files are loaded before the `strapi` global exists.
 import { sendDigests } from "../src/digest/send-digests";
 import { pruneSearchLogs } from "../src/cron/prune-search-logs";
 import { sweepOrphanedUploads } from "../src/cron/sweep-orphaned-uploads";

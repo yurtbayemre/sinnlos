@@ -174,9 +174,7 @@ export default async function AdminPage() {
 
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">{t("rolesSection")}</h2>
-        <p className="text-sm text-muted-foreground">
-          {t("rolesDesc", { file: "config/ms-role-map.ts" })}
-        </p>
+        <p className="text-sm text-muted-foreground">{t("rolesDesc")}</p>
         <div className="grid gap-4 md:grid-cols-2">
           {roles.map((r) => (
             <Card key={r.name}>
@@ -198,7 +196,7 @@ export default async function AdminPage() {
         <CardContent className="flex flex-col gap-2 py-6 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <div>
             <div className="font-medium text-foreground">{t("roleChangeHint")}</div>
-            <div>{t("roleChangeInstruction", { file: "apps/cms/config/ms-role-map.ts" })}</div>
+            <div>{t("roleChangeInstruction")}</div>
           </div>
           <Button variant="outline" asChild className="text-foreground">
             <Link href="/wiki/handbook/welcome">{t("readHandbook")}</Link>

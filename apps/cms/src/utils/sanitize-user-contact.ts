@@ -51,12 +51,15 @@ export const USER_UID = "plugin::users-permissions.user";
  *   - `officeLocation` — part of the physical contact card;
  *   - `microsoftOid`   — the internal Entra object id, never a display
  *     field. Since FX22 it is also schema-`private` (no role reads, filters
- *     or sorts it through the content API; the users-permissions extension
- *     reads it through db.query); it stays listed here as defence in depth.
- * `birthday`/`birthdayVisible`, `lastDigestAt` and (since FX22) the digest
- * opt-ins are schema-`private` and never reach REST output (the self
- * profile /api/me reads them through db.query), so they are intentionally
- * NOT listed here.
+ *     or sorts it through the content API; the Entra exchange,
+ *     entra/provision.ts, reads and writes it through db.query); it stays
+ *     listed here as defence in depth.
+ * `birthday`/`birthdayVisible`, `lastDigestAt`, (since FX22) the digest
+ * opt-ins and (since batch 9) the Entra identity columns `entraTenantId`,
+ * `roleSource`, `entraAppliedRole` and `entraManagerOid` are
+ * schema-`private` and never reach REST output (the self profile /api/me
+ * and the Entra exchange read them through db.query), so they are
+ * intentionally NOT listed here.
  */
 export const SENSITIVE_USER_FIELDS = [
   "email",
