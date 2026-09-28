@@ -84,8 +84,8 @@ async function graphJson(
       signal: AbortSignal.timeout(options.timeoutMs ?? GRAPH_TIMEOUT_MS),
     });
     if (response.status !== 200) {
-      // Drain the body so the connection can be reused; its content is unused.
-      await response.body?.cancel().catch(() => undefined);
+      // Release the body (its content is unused); never wait for it.
+      void response.body?.cancel().catch(() => undefined);
       return { ok: false, reason: response.status };
     }
     try {
