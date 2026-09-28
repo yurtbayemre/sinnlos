@@ -14,7 +14,10 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *      page of images), so a block reaches the files within the TTL, a new
  *      sign-in (another JWT) is checked on its own, and two sessions of the
  *      same user do not evict each other,
- *   4. an accepted request streams the bytes as before (S06 headers).
+ *   4. an accepted request streams the bytes as before (S06 headers); a
+ *      byte fetch that fails (network error, or no response headers within
+ *      the 30 s connect bound) is a 503 without bytes, also when the check
+ *      came from the map.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
  * `@/lib/config` and global fetch; the block-status map is the real one.
@@ -108,6 +111,42 @@ describe("GET /uploads/[...path] (FX41)", () => {
     expect((await get()).status).toBe(200);
     expect(urls().filter((url) => url === CHECK)).toHaveLength(3);
     expect(urls().filter((url) => url === FILE)).toHaveLength(1);
+  });
+
+  it("answers 503 when the cms is gone while the status is still cached", async () => {
+    expect((await get()).status).toBe(200); // caches `active`
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("fetch failed"); // getaddrinfo ENOTFOUND cms
+    });
+    const res = await get();
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("Service unavailable");
+    // The check came from the map; only the byte fetch reached the network.
+    expect(urls()).toEqual([CHECK, FILE, FILE]);
+  });
+
+  it("answers 503 when the cms sends no response headers within 30 s", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    let fileRequested: () => void = () => undefined;
+    const requested = new Promise<void>((resolve) => (fileRequested = resolve));
+    fetchMock.mockImplementation((url: string, init: RequestInit) => {
+      if (url === CHECK) return Promise.resolve(active());
+      fileRequested();
+      return new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new DOMException("This operation was aborted", "AbortError")),
+        );
+      });
+    });
+    let settled = false;
+    const pending = get().finally(() => (settled = true));
+    await requested;
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await pending;
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe("Service unavailable");
   });
 
   it("reuses the answer for 60 s: one check for a page of images", async () => {

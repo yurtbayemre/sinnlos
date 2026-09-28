@@ -918,7 +918,8 @@ This release (branch `fix/user-data-and-search-hardening`, on `batch/6`
   deleted account gets 401 for files within a minute (its pages already
   sent it to sign-in); before, it kept file access until its session
   expired (up to 7 days).
-  While the cms cannot answer, `/uploads` answers 503. Cost: at most one cms
+  While the cms cannot answer, `/uploads` answers 503, also when the file
+  fetch itself fails (before, that was an empty 500). Cost: at most one cms
   request per session token and minute, per web replica.
 
 **Nothing else is needed: a normal deploy.** No env change (the existing

@@ -24,6 +24,8 @@
  * Strapi accepts. A blocked or deleted account (or a rejected token) gets a
  * 401 within the 60 s of lib/upload-block-cache.ts instead of the files for
  * the rest of its session; while Strapi cannot say, the route answers 503.
+ * So does a byte fetch that fails (cms unreachable, or no response headers
+ * within the connect bound), also when the check was answered from the map.
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { getSession, getStrapiToken } from "@/lib/session";
@@ -86,6 +88,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ path
       cache: "no-store",
       signal: connectController.signal,
     });
+  } catch {
+    // Network error or the connect abort: no bytes, the documented 503
+    // (before, Next answered 500 with an empty body).
+    return new NextResponse("Service unavailable", { status: 503 });
   } finally {
     clearTimeout(connectTimeout);
   }
