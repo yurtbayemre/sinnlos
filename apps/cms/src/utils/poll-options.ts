@@ -33,7 +33,7 @@ export function validatePollOptions(raw: unknown): PollOptionsResult {
     }
     const text = value.trim();
     if (options.includes(text)) {
-      return { error: `options[${i}]: "${text}" is already answer ${options.indexOf(text) + 1}` };
+      return { error: `options[${i}]: "${text}" repeats options[${options.indexOf(text)}]` };
     }
     options.push(text);
   }

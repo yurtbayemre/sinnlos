@@ -34,8 +34,9 @@ describe("validatePollOptions (FX20)", () => {
     ["null inside", ["Yes", null], "options[1]: a non-empty text"],
     ["a nested array", [["Yes"], "No"], "options[0]: a non-empty text"],
     ["an object inside", [{ label: "Yes" }, "No"], "options[0]: a non-empty text"],
-    ["a duplicate", ["Yes", "No", "Yes"], 'options[2]: "Yes" is already answer 1'],
-    ["a duplicate after trimming", ["Yes", " Yes "], 'options[1]: "Yes" is already answer 1'],
+    ["a duplicate", ["Yes", "No", "Yes"], 'options[2]: "Yes" repeats options[0]'],
+    ["a later duplicate", ["No", "Yes", "Yes"], 'options[2]: "Yes" repeats options[1]'],
+    ["a duplicate after trimming", ["Yes", " Yes "], 'options[1]: "Yes" repeats options[0]'],
   ])("refuses %s", (_label, raw, fragment) => {
     const result = validatePollOptions(raw);
     expect("error" in result && result.error).toContain(fragment);
