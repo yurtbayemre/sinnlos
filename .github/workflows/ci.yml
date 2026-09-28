@@ -48,6 +48,13 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Non-blocking until the one-time format sweep that follows batch 10
+      # (`git add --renormalize . && pnpm format` in its own PR); then drop
+      # continue-on-error.
+      - name: Format check (prettier, non-blocking)
+        run: pnpm format:check
+        continue-on-error: true
+
       - name: Test
         run: pnpm test
 
@@ -157,3 +164,56 @@ jobs:
 
       - name: Strapi integration suite (SQLite + Postgres 16)
         run: pnpm test:integration
+
+  # The deployment files themselves: shell scripts and the compose files as
+  # docker compose renders them. No Node needed.
+  infra:
+    name: infra · shellcheck · compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Every tracked *.sh plus extensionless files with a shell shebang.
+      # Non-blocking until the sweep after batch 10 (infra/deploy.sh,
+      # infra/live-smoke.sh and infra/backup/pg-backup.sh are being reworked
+      # in the same batch); then drop continue-on-error.
+      - name: shellcheck (non-blocking)
+        continue-on-error: true
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh')
+          while IFS= read -r file; do scripts+=("${file}"); done \
+            < <(git grep -lE '^#!(/usr/bin/env |/bin/)(ba)?sh' -- ':!*.sh' || true)
+          printf 'shellcheck %s\n' "${scripts[@]}"
+          docker run --rm -v "${PWD}:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 "${scripts[@]}"
+
+      # infra/.env.example leaves the required secrets empty (compose
+      # refuses to render without them), so dummy values fill them in.
+      - name: Compose files render (Caddy mode, Traefik mode, rollback overrides)
+        run: |
+          secrets="${RUNNER_TEMP}/compose-ci.env"
+          cat > "${secrets}" <<'EOF'
+          DATABASE_PASSWORD=ci-dummy
+          APP_KEYS=ci-dummy-1,ci-dummy-2
+          API_TOKEN_SALT=ci-dummy
+          ADMIN_JWT_SECRET=ci-dummy
+          TRANSFER_TOKEN_SALT=ci-dummy
+          JWT_SECRET=ci-dummy
+          ENCRYPTION_KEY=ci-dummy
+          AUTH_SECRET=ci-dummy
+          REVALIDATE_SECRET=ci-dummy
+          INTERNAL_UPLOAD_TOKEN=ci-dummy
+          EOF
+          compose() {
+            docker compose --env-file infra/.env.example --env-file "${secrets}" \
+              -f infra/docker-compose.yml "$@"
+          }
+          echo "Caddy mode (base file only)"
+          compose config -q
+          echo "Traefik mode"
+          compose -f infra/docker-compose.traefik.yml config -q
+          echo "Traefik mode with both rollback overrides"
+          DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
+            -f infra/docker-compose.cms-legacy-tz.yml \
+            -f infra/docker-compose.web-legacy-tz.yml config -q
