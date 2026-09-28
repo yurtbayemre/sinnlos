@@ -28,8 +28,11 @@ import {
  *      escaping, so equal secrets compare equal,
  *   4. the Entra preflight (D-ENTRA-01) refuses exactly the settings the
  *      cms (entra/config.ts parseEntraConfig) and the web refuse to start
- *      with when ENTRA_ENABLED=1, is fatal, and only notes stale MS_* keys
- *      without it; compose hands both apps the keys they read,
+ *      with when ENTRA_ENABLED=1, is fatal, and without it only warns about
+ *      a real app registration (GUID client id plus secret: Microsoft
+ *      sign-in of the running release goes off) and notes other stale MS_*
+ *      keys, both with exit code 0; compose hands both apps the keys they
+ *      read,
  *   5. the rollback hint of a failed deploy tells a cms image that still
  *      starts with pnpm by its Cmd and prints a working direct start (runs
  *      the real function with docker stubbed where `bash` exists),
@@ -167,27 +170,31 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
     ",,",
   ];
 
-  it.skipIf(!HAS_AWK)("gives the same placeholder verdict as findPlaceholderSecrets", () => {
-    const keys = [...GUARDED_SECRET_KEYS, ...WARN_ONLY_SECRET_KEYS];
-    for (const value of SAMPLES) {
-      const env = Object.fromEntries(keys.map((key) => [key, value]));
-      const findings = runAwk(
-        PREFLIGHT_AWK,
-        {
-          fatal_keys: shellAssignment("PREFLIGHT_FATAL_KEYS"),
-          warn_keys: shellAssignment("PREFLIGHT_WARN_KEYS"),
-        },
-        composeJson(env),
-      );
-      const verdict = findPlaceholderSecrets(env);
-      expect(sorted(findings), JSON.stringify(value)).toEqual(
-        sorted([
-          ...verdict.placeholders.map((key) => `fatal ${key}`),
-          ...verdict.warnOnly.map((key) => `warn ${key}`),
-        ]),
-      );
-    }
-  }, 30_000);
+  it.skipIf(!HAS_AWK)(
+    "gives the same placeholder verdict as findPlaceholderSecrets",
+    () => {
+      const keys = [...GUARDED_SECRET_KEYS, ...WARN_ONLY_SECRET_KEYS];
+      for (const value of SAMPLES) {
+        const env = Object.fromEntries(keys.map((key) => [key, value]));
+        const findings = runAwk(
+          PREFLIGHT_AWK,
+          {
+            fatal_keys: shellAssignment("PREFLIGHT_FATAL_KEYS"),
+            warn_keys: shellAssignment("PREFLIGHT_WARN_KEYS"),
+          },
+          composeJson(env),
+        );
+        const verdict = findPlaceholderSecrets(env);
+        expect(sorted(findings), JSON.stringify(value)).toEqual(
+          sorted([
+            ...verdict.placeholders.map((key) => `fatal ${key}`),
+            ...verdict.warnOnly.map((key) => `warn ${key}`),
+          ]),
+        );
+      }
+    },
+    30_000,
+  );
 
   it.skipIf(!HAS_AWK)(
     "fails the digest check exactly when digestsEnabled is misconfigured (C4)",
@@ -389,14 +396,51 @@ describe("Entra preflight (D-ENTRA-01)", () => {
     },
   );
 
-  it("makes an invalid Entra configuration fatal and stale MS_* keys a note, in the preflight", () => {
+  it.skipIf(!HAS_AWK)(
+    "tells a real app registration without ENTRA_ENABLED=1 (entra-was-on) from template values (entra-inert)",
+    () => {
+      const scan = (env: Record<string, string>) =>
+        runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(composeEnv(env)));
+      const registration = {
+        MS_TENANT_ID: TENANT,
+        MS_CLIENT_ID: CLIENT,
+        MS_CLIENT_SECRET: "s3cr3t",
+      };
+      for (const flag of ["0", "", "true"]) {
+        expect(scan({ ...registration, ENTRA_ENABLED: flag }), flag).toEqual([
+          "entra-was-on MS_CLIENT_ID",
+        ]);
+      }
+      expect(scan({ ...registration, MS_CLIENT_ID: ` ${CLIENT.toUpperCase()} ` })).toEqual([
+        "entra-was-on MS_CLIENT_ID",
+      ]);
+      // Not a working registration: a template client id, or one key alone.
+      for (const env of [
+        { ...registration, MS_CLIENT_ID: "your-app-client-id" },
+        { ...registration, MS_CLIENT_SECRET: "" },
+        { ...registration, MS_CLIENT_SECRET: "   " },
+        { MS_CLIENT_SECRET: "s3cr3t" },
+      ]) {
+        expect(scan(env), JSON.stringify(env)).toEqual(["entra-inert MS_CLIENT_ID"]);
+      }
+      // With ENTRA_ENABLED=1 the same registration is a valid configuration.
+      expect(scan({ ...registration, ENTRA_ENABLED: "1", ENTRA_EXCHANGE_SECRET: SECRET })).toEqual(
+        [],
+      );
+    },
+  );
+
+  it("makes an invalid Entra configuration fatal and stale MS_* keys a warning or a note, in the preflight", () => {
     const invalidGate = 'if [[ -n "${entra_invalid_keys}" ]]; then';
+    const wasOnGate = 'if [[ -n "${entra_was_on_keys}" ]]; then';
     const inertGate = 'if [[ -n "${entra_inert_keys}" ]]; then';
     const fatal = DEPLOY.slice(DEPLOY.indexOf(invalidGate));
     expect(fatal.slice(0, fatal.indexOf("\nfi\n"))).toContain("preflight_failed=1");
-    const note = DEPLOY.slice(DEPLOY.indexOf(inertGate));
-    expect(note.slice(0, note.indexOf("\nfi\n"))).not.toContain("preflight_failed");
-    for (const gate of [invalidGate, inertGate]) {
+    for (const gate of [wasOnGate, inertGate]) {
+      const block = DEPLOY.slice(DEPLOY.indexOf(gate));
+      expect(block.slice(0, block.indexOf("\nfi\n")), gate).not.toContain("preflight_failed");
+    }
+    for (const gate of [invalidGate, wasOnGate, inertGate]) {
       expect(DEPLOY.indexOf(gate), gate).toBeGreaterThan(-1);
       expect(DEPLOY.indexOf(gate), gate).toBeLessThan(DEPLOY.indexOf('log "Preflight OK"'));
     }
@@ -542,7 +586,10 @@ interface HintProbes {
  * runs under the `timeout` stub and "UNBOUNDED docker …" otherwise, and
  * "permission probe" when a query it is handed reads up_permissions.
  */
-function rollbackHintRun(cmd: string | null, probes: HintProbes = {}): { stdout: string; stderr: string } {
+function rollbackHintRun(
+  cmd: string | null,
+  probes: HintProbes = {},
+): { stdout: string; stderr: string } {
   const script = [
     "set -euo pipefail",
     "exec 3>&1",
@@ -712,7 +759,9 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
     expect(statements[statements.length - 1]).toBe("COMMIT");
     // One writing statement: both DELETEs in data-modifying CTEs, so the
     // second one can only reach the rows the first one returns.
-    const writes = statements.filter((s) => /\b(DELETE|UPDATE|INSERT|TRUNCATE|DROP|ALTER)\b/i.test(s));
+    const writes = statements.filter((s) =>
+      /\b(DELETE|UPDATE|INSERT|TRUNCATE|DROP|ALTER)\b/i.test(s),
+    );
     expect(writes).toHaveLength(1);
     expect(writes[0]).toBe(
       "WITH unlinked AS ( " +
@@ -729,230 +778,373 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
         "(SELECT count(*) FROM removed) AS permission_rows_removed",
     );
     // The action the cms grants every role, guest included.
-    expect(read("apps", "cms", "src", "bootstrap", "permission-matrix.ts")).toContain('"api::poll-vote.poll-vote.vote": "*"');
+    expect(read("apps", "cms", "src", "bootstrap", "permission-matrix.ts")).toContain(
+      '"api::poll-vote.poll-vote.vote": "*"',
+    );
   });
 
-  it.skipIf(!HAS_BASH)("prints the whole sequence for a :rollback cms from before guest access", () => {
-    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { imageCheck: 1 });
-    expect(stdout).toContain(`bounded ${IMAGE_CHECK}`);
-    expect(stderr).toContain("FIRST, before the retag: infra-cms:rollback predates poll guest access.");
-    expect(stderr).toContain("also when the database or the admin panel shows none");
-    expectInOrder(stderr, ["FIRST, before the retag", ...FULL_SEQUENCE]);
-  });
-
-  it.skipIf(!HAS_BASH)("prints it whatever the database holds: it never asks for the permission", () => {
-    // A slow first boot can miss compose's health deadline before its
-    // bootstrap grants the row: the database holds none (every query
-    // answers 0 here), and the still starting or restarting new cms grants
-    // it afterwards.
-    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { naive: "0", imageCheck: 1 });
-    expect(stdout).not.toContain("permission probe");
-    expectInOrder(stderr, FULL_SEQUENCE);
-    expect(DEPLOY).not.toContain("guest_poll_vote_grants");
-  });
-
-  it.skipIf(!HAS_BASH)("prints it with the image check when the :rollback image cannot be checked", () => {
-    for (const imageCheck of [2, 125, 127]) {
-      const hint = rollbackHint(null, "0", { imageCheck });
-      expect(hint, String(imageCheck)).toContain(
-        "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
+  it.skipIf(!HAS_BASH)(
+    "prints the whole sequence for a :rollback cms from before guest access",
+    () => {
+      const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { imageCheck: 1 });
+      expect(stdout).toContain(`bounded ${IMAGE_CHECK}`);
+      expect(stderr).toContain(
+        "FIRST, before the retag: infra-cms:rollback predates poll guest access.",
       );
-      expect(hint).toContain("skip the removal and its rerun below only if this prints 1 or more");
-      expect(hint).toContain(IMAGE_CHECK.replace(" -q ", " -c "));
-      expectInOrder(hint, ["FIRST, before the retag", ...FULL_SEQUENCE]);
-    }
-  });
+      expect(stderr).toContain("also when the database or the admin panel shows none");
+      expectInOrder(stderr, ["FIRST, before the retag", ...FULL_SEQUENCE]);
+    },
+  );
+
+  it.skipIf(!HAS_BASH)(
+    "prints it whatever the database holds: it never asks for the permission",
+    () => {
+      // A slow first boot can miss compose's health deadline before its
+      // bootstrap grants the row: the database holds none (every query
+      // answers 0 here), and the still starting or restarting new cms grants
+      // it afterwards.
+      const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { naive: "0", imageCheck: 1 });
+      expect(stdout).not.toContain("permission probe");
+      expectInOrder(stderr, FULL_SEQUENCE);
+      expect(DEPLOY).not.toContain("guest_poll_vote_grants");
+    },
+  );
+
+  it.skipIf(!HAS_BASH)(
+    "prints it with the image check when the :rollback image cannot be checked",
+    () => {
+      for (const imageCheck of [2, 125, 127]) {
+        const hint = rollbackHint(null, "0", { imageCheck });
+        expect(hint, String(imageCheck)).toContain(
+          "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
+        );
+        expect(hint).toContain(
+          "skip the removal and its rerun below only if this prints 1 or more",
+        );
+        expect(hint).toContain(IMAGE_CHECK.replace(" -q ", " -c "));
+        expectInOrder(hint, ["FIRST, before the retag", ...FULL_SEQUENCE]);
+      }
+    },
+  );
 
   it.skipIf(!HAS_BASH)("prints it when the image check times out", () => {
     const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { imageCheck: 0, hang: ["run"] });
     expect(stdout).not.toContain("docker run");
-    expect(stderr).toContain("FIRST, before the retag, unless infra-cms:rollback knows poll guest access");
+    expect(stderr).toContain(
+      "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
+    );
     expectInOrder(stderr, FULL_SEQUENCE);
   });
 
-  it.skipIf(!HAS_BASH)("says nothing about it when the :rollback cms knows guest access (the row is its own grant)", () => {
-    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { imageCheck: 0 });
-    expect(stdout).toContain(`bounded ${IMAGE_CHECK}`);
-    expect(stderr).not.toContain("FIRST");
-    expect(stderr).not.toContain("stop cms");
-    expect(stderr).not.toContain(REVOKE_SQL);
-    expect(stderr).not.toContain("THEN, once the previous cms is up");
-    expect(stderr).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
-  });
+  it.skipIf(!HAS_BASH)(
+    "says nothing about it when the :rollback cms knows guest access (the row is its own grant)",
+    () => {
+      const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { imageCheck: 0 });
+      expect(stdout).toContain(`bounded ${IMAGE_CHECK}`);
+      expect(stderr).not.toContain("FIRST");
+      expect(stderr).not.toContain("stop cms");
+      expect(stderr).not.toContain(REVOKE_SQL);
+      expect(stderr).not.toContain("THEN, once the previous cms is up");
+      expect(stderr).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    },
+  );
 
-  it.skipIf(!HAS_BASH)("keeps the rerun after every start command, the direct start included", () => {
-    const hint = rollbackHint('["pnpm","start"]', "3", { imageCheck: 1 });
-    expectInOrder(hint, [
-      `${COMPOSE_LINE} stop cms`,
-      REVOKE_LINE,
-      "To roll back:",
-      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms`,
-      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
-      "THEN, once the previous cms is up",
-      REVOKE_LINE,
-    ]);
-  });
-
-  it.skipIf(!HAS_BASH)("prints a removal command that the shell splits into the psql call of DEPLOYMENT", () => {
-    const hint = rollbackHint(STRAPI_CMD, "0", { imageCheck: 1 });
-    const lines = hint
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.includes(" exec -T db "));
-    expect(lines).toHaveLength(2);
-    expect(lines[1]).toBe(lines[0]);
-    const line = lines[0];
-    const redirect = ` < /srv/${REVOKE_SQL}`;
-    expect(line.endsWith(redirect)).toBe(true);
-    // Run as printed (minus the redirect) with docker printing one argument per line.
-    const run = runBash(`docker() { printf '%s\n' "$@"; }\n${line.slice(0, -redirect.length)}\n`);
-    expect(run.status).toBe(0);
-    expect(run.stdout.trimEnd().split("\n").slice(-4)).toEqual(["db", "sh", "-c", PSQL]);
-  });
-});
-
-describe("rollback hint: bounded probes (a failed deploy must print every line)", BASH_BUDGET, () => {
-  const COMPOSE_LINE =
-    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
-
-  it("bounds every docker call of the hint with timeout, and the naive query with lock and statement timeouts", () => {
-    expect(shellLine("PROBE_TIMEOUT=(")).toBe("PROBE_TIMEOUT=(timeout -k 5 15)");
-    const naive = shellFunction("naive_app_columns");
-    expect(naive).toContain("SET lock_timeout = '5s';");
-    expect(naive).toContain("SET statement_timeout = '10s';");
-    // -q keeps the SET command tags out of the number the callers parse.
-    expect(naive).toContain("psql -X -q -tA");
-    // The preflight gate keeps its unbounded call; the hint passes the bound.
-    expect(shellFunction("datetime_repair_env_missing")).toContain('naive="$(naive_app_columns)"');
-    expect(shellFunction("print_rollback_hint")).toContain('naive_app_columns "${PROBE_TIMEOUT[@]}"');
-  });
-
-  it.skipIf(!HAS_BASH)("runs each of its docker calls under the bound", () => {
-    for (const imageCheck of [0, 1]) {
-      const { stdout } = rollbackHintRun('["pnpm","start"]', { imageCheck });
-      const calls = stdout.split("\n").filter((l) => l.includes("docker "));
-      expect(calls.map((l) => l.split(" ").slice(0, 3).join(" ")).sort()).toEqual([
-        "bounded docker exec",
-        "bounded docker image",
-        "bounded docker image",
-        "bounded docker run",
+  it.skipIf(!HAS_BASH)(
+    "keeps the rerun after every start command, the direct start included",
+    () => {
+      const hint = rollbackHint('["pnpm","start"]', "3", { imageCheck: 1 });
+      expectInOrder(hint, [
+        `${COMPOSE_LINE} stop cms`,
+        REVOKE_LINE,
+        "To roll back:",
+        `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms`,
+        `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+        "THEN, once the previous cms is up",
+        REVOKE_LINE,
       ]);
-      expect(stdout).toContain(
-        `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:rollback`,
-      );
-      expect(stdout).not.toContain("UNBOUNDED");
-    }
-  });
+    },
+  );
 
-  it.skipIf(!HAS_BASH)("prints every line, the safe variant each, when all probes time out", () => {
-    const { stderr } = rollbackHintRun('["pnpm","start"]', { hang: ["exec", "image", "run"] });
-    expectInOrder(stderr, [
-      "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
-      `${COMPOSE_LINE} stop cms`,
-      "rollback/revoke-guest-poll-vote.sql",
-      "To roll back:",
-      "(the database could not be asked whether the datetime repair has run",
-      "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
-      "(infra-web:rollback could not be checked for the web's datetime port, so the web",
-      `${COMPOSE_LINE} -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
-      "(--no-build is essential",
-      "Check the rollback image:",
-      "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
-      "THEN, once the previous cms is up",
-      "rollback/revoke-guest-poll-vote.sql",
-      "A re-run of this script tags whatever runs then as :rollback",
-    ]);
-  });
-
-  it.skipIf(!HAS_BASH)("says so when the database cannot be asked about the datetime repair", () => {
-    const hint = rollbackHint('["node_modules/.bin/strapi","start"]', "");
-    expect(hint).toContain("the database could not be asked whether the datetime repair has run");
-    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
-    expect(rollbackHint('["node_modules/.bin/strapi","start"]', "0")).not.toContain("could not be asked");
-  });
+  it.skipIf(!HAS_BASH)(
+    "prints a removal command that the shell splits into the psql call of DEPLOYMENT",
+    () => {
+      const hint = rollbackHint(STRAPI_CMD, "0", { imageCheck: 1 });
+      const lines = hint
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => l.includes(" exec -T db "));
+      expect(lines).toHaveLength(2);
+      expect(lines[1]).toBe(lines[0]);
+      const line = lines[0];
+      const redirect = ` < /srv/${REVOKE_SQL}`;
+      expect(line.endsWith(redirect)).toBe(true);
+      // Run as printed (minus the redirect) with docker printing one argument per line.
+      const run = runBash(`docker() { printf '%s\n' "$@"; }\n${line.slice(0, -redirect.length)}\n`);
+      expect(run.status).toBe(0);
+      expect(run.stdout.trimEnd().split("\n").slice(-4)).toEqual(["db", "sh", "-c", PSQL]);
+    },
+  );
 });
 
-describe("datetime phase 2: the web in UTC, and the web legacy-zone override for a rollback", BASH_BUDGET, () => {
-  const COMPOSE_LINE =
-    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
-  const WEB_OVERRIDE = "/srv/infra/docker-compose.web-legacy-tz.yml";
-  const OVERRIDE = read("infra", "docker-compose.web-legacy-tz.yml");
-  const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+describe(
+  "rollback hint: bounded probes (a failed deploy must print every line)",
+  BASH_BUDGET,
+  () => {
+    const COMPOSE_LINE =
+      "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
 
-  /** The environment lines of one compose service (two-space service indent). */
-  function serviceEnvironment(compose: string, service: string): string[] {
-    const lines = compose.split("\n");
-    const start = lines.indexOf(`  ${service}:`);
-    expect(start, service).toBeGreaterThanOrEqual(0);
-    const rest = lines.slice(start + 1);
-    const end = rest.findIndex((line) => /^ {0,2}\S/.test(line));
-    return (end === -1 ? rest : rest.slice(0, end)).filter((line) => !line.trim().startsWith("#"));
-  }
-
-  it("runs the web in UTC: the image and compose both say so", () => {
-    expect(WEB_DOCKERFILE).toMatch(/^ENV TZ=UTC$/m);
-    expect(serviceEnvironment(COMPOSE, "web")).toContain("      TZ: UTC");
-    expect(serviceEnvironment(COMPOSE, "web")).toContain(
-      "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
-    );
-  });
-
-  it("labels the web image with the value the rollback hint checks", () => {
-    const label = shellAssignment("WEB_DATETIME_LABEL");
-    const value = shellAssignment("WEB_DATETIME_VALUE");
-    expect(WEB_DOCKERFILE).toContain(`LABEL ${label}="${value}"`);
-    expect(shellFunction("image_web_zone_explicit")).toContain(
-      'docker image inspect -f "{{ index .Config.Labels \\"${WEB_DATETIME_LABEL}\\" }}" "$1"',
-    );
-  });
-
-  it("the override gives the web exactly the TZ the compose file set before the port, and nothing else", () => {
-    const lines = OVERRIDE.split("\n").filter((line) => line.trim() !== "" && !line.trim().startsWith("#"));
-    expect(lines).toEqual(["services:", "  web:", "    environment:", "      TZ: ${APP_TIME_ZONE:-Europe/Berlin}"]);
-    // The web's APP_TIME_ZONE default, so the old start check (Node runs in APP_TIME_ZONE) passes.
-    expect(serviceEnvironment(COMPOSE, "web")).toContain(
-      "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
-    );
-    expect(shellAssignment("COMPOSE_WEB_LEGACY_TZ")).toBe("${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml");
-  });
-
-  it.skipIf(!HAS_BASH)("adds the override for a :rollback web from before the port", () => {
-    const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "<no value>" });
-    expectInOrder(hint, [
-      "To roll back:",
-      "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
-      // Both kinds of old web: one with the start check (500), one without (UTC times).
-      "zone, so in UTC it fails to start or shows UTC times; hence the web override",
-      `${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`,
-    ]);
-    expect(hint).not.toContain("could not be checked for the web's datetime port");
-  });
-
-  it.skipIf(!HAS_BASH)("adds it, with the check, when the :rollback web cannot be checked", () => {
-    for (const probes of [{ webLabel: null }, { hang: ["image"] }]) {
-      const hint = rollbackHint(STRAPI_CMD, "0", probes);
-      expect(hint).toContain("(infra-web:rollback could not be checked for the web's datetime port, so the web");
-      expect(hint).toContain("in UTC a web from before it fails to start or shows UTC times, a newer one only");
-      expect(hint).toContain(
-        `docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`,
+    it("bounds every docker call of the hint with timeout, and the naive query with lock and statement timeouts", () => {
+      expect(shellLine("PROBE_TIMEOUT=(")).toBe("PROBE_TIMEOUT=(timeout -k 5 15)");
+      const naive = shellFunction("naive_app_columns");
+      expect(naive).toContain("SET lock_timeout = '5s';");
+      expect(naive).toContain("SET statement_timeout = '10s';");
+      // -q keeps the SET command tags out of the number the callers parse.
+      expect(naive).toContain("psql -X -q -tA");
+      // The preflight gate keeps its unbounded call; the hint passes the bound.
+      expect(shellFunction("datetime_repair_env_missing")).toContain(
+        'naive="$(naive_app_columns)"',
       );
-      expect(hint).toContain(`${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`);
+      expect(shellFunction("print_rollback_hint")).toContain(
+        'naive_app_columns "${PROBE_TIMEOUT[@]}"',
+      );
+    });
+
+    it.skipIf(!HAS_BASH)("runs each of its docker calls under the bound", () => {
+      for (const imageCheck of [0, 1]) {
+        const { stdout } = rollbackHintRun('["pnpm","start"]', { imageCheck });
+        const calls = stdout.split("\n").filter((l) => l.includes("docker "));
+        expect(calls.map((l) => l.split(" ").slice(0, 3).join(" ")).sort()).toEqual([
+          "bounded docker exec",
+          "bounded docker image",
+          "bounded docker image",
+          "bounded docker run",
+        ]);
+        expect(stdout).toContain(
+          `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:rollback`,
+        );
+        expect(stdout).not.toContain("UNBOUNDED");
+      }
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "prints every line, the safe variant each, when all probes time out",
+      () => {
+        const { stderr } = rollbackHintRun('["pnpm","start"]', { hang: ["exec", "image", "run"] });
+        expectInOrder(stderr, [
+          "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
+          `${COMPOSE_LINE} stop cms`,
+          "rollback/revoke-guest-poll-vote.sql",
+          "To roll back:",
+          "(the database could not be asked whether the datetime repair has run",
+          "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
+          "(infra-web:rollback could not be checked for the web's datetime port, so the web",
+          `${COMPOSE_LINE} -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
+          "(--no-build is essential",
+          "Check the rollback image:",
+          "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
+          "THEN, once the previous cms is up",
+          "rollback/revoke-guest-poll-vote.sql",
+          "A re-run of this script tags whatever runs then as :rollback",
+        ]);
+      },
+    );
+
+    it.skipIf(!HAS_BASH)(
+      "says so when the database cannot be asked about the datetime repair",
+      () => {
+        const hint = rollbackHint('["node_modules/.bin/strapi","start"]', "");
+        expect(hint).toContain(
+          "the database could not be asked whether the datetime repair has run",
+        );
+        expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+        expect(rollbackHint('["node_modules/.bin/strapi","start"]', "0")).not.toContain(
+          "could not be asked",
+        );
+      },
+    );
+  },
+);
+
+describe(
+  "datetime phase 2: the web in UTC, and the web legacy-zone override for a rollback",
+  BASH_BUDGET,
+  () => {
+    const COMPOSE_LINE =
+      "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+    const WEB_OVERRIDE = "/srv/infra/docker-compose.web-legacy-tz.yml";
+    const OVERRIDE = read("infra", "docker-compose.web-legacy-tz.yml");
+    const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+
+    /** The environment lines of one compose service (two-space service indent). */
+    function serviceEnvironment(compose: string, service: string): string[] {
+      const lines = compose.split("\n");
+      const start = lines.indexOf(`  ${service}:`);
+      expect(start, service).toBeGreaterThanOrEqual(0);
+      const rest = lines.slice(start + 1);
+      const end = rest.findIndex((line) => /^ {0,2}\S/.test(line));
+      return (end === -1 ? rest : rest.slice(0, end)).filter(
+        (line) => !line.trim().startsWith("#"),
+      );
     }
+
+    it("runs the web in UTC: the image and compose both say so", () => {
+      expect(WEB_DOCKERFILE).toMatch(/^ENV TZ=UTC$/m);
+      expect(serviceEnvironment(COMPOSE, "web")).toContain("      TZ: UTC");
+      expect(serviceEnvironment(COMPOSE, "web")).toContain(
+        "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
+      );
+    });
+
+    it("labels the web image with the value the rollback hint checks", () => {
+      const label = shellAssignment("WEB_DATETIME_LABEL");
+      const value = shellAssignment("WEB_DATETIME_VALUE");
+      expect(WEB_DOCKERFILE).toContain(`LABEL ${label}="${value}"`);
+      expect(shellFunction("image_web_zone_explicit")).toContain(
+        'docker image inspect -f "{{ index .Config.Labels \\"${WEB_DATETIME_LABEL}\\" }}" "$1"',
+      );
+    });
+
+    it("the override gives the web exactly the TZ the compose file set before the port, and nothing else", () => {
+      const lines = OVERRIDE.split("\n").filter(
+        (line) => line.trim() !== "" && !line.trim().startsWith("#"),
+      );
+      expect(lines).toEqual([
+        "services:",
+        "  web:",
+        "    environment:",
+        "      TZ: ${APP_TIME_ZONE:-Europe/Berlin}",
+      ]);
+      // The web's APP_TIME_ZONE default, so the old start check (Node runs in APP_TIME_ZONE) passes.
+      expect(serviceEnvironment(COMPOSE, "web")).toContain(
+        "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
+      );
+      expect(shellAssignment("COMPOSE_WEB_LEGACY_TZ")).toBe(
+        "${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml",
+      );
+    });
+
+    it.skipIf(!HAS_BASH)("adds the override for a :rollback web from before the port", () => {
+      const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "<no value>" });
+      expectInOrder(hint, [
+        "To roll back:",
+        "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
+        // Both kinds of old web: one with the start check (500), one without (UTC times).
+        "zone, so in UTC it fails to start or shows UTC times; hence the web override",
+        `${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`,
+      ]);
+      expect(hint).not.toContain("could not be checked for the web's datetime port");
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "adds it, with the check, when the :rollback web cannot be checked",
+      () => {
+        for (const probes of [{ webLabel: null }, { hang: ["image"] }]) {
+          const hint = rollbackHint(STRAPI_CMD, "0", probes);
+          expect(hint).toContain(
+            "(infra-web:rollback could not be checked for the web's datetime port, so the web",
+          );
+          expect(hint).toContain(
+            "in UTC a web from before it fails to start or shows UTC times, a newer one only",
+          );
+          expect(hint).toContain(
+            `docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback`,
+          );
+          expect(hint).toContain(`${COMPOSE_LINE} -f ${WEB_OVERRIDE} up -d --no-build web cms`);
+        }
+      },
+    );
+
+    it.skipIf(!HAS_BASH)("leaves it out for a :rollback web from the port on", () => {
+      const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "zone-explicit" });
+      expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+      expect(hint).not.toContain("web-legacy-tz");
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "puts both overrides and the direct start on the same up line when all are needed",
+      () => {
+        const hint = rollbackHint('["pnpm","start"]', "3", { webLabel: "<no value>" });
+        expect(hint).toContain(
+          `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} up -d --no-build web cms`,
+        );
+        expect(hint).toContain(
+          `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+        );
+      },
+    );
+  },
+);
+
+/**
+ * The preflight of deploy.sh from its scan to "Preflight OK", in bash, with
+ * compose answering `env` (the cms service) and the docker probes (JWT
+ * rotation, datetime repair) stubbed to "nothing to do".
+ */
+function preflightRun(env: Record<string, string>): {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+} {
+  const from = DEPLOY.indexOf('findings="$(');
+  const okLine = 'log "Preflight OK"';
+  const to = DEPLOY.indexOf(okLine, from) + okLine.length;
+  const script = [
+    "set -euo pipefail",
+    "log() { printf '==> %s\\n' \"$*\"; }",
+    "jwt_rotation_missing() { return 1; }",
+    "datetime_repair_env_missing() { return 1; }",
+    "compose_stub() {",
+    "cat <<'COMPOSE_JSON'",
+    composeJson(env),
+    "COMPOSE_JSON",
+    "}",
+    "COMPOSE=(compose_stub)",
+    `PREFLIGHT_FATAL_KEYS=${shellQuote(shellAssignment("PREFLIGHT_FATAL_KEYS"))}`,
+    `PREFLIGHT_WARN_KEYS=${shellQuote(shellAssignment("PREFLIGHT_WARN_KEYS"))}`,
+    shellFunction("preflight_scan"),
+    DEPLOY.slice(from, to),
+    "",
+  ].join("\n");
+  return runBash(script);
+}
+
+describe("Entra preflight messages and exit code (D-ENTRA-01)", BASH_BUDGET, () => {
+  const CLIENT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  /** What compose hands the apps from an infra/.env without ENTRA_ENABLED. */
+  const entraOff = (clientId: string, secret: string) => ({
+    ENTRA_ENABLED: "0",
+    MS_TENANT_ID: "11111111-2222-4333-8444-555555555555",
+    MS_CLIENT_ID: clientId,
+    AUTH_MICROSOFT_ENTRA_ID_ID: clientId,
+    AUTH_MICROSOFT_ENTRA_ID_SECRET: secret,
   });
 
-  it.skipIf(!HAS_BASH)("leaves it out for a :rollback web from the port on", () => {
-    const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "zone-explicit" });
-    expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
-    expect(hint).not.toContain("web-legacy-tz");
+  it.skipIf(!HAS_BASH)("warns, and passes, when a real app registration goes off", () => {
+    const run = preflightRun(entraOff(CLIENT, "client-secret-value"));
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("Preflight OK");
+    expect(run.stderr).toContain(
+      "WARNING: infra/.env holds a Microsoft app registration (MS_CLIENT_ID is a GUID and",
+    );
+    expect(run.stderr).toContain("it is OFF after this deploy");
+    expect(run.stderr).toContain('"Upgrading to the Entra sign-in (batch 9, lane 4A)"');
+    expect(run.stderr).not.toContain("stays off");
+    expect(run.stderr).not.toContain("client-secret-value");
   });
 
-  it.skipIf(!HAS_BASH)("puts both overrides and the direct start on the same up line when all are needed", () => {
-    const hint = rollbackHint('["pnpm","start"]', "3", { webLabel: "<no value>" });
-    expect(hint).toContain(
-      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} up -d --no-build web cms`,
+  it.skipIf(!HAS_BASH)("only notes template values, and passes", () => {
+    const run = preflightRun(entraOff("your-app-client-id", "your-app-client-secret"));
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("Preflight OK");
+    expect(run.stderr).toContain(
+      "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:",
     );
-    expect(hint).toContain(
-      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f ${WEB_OVERRIDE} -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
-    );
+    expect(run.stderr).not.toContain("WARNING");
+  });
+
+  it.skipIf(!HAS_BASH)("says nothing about Entra without MS_* values", () => {
+    const run = preflightRun(entraOff("", ""));
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stderr).toBe("");
   });
 });

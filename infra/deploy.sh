@@ -81,8 +81,11 @@ PREFLIGHT_WARN_KEYS="DATABASE_PASSWORD"
 # gate in apps/cms/src/digest/send-digests.ts would skip every run),
 # "entra-invalid KEY" (ENTRA_ENABLED=1 and KEY fails the check the cms
 # (apps/cms/src/entra/config.ts) or the web (apps/web/src/lib/auth-config.ts)
-# runs at start, so both would refuse to start) or "entra-inert MS_CLIENT_ID"
-# (MS_* values left in infra/.env without ENTRA_ENABLED=1: ignored).
+# runs at start, so both would refuse to start), "entra-was-on MS_CLIENT_ID"
+# (without ENTRA_ENABLED=1, a real app registration: a GUID client id and a
+# client secret, with which the running release may have offered Microsoft
+# sign-in) or "entra-inert MS_CLIENT_ID" (other MS_* values left in
+# infra/.env without ENTRA_ENABLED=1: ignored).
 # The key lists, the markers, the digest rule and the Entra rules are
 # pinned against env-guard.ts, send-digests.ts, entra/config.ts and the web's
 # auth-config.ts by apps/cms/src/utils/deploy-preflight.test.ts.
@@ -174,6 +177,10 @@ preflight_scan() {
         if (role != "" && role != "member" && role != "guest" && role != "deny") print "entra-invalid ENTRA_DEFAULT_ROLE"
         if (!ttl_ok(env["ENTRA_SESSION_TTL"])) print "entra-invalid ENTRA_SESSION_TTL"
         if (!group_roles_ok(env["ENTRA_GROUP_ROLES"])) print "entra-invalid ENTRA_GROUP_ROLES"
+      } else if (guid(trim(env["AUTH_MICROSOFT_ENTRA_ID_ID"])) && trim(env["AUTH_MICROSOFT_ENTRA_ID_SECRET"]) != "") {
+        # The web before D-ENTRA-01 offered Microsoft sign-in with exactly
+        # these two keys; this deploy switches it off.
+        print "entra-was-on MS_CLIENT_ID"
       } else if (env["MS_CLIENT_ID"] != "" || env["AUTH_MICROSOFT_ENTRA_ID_SECRET"] != "") {
         print "entra-inert MS_CLIENT_ID"
       }
@@ -421,6 +428,19 @@ warn_keys="$(keys_of warn)"
 digest_keys="$(keys_of digest)"
 entra_invalid_keys="$(keys_of entra-invalid)"
 entra_inert_keys="$(keys_of entra-inert)"
+entra_was_on_keys="$(keys_of entra-was-on)"
+# Not fatal: the owner instance may keep an unused registration in
+# infra/.env. But an instance that still signs users in with the old
+# Microsoft flow loses it with this deploy.
+if [[ -n "${entra_was_on_keys}" ]]; then
+  echo "WARNING: infra/.env holds a Microsoft app registration (MS_CLIENT_ID is a GUID and" >&2
+  echo "         MS_CLIENT_SECRET is set), but ENTRA_ENABLED is not 1. If Microsoft sign-in" >&2
+  echo "         works with the running release, it is OFF after this deploy (local sign-in is" >&2
+  echo "         on) until ENTRA_ENABLED=1 is set. Accounts the old flow created have no password," >&2
+  echo "         and the new sign-in answers \"already exists\" for them until an admin binds each" >&2
+  echo "         one: docs/DEPLOYMENT.md, \"Upgrading to the Entra sign-in (batch 9, lane 4A)\"." >&2
+  echo "         Nothing to do if Microsoft sign-in was never used here." >&2
+fi
 if [[ -n "${entra_inert_keys}" ]]; then
   echo "NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET are set in infra/.env, but ENTRA_ENABLED is not 1:" >&2
   echo "      Microsoft sign-in stays off and the MS_* values are ignored (safe to delete)." >&2

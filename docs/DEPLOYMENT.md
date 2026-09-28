@@ -121,8 +121,10 @@ openssl version  # OpenSSL 3.x.x
 Sinnlos signs users in with e-mail and password (local sign-in) by default.
 **Microsoft Entra ID** (formerly Azure AD) single sign-on is optional and
 **off unless `ENTRA_ENABLED=1`** is set; without it every `MS_*` and
-`ENTRA_*` value is ignored (a leftover `MS_*` line in `infra/.env` only earns
-a note from `infra/deploy.sh`). The owner's instance runs without it.
+`ENTRA_*` value is ignored (leftover `MS_*` lines in `infra/.env` only earn
+a note from `infra/deploy.sh`, or a warning when they are a real app
+registration; see [the upgrade notes](#upgrading-to-the-entra-sign-in-batch-9-lane-4a)).
+The owner's instance runs without it.
 
 How it works (D-ENTRA-01): Auth.js runs the OIDC code flow against exactly
 one tenant. The web then POSTs the ID token and the Graph access token to the
@@ -1151,13 +1153,20 @@ the first boot changes, by itself:
   cms no longer gets `MS_CLIENT_SECRET` and the web no longer gets
   `AUTH_MICROSOFT_ENTRA_ID_ISSUER`. `MS_*` lines left in `infra/.env` are
   ignored; `infra/deploy.sh` notes them (`NOTE: MS_CLIENT_ID/MS_CLIENT_SECRET
-  are set …`), and they can be deleted. The old refusal ("Microsoft sign-in is
-  configured …") is gone.
+  are set …`), and they can be deleted. When they are a real app
+  registration (a GUID `MS_CLIENT_ID` plus `MS_CLIENT_SECRET`) it warns
+  instead (`WARNING: infra/.env holds a Microsoft app registration …`):
+  if Microsoft sign-in works with the running release, it is **off** after
+  this deploy until `ENTRA_ENABLED=1`, see the last paragraph of this
+  section. Both only inform (exit code 0). The old refusal ("Microsoft
+  sign-in is configured …") is gone.
 
 **Before the deploy**
 
 1. `infra/deploy.sh --check` prints `Preflight OK` (a note about leftover
-   `MS_*` lines is fine).
+   `MS_*` lines is fine; the *app registration* warning is fine only if
+   nobody signs in with Microsoft on this instance, otherwise follow the
+   last paragraph of this section first).
 2. Optional, read-only: accounts from the old Microsoft flow, which the new
    sign-in would not adopt (expected 0 and 0 on the owner instance):
 
@@ -1216,8 +1225,12 @@ questions are answered) is a separate change of `infra/.env`: follow
 
 **An instance that still signs users in with the old Microsoft flow** (the
 Strapi 5.49 image from before PR #39) must leave it now; it cannot stay on
-that image. Work through the upgrade notes it does not run yet (newest first,
-see the top of this guide), with these Entra steps:
+that image. `infra/deploy.sh` warns about it (`WARNING: infra/.env holds a
+Microsoft app registration …`) while `ENTRA_ENABLED` is unset: deployed like
+that, Microsoft sign-in is off and only local accounts can sign in, which
+the old flow's accounts are not (no password). Work through the upgrade
+notes it does not run yet (newest first, see the top of this guide), with
+these Entra steps:
 
 1. Tenant: add the app roles, set *Assignment required*, assign the roles,
    and remove the `…/api/connect/microsoft/callback` redirect URI and the

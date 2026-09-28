@@ -188,7 +188,9 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   upgrade needs no rotation: tokens issued by 5.49 stay valid.
 - **Microsoft Entra ID** (optional): `ENTRA_ENABLED=1` is the only switch;
   without it every `MS_*` / `ENTRA_*` value is ignored (`infra/deploy.sh`
-  only notes leftover `MS_*` lines). With it, `MS_TENANT_ID`,
+  notes leftover `MS_*` lines, and warns when they are a real app
+  registration whose Microsoft sign-in goes off with the deploy). With it,
+  `MS_TENANT_ID`,
   `MS_CLIENT_ID` (GUIDs), `MS_CLIENT_SECRET` (web only) and
   `ENTRA_EXCHANGE_SECRET` (32+ characters, same for both apps) are required;
   `ENTRA_SYNC_MODE` (`dry-run` by default, then `on`), `ENTRA_DEFAULT_ROLE`,
