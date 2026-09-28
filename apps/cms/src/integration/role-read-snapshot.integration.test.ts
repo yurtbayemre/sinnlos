@@ -569,6 +569,53 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
     expect(await bodies(salesMember, "pagination[pageSize]=100")).toEqual(["S:c:widened"]);
     expect(await bodies(salesMember, pin)).toEqual(["S:c:widened"]);
   });
+
+  it("answers the web's batched reactions read ($in, WD04) with each target's own thread (PL04)", async () => {
+    // lib/comment-actions.ts readReactionBatch (lane 4C) asks for the
+    // reactions of several targets in one request: `$in` over their types
+    // and documentIds, which takes comment-target-visibility's full path
+    // (lane 4B); each section's single pin takes the fast path. Both must
+    // select the same rows for every caller.
+    const types = [...new Set(seeded.targets.map((target) => target.targetType))];
+    const batch = [
+      ...types.map((type, i) => `filters[targetType][$in][${i}]=${type}`),
+      ...seeded.targets.map(
+        (target, i) => `filters[targetDocumentId][$in][${i}]=${target.documentId}`,
+      ),
+      "populate[author]=true",
+      "sort[0]=createdAt:desc",
+      "sort[1]=id:desc",
+      `pagination[pageSize]=${500 * seeded.targets.length}`,
+    ].join("&");
+    const seen = new Map<CallerName, number>();
+    for (const name of CALLERS) {
+      const caller = jwts.get(name) ?? null;
+      const res = await t.api<{ data?: Params[] }>(caller, `${LISTS.reactions.path}?${batch}`);
+      const threads: Answer[] = [];
+      for (const target of seeded.targets) {
+        const pin =
+          `filters[targetType][$eq]=${target.targetType}` +
+          `&filters[targetDocumentId][$eq]=${target.documentId}`;
+        threads.push(await list(caller, LISTS.reactions, pin));
+      }
+      if (res.status !== 200) {
+        expect(threads, name).toEqual(threads.map(() => res.status));
+        continue;
+      }
+      const batched = (res.body.data ?? [])
+        .map((row) => LISTS.reactions.label(row, labelOf))
+        .filter((label): label is string => label !== null)
+        .sort();
+      const single = threads.flatMap((answer) => (typeof answer === "number" ? [] : answer)).sort();
+      expect(batched, name).toEqual(single);
+      seen.set(name, batched.length);
+    }
+    // The comparison is not vacuous: the bypass reads every seeded thread,
+    // a member of another department fewer.
+    expect(seen.get("admin_role")).toBe(seeded.targets.length);
+    expect(seen.get("sales_member") ?? 0).toBeGreaterThan(0);
+    expect(seen.get("sales_member") ?? 0).toBeLessThan(seeded.targets.length);
+  }, 120_000);
 });
 
 interface QueryEvents {
