@@ -1,0 +1,765 @@
+admin_role | detail announcements S:ann:all | 200
+admin_role | detail announcements S:ann:draft | 404
+admin_role | detail announcements S:ann:eng | 200
+admin_role | detail announcements S:ann:eng-team | 200
+admin_role | detail announcements S:ann:role-member | 200
+admin_role | detail announcements S:ann:sales | 200
+admin_role | detail announcements S:ann:team | 200
+admin_role | detail announcements S:ann:widened-draft | 200
+admin_role | detail courses S:course:draft | 404
+admin_role | detail courses S:course:published | 200
+admin_role | detail documents S:doc:all | 200
+admin_role | detail documents S:doc:draft | 404
+admin_role | detail documents S:doc:eng | 200
+admin_role | detail documents S:doc:sales | 200
+admin_role | detail lessons S:lesson:draft | 404
+admin_role | detail lessons S:lesson:in-draft-course | 200
+admin_role | detail lessons S:lesson:published | 200
+admin_role | detail polls S:poll:all | 200
+admin_role | detail polls S:poll:draft | 404
+admin_role | detail polls S:poll:eng | 200
+admin_role | detail polls S:poll:guests | 200
+admin_role | detail polls S:poll:sales | 200
+admin_role | detail quick-links S:ql:all | 200
+admin_role | detail quick-links S:ql:eng | 200
+admin_role | detail quick-links S:ql:sales | 200
+admin_role | detail wiki-pages S:page:dept-eng | 200
+admin_role | detail wiki-pages S:page:dept-sales | 200
+admin_role | detail wiki-pages S:page:draft | 404
+admin_role | detail wiki-pages S:page:public | 200
+admin_role | detail wiki-pages S:page:role-member | 200
+admin_role | detail wiki-pages S:page:team | 200
+admin_role | detail wiki-revisions S:rev:dept-eng | 200
+admin_role | detail wiki-revisions S:rev:dept-sales | 200
+admin_role | detail wiki-revisions S:rev:public | 200
+admin_role | detail wiki-revisions S:rev:role-member | 200
+admin_role | detail wiki-revisions S:rev:team | 200
+admin_role | detail wiki-spaces S:space:dept-eng | 200
+admin_role | detail wiki-spaces S:space:dept-sales | 200
+admin_role | detail wiki-spaces S:space:draft | 404
+admin_role | detail wiki-spaces S:space:public | 200
+admin_role | detail wiki-spaces S:space:role-member | 200
+admin_role | detail wiki-spaces S:space:team | 200
+admin_role | list acknowledgements | ["ack@S:ann:all","ack@S:ann:eng","ack@S:ann:sales"]
+admin_role | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
+admin_role | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
+admin_role | list courses | ["S:course:published"]
+admin_role | list documents | ["S:doc:all","S:doc:eng","S:doc:sales"]
+admin_role | list event-rsvps | ["rsvp:maybe@S:event:a","rsvp:no@S:event:b","rsvp:yes@S:event:a"]
+admin_role | list lesson-progresses | ["progress@S:lesson:draft","progress@S:lesson:published","progress@S:lesson:published"]
+admin_role | list lessons | ["S:lesson:in-draft-course","S:lesson:published"]
+admin_role | list notifications | ["S:note:admin","S:note:editor","S:note:guest","S:note:member","S:note:sales"]
+admin_role | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sales"]
+admin_role | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
+admin_role | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
+admin_role | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
+admin_role | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
+admin_role | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
+admin_role | thread comments S:ann:all | ["S:c:S:ann:all"]
+admin_role | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+admin_role | thread comments S:ann:eng | ["S:c:S:ann:eng"]
+admin_role | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+admin_role | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
+admin_role | thread comments S:ann:sales | ["S:c:S:ann:sales"]
+admin_role | thread comments S:ann:team | ["S:c:S:ann:team"]
+admin_role | thread comments S:ann:widened-draft | ["S:c:S:ann:widened-draft"]
+admin_role | thread comments S:page:dept-eng | ["S:c:S:page:dept-eng"]
+admin_role | thread comments S:page:dept-sales | ["S:c:S:page:dept-sales"]
+admin_role | thread comments S:page:draft | ["S:c:S:page:draft"]
+admin_role | thread comments S:page:public | ["S:c:S:page:public"]
+admin_role | thread comments S:page:role-member | ["S:c:S:page:role-member"]
+admin_role | thread comments S:page:team | ["S:c:S:page:team"]
+admin_role | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+admin_role | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+admin_role | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
+admin_role | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+admin_role | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
+admin_role | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
+admin_role | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
+admin_role | thread reactions S:ann:widened-draft | ["reaction:heart@S:ann:widened-draft"]
+admin_role | thread reactions S:page:dept-eng | ["reaction:heart@S:page:dept-eng"]
+admin_role | thread reactions S:page:dept-sales | ["reaction:heart@S:page:dept-sales"]
+admin_role | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+admin_role | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+admin_role | thread reactions S:page:role-member | ["reaction:heart@S:page:role-member"]
+admin_role | thread reactions S:page:team | ["reaction:heart@S:page:team"]
+editor | detail announcements S:ann:all | 200
+editor | detail announcements S:ann:draft | 404
+editor | detail announcements S:ann:eng | 200
+editor | detail announcements S:ann:eng-team | 200
+editor | detail announcements S:ann:role-member | 200
+editor | detail announcements S:ann:sales | 200
+editor | detail announcements S:ann:team | 200
+editor | detail announcements S:ann:widened-draft | 200
+editor | detail courses S:course:draft | 404
+editor | detail courses S:course:published | 200
+editor | detail documents S:doc:all | 200
+editor | detail documents S:doc:draft | 404
+editor | detail documents S:doc:eng | 200
+editor | detail documents S:doc:sales | 200
+editor | detail lessons S:lesson:draft | 404
+editor | detail lessons S:lesson:in-draft-course | 200
+editor | detail lessons S:lesson:published | 200
+editor | detail polls S:poll:all | 200
+editor | detail polls S:poll:draft | 404
+editor | detail polls S:poll:eng | 200
+editor | detail polls S:poll:guests | 200
+editor | detail polls S:poll:sales | 200
+editor | detail quick-links S:ql:all | 200
+editor | detail quick-links S:ql:eng | 200
+editor | detail quick-links S:ql:sales | 200
+editor | detail wiki-pages S:page:dept-eng | 200
+editor | detail wiki-pages S:page:dept-sales | 200
+editor | detail wiki-pages S:page:draft | 404
+editor | detail wiki-pages S:page:public | 200
+editor | detail wiki-pages S:page:role-member | 200
+editor | detail wiki-pages S:page:team | 200
+editor | detail wiki-revisions S:rev:dept-eng | 200
+editor | detail wiki-revisions S:rev:dept-sales | 200
+editor | detail wiki-revisions S:rev:public | 200
+editor | detail wiki-revisions S:rev:role-member | 200
+editor | detail wiki-revisions S:rev:team | 200
+editor | detail wiki-spaces S:space:dept-eng | 200
+editor | detail wiki-spaces S:space:dept-sales | 200
+editor | detail wiki-spaces S:space:draft | 404
+editor | detail wiki-spaces S:space:public | 200
+editor | detail wiki-spaces S:space:role-member | 200
+editor | detail wiki-spaces S:space:team | 200
+editor | list acknowledgements | ["ack@S:ann:eng"]
+editor | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
+editor | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
+editor | list courses | ["S:course:published"]
+editor | list documents | ["S:doc:all","S:doc:eng","S:doc:sales"]
+editor | list event-rsvps | ["rsvp:maybe@S:event:a"]
+editor | list lesson-progresses | ["progress@S:lesson:published"]
+editor | list lessons | ["S:lesson:in-draft-course","S:lesson:published"]
+editor | list notifications | ["S:note:editor"]
+editor | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sales"]
+editor | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
+editor | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
+editor | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
+editor | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
+editor | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
+editor | thread comments S:ann:all | ["S:c:S:ann:all"]
+editor | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+editor | thread comments S:ann:eng | ["S:c:S:ann:eng"]
+editor | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+editor | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
+editor | thread comments S:ann:sales | ["S:c:S:ann:sales"]
+editor | thread comments S:ann:team | ["S:c:S:ann:team"]
+editor | thread comments S:ann:widened-draft | ["S:c:S:ann:widened-draft"]
+editor | thread comments S:page:dept-eng | ["S:c:S:page:dept-eng"]
+editor | thread comments S:page:dept-sales | ["S:c:S:page:dept-sales"]
+editor | thread comments S:page:draft | ["S:c:S:page:draft"]
+editor | thread comments S:page:public | ["S:c:S:page:public"]
+editor | thread comments S:page:role-member | ["S:c:S:page:role-member"]
+editor | thread comments S:page:team | ["S:c:S:page:team"]
+editor | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+editor | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+editor | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
+editor | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+editor | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
+editor | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
+editor | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
+editor | thread reactions S:ann:widened-draft | ["reaction:heart@S:ann:widened-draft"]
+editor | thread reactions S:page:dept-eng | ["reaction:heart@S:page:dept-eng"]
+editor | thread reactions S:page:dept-sales | ["reaction:heart@S:page:dept-sales"]
+editor | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+editor | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+editor | thread reactions S:page:role-member | ["reaction:heart@S:page:role-member"]
+editor | thread reactions S:page:team | ["reaction:heart@S:page:team"]
+department_head | detail announcements S:ann:all | 200
+department_head | detail announcements S:ann:draft | 404
+department_head | detail announcements S:ann:eng | 200
+department_head | detail announcements S:ann:eng-team | 404
+department_head | detail announcements S:ann:role-member | 404
+department_head | detail announcements S:ann:sales | 404
+department_head | detail announcements S:ann:team | 404
+department_head | detail announcements S:ann:widened-draft | 200
+department_head | detail courses S:course:draft | 404
+department_head | detail courses S:course:published | 200
+department_head | detail documents S:doc:all | 200
+department_head | detail documents S:doc:draft | 404
+department_head | detail documents S:doc:eng | 200
+department_head | detail documents S:doc:sales | 404
+department_head | detail lessons S:lesson:draft | 404
+department_head | detail lessons S:lesson:in-draft-course | 404
+department_head | detail lessons S:lesson:published | 200
+department_head | detail polls S:poll:all | 200
+department_head | detail polls S:poll:draft | 404
+department_head | detail polls S:poll:eng | 200
+department_head | detail polls S:poll:guests | 200
+department_head | detail polls S:poll:sales | 404
+department_head | detail quick-links S:ql:all | 200
+department_head | detail quick-links S:ql:eng | 200
+department_head | detail quick-links S:ql:sales | 404
+department_head | detail wiki-pages S:page:dept-eng | 200
+department_head | detail wiki-pages S:page:dept-sales | 404
+department_head | detail wiki-pages S:page:draft | 404
+department_head | detail wiki-pages S:page:public | 200
+department_head | detail wiki-pages S:page:role-member | 404
+department_head | detail wiki-pages S:page:team | 404
+department_head | detail wiki-revisions S:rev:dept-eng | 200
+department_head | detail wiki-revisions S:rev:dept-sales | 404
+department_head | detail wiki-revisions S:rev:public | 200
+department_head | detail wiki-revisions S:rev:role-member | 404
+department_head | detail wiki-revisions S:rev:team | 404
+department_head | detail wiki-spaces S:space:dept-eng | 200
+department_head | detail wiki-spaces S:space:dept-sales | 404
+department_head | detail wiki-spaces S:space:draft | 404
+department_head | detail wiki-spaces S:space:public | 200
+department_head | detail wiki-spaces S:space:role-member | 404
+department_head | detail wiki-spaces S:space:team | 404
+department_head | list acknowledgements | []
+department_head | list announcements | ["S:ann:all","S:ann:eng","S:ann:widened-draft"]
+department_head | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:draft","S:c:S:page:public"]
+department_head | list courses | ["S:course:published"]
+department_head | list documents | ["S:doc:all","S:doc:eng"]
+department_head | list event-rsvps | []
+department_head | list lesson-progresses | []
+department_head | list lessons | ["S:lesson:published"]
+department_head | list notifications | []
+department_head | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
+department_head | list quick-links | ["S:ql:all","S:ql:eng"]
+department_head | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
+department_head | list wiki-pages | ["S:page:dept-eng","S:page:public"]
+department_head | list wiki-revisions | ["S:rev:dept-eng","S:rev:public"]
+department_head | list wiki-spaces | ["S:space:dept-eng","S:space:public"]
+department_head | thread comments S:ann:all | ["S:c:S:ann:all"]
+department_head | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+department_head | thread comments S:ann:eng | ["S:c:S:ann:eng"]
+department_head | thread comments S:ann:eng-team | []
+department_head | thread comments S:ann:role-member | []
+department_head | thread comments S:ann:sales | []
+department_head | thread comments S:ann:team | []
+department_head | thread comments S:ann:widened-draft | ["S:c:S:ann:widened-draft"]
+department_head | thread comments S:page:dept-eng | ["S:c:S:page:dept-eng"]
+department_head | thread comments S:page:dept-sales | []
+department_head | thread comments S:page:draft | ["S:c:S:page:draft"]
+department_head | thread comments S:page:public | ["S:c:S:page:public"]
+department_head | thread comments S:page:role-member | []
+department_head | thread comments S:page:team | []
+department_head | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+department_head | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+department_head | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
+department_head | thread reactions S:ann:eng-team | []
+department_head | thread reactions S:ann:role-member | []
+department_head | thread reactions S:ann:sales | []
+department_head | thread reactions S:ann:team | []
+department_head | thread reactions S:ann:widened-draft | ["reaction:heart@S:ann:widened-draft"]
+department_head | thread reactions S:page:dept-eng | ["reaction:heart@S:page:dept-eng"]
+department_head | thread reactions S:page:dept-sales | []
+department_head | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+department_head | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+department_head | thread reactions S:page:role-member | []
+department_head | thread reactions S:page:team | []
+team_lead | detail announcements S:ann:all | 200
+team_lead | detail announcements S:ann:draft | 404
+team_lead | detail announcements S:ann:eng | 200
+team_lead | detail announcements S:ann:eng-team | 200
+team_lead | detail announcements S:ann:role-member | 404
+team_lead | detail announcements S:ann:sales | 404
+team_lead | detail announcements S:ann:team | 200
+team_lead | detail announcements S:ann:widened-draft | 200
+team_lead | detail courses S:course:draft | 404
+team_lead | detail courses S:course:published | 200
+team_lead | detail documents S:doc:all | 200
+team_lead | detail documents S:doc:draft | 404
+team_lead | detail documents S:doc:eng | 200
+team_lead | detail documents S:doc:sales | 404
+team_lead | detail lessons S:lesson:draft | 404
+team_lead | detail lessons S:lesson:in-draft-course | 404
+team_lead | detail lessons S:lesson:published | 200
+team_lead | detail polls S:poll:all | 200
+team_lead | detail polls S:poll:draft | 404
+team_lead | detail polls S:poll:eng | 200
+team_lead | detail polls S:poll:guests | 200
+team_lead | detail polls S:poll:sales | 404
+team_lead | detail quick-links S:ql:all | 200
+team_lead | detail quick-links S:ql:eng | 200
+team_lead | detail quick-links S:ql:sales | 404
+team_lead | detail wiki-pages S:page:dept-eng | 200
+team_lead | detail wiki-pages S:page:dept-sales | 404
+team_lead | detail wiki-pages S:page:draft | 404
+team_lead | detail wiki-pages S:page:public | 200
+team_lead | detail wiki-pages S:page:role-member | 404
+team_lead | detail wiki-pages S:page:team | 200
+team_lead | detail wiki-revisions S:rev:dept-eng | 200
+team_lead | detail wiki-revisions S:rev:dept-sales | 404
+team_lead | detail wiki-revisions S:rev:public | 200
+team_lead | detail wiki-revisions S:rev:role-member | 404
+team_lead | detail wiki-revisions S:rev:team | 200
+team_lead | detail wiki-spaces S:space:dept-eng | 200
+team_lead | detail wiki-spaces S:space:dept-sales | 404
+team_lead | detail wiki-spaces S:space:draft | 404
+team_lead | detail wiki-spaces S:space:public | 200
+team_lead | detail wiki-spaces S:space:role-member | 404
+team_lead | detail wiki-spaces S:space:team | 200
+team_lead | list acknowledgements | []
+team_lead | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:team","S:ann:widened-draft"]
+team_lead | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:team"]
+team_lead | list courses | ["S:course:published"]
+team_lead | list documents | ["S:doc:all","S:doc:eng"]
+team_lead | list event-rsvps | []
+team_lead | list lesson-progresses | []
+team_lead | list lessons | ["S:lesson:published"]
+team_lead | list notifications | []
+team_lead | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
+team_lead | list quick-links | ["S:ql:all","S:ql:eng"]
+team_lead | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:team"]
+team_lead | list wiki-pages | ["S:page:dept-eng","S:page:public","S:page:team"]
+team_lead | list wiki-revisions | ["S:rev:dept-eng","S:rev:public","S:rev:team"]
+team_lead | list wiki-spaces | ["S:space:dept-eng","S:space:public","S:space:team"]
+team_lead | thread comments S:ann:all | ["S:c:S:ann:all"]
+team_lead | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+team_lead | thread comments S:ann:eng | ["S:c:S:ann:eng"]
+team_lead | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+team_lead | thread comments S:ann:role-member | []
+team_lead | thread comments S:ann:sales | []
+team_lead | thread comments S:ann:team | ["S:c:S:ann:team"]
+team_lead | thread comments S:ann:widened-draft | ["S:c:S:ann:widened-draft"]
+team_lead | thread comments S:page:dept-eng | ["S:c:S:page:dept-eng"]
+team_lead | thread comments S:page:dept-sales | []
+team_lead | thread comments S:page:draft | ["S:c:S:page:draft"]
+team_lead | thread comments S:page:public | ["S:c:S:page:public"]
+team_lead | thread comments S:page:role-member | []
+team_lead | thread comments S:page:team | ["S:c:S:page:team"]
+team_lead | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+team_lead | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+team_lead | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
+team_lead | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+team_lead | thread reactions S:ann:role-member | []
+team_lead | thread reactions S:ann:sales | []
+team_lead | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
+team_lead | thread reactions S:ann:widened-draft | ["reaction:heart@S:ann:widened-draft"]
+team_lead | thread reactions S:page:dept-eng | ["reaction:heart@S:page:dept-eng"]
+team_lead | thread reactions S:page:dept-sales | []
+team_lead | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+team_lead | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+team_lead | thread reactions S:page:role-member | []
+team_lead | thread reactions S:page:team | ["reaction:heart@S:page:team"]
+member | detail announcements S:ann:all | 200
+member | detail announcements S:ann:draft | 404
+member | detail announcements S:ann:eng | 200
+member | detail announcements S:ann:eng-team | 200
+member | detail announcements S:ann:role-member | 200
+member | detail announcements S:ann:sales | 404
+member | detail announcements S:ann:team | 200
+member | detail announcements S:ann:widened-draft | 200
+member | detail courses S:course:draft | 404
+member | detail courses S:course:published | 200
+member | detail documents S:doc:all | 200
+member | detail documents S:doc:draft | 404
+member | detail documents S:doc:eng | 200
+member | detail documents S:doc:sales | 404
+member | detail lessons S:lesson:draft | 404
+member | detail lessons S:lesson:in-draft-course | 404
+member | detail lessons S:lesson:published | 200
+member | detail polls S:poll:all | 200
+member | detail polls S:poll:draft | 404
+member | detail polls S:poll:eng | 200
+member | detail polls S:poll:guests | 200
+member | detail polls S:poll:sales | 404
+member | detail quick-links S:ql:all | 200
+member | detail quick-links S:ql:eng | 200
+member | detail quick-links S:ql:sales | 404
+member | detail wiki-pages S:page:dept-eng | 200
+member | detail wiki-pages S:page:dept-sales | 404
+member | detail wiki-pages S:page:draft | 404
+member | detail wiki-pages S:page:public | 200
+member | detail wiki-pages S:page:role-member | 200
+member | detail wiki-pages S:page:team | 200
+member | detail wiki-revisions S:rev:dept-eng | 200
+member | detail wiki-revisions S:rev:dept-sales | 404
+member | detail wiki-revisions S:rev:public | 200
+member | detail wiki-revisions S:rev:role-member | 200
+member | detail wiki-revisions S:rev:team | 200
+member | detail wiki-spaces S:space:dept-eng | 200
+member | detail wiki-spaces S:space:dept-sales | 404
+member | detail wiki-spaces S:space:draft | 404
+member | detail wiki-spaces S:space:public | 200
+member | detail wiki-spaces S:space:role-member | 200
+member | detail wiki-spaces S:space:team | 200
+member | list acknowledgements | ["ack@S:ann:all"]
+member | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:role-member","S:ann:team","S:ann:widened-draft"]
+member | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:role-member","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
+member | list courses | ["S:course:published"]
+member | list documents | ["S:doc:all","S:doc:eng"]
+member | list event-rsvps | ["rsvp:yes@S:event:a"]
+member | list lesson-progresses | ["progress@S:lesson:published"]
+member | list lessons | ["S:lesson:published"]
+member | list notifications | ["S:note:member"]
+member | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
+member | list quick-links | ["S:ql:all","S:ql:eng"]
+member | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
+member | list wiki-pages | ["S:page:dept-eng","S:page:public","S:page:role-member","S:page:team"]
+member | list wiki-revisions | ["S:rev:dept-eng","S:rev:public","S:rev:role-member","S:rev:team"]
+member | list wiki-spaces | ["S:space:dept-eng","S:space:public","S:space:role-member","S:space:team"]
+member | thread comments S:ann:all | ["S:c:S:ann:all"]
+member | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+member | thread comments S:ann:eng | ["S:c:S:ann:eng"]
+member | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+member | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
+member | thread comments S:ann:sales | []
+member | thread comments S:ann:team | ["S:c:S:ann:team"]
+member | thread comments S:ann:widened-draft | ["S:c:S:ann:widened-draft"]
+member | thread comments S:page:dept-eng | ["S:c:S:page:dept-eng"]
+member | thread comments S:page:dept-sales | []
+member | thread comments S:page:draft | ["S:c:S:page:draft"]
+member | thread comments S:page:public | ["S:c:S:page:public"]
+member | thread comments S:page:role-member | ["S:c:S:page:role-member"]
+member | thread comments S:page:team | ["S:c:S:page:team"]
+member | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+member | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+member | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
+member | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+member | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
+member | thread reactions S:ann:sales | []
+member | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
+member | thread reactions S:ann:widened-draft | ["reaction:heart@S:ann:widened-draft"]
+member | thread reactions S:page:dept-eng | ["reaction:heart@S:page:dept-eng"]
+member | thread reactions S:page:dept-sales | []
+member | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+member | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+member | thread reactions S:page:role-member | ["reaction:heart@S:page:role-member"]
+member | thread reactions S:page:team | ["reaction:heart@S:page:team"]
+guest | detail announcements S:ann:all | 403
+guest | detail announcements S:ann:draft | 403
+guest | detail announcements S:ann:eng | 403
+guest | detail announcements S:ann:eng-team | 403
+guest | detail announcements S:ann:role-member | 403
+guest | detail announcements S:ann:sales | 403
+guest | detail announcements S:ann:team | 403
+guest | detail announcements S:ann:widened-draft | 403
+guest | detail courses S:course:draft | 403
+guest | detail courses S:course:published | 403
+guest | detail documents S:doc:all | 200
+guest | detail documents S:doc:draft | 404
+guest | detail documents S:doc:eng | 404
+guest | detail documents S:doc:sales | 404
+guest | detail lessons S:lesson:draft | 403
+guest | detail lessons S:lesson:in-draft-course | 403
+guest | detail lessons S:lesson:published | 403
+guest | detail polls S:poll:all | 404
+guest | detail polls S:poll:draft | 404
+guest | detail polls S:poll:eng | 404
+guest | detail polls S:poll:guests | 200
+guest | detail polls S:poll:sales | 404
+guest | detail quick-links S:ql:all | 200
+guest | detail quick-links S:ql:eng | 404
+guest | detail quick-links S:ql:sales | 404
+guest | detail wiki-pages S:page:dept-eng | 404
+guest | detail wiki-pages S:page:dept-sales | 404
+guest | detail wiki-pages S:page:draft | 404
+guest | detail wiki-pages S:page:public | 200
+guest | detail wiki-pages S:page:role-member | 404
+guest | detail wiki-pages S:page:team | 404
+guest | detail wiki-revisions S:rev:dept-eng | 403
+guest | detail wiki-revisions S:rev:dept-sales | 403
+guest | detail wiki-revisions S:rev:public | 403
+guest | detail wiki-revisions S:rev:role-member | 403
+guest | detail wiki-revisions S:rev:team | 403
+guest | detail wiki-spaces S:space:dept-eng | 404
+guest | detail wiki-spaces S:space:dept-sales | 404
+guest | detail wiki-spaces S:space:draft | 404
+guest | detail wiki-spaces S:space:public | 200
+guest | detail wiki-spaces S:space:role-member | 404
+guest | detail wiki-spaces S:space:team | 404
+guest | list acknowledgements | 403
+guest | list announcements | 403
+guest | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:page:draft","S:c:S:page:public"]
+guest | list courses | 403
+guest | list documents | ["S:doc:all"]
+guest | list event-rsvps | 403
+guest | list lesson-progresses | 403
+guest | list lessons | 403
+guest | list notifications | ["S:note:guest"]
+guest | list polls | ["S:poll:guests"]
+guest | list quick-links | ["S:ql:all"]
+guest | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
+guest | list wiki-pages | ["S:page:public"]
+guest | list wiki-revisions | 403
+guest | list wiki-spaces | ["S:space:public"]
+guest | thread comments S:ann:all | ["S:c:S:ann:all"]
+guest | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+guest | thread comments S:ann:eng | []
+guest | thread comments S:ann:eng-team | []
+guest | thread comments S:ann:role-member | []
+guest | thread comments S:ann:sales | []
+guest | thread comments S:ann:team | []
+guest | thread comments S:ann:widened-draft | []
+guest | thread comments S:page:dept-eng | []
+guest | thread comments S:page:dept-sales | []
+guest | thread comments S:page:draft | ["S:c:S:page:draft"]
+guest | thread comments S:page:public | ["S:c:S:page:public"]
+guest | thread comments S:page:role-member | []
+guest | thread comments S:page:team | []
+guest | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+guest | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+guest | thread reactions S:ann:eng | []
+guest | thread reactions S:ann:eng-team | []
+guest | thread reactions S:ann:role-member | []
+guest | thread reactions S:ann:sales | []
+guest | thread reactions S:ann:team | []
+guest | thread reactions S:ann:widened-draft | []
+guest | thread reactions S:page:dept-eng | []
+guest | thread reactions S:page:dept-sales | []
+guest | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+guest | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+guest | thread reactions S:page:role-member | []
+guest | thread reactions S:page:team | []
+authenticated | detail announcements S:ann:all | 200
+authenticated | detail announcements S:ann:draft | 404
+authenticated | detail announcements S:ann:eng | 404
+authenticated | detail announcements S:ann:eng-team | 404
+authenticated | detail announcements S:ann:role-member | 404
+authenticated | detail announcements S:ann:sales | 404
+authenticated | detail announcements S:ann:team | 404
+authenticated | detail announcements S:ann:widened-draft | 404
+authenticated | detail courses S:course:draft | 404
+authenticated | detail courses S:course:published | 200
+authenticated | detail documents S:doc:all | 200
+authenticated | detail documents S:doc:draft | 404
+authenticated | detail documents S:doc:eng | 404
+authenticated | detail documents S:doc:sales | 404
+authenticated | detail lessons S:lesson:draft | 404
+authenticated | detail lessons S:lesson:in-draft-course | 404
+authenticated | detail lessons S:lesson:published | 200
+authenticated | detail polls S:poll:all | 200
+authenticated | detail polls S:poll:draft | 404
+authenticated | detail polls S:poll:eng | 404
+authenticated | detail polls S:poll:guests | 200
+authenticated | detail polls S:poll:sales | 404
+authenticated | detail quick-links S:ql:all | 200
+authenticated | detail quick-links S:ql:eng | 404
+authenticated | detail quick-links S:ql:sales | 404
+authenticated | detail wiki-pages S:page:dept-eng | 404
+authenticated | detail wiki-pages S:page:dept-sales | 404
+authenticated | detail wiki-pages S:page:draft | 404
+authenticated | detail wiki-pages S:page:public | 200
+authenticated | detail wiki-pages S:page:role-member | 404
+authenticated | detail wiki-pages S:page:team | 404
+authenticated | detail wiki-revisions S:rev:dept-eng | 404
+authenticated | detail wiki-revisions S:rev:dept-sales | 404
+authenticated | detail wiki-revisions S:rev:public | 200
+authenticated | detail wiki-revisions S:rev:role-member | 404
+authenticated | detail wiki-revisions S:rev:team | 404
+authenticated | detail wiki-spaces S:space:dept-eng | 404
+authenticated | detail wiki-spaces S:space:dept-sales | 404
+authenticated | detail wiki-spaces S:space:draft | 404
+authenticated | detail wiki-spaces S:space:public | 200
+authenticated | detail wiki-spaces S:space:role-member | 404
+authenticated | detail wiki-spaces S:space:team | 404
+authenticated | list acknowledgements | []
+authenticated | list announcements | ["S:ann:all"]
+authenticated | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:page:draft","S:c:S:page:public"]
+authenticated | list courses | ["S:course:published"]
+authenticated | list documents | ["S:doc:all"]
+authenticated | list event-rsvps | []
+authenticated | list lesson-progresses | []
+authenticated | list lessons | ["S:lesson:published"]
+authenticated | list notifications | []
+authenticated | list polls | ["S:poll:all","S:poll:guests"]
+authenticated | list quick-links | ["S:ql:all"]
+authenticated | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
+authenticated | list wiki-pages | ["S:page:public"]
+authenticated | list wiki-revisions | ["S:rev:public"]
+authenticated | list wiki-spaces | ["S:space:public"]
+authenticated | thread comments S:ann:all | ["S:c:S:ann:all"]
+authenticated | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+authenticated | thread comments S:ann:eng | []
+authenticated | thread comments S:ann:eng-team | []
+authenticated | thread comments S:ann:role-member | []
+authenticated | thread comments S:ann:sales | []
+authenticated | thread comments S:ann:team | []
+authenticated | thread comments S:ann:widened-draft | []
+authenticated | thread comments S:page:dept-eng | []
+authenticated | thread comments S:page:dept-sales | []
+authenticated | thread comments S:page:draft | ["S:c:S:page:draft"]
+authenticated | thread comments S:page:public | ["S:c:S:page:public"]
+authenticated | thread comments S:page:role-member | []
+authenticated | thread comments S:page:team | []
+authenticated | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+authenticated | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+authenticated | thread reactions S:ann:eng | []
+authenticated | thread reactions S:ann:eng-team | []
+authenticated | thread reactions S:ann:role-member | []
+authenticated | thread reactions S:ann:sales | []
+authenticated | thread reactions S:ann:team | []
+authenticated | thread reactions S:ann:widened-draft | []
+authenticated | thread reactions S:page:dept-eng | []
+authenticated | thread reactions S:page:dept-sales | []
+authenticated | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+authenticated | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+authenticated | thread reactions S:page:role-member | []
+authenticated | thread reactions S:page:team | []
+sales_member | detail announcements S:ann:all | 200
+sales_member | detail announcements S:ann:draft | 404
+sales_member | detail announcements S:ann:eng | 404
+sales_member | detail announcements S:ann:eng-team | 404
+sales_member | detail announcements S:ann:role-member | 200
+sales_member | detail announcements S:ann:sales | 200
+sales_member | detail announcements S:ann:team | 404
+sales_member | detail announcements S:ann:widened-draft | 404
+sales_member | detail courses S:course:draft | 404
+sales_member | detail courses S:course:published | 200
+sales_member | detail documents S:doc:all | 200
+sales_member | detail documents S:doc:draft | 404
+sales_member | detail documents S:doc:eng | 404
+sales_member | detail documents S:doc:sales | 200
+sales_member | detail lessons S:lesson:draft | 404
+sales_member | detail lessons S:lesson:in-draft-course | 404
+sales_member | detail lessons S:lesson:published | 200
+sales_member | detail polls S:poll:all | 200
+sales_member | detail polls S:poll:draft | 404
+sales_member | detail polls S:poll:eng | 404
+sales_member | detail polls S:poll:guests | 200
+sales_member | detail polls S:poll:sales | 200
+sales_member | detail quick-links S:ql:all | 200
+sales_member | detail quick-links S:ql:eng | 404
+sales_member | detail quick-links S:ql:sales | 200
+sales_member | detail wiki-pages S:page:dept-eng | 404
+sales_member | detail wiki-pages S:page:dept-sales | 200
+sales_member | detail wiki-pages S:page:draft | 404
+sales_member | detail wiki-pages S:page:public | 200
+sales_member | detail wiki-pages S:page:role-member | 200
+sales_member | detail wiki-pages S:page:team | 404
+sales_member | detail wiki-revisions S:rev:dept-eng | 404
+sales_member | detail wiki-revisions S:rev:dept-sales | 200
+sales_member | detail wiki-revisions S:rev:public | 200
+sales_member | detail wiki-revisions S:rev:role-member | 200
+sales_member | detail wiki-revisions S:rev:team | 404
+sales_member | detail wiki-spaces S:space:dept-eng | 404
+sales_member | detail wiki-spaces S:space:dept-sales | 200
+sales_member | detail wiki-spaces S:space:draft | 404
+sales_member | detail wiki-spaces S:space:public | 200
+sales_member | detail wiki-spaces S:space:role-member | 200
+sales_member | detail wiki-spaces S:space:team | 404
+sales_member | list acknowledgements | ["ack@S:ann:sales"]
+sales_member | list announcements | ["S:ann:all","S:ann:role-member","S:ann:sales"]
+sales_member | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member"]
+sales_member | list courses | ["S:course:published"]
+sales_member | list documents | ["S:doc:all","S:doc:sales"]
+sales_member | list event-rsvps | ["rsvp:no@S:event:b"]
+sales_member | list lesson-progresses | ["progress@S:lesson:draft"]
+sales_member | list lessons | ["S:lesson:published"]
+sales_member | list notifications | ["S:note:sales"]
+sales_member | list polls | ["S:poll:all","S:poll:guests","S:poll:sales"]
+sales_member | list quick-links | ["S:ql:all","S:ql:sales"]
+sales_member | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member"]
+sales_member | list wiki-pages | ["S:page:dept-sales","S:page:public","S:page:role-member"]
+sales_member | list wiki-revisions | ["S:rev:dept-sales","S:rev:public","S:rev:role-member"]
+sales_member | list wiki-spaces | ["S:space:dept-sales","S:space:public","S:space:role-member"]
+sales_member | thread comments S:ann:all | ["S:c:S:ann:all"]
+sales_member | thread comments S:ann:draft | ["S:c:S:ann:draft"]
+sales_member | thread comments S:ann:eng | []
+sales_member | thread comments S:ann:eng-team | []
+sales_member | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
+sales_member | thread comments S:ann:sales | ["S:c:S:ann:sales"]
+sales_member | thread comments S:ann:team | []
+sales_member | thread comments S:ann:widened-draft | []
+sales_member | thread comments S:page:dept-eng | []
+sales_member | thread comments S:page:dept-sales | ["S:c:S:page:dept-sales"]
+sales_member | thread comments S:page:draft | ["S:c:S:page:draft"]
+sales_member | thread comments S:page:public | ["S:c:S:page:public"]
+sales_member | thread comments S:page:role-member | ["S:c:S:page:role-member"]
+sales_member | thread comments S:page:team | []
+sales_member | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
+sales_member | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
+sales_member | thread reactions S:ann:eng | []
+sales_member | thread reactions S:ann:eng-team | []
+sales_member | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
+sales_member | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
+sales_member | thread reactions S:ann:team | []
+sales_member | thread reactions S:ann:widened-draft | []
+sales_member | thread reactions S:page:dept-eng | []
+sales_member | thread reactions S:page:dept-sales | ["reaction:heart@S:page:dept-sales"]
+sales_member | thread reactions S:page:draft | ["reaction:heart@S:page:draft"]
+sales_member | thread reactions S:page:public | ["reaction:heart@S:page:public"]
+sales_member | thread reactions S:page:role-member | ["reaction:heart@S:page:role-member"]
+sales_member | thread reactions S:page:team | []
+anonymous | detail announcements S:ann:all | 403
+anonymous | detail announcements S:ann:draft | 403
+anonymous | detail announcements S:ann:eng | 403
+anonymous | detail announcements S:ann:eng-team | 403
+anonymous | detail announcements S:ann:role-member | 403
+anonymous | detail announcements S:ann:sales | 403
+anonymous | detail announcements S:ann:team | 403
+anonymous | detail announcements S:ann:widened-draft | 403
+anonymous | detail courses S:course:draft | 403
+anonymous | detail courses S:course:published | 403
+anonymous | detail documents S:doc:all | 403
+anonymous | detail documents S:doc:draft | 403
+anonymous | detail documents S:doc:eng | 403
+anonymous | detail documents S:doc:sales | 403
+anonymous | detail lessons S:lesson:draft | 403
+anonymous | detail lessons S:lesson:in-draft-course | 403
+anonymous | detail lessons S:lesson:published | 403
+anonymous | detail polls S:poll:all | 403
+anonymous | detail polls S:poll:draft | 403
+anonymous | detail polls S:poll:eng | 403
+anonymous | detail polls S:poll:guests | 403
+anonymous | detail polls S:poll:sales | 403
+anonymous | detail quick-links S:ql:all | 403
+anonymous | detail quick-links S:ql:eng | 403
+anonymous | detail quick-links S:ql:sales | 403
+anonymous | detail wiki-pages S:page:dept-eng | 403
+anonymous | detail wiki-pages S:page:dept-sales | 403
+anonymous | detail wiki-pages S:page:draft | 403
+anonymous | detail wiki-pages S:page:public | 403
+anonymous | detail wiki-pages S:page:role-member | 403
+anonymous | detail wiki-pages S:page:team | 403
+anonymous | detail wiki-revisions S:rev:dept-eng | 403
+anonymous | detail wiki-revisions S:rev:dept-sales | 403
+anonymous | detail wiki-revisions S:rev:public | 403
+anonymous | detail wiki-revisions S:rev:role-member | 403
+anonymous | detail wiki-revisions S:rev:team | 403
+anonymous | detail wiki-spaces S:space:dept-eng | 403
+anonymous | detail wiki-spaces S:space:dept-sales | 403
+anonymous | detail wiki-spaces S:space:draft | 403
+anonymous | detail wiki-spaces S:space:public | 403
+anonymous | detail wiki-spaces S:space:role-member | 403
+anonymous | detail wiki-spaces S:space:team | 403
+anonymous | list acknowledgements | 403
+anonymous | list announcements | 403
+anonymous | list comments | 403
+anonymous | list courses | 403
+anonymous | list documents | 403
+anonymous | list event-rsvps | 403
+anonymous | list lesson-progresses | 403
+anonymous | list lessons | 403
+anonymous | list notifications | 403
+anonymous | list polls | 403
+anonymous | list quick-links | 403
+anonymous | list reactions | 403
+anonymous | list wiki-pages | 403
+anonymous | list wiki-revisions | 403
+anonymous | list wiki-spaces | 403
+anonymous | thread comments S:ann:all | 403
+anonymous | thread comments S:ann:draft | 403
+anonymous | thread comments S:ann:eng | 403
+anonymous | thread comments S:ann:eng-team | 403
+anonymous | thread comments S:ann:role-member | 403
+anonymous | thread comments S:ann:sales | 403
+anonymous | thread comments S:ann:team | 403
+anonymous | thread comments S:ann:widened-draft | 403
+anonymous | thread comments S:page:dept-eng | 403
+anonymous | thread comments S:page:dept-sales | 403
+anonymous | thread comments S:page:draft | 403
+anonymous | thread comments S:page:public | 403
+anonymous | thread comments S:page:role-member | 403
+anonymous | thread comments S:page:team | 403
+anonymous | thread reactions S:ann:all | 403
+anonymous | thread reactions S:ann:draft | 403
+anonymous | thread reactions S:ann:eng | 403
+anonymous | thread reactions S:ann:eng-team | 403
+anonymous | thread reactions S:ann:role-member | 403
+anonymous | thread reactions S:ann:sales | 403
+anonymous | thread reactions S:ann:team | 403
+anonymous | thread reactions S:ann:widened-draft | 403
+anonymous | thread reactions S:page:dept-eng | 403
+anonymous | thread reactions S:page:dept-sales | 403
+anonymous | thread reactions S:page:draft | 403
+anonymous | thread reactions S:page:public | 403
+anonymous | thread reactions S:page:role-member | 403
+anonymous | thread reactions S:page:team | 403

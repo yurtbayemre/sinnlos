@@ -1,7 +1,7 @@
 import { factories } from "@strapi/strapi";
 
-import { ADMIN } from "../../../bootstrap/roles";
-import { parseEntryRef } from "../../../utils/entry-id";
+import { ADMIN, hasRole } from "../../../bootstrap/roles";
+import { findByRef, type EntryRow } from "../../../utils/policy-factories";
 import {
   capacityDecision,
   isRsvpStatus,
@@ -31,6 +31,12 @@ import {
 
 const RSVP_UID = "api::event-rsvp.event-rsvp";
 const EVENT_UID = "api::event.event";
+
+/** The columns of an RSVP the update reads. */
+interface RsvpEntry extends EntryRow {
+  status?: string | null;
+  targetDocumentId?: string | null;
+}
 
 /**
  * Count how many users currently hold a seat for the event, excluding
@@ -79,7 +85,7 @@ function refusesLegacyFormat(ctx: {
   headers?: unknown;
   state?: { user?: { role?: { type?: unknown } | null } | null };
 }): boolean {
-  if (ctx.state?.user?.role?.type === ADMIN) return false;
+  if (hasRole(ctx.state?.user, [ADMIN])) return false;
   return requestsLegacyFormat(ctx.headers);
 }
 
@@ -244,10 +250,8 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     // The web app addresses records by numeric id, but the v5 core
     // controller resolves by documentId — translate before delegating
     // (comment controller gotcha). A malformed id is an unknown RSVP and
-    // never reaches the query (utils/entry-id.ts).
-    const where = parseEntryRef(ctx.params.id);
-    if (!where) return ctx.notFound();
-    const entity = await strapi.db.query(RSVP_UID).findOne({ where });
+    // never reaches the query (findByRef, utils/entry-id.ts).
+    const entity = await findByRef<RsvpEntry>(strapi, RSVP_UID, ctx.params.id);
     if (!entity) return ctx.notFound();
 
     const body = (ctx.request.body ?? {}) as any;

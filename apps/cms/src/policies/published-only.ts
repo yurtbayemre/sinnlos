@@ -1,4 +1,4 @@
-import { hasAudienceBypass } from "../utils/announcement-audience";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { forcePublishedStatus, getMutableQuery } from "../utils/policy-query";
 
 /**
@@ -37,7 +37,7 @@ interface PolicyContext {
 }
 
 export default (policyContext: PolicyContext): boolean => {
-  if (hasAudienceBypass(policyContext.state?.user?.role?.type)) return true;
+  if (hasRole(policyContext.state?.user, MODERATORS)) return true;
   forcePublishedStatus(getMutableQuery(policyContext));
   return true;
 };

@@ -948,6 +948,107 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to the policy primitives (batch 9, lane 4B)
+
+This release (branch `refactor/policy-primitives`, on `batch/8` `5f2eac0`)
+rebuilds the cms read and ownership policies on shared helpers. What each
+role can read and write is unchanged, except for one visible fix (wiki
+threads follow the published space) and one defence-in-depth point (callers
+without a user id), both at the end of this list:
+
+- **Policy primitives and factories (PL01, PL02).** One role check
+  (`hasRole`), one way to add a policy's filter (`narrowFilters`, always
+  `$and`), one id lookup (`findByRef`), and three factories in
+  `apps/cms/src/utils/policy-factories.ts` that the fourteen read and
+  ownership policies now call. A per-role snapshot of every policy-guarded
+  read, recorded on the previous release, is unchanged on SQLite and
+  Postgres (`apps/cms/src/integration/role-read-snapshot.integration.test.ts`).
+- **Comment and reaction threads (PL04).** A read that pins one thread (the
+  web's comment sections) checks only that target instead of resolving
+  every visible announcement and wiki page. A caller's role, department and
+  teams are read once per request.
+- **Bind-parameter guard (PL04).** One SQL statement binds at most 65535
+  values on Postgres and 32766 on SQLite. A policy that binds a list of
+  visible ids without reading a whole table first (wiki pages and
+  revisions, lessons, the wiki-page anchors of comment and reaction lists)
+  now checks the list against that limit minus 1000 values of headroom,
+  which the request's own filters, status and pagination need. A longer
+  list answers with an empty result and logs
+  `[policy] <policy>: <count> values exceed ...` at error level. Past the
+  engine limit, where such a list used to fail with a 500, the answer is
+  now an empty 200; in the window of about 1000 values just below the
+  limit, where the previous release still returned the rows, it is empty
+  too (an accepted trade-off). The announcement, document, quick-link and
+  poll policies, the wiki spaces and the team lookup read whole tables
+  with `populate`: past the engine limit they still fail with a 500 inside
+  Strapi, before any guard runs, with no data returned and no `[policy]`
+  line ([architecture.md §5.63](./architecture.md)). Nothing near either
+  size exists on an intranet; the log line, or a 500 with a database
+  bind-parameter error, is the signal to change that policy.
+- **Wiki threads follow the published space.** Comment and reaction lists
+  now judge a wiki page the way a single thread and the page itself are
+  judged: by its published row, or by its draft when it was never
+  published. The previous release showed a page's discussions in these
+  lists, while the page itself stayed hidden, in three cases that are now
+  closed: a wiki space whose visibility was widened only in an unpublished
+  draft, a page moved into a wider space only in its draft, and a
+  published page whose space was never published (its published row has
+  no space, its draft links the draft-only space). Depending on that
+  space's visibility, this reached up to every signed-in role, guest
+  included.
+- **Callers without a user id.** A request whose user carries no numeric
+  id owns no row and reads like an anonymous one. users-permissions always
+  sets one, so no real request is affected.
+
+**A normal deploy with `infra/deploy.sh`.** Only the cms changes; no
+schema, env, edge or grant change, nothing to migrate.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **Smoke:** open the dashboard, announcements with comments, a wiki space
+   and page, documents, polls and a course as a member, and the wiki and
+   documents as a guest.
+3. **First hour:** watch the cms log for policy errors and guard lines
+   (on a standalone Caddy box, drop the second `-f`):
+
+   ```bash
+   cd /opt/sinnlos
+   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+     logs --since 1h cms | grep -E '\[policy\]|error'
+   ```
+
+   Expect no output (a policy that throws shows up as an `error` line, and
+   its request as a 500). A `[policy]` line names the policy and the list
+   size that did not fit; that list reads empty for every caller whose
+   visible ids exceed the limit (admin and editor bypass it) until that
+   policy is changed. For the policies that read whole tables with
+   `populate` (announcements, documents, quick links, polls, wiki spaces,
+   the team lookup) the signal is a 500 with a database bind-parameter
+   error in the log instead, and no `[policy]` line.
+
+**Rollback:** the batch 8 image runs on the same database as it is (no
+schema or data change), with the commands `infra/deploy.sh` prints.
+
+**Rehearsal (integration harness, SQLite and Postgres 16, compared with
+`5f2eac0`):** the per-role snapshot of every guarded read was identical;
+one comment-thread read ran 22 (announcement) or 24 (wiki page) SQL
+statements instead of 27, without loading every announcement and page; a
+wiki space widened only in its draft opened its page's thread before and
+does not now, on both the thread and the list, and a wider review matrix
+(6,084 read keys per engine) changed only by losing threads of the three
+wiki cases above; numeric id and documentId on comment delete, classified
+update and RSVP update answered exactly as before (owner 204/200, stranger
+403; a missing or malformed id is 403 at the ownership policy for
+non-bypass callers on classified update/delete and RSVP update, and 404
+for the bypass roles and for comment delete); past the engine limit
+(33,000 visible wiki pages on SQLite and 66,000 on Postgres in the
+rehearsal, 32,767 and 65,536 in the integration test) the previous release
+answered the member's page list and full comment list with a 500 and this
+one answers an empty 200 with the log line, while a single thread and the
+admin list were unaffected. The guard already answers the page list empty
+from 31,767 (SQLite) or 64,536 (Postgres) visible pages, and the full
+comment list from one page fewer plus an announcement, where the previous
+release still served the rows.
+
 #### Deploying batch 8 (2026-09-28)
 
 Batch 8 (branch `batch/8`, on `main` `c219034`, which production runs since

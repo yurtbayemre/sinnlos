@@ -1,16 +1,16 @@
 import { ADMIN } from "../bootstrap/roles";
-import { getMutableQuery } from "../utils/policy-query";
+import { ownRowsFilter } from "../utils/policy-factories";
 
 /**
  * Read-side guard for acknowledgements. Every role may only list/read
  * its OWN acknowledgements (user = caller); `admin_role` bypasses the
  * filter so the /manage/acknowledgements report can aggregate the
- * confirmation state across all users.
+ * confirmation state across all users. Editors do not: a read receipt is
+ * personal data, not content.
  *
- * The filter is applied to the REAL request query (see `getMutableQuery`):
- * assigning to `policyContext.query` is a silent no-op because Koa's
- * `query` is a prototype getter that `createPolicyContext`'s
- * `Object.assign` never copies.
+ * The own-rows clause is $and-ed onto the REAL request query, so a client
+ * `user` filter can only narrow the result, never widen it to other users'
+ * rows (ownRowsFilter, utils/policy-factories.ts, §5.14).
  *
  * Note: the `user` clause references the users-permissions user relation,
  * so every role that can read acknowledgements must also hold
@@ -20,18 +20,4 @@ import { getMutableQuery } from "../utils/policy-query";
  * all — it cannot read announcements, so ack grants would be dead attack
  * surface.)
  */
-export default async (policyContext: any, _config: unknown, _deps: any) => {
-  const user = policyContext.state?.user;
-  if (!user) return false;
-
-  if (user.role?.type === ADMIN) return true;
-
-  const query = getMutableQuery(policyContext);
-  // $and instead of a spread merge so an incoming `user` filter can
-  // only narrow the result set, never widen it to other users' rows.
-  query.filters = query.filters
-    ? { $and: [query.filters, { user: { id: user.id } }] }
-    : { user: { id: user.id } };
-
-  return true;
-};
+export default ownRowsFilter({ ownerField: "user", bypass: [ADMIN] });

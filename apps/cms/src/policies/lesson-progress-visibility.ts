@@ -1,15 +1,15 @@
 import { ADMIN } from "../bootstrap/roles";
-import { getMutableQuery } from "../utils/policy-query";
+import { ownRowsFilter } from "../utils/policy-factories";
 
 /**
- * Read-side guard for lesson-progress rows (issue #29) — documented
- * clone of `acknowledgement-visibility`: every role may only list/read
- * its OWN completion receipts; `admin_role` bypasses so the
- * /manage/training report can aggregate across all users.
+ * Read-side guard for lesson-progress rows (issue #29) — the same rule as
+ * `acknowledgement-visibility`: every role may only list/read its OWN
+ * completion receipts; `admin_role` bypasses so the /manage/training
+ * report can aggregate across all users.
  *
  * Progress data is personnel data — a member must not be able to query
  * a colleague's training state (same posture as notifications and
- * poll votes).
+ * RSVPs), and editors get no bypass.
  *
  * The `user` clause references the users-permissions relation, so every
  * role reading progress must also hold `users-permissions.user.find`
@@ -17,17 +17,4 @@ import { getMutableQuery } from "../utils/policy-query";
  * that grant already (see the announcement-visibility notes in
  * docs/architecture.md §6).
  */
-export default async (policyContext: any, _config: unknown, _deps: any) => {
-  const user = policyContext.state?.user;
-  if (!user) return false;
-
-  if (user.role?.type === ADMIN) return true;
-
-  const query = getMutableQuery(policyContext);
-  // $and so an incoming `user` filter can only narrow, never widen.
-  query.filters = query.filters
-    ? { $and: [query.filters, { user: { id: user.id } }] }
-    : { user: { id: user.id } };
-
-  return true;
-};
+export default ownRowsFilter({ ownerField: "user", bypass: [ADMIN] });

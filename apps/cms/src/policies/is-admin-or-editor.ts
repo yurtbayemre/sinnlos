@@ -1,11 +1,11 @@
-import { MODERATORS } from "../bootstrap/roles";
+import { MODERATORS, hasRole, type RoleHolder } from "../bootstrap/roles";
 
 /**
  * Allows access only if the authenticated user belongs to the
  * admin_role or editor Strapi role (MODERATORS, bootstrap/roles.ts).
  */
-export default (policyContext: any, _config: unknown, { strapi: _strapi }: any) => {
-  const user = policyContext.state?.user;
-  if (!user?.role?.type) return false;
-  return MODERATORS.includes(user.role.type);
-};
+export default (
+  policyContext: { state?: { user?: RoleHolder | null } },
+  _config?: unknown,
+  _deps?: unknown,
+): boolean => hasRole(policyContext.state?.user, MODERATORS);

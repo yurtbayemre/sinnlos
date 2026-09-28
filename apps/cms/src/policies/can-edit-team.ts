@@ -1,8 +1,9 @@
+import { hasRole } from "../bootstrap/roles";
 import {
   TEAM_UID,
   USER_UID,
+  WRITE_BYPASS_ROLES,
   enforceWriteAllowlist,
-  isWriteBypassRole,
   targetRowWhere,
   type StrapiDb,
   type WritePolicy,
@@ -46,9 +47,8 @@ export default async (
   { strapi }: { strapi: StrapiDb },
 ): Promise<boolean> => {
   const user = policyContext.state?.user;
-  const roleType = user?.role?.type;
-  if (!user || typeof user.id !== "number" || !roleType) return false;
-  if (isWriteBypassRole(roleType)) return true;
+  if (!user || typeof user.id !== "number" || !user.role?.type) return false;
+  if (hasRole(user, WRITE_BYPASS_ROLES)) return true;
 
   const where = targetRowWhere(policyContext.params?.id);
   if (!where) return false;
@@ -61,7 +61,7 @@ export default async (
   let roleClass: "lead" | "departmentHead" | undefined;
   if (team.lead?.id === user.id) {
     roleClass = "lead";
-  } else if (roleType === "department_head" && typeof team.department?.id === "number") {
+  } else if (hasRole(user, ["department_head"]) && typeof team.department?.id === "number") {
     const me = (await strapi.db.query(USER_UID).findOne({
       where: { id: user.id },
       populate: { department: true },

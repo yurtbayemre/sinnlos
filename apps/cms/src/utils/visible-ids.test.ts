@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DEPT, ROLE, TEAM, USER, USER_UID, createOrgStub } from "../test/org-fixtures.test.helper";
+import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
   ANNOUNCEMENT_FIND,
   EVENT_FIND,
   KUDOS_FIND,
   announcementRecipients,
-  audienceScopeOf,
+  toAudienceScope,
   holdsGrant,
   loadAllUserScopes,
   loadRoleGrants,
@@ -260,6 +261,87 @@ describe("loadUserScope", () => {
       ledTeamIds: [],
     });
   });
+
+  it("hands out a frozen scope (callers only read it)", async () => {
+    const scope = await loadUserScope(stubStrapi({ user: USER, teams: TEAMS }), 7);
+    expect(Object.isFrozen(scope)).toBe(true);
+    expect(Object.isFrozen(scope.teamIds)).toBe(true);
+    expect(Object.isFrozen(scope.ledTeamIds)).toBe(true);
+  });
+});
+
+/**
+ * PL04: one read per request and user. The shared stub answers
+ * strapi.requestContext.get() with the object the test passes (the Koa
+ * context in production) and records every db call.
+ */
+describe("loadUserScope: per-request memo (PL04)", () => {
+  const tables = {
+    "api::team.team": [{ id: 40, lead: { id: 7 } }],
+    [USER_UID]: [
+      { id: 7, username: "seven", department: { id: ENGINEERING }, teams: [{ id: 40 }] },
+      { id: 8, username: "eight", department: null, teams: [] },
+    ],
+  };
+  const reads = (strapi: StrapiStub) => strapi.calls.filter((call) => call.method !== "count");
+
+  it("reads once per request and user, and shares concurrent reads", async () => {
+    const strapi = createStrapiStub({ tables, requestContext: { request: "one" } });
+    const [a, b] = await Promise.all([loadUserScope(strapi, 7), loadUserScope(strapi, 7)]);
+    const c = await loadUserScope(strapi, 7);
+    expect(a).toBe(b);
+    expect(c).toBe(a);
+    expect(reads(strapi)).toHaveLength(2); // the user and the team-lead map, once
+    expect(a).toEqual({
+      roleId: undefined,
+      departmentId: ENGINEERING,
+      teamIds: [40],
+      ledTeamIds: [40],
+    });
+
+    const other = await loadUserScope(strapi, 8);
+    expect(other.departmentId).toBeUndefined();
+    expect(reads(strapi)).toHaveLength(4); // another user reads on its own
+  });
+
+  it("never carries a scope over to the next request", async () => {
+    let request: object = { request: "one" };
+    const strapi = createStrapiStub({ tables });
+    strapi.requestContext = { get: () => request };
+    const first = await loadUserScope(strapi, 7);
+    request = { request: "two" };
+    const second = await loadUserScope(strapi, 7);
+    expect(second).not.toBe(first);
+    expect(second).toEqual(first);
+    expect(reads(strapi)).toHaveLength(4);
+  });
+
+  it("reads every time without a request context (cron, bootstrap)", async () => {
+    const strapi = createStrapiStub({ tables });
+    await loadUserScope(strapi, 7);
+    await loadUserScope(strapi, 7);
+    expect(reads(strapi)).toHaveLength(4);
+  });
+
+  it("does not remember a failed read", async () => {
+    const strapi = createStrapiStub({ tables, requestContext: { request: "one" } });
+    const query = strapi.db.query.bind(strapi.db);
+    let fail = true;
+    strapi.db.query = (uid: string) => {
+      const real = query(uid);
+      if (uid !== USER_UID) return real;
+      return {
+        ...real,
+        findOne: async (params) => {
+          if (fail) throw new Error("connection reset");
+          return real.findOne(params);
+        },
+      };
+    };
+    await expect(loadUserScope(strapi, 7)).rejects.toThrow("connection reset");
+    fail = false;
+    await expect(loadUserScope(strapi, 7)).resolves.toMatchObject({ departmentId: ENGINEERING });
+  });
 });
 
 describe("loadAllUserScopes (FX19)", () => {
@@ -377,7 +459,7 @@ describe("the announcement recipient filter (FX19)", () => {
     ]);
   });
 
-  it("holdsGrant and audienceScopeOf", () => {
+  it("holdsGrant and toAudienceScope", () => {
     const scope: UserScope = {
       roleId: ROLE.member,
       departmentId: 1,
@@ -387,10 +469,11 @@ describe("the announcement recipient filter (FX19)", () => {
     expect(holdsGrant(scope, new Set([ROLE.member]))).toBe(true);
     expect(holdsGrant(scope, new Set([ROLE.guest]))).toBe(false);
     expect(holdsGrant({ ...scope, roleId: undefined }, new Set([ROLE.member]))).toBe(false);
-    expect(audienceScopeOf(scope)).toEqual({
+    expect(toAudienceScope(scope)).toEqual({
       roleId: ROLE.member,
       departmentId: 1,
       teamIds: [2, 3],
     });
+    expect(toAudienceScope(null)).toBeNull();
   });
 });

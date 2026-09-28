@@ -1,8 +1,9 @@
 import { factories } from "@strapi/strapi";
 
-import { MODERATORS } from "../../../bootstrap/roles";
+import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { clampExpiresAt } from "../../../utils/classified-expiry";
-import { isRowId, parseEntryRef } from "../../../utils/entry-id";
+import { isRowId } from "../../../utils/entry-id";
+import { findByRef, type EntryRow } from "../../../utils/policy-factories";
 import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
 
 /**
@@ -27,6 +28,13 @@ import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/
  */
 
 const MAX_IMAGES = 4;
+
+const CLASSIFIED_UID = "api::classified.classified";
+
+/** The columns of the ad the update reads. */
+interface ClassifiedRow extends EntryRow {
+  category?: string | null;
+}
 
 /**
  * Normalize + verify the images payload. Returns the deduplicated id list
@@ -63,7 +71,7 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   if (!files.every((f: any) => typeof f.mime === "string" && f.mime.startsWith("image/"))) {
     return null;
   }
-  const isModerator = MODERATORS.includes(user?.role?.type);
+  const isModerator = hasRole(user, MODERATORS);
   if (!isModerator) {
     const ownsAll =
       user != null &&
@@ -81,7 +89,7 @@ function resolvePrice(value: unknown): { ok: true; price: number | null } | { ok
   return { ok: true, price: Math.round(parsed * 100) / 100 };
 }
 
-export default factories.createCoreController("api::classified.classified", ({ strapi }) => ({
+export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
   async create(ctx) {
     const user = ctx.state.user;
     if (!user) return ctx.unauthorized();
@@ -126,10 +134,8 @@ export default factories.createCoreController("api::classified.classified", ({ s
     // web app addresses ads by numeric id, but the v5 core controller
     // resolves by documentId — an untranslated numeric id would 404
     // (comment controller gotcha). A malformed id is an unknown ad and
-    // never reaches the query (utils/entry-id.ts).
-    const where = parseEntryRef(ctx.params.id);
-    if (!where) return ctx.notFound();
-    const entity = await strapi.db.query("api::classified.classified").findOne({ where });
+    // never reaches the query (findByRef, utils/entry-id.ts).
+    const entity = await findByRef<ClassifiedRow>(strapi, CLASSIFIED_UID, ctx.params.id);
     if (!entity) return ctx.notFound();
 
     const body = (ctx.request.body ?? {}) as any;
@@ -179,9 +185,7 @@ export default factories.createCoreController("api::classified.classified", ({ s
   async delete(ctx) {
     // Same numeric-id → documentId translation as update; the v5 core
     // delete would otherwise answer 204 while deleting nothing.
-    const where = parseEntryRef(ctx.params.id);
-    if (!where) return ctx.notFound();
-    const entity = await strapi.db.query("api::classified.classified").findOne({ where });
+    const entity = await findByRef(strapi, CLASSIFIED_UID, ctx.params.id);
     if (!entity) return ctx.notFound();
     ctx.params.id = entity.documentId;
     return super.delete(ctx);

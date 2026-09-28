@@ -1,12 +1,12 @@
-import { GUEST } from "../bootstrap/roles";
+import { GUEST, hasRole, type RoleHolder } from "../bootstrap/roles";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
 import { editablePageSpace, wikiRelationChecks } from "../utils/wiki-write-targets";
 import {
   USER_UID,
   WIKI_PAGE_UID,
   enforceWriteAllowlist,
+  WRITE_BYPASS_ROLES,
   hasTargetId,
-  isWriteBypassRole,
   targetRowWhere,
   type StrapiDb,
   type WritePolicy,
@@ -67,10 +67,9 @@ export default async (
   { strapi }: { strapi: StrapiDb },
 ): Promise<boolean> => {
   const user = policyContext.state?.user;
-  const roleType = user?.role?.type;
-  if (!user || typeof user.id !== "number" || !roleType) return false;
-  if (isWriteBypassRole(roleType)) return true;
-  if (roleType === GUEST) return false;
+  if (!user || typeof user.id !== "number" || !user.role?.type) return false;
+  if (hasRole(user, WRITE_BYPASS_ROLES)) return true;
+  if (hasRole(user, [GUEST])) return false;
 
   if (!hasTargetId(policyContext.params?.id)) {
     const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);
@@ -89,7 +88,7 @@ export default async (
     populate: { author: true, department: true, team: { populate: { lead: true } } },
   })) as PageRow | null;
   if (!page) return false;
-  const roleClass = await pageEditorClass(strapi, user.id, roleType, page);
+  const roleClass = await pageEditorClass(strapi, user.id, user, page);
   if (!roleClass) return false;
 
   const visibleSpaceIds = await visibleSpacesOf(strapi, user.id);
@@ -117,17 +116,17 @@ async function visibleSpacesOf(strapi: StrapiDb, userId: number): Promise<Set<nu
 async function pageEditorClass(
   strapi: StrapiDb,
   userId: number,
-  roleType: string,
+  caller: RoleHolder,
   page: PageRow,
 ): Promise<PageEditorClass | undefined> {
   if (page.author?.id === userId) return "author";
-  if (roleType === "department_head" && typeof page.department?.id === "number") {
+  if (hasRole(caller, ["department_head"]) && typeof page.department?.id === "number") {
     const me = (await strapi.db.query(USER_UID).findOne({
       where: { id: userId },
       populate: { department: true },
     })) as CallerRow | null;
     if (me?.department?.id === page.department.id) return "departmentHead";
   }
-  if (roleType === "team_lead" && page.team?.lead?.id === userId) return "teamLead";
+  if (hasRole(caller, ["team_lead"]) && page.team?.lead?.id === userId) return "teamLead";
   return undefined;
 }

@@ -1,5 +1,15 @@
-import { describe, expect, it } from "vitest";
-import { forcePublishedStatus, getMutableQuery, restrictiveIdFilter } from "./policy-query";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BIND_HEADROOM,
+  BIND_LIMITS,
+  boundedIdFilter,
+  fitsBindLimit,
+  forcePublishedStatus,
+  getMutableQuery,
+  maxBoundValues,
+  narrowFilters,
+  restrictiveIdFilter,
+} from "./policy-query";
 
 /**
  * Guards the sanitize fail-open fix: @strapi/utils' defaultSanitizeFilters
@@ -135,5 +145,108 @@ describe("getMutableQuery", () => {
 
     expect(policyContext.query).toBe(query);
     expect(query).toEqual({});
+  });
+});
+
+/**
+ * narrowFilters (PL01): the injected clause is $and-composed with the
+ * client filter, never spread-merged, so a client key can neither replace
+ * the policy's clause nor sit next to it as an alternative.
+ */
+describe("narrowFilters", () => {
+  const clause = { user: { id: 7 } };
+
+  it("stands alone without a client filter (never an empty $and)", () => {
+    for (const filters of [undefined, null, ""]) {
+      const query: Record<string, unknown> = filters === undefined ? {} : { filters };
+      narrowFilters(query, clause);
+      expect(query.filters, String(filters)).toBe(clause);
+    }
+  });
+
+  it("wraps the client filter and the clause in one $and, client first", () => {
+    const client = { title: { $eq: "x" } };
+    const query: Record<string, unknown> = { filters: client };
+    narrowFilters(query, clause);
+    expect(query.filters).toEqual({ $and: [client, clause] });
+    expect((query.filters as { $and: unknown[] }).$and[0]).toBe(client);
+  });
+
+  it("keeps a client key of the same name as a separate operand", () => {
+    // A spread merge would let `user` of one side overwrite the other.
+    const client = { user: { id: 99 }, $or: [{ id: 1 }, { id: 2 }] };
+    const query: Record<string, unknown> = { filters: client };
+    narrowFilters(query, clause);
+    expect(query.filters).toEqual({ $and: [client, { user: { id: 7 } }] });
+  });
+
+  it("nests on repeated calls instead of flattening", () => {
+    const query: Record<string, unknown> = { filters: { a: 1 } };
+    narrowFilters(query, { b: 2 });
+    narrowFilters(query, { c: 3 });
+    expect(query.filters).toEqual({ $and: [{ $and: [{ a: 1 }, { b: 2 }] }, { c: 3 }] });
+  });
+
+  it("writes onto the query it is given (the real request query)", () => {
+    const ctx = { request: { query: { filters: { a: 1 } } as Record<string, unknown> } };
+    narrowFilters(getMutableQuery(ctx), clause);
+    expect(ctx.request.query.filters).toEqual({ $and: [{ a: 1 }, clause] });
+  });
+});
+
+/**
+ * The bind-limit guard (PL04): an injected list beyond what one statement
+ * may bind fails closed with an error log instead of an SQL error.
+ */
+describe("bind-limit guard", () => {
+  const host = (client?: string) => ({
+    db: client === undefined ? {} : { dialect: { client } },
+    log: { error: vi.fn<(message: string) => void>() },
+  });
+  const ids = (count: number) => Array.from({ length: count }, (_, index) => index + 1);
+
+  it("uses the dialect's limit minus the headroom, SQLite's when unknown", () => {
+    expect(BIND_LIMITS).toEqual({ postgres: 65535, sqlite: 32766 });
+    expect(maxBoundValues(host("postgres"))).toBe(65535 - BIND_HEADROOM);
+    expect(maxBoundValues(host("sqlite"))).toBe(32766 - BIND_HEADROOM);
+    for (const client of [undefined, "mysql", "better-sqlite3"]) {
+      expect(maxBoundValues(host(client)), String(client)).toBe(32766 - BIND_HEADROOM);
+    }
+    expect(maxBoundValues({})).toBe(32766 - BIND_HEADROOM);
+  });
+
+  it("passes a list up to the limit without a log", () => {
+    const strapi = host("sqlite");
+    const max = maxBoundValues(strapi);
+    expect(fitsBindLimit(strapi, max, "test")).toBe(true);
+    expect(boundedIdFilter(strapi, ids(3), "test")).toEqual({ id: { $in: [1, 2, 3] } });
+    expect(boundedIdFilter(strapi, [], "test")).toEqual({ id: { $eq: -1 } });
+    expect(strapi.log.error).not.toHaveBeenCalled();
+  });
+
+  it("fails closed beyond the limit, logging the count but no values", () => {
+    const strapi = host("sqlite");
+    const over = maxBoundValues(strapi) + 1;
+    expect(fitsBindLimit(strapi, over, "document read policy")).toBe(false);
+    expect(boundedIdFilter(strapi, ids(over), "document read policy")).toEqual({
+      id: { $eq: -1 },
+    });
+    expect(strapi.log.error).toHaveBeenCalledTimes(2);
+    const message = strapi.log.error.mock.calls[0][0];
+    expect(message).toContain("[policy] document read policy");
+    expect(message).toContain(String(over));
+    expect(message).not.toContain("1, 2, 3");
+  });
+
+  it("allows Postgres more than SQLite", () => {
+    const list = ids(40_000);
+    const pg = host("postgres");
+    expect(boundedIdFilter(pg, list, "t")).toEqual({ id: { $in: list } });
+    const sqlite = host("sqlite");
+    expect(boundedIdFilter(sqlite, list, "t")).toEqual({ id: { $eq: -1 } });
+  });
+
+  it("works without a log (fails closed all the same)", () => {
+    expect(fitsBindLimit({ db: { dialect: { client: "sqlite" } } }, 1_000_000, "t")).toBe(false);
   });
 });

@@ -59,6 +59,28 @@ export function isRoleType(value: unknown): value is RoleType {
   return (ROLE_PRIVILEGE_ORDER as readonly unknown[]).includes(value);
 }
 
+/**
+ * What a role check reads from a caller: users-permissions puts the user
+ * with its populated role on ctx.state.user (policies, controllers) and the
+ * request context.
+ */
+export interface RoleHolder {
+  role?: { type?: unknown } | null;
+}
+
+/**
+ * Whether the caller's role type is one of `roles` (PL01): the one role
+ * check the policies, controllers and utils decide bypasses by. The match
+ * is exact, so "Admin_role", " editor" or "admin" never pass, and a caller
+ * without a user, a role or a string role type holds none. `roles` is typed
+ * as RoleType, so a misspelt role fails `tsc`; a list from route config goes
+ * through isRoleType first.
+ */
+export function hasRole(user: RoleHolder | null | undefined, roles: readonly RoleType[]): boolean {
+  const type = user?.role?.type;
+  return typeof type === "string" && (roles as readonly string[]).includes(type);
+}
+
 export type RoleSeed = {
   name: string;
   type: RoleType;

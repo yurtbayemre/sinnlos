@@ -1,10 +1,17 @@
 import { factories } from "@strapi/strapi";
-import { MODERATORS } from "../../../bootstrap/roles";
+import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
-import { parseEntryRef } from "../../../utils/entry-id";
+import { findByRef, identifiedCaller, type EntryRow } from "../../../utils/policy-factories";
 import { isTargetVisible } from "../../../utils/target-visibility";
 
-export default factories.createCoreController("api::comment.comment", ({ strapi }) => ({
+const COMMENT_UID = "api::comment.comment";
+
+/** A comment with its author's id, for the delete ownership check. */
+interface CommentRow extends EntryRow {
+  author?: { id?: number } | null;
+}
+
+export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
   /**
    * Author is server-authoritative (§5.21) and the target is anchored by
    * documentId, never by the numeric row id: publishing an announcement in
@@ -56,18 +63,18 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
   async delete(ctx) {
     // The web app addresses comments by numeric id; accept both that and a
     // documentId so direct API consumers keep working. Anything else is an
-    // unknown comment and never reaches the query (utils/entry-id.ts: a
-    // malformed row id was a 500 on Postgres).
-    const where = parseEntryRef(ctx.params.id);
-    if (!where) return ctx.notFound();
-    const entity = await strapi.db.query("api::comment.comment").findOne({
-      where,
-      populate: { author: true },
+    // unknown comment and never reaches the query (findByRef,
+    // utils/entry-id.ts: a malformed row id was a 500 on Postgres).
+    const entity = await findByRef<CommentRow>(strapi, COMMENT_UID, ctx.params.id, {
+      populate: { author: { select: ["id"] } },
     });
     if (!entity) return ctx.notFound();
     const user = ctx.state.user;
-    const isOwner = entity.author?.id === user?.id;
-    const isPrivileged = MODERATORS.includes(user?.role?.type);
+    // Without a numeric id the caller owns nothing, not even a comment whose
+    // author is gone (ownerGate's rule, utils/policy-factories.ts).
+    const caller = identifiedCaller(user);
+    const isOwner = caller !== null && entity.author?.id === caller.id;
+    const isPrivileged = hasRole(user, MODERATORS);
     if (!isOwner && !isPrivileged) return ctx.forbidden();
     // The v5 core controller resolves by documentId — a numeric id deletes
     // nothing while still answering 204, so translate before delegating.
