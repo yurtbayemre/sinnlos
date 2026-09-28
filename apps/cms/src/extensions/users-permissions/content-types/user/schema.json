@@ -107,7 +107,8 @@
     "manager": {
       "type": "relation",
       "relation": "manyToOne",
-      "target": "plugin::users-permissions.user"
+      "target": "plugin::users-permissions.user",
+      "inversedBy": "directReports"
     },
     "directReports": {
       "type": "relation",

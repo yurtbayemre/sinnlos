@@ -704,15 +704,13 @@ describe("schema.json enums = web unions and constants", () => {
 
 describe("relations: every mappedBy has its inversedBy and back", () => {
   /**
-   * KNOWN: two phantom inverse sides whose owning side names no inversedBy
-   * (FX23): user.directReports -> user.manager (lane 2C adds the pairing),
-   * and comment.replies -> comment.parent (writes to parent are blocked by
-   * FX04; DA02 decides). Remove an entry when its pair is fixed.
+   * KNOWN: one phantom inverse side whose owning side names no inversedBy:
+   * comment.replies -> comment.parent (writes to parent are blocked by FX04;
+   * DA02 decides). Remove the entry when its pair is fixed. user.directReports
+   * -> user.manager was the other one until FX23 paired it (2026-09-28f):
+   * before that, populating directReports returned nothing.
    */
-  const KNOWN_UNPAIRED = [
-    "api::comment.comment.replies",
-    "plugin::users-permissions.user.directReports",
-  ];
+  const KNOWN_UNPAIRED = ["api::comment.comment.replies"];
 
   it("finds exactly the known unpaired sides", () => {
     const all = { ...pluginSchemas(), ...SCHEMAS };
