@@ -834,7 +834,9 @@ admin panel and the content API:
   The file name is now sent per RFC 6266: an ASCII `filename` fallback plus
   `filename*=UTF-8''<percent-encoded>`. The file itself escapes text
   correctly (also line breaks), folds long lines at 75 octets, carries the
-  description as plain text, a URL only when it is an http(s) link, and
+  description as plain text (its first 10 000 characters, then `…`, so a
+  very long description with unbalanced Markdown converts quickly), a URL
+  only when it is an http(s) link, and
   `SEQUENCE` plus `LAST-MODIFIED` from the event's last change, so a calendar
   that imports an updated event again can tell that it is newer. `UID`, the
   dates and the published-only lookup are unchanged.

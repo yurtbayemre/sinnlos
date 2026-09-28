@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ICS_LINE_OCTETS,
+  MAX_DESCRIPTION_CHARS,
   buildIcs,
   escapeIcsText,
   foldIcsLine,
@@ -372,6 +373,37 @@ describe("buildIcs", () => {
     expect(property(file.body, "DESCRIPTION")).toBe(
       "Ablauf\\n\\n18:00 Start\\, danach Buffet\\; Ende offen",
     );
+  });
+
+  it("cuts a long description before the Markdown conversion (quadratic rules)", () => {
+    // Openers without a closer make several Markdown rules rescan the rest
+    // of the input from every position: uncut, 64K characters took seconds.
+    for (const description of [
+      "[".repeat(200_000),
+      "![".repeat(100_000),
+      "**a ".repeat(50_000),
+      "~~a ".repeat(50_000),
+      "<a".repeat(100_000),
+      "<!--".repeat(50_000),
+    ]) {
+      const label = description.slice(0, 4);
+      const started = performance.now();
+      const body = buildIcs({ ...EVENT, description }, { tz: BERLIN, now: NOW }).body;
+      expect(performance.now() - started, label).toBeLessThan(250);
+      const text = property(body, "DESCRIPTION");
+      expect(text, label).toBeDefined();
+      expect(text?.endsWith("…"), label).toBe(true);
+      expect(text?.length ?? 0, label).toBeLessThanOrEqual(MAX_DESCRIPTION_CHARS * 2 + 1);
+    }
+  });
+
+  it("keeps a description up to the cap whole and never splits a surrogate pair", () => {
+    const whole = "a".repeat(MAX_DESCRIPTION_CHARS);
+    const kept = buildIcs({ ...EVENT, description: whole }, { tz: BERLIN, now: NOW }).body;
+    expect(property(kept, "DESCRIPTION")).toBe(whole);
+    const emojiAtCut = `${"a".repeat(MAX_DESCRIPTION_CHARS - 1)}🎉b`;
+    const cut = buildIcs({ ...EVENT, description: emojiAtCut }, { tz: BERLIN, now: NOW }).body;
+    expect(property(cut, "DESCRIPTION")).toBe(`${"a".repeat(MAX_DESCRIPTION_CHARS - 1)}…`);
   });
 
   it("omits empty LOCATION, DESCRIPTION and non-http URLs", () => {

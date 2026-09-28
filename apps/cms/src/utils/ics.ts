@@ -18,7 +18,12 @@
  *  - SUMMARY, LOCATION and DESCRIPTION as TEXT values (3.3.11): backslash,
  *    semicolon and comma escaped, every line break as the two characters
  *    backslash-n, other control characters dropped. DESCRIPTION is the
- *    richtext (Markdown) description as plain text.
+ *    richtext (Markdown) description as plain text, cut to its first
+ *    MAX_DESCRIPTION_CHARS (10 000) characters before the conversion and
+ *    then marked with '…': some of the Markdown rules rescan the rest of the
+ *    line from every opener without a closer, which is quadratic, and the
+ *    field has no maxLength (a 64K-character description of '![' took
+ *    seconds on every download).
  *  - URL only for http(s) links (a URI value has no escaping; control
  *    characters are dropped).
  *  - Every content line folded at 75 octets of UTF-8 (3.1), between code
@@ -227,6 +232,22 @@ export function markdownToPlainText(markdown: string): string {
     .trim();
 }
 
+/**
+ * The description characters (UTF-16 code units) that reach
+ * markdownToPlainText; see the module header. At this size the worst
+ * pathological input converts in a few tens of milliseconds.
+ */
+export const MAX_DESCRIPTION_CHARS = 10_000;
+
+/** The first MAX_DESCRIPTION_CHARS of a description, never half a surrogate pair. */
+function cutDescription(description: string): { text: string; cut: boolean } {
+  if (description.length <= MAX_DESCRIPTION_CHARS) return { text: description, cut: false };
+  let end = MAX_DESCRIPTION_CHARS;
+  const last = description.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return { text: description.slice(0, end), cut: true };
+}
+
 /** SEQUENCE for an updatedAt: grows with it, 0 without one. */
 export function icsSequence(updatedAt: InstantInput | null | undefined): number {
   const ms = instantMsOrNull(updatedAt);
@@ -327,8 +348,11 @@ export function buildIcs(event: IcsEvent, options: IcsOptions = {}): IcsFile {
   const location = nonEmpty(event.location);
   if (location !== null) lines.push(`LOCATION:${escapeIcsText(location)}`);
   const description = nonEmpty(event.description);
-  const plain = description === null ? "" : markdownToPlainText(description);
-  if (plain !== "") lines.push(`DESCRIPTION:${escapeIcsText(plain)}`);
+  if (description !== null) {
+    const { text, cut } = cutDescription(description);
+    const plain = markdownToPlainText(text);
+    if (plain !== "") lines.push(`DESCRIPTION:${escapeIcsText(cut ? `${plain}…` : plain)}`);
+  }
   const url = httpUrl(event.url);
   if (url !== null) lines.push(`URL:${url}`);
   lines.push("END:VEVENT", "END:VCALENDAR");
