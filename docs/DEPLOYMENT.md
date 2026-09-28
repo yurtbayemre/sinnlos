@@ -971,12 +971,16 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    Expected in section 1: six new rows `MISSING_IN_DB | <role> |
    api::event-rsvp.event-rsvp.summary`, for `admin_role`, `authenticated`,
-   `department_head`, `editor`, `member` and `team_lead` (never `guest`),
-   next to the two known informational `MISSING_IN_DB` rows for
-   `authenticated` (`plugin::users-permissions.auth.getSessions` and
-   `…auth.revokeSession`, Strapi first-boot defaults). Anything else was
-   there before this deploy: compare it with the result of the batch 6
-   deploy before you go on.
+   `department_head`, `editor`, `member` and `team_lead` (never `guest`).
+   A database created before the Strapi 5.55.1 release, such as
+   production's, also lists the two known informational `MISSING_IN_DB`
+   rows for `authenticated` (`plugin::users-permissions.auth.getSessions`
+   and `…auth.revokeSession`): users-permissions grants them only on a
+   fresh database (step 9 of
+   [Upgrading to the Strapi 5.55.1 release](#upgrading-to-the-strapi-5551-release-2026-09-25)),
+   so a database first booted by 5.55.1 or later holds both, and the diff
+   lists neither. Anything else was there before this deploy: compare it
+   with the result of the batch 6 deploy before you go on.
 
 3. **Census.** Who the notification and digest rules affect, and the
    manager links FX23 pairs. Write the numbers down; the link count is
@@ -1053,8 +1057,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    without the cleanup below it reads `granted N` with N ≤ 6).
 
 6. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
-   lists no `event-rsvp` row any more; only the two known informational
-   `MISSING_IN_DB` rows for `authenticated` remain.
+   lists no `event-rsvp` row any more; at most the two known informational
+   `MISSING_IN_DB` rows for `authenticated` remain (only on a database
+   created before the Strapi 5.55.1 release, see step 2).
 
 7. **FX23: the column is there and no link was lost.**
 
@@ -1613,10 +1618,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    A later boot grants nothing new and logs no such line.
 
 5. **Permissions after.** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
-   lists no `event-rsvp` row any more. The only rows left should be the two
-   known informational `MISSING_IN_DB` rows for `authenticated`
-   (`plugin::users-permissions.auth.getSessions` and `…auth.revokeSession`,
-   Strapi first-boot defaults; see step 9 of
+   lists no `event-rsvp` row any more. At most the two known informational
+   `MISSING_IN_DB` rows for `authenticated` remain
+   (`plugin::users-permissions.auth.getSessions` and `…auth.revokeSession`),
+   and only on a database created before the Strapi 5.55.1 release, such as
+   production's: users-permissions grants them only on a fresh database
+   (see step 9 of
    [Upgrading to the Strapi 5.55.1 release](#upgrading-to-the-strapi-5551-release-2026-09-25)).
 
 6. **RSVPs through the API.** This signs in as the demo account
