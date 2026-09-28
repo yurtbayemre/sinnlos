@@ -1,7 +1,25 @@
 /**
  * In-memory demo dataset used when DEMO_MODE=1, so the UI can be
- * previewed without a running Strapi instance. The shapes match what
- * Strapi v5 flat responses return.
+ * previewed without a running Strapi instance (DM01-lite: DEMO_MODE is a
+ * frozen, best-effort PREVIEW, never a second backend). The shapes match
+ * what Strapi v5 flat responses return, and the fixtures are checked
+ * against the web's own types (`satisfies`).
+ *
+ * The contract (docs/architecture.md §5, demo.test.ts):
+ *   - strapi() answers every request from demo(path) before any session
+ *     read or fetch (lib/strapi/client.ts); getSession() answers
+ *     DEMO_SESSION, the fixture user Ada Lovelace (id 1, lib/session.ts);
+ *   - a small route table answers each path template of the api.* reads
+ *     and the direct readers: content-type lists apply the request's
+ *     `filters` ($eq/$ne/$lt/$lte/$gt/$gte/$null/$notNull/$in/$containsi,
+ *     nested $or/$and, relation paths), `sort` and pagination, with a real
+ *     `meta.pagination` (page walks end); /api/users answers a BARE ARRAY
+ *     paged by start/limit like the users-permissions plugin,
+ *     /api/users/:id and /api/users/me the bare user;
+ *   - an unknown poll's results answer 404 (a StrapiError, like the cms);
+ *   - anything else (a mutation, an unknown path) falls through to an
+ *     empty list, with a console.warn outside production;
+ *   - a production server refuses DEMO_MODE=1 at start (auth.ts).
  */
 import { appTimeZone } from "@/lib/app-time-zone";
 import {
@@ -10,16 +28,33 @@ import {
   zonedDateKey,
   zonedWallTimeToInstant,
 } from "@/lib/plain-date";
+import { StrapiError } from "@/lib/strapi-error";
+import type {
+  Acknowledgement,
+  Announcement,
+  Celebration,
+  Classified,
+  Comment,
+  Course,
+  Department,
+  Document,
+  Event,
+  EventRsvp,
+  Kudos,
+  Lesson,
+  LessonProgress,
+  Notification,
+  Poll,
+  PollResults,
+  QuickLink,
+  Reaction,
+  Team,
+  UserLite,
+  WikiPage,
+  WikiSpace,
+} from "@/lib/types";
 
-type AnyEntry = { id: number; [key: string]: any };
-type ListResponse = { data: AnyEntry[]; meta: { pagination: any } };
-
-const pack = (data: AnyEntry[]): ListResponse => ({
-  data,
-  meta: { pagination: { page: 1, pageSize: 25, pageCount: 1, total: data.length } },
-});
-
-const users: Record<string, AnyEntry> = {
+const users = {
   ada: {
     id: 1,
     username: "ada",
@@ -62,7 +97,10 @@ const users: Record<string, AnyEntry> = {
     displayName: "Sofia Martín",
     jobTitle: "Head of Marketing",
   },
-};
+} satisfies Record<string, UserLite>;
+
+/** The demo user (DEMO_SESSION, DEMO_VIEWER): Ada Lovelace. */
+const DEMO_USER_ID = users.ada.id;
 
 /**
  * Fixture dates relative to today in APP_TIME_ZONE (datetime contract,
@@ -70,8 +108,9 @@ const users: Record<string, AnyEntry> = {
  * the process runs in (the local setHours before gave 17:00 of the process
  * zone, 19:00 Berlin time in a UTC container), and dateOnly(n) is a
  * calendar date. Resolved once at import, like the fixtures; this module is
- * imported by strapi.ts in every mode, so an invalid APP_TIME_ZONE falls
- * back to the default here (instrumentation.ts refuses to serve with it).
+ * imported by the Strapi client in every mode, so an invalid APP_TIME_ZONE
+ * falls back to the default here (instrumentation.ts refuses to serve with
+ * it).
  */
 const DEMO_ZONE = (() => {
   try {
@@ -89,9 +128,10 @@ const iso = (offsetDays: number, hour = 10) =>
   ).toISOString();
 const dateOnly = (offsetDays: number) => addDaysToKey(DEMO_TODAY, offsetDays);
 
-const departments: AnyEntry[] = [
+const departments = [
   {
     id: 1,
+    documentId: "demo-department-1",
     name: "Engineering",
     slug: "engineering",
     description: "We build and operate the product platform.",
@@ -106,6 +146,7 @@ const departments: AnyEntry[] = [
   },
   {
     id: 2,
+    documentId: "demo-department-2",
     name: "People & Culture",
     slug: "people-culture",
     description: "Hiring, onboarding, office and wellbeing.",
@@ -119,6 +160,7 @@ const departments: AnyEntry[] = [
   },
   {
     id: 3,
+    documentId: "demo-department-3",
     name: "Marketing",
     slug: "marketing",
     description: "Brand, growth and content.",
@@ -130,23 +172,25 @@ const departments: AnyEntry[] = [
       { id: 31, name: "Growth", slug: "growth", description: "Paid and lifecycle" },
     ],
   },
-];
+] satisfies Department[];
 
-const teams: AnyEntry[] = departments.flatMap((d) =>
-  d.teams.map((t: AnyEntry) => ({
+/** A department as a relation of another row (no nested relations). */
+const departmentRef = (d: Department) => ({ id: d.id, name: d.name, slug: d.slug });
+
+const teams: Team[] = departments.flatMap((d) =>
+  d.teams.map((t) => ({
     ...t,
-    department: { id: d.id, name: d.name, slug: d.slug },
+    department: departmentRef(d),
     lead: d.head,
     members: d.members,
   })),
 );
 
-const wikiSpaces: AnyEntry[] = [
+const wikiSpaces = [
   {
     id: 1,
     name: "Handbook",
     slug: "handbook",
-    icon: "book",
     description: "How we work, our values and policies.",
     visibility: "public",
     pages: [
@@ -176,7 +220,6 @@ const wikiSpaces: AnyEntry[] = [
     id: 2,
     name: "Engineering",
     slug: "engineering",
-    icon: "code",
     description: "Runbooks, ADRs and platform docs.",
     visibility: "department",
     pages: [
@@ -192,9 +235,14 @@ const wikiSpaces: AnyEntry[] = [
       },
     ],
   },
-];
+] satisfies WikiSpace[];
 
-const announcements: AnyEntry[] = [
+/** Every wiki page with its space (the /api/wiki-pages rows). */
+const wikiPages: WikiPage[] = wikiSpaces.flatMap((s) =>
+  s.pages.map((p) => ({ ...p, space: { id: s.id, name: s.name, slug: s.slug } })),
+);
+
+const announcements = [
   {
     id: 1,
     documentId: "demo-ann-1",
@@ -252,7 +300,7 @@ const announcements: AnyEntry[] = [
     createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
     author: users.linus,
   },
-];
+] satisfies Announcement[];
 
 /**
  * Fixtures for the modules added after the original demo set (issue #15):
@@ -262,7 +310,7 @@ const announcements: AnyEntry[] = [
  * above) so the events month view and expiry filters always show content.
  */
 
-const events: AnyEntry[] = [
+const events = [
   {
     id: 1,
     documentId: "demo-event-1",
@@ -303,9 +351,9 @@ const events: AnyEntry[] = [
     departments: [{ id: 2, name: "People & Culture", slug: "people-culture" }],
     createdAt: iso(-15),
   },
-];
+] satisfies Event[];
 
-const eventRsvps: AnyEntry[] = [
+const eventRsvps = [
   { id: 1, targetDocumentId: "demo-event-1", status: "yes", respondedAt: iso(-2), user: users.ada },
   {
     id: 2,
@@ -328,9 +376,9 @@ const eventRsvps: AnyEntry[] = [
     respondedAt: iso(-3),
     user: users.sofia,
   },
-];
+] satisfies EventRsvp[];
 
-const polls: AnyEntry[] = [
+const polls = [
   {
     id: 1,
     documentId: "demo-poll-1",
@@ -363,35 +411,18 @@ const polls: AnyEntry[] = [
     guestsCanVote: false,
     createdAt: iso(-9),
   },
-];
+] satisfies Poll[];
 
-const pollResults: Record<number, unknown> = {
-  1: {
-    poll: {
-      id: 1,
-      question: polls[0].question,
-      options: polls[0].options,
-      closesAt: polls[0].closesAt,
-      anonymous: false,
-      visibleToGuests: true,
-      guestsCanVote: true,
-    },
+/** The counts, the demo user's vote and the audience per poll. */
+const pollTallies: Record<string, Omit<PollResults, "poll">> = {
+  "demo-poll-1": {
     counts: [9, 6, 4],
     total: 19,
     myVoteIndex: null,
     canVote: true,
     audience: { targeted: false, departments: [] },
   },
-  2: {
-    poll: {
-      id: 2,
-      question: polls[1].question,
-      options: polls[1].options,
-      closesAt: polls[1].closesAt,
-      anonymous: true,
-      visibleToGuests: false,
-      guestsCanVote: false,
-    },
+  "demo-poll-2": {
     counts: [14, 5, 1],
     total: 20,
     myVoteIndex: 0,
@@ -404,7 +435,25 @@ const pollResults: Record<number, unknown> = {
   },
 };
 
-const kudosEntries: AnyEntry[] = [
+/** The results body of a poll, as GET /api/polls/:id/results answers it. */
+function pollResultsOf(poll: Poll): PollResults | null {
+  const tally = poll.documentId ? pollTallies[poll.documentId] : undefined;
+  if (!tally) return null;
+  return {
+    poll: {
+      id: poll.id,
+      question: poll.question,
+      options: poll.options,
+      closesAt: poll.closesAt,
+      anonymous: poll.anonymous ?? false,
+      visibleToGuests: poll.visibleToGuests === true,
+      guestsCanVote: poll.guestsCanVote === true,
+    },
+    ...tally,
+  };
+}
+
+const kudosEntries = [
   {
     id: 1,
     message: "For calmly steering the Sev2 last Tuesday to a fix before lunch.",
@@ -437,14 +486,14 @@ const kudosEntries: AnyEntry[] = [
     to: users.ada,
     createdAt: iso(-6),
   },
-];
+] satisfies Kudos[];
 
-const celebrations: AnyEntry[] = [
-  { id: 1, user: users.jonas, type: "birthday", date: dateOnly(2), daysUntil: 2 },
-  { id: 2, user: users.grace, type: "work-anniversary", years: 3, daysUntil: 9 },
-];
+const celebrations = [
+  { user: users.jonas, type: "birthday", date: dateOnly(2), daysUntil: 2 },
+  { user: users.grace, type: "work-anniversary", years: 3, daysUntil: 9 },
+] satisfies Celebration[];
 
-const documents: AnyEntry[] = [
+const documents = [
   {
     id: 1,
     documentId: "demo-doc-1",
@@ -496,9 +545,9 @@ const documents: AnyEntry[] = [
     createdAt: iso(-12),
     updatedAt: iso(-5),
   },
-];
+] satisfies Document[];
 
-const classifieds: AnyEntry[] = [
+const classifieds = [
   {
     id: 1,
     documentId: "demo-ad-1",
@@ -539,17 +588,18 @@ const classifieds: AnyEntry[] = [
     author: users.sofia,
     createdAt: iso(-5),
   },
-];
+] satisfies Classified[];
 
-const quickLinks: AnyEntry[] = [
+const quickLinks = [
   { id: 1, label: "HR portal", url: "https://example.com/hr", icon: "Contact", order: 1 },
   { id: 2, label: "Expense tool", url: "https://example.com/expenses", icon: "Wallet", order: 2 },
   { id: 3, label: "IT helpdesk", url: "https://example.com/helpdesk", icon: "LifeBuoy", order: 3 },
   { id: 4, label: "Meeting rooms", url: "https://example.com/rooms", icon: "Calendar", order: 4 },
   { id: 5, label: "Status page", url: "https://status.example.com", icon: "Globe", order: 5 },
-];
+] satisfies QuickLink[];
 
-const notifications: AnyEntry[] = [
+/** The demo user's notifications (the bell reads them by recipient). */
+const notifications = [
   {
     id: 1,
     type: "comment",
@@ -558,6 +608,7 @@ const notifications: AnyEntry[] = [
     readAt: null,
     createdAt: iso(0, 8),
     actor: users.grace,
+    recipient: users.ada,
   },
   {
     id: 2,
@@ -567,6 +618,7 @@ const notifications: AnyEntry[] = [
     readAt: null,
     createdAt: iso(-1),
     actor: users.sofia,
+    recipient: users.ada,
   },
   {
     id: 3,
@@ -576,10 +628,11 @@ const notifications: AnyEntry[] = [
     readAt: iso(-2),
     createdAt: iso(-2),
     actor: users.linus,
+    recipient: users.ada,
   },
-];
+] satisfies Notification[];
 
-const demoComments: AnyEntry[] = [
+const demoComments = [
   {
     id: 1,
     body: "Will the session be recorded for the folks on parental leave?",
@@ -604,9 +657,9 @@ const demoComments: AnyEntry[] = [
     author: users.jonas,
     createdAt: iso(0, 7),
   },
-];
+] satisfies Comment[];
 
-const demoReactions: AnyEntry[] = [
+const demoReactions = [
   {
     id: 1,
     emoji: "celebrate",
@@ -628,9 +681,9 @@ const demoReactions: AnyEntry[] = [
     targetDocumentId: "demo-ann-4",
     author: users.ada,
   },
-];
+] satisfies Reaction[];
 
-const demoLessons: AnyEntry[] = [
+const demoLessons = [
   {
     id: 1,
     documentId: "demo-lesson-1",
@@ -666,9 +719,9 @@ const demoLessons: AnyEntry[] = [
     body: "If something feels off: **report early**. There is no penalty for false alarms — there is for silence.",
     quiz: [],
   },
-];
+] satisfies Lesson[];
 
-const demoCourses: AnyEntry[] = [
+const demoCourses = [
   {
     id: 1,
     documentId: "demo-course-1",
@@ -698,173 +751,301 @@ const demoCourses: AnyEntry[] = [
     ],
     updatedAt: iso(-10),
   },
-];
+] satisfies Course[];
 
-const demoLessonProgress: AnyEntry[] = [
+/** Every lesson with its course (the /api/lessons rows). */
+const lessonRows: Lesson[] = demoCourses.flatMap((c) =>
+  c.lessons.map((l) => ({
+    ...l,
+    course: { id: c.id, documentId: c.documentId, title: c.title, slug: c.slug },
+  })),
+);
+
+const demoLessonProgress = [
   { id: 1, targetDocumentId: "demo-lesson-1", completedAt: iso(-2) },
-];
+] satisfies LessonProgress[];
 
-/** Value of a query param inside the raw path, or null. */
-function param(path: string, key: string): string | null {
-  const m = path.match(new RegExp(`[?&]${key.replace(/[[\]$]/g, "\\$&")}=([^&]*)`));
-  return m ? decodeURIComponent(m[1]!) : null;
+const demoAcknowledgements: Acknowledgement[] = [];
+
+/** The directory as /api/users answers it: every user with a department. */
+const directory: UserLite[] = Object.values(users).map((u) => ({
+  ...u,
+  department: departmentRef(departments[0]),
+}));
+
+/** GET /api/me: the demo user's allowlisted self-profile (FX02 shape). */
+const me = {
+  ...users.ada,
+  department: {
+    id: 1,
+    documentId: "demo-department-1",
+    name: "Engineering",
+    slug: "engineering",
+  },
+  role: { type: "member", name: "Member" },
+  birthdayVisible: false,
+};
+
+// ---------------------------------------------------------------------------
+// Strapi's REST query semantics, as far as the web uses them
+// ---------------------------------------------------------------------------
+
+/** A parsed `filters` tree: operators and attributes, leaves are the raw values. */
+type FilterTree = { [key: string]: FilterTree | string };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** A property of a row (or of a populated relation). */
+const field = (value: unknown, key: string): unknown => (isRecord(value) ? value[key] : undefined);
+
+/** `filters[a][$or][0][b][$eq]=v` → { a: { $or: { 0: { b: { $eq: "v" } } } } }. */
+function filterTree(params: URLSearchParams): FilterTree {
+  const tree: FilterTree = {};
+  for (const [key, value] of params) {
+    if (!key.startsWith("filters[")) continue;
+    const segments = [...key.slice("filters".length).matchAll(/\[([^\]]*)\]/g)].map((m) => m[1]!);
+    let node = tree;
+    segments.forEach((segment, i) => {
+      if (i === segments.length - 1) {
+        node[segment] = value;
+        return;
+      }
+      const next = node[segment];
+      if (typeof next === "object") {
+        node = next;
+      } else {
+        const created: FilterTree = {};
+        node[segment] = created;
+        node = created;
+      }
+    });
+  }
+  return tree;
+}
+
+/** Order of a row value and a filter value: numbers numerically, else as text (ISO instants and dates sort as text). */
+function order(value: string | number | boolean, operand: string): number {
+  if (typeof value === "number") return value - Number(operand);
+  const text = String(value);
+  return text < operand ? -1 : text > operand ? 1 : 0;
 }
 
 /**
- * The documentIds a comment/reaction read asks for: the `$eq` of one
- * section, or the `$in` list of the batched read (WD04); null = no filter.
+ * One operator on one value. Like SQL, a comparison with a missing value
+ * (NULL) is false: `blocked $ne true` does not take a user without the
+ * column, which is why the web adds `$null` next to it.
  */
-function targetDocumentIds(path: string): Set<string> | null {
-  const one = param(path, "filters[targetDocumentId][$eq]");
-  if (one !== null) return new Set([one]);
-  const many = [...path.matchAll(/[?&]filters\[targetDocumentId\]\[\$in\]\[\d+\]=([^&]*)/g)];
-  return many.length > 0 ? new Set(many.map((m) => decodeURIComponent(m[1]!))) : null;
+function applies(operator: string, value: unknown, operand: FilterTree | string): boolean {
+  if (operator === "$in") {
+    return (
+      typeof operand === "object" &&
+      value != null &&
+      Object.values(operand).some((item) => typeof item === "string" && String(value) === item)
+    );
+  }
+  if (typeof operand !== "string") return false;
+  if (operator === "$null") return (value == null) === (operand === "true");
+  if (operator === "$notNull") return (value != null) === (operand === "true");
+  if (typeof value !== "string" && typeof value !== "number" && typeof value !== "boolean") {
+    return false;
+  }
+  switch (operator) {
+    case "$eq":
+      return String(value) === operand;
+    case "$ne":
+      return String(value) !== operand;
+    case "$lt":
+      return order(value, operand) < 0;
+    case "$lte":
+      return order(value, operand) <= 0;
+    case "$gt":
+      return order(value, operand) > 0;
+    case "$gte":
+      return order(value, operand) >= 0;
+    case "$containsi":
+      return String(value).toLowerCase().includes(operand.toLowerCase());
+    default:
+      warn(`unsupported filter operator ${operator}`);
+      return false;
+  }
 }
 
-function findBy<T extends AnyEntry>(items: T[], slug: string): T | undefined {
-  return items.find((i) => i.slug === slug);
+/** Whether `value` (a row, a relation, a list of relations or a scalar) passes `tree`. */
+function passes(value: unknown, tree: FilterTree): boolean {
+  // A to-many relation passes when one of its rows does (a join).
+  if (Array.isArray(value)) return value.some((item) => passes(item, tree));
+  return Object.entries(tree).every(([key, child]) => {
+    if (key === "$or" || key === "$and") {
+      const branches = typeof child === "object" ? Object.values(child) : [];
+      const test = (branch: FilterTree | string) =>
+        typeof branch === "object" && passes(value, branch);
+      return key === "$or" ? branches.some(test) : branches.every(test);
+    }
+    if (key.startsWith("$")) return applies(key, value, child);
+    return typeof child === "object" && passes(field(value, key), child);
+  });
 }
 
-export function demo(path: string): unknown {
-  // /api/departments → list
-  if (path.startsWith("/api/departments?filters[slug][$eq]=")) {
-    const slug = decodeURIComponent(path.split("filters[slug][$eq]=")[1]!.split("&")[0]!);
-    const hit = findBy(departments, slug);
-    return pack(hit ? [hit] : []);
-  }
-  if (path.startsWith("/api/departments")) return pack(departments);
+/** `sort=a:desc,b` or `sort[0]=a:desc&sort[1]=b` → [["a", -1], ["b", 1]]. */
+function sortSpecs(params: URLSearchParams): [string, number][] {
+  const specs = [
+    ...params.getAll("sort").flatMap((value) => value.split(",")),
+    ...[...params]
+      .filter(([key]) => /^sort\[\d+\]$/.test(key))
+      .sort(([a], [b]) => Number(a.slice(5, -1)) - Number(b.slice(5, -1)))
+      .map(([, value]) => value),
+  ];
+  return specs
+    .filter((spec) => spec !== "")
+    .map((spec) => {
+      const [name = "", direction = "asc"] = spec.split(":");
+      return [name, direction.toLowerCase() === "desc" ? -1 : 1];
+    });
+}
 
-  if (path.startsWith("/api/teams?filters[slug][$eq]=")) {
-    const slug = decodeURIComponent(path.split("filters[slug][$eq]=")[1]!.split("&")[0]!);
-    const hit = findBy(teams, slug);
-    return pack(hit ? [hit] : []);
-  }
-  if (path.startsWith("/api/teams")) return pack(teams);
+function compareValues(a: unknown, b: unknown): number {
+  if (a == null || b == null) return a == null ? (b == null ? 0 : 1) : -1;
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  const [x, y] = [String(a), String(b)];
+  return x < y ? -1 : x > y ? 1 : 0;
+}
 
-  if (path.startsWith("/api/wiki-spaces?filters[slug][$eq]=")) {
-    const slug = decodeURIComponent(path.split("filters[slug][$eq]=")[1]!.split("&")[0]!);
-    const hit = findBy(wikiSpaces, slug);
-    return pack(hit ? [hit] : []);
-  }
-  if (path.startsWith("/api/wiki-spaces")) return pack(wikiSpaces);
+/** The rows that pass the request's filters, in the request's sort order. */
+function query<T>(rows: readonly T[], params: URLSearchParams): T[] {
+  const tree = filterTree(params);
+  const specs = sortSpecs(params);
+  const matched = rows.filter((row) => passes(row, tree));
+  return specs.length === 0
+    ? matched
+    : [...matched].sort((a, b) => {
+        for (const [name, direction] of specs) {
+          const diff = compareValues(field(a, name), field(b, name));
+          if (diff !== 0) return diff * direction;
+        }
+        return 0;
+      });
+}
 
-  if (path.startsWith("/api/wiki-pages?filters[space][slug][$eq]=")) {
-    const spaceSlug = decodeURIComponent(
-      path.split("filters[space][slug][$eq]=")[1]!.split("&")[0]!,
-    );
-    const pageSlug = decodeURIComponent(path.split("filters[slug][$eq]=")[1]!.split("&")[0]!);
-    const space = findBy(wikiSpaces, spaceSlug);
-    const page = space?.pages?.find((p: AnyEntry) => p.slug === pageSlug);
-    return pack(page ? [{ ...page, space }] : []);
-  }
-  if (path.startsWith("/api/wiki-pages")) {
-    const allPages = wikiSpaces.flatMap((s) =>
-      (s.pages ?? []).map((p: AnyEntry) => ({
-        ...p,
-        space: { id: s.id, name: s.name, slug: s.slug },
-      })),
-    );
-    return pack(allPages);
-  }
-
-  if (path.startsWith("/api/announcements")) {
-    // The requiresAck probe (dashboard banner + announcements page) filters
-    // on requiresAck=true — return only those there.
-    if (param(path, "filters[requiresAck][$eq]") === "true")
-      return pack(announcements.filter((a) => a.requiresAck));
-    return pack(announcements);
-  }
-
-  // /api/users is the users-permissions plugin: it answers with a PLAIN
-  // ARRAY (no data/meta envelope) — users.ts pages it via start/limit.
-  if (path.startsWith("/api/users")) {
-    const start = Number(param(path, "start") ?? 0);
-    return start > 0
-      ? []
-      : Object.values(users).map((u) => ({
-          ...u,
-          department: departments[0]
-            ? { id: departments[0].id, name: departments[0].name, slug: departments[0].slug }
-            : null,
-        }));
-  }
-
-  if (path.startsWith("/api/events")) {
-    const id = param(path, "filters[id][$eq]");
-    if (id) return pack(events.filter((e) => String(e.id) === id));
-    return pack([...events].sort((a, b) => a.start.localeCompare(b.start)));
-  }
-  if (path.startsWith("/api/event-rsvps")) {
-    const target = param(path, "filters[targetDocumentId][$eq]");
-    return pack(target ? eventRsvps.filter((r) => r.targetDocumentId === target) : eventRsvps);
-  }
-
-  // /api/polls/:id/results is a custom route with its own (non-list) shape.
-  // `:id` is the poll's documentId (DA01) or its numeric id (the fallback).
-  const resultsMatch = path.match(/^\/api\/polls\/([^/?]+)\/results/);
-  if (resultsMatch) {
-    const ref = decodeURIComponent(resultsMatch[1]!);
-    const poll = polls.find((p) => p.documentId === ref || String(p.id) === ref);
-    return pollResults[poll?.id ?? 1] ?? pollResults[1];
-  }
-  if (path.startsWith("/api/polls")) return pack(polls);
-
-  if (path.startsWith("/api/kudos-entries")) return pack(kudosEntries);
-  if (path.startsWith("/api/celebrations")) return pack(celebrations);
-  if (path.startsWith("/api/documents")) return pack(documents);
-
-  if (path.startsWith("/api/classifieds")) {
-    const id = param(path, "filters[id][$eq]");
-    if (id) return pack(classifieds.filter((c) => String(c.id) === id));
-    // "my ads" filter — the demo session has no user, show nothing there.
-    if (param(path, "filters[author][id][$eq]")) return pack([]);
-    return pack(classifieds);
-  }
-
-  if (path.startsWith("/api/courses")) {
-    const slug = param(path, "filters[slug][$eq]");
-    if (slug) return pack(demoCourses.filter((c) => c.slug === slug));
-    return pack(demoCourses);
-  }
-  if (path.startsWith("/api/lessons")) {
-    const docId = param(path, "filters[documentId][$eq]");
-    const all = demoCourses.flatMap((c) =>
-      (c.lessons ?? []).map((l: AnyEntry) => ({
-        ...l,
-        course: { id: c.id, documentId: c.documentId, title: c.title, slug: c.slug },
-      })),
-    );
-    return pack(docId ? all.filter((l) => l.documentId === docId) : all);
-  }
-  if (path.startsWith("/api/lesson-progresses")) return pack(demoLessonProgress);
-
-  if (path.startsWith("/api/quick-links")) return pack(quickLinks);
-  if (path.startsWith("/api/notifications")) return pack(notifications);
-  if (path.startsWith("/api/acknowledgements")) return pack([]);
-
-  if (path.startsWith("/api/comments")) {
-    const targets = targetDocumentIds(path);
-    return pack(
-      targets ? demoComments.filter((c) => targets.has(c.targetDocumentId)) : demoComments,
-    );
-  }
-  if (path.startsWith("/api/reactions")) {
-    const targets = targetDocumentIds(path);
-    return pack(
-      targets ? demoReactions.filter((r) => targets.has(r.targetDocumentId)) : demoReactions,
-    );
-  }
-
-  // Profile page: { data: <user> } envelope.
-  if (path.startsWith("/api/me")) {
-    return {
-      data: {
-        ...users.ada,
-        department: { id: 1, name: "Engineering", slug: "engineering" },
-        birthdayVisible: false,
+/** A content-type `find` answer: filtered, sorted, one page with its pagination. */
+function list<T>(rows: readonly T[], params: URLSearchParams) {
+  const matched = query(rows, params);
+  const pageSize = Math.max(1, Number(params.get("pagination[pageSize]") ?? 25) || 25);
+  const page = Math.max(1, Number(params.get("pagination[page]") ?? 1) || 1);
+  return {
+    data: matched.slice((page - 1) * pageSize, page * pageSize),
+    meta: {
+      pagination: {
+        page,
+        pageSize,
+        pageCount: Math.ceil(matched.length / pageSize),
+        total: matched.length,
       },
-    };
-  }
+    },
+  };
+}
 
-  return pack([]);
+/** GET /api/users: a BARE ARRAY paged by start/limit (users-permissions). */
+function userList(params: URLSearchParams): UserLite[] {
+  const start = Math.max(0, Number(params.get("start") ?? 0) || 0);
+  const limit = Math.max(0, Number(params.get("limit") ?? 100) || 100);
+  return query(directory, params).slice(start, start + limit);
+}
+
+/** GET /api/event-rsvps/summary?targets=: the FX21 aggregate per listed event. */
+function rsvpSummaries(params: URLSearchParams) {
+  const targets = (params.get("targets") ?? "").split(",").filter(Boolean);
+  return {
+    data: targets.map((targetDocumentId) => {
+      const rows = eventRsvps.filter((row) => row.targetDocumentId === targetDocumentId);
+      const count = (status: string) => rows.filter((row) => row.status === status).length;
+      return {
+        targetDocumentId,
+        yesCount: count("yes"),
+        maybeCount: count("maybe"),
+        noCount: count("no"),
+        yesNames: rows.filter((row) => row.status === "yes").map((row) => row.user.displayName),
+        myStatus: rows.find((row) => row.user.id === DEMO_USER_ID)?.status ?? null,
+      };
+    }),
+  };
+}
+
+/** A poll by its address: documentId or row id (DA01). */
+const pollByRef = (ref: string) => polls.find((p) => p.documentId === ref || String(p.id) === ref);
+
+/** What Strapi answers for an unknown entry. */
+const notFound = () =>
+  new StrapiError(
+    404,
+    "Not Found",
+    JSON.stringify({
+      data: null,
+      error: { status: 404, name: "NotFoundError", message: "Not Found" },
+    }),
+  );
+
+function warn(message: string): void {
+  if (process.env.NODE_ENV !== "production") console.warn(`[demo] ${message}`);
+}
+
+type Handler = (params: URLSearchParams, match: RegExpMatchArray) => unknown;
+
+/**
+ * The route table: an exact path (or pattern) per path template. Order
+ * matters only where patterns overlap (a custom route before its list).
+ */
+const ROUTES: [RegExp, Handler][] = [
+  [/^\/api\/departments$/, (p) => list(departments, p)],
+  [/^\/api\/teams$/, (p) => list(teams, p)],
+  [/^\/api\/wiki-spaces$/, (p) => list(wikiSpaces, p)],
+  [/^\/api\/wiki-pages$/, (p) => list(wikiPages, p)],
+  [/^\/api\/announcements$/, (p) => list(announcements, p)],
+  [/^\/api\/acknowledgements$/, (p) => list(demoAcknowledgements, p)],
+  [/^\/api\/events$/, (p) => list(events, p)],
+  [/^\/api\/event-rsvps\/summary$/, (p) => rsvpSummaries(p)],
+  [/^\/api\/event-rsvps$/, (p) => list(eventRsvps, p)],
+  [
+    /^\/api\/polls\/([^/]+)\/results$/,
+    (_, match) => {
+      const poll = pollByRef(decodeURIComponent(match[1]!));
+      const results = poll ? pollResultsOf(poll) : null;
+      if (!results) throw notFound();
+      return results;
+    },
+  ],
+  [/^\/api\/polls$/, (p) => list(polls, p)],
+  [/^\/api\/kudos-entries$/, (p) => list(kudosEntries, p)],
+  [/^\/api\/celebrations$/, () => ({ data: celebrations })],
+  [/^\/api\/documents$/, (p) => list(documents, p)],
+  [/^\/api\/classifieds$/, (p) => list(classifieds, p)],
+  [/^\/api\/courses$/, (p) => list(demoCourses, p)],
+  [/^\/api\/lessons$/, (p) => list(lessonRows, p)],
+  [/^\/api\/lesson-progresses$/, (p) => list(demoLessonProgress, p)],
+  [/^\/api\/quick-links$/, (p) => list(quickLinks, p)],
+  [/^\/api\/notifications$/, (p) => list(notifications, p)],
+  [/^\/api\/comments$/, (p) => list(demoComments, p)],
+  [/^\/api\/reactions$/, (p) => list(demoReactions, p)],
+  [/^\/api\/users$/, (p) => userList(p)],
+  [/^\/api\/users\/me$/, () => directory.find((u) => u.id === DEMO_USER_ID)],
+  // An unknown id answers an empty body, like the users-permissions findOne.
+  [/^\/api\/users\/(\d+)$/, (_, match) => directory.find((u) => String(u.id) === match[1])],
+  [/^\/api\/me$/, () => ({ data: me })],
+];
+
+/**
+ * The fixture answer for a Strapi `path` (with its query string), as
+ * strapi() would receive it. Throws a StrapiError where Strapi answers an
+ * error (an unknown poll's results).
+ */
+export function demo(path: string): unknown {
+  const [pathname = "", search = ""] = path.split(/\?(.*)/s);
+  const params = new URLSearchParams(search);
+  for (const [pattern, handler] of ROUTES) {
+    const match = pathname.match(pattern);
+    if (match) return handler(params, match);
+  }
+  warn(`no fixture for ${path}`);
+  return list([], params);
 }
