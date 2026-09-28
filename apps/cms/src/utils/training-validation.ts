@@ -16,6 +16,8 @@
  * no shared import possible).
  */
 
+import { parseAdminJsonField } from "./json-field";
+
 /** Hosts we accept for lesson videos — YouTube only (user decision). */
 const YOUTUBE_HOSTS = new Set([
   "www.youtube.com",
@@ -102,28 +104,61 @@ export function validateQuiz(raw: unknown): { quiz: QuizQuestion[] } | { error: 
   return { quiz };
 }
 
+/** Values validateLessonData normalised; a key is set only when `data` had it. */
+export interface NormalizedLessonData {
+  /** The quiz as validateQuiz returns it, or null for a cleared quiz. */
+  quiz?: QuizQuestion[] | null;
+}
+
+export type LessonDataResult = { normalized: NormalizedLessonData } | { error: string };
+
+export const QUIZ_NOT_JSON_ERROR = "quiz ist kein gültiges JSON";
+
 /**
  * Validate the mutable lesson fields present in a lifecycle `data`
- * payload. PARTIAL-UPDATE RULE: only fields present in `data` are
- * checked (`"videoUrl" in data`) — admin saves send partial payloads.
- * Returns null when valid, else a German error message for the admin
+ * payload. KEYS-PRESENT RULE: only fields present in `data` are checked
+ * (`"videoUrl" in data`). The admin panel submits the whole form, but
+ * db.query and script writers send partial payloads, and a missing key
+ * must never be read as "cleared".
+ *
+ * The quiz arrives in whatever shape the writer used (utils/json-field.ts):
+ * an array (content API, or an admin form whose quiz was not touched), the
+ * raw editor text (edited in the admin panel) or '' (cleared there). An
+ * empty or whitespace string means null, any other string must be JSON.
+ * The result carries the normalised quiz for the lifecycle to write back,
+ * so the database always stores the array (or null). Idempotent: the
+ * normalised value validates to itself, which matters because beforeCreate
+ * runs again on every publish.
+ *
+ * Returns the normalised values, or a German error message for the admin
  * panel.
  */
-export function validateLessonData(data: Record<string, unknown>): string | null {
+export function validateLessonData(data: Record<string, unknown>): LessonDataResult {
+  const normalized: NormalizedLessonData = {};
   if ("videoUrl" in data && data.videoUrl != null && data.videoUrl !== "") {
     if (youtubeVideoId(data.videoUrl) == null) {
-      return "videoUrl: nur YouTube-Links (https://www.youtube.com/watch?v=…, youtu.be/…, youtube-nocookie.com/embed/…)";
+      return {
+        error:
+          "videoUrl: nur YouTube-Links (https://www.youtube.com/watch?v=…, youtu.be/…, youtube-nocookie.com/embed/…)",
+      };
     }
   }
-  if ("quiz" in data && data.quiz != null) {
-    const result = validateQuiz(data.quiz);
-    if ("error" in result) return result.error;
+  if ("quiz" in data && data.quiz !== undefined) {
+    const parsed = parseAdminJsonField(data.quiz);
+    if (!parsed.ok) return { error: QUIZ_NOT_JSON_ERROR };
+    if (parsed.value === null) {
+      normalized.quiz = null;
+    } else {
+      const result = validateQuiz(parsed.value);
+      if ("error" in result) return { error: result.error };
+      normalized.quiz = result.quiz;
+    }
   }
   if ("order" in data && data.order != null) {
     const order = data.order;
     if (typeof order !== "number" || !Number.isInteger(order) || order < 0 || order > 10000) {
-      return "order: ganze Zahl zwischen 0 und 10000";
+      return { error: "order: ganze Zahl zwischen 0 und 10000" };
     }
   }
-  return null;
+  return { normalized };
 }
