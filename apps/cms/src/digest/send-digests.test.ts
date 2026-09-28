@@ -414,6 +414,31 @@ describe("sendDigests orchestrator", () => {
     );
   });
 
+  it("a weekly digest that failed on Monday is sent on Tuesday, then not again that week", async () => {
+    const saturday = news("Weekend on-call", "2026-09-05T09:00:00.000Z");
+    const { strapi, send, mails } = digestStub({
+      users: { [USER.alice]: optIn({ digestFrequency: "weekly", lastDigestAt: WEEK_AGO }) },
+      announcements: [saturday],
+      failFor: ["alice@sinnlos.local"],
+    });
+
+    await sendDigests(strapi, new Date(MONDAY_RUN));
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(lastDigestAt(strapi, USER.alice)).toBe(WEEK_AGO);
+
+    send.mockImplementation(async () => undefined);
+    await sendDigests(strapi, NOW);
+    expect(mailTo(mails(), "alice")?.text).toContain("Weekend on-call");
+    expect(lastDigestAt(strapi, USER.alice)).toBe(NOW.toISOString());
+
+    const wednesday = new Date("2026-09-09T05:30:00.000Z");
+    await sendDigests(strapi, wednesday);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(strapi.log.info).toHaveBeenLastCalledWith(
+      "[digest] run complete: sent=0 empty=0 skipped=1 failed=0 of 1 candidate(s)",
+    );
+  });
+
   it("no due user: one query, nothing else", async () => {
     const { strapi } = digestStub({
       users: { [USER.alice]: optIn({ lastDigestAt: NOW.toISOString() }) },

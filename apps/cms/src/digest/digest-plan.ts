@@ -6,8 +6,10 @@
  *  - The cron fires DAILY in the morning; this module decides per user
  *    whether a digest is due at that firing.
  *  - `daily` users are due when their last digest was before the start
- *    of today; `weekly` users only on Monday, when the last digest was
- *    before the start of this week.
+ *    of today; `weekly` users whenever their last digest was before the
+ *    start of this ISO week (FX48). Normally that is Monday's run; a
+ *    Monday that failed or had nothing to send is caught up on the next
+ *    morning with something to send, still at most once per week.
  *  - Idempotency anchor is `lastDigestAt` ON THE USER ROW (persisted →
  *    survives container restarts): it is advanced only AFTER a
  *    successful send, so a crash mid-run re-sends at most one digest
@@ -46,9 +48,10 @@ export function wantsAnyDigest(user: DigestUserFlags): boolean {
 
 /**
  * `daily`: due iff the last digest is before the start of today.
- * `weekly`: due iff today is a Monday and the last digest is before the
- * start of this week (a Monday missed by a failed run is not caught up on
- * Tuesday; the weekly catch-up is roadmap FX48).
+ * `weekly`: due iff the last digest is before the start of this ISO week
+ * (Monday 00:00), on any day (FX48): a Monday missed by a failed run, or
+ * one without anything to send, is caught up the next morning instead of a
+ * week later. A new weekly subscriber is due the next morning.
  * "Today" and "this week" are calendar days of `timeZone` (APP_TIME_ZONE).
  * A missing or unparseable lastDigestAt counts as "never sent".
  */
@@ -60,8 +63,7 @@ export function isDigestDue(user: DigestUserFlags, now: Date, timeZone?: string)
 
   if (frequency === "daily") return last < startOfDayInstant(today, timeZone).getTime();
 
-  // weekly: only on Mondays, once per week.
-  if (today.dayOfWeek !== 1) return false;
+  // weekly: once per ISO week, due until it has been sent.
   return last < startOfDayInstant(startOfIsoWeek(today), timeZone).getTime();
 }
 

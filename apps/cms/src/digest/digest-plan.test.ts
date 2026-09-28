@@ -67,12 +67,19 @@ describe("isDigestDue", () => {
     expect(isDigestDue({ ...user, lastDigestAt: "2026-10-24T22:30:00.000Z" }, sunday, BERLIN)).toBe(false);
   });
 
-  it("weekly: only on Mondays, once per week", () => {
+  it("weekly: once per ISO week", () => {
     expect(isDigestDue(base, MONDAY, BERLIN)).toBe(true);
-    expect(isDigestDue(base, TUESDAY, BERLIN)).toBe(false);
     expect(isDigestDue({ ...base, lastDigestAt: "2026-09-07T05:30:00.000Z" }, MONDAY, BERLIN)).toBe(false);
+    expect(isDigestDue({ ...base, lastDigestAt: "2026-09-07T05:30:00.000Z" }, TUESDAY, BERLIN)).toBe(false);
     // Last digest the previous week → due again this Monday.
     expect(isDigestDue({ ...base, lastDigestAt: "2026-08-31T05:30:00.000Z" }, MONDAY, BERLIN)).toBe(true);
+    // Sunday evening still belongs to the week of that Monday's digest.
+    const sundayEvening = new Date("2026-09-13T19:30:00.000Z"); // 21:30 Berlin
+    expect(isDigestDue({ ...base, lastDigestAt: "2026-09-07T05:30:00.000Z" }, sundayEvening, BERLIN)).toBe(false);
+  });
+
+  it("weekly: never sent → due on any day (a new subscriber gets the next morning's run)", () => {
+    expect(isDigestDue(base, TUESDAY, BERLIN)).toBe(true);
   });
 
   it("weekly: Monday 00:30 Berlin is Sunday 22:30Z and already belongs to the new week", () => {
@@ -82,24 +89,42 @@ describe("isDigestDue", () => {
     expect(isDigestDue({ ...base, lastDigestAt: "2026-09-06T21:30:00.000Z" }, MONDAY, BERLIN)).toBe(true);
   });
 
-  it("weekly: a Tuesday after a failed Monday is not due (the catch-up is FX48)", () => {
-    expect(isDigestDue({ ...base, lastDigestAt: "2026-08-31T05:30:00.000Z" }, TUESDAY, BERLIN)).toBe(false);
+  it("weekly: a Tuesday after a failed Monday is due (catch-up, FX48)", () => {
+    expect(isDigestDue({ ...base, lastDigestAt: "2026-08-31T05:30:00.000Z" }, TUESDAY, BERLIN)).toBe(true);
+    // Once Tuesday's run sent it, the rest of the week is quiet.
+    const wednesday = new Date("2026-09-09T05:30:00.000Z");
+    expect(isDigestDue({ ...base, lastDigestAt: TUESDAY.toISOString() }, wednesday, BERLIN)).toBe(false);
   });
 
-  it("uses the business zone's weekday, not the UTC one", () => {
-    // 2026-09-08T03:30Z is Tuesday 05:30 in Berlin but Monday 23:30 in New York.
+  it("weekly: the week starts at Monday 00:00 in the zone, across the DST change", () => {
+    // Week of Monday 2026-10-26 (after the 25-hour Sunday): it starts at
+    // 00:00 CET = 2026-10-25T23:00Z.
+    const tuesday = new Date("2026-10-27T06:30:00.000Z");
+    expect(isDigestDue({ ...base, lastDigestAt: "2026-10-25T22:59:00.000Z" }, tuesday, BERLIN)).toBe(true);
+    expect(isDigestDue({ ...base, lastDigestAt: "2026-10-25T23:00:00.000Z" }, tuesday, BERLIN)).toBe(false);
+  });
+
+  // Sent Monday 03:00 in Berlin = Sunday 21:00 in New York.
+  const SENT_EARLY_MONDAY = "2026-09-07T01:00:00.000Z";
+
+  it("uses the business zone's week, not the UTC one", () => {
+    // 2026-09-08T03:30Z is Tuesday 05:30 in Berlin but Monday 23:30 in New
+    // York: the digest from Monday 03:00 Berlin is this week's in Berlin,
+    // last week's in New York.
     const instant = new Date("2026-09-08T03:30:00.000Z");
-    expect(isDigestDue(base, instant, BERLIN)).toBe(false);
-    expect(isDigestDue(base, instant, NEW_YORK)).toBe(true);
+    const user = { ...base, lastDigestAt: SENT_EARLY_MONDAY };
+    expect(isDigestDue(user, instant, BERLIN)).toBe(false);
+    expect(isDigestDue(user, instant, NEW_YORK)).toBe(true);
   });
 
   it("defaults to APP_TIME_ZONE (Europe/Berlin when unset)", () => {
     const previous = process.env.APP_TIME_ZONE;
     delete process.env.APP_TIME_ZONE;
+    const user = { ...base, lastDigestAt: SENT_EARLY_MONDAY };
     try {
-      expect(isDigestDue(base, new Date("2026-09-08T03:30:00.000Z"))).toBe(false);
+      expect(isDigestDue(user, new Date("2026-09-08T03:30:00.000Z"))).toBe(false);
       process.env.APP_TIME_ZONE = NEW_YORK;
-      expect(isDigestDue(base, new Date("2026-09-08T03:30:00.000Z"))).toBe(true);
+      expect(isDigestDue(user, new Date("2026-09-08T03:30:00.000Z"))).toBe(true);
     } finally {
       if (previous === undefined) delete process.env.APP_TIME_ZONE;
       else process.env.APP_TIME_ZONE = previous;
@@ -113,7 +138,10 @@ describe("isDigestDue", () => {
   });
 
   it("unknown frequency falls back to weekly", () => {
-    expect(isDigestDue({ ...base, digestFrequency: "hourly" }, TUESDAY, BERLIN)).toBe(false);
+    // Monday's digest sent: a daily user would be due on Tuesday, a weekly one not.
+    const sentMonday = { ...base, lastDigestAt: "2026-09-07T05:30:00.000Z" };
+    expect(isDigestDue({ ...sentMonday, digestFrequency: "daily" }, TUESDAY, BERLIN)).toBe(true);
+    expect(isDigestDue({ ...sentMonday, digestFrequency: "hourly" }, TUESDAY, BERLIN)).toBe(false);
     expect(isDigestDue({ ...base, digestFrequency: "hourly" }, MONDAY, BERLIN)).toBe(true);
   });
 });
