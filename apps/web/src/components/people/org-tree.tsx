@@ -18,8 +18,8 @@ type PersonNode = OrgNode<OrgPersonLite>;
  * The org chart. The tree comes from lib/org-tree.ts (FX49): every person
  * appears once; people whose manager chain loops back, and people set as
  * their own manager, are extra roots with a warning, so an admin can fix
- * the manager field instead of the chart losing them (or never finishing
- * rendering).
+ * the manager field instead of the chart silently losing them and everyone
+ * below them.
  */
 export function OrgTree({ people }: { people: OrgPersonLite[] }) {
   const t = useTranslations("people");

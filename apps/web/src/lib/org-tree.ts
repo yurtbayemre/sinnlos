@@ -3,8 +3,9 @@
  * Pure and iterative, so a long reporting chain cannot overflow the stack.
  *
  * Manager data comes from the admin panel and is not validated as a tree:
- *   - a person who is their own manager used to become their own child, and
- *     the recursive render never ended;
+ *   - a person who is their own manager used to become their own child and
+ *     so was never a root: the render, which starts at the roots, never
+ *     reached them, and they vanished with everyone below them;
  *   - in a manager cycle (A → B → A, or longer) nobody was a root, so the
  *     whole cycle and everyone below it vanished from the chart.
  * Now every person appears exactly once. A self-manager is a root marked

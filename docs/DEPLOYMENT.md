@@ -939,8 +939,9 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   5, 2026, 09:00 – Wed, Oct 7, 2026, 17:00"); relative times count calendar
   days ("yesterday" at 00:10 for a comment from 23:50) in the user's
   language; the org chart no longer drops people whose manager assignments
-  form a loop (or hangs on someone set as their own manager): they appear at
-  the top level with a warning, so an admin can fix the Manager field.
+  form a loop or who are set as their own manager (until now they vanished
+  without a notice, together with everyone below them): they appear at the
+  top level with a warning, so an admin can fix the Manager field.
 - **Guardrails:** ESLint rejects process-zone date APIs in the web as
   errors, and the web image carries `ENV TZ=UTC` and the label
   `org.sinnlos.datetime=zone-explicit`.
