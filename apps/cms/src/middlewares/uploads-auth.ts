@@ -28,10 +28,16 @@
  * encoded-`/uploads` variants are all caught while `/upload` (no s — the
  * media-library admin API) and `/api/upload` (marketplace POST) are not.
  *
- * Position: registered BEFORE `strapi::public` in config/middlewares.ts so it
- * runs before the koa-static route handler; the upload plugin's
- * `/uploads/(.*)` route is mounted after all global middlewares anyway, so
- * this covers the direct path too.
+ * Invariant: it must stay a GLOBAL middleware (config/middlewares.ts). Any
+ * position in that list protects: `strapi::public` registers the koa-static
+ * route (and `/`) through `strapi.server.routes()` instead of returning a
+ * middleware, and Strapi mounts every route, the upload plugin's
+ * `/uploads/(.*)` included, after all global middlewares
+ * (@strapi/core 5.55.1 middlewares/public.js and services/server/index.js
+ * `mount()`, pinned in src/framework-contract.test.ts). So this gate runs
+ * before each of those handlers wherever it is listed. Turning it into a
+ * route middleware would lose that: it would then only guard the routes it
+ * is attached to.
  */
 import { timingSafeEqual } from "node:crypto";
 import { posix } from "node:path";
