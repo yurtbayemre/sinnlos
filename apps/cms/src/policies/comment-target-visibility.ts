@@ -1,5 +1,5 @@
 import { MODERATORS, hasRole } from "../bootstrap/roles";
-import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
+import { getMutableQuery, narrowFilters, restrictiveIdFilter } from "../utils/policy-query";
 import { visibleTargetAnchors } from "../utils/target-visibility";
 
 /**
@@ -59,8 +59,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
         ? branches[0]
         : { $or: branches };
 
-  const query = getMutableQuery(policyContext);
-  query.filters = query.filters ? { $and: [query.filters, visibilityFilter] } : visibilityFilter;
+  narrowFilters(getMutableQuery(policyContext), visibilityFilter);
 
   return true;
 };

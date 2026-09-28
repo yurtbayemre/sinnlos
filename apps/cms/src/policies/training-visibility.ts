@@ -2,6 +2,7 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
   forcePublishedStatus,
   getMutableQuery,
+  narrowFilters,
   restrictiveIdFilter,
 } from "../utils/policy-query";
 
@@ -46,8 +47,7 @@ export default async (
       where: { course: { publishedAt: { $notNull: true } } },
       select: ["id"],
     });
-    const idFilter = restrictiveIdFilter(rows.map((r) => r.id));
-    query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+    narrowFilters(query, restrictiveIdFilter(rows.map((r) => r.id)));
   }
 
   forcePublishedStatus(query);

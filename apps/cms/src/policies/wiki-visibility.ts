@@ -2,6 +2,7 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
   forcePublishedStatus,
   getMutableQuery,
+  narrowFilters,
   restrictiveIdFilter,
 } from "../utils/policy-query";
 import { loadUserScope, visibleWikiSpaceIds } from "../utils/visible-ids";
@@ -98,8 +99,7 @@ export default async (
   }
 
   const query = getMutableQuery(policyContext);
-  const idFilter = restrictiveIdFilter(idList);
-  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+  narrowFilters(query, restrictiveIdFilter(idList));
   forcePublishedStatus(query);
 
   return true;

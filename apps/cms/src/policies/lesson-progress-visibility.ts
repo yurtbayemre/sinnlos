@@ -1,5 +1,5 @@
 import { ADMIN, hasRole } from "../bootstrap/roles";
-import { getMutableQuery } from "../utils/policy-query";
+import { getMutableQuery, narrowFilters } from "../utils/policy-query";
 
 /**
  * Read-side guard for lesson-progress rows (issue #29) — documented
@@ -25,9 +25,7 @@ export default async (policyContext: any, _config: unknown, _deps: any) => {
 
   const query = getMutableQuery(policyContext);
   // $and so an incoming `user` filter can only narrow, never widen.
-  query.filters = query.filters
-    ? { $and: [query.filters, { user: { id: user.id } }] }
-    : { user: { id: user.id } };
+  narrowFilters(query, { user: { id: user.id } });
 
   return true;
 };

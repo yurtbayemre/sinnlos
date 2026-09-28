@@ -7,6 +7,7 @@ import {
 import {
   forcePublishedStatus,
   getMutableQuery,
+  narrowFilters,
   restrictiveIdFilter,
 } from "../utils/policy-query";
 import { loadUserScope } from "../utils/visible-ids";
@@ -90,8 +91,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const idList = rows.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
 
   const query = getMutableQuery(policyContext);
-  const idFilter = restrictiveIdFilter(idList);
-  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+  narrowFilters(query, restrictiveIdFilter(idList));
   forcePublishedStatus(query);
 
   return true;

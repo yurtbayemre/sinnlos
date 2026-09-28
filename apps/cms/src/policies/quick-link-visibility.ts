@@ -2,6 +2,7 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
   forcePublishedStatus,
   getMutableQuery,
+  narrowFilters,
   restrictiveIdFilter,
 } from "../utils/policy-query";
 
@@ -79,8 +80,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
     .map((link) => link.id);
 
   const query = getMutableQuery(policyContext);
-  const idFilter = restrictiveIdFilter(idList);
-  query.filters = query.filters ? { $and: [query.filters, idFilter] } : idFilter;
+  narrowFilters(query, restrictiveIdFilter(idList));
   forcePublishedStatus(query);
 
   return true;

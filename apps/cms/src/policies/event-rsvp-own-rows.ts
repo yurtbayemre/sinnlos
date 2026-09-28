@@ -1,6 +1,6 @@
 import { errors } from "@strapi/utils";
 import { ADMIN, hasRole } from "../bootstrap/roles";
-import { getMutableQuery } from "../utils/policy-query";
+import { getMutableQuery, narrowFilters } from "../utils/policy-query";
 import { filtersReferenceUser } from "../utils/rsvp";
 
 /**
@@ -49,9 +49,7 @@ export default async (
     throw new errors.ValidationError("Filtering RSVPs by user is not allowed");
   }
   // $and so an incoming filter can only narrow, never widen.
-  query.filters = query.filters
-    ? { $and: [query.filters, { user: { id: user.id } }] }
-    : { user: { id: user.id } };
+  narrowFilters(query, { user: { id: user.id } });
 
   return true;
 };

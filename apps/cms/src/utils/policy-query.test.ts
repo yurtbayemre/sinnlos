@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { forcePublishedStatus, getMutableQuery, restrictiveIdFilter } from "./policy-query";
+import {
+  forcePublishedStatus,
+  getMutableQuery,
+  narrowFilters,
+  restrictiveIdFilter,
+} from "./policy-query";
 
 /**
  * Guards the sanitize fail-open fix: @strapi/utils' defaultSanitizeFilters
@@ -135,5 +140,51 @@ describe("getMutableQuery", () => {
 
     expect(policyContext.query).toBe(query);
     expect(query).toEqual({});
+  });
+});
+
+/**
+ * narrowFilters (PL01): the injected clause is $and-composed with the
+ * client filter, never spread-merged, so a client key can neither replace
+ * the policy's clause nor sit next to it as an alternative.
+ */
+describe("narrowFilters", () => {
+  const clause = { user: { id: 7 } };
+
+  it("stands alone without a client filter (never an empty $and)", () => {
+    for (const filters of [undefined, null, ""]) {
+      const query: Record<string, unknown> = filters === undefined ? {} : { filters };
+      narrowFilters(query, clause);
+      expect(query.filters, String(filters)).toBe(clause);
+    }
+  });
+
+  it("wraps the client filter and the clause in one $and, client first", () => {
+    const client = { title: { $eq: "x" } };
+    const query: Record<string, unknown> = { filters: client };
+    narrowFilters(query, clause);
+    expect(query.filters).toEqual({ $and: [client, clause] });
+    expect((query.filters as { $and: unknown[] }).$and[0]).toBe(client);
+  });
+
+  it("keeps a client key of the same name as a separate operand", () => {
+    // A spread merge would let `user` of one side overwrite the other.
+    const client = { user: { id: 99 }, $or: [{ id: 1 }, { id: 2 }] };
+    const query: Record<string, unknown> = { filters: client };
+    narrowFilters(query, clause);
+    expect(query.filters).toEqual({ $and: [client, { user: { id: 7 } }] });
+  });
+
+  it("nests on repeated calls instead of flattening", () => {
+    const query: Record<string, unknown> = { filters: { a: 1 } };
+    narrowFilters(query, { b: 2 });
+    narrowFilters(query, { c: 3 });
+    expect(query.filters).toEqual({ $and: [{ $and: [{ a: 1 }, { b: 2 }] }, { c: 3 }] });
+  });
+
+  it("writes onto the query it is given (the real request query)", () => {
+    const ctx = { request: { query: { filters: { a: 1 } } as Record<string, unknown> } };
+    narrowFilters(getMutableQuery(ctx), clause);
+    expect(ctx.request.query.filters).toEqual({ $and: [{ a: 1 }, clause] });
   });
 });

@@ -1,5 +1,5 @@
 import { ADMIN, hasRole } from "../bootstrap/roles";
-import { getMutableQuery } from "../utils/policy-query";
+import { getMutableQuery, narrowFilters } from "../utils/policy-query";
 
 /**
  * Read-side guard for acknowledgements. Every role may only list/read
@@ -29,9 +29,7 @@ export default async (policyContext: any, _config: unknown, _deps: any) => {
   const query = getMutableQuery(policyContext);
   // $and instead of a spread merge so an incoming `user` filter can
   // only narrow the result set, never widen it to other users' rows.
-  query.filters = query.filters
-    ? { $and: [query.filters, { user: { id: user.id } }] }
-    : { user: { id: user.id } };
+  narrowFilters(query, { user: { id: user.id } });
 
   return true;
 };

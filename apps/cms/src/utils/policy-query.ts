@@ -66,6 +66,28 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
 }
 
 /**
+ * Adds a policy's clause to the query's filters so that a client filter can
+ * only NARROW the result (PL01): `{ $and: [clientFilters, clause] }`, or the
+ * clause alone when the client sent none.
+ *
+ * Never a spread merge: in `{ ...a, ...b }` a key of one side REPLACES the
+ * same key of the other (`id`, `user`, `$and`, `$or`), so depending on the
+ * order either the client's condition is lost or the client overwrites the
+ * policy's clause and widens the result. The client filter stays one opaque
+ * operand; Strapi validates and sanitizes the whole tree afterwards.
+ *
+ * `query` must be the REAL request query (getMutableQuery above); a falsy
+ * client value (absent, null, "") counts as none, so the clause never ends
+ * up next to an empty operand in an `$and`.
+ */
+export function narrowFilters(
+  query: Record<string, unknown>,
+  clause: Record<string, unknown>,
+): void {
+  query.filters = query.filters ? { $and: [query.filters, clause] } : clause;
+}
+
+/**
  * Pins a read query to PUBLISHED rows for the content types that use
  * draft & publish.
  *

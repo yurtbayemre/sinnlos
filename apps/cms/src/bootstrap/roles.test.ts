@@ -78,7 +78,15 @@ describe("hasRole (PL01)", () => {
   });
 
   it("holds no role for lookalikes, missing roles and non-string types", () => {
-    const lookalikes = ["Admin_role", "ADMIN_ROLE", "admin", " editor", "editor ", "", "authenticated"];
+    const lookalikes = [
+      "Admin_role",
+      "ADMIN_ROLE",
+      "admin",
+      " editor",
+      "editor ",
+      "",
+      "authenticated",
+    ];
     for (const type of lookalikes) {
       expect(hasRole({ role: { type } }, MODERATORS), JSON.stringify(type)).toBe(false);
     }
