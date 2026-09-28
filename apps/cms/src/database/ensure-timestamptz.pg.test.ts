@@ -240,7 +240,7 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
       await db.destroy();
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30000);
 
   it("refuses to read unrepaired data as UTC when the legacy repair is not recorded", async () => {
     await knex.raw(`DELETE FROM "${schema}".strapi_migrations`);

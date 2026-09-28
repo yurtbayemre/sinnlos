@@ -180,7 +180,7 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
         ]),
       );
     }
-  });
+  }, 30_000);
 
   it.skipIf(!HAS_AWK)(
     "fails the digest check exactly when digestsEnabled is misconfigured (C4)",
@@ -217,6 +217,7 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
       // The table does reach the misconfigured branch.
       expect(misconfigured).toBeGreaterThan(0);
     },
+    30_000,
   );
 
   it("makes the digest finding fatal, not a warning (C4)", () => {

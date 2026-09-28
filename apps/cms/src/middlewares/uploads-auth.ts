@@ -27,11 +27,22 @@
  * posix-normalise, and also test the raw form, so `..`, `%2e%2e`, `%2f` and
  * encoded-`/uploads` variants are all caught while `/upload` (no s — the
  * media-library admin API) and `/api/upload` (marketplace POST) are not.
+ * The comparison ignores case, like the router: it matches `/uploads/(.*)`
+ * (and leaves it out of strapi::public's route) case-insensitively, and on a
+ * case-insensitive file system koa-send finds public/uploads under any
+ * casing. On the Linux images that changes nothing (`/UPLOADS/…` was a 404
+ * there before, and still is).
  *
- * Position: registered BEFORE `strapi::public` in config/middlewares.ts so it
- * runs before the koa-static route handler; the upload plugin's
- * `/uploads/(.*)` route is mounted after all global middlewares anyway, so
- * this covers the direct path too.
+ * Invariant: it must stay a GLOBAL middleware (config/middlewares.ts). Any
+ * position in that list protects: `strapi::public` registers the koa-static
+ * route (and `/`) through `strapi.server.routes()` instead of returning a
+ * middleware, and Strapi mounts every route, the upload plugin's
+ * `/uploads/(.*)` included, after all global middlewares
+ * (@strapi/core 5.55.1 middlewares/public.js and services/server/index.js
+ * `mount()`, @strapi/upload 5.55.1 server/middlewares/upload.js; each pinned
+ * in src/framework-contract.test.ts). So this gate runs before each of those
+ * handlers wherever it is listed. Turning it into a route middleware would
+ * lose that: it would then only guard the routes it is attached to.
  */
 import { timingSafeEqual } from "node:crypto";
 import { posix } from "node:path";
@@ -40,8 +51,8 @@ const HEADER = "x-internal-upload-token";
 
 /**
  * Does the request target the upload BYTES path under ANY encoding? Tests the
- * raw and the once-decoded form, each posix-normalised, against `/uploads/`.
- * Exported for uploads-auth.test.ts (S06).
+ * raw and the once-decoded form, each posix-normalised and lower-cased,
+ * against `/uploads/`. Exported for uploads-auth.test.ts (S06).
  */
 export function targetsUploads(rawPath: string): boolean {
   const forms = [rawPath];
@@ -51,7 +62,7 @@ export function targetsUploads(rawPath: string): boolean {
     // Malformed %-escape: keep only the raw form (koa-send would 400 anyway).
   }
   return forms.some((form) => {
-    const norm = posix.normalize(form);
+    const norm = posix.normalize(form).toLowerCase();
     return norm === "/uploads" || norm.startsWith("/uploads/");
   });
 }
