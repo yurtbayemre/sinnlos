@@ -1642,14 +1642,16 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 6. **RSVPs through the API.** This signs in as the demo account
    `infra/live-smoke.sh` uses (password from the same file, or set
-   `SMOKE_PASSWORD` yourself) and prints what the raw reads and the summary
-   answer:
+   `SMOKE_PASSWORD` yourself; it reaches the container through the
+   environment, not the command line) and prints what the raw reads and the
+   summary answer:
 
    ```bash
    SMOKE_EMAIL=casey.jones@sinnlos.local
    SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
-   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
-   const [identifier, password] = process.argv.slice(2);
+   SMOKE_PASSWORD="$SMOKE_PASSWORD" docker exec -i -e SMOKE_PASSWORD infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" <<'NODE'
+   const [identifier] = process.argv.slice(2);
+   const password = process.env.SMOKE_PASSWORD;
    const base = "http://127.0.0.1:1337";
    const login = await fetch(`${base}/api/auth/local`, {
      method: "POST",
