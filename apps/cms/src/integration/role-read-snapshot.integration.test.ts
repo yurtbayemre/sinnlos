@@ -486,4 +486,92 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
     );
     await expect(`${lines.join("\n")}\n`).toMatchFileSnapshot(SNAPSHOT);
   }, 240_000);
+
+  /** Counts the SQL statements `run` sends (knex `query` events). */
+  const countQueries = async (run: () => Promise<unknown>): Promise<number> => {
+    const knex = (t.strapi.db as unknown as { connection: QueryEvents }).connection;
+    let count = 0;
+    const listener = () => {
+      count += 1;
+    };
+    knex.on("query", listener);
+    try {
+      await run();
+    } finally {
+      knex.off("query", listener);
+    }
+    return count;
+  };
+
+  it("reads a single-anchor thread with fewer queries than the full path (PL04)", async () => {
+    const target = seeded.targets.find((entry) => entry.label === "S:ann:all");
+    if (!target) throw new Error("seed target missing");
+    const pin =
+      `filters[targetType][$eq]=${target.targetType}` +
+      `&filters[targetDocumentId][$eq]=${target.documentId}`;
+    // The full path for the same thread: an $in the fast path does not take.
+    const full =
+      `filters[targetType][$in][0]=${target.targetType}` +
+      `&filters[targetDocumentId][$in][0]=${target.documentId}`;
+    await t.api("member", `/api/comments?${pin}`); // warm the member's session
+    const fast = await countQueries(() => t.api("member", `/api/comments?${pin}`));
+    const slow = await countQueries(() => t.api("member", `/api/comments?${full}`));
+    expect(fast).toBeLessThan(slow);
+    const [a, b] = await Promise.all([
+      t.api<{ data: Params[] }>("member", `/api/comments?${pin}`),
+      t.api<{ data: Params[] }>("member", `/api/comments?${full}`),
+    ]);
+    expect(a.body.data.map((row) => row.body)).toEqual(b.body.data.map((row) => row.body));
+  });
+
+  it("opens no thread through a space widened only in its draft (PL04)", async () => {
+    const docs = (uid: string) => t.strapi.documents(uid);
+    const { sales } = t.fixtures.departments;
+    const space = await docs("api::wiki-space.wiki-space").create({
+      data: {
+        name: "S:space:widened",
+        slug: "s-space-widened",
+        visibility: "department",
+        department: sales.documentId,
+      },
+      status: "published",
+    });
+    const page = await docs("api::wiki-page.wiki-page").create({
+      data: { title: "S:page:widened", slug: "s-page-widened", space: space.documentId },
+      status: "published",
+    });
+    // The space's draft is public; its published row stays Sales-only.
+    await docs("api::wiki-space.wiki-space").update({
+      documentId: space.documentId,
+      data: { visibility: "public", department: null },
+    });
+    await t.strapi.db.query("api::comment.comment").create({
+      data: {
+        body: "S:c:widened",
+        targetType: "wiki-page",
+        targetDocumentId: page.documentId,
+        author: t.fixtures.users.admin_role.id,
+      },
+    });
+    const pin =
+      `filters[targetType][$eq]=wiki-page` + `&filters[targetDocumentId][$eq]=${page.documentId}`;
+    const bodies = async (caller: Caller, query: string) => {
+      const res = await t.api<{ data: Params[] }>(caller, `/api/comments?${query}`);
+      expect(res.status).toBe(200);
+      return res.body.data.map((row) => row.body).filter((body) => body === "S:c:widened");
+    };
+    const salesMember = jwts.get("sales_member") ?? null;
+    // Engineering reads neither the page nor its thread, on either path.
+    expect(await bodies("member", "pagination[pageSize]=100")).toEqual([]);
+    expect(await bodies("member", pin)).toEqual([]);
+    expect((await t.api("member", `/api/wiki-pages/${page.documentId}`)).status).toBe(404);
+    // Sales reads both.
+    expect(await bodies(salesMember, "pagination[pageSize]=100")).toEqual(["S:c:widened"]);
+    expect(await bodies(salesMember, pin)).toEqual(["S:c:widened"]);
+  });
 });
+
+interface QueryEvents {
+  on(event: "query", listener: () => void): void;
+  off(event: "query", listener: () => void): void;
+}

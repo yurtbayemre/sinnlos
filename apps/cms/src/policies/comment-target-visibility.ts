@@ -1,6 +1,12 @@
 import { MODERATORS, hasRole } from "../bootstrap/roles";
+import { isCommentTargetType } from "../utils/comment-target";
+import { identifiedCaller, type PolicyContext, type PolicyStrapi } from "../utils/policy-factories";
 import { getMutableQuery, narrowFilters, restrictiveIdFilter } from "../utils/policy-query";
-import { visibleTargetAnchors } from "../utils/target-visibility";
+import {
+  isTargetVisible,
+  pinnedTargetAnchor,
+  visibleTargetAnchors,
+} from "../utils/target-visibility";
 
 /**
  * Enforces TARGET visibility on reads of `comment` and `reaction`
@@ -12,13 +18,24 @@ import { visibleTargetAnchors } from "../utils/target-visibility";
  * it knew the documentId. documentIds are treated as unguessable
  * capability tokens (§5.17), which was the ONLY protection.
  *
- * HOW IT WORKS — same shape as `announcement-visibility.ts` /
- * `wiki-visibility.ts` (see there for the Koa-query and 400-trap
- * rationale): the visible anchors are resolved server-side via
- * `strapi.db.query` and injected as a NON-relational filter on the two
- * plain string columns, `$and`-composed with any client filter so it can
- * only narrow, never widen. No relation traversal → validates for every
- * role (guest holds no department/team/role `.find`).
+ * HOW IT WORKS — same shape as the id-based visibility policies (see
+ * utils/policy-factories.ts for the Koa-query and 400-trap rationale): the
+ * visible anchors are resolved server-side via `strapi.db.query` and
+ * injected as a NON-relational filter on the two plain string columns,
+ * `$and`-composed with any client filter so it can only narrow, never
+ * widen. No relation traversal → validates for every role (guest holds no
+ * department/team/role `.find`).
+ *
+ * Single-anchor fast path (PL04): the web reads one thread at a time with
+ * `filters[targetType][$eq]=…&filters[targetDocumentId][$eq]=…`. When the
+ * client filter pins exactly one anchor like that (pinnedTargetAnchor,
+ * utils/target-visibility.ts), only that target is checked (isTargetVisible,
+ * the rule the create controllers use) instead of resolving every visible
+ * announcement and wiki page. A visible anchor gets the same branch the
+ * full path would inject for it, `{ targetType, targetDocumentId: { $in:
+ * [anchor] } }`; an invisible one `restrictiveIdFilter([])`. Since the
+ * client filter already restricts the rows to that anchor, both paths
+ * return the same rows; any other filter shape takes the full path.
  *
  * Empty-list trap: `$in: []` operands are stripped by sanitizeQuery
  * (fail-open!), so a branch is only emitted when its list is non-empty;
@@ -26,17 +43,35 @@ import { visibleTargetAnchors } from "../utils/target-visibility";
  * (`{ id: { $eq: -1 } }` — `id` is a plain attribute here too) makes the
  * query match nothing.
  *
- * No `forcePublishedStatus`: comment/reaction have draftAndPublish
- * disabled. Cost note: one announcements scan + one spaces scan per read,
- * the same O as the sibling visibility policies — fine at intranet scale.
+ * admin_role / editor moderate everything (bypass, query untouched). A
+ * caller without a numeric id is treated as anonymous. No
+ * `forcePublishedStatus`: comment/reaction have draftAndPublish disabled.
  */
-export default async (policyContext: any, _config: unknown, { strapi }: any) => {
+export default async (
+  policyContext: PolicyContext,
+  _config: unknown,
+  { strapi }: { strapi: PolicyStrapi },
+): Promise<boolean> => {
   const user = policyContext.state?.user;
-
-  // admin_role / editor moderate everything, no filter needed.
   if (hasRole(user, MODERATORS)) return true;
+  const caller = identifiedCaller(user);
+  const query = getMutableQuery(policyContext);
 
-  const anchors = await visibleTargetAnchors(strapi, user ?? null);
+  const pin = pinnedTargetAnchor(query.filters);
+  if (pin) {
+    const visible =
+      isCommentTargetType(pin.targetType) &&
+      (await isTargetVisible(strapi, pin.targetType, pin.targetDocumentId, caller));
+    narrowFilters(
+      query,
+      visible
+        ? { targetType: pin.targetType, targetDocumentId: { $in: [pin.targetDocumentId] } }
+        : restrictiveIdFilter([]),
+    );
+    return true;
+  }
+
+  const anchors = await visibleTargetAnchors(strapi, caller);
 
   const branches: Record<string, unknown>[] = [];
   if (anchors.announcement.length > 0) {
@@ -59,7 +94,6 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
         ? branches[0]
         : { $or: branches };
 
-  narrowFilters(getMutableQuery(policyContext), visibilityFilter);
-
+  narrowFilters(query, visibilityFilter);
   return true;
 };
