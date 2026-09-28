@@ -33,9 +33,12 @@
  * and stamps a new publishedAt, so an edited announcement re-entered the
  * next digest as news. It is dropped for a user who already holds an
  * announcement notification anchored to its documentId (§5.26) from before
- * the user's window: the fan-out told them about it earlier. Announcements
- * from before the #12 anchors, and a user who never got the notification
- * (the author, an audience that changed), still see a republish once.
+ * the user's window: the fan-out told them about it earlier. The fan-out
+ * never notifies the author, so the author's own announcement is dropped
+ * once ANY recipient's anchor predates the author's window (it was
+ * published, and in the author's digest, before). Announcements from
+ * before the #12 anchors, and a user who joined the audience later (the
+ * republish's fan-out notifies them), still see a republish once.
  *
  * Off switch: without SMTP_HOST/SMTP_USER/SMTP_PASS (or with
  * DIGESTS_DISABLED=1) the run is a logged no-op — the feature ships
@@ -143,7 +146,7 @@ export interface DigestAnnouncement extends AnnouncementTargeting {
   documentId?: string | null;
   title?: string | null;
   publishedAt: string;
-  author?: { displayName?: string | null } | null;
+  author?: { id?: number | null; displayName?: string | null } | null;
 }
 
 /**
@@ -166,7 +169,9 @@ export function isDigestRecipient(
  * `more` counts the rest.
  *
  * `notifiedAt` maps a documentId to the earliest instant (ms) this user got
- * an announcement notification anchored to it.
+ * an announcement notification anchored to it; `firstNotifiedAt` to the
+ * earliest one of ANY recipient, which decides for the author (whom the
+ * fan-out never notifies).
  */
 export function selectAnnouncements(
   rows: readonly DigestAnnouncement[],
@@ -174,6 +179,7 @@ export function selectAnnouncements(
     since: Date;
     scope: RecipientScope;
     notifiedAt: ReadonlyMap<string, number>;
+    firstNotifiedAt?: ReadonlyMap<string, number>;
     cap?: number;
   },
 ): { items: DigestContent["announcements"]; more: number } {
@@ -191,6 +197,10 @@ export function selectAnnouncements(
       seen.add(documentId);
       const notified = options.notifiedAt.get(documentId);
       if (notified != null && notified < sinceMs) continue;
+      if (row.author?.id != null && row.author.id === options.scope.userId) {
+        const first = options.firstNotifiedAt?.get(documentId);
+        if (first != null && first < sinceMs) continue;
+      }
     }
     selected.push(row);
   }
@@ -209,20 +219,30 @@ interface NotifiedRow {
   recipient?: { id?: number } | null;
 }
 
-/** user id → documentId → earliest notification instant (ms). */
-function notifiedIndex(rows: readonly NotifiedRow[]): Map<number, Map<string, number>> {
-  const index = new Map<number, Map<string, number>>();
+interface NotifiedIndex {
+  /** user id → documentId → earliest notification instant (ms). */
+  byUser: Map<number, Map<string, number>>;
+  /** documentId → earliest notification instant (ms) of any recipient. */
+  first: Map<string, number>;
+}
+
+function notifiedIndex(rows: readonly NotifiedRow[]): NotifiedIndex {
+  const byUser = new Map<number, Map<string, number>>();
+  const first = new Map<string, number>();
   for (const row of rows) {
-    const userId = row.recipient?.id;
     const documentId = row.sourceDocumentId;
     const createdMs = instantMsOrNull(row.createdAt);
-    if (typeof userId !== "number" || !documentId || createdMs == null) continue;
-    const perUser = index.get(userId) ?? new Map<string, number>();
+    if (!documentId || createdMs == null) continue;
+    const earliest = first.get(documentId);
+    if (earliest == null || createdMs < earliest) first.set(documentId, createdMs);
+    const userId = row.recipient?.id;
+    if (typeof userId !== "number") continue;
+    const perUser = byUser.get(userId) ?? new Map<string, number>();
     const earlier = perUser.get(documentId);
     if (earlier == null || createdMs < earlier) perUser.set(documentId, createdMs);
-    index.set(userId, perUser);
+    byUser.set(userId, perUser);
   }
-  return index;
+  return { byUser, first };
 }
 
 /** The slice of the Strapi instance the orchestrator uses. */
@@ -261,9 +281,10 @@ async function loadAnnouncementWindow(
   strapi: DigestStrapi,
   due: readonly Due[],
   now: Date,
-): Promise<{ rows: DigestAnnouncement[]; notified: Map<number, Map<string, number>> }> {
+): Promise<{ rows: DigestAnnouncement[]; notified: NotifiedIndex }> {
+  const none = (): NotifiedIndex => ({ byUser: new Map(), first: new Map() });
   const wanting = due.filter((entry) => entry.user.digestAnnouncements);
-  if (wanting.length === 0) return { rows: [], notified: new Map() };
+  if (wanting.length === 0) return { rows: [], notified: none() };
   const starts = wanting.map((entry) => entry.since.getTime());
   const widest = new Date(Math.min(...starts));
   const latest = new Date(Math.max(...starts));
@@ -276,7 +297,7 @@ async function loadAnnouncementWindow(
         department: { select: ["id"] },
         team: { select: ["id"] },
         audienceRoles: { select: ["id"] },
-        author: { select: ["displayName"] },
+        author: { select: ["id", "displayName"] },
       },
       orderBy: { publishedAt: "desc" },
     }),
@@ -284,7 +305,7 @@ async function loadAnnouncementWindow(
   const documentIds = [
     ...new Set(rows.map((row) => row.documentId).filter((id): id is string => !!id)),
   ];
-  if (documentIds.length === 0) return { rows, notified: new Map() };
+  if (documentIds.length === 0) return { rows, notified: none() };
   const notifications = listOf<NotifiedRow>(
     await strapi.db.query(NOTIFICATION_UID).findMany({
       where: {
@@ -446,7 +467,8 @@ export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promi
           const { items, more } = selectAnnouncements(window.rows, {
             since: entry.since,
             scope: entry.scope,
-            notifiedAt: window.notified.get(user.id) ?? new Map(),
+            notifiedAt: window.notified.byUser.get(user.id) ?? new Map(),
+            firstNotifiedAt: window.notified.first,
           });
           content.announcements = items;
           if (more > 0) content.announcementsMore = more;

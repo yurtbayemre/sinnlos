@@ -362,6 +362,65 @@ describe("sendDigests orchestrator", () => {
     expect(mailTo(mails(), "bob")?.text).toContain("Holiday rota (fixed)");
   });
 
+  it("the author's own republish is not news to them; a user new to the audience gets it once", async () => {
+    // Published Monday before the run for Engineering (alice notified), then
+    // opened to everyone and republished in the afternoon (bob notified).
+    // carol, the author, is never notified by the fan-out.
+    const early = minutesAfter(MONDAY_RUN, -90);
+    const afternoon = minutesAfter(MONDAY_RUN, 8 * 60);
+    const reorg = news("Reorg (update)", afternoon);
+    // carol's own announcement first published inside the window: listed.
+    const own = news("Carol's new one", minutesAfter(MONDAY_RUN, 9 * 60));
+    const other = news("Canteen menu", minutesAfter(MONDAY_RUN, 10 * 60), {
+      author: { id: USER.dave },
+    });
+    const anchored = (documentId: unknown, recipient: number, createdAt: string): Row => ({
+      id: Number(`8${recipient}${String(documentId).slice(-2)}`),
+      type: "announcement",
+      title: "New announcement: …",
+      sourceType: "announcement",
+      sourceDocumentId: documentId,
+      recipient: { id: recipient },
+      createdAt,
+    });
+    const users = { [USER.alice]: optIn(), [USER.bob]: optIn(), [USER.carol]: optIn() };
+    const notifications = [
+      anchored(reorg.documentId, USER.alice, early),
+      anchored(reorg.documentId, USER.bob, afternoon),
+      anchored(own.documentId, USER.alice, minutesAfter(MONDAY_RUN, 9 * 60)),
+    ];
+    const { strapi, mails } = digestStub({
+      users,
+      announcements: [reorg, own, other],
+      notifications,
+    });
+    await sendDigests(strapi, NOW);
+
+    const carol = mailTo(mails(), "carol")?.text ?? "";
+    expect(carol).not.toContain("Reorg (update)");
+    expect(carol).toContain("Carol's new one");
+    expect(carol).toContain("Canteen menu");
+    expect(mailTo(mails(), "bob")?.text).toContain("Reorg (update)");
+    expect(mailTo(mails(), "alice")?.text).not.toContain("Reorg (update)");
+
+    // The next republish (Tuesday) is not news to bob either.
+    const wednesday = new Date("2026-09-09T05:30:00.000Z");
+    const again = news("Reorg (final)", minutesAfter(NOW.toISOString(), 60), {
+      documentId: reorg.documentId,
+    });
+    const next = digestStub({
+      users: {
+        [USER.bob]: optIn({ lastDigestAt: NOW.toISOString() }),
+        [USER.carol]: optIn({ lastDigestAt: NOW.toISOString() }),
+      },
+      announcements: [again, news("Parking", minutesAfter(NOW.toISOString(), 90))],
+      notifications,
+    });
+    await sendDigests(next.strapi, wednesday);
+    expect(mailTo(next.mails(), "bob")?.text).not.toContain("Reorg");
+    expect(mailTo(next.mails(), "carol")?.text).not.toContain("Reorg");
+  });
+
   it("lastDigestAt: set to the window's now after a send, kept for empty and failed digests", async () => {
     const { strapi, mails } = digestStub({
       users: {
@@ -506,6 +565,26 @@ describe("selectAnnouncements", () => {
     expect(items.map((item) => item.title)).toEqual(["N0", "N1"]);
     expect(more).toBe(3);
     expect(DIGEST_ANNOUNCEMENT_CAP).toBe(25);
+  });
+
+  it("the author's own announcement: dropped once any anchor predates the window", () => {
+    const own = news("Own", minutesAfter(MONDAY_RUN, 5), { author: { id: USER.alice } });
+    const foreign = news("Foreign", minutesAfter(MONDAY_RUN, 6));
+    const rows = [foreign, own] as unknown as DigestAnnouncement[];
+    const before = Date.parse(MONDAY_RUN) - 60_000;
+    const inside = Date.parse(MONDAY_RUN) + 60_000;
+    const titles = (firstNotifiedAt?: Map<string, number>) =>
+      selectAnnouncements(rows, { since, scope, notifiedAt: new Map(), firstNotifiedAt }).items.map(
+        (item) => item.title,
+      );
+    const first = (at: number) =>
+      new Map([
+        [String(own.documentId), at],
+        [String(foreign.documentId), at],
+      ]);
+    expect(titles(first(before))).toEqual(["Foreign"]);
+    expect(titles(first(inside))).toEqual(["Foreign", "Own"]);
+    expect(titles()).toEqual(["Foreign", "Own"]);
   });
 
   it("isDigestRecipient: no scope, a guest, or a role without the grant is out", () => {
