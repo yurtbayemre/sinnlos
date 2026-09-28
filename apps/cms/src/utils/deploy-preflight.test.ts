@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { digestsEnabled } from "../digest/send-digests";
+import { EntraConfigError, parseEntraConfig } from "../entra/config";
 import {
   GUARDED_SECRET_KEYS,
   PLACEHOLDER_MARKERS,
@@ -25,9 +26,10 @@ import {
  *   3. the D-SESSION-01 JWT rotation gate (final review C3) reads the label
  *      apps/web/Dockerfile sets, and its env extraction undoes Go's JSON
  *      escaping, so equal secrets compare equal,
- *   4. the Microsoft sign-in gate (Strapi 5.51+ rejects the web's token
- *      exchange) fires exactly when the web would offer Microsoft sign-in
- *      with a real (GUID) client id, and is fatal,
+ *   4. the Entra preflight (D-ENTRA-01) refuses exactly the settings the
+ *      cms (entra/config.ts parseEntraConfig) and the web refuse to start
+ *      with when ENTRA_ENABLED=1, is fatal, and only notes stale MS_* keys
+ *      without it; compose hands both apps the keys they read,
  *   5. the rollback hint of a failed deploy tells a cms image that still
  *      starts with pnpm by its Cmd and prints a working direct start (runs
  *      the real function with docker stubbed where `bash` exists),
@@ -232,54 +234,216 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
   });
 });
 
-describe("Microsoft sign-in gate (Strapi 5.51+)", () => {
-  const GUID = "0b9d6c3e-4a1f-4c2b-9e8d-7f6a5b4c3d2e";
+describe("Entra preflight (D-ENTRA-01)", () => {
+  const TENANT = "11111111-2222-4333-8444-555555555555";
+  const CLIENT = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const GROUP = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+  const SECRET = "0123456789abcdef0123456789abcdef";
 
-  it("keys on the pair compose hands the web (which also needs ENTRA_ENABLED=1 now)", () => {
-    // Stricter than the web until the preflight learns ENTRA_ENABLED.
-    expect(WEB_AUTH_CONFIG).toContain('env.ENTRA_ENABLED !== "1"');
-    expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID}");
-    expect(COMPOSE).toContain("AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET}");
-  });
+  /** The cms and web env compose builds from one infra/.env (the Entra keys). */
+  function composeEnv(env: Record<string, string>): Record<string, string> {
+    return {
+      ENTRA_ENABLED: env.ENTRA_ENABLED ?? "0",
+      MS_TENANT_ID: env.MS_TENANT_ID ?? "",
+      MS_CLIENT_ID: env.MS_CLIENT_ID ?? "",
+      ENTRA_EXCHANGE_SECRET: env.ENTRA_EXCHANGE_SECRET ?? "",
+      ENTRA_SYNC_MODE: env.ENTRA_SYNC_MODE ?? "dry-run",
+      ENTRA_DEFAULT_ROLE: env.ENTRA_DEFAULT_ROLE ?? "member",
+      ENTRA_GROUP_ROLES: env.ENTRA_GROUP_ROLES ?? "",
+      ENTRA_SESSION_TTL: env.ENTRA_SESSION_TTL ?? "12h",
+      AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: env.MS_TENANT_ID ?? "",
+      AUTH_MICROSOFT_ENTRA_ID_ID: env.MS_CLIENT_ID ?? "",
+      AUTH_MICROSOFT_ENTRA_ID_SECRET: env.MS_CLIENT_SECRET ?? "",
+    };
+  }
 
-  it.skipIf(!HAS_AWK)("flags a real app registration and only warns about template text", () => {
-    const cases: [string, string, string[]][] = [
-      [GUID, "client-secret-value", ["entra MS_CLIENT_ID"]],
-      [GUID.toUpperCase(), "client-secret-value", ["entra MS_CLIENT_ID"]],
-      ["your-app-client-id", "your-app-client-secret", ["entra-template MS_CLIENT_ID"]],
-      [`${GUID}0`, "client-secret-value", ["entra-template MS_CLIENT_ID"]],
-      [GUID.replace(/-/g, ""), "client-secret-value", ["entra-template MS_CLIENT_ID"]],
-      ["0b9d6c3e4-a1f-4c2b-9e8d-7f6a5b4c3d2e", "client-secret-value", ["entra-template MS_CLIENT_ID"]],
-      ["0b9d6c3e-4a1f-4c2b-9e8d-7f6a5b4c3d2g", "client-secret-value", ["entra-template MS_CLIENT_ID"]],
-      // The web needs both keys; with either one empty it offers no Microsoft sign-in.
-      [GUID, "", []],
-      ["", "client-secret-value", []],
-      ["", "", []],
-    ];
-    for (const [id, secret, expected] of cases) {
-      const findings = runAwk(
+  /**
+   * What the cms (parseEntraConfig) and the web (a non-empty client
+   * secret; its GUID and exchange-secret rules equal the cms's) refuse, as
+   * infra/.env keys.
+   */
+  function refusedByTheApps(env: Record<string, string>): string[] {
+    const keys: string[] = [];
+    const composed = composeEnv(env);
+    try {
+      parseEntraConfig(composed);
+    } catch (err) {
+      if (!(err instanceof EntraConfigError)) throw err;
+      keys.push(...err.issues.map((issue) => issue.variable));
+    }
+    if (composed.ENTRA_ENABLED === "1" && composed.AUTH_MICROSOFT_ENTRA_ID_SECRET.trim() === "") {
+      keys.push("MS_CLIENT_SECRET");
+    }
+    return keys.map((key) => `entra-invalid ${key}`);
+  }
+
+  const valid = {
+    ENTRA_ENABLED: "1",
+    MS_TENANT_ID: TENANT,
+    MS_CLIENT_ID: CLIENT,
+    MS_CLIENT_SECRET: "client-secret-value",
+    ENTRA_EXCHANGE_SECRET: SECRET,
+  };
+  const groups = (n: number) =>
+    Array.from({ length: n }, (_, i) => `member:${GROUP(i + 1)}`).join(",");
+
+  const CASES: Record<string, string>[] = [
+    valid,
+    { ...valid, MS_TENANT_ID: TENANT.toUpperCase(), MS_CLIENT_ID: ` ${CLIENT} ` },
+    { ...valid, MS_TENANT_ID: "common" },
+    { ...valid, MS_TENANT_ID: "organizations" },
+    { ...valid, MS_TENANT_ID: "contoso.onmicrosoft.com" },
+    { ...valid, MS_TENANT_ID: "<directory-tenant-guid>" },
+    { ...valid, MS_TENANT_ID: `${TENANT}0` },
+    { ...valid, MS_CLIENT_ID: "your-app-client-id" },
+    { ...valid, MS_CLIENT_ID: CLIENT.replace(/-/g, "") },
+    { ...valid, MS_CLIENT_SECRET: "" },
+    { ...valid, MS_CLIENT_SECRET: "  " },
+    { ...valid, ENTRA_EXCHANGE_SECRET: "" },
+    { ...valid, ENTRA_EXCHANGE_SECRET: "x".repeat(31) },
+    { ...valid, ENTRA_EXCHANGE_SECRET: "x".repeat(32) },
+    { ...valid, ENTRA_EXCHANGE_SECRET: ` ${"y".repeat(30)} ` },
+    { ...valid, ENTRA_EXCHANGE_SECRET: `change-me-${"z".repeat(30)}` },
+    { ...valid, ENTRA_EXCHANGE_SECRET: `<openssl rand -hex 32 ${"z".repeat(20)}>` },
+    { ...valid, ENTRA_SYNC_MODE: "on" },
+    { ...valid, ENTRA_SYNC_MODE: "" },
+    { ...valid, ENTRA_SYNC_MODE: "ON" },
+    { ...valid, ENTRA_SYNC_MODE: "dryrun" },
+    { ...valid, ENTRA_DEFAULT_ROLE: "deny" },
+    { ...valid, ENTRA_DEFAULT_ROLE: "guest" },
+    { ...valid, ENTRA_DEFAULT_ROLE: "editor" },
+    { ...valid, ENTRA_SESSION_TTL: "7d" },
+    { ...valid, ENTRA_SESSION_TTL: "168h" },
+    { ...valid, ENTRA_SESSION_TTL: "10080m" },
+    { ...valid, ENTRA_SESSION_TTL: "30m" },
+    { ...valid, ENTRA_SESSION_TTL: "" },
+    { ...valid, ENTRA_SESSION_TTL: "8d" },
+    { ...valid, ENTRA_SESSION_TTL: "10081m" },
+    { ...valid, ENTRA_SESSION_TTL: "0h" },
+    { ...valid, ENTRA_SESSION_TTL: "12" },
+    { ...valid, ENTRA_SESSION_TTL: "1w" },
+    { ...valid, ENTRA_SESSION_TTL: "99999999999999999999h" },
+    {
+      ...valid,
+      ENTRA_GROUP_ROLES: `editor:${GROUP(1)}, admin_role:${GROUP(1).toUpperCase()},,member:${GROUP(2)}`,
+    },
+    { ...valid, ENTRA_GROUP_ROLES: `admin:${GROUP(1)}` },
+    { ...valid, ENTRA_GROUP_ROLES: "editor:Intranet-Editors" },
+    { ...valid, ENTRA_GROUP_ROLES: GROUP(1) },
+    { ...valid, ENTRA_GROUP_ROLES: "member" },
+    { ...valid, ENTRA_GROUP_ROLES: groups(20) },
+    { ...valid, ENTRA_GROUP_ROLES: groups(21) },
+    { ENTRA_ENABLED: "1" },
+    {
+      ENTRA_ENABLED: "1",
+      MS_TENANT_ID: "common",
+      ENTRA_SYNC_MODE: "sometimes",
+      ENTRA_SESSION_TTL: "8d",
+    },
+  ];
+
+  it.skipIf(!HAS_AWK)(
+    "refuses exactly what the cms and the web refuse to start with",
+    () => {
+      let refusedSome = 0;
+      for (const env of CASES) {
+        const findings = runAwk(
+          PREFLIGHT_AWK,
+          { fatal_keys: "", warn_keys: "" },
+          composeJson(composeEnv(env)),
+        );
+        const expected = refusedByTheApps(env);
+        if (expected.length > 0) refusedSome += 1;
+        expect(sorted(findings), JSON.stringify(env)).toEqual(sorted(expected));
+      }
+      expect(refusedSome).toBeGreaterThan(20);
+    },
+    30_000,
+  );
+
+  it.skipIf(!HAS_AWK)(
+    "ignores every MS_*/ENTRA_* value without ENTRA_ENABLED=1, noting stale MS_* keys",
+    () => {
+      const stale = {
+        MS_TENANT_ID: "your-tenant-guid-or-common",
+        MS_CLIENT_ID: "your-app-client-id",
+        MS_CLIENT_SECRET: "your-app-client-secret",
+        ENTRA_EXCHANGE_SECRET: "short",
+        ENTRA_SYNC_MODE: "bogus",
+      };
+      for (const flag of ["0", "", "true", "yes", " 1"]) {
+        const findings = runAwk(
+          PREFLIGHT_AWK,
+          { fatal_keys: "", warn_keys: "" },
+          composeJson(composeEnv({ ...stale, ENTRA_ENABLED: flag })),
+        );
+        expect(findings, flag).toEqual(["entra-inert MS_CLIENT_ID"]);
+        expect(refusedByTheApps({ ...stale, ENTRA_ENABLED: flag }), flag).toEqual([]);
+      }
+      const clean = runAwk(
         PREFLIGHT_AWK,
         { fatal_keys: "", warn_keys: "" },
-        composeJson({
-          MS_CLIENT_ID: id,
-          MS_CLIENT_SECRET: secret,
-          AUTH_MICROSOFT_ENTRA_ID_ID: id,
-          AUTH_MICROSOFT_ENTRA_ID_SECRET: secret,
-        }),
+        composeJson(composeEnv({})),
       );
-      expect(findings, JSON.stringify([id, secret])).toEqual(expected);
+      expect(clean).toEqual([]);
+    },
+  );
+
+  it("makes an invalid Entra configuration fatal and stale MS_* keys a note, in the preflight", () => {
+    const invalidGate = 'if [[ -n "${entra_invalid_keys}" ]]; then';
+    const inertGate = 'if [[ -n "${entra_inert_keys}" ]]; then';
+    const fatal = DEPLOY.slice(DEPLOY.indexOf(invalidGate));
+    expect(fatal.slice(0, fatal.indexOf("\nfi\n"))).toContain("preflight_failed=1");
+    const note = DEPLOY.slice(DEPLOY.indexOf(inertGate));
+    expect(note.slice(0, note.indexOf("\nfi\n"))).not.toContain("preflight_failed");
+    for (const gate of [invalidGate, inertGate]) {
+      expect(DEPLOY.indexOf(gate), gate).toBeGreaterThan(-1);
+      expect(DEPLOY.indexOf(gate), gate).toBeLessThan(DEPLOY.indexOf('log "Preflight OK"'));
     }
+    // The old "Microsoft sign-in cannot complete" refusal is gone.
+    expect(DEPLOY).not.toContain("entra_template_keys");
   });
 
-  it("makes a real app registration fatal and template text a warning", () => {
-    const fatal = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${entra_keys}" ]]; then'));
-    expect(fatal.slice(0, fatal.indexOf("\nfi\n"))).toContain("preflight_failed=1");
-    const warning = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${entra_template_keys}" ]]; then'));
-    expect(warning.slice(0, warning.indexOf("\nfi\n"))).not.toContain("preflight_failed");
-    // Both run in the preflight, before anything is touched.
-    expect(DEPLOY.indexOf('if [[ -n "${entra_keys}" ]]; then')).toBeLessThan(
-      DEPLOY.indexOf('log "Preflight OK"'),
-    );
+  it("wires the env as the apps read it (compose)", () => {
+    const service = (name: string) => {
+      const start = COMPOSE.indexOf(`\n  ${name}:\n`);
+      const next = COMPOSE.slice(start + 1).search(/\n {2}[a-z]+:\n/);
+      return COMPOSE.slice(start, next < 0 ? undefined : start + 1 + next);
+    };
+    const cms = service("cms");
+    const web = service("web");
+    for (const line of [
+      "ENTRA_ENABLED: ${ENTRA_ENABLED:-0}",
+      "MS_TENANT_ID: ${MS_TENANT_ID:-}",
+      "MS_CLIENT_ID: ${MS_CLIENT_ID:-}",
+      "ENTRA_EXCHANGE_SECRET: ${ENTRA_EXCHANGE_SECRET:-}",
+      "ENTRA_SYNC_MODE: ${ENTRA_SYNC_MODE:-dry-run}",
+      "ENTRA_DEFAULT_ROLE: ${ENTRA_DEFAULT_ROLE:-member}",
+      "ENTRA_GROUP_ROLES: ${ENTRA_GROUP_ROLES:-}",
+      "ENTRA_SYNC_DEPARTMENT: ${ENTRA_SYNC_DEPARTMENT:-0}",
+      "ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}",
+      "ENTRA_SESSION_TTL: ${ENTRA_SESSION_TTL:-12h}",
+      "AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}",
+    ]) {
+      expect(cms, line).toContain(line);
+    }
+    for (const line of [
+      "ENTRA_ENABLED: ${ENTRA_ENABLED:-0}",
+      "AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: ${MS_TENANT_ID:-}",
+      "AUTH_MICROSOFT_ENTRA_ID_ID: ${MS_CLIENT_ID:-}",
+      "AUTH_MICROSOFT_ENTRA_ID_SECRET: ${MS_CLIENT_SECRET:-}",
+      "ENTRA_EXCHANGE_SECRET: ${ENTRA_EXCHANGE_SECRET:-}",
+      "ENTRA_SYNC_MANAGER: ${ENTRA_SYNC_MANAGER:-0}",
+      "AUTH_LOCAL_ENABLED: ${AUTH_LOCAL_ENABLED:-0}",
+    ]) {
+      expect(web, line).toContain(line);
+    }
+    // The cms never needs the client secret; the issuer is computed.
+    expect(cms).not.toContain("MS_CLIENT_SECRET");
+    expect(COMPOSE).not.toContain("AUTH_MICROSOFT_ENTRA_ID_ISSUER:");
+    // The same switch in the web (lib/auth-config.ts).
+    expect(WEB_AUTH_CONFIG).toContain('env.ENTRA_ENABLED !== "1"');
+    expect(WEB_AUTH_CONFIG).toContain("AUTH_MICROSOFT_ENTRA_ID_SECRET");
   });
 });
 
