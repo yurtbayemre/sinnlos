@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errors, sanitize, validate } from "@strapi/utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import middlewaresConfig from "../../config/middlewares";
 import sensitiveQueryGuard, {
   assertNoSensitiveUserKeys,
   registerSensitiveQueryGuard,
@@ -40,7 +41,10 @@ import {
  *      instantiated at boot before the routes, and every content-API
  *      controller resolves `strapi.contentAPI.validate.query` at call time,
  *   4. the schema-private user fields are no `_q` target for any role:
- *      `searchable: false`, checked on the installed @strapi/database.
+ *      `searchable: false`, checked on the installed @strapi/database,
+ *   5. config/middlewares.ts registers the guard (and the other global
+ *      guards): every other test here would still pass if a merge dropped
+ *      that line, and the boot check only fires once the factory runs.
  */
 
 const CMS_SRC = join(__dirname, "..");
@@ -511,6 +515,33 @@ describe("registration", () => {
     await expect(
       assertNoSensitiveUserKeys({ filters: { displayName: "x" } }, user(), getModel),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe("config/middlewares.ts: the global guards are registered", () => {
+  /** Strapi's env helper, reduced to the defaults. */
+  const env = Object.assign((_key: string, fallback?: unknown) => fallback, {
+    int: (_key: string, fallback?: number) => fallback ?? 0,
+    bool: (_key: string, fallback?: boolean) => fallback ?? false,
+    array: (_key: string, fallback?: string[]) => fallback ?? [],
+  });
+  const names = () =>
+    middlewaresConfig({ env }).map((entry) => (typeof entry === "string" ? entry : entry.name));
+
+  it.each(["global::sensitive-query-guard", "global::uploads-auth", "global::auth-path-guard"])(
+    "lists %s exactly once",
+    (name) => {
+      expect(names().filter((entry) => entry === name)).toHaveLength(1);
+    },
+  );
+
+  it("every global:: entry names a file in src/middlewares (Strapi resolves it by file name)", () => {
+    const globals = names().filter((entry) => entry.startsWith("global::"));
+    expect(globals.length).toBeGreaterThanOrEqual(3);
+    for (const name of globals) {
+      const file = join(CMS_SRC, "middlewares", `${name.slice("global::".length)}.ts`);
+      expect({ name, exists: existsSync(file) }).toEqual({ name, exists: true });
+    }
   });
 });
 

@@ -931,6 +931,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
   (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
   pin fails first on purpose.
+- `apps/cms/src/middlewares/sensitive-query-guard.test.ts` also reads
+  `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
+  global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)
+  or names a `global::` middleware without its file in `src/middlewares`.
 - `infra/contracts.test.ts` pins what the cms and the web both state: the
   announcement audience rule, the YouTube parser, comment anchors, schema
   enums against the web unions and constants, relation pairs, and the web
