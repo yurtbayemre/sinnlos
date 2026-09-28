@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CommentTarget } from "@/lib/comment-target";
 import type { Reaction } from "@/lib/types";
-import { ALL_EMOJIS, summarize } from "./reaction-summary";
+import { ALL_EMOJIS, summarize, withOwnReactions } from "./reaction-summary";
 
 /** The announcement every reaction below belongs to (documentId-anchored). */
 const DOC = "a1b2c3d4e5f6g7h8i9j0kl";
@@ -139,5 +139,62 @@ describe("summarize with a target", () => {
     const foreign = { ...reaction("heart", 9), targetDocumentId: OTHER_DOC } as Reaction;
     const result = summarize([foreign]);
     expect(result.find((r) => r.emoji === "heart")!.count).toBe(1);
+  });
+});
+
+/**
+ * The caller's own rows read next to the newest-500 window (1B-T1): an own
+ * reaction the window missed shows as pressed and adds itself to the count
+ * (a row outside the window was not counted in it).
+ */
+describe("withOwnReactions", () => {
+  const me = 5;
+  const base = () => summarize([reaction("heart", 9), reaction("heart", 9)], me, TARGET);
+
+  it("marks an emoji the window missed and counts that row", () => {
+    const result = withOwnReactions(base(), [reaction("heart", me)], me, TARGET);
+    expect(result.find((r) => r.emoji === "heart")).toEqual({
+      emoji: "heart",
+      count: 3,
+      reacted: true,
+    });
+    expect(result.find((r) => r.emoji === "laugh")).toEqual({
+      emoji: "laugh",
+      count: 0,
+      reacted: false,
+    });
+  });
+
+  it("leaves an emoji the window already marks unchanged", () => {
+    const summary = summarize([reaction("heart", me), reaction("heart", 9)], me, TARGET);
+    const result = withOwnReactions(summary, [reaction("heart", me)], me, TARGET);
+    expect(result).toEqual(summary);
+  });
+
+  it("counts duplicate own rows of one emoji once", () => {
+    const own = [reaction("laugh", me), reaction("laugh", me)];
+    const result = withOwnReactions(base(), own, me, TARGET);
+    expect(result.find((r) => r.emoji === "laugh")).toEqual({
+      emoji: "laugh",
+      count: 1,
+      reacted: true,
+    });
+  });
+
+  it("ignores rows of another author, another entry or without an anchor", () => {
+    const own = [
+      reaction("laugh", 9),
+      { ...reaction("celebrate", me), targetDocumentId: OTHER_DOC } as Reaction,
+      { ...reaction("lightbulb", me), targetDocumentId: null } as Reaction,
+      reaction("thumbsup"),
+    ];
+    expect(withOwnReactions(base(), own, me, TARGET)).toEqual(base());
+  });
+
+  it("never mutates the summary it is given", () => {
+    const summary = base();
+    const copy = structuredClone(summary);
+    withOwnReactions(summary, [reaction("heart", me)], me, TARGET);
+    expect(summary).toEqual(copy);
   });
 });

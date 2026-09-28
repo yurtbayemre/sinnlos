@@ -3,40 +3,61 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, Building2, Mail, MapPin, Phone, Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { strapi } from "@/lib/strapi";
+import { StrapiError } from "@/lib/strapi-error";
 import { avatarThumbUrl } from "@/lib/config";
+import { parseRowId } from "@/lib/entry-id";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { UserLite } from "@/lib/types";
+import type { Team, UserLite } from "@/lib/types";
 import { initials } from "@/lib/utils";
-import { FetchErrorBanner } from "@/components/fetch-error";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const { data } = await tryFetch(
-    () => strapi<any>(`/api/users/${id}?populate[department]=true&populate[avatar]=true`),
-    "person-meta",
-  );
-  return { title: data?.displayName ?? data?.username ?? "Person" };
+type Params = { params: Promise<{ id: string }> };
+type Person = UserLite & { teams?: Team[] };
+
+/**
+ * One read for metadata and page: the same GET in one render is sent once
+ * (Next's fetch dedupe). The users-permissions findOne answers an unknown id
+ * with an empty body (204); a 404 means the same.
+ */
+async function fetchPerson(id: number): Promise<Person | null> {
+  try {
+    const person = await strapi<Person | undefined>(
+      `/api/users/${id}?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true`,
+    );
+    return person ?? null;
+  } catch (e) {
+    if (e instanceof StrapiError && e.status === 404) return null;
+    throw e;
+  }
 }
 
-export default async function PersonPage({ params }: { params: Promise<{ id: string }> }) {
+export async function generateMetadata({ params }: Params) {
   const { id } = await params;
-  const [t, tNav] = await Promise.all([getTranslations("people"), getTranslations("nav")]);
-  const { data, failed } = await tryFetch(
-    () =>
-      strapi<any>(
-        `/api/users/${id}?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true`,
-      ),
-    "person",
-  );
+  // A malformed id never reaches the CMS (WD07): Postgres answers a lookup
+  // on the int4 id with an error, i.e. a 500 instead of a 404.
+  const rowId = parseRowId(id) ?? notFound();
+  const [tNav, { data }] = await Promise.all([
+    getTranslations("nav"),
+    tryFetch(() => fetchPerson(rowId), "person-meta"),
+  ]);
+  return { title: data?.displayName ?? data?.username ?? tNav("people") };
+}
 
-  if (!data && !failed) notFound();
-
-  const person = data as UserLite | null;
-  if (!person) {
-    return <div className="space-y-6">{failed && <FetchErrorBanner />}</div>;
-  }
+/**
+ * Detail-page error strategy (WD07, same on all detail pages): a malformed
+ * or unknown id is a 404; a failed read goes to (app)/error.tsx, whose
+ * "Try again" fetches the page again.
+ */
+export default async function PersonPage({ params }: Params) {
+  const { id } = await params;
+  const rowId = parseRowId(id) ?? notFound();
+  const [t, tNav, person] = await Promise.all([
+    getTranslations("people"),
+    getTranslations("nav"),
+    fetchPerson(rowId),
+  ]);
+  if (!person) notFound();
 
   const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
   const avatarUrl = avatarThumbUrl(person.avatar);
@@ -50,8 +71,6 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
         <ArrowLeft className="h-3.5 w-3.5" />
         {tNav("people")}
       </Link>
-
-      {failed && <FetchErrorBanner />}
 
       <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-start">
         <Avatar className="h-24 w-24">
@@ -112,24 +131,26 @@ export default async function PersonPage({ params }: { params: Promise<{ id: str
           </Card>
 
           {/* Teams */}
-          {(person as any).teams?.length > 0 && (
+          {person.teams && person.teams.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle>{t("teams")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-2">
-                  {((person as any).teams as any[]).map((t: any) => (
+                  {person.teams.map((team) => (
                     <Link
-                      key={t.id}
-                      href={`/teams/${t.slug}`}
+                      key={team.id}
+                      href={`/teams/${team.slug}`}
                       className="flex items-center gap-3 rounded-lg p-2 text-sm transition-colors hover:bg-muted"
                     >
                       <Users2 className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                       <div>
-                        <div className="font-medium">{t.name}</div>
-                        {t.department?.name && (
-                          <div className="text-xs text-muted-foreground">{t.department.name}</div>
+                        <div className="font-medium">{team.name}</div>
+                        {team.department?.name && (
+                          <div className="text-xs text-muted-foreground">
+                            {team.department.name}
+                          </div>
                         )}
                       </div>
                     </Link>

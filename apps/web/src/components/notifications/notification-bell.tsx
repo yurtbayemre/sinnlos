@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { unstable_rethrow, useRouter } from "next/navigation";
 import type { Route } from "next";
 import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -52,29 +52,43 @@ export function NotificationBell({
     };
   }, [open]);
 
+  // A failed mark-read keeps the page (FX28): the bell lives in the layout,
+  // so an uncaught rejection here replaced the whole app with the global
+  // error page. The error shows in the open panel until the next attempt.
+  const [failed, setFailed] = useState(false);
+
+  // Opening the panel clears an old error: a click-through closes the panel
+  // before its mark-read settles, and the bell stays mounted across pages,
+  // so the error would describe an earlier click. The notification that
+  // failed stays unread, which is the lasting signal.
   const handleOpen = () => {
+    if (!open) setFailed(false);
     setOpen(!open);
   };
 
-  const handleClick = (notif: Notification) => {
-    if (!notif.readAt) {
-      startTransition(async () => {
-        await markNotificationsRead([notif.id]);
+  const runAction = (action: () => Promise<void>) => {
+    setFailed(false);
+    startTransition(async () => {
+      try {
+        await action();
         await onChanged?.();
-      });
-    }
+      } catch (e) {
+        // An expired session still redirects to sign-in (NEXT_REDIRECT).
+        unstable_rethrow(e);
+        setFailed(true);
+      }
+    });
+  };
+
+  const handleClick = (notif: Notification) => {
+    if (!notif.readAt) runAction(() => markNotificationsRead([notif.id]));
     setOpen(false);
     // Server-authored notification links ("/announcements", …) — data-
     // driven, so typedRoutes needs the cast.
     if (notif.link) router.push(notif.link as Route);
   };
 
-  const handleMarkAll = () => {
-    startTransition(async () => {
-      await markAllNotificationsRead();
-      await onChanged?.();
-    });
-  };
+  const handleMarkAll = () => runAction(() => markAllNotificationsRead());
 
   return (
     <div ref={ref} className="relative">
@@ -111,6 +125,11 @@ export function NotificationBell({
               </button>
             )}
           </div>
+          {failed && (
+            <p role="alert" className="border-b px-4 py-2 text-xs text-destructive">
+              {t("markReadFailed")}
+            </p>
+          )}
           <div className="max-h-80 overflow-y-auto">
             {notifications.length === 0 ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">

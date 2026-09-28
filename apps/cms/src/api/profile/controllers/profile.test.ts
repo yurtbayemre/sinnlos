@@ -19,7 +19,11 @@ import { SENSITIVE_USER_FIELDS } from "../../../utils/sanitize-user-contact";
 import profile, {
   MANAGER_CONTACT_FIELDS,
   MANAGER_SUMMARY_FIELDS,
+  PROFILE_LOCALES,
+  PROFILE_TEXT_FIELDS,
+  PROFILE_TEXT_MAX,
   SELF_PROFILE_FIELDS,
+  normalizeProfileText,
   toManagerSummary,
   toSelfProfile,
   type ProfileContext,
@@ -439,6 +443,125 @@ describe("PUT /api/me (FX02 allowlist)", () => {
     await expect(profile.updateMe(makeCtx(caller("member"), "displayName=x").ctx)).resolves.toBe(
       "400 No editable fields provided",
     );
+  });
+});
+
+describe("PUT /api/me input validation (FX26)", () => {
+  let stub: ReturnType<typeof stubStrapi>;
+
+  beforeEach(() => {
+    stub = stubStrapi();
+    vi.stubGlobal("strapi", stub.strapi);
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const put = (data: unknown) => profile.updateMe(makeCtx(caller("member"), { data }).ctx);
+  const written = () => stub.updateCalls[stub.updateCalls.length - 1]?.data;
+
+  it("trims every free-text field before the write", async () => {
+    await put({
+      displayName: "  Sam C.  ",
+      jobTitle: "\tEngineer\n",
+      phone: " +49 30 1 ",
+      officeLocation: " Remote ",
+    });
+    expect(written()).toEqual({
+      displayName: "Sam C.",
+      jobTitle: "Engineer",
+      phone: "+49 30 1",
+      officeLocation: "Remote",
+    });
+  });
+
+  it("stores an empty or blank displayName as null, other empty fields as ''", async () => {
+    await put({ displayName: "   ", jobTitle: "", phone: " ", officeLocation: "" });
+    expect(written()).toEqual({ displayName: null, jobTitle: "", phone: "", officeLocation: "" });
+  });
+
+  it("accepts null to clear a field", async () => {
+    await put({ displayName: null, jobTitle: null });
+    expect(written()).toEqual({ displayName: null, jobTitle: null });
+  });
+
+  it.each(PROFILE_TEXT_FIELDS)(
+    "rejects %s over 255 characters with 400 and writes nothing",
+    async (field) => {
+      await expect(put({ [field]: "x".repeat(PROFILE_TEXT_MAX + 1) })).resolves.toBe(
+        `400 ${field} must be at most 255 characters`,
+      );
+      expect(stub.updateCalls).toHaveLength(0);
+    },
+  );
+
+  it("measures the length after trimming and in characters, as Postgres does", async () => {
+    await put({ jobTitle: ` ${"x".repeat(PROFILE_TEXT_MAX)} ` });
+    expect((written()!.jobTitle as string).length).toBe(PROFILE_TEXT_MAX);
+    // 255 emoji: 510 UTF-16 units, but 255 characters for varchar(255).
+    await put({ officeLocation: "\u{1F3E2}".repeat(PROFILE_TEXT_MAX) });
+    expect(written()!.officeLocation).toBe("\u{1F3E2}".repeat(PROFILE_TEXT_MAX));
+    await expect(put({ officeLocation: "\u{1F3E2}".repeat(PROFILE_TEXT_MAX + 1) })).resolves.toBe(
+      "400 officeLocation must be at most 255 characters",
+    );
+  });
+
+  it.each([42, true, { text: "x" }, ["x"]])(
+    "rejects a non-string value (%j) with 400",
+    async (value) => {
+      await expect(put({ phone: value })).resolves.toBe("400 phone must be a string or null");
+      expect(stub.updateCalls).toHaveLength(0);
+    },
+  );
+
+  it("rejects the whole request when one field is invalid (no partial update)", async () => {
+    await expect(
+      put({ displayName: "Sam", jobTitle: "x".repeat(300), birthdayVisible: true }),
+    ).resolves.toBe("400 jobTitle must be at most 255 characters");
+    expect(stub.updateCalls).toHaveLength(0);
+  });
+
+  it("accepts the locales en and de only", async () => {
+    for (const locale of PROFILE_LOCALES) {
+      await put({ locale });
+      expect(written()).toEqual({ locale });
+    }
+    for (const locale of ["fr", "EN", " de", "", null, 1]) {
+      stub.updateCalls.length = 0;
+      await expect(put({ locale }), String(locale)).resolves.toBe("400 locale must be en or de");
+      expect(stub.updateCalls).toHaveLength(0);
+    }
+  });
+
+  it("keeps the birthday and boolean coercion and lastDigestAt stays out", async () => {
+    await put({
+      displayName: " Sam ",
+      birthday: "1990-02-03",
+      birthdayVisible: "on",
+      digestAnnouncements: "false",
+      lastDigestAt: "2000-01-01T00:00:00.000Z",
+    });
+    expect(written()).toEqual({
+      displayName: "Sam",
+      birthday: "1990-02-03",
+      birthdayVisible: true,
+      digestAnnouncements: false,
+    });
+  });
+
+  it("ignores inherited keys of the body", async () => {
+    const body = Object.create({ displayName: "inherited" }) as Row;
+    body.jobTitle = "Engineer";
+    await put(body);
+    expect(written()).toEqual({ jobTitle: "Engineer" });
+  });
+});
+
+describe("normalizeProfileText", () => {
+  it("leaves absent fields absent and other keys untouched", () => {
+    const data: Row = { birthday: "  1990-02-03 ", locale: "de" };
+    expect(normalizeProfileText(data)).toBeNull();
+    expect(data).toEqual({ birthday: "  1990-02-03 ", locale: "de" });
   });
 });
 

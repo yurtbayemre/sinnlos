@@ -1,6 +1,7 @@
 "use server";
 
 import { refresh } from "next/cache";
+import { unstable_rethrow } from "next/navigation";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { pollClosesAtForDay } from "@/lib/poll-close";
 import { normalizeGuestAccess } from "@/lib/poll-guest-access";
@@ -81,7 +82,11 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
         },
       }),
     });
-  } catch {
+  } catch (e) {
+    // strapi() answers an expired session with redirect() (NEXT_REDIRECT);
+    // it must reach Next.js so the author lands on /sign-in?expired=1
+    // instead of a "failed" message (FX47).
+    unstable_rethrow(e);
     return { ok: false, code: "failed" };
   }
 

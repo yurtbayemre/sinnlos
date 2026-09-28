@@ -41,6 +41,14 @@ const config: Config = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      // Text utilities get text-safe tokens (FX31, see globals.css):
+      // `text-primary` / `text-destructive` (with opacity modifiers) read
+      // --primary-text / --destructive-text; bg-, border- and ring- keep the
+      // fill tokens, and `text-*-foreground` is merged in from `colors`.
+      textColor: {
+        primary: { DEFAULT: "hsl(var(--primary-text))" },
+        destructive: { DEFAULT: "hsl(var(--destructive-text))" },
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -51,13 +59,7 @@ const config: Config = {
         // --font-geist-mono was never defined (no next/font wiring), so the
         // mono stack fell through to the system monospace anyway. Point it at
         // an explicit system monospace stack and drop the dead CSS var.
-        mono: [
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
-          "Consolas",
-          "monospace",
-        ],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       keyframes: {
         "accordion-down": {
@@ -94,7 +96,14 @@ const config: Config = {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         shimmer: "shimmer 1.8s ease-in-out infinite",
-        "fade-in-up": "fade-in-up 0.3s ease-out both",
+        // Fill mode `backwards`, not `both` (UI01): `both` kept the final
+        // translateY(0) on the element after the animation, and any
+        // transform makes an element the containing block of its `fixed`
+        // descendants. On PageFade's wrapper (every page) that pinned
+        // modals and overlays to the content column. `backwards` still
+        // applies the first keyframe from the first frame (no flash) and
+        // leaves no style behind once the animation ends.
+        "fade-in-up": "fade-in-up 0.3s ease-out backwards",
         "fade-in": "fade-in 0.2s ease-out both",
         "scale-in": "scale-in 0.15s ease-out both",
         indeterminate: "indeterminate 1.2s ease-in-out infinite",

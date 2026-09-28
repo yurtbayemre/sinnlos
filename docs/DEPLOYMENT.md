@@ -26,9 +26,12 @@ All methods share the same [prerequisites](#prerequisites) and
 cannot offer; see the note there).
 
 > **Upgrading an existing instance?** On an instance that runs `main`
-> `afc1506` (the owner instance since 2026-09-28), the
-> [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28)
-> is a normal deploy (one optional read-only query first). On an instance that already runs the
+> `afc1506` (the owner instance since 2026-09-28), batch 6 is one normal
+> deploy of cms and web (one optional read-only query first; see
+> [3.8 Updates](#38-updates)): the test safety nets, the web correctness
+> fixes and the
+> [cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28).
+> On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
 > what the instance does not run yet, newest first:
@@ -730,6 +733,44 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 6 (2026-09-28)?** The test safety nets, the web
+> correctness fixes and the cms input hardening (the two notes below and
+> the "Uploads gate" and live-event notes further down) ship as one normal
+> deploy of cms and web together (`infra/deploy.sh`): no env, schema or
+> permission change, and the order of web and cms does not matter. Before
+> it, run `infra/deploy.sh --check` and, optionally, the read-only poll
+> query (step 2 of
+> [Upgrading to the cms input hardening (2026-09-28)](#upgrading-to-the-cms-input-hardening-2026-09-28)).
+> After it, check:
+>
+> - `infra/live-smoke.sh` passed (`deploy.sh` runs it; the live-event
+>   receiver moved into `apps/web/src/lib/live-emit.ts` unchanged);
+> - the calendar file of an event with a non-ASCII title downloads (200,
+>   no `ERR_INVALID_CHAR` in the cms log; step 4 of the cms input
+>   hardening);
+> - a lesson quiz can be typed, saved and cleared in the admin panel
+>   (step 5 there), and the authorless polls are re-linked by hand
+>   (step 6);
+> - a lesson video plays on production (no player "Error 153");
+> - the web items of the README's
+>   [verification checklist](../README.md#8-verification-checklist):
+>   `/people/abc` shows the *Page not found* card, the first Tab shows
+>   *Skip to content*, the theme toggle switches on the first click.
+>
+> Nothing in the database needs undoing for a rollback; follow the hint
+> `deploy.sh` prints.
+>
+> **Deploying the web correctness fixes (2026-09-28)?** A normal deploy of
+> web and cms together (`infra/deploy.sh`): no env, schema or permission
+> change. The cms part is the stricter `PUT /api/me` (trimmed strings, 400
+> above 255 characters, `locale` `en` or `de` only); the web sends the
+> desired reaction state as `data.reacted`, which a cms without that
+> support ignores (it toggles as before), so the order of web and cms does
+> not matter. After the deploy, play the video of a lesson on production:
+> YouTube refused to play embedded videos without the Referer ("Error
+> 153"), and localhost can hide that effect. This change leaves nothing to
+> undo in the database; for a rollback follow the hint `deploy.sh` prints.
+>
 > **Deploying the cms input hardening (2026-09-28)?** A normal deploy: no
 > env, schema or permission change. One optional read-only query lists the
 > polls whose answers the new check refuses; after the deploy, download the

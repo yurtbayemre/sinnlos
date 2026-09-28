@@ -190,14 +190,21 @@ export const api = {
     // No page walk for space()/page(): `slug` is a uid attribute (unique) →
     // 0..1 top-level rows; the defaultLimit of 25 bounds only top-level
     // pagination, and Strapi 5 REST does not paginate populated relations
-    // (pages/revisions arrive in full).
+    // (the space's pages arrive in full).
+    //
+    // Field-limited (FX24, WD05): the space page lists each page's title,
+    // slug and summary only, so neither the page bodies nor an author are
+    // loaded (Strapi always adds id and documentId).
     space: (slug: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/wiki-spaces?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[pages][populate][author]=true`,
+        `/api/wiki-spaces?filters[slug][$eq]=${encodeURIComponent(slug)}&populate[pages][fields][0]=title&populate[pages][fields][1]=slug&populate[pages][fields][2]=summary`,
       ),
+    // No revisions (FX24): every view used to transfer the full body of
+    // every historical revision, and none was rendered. The byline needs
+    // the author's and last editor's names only; `id` tells them apart.
     page: (spaceSlug: string, pageSlug: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/wiki-pages?filters[space][slug][$eq]=${encodeURIComponent(spaceSlug)}&filters[slug][$eq]=${encodeURIComponent(pageSlug)}&populate[author]=true&populate[lastEditor]=true&populate[space]=true&populate[revisions][populate][editor]=true`,
+        `/api/wiki-pages?filters[space][slug][$eq]=${encodeURIComponent(spaceSlug)}&filters[slug][$eq]=${encodeURIComponent(pageSlug)}&populate[author][fields][0]=displayName&populate[author][fields][1]=username&populate[lastEditor][fields][0]=displayName&populate[lastEditor][fields][1]=username&populate[space][fields][0]=name&populate[space][fields][1]=slug`,
       ),
   },
   announcements: {

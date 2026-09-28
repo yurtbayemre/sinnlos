@@ -307,7 +307,7 @@ Strapi ships 22 collection types plus one routes-only API
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below) |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only |
 
 **Draft & publish.** announcement, course, document, event, lesson, poll,
 quick-link, wiki-space, wiki-page and wiki-revision keep Strapi's draft &
@@ -986,3 +986,15 @@ Safety nets for refactors (roadmap S03–S06, S09):
       is an all-day entry
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
+- [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
+      real domain, since localhost can hide the Referer effect
+- [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`
+      show the *Page not found* card (like every `notFound()` page here
+      with HTTP status 200 and `noindex`: `loading.tsx` streams the shell
+      first) and send no request to the cms; with the cms stopped, `/profile` shows the error banner
+      and no editable profile form; stopping the cms after a page loaded, a
+      reaction click or *Mark all read* shows an inline error while the
+      page stays
+- [ ] The first Tab on an app page shows *Skip to content*; the theme
+      toggle switches on the first click also for a user whose system theme
+      is dark

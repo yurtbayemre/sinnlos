@@ -28,6 +28,7 @@
     "mainNav": "Hauptnavigation",
     "bottomNav": "Untere Navigation",
     "loadingPage": "Seite lädt",
+    "skipToContent": "Zum Inhalt springen",
     "signedOut": "Abgemeldet"
   },
   "nav": {
@@ -374,6 +375,8 @@
     "confirmPassword": "Neues Passwort bestätigen",
     "changePassword": "Passwort ändern",
     "profileUpdated": "Profil aktualisiert.",
+    "error_tooLong": "{field} darf höchstens {max} Zeichen lang sein.",
+    "error_invalid": "Einige Angaben konnten nicht gespeichert werden – bitte prüfen Sie Ihre Eingaben.",
     "passwordRateLimited": "Zu viele Versuche, das Passwort zu ändern – bitte warten Sie eine Minute und versuchen Sie es erneut.",
     "digestSection": "E-Mail-Zusammenfassungen",
     "digestHint": "Erhalte morgens eine Zusammenfassung per E-Mail — täglich oder wöchentlich (montags). Ohne Auswahl wird nichts versendet.",
@@ -466,6 +469,7 @@
     "sendComment": "Kommentar senden",
     "sendFailed": "Kommentar konnte nicht gesendet werden – bitte erneut versuchen.",
     "deleteFailed": "Kommentar konnte nicht gelöscht werden – bitte erneut versuchen.",
+    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen.",
     "today": "heute",
     "yesterday": "gestern",
     "daysAgo": "vor {days} T."
@@ -481,6 +485,7 @@
   "notifications": {
     "title": "Benachrichtigungen",
     "markAllRead": "Alle als gelesen markieren",
+    "markReadFailed": "Konnte nicht als gelesen markiert werden – bitte erneut versuchen.",
     "noNotificationsYet": "Noch keine Benachrichtigungen",
     "unread": "ungelesen",
     "justNow": "gerade eben",
@@ -505,6 +510,7 @@
     "somethingWrong": "Da ist etwas schiefgelaufen",
     "somethingWrongHint": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
     "tryAgain": "Erneut versuchen",
+    "reference": "Referenz: {digest}",
     "notFoundTitle": "Seite nicht gefunden",
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
     "backToDashboard": "Zurück zum Dashboard"
@@ -529,6 +535,7 @@
     "continueCourse": "Fortsetzen",
     "noLessons": "Dieser Kurs hat noch keine Lektionen.",
     "lessonPosition": "Lektion {current} von {total}",
+    "videoTitle": "Lektionsvideo",
     "quizTitle": "Verständnisfragen (Selbstkontrolle)",
     "quizCorrect": "Richtig!",
     "quizWrong": "Nicht ganz — probier es nochmal.",

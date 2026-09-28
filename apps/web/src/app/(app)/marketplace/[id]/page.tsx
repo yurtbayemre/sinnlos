@@ -6,50 +6,54 @@ import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
+import { parseRowId } from "@/lib/entry-id";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
 import { AD_CATEGORY_KEYS, isClassifiedExpired } from "@/lib/classified-shared";
 import { isAdmin } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { initials } from "@/lib/utils";
-import { FetchErrorBanner } from "@/components/fetch-error";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RenewButton } from "@/components/marketplace/renew-button";
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
+type Params = { params: Promise<{ id: string }> };
+
+export async function generateMetadata({ params }: Params) {
   const { id } = await params;
-  const { data } = await tryFetch(() => api.classifieds.one(id), "classified-meta");
+  // A malformed id never reaches the CMS (WD07): Postgres answers the
+  // filters[id] lookup with an error, i.e. a 500 instead of a 404.
+  const rowId = parseRowId(id) ?? notFound();
+  const [t, { data }] = await Promise.all([
+    getTranslations("marketplace"),
+    tryFetch(() => api.classifieds.one(String(rowId)), "classified-meta"),
+  ]);
   const ad = data?.data?.[0] as Classified | undefined;
-  return { title: ad?.title ?? "Marketplace" };
+  return { title: ad?.title ?? t("title") };
 }
 
-export default async function ClassifiedDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+/**
+ * Detail-page error strategy (WD07, same on all detail pages): a malformed
+ * or unknown id is a 404; a failed read goes to (app)/error.tsx, whose
+ * "Try again" fetches the page again.
+ */
+export default async function ClassifiedDetailPage({ params }: Params) {
   const { id } = await params;
+  const rowId = parseRowId(id) ?? notFound();
   // The ad read needs no role (canManage below is display-only), so it runs
-  // alongside getViewer()'s /api/me read instead of behind it.
-  const [t, tRel, locale, session, viewer, { data, failed }] = await Promise.all([
+  // alongside getViewer()'s /api/me read instead of behind it. The same GET
+  // as generateMetadata's is sent once per render (Next's fetch dedupe).
+  const [t, tRel, locale, session, viewer, res] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
     getViewer(),
-    tryFetch(() => api.classifieds.one(id), "classified"),
+    api.classifieds.one(String(rowId)),
   ]);
 
-  const ad = (data?.data?.[0] ?? null) as Classified | null;
-  if (!ad && !failed) notFound();
-  if (!ad) {
-    return (
-      <div className="space-y-6">
-        <FetchErrorBanner />
-      </div>
-    );
-  }
+  const ad = (res.data?.[0] ?? null) as Classified | null;
+  if (!ad) notFound();
 
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
   // Editing is owner/admin only (editors keep only the delete takedown,
