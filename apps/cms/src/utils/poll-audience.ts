@@ -9,9 +9,11 @@ import { MODERATORS, hasRole } from "../bootstrap/roles";
  * Pure functions, no Strapi runtime. The DB-facing side lives in
  * `poll-access.ts` (viewer and poll loaders); the `poll-visibility` read
  * policy and the vote/results controllers load their inputs there and
- * decide HERE. Every future poll consumer (DA01 documentId routing, WD04
- * batched results, notifications, digests, dashboard widgets) must decide
- * through this module as well.
+ * decide HERE (the documentId addressing of vote/results, DA01, too:
+ * loadPublishedPoll resolves the address, canSeePoll decides). Every future
+ * poll consumer (WD04 batched results, notifications, digests, dashboard
+ * widgets) must decide through this module as well, and joins the reviewed
+ * inventory in poll-exposure.test.ts.
  *
  * Rules, evaluated on the PUBLISHED poll row:
  *   - A poll is company-wide unless it is TARGETED. Company-wide polls are

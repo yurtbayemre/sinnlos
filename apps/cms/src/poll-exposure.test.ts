@@ -25,7 +25,8 @@ import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restr
  *     before a write (FX20), so none can fan one out,
  *   - comments, reactions and read receipts cannot anchor on a poll,
  *   - live (SSE) pings: poll and poll-vote writes emit nothing, and the
- *     pings carry no content anyway (utils/live-events.ts),
+ *     pings carry no content anyway (utils/live-events.ts; the channels of
+ *     utils/live-contract.ts are the comment targets, no poll among them),
  *   - e-mail digests read no polls,
  *   - relations: only poll-vote.poll points at a poll (no content-API
  *     route, and the relation guard trusts no source into polls), and the
@@ -134,7 +135,14 @@ describe("poll consumers (inventory)", () => {
   });
 
   it("has no notification, digest, cron or live-event module among them", () => {
-    for (const prefix of ["api/notification/", "digest/", "cron/", "utils/live-events", "utils/notification-source"]) {
+    for (const prefix of [
+      "api/notification/",
+      "digest/",
+      "cron/",
+      "utils/live-events",
+      "utils/live-contract",
+      "utils/notification-source",
+    ]) {
       expect(consumers.filter((file) => file.startsWith(prefix)), prefix).toEqual([]);
     }
   });
