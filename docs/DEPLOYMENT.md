@@ -1238,7 +1238,9 @@ change:
   reactions of all cards in one batch (10 cards: 11 cms requests instead of
   20), shows the cards first and the sections as they arrive, and keeps
   them fresh with one poll interval and one live subscription request per
-  page. A comment on one card refreshes that card only.
+  page. A comment on one card refreshes that card only. With live events
+  off (`LIVE_EVENTS_DISABLED=1`, or `DEMO_MODE`), returning to the tab
+  still refreshes every section at once, in one batch.
 
 **A normal deploy of cms and web together with `infra/deploy.sh`.** No
 schema, permission, env, route or edge change; `infra/diagnostics/prod-perm-diff.sql`

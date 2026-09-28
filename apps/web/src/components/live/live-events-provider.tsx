@@ -65,11 +65,20 @@ export type LiveContextValue = {
   /** Adds a listener on `channel`; returns its removal. */
   register: (channel: LiveChannel, listener: Listener) => () => void;
   healthy: boolean;
+  /**
+   * Whether a push stream runs at all: false with live events off
+   * (LIVE_EVENTS_DISABLED=1, DEMO_MODE) and outside a provider. Without
+   * one, no hello runs a catch-up when the tab comes back, so an owner
+   * refetches on visibility regain itself (the page-level comment
+   * provider does, WD04).
+   */
+  streaming: boolean;
 };
 
 const LiveEventsContext = createContext<LiveContextValue>({
   register: () => () => {},
   healthy: false,
+  streaming: false,
 });
 
 const HEARTBEAT_TIMEOUT_MS = 65_000;
@@ -432,7 +441,7 @@ export function LiveEventsProvider({
   );
 
   return (
-    <LiveEventsContext.Provider value={{ register, healthy }}>
+    <LiveEventsContext.Provider value={{ register, healthy, streaming: enabled }}>
       {children}
     </LiveEventsContext.Provider>
   );
@@ -441,7 +450,8 @@ export function LiveEventsProvider({
 /**
  * The provider itself, for a component that listens on many channels at
  * once (the page-level comment provider, WD04): `register` per channel,
- * `healthy` for its poll interval.
+ * `healthy` for its poll interval, `streaming` for its own tab-regain
+ * refetch when there is no stream.
  */
 export function useLiveRegistry(): LiveContextValue {
   return useContext(LiveEventsContext);

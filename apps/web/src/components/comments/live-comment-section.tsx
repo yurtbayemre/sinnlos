@@ -37,7 +37,11 @@ import { ReactionBar } from "@/components/reactions/reaction-bar";
  *     instead of one per section.
  * No visibilitychange refetch per section any more: regaining the tab
  * reopens the stream, whose hello runs the provider's catch-up for every
- * channel (one batch), and without a stream the next poll tick covers.
+ * channel (one batch), and when the stream cannot open the next poll tick
+ * covers. With live events off (LIVE_EVENTS_DISABLED=1, DEMO_MODE, or no
+ * LiveEventsProvider) there is no stream and no hello, so the page-level
+ * owner refetches every section on regain itself, in one batch
+ * (refreshOnTabRegain).
  *
  * Each section still refetches itself right after its own mutations
  * (comment, delete, reaction), and every snapshot, batched or its own, goes
@@ -167,6 +171,32 @@ export function createSectionsRefresher(
   };
 }
 
+/** The slice of `document` refreshOnTabRegain uses (a fake in tests). */
+export interface TabDocument {
+  readonly visibilityState: DocumentVisibilityState;
+  addEventListener(type: "visibilitychange", listener: () => void): void;
+  removeEventListener(type: "visibilitychange", listener: () => void): void;
+}
+
+/**
+ * Without a push stream (`streaming` false), refetches every section as
+ * soon as the tab is visible again: `refreshAll` queues one batched load.
+ * With a stream it does nothing, because the stream's hello already runs
+ * that catch-up and a second one would fetch twice. Returns the removal.
+ */
+export function refreshOnTabRegain(
+  doc: TabDocument,
+  streaming: boolean,
+  refreshAll: () => void,
+): () => void {
+  if (streaming) return () => {};
+  const onVisibility = () => {
+    if (doc.visibilityState === "visible") refreshAll();
+  };
+  doc.addEventListener("visibilitychange", onVisibility);
+  return () => doc.removeEventListener("visibilitychange", onVisibility);
+}
+
 type CommentSectionsRegistry = {
   /** Registers a mounted section on its channel; returns its removal. */
   register: (channel: ContentChannel, section: SectionHandle) => () => void;
@@ -176,7 +206,7 @@ const CommentSectionsContext = createContext<CommentSectionsRegistry | null>(nul
 
 /** The page-level owner of every comment section below it (WD04). */
 export function CommentSectionsProvider({ children }: { children: React.ReactNode }) {
-  const { register: registerChannel, healthy } = useLiveRegistry();
+  const { register: registerChannel, healthy, streaming } = useLiveRegistry();
   const [refresher] = useState(() =>
     createSectionsRefresher((targets) => getCommentSections(targets)),
   );
@@ -194,6 +224,12 @@ export function CommentSectionsProvider({ children }: { children: React.ReactNod
     );
     return () => clearInterval(id);
   }, [refresher, healthy]);
+
+  // Tab regain with live events off: no hello catch-up, so refetch here.
+  useEffect(
+    () => refreshOnTabRegain(document, streaming, () => refresher.refreshAll()),
+    [refresher, streaming],
+  );
 
   const registry = useMemo<CommentSectionsRegistry>(
     () => ({

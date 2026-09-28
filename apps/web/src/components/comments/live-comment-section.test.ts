@@ -12,6 +12,10 @@ import type { CommentSectionData } from "@/lib/reaction-summary";
  * are single-flight, every section applies a snapshot through its own
  * sequence guard (FX28), and a failed load keeps the current state.
  *
+ * refreshOnTabRegain: with live events off (no stream, no hello catch-up)
+ * a regained tab refetches every section at once, in one batch; with a
+ * stream it adds nothing (no double fetch).
+ *
  * The Server Action module is stubbed; the refresher gets its load function
  * injected.
  */
@@ -23,7 +27,7 @@ vi.mock("@/lib/comment-actions", () => ({
   toggleReaction: vi.fn(),
 }));
 
-const { createSectionsRefresher } = await import("./live-comment-section");
+const { createSectionsRefresher, refreshOnTabRegain } = await import("./live-comment-section");
 
 const DELAY = 50;
 const target = (n: number): CommentTarget => ({ type: "announcement", documentId: `doc-${n}` });
@@ -198,5 +202,78 @@ describe("createSectionsRefresher", () => {
     refresher.stop();
     await vi.advanceTimersByTimeAsync(DELAY * 2);
     expect(load).not.toHaveBeenCalled();
+  });
+});
+
+/** A document stand-in: its visibility and the visibilitychange listeners. */
+function fakeDocument(initial: DocumentVisibilityState = "visible") {
+  const listeners = new Set<() => void>();
+  const doc = {
+    visibilityState: initial,
+    addEventListener: vi.fn((_type: "visibilitychange", listener: () => void) => {
+      listeners.add(listener);
+    }),
+    removeEventListener: vi.fn((_type: "visibilitychange", listener: () => void) => {
+      listeners.delete(listener);
+    }),
+  };
+  /** The browser hiding or showing the tab. */
+  const show = (state: DocumentVisibilityState) => {
+    doc.visibilityState = state;
+    for (const listener of [...listeners]) listener();
+  };
+  return { doc, show, listeners };
+}
+
+describe("refreshOnTabRegain", () => {
+  it("without a stream: refetches every section once when the tab is visible again", () => {
+    const { doc, show } = fakeDocument();
+    const refreshAll = vi.fn();
+    refreshOnTabRegain(doc, false, refreshAll);
+
+    show("hidden");
+    expect(refreshAll).not.toHaveBeenCalled();
+    show("visible");
+    expect(refreshAll).toHaveBeenCalledOnce();
+  });
+
+  it("without a stream: the regain is one batched load for all sections", async () => {
+    const load = vi.fn<Load>(async (targets) => targets.map((t) => snapshot(t.documentId ?? "")));
+    const refresher = createSectionsRefresher(load, DELAY);
+    const cards = [1, 2, 3].map((n) => section(n));
+    cards.forEach((card, i) => refresher.add(channel(i + 1), card.handle));
+    const { doc, show } = fakeDocument();
+    refreshOnTabRegain(doc, false, () => refresher.refreshAll());
+
+    show("hidden");
+    show("visible");
+    await vi.advanceTimersByTimeAsync(DELAY);
+    expect(load).toHaveBeenCalledTimes(1);
+    expect(load.mock.calls[0]?.[0]).toEqual([target(1), target(2), target(3)]);
+    for (const card of cards) expect(card.applied).toHaveLength(1);
+  });
+
+  it("with a stream: adds no listener (the stream's hello runs the catch-up)", () => {
+    const { doc, show } = fakeDocument();
+    const refreshAll = vi.fn();
+    const remove = refreshOnTabRegain(doc, true, refreshAll);
+
+    expect(doc.addEventListener).not.toHaveBeenCalled();
+    show("hidden");
+    show("visible");
+    expect(refreshAll).not.toHaveBeenCalled();
+    remove();
+  });
+
+  it("removes its listener on cleanup", () => {
+    const { doc, show, listeners } = fakeDocument();
+    const refreshAll = vi.fn();
+    const remove = refreshOnTabRegain(doc, false, refreshAll);
+    expect(listeners.size).toBe(1);
+
+    remove();
+    expect(listeners.size).toBe(0);
+    show("visible");
+    expect(refreshAll).not.toHaveBeenCalled();
   });
 });
