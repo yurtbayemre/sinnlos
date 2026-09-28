@@ -855,7 +855,10 @@ admin panel and the content API:
 - **Reactions accept the desired state (FX28, cms part).** `POST
   /api/reactions` takes an optional `reacted` (true or false), so a double
   click or a retry can no longer add and remove the same reaction. Without
-  it the request toggles, as before.
+  it the request toggles, as before. Removing a reaction (`reacted: false`
+  or the toggle) now removes every copy of it: two requests at the same
+  moment can still store the same reaction twice, and before only one copy
+  was removed, so the reaction stayed.
 - **Deleting an ad on SQLite (local development)** no longer hangs for about
   60 s and now removes the ad's images right away (FX45). Postgres was not
   affected.

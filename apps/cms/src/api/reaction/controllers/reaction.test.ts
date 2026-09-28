@@ -12,6 +12,8 @@ import reactionController from "./reaction";
  *   2. unresolvable and invisible targets answer the byte-identical 400;
  *   3. the lookup where: target anchor + emoji + the caller as author;
  *   4. without `reacted`: the toggle (existing → delete, else create);
+ *      a remove deletes EVERY matching row (duplicates from concurrent
+ *      creates, no unique index: DA04), with one live ping;
  *   5. with `reacted` (FX28, the desired end state): true + existing is a
  *      no-op answering the reaction, true + none creates, false + existing
  *      deletes, false + none is a no-op; a repeated request never flips;
@@ -87,6 +89,12 @@ function setup(body: unknown, reactions: Row[] = []) {
     findOne: vi.fn(async ({ where }: { where: Where }) => {
       calls.push({ uid, op: "findOne", where });
       return (tables[uid] ?? []).find((row) => matches(row, where)) ?? null;
+    }),
+    findMany: vi.fn(async ({ where }: { where: Where }) => {
+      calls.push({ uid, op: "findMany", where });
+      return (tables[uid] ?? [])
+        .filter((row) => matches(row, where))
+        .map((row) => ({ id: row.id }));
     }),
     delete: vi.fn(async ({ where }: { where: Where }) => {
       calls.push({ uid, op: "delete", where });
@@ -271,6 +279,38 @@ describe("reaction create: desired end state `reacted` (FX28)", () => {
     ]);
     expect(writes(calls)).toHaveLength(1);
     expect(result).toEqual({ data: null, toggled: "removed" });
+    expect(mocks.superCreate).not.toHaveBeenCalled();
+  });
+
+  it("false + duplicates: deletes every matching row, pings once (DA04)", async () => {
+    // Two concurrent creates can both miss the lookup and insert the same
+    // reaction twice (no unique index). "false" must leave none behind; the
+    // toggle's remove shares the branch.
+    const duplicate: Row = { ...mine(), id: 71, documentId: "r1r2r3r4r5r6r7r8r9s0s1s2" };
+    const others: Row[] = [
+      { ...mine("thumbsup"), id: 72 },
+      { ...mine(), id: 73, author: 6 },
+    ];
+    for (const reacted of [false, undefined]) {
+      mocks.emitLiveEvent.mockClear();
+      const { calls, tables, result } = await post(
+        { data: { ...target, emoji: "heart", reacted } },
+        [mine(), duplicate, ...others],
+      );
+      expect(writes(calls), String(reacted)).toEqual([
+        { uid: REACTION_UID, op: "delete", where: { id: 70 } },
+        { uid: REACTION_UID, op: "delete", where: { id: 71 } },
+      ]);
+      expect(calls.find((c) => c.op === "findMany")?.where).toEqual({
+        targetType: "announcement",
+        targetDocumentId: ANN_DOC,
+        emoji: "heart",
+        author: MEMBER.id,
+      });
+      expect(tables[REACTION_UID]).toEqual(others);
+      expect(mocks.emitLiveEvent).toHaveBeenCalledTimes(1);
+      expect(result).toEqual({ data: null, toggled: "removed" });
+    }
     expect(mocks.superCreate).not.toHaveBeenCalled();
   });
 

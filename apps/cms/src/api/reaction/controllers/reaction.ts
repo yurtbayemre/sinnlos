@@ -27,6 +27,8 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
    * publishing an announcement/wiki page in Strapi 5 is delete+recreate, so
    * an id-anchored reaction detaches on the next "Publish" (issue #11, see
    * utils/comment-target.ts). Author is server-authoritative (§5.21).
+   * A remove deletes every matching row: concurrent creates can leave
+   * duplicates (no unique index, DA04).
    * Only the documentId anchor is accepted (#25 removed the targetId
    * migration bridge): a targetId-only payload is answered with 400.
    *
@@ -79,9 +81,23 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     }
 
     if (existing) {
-      await strapi.db.query(REACTION_UID).delete({
-        where: { id: existing.id },
+      // Delete EVERY matching row, not just the one found above: reactions
+      // have no unique index (DA04), so two concurrent creates can both miss
+      // the lookup and insert a duplicate. "false" (and the toggle's remove)
+      // must leave none behind. One entity-manager delete per row, not
+      // deleteMany: the latter is a bare query-builder delete in
+      // @strapi/database 5.55.1 and would leave the author link rows behind.
+      const rows: Array<{ id: number }> = await strapi.db.query(REACTION_UID).findMany({
+        where: {
+          ...targetMatchWhere(targetType, targetDocumentId),
+          emoji,
+          author: user.id,
+        },
+        select: ["id"],
       });
+      for (const row of rows) {
+        await strapi.db.query(REACTION_UID).delete({ where: { id: row.id } });
+      }
       // Belt-and-braces alongside the global DB-lifecycle subscriber:
       // whether afterDelete fires for db.query deletes is version-
       // sensitive, and the 100ms emit batch dedupes the channel anyway.
