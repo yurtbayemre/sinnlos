@@ -35,7 +35,7 @@
  * `entraManagedFields` (the four, or [] for everyone else) so the web can
  * disable the inputs. The Entra columns themselves never leave /api/me.
  */
-import { GUEST } from "../../../bootstrap/roles";
+import { GUEST, hasRole, type RoleType as IntranetRoleType } from "../../../bootstrap/roles";
 import { ENTRA_MANAGED_PROFILE_FIELDS, isEntraBound } from "../../../entra/profile";
 import {
   SENSITIVE_USER_FIELDS,
@@ -75,7 +75,7 @@ export const DIGEST_FIELDS = [
 ] as const satisfies readonly (typeof EDITABLE_FIELDS)[number][];
 
 /** Role types whose digest opt-ins updateMe ignores. */
-export const DIGEST_IGNORED_ROLE_TYPES: readonly string[] = [GUEST];
+export const DIGEST_IGNORED_ROLE_TYPES: readonly IntranetRoleType[] = [GUEST];
 
 /**
  * Free-text fields of PUT /api/me (FX26): trimmed, `null` clears them, and
@@ -295,7 +295,7 @@ export default {
 
     const raw = ctx.request.body;
     const body = isRow(raw) && isRow(raw.data) ? raw.data : isRow(raw) ? raw : {};
-    const ignoresDigest = DIGEST_IGNORED_ROLE_TYPES.includes(user.role?.type ?? "");
+    const ignoresDigest = hasRole(user, DIGEST_IGNORED_ROLE_TYPES);
     // Entra owns these four for a bound caller (read fresh, not from the JWT).
     const own: unknown = await strapi.db.query(USER_UID).findOne({
       where: { id: user.id },

@@ -1,11 +1,11 @@
 import { factories } from "@strapi/strapi";
 
+import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import {
-  hasAudienceBypass,
   isAnnouncementVisible,
   type AnnouncementTargeting,
 } from "../../../utils/announcement-audience";
-import { loadUserScope } from "../../../utils/visible-ids";
+import { loadUserScope, toAudienceScope } from "../../../utils/visible-ids";
 
 /**
  * Acknowledgements follow the poll-vote integrity pattern: the caller can
@@ -42,10 +42,11 @@ interface AckCaller {
  * May the caller see the target (FX27)? An announcement only its audience
  * may acknowledge, decided by the rules every announcement read uses
  * (utils/announcement-audience.ts: admin_role/editor bypass, else department
- * AND team (member or lead) AND role over whatever is set). The scope mapping
- * is the one of target-visibility.ts toAudienceScope. Any other target type
- * fails closed: documents have no requiresAck yet, and would need their own
- * visibility rules here once they do.
+ * AND team (member or lead) AND role over whatever is set), with the bypass
+ * decided by hasRole and the scope mapped by toAudienceScope, as every
+ * announcement read does (PL01). Any other target type fails closed:
+ * documents have no requiresAck yet, and would need their own visibility
+ * rules here once they do.
  */
 async function isInAudience(
   strapi: unknown,
@@ -54,13 +55,8 @@ async function isInAudience(
   user: AckCaller,
 ): Promise<boolean> {
   if (targetType !== "announcement") return false;
-  if (hasAudienceBypass(user.role?.type)) return true;
-  const scope = await loadUserScope(strapi, user.id);
-  return isAnnouncementVisible(target, {
-    roleId: scope.roleId,
-    departmentId: scope.departmentId,
-    teamIds: [...scope.teamIds, ...scope.ledTeamIds],
-  });
+  if (hasRole(user, MODERATORS)) return true;
+  return isAnnouncementVisible(target, toAudienceScope(await loadUserScope(strapi, user.id)));
 }
 
 export default factories.createCoreController(
