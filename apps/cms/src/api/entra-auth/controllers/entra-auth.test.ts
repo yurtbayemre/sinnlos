@@ -25,7 +25,10 @@ const ENV = {
 const ID_TOKEN = "header.payload-ID-TOKEN-VALUE.signature";
 const ACCESS_TOKEN = "graph-ACCESS-TOKEN-VALUE";
 
-function context(headers: Record<string, string>, body: unknown): ExchangeContext & { notFound: ReturnType<typeof vi.fn> } {
+function context(
+  headers: Record<string, string>,
+  body: unknown,
+): ExchangeContext & { notFound: ReturnType<typeof vi.fn> } {
   const ctx = {
     get: (field: string) => headers[field.toLowerCase()] ?? "",
     request: { body },
@@ -33,7 +36,10 @@ function context(headers: Record<string, string>, body: unknown): ExchangeContex
     body: undefined as unknown,
     notFound: vi.fn(() => {
       ctx.status = 404;
-      ctx.body = { data: null, error: { status: 404, name: "NotFoundError", message: "Not Found" } };
+      ctx.body = {
+        data: null,
+        error: { status: 404, name: "NotFoundError", message: "Not Found" },
+      };
     }),
   };
   return ctx;
@@ -57,7 +63,9 @@ function host(): ExchangeHost & { log: { info: LogSpy; warn: LogSpy; error: LogS
   };
 }
 
-const deps = (result: IdTokenResult | Error): ExchangeDeps & { verify: ReturnType<typeof vi.fn> } => ({
+const deps = (
+  result: IdTokenResult | Error,
+): ExchangeDeps & { verify: ReturnType<typeof vi.fn> } => ({
   verify: vi.fn(async () => {
     if (result instanceof Error) throw result;
     return result;
@@ -91,7 +99,12 @@ describe("POST /api/auth/entra/exchange: front door", () => {
   });
 
   it("refuses a missing or wrong secret with 401 unauthorized before looking at the token", async () => {
-    for (const headers of [{}, { "x-entra-exchange-secret": "" }, { "x-entra-exchange-secret": `${SECRET}x` }, { "x-entra-exchange-secret": SECRET.toUpperCase() }]) {
+    for (const headers of [
+      {},
+      { "x-entra-exchange-secret": "" },
+      { "x-entra-exchange-secret": `${SECRET}x` },
+      { "x-entra-exchange-secret": SECRET.toUpperCase() },
+    ]) {
       const ctx = context(headers, goodBody);
       const d = deps(new Error("must not verify"));
       const h = host();
@@ -105,7 +118,18 @@ describe("POST /api/auth/entra/exchange: front door", () => {
 
   it("refuses a malformed body with 400 invalid", async () => {
     const big = "x".repeat(MAX_TOKEN_BYTES + 1);
-    for (const body of [undefined, null, "text", [], {}, { idToken: ID_TOKEN }, { idToken: 1, accessToken: ACCESS_TOKEN }, { idToken: "", accessToken: ACCESS_TOKEN }, { idToken: big, accessToken: ACCESS_TOKEN }, { idToken: ID_TOKEN, accessToken: big }]) {
+    for (const body of [
+      undefined,
+      null,
+      "text",
+      [],
+      {},
+      { idToken: ID_TOKEN },
+      { idToken: 1, accessToken: ACCESS_TOKEN },
+      { idToken: "", accessToken: ACCESS_TOKEN },
+      { idToken: big, accessToken: ACCESS_TOKEN },
+      { idToken: ID_TOKEN, accessToken: big },
+    ]) {
       const ctx = context(withSecret, body);
       await handleExchange(ctx, host(), ENV, deps(new Error("must not verify")));
       expect(ctx.status, JSON.stringify(body)?.slice(0, 40)).toBe(400);
@@ -116,13 +140,25 @@ describe("POST /api/auth/entra/exchange: front door", () => {
   it("answers 401 invalid for a rejected ID token and 503 when the keys are unreachable", async () => {
     const invalid = context(withSecret, goodBody);
     const h1 = host();
-    await handleExchange(invalid, h1, ENV, deps({ ok: false, reason: "invalid", detail: "ERR_JWT_EXPIRED" }));
+    await handleExchange(
+      invalid,
+      h1,
+      ENV,
+      deps({ ok: false, reason: "invalid", detail: "ERR_JWT_EXPIRED" }),
+    );
     expect([invalid.status, invalid.body]).toEqual([401, { error: "invalid" }]);
-    expect(h1.log.warn).toHaveBeenCalledWith("[entra] exchange refused: invalid ID token (ERR_JWT_EXPIRED)");
+    expect(h1.log.warn).toHaveBeenCalledWith(
+      "[entra] exchange refused: invalid ID token (ERR_JWT_EXPIRED)",
+    );
 
     const down = context(withSecret, goodBody);
     const h2 = host();
-    await handleExchange(down, h2, ENV, deps({ ok: false, reason: "unavailable", detail: "jwks TypeError" }));
+    await handleExchange(
+      down,
+      h2,
+      ENV,
+      deps({ ok: false, reason: "unavailable", detail: "jwks TypeError" }),
+    );
     expect([down.status, down.body]).toEqual([503, { error: "unavailable" }]);
     for (const h of [h1, h2]) {
       expect(logText(h)).not.toContain("ID-TOKEN-VALUE");
@@ -141,7 +177,12 @@ describe("POST /api/auth/entra/exchange: front door", () => {
   it("answers 503 when the env turned invalid after the boot", async () => {
     const ctx = context(withSecret, goodBody);
     const h = host();
-    await handleExchange(ctx, h, { ...ENV, MS_TENANT_ID: "common" }, deps(new Error("must not verify")));
+    await handleExchange(
+      ctx,
+      h,
+      { ...ENV, MS_TENANT_ID: "common" },
+      deps(new Error("must not verify")),
+    );
     expect([ctx.status, ctx.body]).toEqual([503, { error: "unavailable" }]);
     expect(h.log.error.mock.calls[0][0]).toMatch(/MS_TENANT_ID/);
   });
@@ -162,7 +203,10 @@ describe("secretMatches / readTokens", () => {
 
   it("accepts two tokens up to 16 KB each", () => {
     const max = "y".repeat(MAX_TOKEN_BYTES);
-    expect(readTokens({ idToken: max, accessToken: max, extra: 1 })).toEqual({ idToken: max, accessToken: max });
+    expect(readTokens({ idToken: max, accessToken: max, extra: 1 })).toEqual({
+      idToken: max,
+      accessToken: max,
+    });
     // Counted in bytes: 8192 two-byte characters are 16 KB.
     expect(readTokens({ idToken: "ä".repeat(8192), accessToken: "a" })).not.toBeNull();
     expect(readTokens({ idToken: "ä".repeat(8193), accessToken: "a" })).toBeNull();

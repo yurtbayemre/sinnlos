@@ -101,13 +101,21 @@ describe("ensureEntraIdentityIndex on SQLite (@strapi/database 5.55.1)", () => {
     engine = await openSqliteEngine([userModel()], { schema: "sync" });
     await ensureEntraIdentityIndex(hostFor(engine).host, { entraEnabled: true });
     const users = engine.db.query(USER);
-    await users.create({ data: { username: "a", documentId: "d1", entraTenantId: TENANT, microsoftOid: OID } });
+    await users.create({
+      data: { username: "a", documentId: "d1", entraTenantId: TENANT, microsoftOid: OID },
+    });
     await expect(
-      users.create({ data: { username: "b", documentId: "d2", entraTenantId: TENANT, microsoftOid: OID } }),
+      users.create({
+        data: { username: "b", documentId: "d2", entraTenantId: TENANT, microsoftOid: OID },
+      }),
     ).rejects.toThrow(/UNIQUE/i);
     // Legacy rows (an oid, no tenant) never collide, and neither do local rows.
-    await users.create({ data: { username: "c", documentId: "d3", entraTenantId: null, microsoftOid: OID } });
-    await users.create({ data: { username: "d", documentId: "d4", entraTenantId: null, microsoftOid: OID } });
+    await users.create({
+      data: { username: "c", documentId: "d3", entraTenantId: null, microsoftOid: OID },
+    });
+    await users.create({
+      data: { username: "d", documentId: "d4", entraTenantId: null, microsoftOid: OID },
+    });
     await users.create({ data: { username: "e", documentId: "d5" } });
     await users.create({ data: { username: "f", documentId: "d6", entraTenantId: TENANT } });
     await users.create({ data: { username: "g", documentId: "d7", entraTenantId: TENANT } });
@@ -135,7 +143,9 @@ describe("ensureEntraIdentityIndex on SQLite (@strapi/database 5.55.1)", () => {
     const log = { info: vi.fn(), error: vi.fn() };
     const broken: IdentityIndexHost = {
       db: {
-        connection: { raw: async () => Promise.reject(new Error("permission denied for table up_users")) },
+        connection: {
+          raw: async () => Promise.reject(new Error("permission denied for table up_users")),
+        },
         dialect: { client: "postgres" },
         getSchemaName: () => "public",
         metadata: { get: () => ({ tableName: "up_users", attributes: {} }) },
@@ -163,7 +173,10 @@ describe("ensureEntraIdentityIndex on SQLite (@strapi/database 5.55.1)", () => {
         metadata: {
           get: () => ({
             tableName: "users_x",
-            attributes: { entraTenantId: { columnName: "tid_x" }, microsoftOid: { columnName: "oid_x" } },
+            attributes: {
+              entraTenantId: { columnName: "tid_x" },
+              microsoftOid: { columnName: "oid_x" },
+            },
           }),
         },
       },

@@ -48,7 +48,9 @@ const privilegeRank = (role: RoleType) => ROLE_PRIVILEGE_ORDER.indexOf(role);
 
 /** Spec H, rules 1-5 in order. */
 export function resolveEntraRole(input: RoleResolutionInput): RoleResolution {
-  const external: boolean | "unknown" = input.me.ok ? input.me.data.userType === "Guest" : "unknown";
+  const external: boolean | "unknown" = input.me.ok
+    ? input.me.data.userType === "Guest"
+    : "unknown";
   const groupsConfigured = input.groupRules.length > 0;
 
   const matches: { role: RoleType; via: string }[] = [];
@@ -61,7 +63,8 @@ export function resolveEntraRole(input: RoleResolutionInput): RoleResolution {
   if (input.groups?.ok) {
     const memberOf = new Set(input.groups.data.map((id) => id.toLowerCase()));
     for (const rule of input.groupRules) {
-      if (memberOf.has(rule.groupId)) matches.push({ role: rule.role, via: `group:${rule.groupId}` });
+      if (memberOf.has(rule.groupId))
+        matches.push({ role: rule.role, via: `group:${rule.groupId}` });
     }
   }
 
@@ -128,7 +131,8 @@ export function decideRoleWrite(
     if (result.kind === "unknown") {
       return { kind: "reject", status: 503, error: "unavailable", audit: "-" };
     }
-    if (result.kind === "deny") return { kind: "reject", status: 403, error: "not_assigned", audit: "-" };
+    if (result.kind === "deny")
+      return { kind: "reject", status: 403, error: "not_assigned", audit: "-" };
     if (mode === "on") return { kind: "create", role: result.role, audit: `new->${result.role}` };
     // Dry-run never grants more than member from Entra; guest stays guest.
     const capped = capForDryRun(result.role);
@@ -154,7 +158,8 @@ export function decideRoleWrite(
     };
   }
   if (result.kind === "unknown") return { kind: "keep", audit: "keep" };
-  if (result.kind === "deny") return { kind: "reject", status: 403, error: "not_assigned", audit: "keep" };
+  if (result.kind === "deny")
+    return { kind: "reject", status: 403, error: "not_assigned", audit: "keep" };
 
   const target = result.role;
   if (mode === "dry-run") {

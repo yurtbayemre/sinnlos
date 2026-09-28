@@ -151,7 +151,9 @@ describe("parseEntraConfig: enabled", () => {
 
   it("refuses an exchange secret under 32 characters or a template placeholder", () => {
     for (const secret of [undefined, "", "x".repeat(31), ` ${"y".repeat(30)} `]) {
-      expect(refused(enabled({ ENTRA_EXCHANGE_SECRET: secret }))).toEqual(["ENTRA_EXCHANGE_SECRET"]);
+      expect(refused(enabled({ ENTRA_EXCHANGE_SECRET: secret }))).toEqual([
+        "ENTRA_EXCHANGE_SECRET",
+      ]);
     }
     expect(refused(enabled({ ENTRA_EXCHANGE_SECRET: `change-me-${"z".repeat(30)}` }))).toEqual([
       "ENTRA_EXCHANGE_SECRET",
@@ -239,7 +241,9 @@ describe("helpers", () => {
   });
 
   it("lets one group map to several roles and dedupes the group ids", () => {
-    const parsed = parseGroupRoles(` editor:${GROUP(1)} ,, admin_role:${GROUP(1)}, editor:${GROUP(1)} `);
+    const parsed = parseGroupRoles(
+      ` editor:${GROUP(1)} ,, admin_role:${GROUP(1)}, editor:${GROUP(1)} `,
+    );
     expect(parsed).toEqual({
       ok: true,
       rules: [

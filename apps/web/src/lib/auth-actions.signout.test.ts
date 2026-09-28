@@ -23,7 +23,9 @@ vi.mock("@/auth", () => ({
 vi.mock("@/lib/session", () => ({
   getSession: async () => (state.provider ? { provider: state.provider, user: { id: 1 } } : null),
 }));
-vi.mock("next/headers", () => ({ headers: async () => new Headers({ host: "intranet.example.test" }) }));
+vi.mock("next/headers", () => ({
+  headers: async () => new Headers({ host: "intranet.example.test" }),
+}));
 vi.mock("next/navigation", () => ({
   redirect: (url: string) => {
     state.redirects.push(url);
@@ -71,7 +73,9 @@ describe("signOutAction", () => {
     expect(`${target.origin}${target.pathname}`).toBe(
       `https://login.microsoftonline.com/${TENANT}/oauth2/v2.0/logout`,
     );
-    expect(target.searchParams.get("post_logout_redirect_uri")).toBe("https://intranet.example.test/sign-in");
+    expect(target.searchParams.get("post_logout_redirect_uri")).toBe(
+      "https://intranet.example.test/sign-in",
+    );
     expect(state.signOuts).toBe(1);
   });
 

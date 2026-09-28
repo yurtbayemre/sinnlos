@@ -707,7 +707,9 @@ describe("Entra-owned profile fields (D-ENTRA-01)", () => {
   it("PUT keeps every field editable for a local (unbound) user", async () => {
     const stub = stubStrapi({ self: { microsoftOid: "legacy-oid" } });
     vi.stubGlobal("strapi", stub.strapi);
-    await profile.updateMe(makeCtx(caller("member"), { data: { displayName: "Sam C.", phone: "1" } }).ctx);
+    await profile.updateMe(
+      makeCtx(caller("member"), { data: { displayName: "Sam C.", phone: "1" } }).ctx,
+    );
     expect(stub.updateCalls[0].data).toEqual({ displayName: "Sam C.", phone: "1" });
   });
 });

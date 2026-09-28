@@ -72,7 +72,11 @@ describe("resolveEntraRole (spec H)", () => {
         via: [`group:${EDITORS}`],
       });
       expect(
-        resolve({ claimRoles: [...claimRoles, "Intranet.Admin"], groupRules: rules, groups: groupsOk(EDITORS) }),
+        resolve({
+          claimRoles: [...claimRoles, "Intranet.Admin"],
+          groupRules: rules,
+          groups: groupsOk(EDITORS),
+        }),
       ).toEqual({ kind: "role", role: "admin_role", via: ["approle:Intranet.Admin"] });
     }
     // Every role outranks the ones after it.
@@ -90,7 +94,11 @@ describe("resolveEntraRole (spec H)", () => {
   it("lists every source of the winning role", () => {
     const twice = [...rules, { role: "editor" as RoleType, groupId: NESTED }];
     expect(
-      resolve({ claimRoles: ["Intranet.Editor"], groupRules: twice, groups: groupsOk(EDITORS, NESTED) }),
+      resolve({
+        claimRoles: ["Intranet.Editor"],
+        groupRules: twice,
+        groups: groupsOk(EDITORS, NESTED),
+      }),
     ).toEqual({
       kind: "role",
       role: "editor",
@@ -99,7 +107,9 @@ describe("resolveEntraRole (spec H)", () => {
   });
 
   it("never matches by name: an app role or group name that is not configured does nothing", () => {
-    expect(resolve({ claimRoles: ["Intranet-Admins", "intranet.admin", "Admin", "admin_role"] })).toEqual({
+    expect(
+      resolve({ claimRoles: ["Intranet-Admins", "intranet.admin", "Admin", "admin_role"] }),
+    ).toEqual({
       kind: "role",
       role: "member",
       via: ["default"],
@@ -113,7 +123,11 @@ describe("resolveEntraRole (spec H)", () => {
   });
 
   it("answers unknown when a configured group check failed, even with an app role", () => {
-    for (const groups of [{ ok: false, reason: 429 } as const, { ok: false, reason: "timeout" } as const, null]) {
+    for (const groups of [
+      { ok: false, reason: 429 } as const,
+      { ok: false, reason: "timeout" } as const,
+      null,
+    ]) {
       expect(resolve({ claimRoles: ["Intranet.Member"], groupRules: rules, groups })).toEqual({
         kind: "unknown",
       });
@@ -152,7 +166,10 @@ describe("resolveEntraRole (spec H)", () => {
 });
 
 const newUser = null;
-const entraUser = (roleType: string | null, entraAppliedRole: string | null = roleType): UserRoleState => ({
+const entraUser = (
+  roleType: string | null,
+  entraAppliedRole: string | null = roleType,
+): UserRoleState => ({
   roleType,
   roleSource: "entra",
   entraAppliedRole,
@@ -179,7 +196,11 @@ describe("decideRoleWrite (spec I): new users", () => {
 
   it("creates with the resolved role in mode on", () => {
     for (const r of ROLE_PRIVILEGE_ORDER) {
-      expect(decideRoleWrite(newUser, role(r), "on")).toEqual({ kind: "create", role: r, audit: `new->${r}` });
+      expect(decideRoleWrite(newUser, role(r), "on")).toEqual({
+        kind: "create",
+        role: r,
+        audit: `new->${r}`,
+      });
     }
   });
 

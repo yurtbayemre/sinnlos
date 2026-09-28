@@ -49,7 +49,9 @@ export class EntraWebConfigError extends Error {
     super(
       `[auth] ENTRA_ENABLED=1, but the Entra configuration is invalid: ${problems
         .map(({ variable, message }) => `${variable} ${message}`)
-        .join("; ")}. Fix the web env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
+        .join(
+          "; ",
+        )}. Fix the web env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
     );
     this.name = "EntraWebConfigError";
     this.variables = problems.map(({ variable }) => variable);

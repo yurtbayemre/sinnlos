@@ -38,7 +38,9 @@ export async function handleExchange(
     settings = parseEntraConfig(env);
   } catch (err) {
     // register() refuses such a boot; only an env changed at runtime lands here.
-    host.log.error(`[entra] exchange failed: ${err instanceof EntraConfigError ? err.message : "invalid configuration"}`);
+    host.log.error(
+      `[entra] exchange failed: ${err instanceof EntraConfigError ? err.message : "invalid configuration"}`,
+    );
     ctx.status = 503;
     ctx.body = { error: "unavailable" };
     return;
@@ -57,7 +59,9 @@ export async function handleExchange(
     ctx.status = outcome.status;
     ctx.body = outcome.body;
   } catch (err) {
-    host.log.error(`[entra] exchange failed: ${err instanceof Error ? err.message : "unknown error"}`);
+    host.log.error(
+      `[entra] exchange failed: ${err instanceof Error ? err.message : "unknown error"}`,
+    );
     ctx.status = 503;
     ctx.body = { error: "unavailable" };
   }

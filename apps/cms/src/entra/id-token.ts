@@ -24,13 +24,7 @@
  * Tests pass `keys` (e.g. jose's createLocalJWKSet) instead; that seam is a
  * function argument only, nothing in the env can redirect the key source.
  */
-import {
-  createRemoteJWKSet,
-  errors,
-  jwtVerify,
-  type JWTPayload,
-  type JWTVerifyGetKey,
-} from "jose";
+import { createRemoteJWKSet, errors, jwtVerify, type JWTPayload, type JWTVerifyGetKey } from "jose";
 import { GUID_PATTERN, entraIssuer, entraJwksUrl } from "./config";
 
 /** The verified claims the exchange uses. */
@@ -98,7 +92,10 @@ function classifyingResolver(keys: JWTVerifyGetKey): JWTVerifyGetKey {
     try {
       return await keys(header, token);
     } catch (err) {
-      if (err instanceof errors.JWKSNoMatchingKey || err instanceof errors.JWKSMultipleMatchingKeys) {
+      if (
+        err instanceof errors.JWKSNoMatchingKey ||
+        err instanceof errors.JWKSMultipleMatchingKeys
+      ) {
         throw err;
       }
       throw new KeySetUnavailable(errorCode(err));

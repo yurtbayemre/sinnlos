@@ -94,7 +94,10 @@ interface Query {
   findOne(params: Record<string, unknown>): Promise<Row | null>;
   findMany(params: Record<string, unknown>): Promise<Row[]>;
   create(params: { data: Record<string, unknown> }): Promise<Row>;
-  update(params: { where: Record<string, unknown>; data: Record<string, unknown> }): Promise<Row | null>;
+  update(params: {
+    where: Record<string, unknown>;
+    data: Record<string, unknown>;
+  }): Promise<Row | null>;
 }
 
 /** The slice of the Strapi instance the exchange uses. */
@@ -128,10 +131,10 @@ export interface ExchangeRequest {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const fail = (
-  status: 400 | 401 | 403 | 409 | 503,
-  error: ExchangeError,
-): ExchangeOutcome => ({ status, body: { error } });
+const fail = (status: 400 | 401 | 403 | 409 | 503, error: ExchangeError): ExchangeOutcome => ({
+  status,
+  body: { error },
+});
 
 /** Constant-time comparison of the header with the configured secret. */
 export function secretMatches(header: unknown, secret: string): boolean {
@@ -146,7 +149,9 @@ export function readTokens(body: unknown): { idToken: string; accessToken: strin
   if (!isRecord(body)) return null;
   const { idToken, accessToken } = body;
   const ok = (value: unknown): value is string =>
-    typeof value === "string" && value !== "" && Buffer.byteLength(value, "utf8") <= MAX_TOKEN_BYTES;
+    typeof value === "string" &&
+    value !== "" &&
+    Buffer.byteLength(value, "utf8") <= MAX_TOKEN_BYTES;
   return ok(idToken) && ok(accessToken) ? { idToken, accessToken } : null;
 }
 
@@ -155,7 +160,9 @@ function jwtExp(jwt: string): number | null {
   const payload = jwt.split(".")[1];
   if (!payload) return null;
   try {
-    const exp = (JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown }).exp;
+    const exp = (
+      JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as { exp?: unknown }
+    ).exp;
     return typeof exp === "number" && Number.isFinite(exp) ? exp : null;
   } catch {
     return null;
@@ -202,11 +209,14 @@ export async function runEntraExchange(
     return fail(400, "invalid");
   }
 
-  const verify = deps.verify ?? ((token: string, config: EntraConfig) => verifyIdToken(token, config));
+  const verify =
+    deps.verify ?? ((token: string, config: EntraConfig) => verifyIdToken(token, config));
   const verified = await verify(tokens.idToken, settings);
   if (verified.ok === false) {
     if (verified.reason === "unavailable") {
-      strapi.log.error(`[entra] exchange failed: the tenant's signing keys are unreachable (${verified.detail})`);
+      strapi.log.error(
+        `[entra] exchange failed: the tenant's signing keys are unreachable (${verified.detail})`,
+      );
       return fail(503, "unavailable");
     }
     strapi.log.warn(`[entra] exchange refused: invalid ID token (${verified.detail})`);
@@ -220,17 +230,28 @@ export async function runEntraExchange(
     settings.groupIds.length > 0
       ? checkMemberGroups(tokens.accessToken, settings.groupIds, graphOptions)
       : Promise.resolve(null),
-    settings.syncManager ? fetchManagerOid(tokens.accessToken, graphOptions) : Promise.resolve(null),
+    settings.syncManager
+      ? fetchManagerOid(tokens.accessToken, graphOptions)
+      : Promise.resolve(null),
   ]);
   const graphLine = `me:${describeGraphResult(me)},groups:${describeGraphResult(groups)},manager:${describeGraphResult(manager)}`;
   const oidShort = claims.oid.slice(0, 8);
 
   if (me.ok === true && me.data.id !== claims.oid) {
-    strapi.log.warn(`[entra] exchange refused: Graph /me is not the token's user (oid=${oidShort})`);
+    strapi.log.warn(
+      `[entra] exchange refused: Graph /me is not the token's user (oid=${oidShort})`,
+    );
     return fail(401, "invalid");
   }
 
-  const audit: Audit = { user: "new", oid: oidShort, result: "unavailable", role: "-", via: "-", extra: [] };
+  const audit: Audit = {
+    user: "new",
+    oid: oidShort,
+    result: "unavailable",
+    role: "-",
+    via: "-",
+    extra: [],
+  };
   const writeAudit = () => {
     const extra = audit.extra.length > 0 ? ` ${audit.extra.join(" ")}` : "";
     strapi.log.info(
@@ -300,7 +321,8 @@ async function provision(
 ): Promise<ProvisionOutcome> {
   const users = strapi.db.query(USER_UID);
   const identity = { entraTenantId: claims.tid, microsoftOid: claims.oid };
-  const findIdentity = () => users.findOne({ where: identity, select: USER_SELECT, populate: USER_POPULATE });
+  const findIdentity = () =>
+    users.findOne({ where: identity, select: USER_SELECT, populate: USER_POPULATE });
   const resolution = resolveEntraRole({
     claimRoles: claims.roles,
     me: graph.me,
@@ -316,7 +338,9 @@ async function provision(
   if (!user) {
     const email = newIdentityEmail(me, claims);
     if (email === null) {
-      strapi.log.warn(`[entra] exchange refused: no e-mail address for a new identity (oid=${audit.oid})`);
+      strapi.log.warn(
+        `[entra] exchange refused: no e-mail address for a new identity (oid=${audit.oid})`,
+      );
       audit.result = "unavailable";
       return { kind: "refused", status: 503, error: "unavailable" };
     }
@@ -333,7 +357,8 @@ async function provision(
       audit.result = decision.status === 403 ? "denied" : "unavailable";
       return { kind: "refused", status: decision.status, error: decision.error };
     }
-    if (decision.kind !== "create") throw new Error(`unexpected role decision ${decision.kind} for a new user`);
+    if (decision.kind !== "create")
+      throw new Error(`unexpected role decision ${decision.kind} for a new user`);
     const roleId = await roleIdOf(strapi, decision.role);
     if (roleId === null) {
       strapi.log.error(`[entra] role ${decision.role} does not exist; refusing the sign-in`);
@@ -362,7 +387,9 @@ async function provision(
     } catch (err) {
       // A concurrent first sign-in of the same person won the unique index.
       if (!(await findIdentity())) throw err;
-      strapi.log.info(`[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`);
+      strapi.log.info(
+        `[entra] concurrent first sign-in (oid=${audit.oid}): continuing with the existing row`,
+      );
     }
     user = await findIdentity();
     if (!user) throw new Error("the provisioned user row could not be read back");
@@ -394,7 +421,9 @@ async function provision(
       if (decision.data.role !== undefined) {
         const roleId = await roleIdOf(strapi, decision.data.role);
         if (roleId === null) {
-          strapi.log.error(`[entra] role ${decision.data.role} does not exist; refusing the sign-in`);
+          strapi.log.error(
+            `[entra] role ${decision.data.role} does not exist; refusing the sign-in`,
+          );
           audit.result = "unavailable";
           return { kind: "refused", status: 503, error: "unavailable" };
         }
@@ -420,7 +449,11 @@ async function provision(
     audit.extra.push(`manager=${await syncManager(strapi, user, claims, graph.manager, mayWrite)}`);
   }
 
-  const final = (await users.findOne({ where: { id: user.id }, select: ["id", "username", "email", "displayName"] })) ?? user;
+  const final =
+    (await users.findOne({
+      where: { id: user.id },
+      select: ["id", "username", "email", "displayName"],
+    })) ?? user;
   return {
     kind: "ok",
     user: {
@@ -518,11 +551,15 @@ async function syncManager(
   let outcome = "keep";
   try {
     if (decision.kind === "clear") {
-      const hasManager = relationId(user.manager) !== null || stringOf(user.entraManagerOid) !== null;
+      const hasManager =
+        relationId(user.manager) !== null || stringOf(user.entraManagerOid) !== null;
       if (!hasManager) outcome = "unchanged";
       else if (!mayWrite) outcome = "would clear";
       else {
-        await users.update({ where: { id: user.id }, data: { manager: null, entraManagerOid: null } });
+        await users.update({
+          where: { id: user.id },
+          data: { manager: null, entraManagerOid: null },
+        });
         outcome = "cleared";
       }
     } else if (decision.kind === "set") {
@@ -532,7 +569,8 @@ async function syncManager(
       });
       const bossId = boss && boss.id !== user.id ? boss.id : null;
       const unchanged =
-        stringOf(user.entraManagerOid) === decision.managerOid && relationId(user.manager) === bossId;
+        stringOf(user.entraManagerOid) === decision.managerOid &&
+        relationId(user.manager) === bossId;
       if (unchanged) outcome = bossId === null ? "pending" : "unchanged";
       else if (!mayWrite) outcome = bossId === null ? "would pend" : "would set";
       else {
@@ -562,7 +600,9 @@ async function syncManager(
     }
     if (linked > 0) return `${outcome} backfilled=${linked}`;
   } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: manager back-fill failed: ${(err as Error).message}`);
+    strapi.log.error(
+      `[entra] user=${user.id}: manager back-fill failed: ${(err as Error).message}`,
+    );
   }
   return outcome;
 }

@@ -101,7 +101,12 @@ export function newIdentityEmail(
   me: GraphMe | null,
   claims: { email: string | null; preferredUsername: string | null },
 ): string | null {
-  const candidates = [me?.mail ?? null, claims.email, me?.userPrincipalName ?? null, claims.preferredUsername];
+  const candidates = [
+    me?.mail ?? null,
+    claims.email,
+    me?.userPrincipalName ?? null,
+    claims.preferredUsername,
+  ];
   for (const candidate of candidates) {
     const value = clean(candidate);
     if (value !== null) return value.toLowerCase();

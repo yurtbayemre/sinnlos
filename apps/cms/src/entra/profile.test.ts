@@ -110,7 +110,10 @@ describe("department", () => {
   it("clears on an empty value", () => {
     expect(departmentName(me({ department: null }))).toBeNull();
     expect(departmentName(me({ department: "   " }))).toBeNull();
-    expect(pickDepartment(null, [{ documentId: "d1" }])).toEqual({ kind: "clear", reason: "empty" });
+    expect(pickDepartment(null, [{ documentId: "d1" }])).toEqual({
+      kind: "clear",
+      reason: "empty",
+    });
     expect(departmentName(me({ department: "  IT Engineering " }))).toBe("IT Engineering");
   });
 
@@ -131,7 +134,10 @@ describe("department", () => {
 
 describe("manager", () => {
   it("sets on 200, clears on 404, keeps on any failure", () => {
-    expect(decideManagerSync({ ok: true, data: MANAGER })).toEqual({ kind: "set", managerOid: MANAGER });
+    expect(decideManagerSync({ ok: true, data: MANAGER })).toEqual({
+      kind: "set",
+      managerOid: MANAGER,
+    });
     expect(decideManagerSync({ ok: true, data: null })).toEqual({ kind: "clear" });
     for (const reason of [403, 429, 500, "timeout", "network", "malformed"] as const) {
       expect(decideManagerSync({ ok: false, reason })).toEqual({ kind: "keep" });
@@ -147,14 +153,25 @@ describe("manager", () => {
       { id: 4, entraTenantId: null, entraManagerOid: MANAGER },
       { id: 5, entraTenantId: TENANT, entraManagerOid: null },
     ];
-    expect(rows.filter((row) => matchWhere("plugin::users-permissions.user", row, where)).map((r) => r.id)).toEqual([1]);
+    expect(
+      rows
+        .filter((row) => matchWhere("plugin::users-permissions.user", row, where))
+        .map((r) => r.id),
+    ).toEqual([1]);
   });
 });
 
 describe("isEntraBound", () => {
   it("is true only with a tenant id", () => {
     expect(isEntraBound({ entraTenantId: TENANT })).toBe(true);
-    for (const row of [{ entraTenantId: null }, { entraTenantId: "" }, { entraTenantId: " " }, {}, null, undefined]) {
+    for (const row of [
+      { entraTenantId: null },
+      { entraTenantId: "" },
+      { entraTenantId: " " },
+      {},
+      null,
+      undefined,
+    ]) {
       expect(isEntraBound(row)).toBe(false);
     }
   });

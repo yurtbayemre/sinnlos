@@ -107,7 +107,9 @@ export class EntraConfigError extends Error {
     super(
       `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: ${issues
         .map(({ variable, message }) => `${variable} ${message}`)
-        .join("; ")}. Fix infra/.env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
+        .join(
+          "; ",
+        )}. Fix infra/.env (docs/DEPLOYMENT.md, "Microsoft Entra ID sign-in"), or unset ENTRA_ENABLED.`,
     );
     this.name = "EntraConfigError";
     this.issues = issues;
@@ -149,7 +151,13 @@ export function parseGroupRoles(
     if (entry === "") continue;
     const colon = entry.indexOf(":");
     const role = colon < 0 ? entry : entry.slice(0, colon).trim();
-    const groupId = colon < 0 ? "" : entry.slice(colon + 1).trim().toLowerCase();
+    const groupId =
+      colon < 0
+        ? ""
+        : entry
+            .slice(colon + 1)
+            .trim()
+            .toLowerCase();
     if (!isRoleType(role)) {
       return {
         ok: false,
@@ -170,11 +178,7 @@ export function parseGroupRoles(
   return { ok: true, rules, groupIds };
 }
 
-function oneOf<T extends string>(
-  values: readonly T[],
-  value: string,
-  fallback: T,
-): T | null {
+function oneOf<T extends string>(values: readonly T[], value: string, fallback: T): T | null {
   if (value === "") return fallback;
   return (values as readonly string[]).includes(value) ? (value as T) : null;
 }

@@ -30,7 +30,9 @@ let jwks: { keys: JWK[] };
 beforeAll(async () => {
   signing = await generateKeyPair("RS256");
   stranger = await generateKeyPair("RS256");
-  jwks = { keys: [{ ...(await exportJWK(signing.publicKey)), kid: KID, alg: "RS256", use: "sig" }] };
+  jwks = {
+    keys: [{ ...(await exportJWK(signing.publicKey)), kid: KID, alg: "RS256", use: "sig" }],
+  };
 });
 
 afterEach(() => {
@@ -57,7 +59,11 @@ function claims(overrides: JWTPayload = {}): JWTPayload {
   };
 }
 
-async function sign(payload: JWTPayload, key: KeyPair["privateKey"] = signing.privateKey, kid = KID) {
+async function sign(
+  payload: JWTPayload,
+  key: KeyPair["privateKey"] = signing.privateKey,
+  kid = KID,
+) {
   return new SignJWT(payload).setProtectedHeader({ alg: "RS256", kid, typ: "JWT" }).sign(key);
 }
 
@@ -89,10 +95,19 @@ describe("verifyIdToken", () => {
   const invalid: [string, () => Promise<string>][] = [
     ["a wrong audience", () => sign(claims({ aud: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }))],
     ["a wrong issuer", () => sign(claims({ iss: entraIssuer(OTHER_TENANT) }))],
-    ["the multi-tenant issuer", () => sign(claims({ iss: "https://login.microsoftonline.com/common/v2.0" }))],
+    [
+      "the multi-tenant issuer",
+      () => sign(claims({ iss: "https://login.microsoftonline.com/common/v2.0" })),
+    ],
     ["a tid of another tenant", () => sign(claims({ tid: OTHER_TENANT }))],
-    ["an expired token", () => sign(claims({ iat: nowSec() - 7200, nbf: nowSec() - 7200, exp: nowSec() - 3600 }))],
-    ["an iat older than 10 minutes", () => sign(claims({ iat: nowSec() - 16 * 60, nbf: nowSec() - 16 * 60 }))],
+    [
+      "an expired token",
+      () => sign(claims({ iat: nowSec() - 7200, nbf: nowSec() - 7200, exp: nowSec() - 3600 })),
+    ],
+    [
+      "an iat older than 10 minutes",
+      () => sign(claims({ iat: nowSec() - 16 * 60, nbf: nowSec() - 16 * 60 })),
+    ],
     ["a missing oid", () => sign(claims({ oid: undefined }))],
     ["a missing tid", () => sign(claims({ tid: undefined }))],
     ["a missing iat", () => sign(claims({ iat: undefined }))],
@@ -110,7 +125,9 @@ describe("verifyIdToken", () => {
       "a tampered payload",
       async () => {
         const [header, , signature] = (await sign(claims())).split(".");
-        const payload = Buffer.from(JSON.stringify(claims({ oid: OID.replace("0f", "1f") }))).toString("base64url");
+        const payload = Buffer.from(
+          JSON.stringify(claims({ oid: OID.replace("0f", "1f") })),
+        ).toString("base64url");
         return `${header}.${payload}.${signature}`;
       },
     ],
@@ -156,8 +173,12 @@ describe("verifyIdToken against the tenant's key set", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     const token = await sign(claims({ iss: entraIssuer(t), tid: t }));
-    expect(await verifyIdToken(token, { tenantId: t, clientId: CLIENT })).toMatchObject({ ok: true });
-    expect(await verifyIdToken(token, { tenantId: t, clientId: CLIENT })).toMatchObject({ ok: true });
+    expect(await verifyIdToken(token, { tenantId: t, clientId: CLIENT })).toMatchObject({
+      ok: true,
+    });
+    expect(await verifyIdToken(token, { tenantId: t, clientId: CLIENT })).toMatchObject({
+      ok: true,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 

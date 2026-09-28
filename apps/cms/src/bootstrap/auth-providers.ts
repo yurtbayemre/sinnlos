@@ -55,7 +55,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
 /** The grant store after the sync. Pure. */
-export function nextGrantConfig(current: GrantConfig | null | undefined, localEnabled: boolean): GrantConfig {
+export function nextGrantConfig(
+  current: GrantConfig | null | undefined,
+  localEnabled: boolean,
+): GrantConfig {
   const grant = isRecord(current) ? current : {};
   const email: ProviderGrant = isRecord(grant.email) ? grant.email : {};
   const microsoft: ProviderGrant = isRecord(grant.microsoft) ? grant.microsoft : {};

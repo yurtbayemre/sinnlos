@@ -586,9 +586,15 @@ describe("route → policy matrix (S01)", async () => {
     // cms's own ID-token verification, src/entra/provision.ts); a caller
     // has no Strapi JWT before it. Any other auth:false route is a hole.
     const publicRoutes = [...routes.values()].filter((e) => e.config.auth === false);
-    expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual([
-      { action: "api::entra-auth.entra-auth.exchange", method: "POST", path: "/auth/entra/exchange" },
-    ]);
+    expect(publicRoutes.map((e) => ({ action: e.action, method: e.method, path: e.path }))).toEqual(
+      [
+        {
+          action: "api::entra-auth.entra-auth.exchange",
+          method: "POST",
+          path: "/auth/entra/exchange",
+        },
+      ],
+    );
   });
 
   describe("(b) every granted core action is gated", () => {
@@ -737,7 +743,8 @@ describe("route → policy matrix (S01)", async () => {
         "plugin::users-permissions.auth.resetPassword",
       ]);
       const granted = new Set(computeDesiredGrants().map((grant) => grant.action));
-      for (const action of REVOKED_PERMISSIONS.public) expect(granted.has(action), action).toBe(false);
+      for (const action of REVOKED_PERMISSIONS.public)
+        expect(granted.has(action), action).toBe(false);
     });
   });
 

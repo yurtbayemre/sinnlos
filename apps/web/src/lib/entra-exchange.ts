@@ -133,12 +133,13 @@ export async function exchangeEntraSignIn(
   };
 
   let result = await attempt();
-  const retryable = (r: Attempt) =>
-    r.kind === "network" || RETRY_STATUSES.has(r.response.status);
+  const retryable = (r: Attempt) => r.kind === "network" || RETRY_STATUSES.has(r.response.status);
   if (retryable(result)) {
     // Release the failed answer; never wait for it.
     if (result.kind === "response") void result.response.body?.cancel().catch(() => undefined);
-    await new Promise((resolve) => setTimeout(resolve, options.retryDelayMs ?? EXCHANGE_RETRY_DELAY_MS));
+    await new Promise((resolve) =>
+      setTimeout(resolve, options.retryDelayMs ?? EXCHANGE_RETRY_DELAY_MS),
+    );
     result = await attempt();
   }
 

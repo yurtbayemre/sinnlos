@@ -302,7 +302,9 @@ const exchangeOk = () => ({
 });
 
 const graphCalls = () =>
-  fetchMock.mock.calls.filter(([input]) => String(input instanceof Request ? input.url : input).includes("graph.microsoft.com"));
+  fetchMock.mock.calls.filter(([input]) =>
+    String(input instanceof Request ? input.url : input).includes("graph.microsoft.com"),
+  );
 
 beforeEach(() => {
   stub.headers = new Headers();
@@ -412,7 +414,9 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
   it("asks the tenant's authorize endpoint for openid profile email User.Read, never offline_access", async () => {
     const mod = await load(ENTRA_ENV);
     const { authorize } = await signInMicrosoft(mod);
-    expect(`${authorize.origin}${authorize.pathname}`).toBe(`${LOGIN}/${TENANT}/oauth2/v2.0/authorize`);
+    expect(`${authorize.origin}${authorize.pathname}`).toBe(
+      `${LOGIN}/${TENANT}/oauth2/v2.0/authorize`,
+    );
     expect(authorize.searchParams.get("client_id")).toBe(CLIENT);
     expect(authorize.searchParams.get("scope")).toBe("openid profile email User.Read");
     expect(authorize.searchParams.get("code_challenge")).toBeTruthy();
@@ -424,7 +428,9 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
   it("adds User.Read.All with ENTRA_SYNC_MANAGER=1 (the cms reads /me/manager)", async () => {
     const mod = await load({ ...ENTRA_ENV, ENTRA_SYNC_MANAGER: "1" });
     const { authorize } = await signInMicrosoft(mod);
-    expect(authorize.searchParams.get("scope")).toBe("openid profile email User.Read User.Read.All");
+    expect(authorize.searchParams.get("scope")).toBe(
+      "openid profile email User.Read User.Read.All",
+    );
   });
 
   it("exchanges the tokens by POST, hands the result to the jwt callback, and never fetches a photo", async () => {
@@ -475,7 +481,9 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
     }
     expect(stub.exchangeCalls).toHaveLength(0);
     // The provider's tenant rewrite never fetched the other tenant's metadata.
-    const urls = fetchMock.mock.calls.map(([input]) => String(input instanceof Request ? input.url : input));
+    const urls = fetchMock.mock.calls.map(([input]) =>
+      String(input instanceof Request ? input.url : input),
+    );
     expect(urls.some((url) => url.includes(OTHER_TENANT))).toBe(false);
   });
 
@@ -485,7 +493,9 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
     const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { jar, callback } = await signInMicrosoft(mod);
-      expect(callback.headers.get("location")).toBe("http://localhost:3000/sign-in?error=entra_tenant");
+      expect(callback.headers.get("location")).toBe(
+        "http://localhost:3000/sign-in?error=entra_tenant",
+      );
       expect(jar.names()).not.toContain("authjs.session-token");
     } finally {
       consoleWarn.mockRestore();
@@ -494,36 +504,62 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
   });
 
   const refusals: [string, string, ExchangeAnswer[], number][] = [
-    ["409 account_exists", "entra_account_exists", [{ status: 409, body: { error: "account_exists" } }], 1],
-    ["403 not_assigned", "entra_not_assigned", [{ status: 403, body: { error: "not_assigned" } }], 1],
+    [
+      "409 account_exists",
+      "entra_account_exists",
+      [{ status: 409, body: { error: "account_exists" } }],
+      1,
+    ],
+    [
+      "403 not_assigned",
+      "entra_not_assigned",
+      [{ status: 403, body: { error: "not_assigned" } }],
+      1,
+    ],
     ["403 blocked", "entra_blocked", [{ status: 403, body: { error: "blocked" } }], 1],
     ["401 invalid", "entra_invalid", [{ status: 401, body: { error: "invalid" } }], 1],
-    ["401 unauthorized (secret mismatch)", "entra_unavailable", [{ status: 401, body: { error: "unauthorized" } }], 1],
-    ["404 (Entra off in the cms)", "entra_unavailable", [{ status: 404, body: { data: null, error: { status: 404 } } }], 1],
+    [
+      "401 unauthorized (secret mismatch)",
+      "entra_unavailable",
+      [{ status: 401, body: { error: "unauthorized" } }],
+      1,
+    ],
+    [
+      "404 (Entra off in the cms)",
+      "entra_unavailable",
+      [{ status: 404, body: { data: null, error: { status: 404 } } }],
+      1,
+    ],
     ["500, not retried", "entra_unavailable", [{ status: 500, body: {} }], 1],
     ["503 twice", "entra_unavailable", [{ status: 503, body: { error: "unavailable" } }], 2],
     ["a network error twice", "entra_unavailable", ["network-error"], 2],
   ];
 
-  it.each(refusals)("maps %s to /sign-in?error=%s without a session", async (_name, code, answers, calls) => {
-    const mod = await load(ENTRA_ENV);
-    stub.exchangeAnswers = answers;
-    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn")].map((spy) =>
-      spy.mockImplementation(() => {}),
-    );
-    try {
-      const { jar, callback } = await signInMicrosoft(mod);
-      expect(callback.headers.get("location")).toBe(`http://localhost:3000/sign-in?error=${code}`);
-      expect(jar.names()).not.toContain("authjs.session-token");
-      // No log line carries a token.
-      const logged = JSON.stringify(quiet.map((spy) => spy.mock.calls));
-      expect(logged).not.toContain(stub.accessToken);
-      expect(logged).not.toContain(stub.idToken.split(".")[1]!);
-    } finally {
-      for (const spy of quiet) spy.mockRestore();
-    }
-    expect(stub.exchangeCalls).toHaveLength(calls);
-  }, 15_000);
+  it.each(refusals)(
+    "maps %s to /sign-in?error=%s without a session",
+    async (_name, code, answers, calls) => {
+      const mod = await load(ENTRA_ENV);
+      stub.exchangeAnswers = answers;
+      const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn")].map((spy) =>
+        spy.mockImplementation(() => {}),
+      );
+      try {
+        const { jar, callback } = await signInMicrosoft(mod);
+        expect(callback.headers.get("location")).toBe(
+          `http://localhost:3000/sign-in?error=${code}`,
+        );
+        expect(jar.names()).not.toContain("authjs.session-token");
+        // No log line carries a token.
+        const logged = JSON.stringify(quiet.map((spy) => spy.mock.calls));
+        expect(logged).not.toContain(stub.accessToken);
+        expect(logged).not.toContain(stub.idToken.split(".")[1]!);
+      } finally {
+        for (const spy of quiet) spy.mockRestore();
+      }
+      expect(stub.exchangeCalls).toHaveLength(calls);
+    },
+    15_000,
+  );
 
   it("retries once after a 503 and signs in when the second attempt succeeds", async () => {
     const mod = await load(ENTRA_ENV);
@@ -551,9 +587,16 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
     const profile = mod.entraProfile({
       ...idClaims({ email: "Grace.Entra@Example.test" }),
     } as unknown as Parameters<typeof mod.entraProfile>[0]);
-    expect(profile).toEqual({ id: OID, name: "Grace Entra", email: "grace.entra@example.test", image: null });
+    expect(profile).toEqual({
+      id: OID,
+      name: "Grace Entra",
+      email: "grace.entra@example.test",
+      image: null,
+    });
     expect(
-      mod.entraProfile({ ...idClaims({ name: undefined }) } as unknown as Parameters<typeof mod.entraProfile>[0]),
+      mod.entraProfile({ ...idClaims({ name: undefined }) } as unknown as Parameters<
+        typeof mod.entraProfile
+      >[0]),
     ).toEqual({ id: OID, name: "Grace@Example.test", email: "grace@example.test", image: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
@@ -561,18 +604,22 @@ describe("Microsoft sign-in (D-ENTRA-01) through @auth/core", () => {
   it("offers no Microsoft provider while ENTRA_ENABLED is not 1, whatever AUTH_MICROSOFT_* holds", async () => {
     for (const flag of [undefined, "0", "true"]) {
       const mod = await load({ ...ENTRA_ENV, ENTRA_ENABLED: flag });
-      const res = await mod.handlers.GET(new NextRequest("http://localhost:3000/api/auth/providers"));
+      const res = await mod.handlers.GET(
+        new NextRequest("http://localhost:3000/api/auth/providers"),
+      );
       expect(Object.keys((await res.json()) as object)).toEqual(["local"]);
     }
     const entraOnly = await load({ ...ENTRA_ENV, AUTH_LOCAL_ENABLED: undefined });
-    const res = await entraOnly.handlers.GET(new NextRequest("http://localhost:3000/api/auth/providers"));
+    const res = await entraOnly.handlers.GET(
+      new NextRequest("http://localhost:3000/api/auth/providers"),
+    );
     expect(Object.keys((await res.json()) as object)).toEqual(["microsoft-entra-id"]);
   });
 
   it("refuses to load with ENTRA_ENABLED=1 and an invalid configuration, except during next build", async () => {
-    await expect(load({ ...ENTRA_ENV, AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: "common" })).rejects.toThrow(
-      /AUTH_MICROSOFT_ENTRA_ID_TENANT_ID/,
-    );
+    await expect(
+      load({ ...ENTRA_ENV, AUTH_MICROSOFT_ENTRA_ID_TENANT_ID: "common" }),
+    ).rejects.toThrow(/AUTH_MICROSOFT_ENTRA_ID_TENANT_ID/);
     await expect(load({ ...ENTRA_ENV, ENTRA_EXCHANGE_SECRET: "short" })).rejects.toThrow(
       /ENTRA_EXCHANGE_SECRET/,
     );

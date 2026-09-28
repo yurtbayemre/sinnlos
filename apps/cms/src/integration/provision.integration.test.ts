@@ -39,7 +39,8 @@ const TTL_SECONDS = 2 * 60 * 60;
 const RESTART_BUDGET = 180_000;
 
 /** A fake object id; the audit line shows its first 8 characters. */
-const oid = (n: number) => `${String(n).padStart(8, "0")}-0f0f-4000-8000-${String(n).padStart(12, "0")}`;
+const oid = (n: number) =>
+  `${String(n).padStart(8, "0")}-0f0f-4000-8000-${String(n).padStart(12, "0")}`;
 
 /** One person in the mock tenant: what Graph and the ID token say. */
 interface Persona {
@@ -107,7 +108,8 @@ const microsoft: OutboundHandler = async (request) => {
   if (url.hostname !== "graph.microsoft.com") return undefined;
   const token = (request.headers.get("authorization") ?? "").replace(/^Bearer /, "");
   const who = graphPersonas.get(token);
-  if (!who) return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
+  if (!who)
+    return Response.json({ error: { code: "InvalidAuthenticationToken" } }, { status: 401 });
   if (url.pathname === "/v1.0/me") {
     if (who.meStatus) return Response.json({ error: {} }, { status: who.meStatus });
     return Response.json({
@@ -126,7 +128,8 @@ const microsoft: OutboundHandler = async (request) => {
     if (who.manager === undefined || who.manager === null) {
       return Response.json({ error: { code: "Request_ResourceNotFound" } }, { status: 404 });
     }
-    if (typeof who.manager === "number") return Response.json({ error: {} }, { status: who.manager });
+    if (typeof who.manager === "number")
+      return Response.json({ error: {} }, { status: who.manager });
     return Response.json({ id: who.manager });
   }
   if (url.pathname === "/v1.0/me/checkMemberGroups") return Response.json({ value: [] });
@@ -175,7 +178,10 @@ async function signIn(
 /** Records the cms log lines of a running boot (the harness logs at error). */
 function captureLogs(t: TestStrapi): string[] {
   const lines: string[] = [];
-  const log = t.strapi.log as unknown as Record<"info" | "warn" | "error", (message: unknown) => unknown>;
+  const log = t.strapi.log as unknown as Record<
+    "info" | "warn" | "error",
+    (message: unknown) => unknown
+  >;
   for (const level of ["info", "warn", "error"] as const) {
     const original = log[level].bind(log);
     log[level] = (message: unknown) => {
@@ -204,15 +210,21 @@ const ENTRA_ENV = {
 async function userRow(t: TestStrapi, where: Record<string, unknown>): Promise<Row | null> {
   return t.strapi.db.query(USER).findOne({
     where,
-    populate: { role: { select: ["type"] }, department: { select: ["documentId"] }, manager: { select: ["id"] } },
+    populate: {
+      role: { select: ["type"] },
+      department: { select: ["documentId"] },
+      manager: { select: ["id"] },
+    },
   });
 }
 
 const relation = (value: unknown, key: "type" | "documentId" | "id") =>
-  value && typeof value === "object" ? (value as Record<string, unknown>)[key] ?? null : null;
+  value && typeof value === "object" ? ((value as Record<string, unknown>)[key] ?? null) : null;
 
 async function roleIdOf(t: TestStrapi, type: string): Promise<number> {
-  const role = await t.strapi.db.query("plugin::users-permissions.role").findOne({ where: { type } });
+  const role = await t.strapi.db
+    .query("plugin::users-permissions.role")
+    .findOne({ where: { type } });
   if (!role) throw new Error(`role ${type} missing`);
   return role.id;
 }
@@ -264,13 +276,19 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     const before = outboundCalls.length;
     const wrong = await signIn(t, persona(1), { secret: `${SECRET}-wrong` });
     expect([wrong.status, wrong.body]).toEqual([401, { error: "unauthorized" }]);
-    const none = await t.api<ExchangeBody>(null, EXCHANGE, { json: { idToken: "a", accessToken: "b" } });
+    const none = await t.api<ExchangeBody>(null, EXCHANGE, {
+      json: { idToken: "a", accessToken: "b" },
+    });
     expect([none.status, none.body]).toEqual([401, { error: "unauthorized" }]);
     expect(outboundCalls.length).toBe(before);
   });
 
   it("answers a case variant of the path with 404 (D-EDGE-01), secret or not", async () => {
-    for (const path of ["/api/Auth/entra/exchange", "/api/AUTH/entra/exchange", "/api/auth/../Auth/entra/exchange"]) {
+    for (const path of [
+      "/api/Auth/entra/exchange",
+      "/api/AUTH/entra/exchange",
+      "/api/auth/../Auth/entra/exchange",
+    ]) {
       const res = await signIn(t, persona(1), { path });
       expect(res.status, path).toBe(404);
     }
@@ -308,8 +326,13 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     const body = res.body;
     expect(Object.keys(body).sort()).toEqual(["expiresAt", "jwt", "user"]);
     expect(Object.keys(body.user ?? {}).sort()).toEqual(["displayName", "email", "id"]);
-    expect(body.user).toMatchObject({ displayName: "Ada Entra", email: "ada.entra@entra.integration.test" });
-    expect(res.text).not.toMatch(/password|resetPasswordToken|confirmationToken|microsoftOid|entraTenantId/);
+    expect(body.user).toMatchObject({
+      displayName: "Ada Entra",
+      email: "ada.entra@entra.integration.test",
+    });
+    expect(res.text).not.toMatch(
+      /password|resetPasswordToken|confirmationToken|microsoftOid|entraTenantId/,
+    );
 
     const claims = decodeJwt(body.jwt ?? "");
     expect(claims.id).toBe(body.user?.id);
@@ -351,12 +374,23 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(first.status).toBe(200);
     const again = await signIn(
       t,
-      persona(11, { name: "   ", jobTitle: null, officeLocation: null, phones: [], department: "No Such Department" }),
+      persona(11, {
+        name: "   ",
+        jobTitle: null,
+        officeLocation: null,
+        phones: [],
+        department: "No Such Department",
+      }),
     );
     expect(again.status).toBe(200);
     expect(again.body.user?.id).toBe(first.body.user?.id);
     const row = await userRow(t, { id: first.body.user?.id });
-    expect(row).toMatchObject({ displayName: "Entra Person 11", jobTitle: null, officeLocation: null, phone: null });
+    expect(row).toMatchObject({
+      displayName: "Entra Person 11",
+      jobTitle: null,
+      officeLocation: null,
+      phone: null,
+    });
     // A department that matches nothing is cleared (access does not survive a move).
     expect(row?.department ?? null).toBeNull();
     expect(await t.strapi.db.query(USER).count({ where: { microsoftOid: oid(11) } })).toBe(1);
@@ -364,11 +398,20 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
 
   it("creates exactly one row for concurrent first sign-ins", async () => {
     const who = persona(12);
-    const results = await Promise.all([signIn(t, who), signIn(t, who), signIn(t, who), signIn(t, who)]);
+    const results = await Promise.all([
+      signIn(t, who),
+      signIn(t, who),
+      signIn(t, who),
+      signIn(t, who),
+    ]);
     expect(results.map((r) => r.status)).toEqual([200, 200, 200, 200]);
     const ids = new Set(results.map((r) => r.body.user?.id));
     expect(ids.size).toBe(1);
-    expect(await t.strapi.db.query(USER).count({ where: { entraTenantId: TENANT, microsoftOid: who.oid } })).toBe(1);
+    expect(
+      await t.strapi.db
+        .query(USER)
+        .count({ where: { entraTenantId: TENANT, microsoftOid: who.oid } }),
+    ).toBe(1);
   });
 
   it("refuses a new identity whose e-mail a local account uses (409), then signs in as the admin-bound row", async () => {
@@ -388,7 +431,12 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(bound.body.user?.id).toBe(member.id);
     const row = await userRow(t, { id: member.id });
     // Provider, e-mail and (manual) role stay; the profile is Entra's now.
-    expect(row).toMatchObject({ provider: "local", email: member.email, roleSource: null, displayName: "Bound Member" });
+    expect(row).toMatchObject({
+      provider: "local",
+      email: member.email,
+      roleSource: null,
+      displayName: "Bound Member",
+    });
     expect(relation(row?.role, "type")).toBe("member");
   });
 
@@ -409,13 +457,18 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(res.body.user?.id).not.toBe(legacy.id);
     const created = await userRow(t, { id: res.body.user?.id });
     expect(relation(created?.role, "type")).toBe("member");
-    expect(await userRow(t, { id: legacy.id })).toMatchObject({ entraTenantId: null, microsoftOid: who.oid });
+    expect(await userRow(t, { id: legacy.id })).toMatchObject({
+      entraTenantId: null,
+      microsoftOid: who.oid,
+    });
   });
 
   it("refuses a blocked user (403 blocked)", async () => {
     const who = persona(15);
     const first = await signIn(t, who);
-    await t.strapi.db.query(USER).update({ where: { id: first.body.user?.id }, data: { blocked: true } });
+    await t.strapi.db
+      .query(USER)
+      .update({ where: { id: first.body.user?.id }, data: { blocked: true } });
     const res = await signIn(t, who);
     expect([res.status, res.body]).toEqual([403, { error: "blocked" }]);
   });
@@ -426,7 +479,9 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(await userRow(t, { microsoftOid: oid(16) })).toBeNull();
     const admitted = await signIn(t, persona(17, { userType: "Guest", roles: ["Intranet.Guest"] }));
     expect(admitted.status).toBe(200);
-    expect(relation((await userRow(t, { id: admitted.body.user?.id }))?.role, "type")).toBe("guest");
+    expect(relation((await userRow(t, { id: admitted.body.user?.id }))?.role, "type")).toBe(
+      "guest",
+    );
   });
 
   it("answers 503 for a new user without /me, and never changes an existing user's role on a Graph failure", async () => {
@@ -449,10 +504,15 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     const first = await signIn(t, who);
     const id = first.body.user?.id;
     expect((await signIn(t, { ...who, roles: ["Intranet.DepartmentHead"] })).status).toBe(200);
-    expect(await userRow(t, { id })).toMatchObject({ roleSource: "entra", entraAppliedRole: "department_head" });
+    expect(await userRow(t, { id })).toMatchObject({
+      roleSource: "entra",
+      entraAppliedRole: "department_head",
+    });
 
     // An admin re-roles the user: the next sign-in flips it to manual and keeps it.
-    await t.strapi.db.query(USER).update({ where: { id }, data: { role: await roleIdOf(t, "guest") } });
+    await t.strapi.db
+      .query(USER)
+      .update({ where: { id }, data: { role: await roleIdOf(t, "guest") } });
     await signIn(t, { ...who, roles: ["Intranet.Admin"] });
     let row = await userRow(t, { id });
     expect(row).toMatchObject({ roleSource: "manual", entraAppliedRole: null });
@@ -463,7 +523,9 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     expect(relation((await userRow(t, { id }))?.role, "type")).toBe("guest");
 
     // Hand-back: roleSource entra, no applied role.
-    await t.strapi.db.query(USER).update({ where: { id }, data: { roleSource: "entra", entraAppliedRole: null } });
+    await t.strapi.db
+      .query(USER)
+      .update({ where: { id }, data: { roleSource: "entra", entraAppliedRole: null } });
     await signIn(t, { ...who, roles: ["Intranet.Editor"] });
     row = await userRow(t, { id });
     expect(row).toMatchObject({ roleSource: "entra", entraAppliedRole: "editor" });
@@ -475,15 +537,25 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     const report = persona(31, { manager: boss.oid });
     const reportRes = await signIn(t, report);
     const reportId = reportRes.body.user?.id;
-    expect(await userRow(t, { id: reportId })).toMatchObject({ entraManagerOid: boss.oid, manager: null });
+    expect(await userRow(t, { id: reportId })).toMatchObject({
+      entraManagerOid: boss.oid,
+      manager: null,
+    });
 
     const bossRes = await signIn(t, boss);
-    expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(bossRes.body.user?.id);
+    expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(
+      bossRes.body.user?.id,
+    );
 
     await signIn(t, { ...report, manager: 403 });
-    expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(bossRes.body.user?.id);
+    expect(relation((await userRow(t, { id: reportId }))?.manager, "id")).toBe(
+      bossRes.body.user?.id,
+    );
     await signIn(t, { ...report, manager: null });
-    expect(await userRow(t, { id: reportId })).toMatchObject({ entraManagerOid: null, manager: null });
+    expect(await userRow(t, { id: reportId })).toMatchObject({
+      entraManagerOid: null,
+      manager: null,
+    });
   });
 
   it("locks the Entra-owned profile fields: PUT /api/me drops them, GET lists them", async () => {
@@ -492,7 +564,9 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
     type Me = { data?: Record<string, unknown> };
     const put = await t.api<Me>({ jwt }, "/api/me", {
       method: "PUT",
-      json: { data: { displayName: "Self-chosen", jobTitle: "Self-promoted", phone: "0", locale: "de" } },
+      json: {
+        data: { displayName: "Self-chosen", jobTitle: "Self-promoted", phone: "0", locale: "de" },
+      },
     });
     expect(put.status).toBe(200);
     expect(put.body.data).toMatchObject({
@@ -502,21 +576,39 @@ describe.each(testEngines())("Entra exchange (ENTRA_ENABLED=1, mode on) on %s", 
       locale: "de",
       entraManagedFields: ["displayName", "jobTitle", "phone", "officeLocation"],
     });
-    for (const key of ["microsoftOid", "entraTenantId", "roleSource", "entraAppliedRole", "entraManagerOid"]) {
+    for (const key of [
+      "microsoftOid",
+      "entraTenantId",
+      "roleSource",
+      "entraAppliedRole",
+      "entraManagerOid",
+    ]) {
       expect(put.body.data, key).not.toHaveProperty(key);
     }
     // Only locked fields: nothing to write, still 200.
-    const onlyLocked = await t.api<Me>({ jwt }, "/api/me", { method: "PUT", json: { data: { displayName: "x" } } });
+    const onlyLocked = await t.api<Me>({ jwt }, "/api/me", {
+      method: "PUT",
+      json: { data: { displayName: "x" } },
+    });
     expect([onlyLocked.status, onlyLocked.body.data?.displayName]).toEqual([200, "Locked Name"]);
     // A local account edits everything, as before.
-    const local = await t.api<Me>("editor", "/api/me", { method: "PUT", json: { data: { jobTitle: "Local Title" } } });
+    const local = await t.api<Me>("editor", "/api/me", {
+      method: "PUT",
+      json: { data: { jobTitle: "Local Title" } },
+    });
     expect(local.body.data).toMatchObject({ jobTitle: "Local Title", entraManagedFields: [] });
   });
 
   it("writes one audit line per exchange and never a token, JWT or secret", () => {
     const audit = logs.filter((line) => line.startsWith("info [entra] user="));
     expect(audit.length).toBeGreaterThan(10);
-    expect(audit.some((line) => /result=created role=new->editor via=approle:Intranet\.Editor mode=on graph=me:ok,groups:off,manager:ok/.test(line))).toBe(true);
+    expect(
+      audit.some((line) =>
+        /result=created role=new->editor via=approle:Intranet\.Editor mode=on graph=me:ok,groups:off,manager:ok/.test(
+          line,
+        ),
+      ),
+    ).toBe(true);
     expect(audit.some((line) => /result=conflict/.test(line))).toBe(true);
     expect(audit.some((line) => /result=denied/.test(line))).toBe(true);
     expect(audit.some((line) => /result=blocked/.test(line))).toBe(true);
@@ -552,7 +644,10 @@ describe.each(testEngines())("Entra off (the owner instance) on %s", (engine) =>
 
   it("answers the exchange with 404, whatever it is sent", async () => {
     for (const headers of [{}, { "x-entra-exchange-secret": SECRET }]) {
-      const res = await t.api(null, EXCHANGE, { json: { idToken: "x", accessToken: "y" }, headers });
+      const res = await t.api(null, EXCHANGE, {
+        json: { idToken: "x", accessToken: "y" },
+        headers,
+      });
       expect(res.status).toBe(404);
     }
   });
@@ -563,17 +658,23 @@ describe.each(testEngines())("Entra off (the owner instance) on %s", (engine) =>
         get(): Promise<Record<string, { enabled?: boolean; key?: string; secret?: string }>>;
       };
     };
-    const grant = await pluginStore.store({ type: "plugin", name: "users-permissions", key: "grant" }).get();
+    const grant = await pluginStore
+      .store({ type: "plugin", name: "users-permissions", key: "grant" })
+      .get();
     expect(grant.email?.enabled).toBe(true);
     expect(grant.microsoft).toMatchObject({ enabled: false, key: "", secret: "" });
     const connect = await t.api(null, "/api/connect/microsoft");
     expect(connect.status).toBeGreaterThanOrEqual(400);
     expect(connect.status).not.toBe(404);
-    expect(await t.login(t.fixtures.users.member.username, t.fixtures.users.member.password)).toMatch(/\./);
+    expect(
+      await t.login(t.fixtures.users.member.username, t.fixtures.users.member.password),
+    ).toMatch(/\./);
   });
 
   it("refuses the anonymous forgot/reset-password flow (403)", async () => {
-    const forgot = await t.api(null, "/api/auth/forgot-password", { json: { email: t.fixtures.users.member.email } });
+    const forgot = await t.api(null, "/api/auth/forgot-password", {
+      json: { email: t.fixtures.users.member.email },
+    });
     expect(forgot.status).toBe(403);
     const reset = await t.api(null, "/api/auth/reset-password", {
       json: { code: "x", password: "Secret123!", passwordConfirmation: "Secret123!" },
@@ -583,15 +684,19 @@ describe.each(testEngines())("Entra off (the owner instance) on %s", (engine) =>
 
   it("refuses microsoftOid (and jobTitle) on self-registration, takes displayName (FX14)", async () => {
     const register = (extra: Record<string, unknown>) =>
-      t.api<{ user?: { id: number }; error?: { message?: string } }>(null, "/api/auth/local/register", {
-        json: {
-          username: "it-register-probe",
-          email: "register.probe@integration.test",
-          password: "Secret123!",
-          displayName: "Probe",
-          ...extra,
+      t.api<{ user?: { id: number }; error?: { message?: string } }>(
+        null,
+        "/api/auth/local/register",
+        {
+          json: {
+            username: "it-register-probe",
+            email: "register.probe@integration.test",
+            password: "Secret123!",
+            displayName: "Probe",
+            ...extra,
+          },
         },
-      });
+      );
     // users-permissions refuses every key outside register.allowedFields.
     const withOid = await register({ microsoftOid: oid(99) });
     expect(withOid.status).toBe(400);
@@ -640,44 +745,54 @@ describe.each(testEngines())("dry-run, Entra-only and restarts on %s", (engine) 
     await database?.drop();
   });
 
-  it("keeps the index across a restart with a schema change; dry-run caps and never changes existing roles", async () => {
-    const t = await createTestStrapi({
-      database,
-      fixtures: false,
-      outbound: microsoft,
-      env: { ...ENTRA_ENV, ENTRA_SYNC_MODE: "dry-run", AUTH_LOCAL_ENABLED: undefined },
-    });
-    try {
-      expect(await identityIndexExists(database)).toBe(true);
-      const columns =
-        engine === "sqlite"
-          ? await database.sql<{ name: string }>("SELECT name FROM pragma_table_info('up_users')")
-          : await database.sql<{ name: string }>(
-              "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'up_users'",
-            );
-      expect(columns.map((c) => c.name)).toContain("entra_manager_oid");
-
-      // Existing users: nothing is written in dry-run, not even a demotion.
-      const admin = await signIn(t, persona(40, { roles: ["Intranet.Member"], jobTitle: "Changed" }));
-      expect([admin.status, admin.body.user?.id]).toEqual([200, adminId]);
-      const adminRow = await userRow(t, { id: adminId });
-      expect(relation(adminRow?.role, "type")).toBe("admin_role");
-      expect(adminRow?.jobTitle).toBe("Title 40");
-
-      // New users: capped at member; guest stays guest.
-      const boss = await signIn(t, persona(42, { roles: ["Intranet.Admin"] }));
-      expect(boss.status).toBe(200);
-      expect(await userRow(t, { id: boss.body.user?.id })).toMatchObject({ entraAppliedRole: "member", roleSource: "entra" });
-      expect(relation((await userRow(t, { id: guestId }))?.role, "type")).toBe("guest");
-
-      // Entra-only (AUTH_LOCAL_ENABLED unset): the cms refuses password sign-ins.
-      const local = await t.api<{ error?: { message?: string } }>(null, "/api/auth/local", {
-        json: { identifier: "nobody@integration.test", password: "whatever1" },
+  it(
+    "keeps the index across a restart with a schema change; dry-run caps and never changes existing roles",
+    async () => {
+      const t = await createTestStrapi({
+        database,
+        fixtures: false,
+        outbound: microsoft,
+        env: { ...ENTRA_ENV, ENTRA_SYNC_MODE: "dry-run", AUTH_LOCAL_ENABLED: undefined },
       });
-      expect(local.status).toBe(400);
-      expect(local.body.error?.message).toBe("This provider is disabled");
-    } finally {
-      await t.stop();
-    }
-  }, RESTART_BUDGET);
+      try {
+        expect(await identityIndexExists(database)).toBe(true);
+        const columns =
+          engine === "sqlite"
+            ? await database.sql<{ name: string }>("SELECT name FROM pragma_table_info('up_users')")
+            : await database.sql<{ name: string }>(
+                "SELECT column_name AS name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'up_users'",
+              );
+        expect(columns.map((c) => c.name)).toContain("entra_manager_oid");
+
+        // Existing users: nothing is written in dry-run, not even a demotion.
+        const admin = await signIn(
+          t,
+          persona(40, { roles: ["Intranet.Member"], jobTitle: "Changed" }),
+        );
+        expect([admin.status, admin.body.user?.id]).toEqual([200, adminId]);
+        const adminRow = await userRow(t, { id: adminId });
+        expect(relation(adminRow?.role, "type")).toBe("admin_role");
+        expect(adminRow?.jobTitle).toBe("Title 40");
+
+        // New users: capped at member; guest stays guest.
+        const boss = await signIn(t, persona(42, { roles: ["Intranet.Admin"] }));
+        expect(boss.status).toBe(200);
+        expect(await userRow(t, { id: boss.body.user?.id })).toMatchObject({
+          entraAppliedRole: "member",
+          roleSource: "entra",
+        });
+        expect(relation((await userRow(t, { id: guestId }))?.role, "type")).toBe("guest");
+
+        // Entra-only (AUTH_LOCAL_ENABLED unset): the cms refuses password sign-ins.
+        const local = await t.api<{ error?: { message?: string } }>(null, "/api/auth/local", {
+          json: { identifier: "nobody@integration.test", password: "whatever1" },
+        });
+        expect(local.status).toBe(400);
+        expect(local.body.error?.message).toBe("This provider is disabled");
+      } finally {
+        await t.stop();
+      }
+    },
+    RESTART_BUDGET,
+  );
 });

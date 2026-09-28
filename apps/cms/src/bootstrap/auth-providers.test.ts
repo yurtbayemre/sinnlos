@@ -64,7 +64,10 @@ describe("nextGrantConfig", () => {
 
   it("mirrors local sign-in into grant.email and keeps every other provider", () => {
     expect(nextGrantConfig(storedGrant(), true).email).toEqual({ enabled: true, icon: "envelope" });
-    expect(nextGrantConfig(storedGrant(), false).email).toEqual({ enabled: false, icon: "envelope" });
+    expect(nextGrantConfig(storedGrant(), false).email).toEqual({
+      enabled: false,
+      icon: "envelope",
+    });
     expect(nextGrantConfig(storedGrant(), false).github).toEqual(storedGrant().github);
   });
 
@@ -82,7 +85,11 @@ describe("syncAuthProviders", () => {
   it("Entra off: e-mail on, Microsoft off, one log line, then no writes", async () => {
     const { host, set, current } = storeHost(storedGrant());
     await syncAuthProviders(host, parseEntraConfig({}));
-    expect(host.store).toHaveBeenCalledWith({ type: "plugin", name: "users-permissions", key: "grant" });
+    expect(host.store).toHaveBeenCalledWith({
+      type: "plugin",
+      name: "users-permissions",
+      key: "grant",
+    });
     expect(set).toHaveBeenCalledTimes(1);
     expect(current()).toMatchObject({
       email: { enabled: true },
@@ -101,15 +108,23 @@ describe("syncAuthProviders", () => {
     expect(entraOnly.current()).toMatchObject({ email: { enabled: false } });
 
     const breakGlass = storeHost(storedGrant());
-    await syncAuthProviders(breakGlass.host, parseEntraConfig({ ...ENABLED, AUTH_LOCAL_ENABLED: "1" }));
-    expect(breakGlass.current()).toMatchObject({ email: { enabled: true }, microsoft: { enabled: false } });
+    await syncAuthProviders(
+      breakGlass.host,
+      parseEntraConfig({ ...ENABLED, AUTH_LOCAL_ENABLED: "1" }),
+    );
+    expect(breakGlass.current()).toMatchObject({
+      email: { enabled: true },
+      microsoft: { enabled: false },
+    });
   });
 });
 
 describe("checkEntraConfig / reportEntraStatus", () => {
   it("throws for an enabled but invalid configuration", () => {
     const log = { info: vi.fn(), warn: vi.fn() };
-    expect(() => checkEntraConfig(log, { ...ENABLED, MS_TENANT_ID: "common" })).toThrow(EntraConfigError);
+    expect(() => checkEntraConfig(log, { ...ENABLED, MS_TENANT_ID: "common" })).toThrow(
+      EntraConfigError,
+    );
     expect(() => checkEntraConfig(log, { MS_TENANT_ID: "common" })).not.toThrow();
   });
 

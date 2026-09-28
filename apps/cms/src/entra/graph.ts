@@ -56,8 +56,7 @@ type Json = Record<string, unknown>;
 const isObject = (value: unknown): value is Json =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const stringOrNull = (value: unknown): string | null =>
-  typeof value === "string" ? value : null;
+const stringOrNull = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
 /**
  * One Graph request: the parsed JSON body of a 200, or the failure. A

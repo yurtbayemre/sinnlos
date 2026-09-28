@@ -88,7 +88,10 @@ describe("exchangeEntraSignIn", () => {
       () => new Response("<html>", { status: 500 }),
     ]) {
       const { calls, options, log } = harness(response);
-      expect(await exchangeEntraSignIn(TOKENS, options)).toEqual({ ok: false, code: "unavailable" });
+      expect(await exchangeEntraSignIn(TOKENS, options)).toEqual({
+        ok: false,
+        code: "unavailable",
+      });
       expect(calls).toHaveLength(1);
       expect(log.error).toHaveBeenCalledTimes(1);
     }
@@ -99,17 +102,26 @@ describe("exchangeEntraSignIn", () => {
 
   it.each([502, 503, 504])("retries a %i once", async (status) => {
     const failing = harness(() => json({ error: "unavailable" }, status));
-    expect(await exchangeEntraSignIn(TOKENS, failing.options)).toEqual({ ok: false, code: "unavailable" });
+    expect(await exchangeEntraSignIn(TOKENS, failing.options)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
     expect(failing.calls).toHaveLength(2);
 
-    const recovering = harness(() => json({ error: "unavailable" }, status), () => json(OK));
+    const recovering = harness(
+      () => json({ error: "unavailable" }, status),
+      () => json(OK),
+    );
     expect(await exchangeEntraSignIn(TOKENS, recovering.options)).toEqual({ ok: true, data: OK });
     expect(recovering.calls).toHaveLength(2);
   });
 
   it("retries a network error once, then gives up as unavailable", async () => {
     const down = harness(async () => Promise.reject(new TypeError("fetch failed")));
-    expect(await exchangeEntraSignIn(TOKENS, down.options)).toEqual({ ok: false, code: "unavailable" });
+    expect(await exchangeEntraSignIn(TOKENS, down.options)).toEqual({
+      ok: false,
+      code: "unavailable",
+    });
     expect(down.calls).toHaveLength(2);
     expect(down.log.error.mock.calls[0][0]).toMatch(/unreachable \(TypeError\)/);
   });
@@ -168,7 +180,13 @@ describe("signInErrorKey", () => {
       "entra_unavailable",
     ]);
     for (const code of ENTRA_SIGN_IN_ERRORS) expect(signInErrorKey(code)).toBe(code);
-    for (const other of ["AccessDenied", "Configuration", "CredentialsSignin", "entra_", "<script>"]) {
+    for (const other of [
+      "AccessDenied",
+      "Configuration",
+      "CredentialsSignin",
+      "entra_",
+      "<script>",
+    ]) {
       expect(signInErrorKey(other)).toBe("signInFailed");
     }
     expect(signInErrorKey(undefined)).toBeNull();
