@@ -414,6 +414,27 @@ describe("sendDigests orchestrator", () => {
     );
   });
 
+  it("a recipient read failure fails every due user and still ends the run with its summary", async () => {
+    const { strapi, send } = digestStub({
+      users: { [USER.alice]: optIn(), [USER.bob]: optIn({ lastDigestAt: NOW.toISOString() }) },
+      announcements: [news("All hands", minutesAfter(MONDAY_RUN, 5))],
+    });
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      if (uid === PERMISSION_UID) throw new Error("db down");
+      return query(uid);
+    };
+    await expect(sendDigests(strapi, NOW)).resolves.toBeUndefined();
+    expect(send).not.toHaveBeenCalled();
+    expect(lastDigestAt(strapi, USER.alice)).toBe(MONDAY_RUN);
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      "[digest] could not load the recipients: db down",
+    );
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      "[digest] run complete: sent=0 empty=0 skipped=1 failed=1 of 2 candidate(s)",
+    );
+  });
+
   it("a weekly digest that failed on Monday is sent on Tuesday, then not again that week", async () => {
     const saturday = news("Weekend on-call", "2026-09-05T09:00:00.000Z");
     const { strapi, send, mails } = digestStub({

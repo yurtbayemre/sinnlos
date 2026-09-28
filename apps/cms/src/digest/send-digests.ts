@@ -62,6 +62,7 @@ import {
   loadAllUserScopes,
   loadRoleGrants,
   type RecipientScope,
+  type RoleGrants,
   type ScopeStrapi,
 } from "../utils/visible-ids";
 import {
@@ -391,12 +392,24 @@ export async function sendDigests(strapi: DigestStrapi, now = new Date()): Promi
   const dueUsers = candidates.filter((user) => wantsAnyDigest(user) && isDigestDue(user, now));
   skipped += candidates.length - dueUsers.length;
 
+  let recipients: [RecipientScope[], RoleGrants] | null = null;
   if (dueUsers.length > 0) {
-    // Run-wide reads (FX48): scopes, grants, announcements, anchors — once.
-    const [scopes, grants] = await Promise.all([
-      loadAllUserScopes(strapi),
-      loadRoleGrants(strapi, [ANNOUNCEMENT_FIND, KUDOS_FIND]),
-    ]);
+    try {
+      // Run-wide reads (FX48): scopes, grants, announcements, anchors — once.
+      recipients = await Promise.all([
+        loadAllUserScopes(strapi),
+        loadRoleGrants(strapi, [ANNOUNCEMENT_FIND, KUDOS_FIND]),
+      ]);
+    } catch (err) {
+      // Nobody's audience or grants are known: every due user fails this
+      // run and keeps lastDigestAt, and the run still ends with its summary.
+      failed += dueUsers.length;
+      strapi.log.error(`[digest] could not load the recipients: ${(err as Error).message}`);
+    }
+  }
+
+  if (recipients != null) {
+    const [scopes, grants] = recipients;
     const scopeById = new Map(scopes.map((scope) => [scope.userId, scope]));
     const announcementReaders = grants.holders(ANNOUNCEMENT_FIND);
     const kudosReaders = grants.holders(KUDOS_FIND);
