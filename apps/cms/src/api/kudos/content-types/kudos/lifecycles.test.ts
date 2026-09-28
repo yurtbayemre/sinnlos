@@ -1,7 +1,8 @@
 /**
  * Kudos notification (S08 characterisation): the recipient of a kudos gets
  * one notification from the giver; self-kudos and incomplete rows notify
- * nobody.
+ * nobody. Written after the kudos' transaction commits, in a transaction
+ * of its own (LF02), so a failing notification never costs the kudos.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -81,6 +82,58 @@ describe("kudos afterCreate", () => {
       result: await kudos(strapi, { from: USER.alice, to: USER.bob }),
     });
     expect(notificationRows(strapi)[2].title).toBe(`${"n".repeat(238)}… gave you kudos!`);
+  });
+
+  it("writes after the kudos' transaction commits; a rollback notifies nobody (LF02)", async () => {
+    const strapi = setup();
+    const row = await kudos(strapi, { from: USER.alice, to: USER.bob });
+    await expect(
+      strapi.db.transaction(async () => {
+        await lifecycles.afterCreate({ result: row });
+        throw new Error("kudos create failed");
+      }),
+    ).rejects.toThrow("kudos create failed");
+    expect(notificationRows(strapi)).toEqual([]);
+
+    let before = -1;
+    await strapi.db.transaction(async () => {
+      await lifecycles.afterCreate({ result: row });
+      before = notificationRows(strapi).length;
+    });
+    expect(before).toBe(0);
+    expect(notificationRows(strapi)).toHaveLength(1);
+  });
+
+  it("a failing notification INSERT costs the notification only, never the kudos", async () => {
+    const strapi = setup();
+    const row = await kudos(strapi, { from: USER.alice, to: USER.bob });
+    const query = strapi.db.query.bind(strapi.db);
+    const insertInTransaction: boolean[] = [];
+    strapi.db.query = (uid: string) => {
+      const q = query(uid);
+      if (uid !== NOTIFICATION_UID) return q;
+      return {
+        ...q,
+        create: async () => {
+          insertInTransaction.push(strapi.db.inTransaction());
+          throw new Error("insert failed");
+        },
+      };
+    };
+    const rolledBack = vi.fn();
+    await expect(
+      strapi.db.transaction(async ({ onRollback }) => {
+        onRollback(rolledBack);
+        await lifecycles.afterCreate({ result: row });
+        return "created";
+      }),
+    ).resolves.toBe("created");
+    expect(rolledBack).not.toHaveBeenCalled();
+    // The insert ran after the commit, in a transaction of its own.
+    expect(insertInTransaction).toEqual([true]);
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      "[notifications] failed for kudos: insert failed",
+    );
   });
 
   it("never throws", async () => {

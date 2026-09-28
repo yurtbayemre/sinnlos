@@ -1,7 +1,9 @@
 /**
  * Comment notification (S08 characterisation): a comment or a reply on an
  * announcement notifies the announcement's author, resolved through the
- * documentId anchor (issue #11); nothing else notifies anybody.
+ * documentId anchor (issue #11); nothing else notifies anybody. Written
+ * after the comment's transaction commits, in a transaction of its own
+ * (LF02), so a failing notification never costs the comment.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -117,16 +119,48 @@ describe("comment afterCreate", () => {
     expect(notificationRows(strapi)[0].title).toBe(`Alice commented on "${"t".repeat(233)}…"`);
   });
 
-  it("writes inside the comment's transaction and never throws", async () => {
+  it("writes after the comment's transaction commits, in a transaction of its own (LF02)", async () => {
     const { strapi, announcement } = setup();
     const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
+    const create = strapi.db.query(NOTIFICATION_UID).create;
+    const query = strapi.db.query.bind(strapi.db);
+    const insertInTransaction: boolean[] = [];
+    strapi.db.query = (uid: string) => {
+      const q = query(uid);
+      if (uid !== NOTIFICATION_UID) return q;
+      return {
+        ...q,
+        create: async (params: { data: Record<string, unknown> }) => {
+          insertInTransaction.push(strapi.db.inTransaction());
+          return create(params);
+        },
+      };
+    };
     let before = -1;
     await strapi.db.transaction(async () => {
       await lifecycles.afterCreate({ result: row });
       before = notificationRows(strapi).length;
     });
-    expect(before).toBe(1);
+    expect(before).toBe(0);
+    expect(notificationRows(strapi)).toHaveLength(1);
+    expect(insertInTransaction).toEqual([true]);
+  });
 
+  it("a comment that rolls back notifies nobody", async () => {
+    const { strapi, announcement } = setup();
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
+    await expect(
+      strapi.db.transaction(async () => {
+        await lifecycles.afterCreate({ result: row });
+        throw new Error("comment create failed");
+      }),
+    ).rejects.toThrow("comment create failed");
+    expect(notificationRows(strapi)).toEqual([]);
+  });
+
+  it("a failing notification INSERT costs the notification only, never the comment", async () => {
+    const { strapi, announcement } = setup();
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
     const query = strapi.db.query.bind(strapi.db);
     strapi.db.query = (uid: string) => {
       const q = query(uid);
@@ -138,9 +172,30 @@ describe("comment afterCreate", () => {
         },
       };
     };
-    await expect(lifecycles.afterCreate({ result: row })).resolves.toBeUndefined();
+    const rolledBack = vi.fn();
+    await expect(
+      strapi.db.transaction(async ({ onRollback }) => {
+        onRollback(rolledBack);
+        await lifecycles.afterCreate({ result: row });
+        return "created";
+      }),
+    ).resolves.toBe("created");
+    expect(rolledBack).not.toHaveBeenCalled();
     expect(strapi.log.error).toHaveBeenCalledWith(
       "[notifications] failed for comment: insert failed",
     );
+  });
+
+  it("never throws: a failing read is logged and the hook resolves", async () => {
+    const { strapi, announcement } = setup();
+    const row = await comment(strapi, { author: USER.alice, targetDocumentId: announcement });
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      if (uid === COMMENT_UID) throw new Error("db down");
+      return query(uid);
+    };
+    await expect(lifecycles.afterCreate({ result: row })).resolves.toBeUndefined();
+    await expect(lifecycles.afterCreate({})).resolves.toBeUndefined();
+    expect(strapi.log.error).toHaveBeenCalledWith("[notifications] failed for comment: db down");
   });
 });
