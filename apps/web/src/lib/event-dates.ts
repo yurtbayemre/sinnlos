@@ -4,19 +4,9 @@
  * APP_TIME_ZONE (i18n/request.ts), and the same zone for the calendar-day
  * comparisons, so nothing depends on the process zone.
  */
+import type { DateTimeFields, DateTimeFormatter } from "@/lib/date-format";
 import { instantEpochMs, zonedDateKey } from "@/lib/plain-date";
 import type { Event } from "@/lib/types";
-
-/** The date and time fields these labels use. */
-type DateTimeFields = Pick<
-  Intl.DateTimeFormatOptions,
-  "weekday" | "year" | "month" | "day" | "hour" | "minute"
->;
-
-/** The part of next-intl's formatter used here (getFormatter/useFormatter). */
-export interface DateTimeFormatter {
-  dateTime(value: Date, options: DateTimeFields): string;
-}
 
 const DAY_FORMAT: DateTimeFields = {
   weekday: "short",
