@@ -44,7 +44,12 @@ describe("lesson lifecycle (FX08)", () => {
   });
 
   it("answers invalid data with an ApplicationError (a 400 in the admin panel)", () => {
-    for (const data of [{ quiz: "[{" }, { quiz: "[]x" }, { quiz: "{}" }, { videoUrl: "https://vimeo.com/1" }]) {
+    for (const data of [
+      { quiz: "[{" },
+      { quiz: "[]x" },
+      { quiz: "{}" },
+      { videoUrl: "https://vimeo.com/1" },
+    ]) {
       expect(() => run("beforeUpdate", data)).toThrow(errors.ApplicationError);
     }
     expect(() => run("beforeUpdate", { quiz: "[{" })).toThrow("quiz ist kein gültiges JSON");
