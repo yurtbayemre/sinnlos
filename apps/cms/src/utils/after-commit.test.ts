@@ -105,6 +105,74 @@ describe("afterCommit", () => {
     expect(task).toHaveBeenCalledTimes(1);
   });
 
+  /**
+   * A transaction double with @strapi/database's shared callback lists:
+   * every transaction pushes into the same two arrays and nothing clears
+   * them, as for sibling transactions inside a commit callback.
+   */
+  function sharedListsDb() {
+    const commits: Array<() => unknown> = [];
+    const rollbacks: Array<() => unknown> = [];
+    const open = (completed: { value: boolean }): CommitAwareDb => ({
+      inTransaction: () => true,
+      transaction: async (callback) =>
+        callback({
+          onCommit: (fn) => commits.push(fn),
+          onRollback: (fn) => rollbacks.push(fn),
+          trx: { isCompleted: () => completed.value },
+        }),
+    });
+    const fire = async (list: Array<() => unknown>) => {
+      for (const fn of [...list]) await fn();
+    };
+    return { commits, rollbacks, open, fire };
+  }
+
+  it("a rollback cancels the task, also when a later sibling's commit calls it", async () => {
+    const { commits, rollbacks, open, fire } = sharedListsDb();
+    const first = { value: false };
+    const task = vi.fn();
+    await afterCommit(open(first), task, () => undefined);
+    // The first sibling rolls back: its own trx is finished.
+    first.value = true;
+    await fire(rollbacks);
+    // A later sibling commits and the shared list still holds the callback.
+    await fire(commits);
+    expect(task).not.toHaveBeenCalled();
+  });
+
+  it("another transaction's rollback does not cancel a task whose transaction is still open", async () => {
+    const { commits, rollbacks, open, fire } = sharedListsDb();
+    const own = { value: false };
+    const task = vi.fn();
+    await afterCommit(open(own), task, () => undefined);
+    await fire(rollbacks); // someone else's rollback, the task's trx is open
+    own.value = true;
+    await fire(commits); // its own commit
+    await fire(rollbacks); // a later rollback: the task already ran
+    await fire(commits);
+    expect(task).toHaveBeenCalledTimes(1);
+  });
+
+  it("a transaction handle without isCompleted counts as finished: a rollback cancels", async () => {
+    const commits: Array<() => unknown> = [];
+    const rollbacks: Array<() => unknown> = [];
+    const db: CommitAwareDb = {
+      inTransaction: () => true,
+      transaction: async (callback) =>
+        callback({
+          onCommit: (fn) => commits.push(fn),
+          onRollback: (fn) => rollbacks.push(fn),
+          trx: { stubTransaction: true },
+        }),
+    };
+    const task = vi.fn();
+    await afterCommit(db, task, () => undefined);
+    for (const fn of rollbacks) await fn();
+    for (const fn of commits) await fn();
+    expect(task).not.toHaveBeenCalled();
+  });
+
   it("a db without transaction support runs the task right away", async () => {
     const task = vi.fn();
     await afterCommit({}, task, () => undefined);

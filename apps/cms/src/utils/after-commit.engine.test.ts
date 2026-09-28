@@ -17,7 +17,11 @@
  *  - the @strapi/database quirk afterCommit guards against: a transaction
  *    started after a commit in the same async context inherits the finished
  *    transaction's callback list, so sibling commits run earlier callbacks
- *    again (the raw count), while afterCommit's tasks run once each;
+ *    again (the raw count), while afterCommit's tasks run once each; the
+ *    list also keeps a ROLLED BACK sibling's callbacks for the next
+ *    sibling's commit, and afterCommit cancels its task on the rollback
+ *    (directly, and through the live subscriber when a notification row
+ *    fails after its afterCreate);
  *  - Postgres only: a statement error swallowed inside the transaction, and
  *    a failure AT COMMIT (deferred constraint), both resolve the transaction
  *    and run the commit callbacks although nothing was committed (knex
@@ -328,6 +332,80 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
       // Sibling i's commit runs the callbacks of siblings 0..i: 1 + 2 + 3.
       expect(raw).toBe(6);
       expect(guarded).toBe(3);
+    }, 30_000);
+
+    it("a rolled back sibling's task never runs, not even on a later sibling's commit", async () => {
+      // The Codex finding on LF02: the shared callback list keeps the
+      // callbacks of a sibling that rolled back, and the next sibling's
+      // commit calls them (the raw count proves the engine does). afterCommit
+      // cancels its task on the rollback.
+      let rawOfRolledBack = 0;
+      const ran: string[] = [];
+      const outcome: string[] = [];
+      let siblings: Promise<void> | undefined;
+      await engine.transaction(async ({ onCommit }) => {
+        onCommit(() => {
+          siblings = (async () => {
+            try {
+              await engine.transaction(async ({ onCommit: inner }) => {
+                inner(() => {
+                  rawOfRolledBack += 1;
+                });
+                await afterCommit(
+                  engine,
+                  () => void ran.push("rolled back"),
+                  () => undefined,
+                );
+                throw new Error("sibling 1 failed");
+              });
+            } catch (err) {
+              outcome.push((err as Error).message);
+            }
+            await engine.transaction(async () => {
+              await afterCommit(
+                engine,
+                () => void ran.push("committed"),
+                () => undefined,
+              );
+            });
+          })();
+        });
+      });
+      await siblings;
+      await vi.waitFor(() => expect(ran).toContain("committed"));
+      expect(outcome).toEqual(["sibling 1 failed"]);
+      expect(rawOfRolledBack).toBe(1);
+      expect(ran).toEqual(["committed"]);
+    }, 30_000);
+
+    it("a notification row that rolls back after its afterCreate pings nobody", async () => {
+      // Through the real live subscriber and writeNotifications: a later
+      // afterCreate step fails for recipient 2 AFTER the subscriber queued
+      // its ping. Row 2 is rolled back; row 3's commit must not send it.
+      const unsubscribe = engine.lifecycles.subscribe({
+        models: [NOTIFICATION_UID],
+        afterCreate(event: { params: { data: Row } }) {
+          if (event.params.data.recipient === 2) throw new Error("row 2 refused after create");
+        },
+      });
+      try {
+        await publish("Canteen");
+      } finally {
+        unsubscribe();
+      }
+      const rows = await engine.query(NOTIFICATION_UID).findMany({
+        populate: { recipient: { select: ["id"] } },
+        orderBy: { id: "asc" },
+      });
+      expect(rows.map((row) => (row.recipient as { id: number }).id)).toEqual([1, 3]);
+      expect(await pings()).toEqual([
+        { kind: "announcements" },
+        { kind: "notification", recipientId: 1 },
+        { kind: "notification", recipientId: 3 },
+      ]);
+      expect(errors).toEqual([
+        expect.stringContaining("could not create the notification for user 2"),
+      ]);
     }, 30_000);
 
     it("a nested transaction defers the task to the OUTER commit", async () => {
