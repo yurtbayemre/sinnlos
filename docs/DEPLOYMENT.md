@@ -1099,15 +1099,20 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     "${COMPOSE[@]}" logs -f --since 5m cms | grep --line-buffered sensitive-query-guard
     ```
 
-    Each line names the method, path, model and role, never a value. A
-    path the web calls while rendering a page (a guest's or an
-    `authenticated` user's page with an error banner or a missing list) is
-    a missed web query: note the page and the line and report it; nothing
-    needs to be rolled back for it (`infra/sensitive-queries.test.ts` pins
-    the web's queries against the guard). Lines that match no page are
-    probes the guard refused as intended. Not a guard line and known: a
-    guest's `/kudos` shows the cms error banner, because guests hold no
-    kudos grant (a 403, unchanged by this batch).
+    Each line names the method, path, model and role, never a value. Only
+    a `[sensitive-query-guard]` line counts. If its path is one the web
+    calls while rendering a page (a guest's or an `authenticated` user's
+    page with an error banner or a missing list), it is a missed web query:
+    note the page and the line and report it; nothing needs to be rolled
+    back for it (`infra/sensitive-queries.test.ts` pins the web's queries
+    against the guard). Lines that match no page are probes the guard
+    refused as intended. A banner without such a line is not a guard issue.
+    Known and unchanged by this batch (403s from grants the role does not
+    hold, not guard refusals): a guest sees the cms error banner on `/`,
+    `/announcements`, `/departments`, `/teams`, `/kudos`, `/marketplace`,
+    `/training` and the lesson pages, and an error page on every department,
+    team and course page; an `authenticated`-role user sees it on `/kudos`
+    (celebrations).
 
 11. **First publish.** The next announcement or event logs
 
@@ -1497,11 +1502,15 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    "${COMPOSE[@]}" logs -f --since 5m cms | grep --line-buffered sensitive-query-guard
    ```
 
-   Each line names the method, path, model and role. A path the web calls
-   while rendering a page (a guest's or an `authenticated` user's page with
-   an error banner or a missing list) is a missed web query: note the page
-   and report it; nothing needs to be rolled back for it. Lines nobody can
-   match to a page are probes the guard refused as intended.
+   Each line names the method, path, model and role. Only such a line
+   counts. If its path is one the web calls while rendering a page (a
+   guest's or an `authenticated` user's page with an error banner or a
+   missing list), it is a missed web query: note the page and report it;
+   nothing needs to be rolled back for it. Lines nobody can match to a page
+   are probes the guard refused as intended. A banner without such a line
+   is not a guard issue: guests and the `authenticated` role already see
+   error banners on several pages for grants they do not hold (the list is
+   in step 10 of [Deploying batch 7](#deploying-batch-7-2026-09-28)).
 
 5. **Search and files.** Press ⌘K as a guest (if you have one) and as a
    member: a colleague is found by name; only the member finds them by
