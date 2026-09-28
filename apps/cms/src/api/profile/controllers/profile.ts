@@ -53,6 +53,21 @@ const EDITABLE_FIELDS = [
 ] as const;
 
 /**
+ * Free-text fields of PUT /api/me (FX26): trimmed, `null` clears them, and
+ * at most PROFILE_TEXT_MAX characters. They are `string` attributes, i.e.
+ * varchar(255) on Postgres, where a longer value failed the UPDATE with a
+ * 500. Counted in code points, as Postgres counts characters (an emoji is
+ * one character there, two UTF-16 units in JS). An empty displayName is
+ * stored as null so every consumer falls back to the username
+ * (`displayName ?? username`) instead of showing an empty name.
+ */
+export const PROFILE_TEXT_FIELDS = ["displayName", "jobTitle", "phone", "officeLocation"] as const;
+export const PROFILE_TEXT_MAX = 255;
+
+/** UI languages a profile may store (apps/web/src/i18n/locale.ts). */
+export const PROFILE_LOCALES = ["en", "de"] as const;
+
+/**
  * The caller's own scalar fields returned by GET/PUT /api/me. Never add
  * password, resetPasswordToken or confirmationToken. The web profile page
  * reads username/email/displayName/avatar and the form fields
@@ -209,6 +224,30 @@ export interface ProfileContext {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
+/** Length as Postgres varchar counts it: characters (code points). */
+function charLength(value: string): number {
+  return Array.from(value).length;
+}
+
+/**
+ * Normalises the free-text fields present in `data` in place (trim, empty
+ * displayName → null). Returns the 400 message for the first invalid one,
+ * or null when all are valid.
+ */
+export function normalizeProfileText(data: Row): string | null {
+  for (const field of PROFILE_TEXT_FIELDS) {
+    if (!has(data, field) || data[field] === null) continue;
+    const value = data[field];
+    if (typeof value !== "string") return `${field} must be a string or null`;
+    const trimmed = value.trim();
+    if (charLength(trimmed) > PROFILE_TEXT_MAX) {
+      return `${field} must be at most ${PROFILE_TEXT_MAX} characters`;
+    }
+    data[field] = field === "displayName" && trimmed === "" ? null : trimmed;
+  }
+  return null;
+}
+
 export default {
   async me(ctx: ProfileContext) {
     const user = ctx.state.user;
@@ -227,9 +266,17 @@ export default {
     const body = isRow(raw) && isRow(raw.data) ? raw.data : isRow(raw) ? raw : {};
     const data: Record<string, unknown> = {};
     for (const field of EDITABLE_FIELDS) {
-      if (field in body) data[field] = body[field];
+      if (has(body, field)) data[field] = body[field];
     }
     if (Object.keys(data).length === 0) return ctx.badRequest("No editable fields provided");
+
+    // Every check below runs before the write, so an invalid field rejects
+    // the whole request (400) instead of a partial update or a database 500.
+    const textError = normalizeProfileText(data);
+    if (textError) return ctx.badRequest(textError);
+    if (has(data, "locale") && !(PROFILE_LOCALES as readonly unknown[]).includes(data.locale)) {
+      return ctx.badRequest("locale must be en or de");
+    }
 
     // Normalize the birthday fields: empty string clears the date, anything
     // else must be a plain ISO date; the visibility flag is coerced to boolean
@@ -248,7 +295,9 @@ export default {
     }
     if ("birthdayVisible" in data) {
       data.birthdayVisible =
-        data.birthdayVisible === true || data.birthdayVisible === "true" || data.birthdayVisible === "on";
+        data.birthdayVisible === true ||
+        data.birthdayVisible === "true" ||
+        data.birthdayVisible === "on";
     }
     // Digest opt-ins: same boolean coercion as birthdayVisible; the
     // frequency must be one of the schema enum values.
@@ -257,7 +306,10 @@ export default {
         data[flag] = data[flag] === true || data[flag] === "true" || data[flag] === "on";
       }
     }
-    if ("digestFrequency" in data && !["daily", "weekly"].includes(data.digestFrequency as string)) {
+    if (
+      "digestFrequency" in data &&
+      !["daily", "weekly"].includes(data.digestFrequency as string)
+    ) {
       return ctx.badRequest("digestFrequency must be daily or weekly");
     }
 
