@@ -901,9 +901,17 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    ```bash
    psql_db -X <<'SQL'
+   -- trim_re strips exactly what the cms strips (String.prototype.trim):
+   -- tab, line feed, vertical tab, form feed, carriage return, space, the
+   -- Unicode space separators (e.g. the no-break space), the BOM and the
+   -- line/paragraph separators. Not \s: that also strips U+0085.
+   WITH trim_re(re) AS (
+     SELECT '^' || ws || '+|' || ws || '+$'
+     FROM (VALUES ('[\t\n\v\f\r    -     　﻿]')) AS c(ws)
+   )
    SELECT id, document_id, published_at IS NOT NULL AS published,
           left(question, 60) AS question, options::text AS options
-   FROM polls
+   FROM polls, trim_re
    WHERE CASE
      WHEN options IS NULL THEN false
      WHEN jsonb_typeof(options) <> 'array' THEN true
@@ -911,8 +919,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      ELSE EXISTS (
             SELECT 1 FROM jsonb_array_elements(options) AS e
             WHERE jsonb_typeof(e) <> 'string'
-               OR regexp_replace(e #>> '{}', '^\s+|\s+$', '', 'g') = '')
-       OR (SELECT count(DISTINCT regexp_replace(e #>> '{}', '^\s+|\s+$', '', 'g'))
+               OR regexp_replace(e #>> '{}', re, '', 'g') = '')
+       OR (SELECT count(DISTINCT regexp_replace(e #>> '{}', re, '', 'g'))
            FROM jsonb_array_elements(options) AS e) <> jsonb_array_length(options)
    END
    ORDER BY id;
