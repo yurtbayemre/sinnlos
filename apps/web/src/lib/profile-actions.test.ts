@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import de from "../../messages/de.json";
+import en from "../../messages/en.json";
 import { StrapiError } from "./strapi-error";
 
 /**
@@ -8,7 +10,10 @@ import { StrapiError } from "./strapi-error";
  * profile.passwordRateLimited message instead of "check your current
  * password". FX26 for the profile save: trimmed values, the 255-character
  * limit answered before any write, and a CMS 400 told apart from an
- * outage. `@/lib/strapi` is mocked; its StrapiError is the real class.
+ * outage. Every message comes from the catalogs (profile.*), in the
+ * viewer's language: the translator stub answers the key and throws for a
+ * key that en.json or de.json lacks. `@/lib/strapi` is mocked; its
+ * StrapiError is the real class.
  */
 const strapiMock = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 const state = vi.hoisted(() => ({ headers: new Headers() }));
@@ -25,8 +30,14 @@ vi.mock("next/navigation", () => ({
   },
 }));
 vi.mock("next-intl/server", () => ({
-  getTranslations: async (namespace: string) => (key: string, values?: Record<string, unknown>) =>
-    values ? `${namespace}.${key} ${JSON.stringify(values)}` : `${namespace}.${key}`,
+  getTranslations: async (namespace: "profile") => (key: string, values?: object) => {
+    for (const catalog of [en, de]) {
+      if (typeof (catalog[namespace] as Record<string, unknown>)[key] !== "string") {
+        throw new Error(`missing message ${namespace}.${key}`);
+      }
+    }
+    return values ? `${namespace}.${key} ${JSON.stringify(values)}` : `${namespace}.${key}`;
+  },
 }));
 
 const { changePassword, updateProfile } = await import("./profile-actions");
@@ -85,7 +96,7 @@ describe("updateProfile (FX26)", () => {
       phone: " +49 30 1 ",
       officeLocation: " Remote\n",
     });
-    await expect(updateProfile({}, form)).resolves.toEqual({ success: "Profile updated." });
+    await expect(updateProfile({}, form)).resolves.toEqual({ success: "profile.profileUpdated" });
     expect(sentProfile()).toEqual({
       displayName: "Sam C.",
       jobTitle: "Engineer",
@@ -134,7 +145,7 @@ describe("updateProfile (FX26)", () => {
     strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
     const result = await updateProfile({}, profileForm({ jobTitle: "Lead" }));
     expect(result).toMatchObject({
-      error: "Could not save profile.",
+      error: "profile.error_saveFailed",
       values: { jobTitle: "Lead" },
     });
     expect(refreshMock).not.toHaveBeenCalled();
@@ -148,7 +159,9 @@ describe("updateProfile (FX26)", () => {
 
 describe("changePassword", () => {
   it("forwards the client IP to Strapi's change-password route", async () => {
-    await expect(changePassword({}, form())).resolves.toEqual({ success: "Password changed." });
+    await expect(changePassword({}, form())).resolves.toEqual({
+      success: "profile.passwordChanged",
+    });
     const [path, init] = strapiMock.mock.calls[0]!;
     expect(path).toBe("/api/auth/change-password");
     expect(init?.method).toBe("POST");
@@ -165,7 +178,7 @@ describe("changePassword", () => {
   it("keeps the current-password hint for a rejected current password (400)", async () => {
     strapiMock.mockRejectedValue(new StrapiError(400, "Bad Request", "{}"));
     await expect(changePassword({}, form())).resolves.toEqual({
-      error: "Could not change password — check your current password.",
+      error: "profile.passwordChangeFailed",
     });
   });
 
@@ -176,10 +189,10 @@ describe("changePassword", () => {
 
   it("validates locally before calling Strapi", async () => {
     await expect(changePassword({}, form({ password: "short" }))).resolves.toEqual({
-      error: "New password needs at least 6 characters.",
+      error: 'profile.passwordTooShort {"min":6}',
     });
     await expect(changePassword({}, form({ passwordConfirmation: "different" }))).resolves.toEqual({
-      error: "Passwords do not match.",
+      error: "profile.passwordMismatch",
     });
     expect(strapiMock).not.toHaveBeenCalled();
   });

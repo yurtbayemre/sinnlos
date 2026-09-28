@@ -38,6 +38,8 @@ const TEXT_FIELDS = ["displayName", "jobTitle", "phone", "officeLocation"] as co
  * (varchar(255), counted in characters as Postgres does).
  */
 const TEXT_MAX = 255;
+/** Same minimum as the form's minLength (change-password-form.tsx). */
+const PASSWORD_MIN = 6;
 
 export async function updateProfile(
   _prev: ProfileFormState,
@@ -65,11 +67,13 @@ export async function updateProfile(
     digestFrequency: formData.get("digestFrequency") === "daily" ? "daily" : "weekly",
   };
 
+  // Every message is in the viewer's language (messages/*.json, profile).
+  const t = await getTranslations("profile");
+
   // Same limit as the CMS, answered here with the field's name instead of
   // a generic failure.
   const tooLong = TEXT_FIELDS.find((field) => Array.from(values[field]).length > TEXT_MAX);
   if (tooLong) {
-    const t = await getTranslations("profile");
     return { error: t("error_tooLong", { field: t(tooLong), max: TEXT_MAX }), values };
   }
 
@@ -81,16 +85,16 @@ export async function updateProfile(
     // Profile/people data is read uncached (D-DC01) — re-render so the saved
     // values show up immediately.
     refresh();
-    return { success: "Profile updated." };
+    return { success: t("profileUpdated") };
   } catch (e) {
     // Don't swallow strapi()'s 401 redirect (NEXT_REDIRECT) — an expired
     // session must navigate to sign-in, not surface as a save error.
     unstable_rethrow(e);
     // A 400 is the CMS refusing a value (FX26), not an outage.
     if (e instanceof StrapiError && e.status === 400) {
-      return { error: (await getTranslations("profile"))("error_invalid"), values };
+      return { error: t("error_invalid"), values };
     }
-    return { error: "Could not save profile.", values };
+    return { error: t("error_saveFailed"), values };
   }
 }
 
@@ -101,8 +105,11 @@ export async function changePassword(
   const currentPassword = String(formData.get("currentPassword") ?? "");
   const password = String(formData.get("password") ?? "");
   const passwordConfirmation = String(formData.get("passwordConfirmation") ?? "");
-  if (password.length < 6) return { error: "New password needs at least 6 characters." };
-  if (password !== passwordConfirmation) return { error: "Passwords do not match." };
+  const t = await getTranslations("profile");
+  if (password.length < PASSWORD_MIN) {
+    return { error: t("passwordTooShort", { min: PASSWORD_MIN }) };
+  }
+  if (password !== passwordConfirmation) return { error: t("passwordMismatch") };
   try {
     await strapi("/api/auth/change-password", {
       method: "POST",
@@ -113,7 +120,7 @@ export async function changePassword(
       headers: { "X-Forwarded-For": clientIpFrom(await headers()) },
       body: JSON.stringify({ currentPassword, password, passwordConfirmation }),
     });
-    return { success: "Password changed." };
+    return { success: t("passwordChanged") };
   } catch (e) {
     // A wrong current password is a 400 and stays a friendly error; an
     // expired session is a 401 that strapi() turns into a redirect
@@ -122,8 +129,8 @@ export async function changePassword(
     // Strapi's throttle (10 attempts/min): say so instead of blaming the
     // current password (FX11).
     if (e instanceof StrapiError && e.status === 429) {
-      return { error: (await getTranslations("profile"))("passwordRateLimited") };
+      return { error: t("passwordRateLimited") };
     }
-    return { error: "Could not change password — check your current password." };
+    return { error: t("passwordChangeFailed") };
   }
 }
