@@ -51,10 +51,10 @@ const keys = (query: string) => [...new URLSearchParams(query).keys()];
 const SENSITIVE = ["email", "phone", "hireDate", "officeLocation", "microsoftOid"];
 
 describe("kudos picker", () => {
-  it("asks for name, job title and avatar only, active colleagues but the caller", () => {
+  it("asks for name, job title, avatar and blocked only, active colleagues but the caller", () => {
     const query = kudosRecipientQuery(7);
     expect(query).toBe(
-      "fields[0]=displayName&fields[1]=username&fields[2]=jobTitle" +
+      "fields[0]=displayName&fields[1]=username&fields[2]=jobTitle&fields[3]=blocked" +
         "&populate[avatar][fields][0]=url&populate[avatar][fields][1]=formats" +
         "&filters[$or][0][blocked][$ne]=true&filters[$or][1][blocked][$null]=true" +
         "&filters[id][$ne]=7&sort=displayName:asc,id:asc",
@@ -91,7 +91,20 @@ describe("kudos picker", () => {
       { id: 8, displayName: "grace", jobTitle: null, avatarUrl: "/uploads/thumb_full.jpg" },
       { id: 13, displayName: "Ada Lovelace", jobTitle: "Engineer", avatarUrl: null },
     ]);
-    expect(JSON.stringify(recipients)).not.toMatch(/@example|Room|2020|\+49/);
+    expect(JSON.stringify(recipients)).not.toMatch(/@example|Room|2020|\+49|blocked/);
+  });
+
+  it("drops blocked rows as the CMS returns them for the picker query", () => {
+    // What /api/users answers to kudosRecipientQuery: the selected fields,
+    // `blocked` included, so the mapper's check also fires on real rows.
+    expect(new URLSearchParams(kudosRecipientQuery(null)).get("fields[3]")).toBe("blocked");
+    const row = { documentId: "d", username: "u", jobTitle: "Dev" };
+    const rows = [
+      { ...row, id: 1, displayName: "Ada", blocked: false },
+      { ...row, id: 2, displayName: "Bo", blocked: true },
+      { ...row, id: 3, displayName: "Cy", blocked: null },
+    ];
+    expect(toKudosRecipients(rows, null).map((r) => r.id)).toEqual([1, 3]);
   });
 });
 

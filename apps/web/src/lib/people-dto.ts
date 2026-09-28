@@ -32,16 +32,19 @@ export interface KudosRecipient {
 }
 
 /**
- * The /api/users query of the kudos picker: name, job title and avatar
- * only; blocked accounts and the caller left out by the CMS. `blocked` is a
- * plain users-permissions field every role may filter on; NULL (an account
- * written outside users-permissions) counts as not blocked. No email or
- * phone filter or sort: the picker searches name and job title only.
+ * The /api/users query of the kudos picker: name, job title and avatar,
+ * plus `blocked` for the mapper's second check (the DTO drops it); blocked
+ * accounts and the caller left out by the CMS. `blocked` is a plain
+ * users-permissions field every role may select and filter on; NULL (an
+ * account written outside users-permissions) counts as not blocked. No
+ * email or phone filter or sort: the picker searches name and job title
+ * only.
  */
 export function kudosRecipientQuery(selfId: number | null): string {
   const self = selfId === null ? "" : `&filters[id][$ne]=${selfId}`;
   return (
-    `fields[0]=displayName&fields[1]=username&fields[2]=jobTitle&${AVATAR_FIELDS}` +
+    `fields[0]=displayName&fields[1]=username&fields[2]=jobTitle&fields[3]=blocked` +
+    `&${AVATAR_FIELDS}` +
     `&filters[$or][0][blocked][$ne]=true&filters[$or][1][blocked][$null]=true${self}` +
     `&sort=displayName:asc,id:asc`
   );
@@ -49,8 +52,9 @@ export function kudosRecipientQuery(selfId: number | null): string {
 
 /**
  * The picker's DTOs, in directory order. The CMS already filtered blocked
- * accounts and the caller; both are dropped here again, so a stale or
- * mocked response cannot offer them either.
+ * accounts and the caller; both are dropped here again (the query selects
+ * `blocked` for this), so a stale or mocked response cannot offer them
+ * either. `blocked` itself never reaches the DTO.
  */
 export function toKudosRecipients(
   users: (UserLite & { blocked?: boolean | null })[],
