@@ -4,7 +4,7 @@ import { Suspense } from "react";
 import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
-import { zonedDateKey, zonedDayStart } from "@/lib/plain-date";
+import { zonedDateKey, zonedDayStart, zonedHour } from "@/lib/plain-date";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { fetchAllUsers } from "@/lib/users";
@@ -69,7 +69,7 @@ export default async function DashboardPage() {
     <div className="space-y-8">
       <header>
         <p className="text-sm text-muted-foreground">
-          {greeting(t)}, {session?.user?.name ?? t("friendFallback")}
+          {greeting(t, zonedHour(now, timeZone))}, {session?.user?.name ?? t("friendFallback")}
         </p>
         <h1 className="text-3xl font-semibold tracking-tight">{t("welcomeBack")}</h1>
       </header>
@@ -195,8 +195,8 @@ function StatCard({
   );
 }
 
-function greeting(t: (key: string) => string) {
-  const h = new Date().getHours();
+/** The greeting of the wall-clock hour `h` (0-23) in APP_TIME_ZONE, not the process zone. */
+function greeting(t: (key: string) => string, h: number) {
   if (h < 12) return t("goodMorning");
   if (h < 18) return t("goodAfternoon");
   return t("goodEvening");
