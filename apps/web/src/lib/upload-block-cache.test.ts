@@ -13,13 +13,16 @@ import {
 /**
  * FX41: the /uploads block-status map and the Strapi probe (owner default:
  * bounded, in process, 60 s). Pinned:
- *   1. the map: TTL, answers only for the JWT an entry was checked with,
+ *   1. the map: TTL, one entry per session token (user id + JWT hash), so
+ *      two sessions of a user neither share nor evict each other's entry,
  *      bounded (the oldest write goes first), never holds the raw JWT,
  *   2. the probe: a no-store GET /api/users/me with the session's JWT;
  *      401 or a blocked flag = blocked, 200 = active, anything else
  *      (403, 5xx, network, bad JSON) = unavailable,
  *   3. checkUploadAccess: caches active/blocked (never unavailable), one
- *      probe in flight per user and JWT, nothing cached without a user id.
+ *      probe per session token and TTL even when two sessions of a user
+ *      interleave, one probe in flight per user and JWT, nothing cached
+ *      without a user id.
  * The route itself is covered in app/uploads/[...path]/route.test.ts.
  */
 
@@ -53,9 +56,25 @@ describe("BlockStatusCache", () => {
     const cache = new BlockStatusCache();
     cache.set(7, "old-token", "blocked");
     expect(cache.get(7, "new-token")).toBeUndefined();
-    cache.set(7, "new-token", "active");
-    expect(cache.get(7, "new-token")).toBe("active");
-    expect(cache.get(7, "old-token")).toBeUndefined();
+    expect(cache.get(8, "old-token")).toBeUndefined();
+  });
+
+  it("keeps one entry per JWT of a user: sessions neither share nor evict each other", () => {
+    let now = 0;
+    const cache = new BlockStatusCache(60_000, 10, () => now);
+    cache.set(7, "laptop", "active");
+    now = 30_000;
+    cache.set(7, "phone", "blocked");
+    expect(cache.get(7, "laptop")).toBe("active");
+    expect(cache.get(7, "phone")).toBe("blocked");
+    expect(cache.size).toBe(2);
+    // Each expires on its own.
+    now = 60_000;
+    expect(cache.get(7, "laptop")).toBeUndefined();
+    expect(cache.get(7, "phone")).toBe("blocked");
+    now = 90_000;
+    expect(cache.get(7, "phone")).toBeUndefined();
+    expect(cache.size).toBe(0);
   });
 
   it("is bounded: the oldest write goes first, a rewrite counts as new", () => {
@@ -72,11 +91,13 @@ describe("BlockStatusCache", () => {
     expect(cache.get(4, "t")).toBe("active");
   });
 
-  it("defaults to a 60 s TTL and a cap of 1000 users", () => {
+  it("defaults to a 60 s TTL and a cap of 1000 session tokens", () => {
     expect(BLOCK_STATUS_TTL_MS).toBe(60_000);
     expect(BLOCK_STATUS_MAX_ENTRIES).toBe(1000);
     const cache = new BlockStatusCache();
     for (let id = 0; id < 1500; id++) cache.set(id, "t", "active");
+    expect(cache.size).toBe(1000);
+    for (let n = 0; n < 1500; n++) cache.set(7, `t${n}`, "active");
     expect(cache.size).toBe(1000);
   });
 
@@ -129,6 +150,45 @@ describe("checkUploadAccess", () => {
     expect(await check(8, "jwt-8")).toBe("blocked");
     expect(await check(8, "jwt-8")).toBe("blocked");
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("two interleaved sessions of one user: one probe per session token and TTL", async () => {
+    let now = 0;
+    const cache = new BlockStatusCache(BLOCK_STATUS_TTL_MS, BLOCK_STATUS_MAX_ENTRIES, () => now);
+    const fetchMock = vi.fn<(input: string, init: RequestInit) => Promise<Response>>(async () =>
+      me(),
+    );
+    const check = (jwt: string) =>
+      checkUploadAccess({
+        userId: 7,
+        jwt,
+        strapiUrl: "http://cms.test",
+        fetchImpl: fetchMock,
+        cache,
+      });
+    const probes = (jwt: string) =>
+      fetchMock.mock.calls.filter(([, init]) => {
+        const headers = init.headers as Record<string, string>;
+        return headers.Authorization === `Bearer ${jwt}`;
+      }).length;
+
+    for (let i = 0; i < 5; i++) {
+      expect(await check("jwt-laptop")).toBe("active");
+      now += 1_000;
+      expect(await check("jwt-phone")).toBe("active");
+      now += 1_000;
+    }
+    expect([probes("jwt-laptop"), probes("jwt-phone")]).toEqual([1, 1]);
+
+    // Written at 0 s and 1 s: each expires on its own.
+    now = 60_000;
+    await check("jwt-laptop");
+    await check("jwt-phone");
+    expect([probes("jwt-laptop"), probes("jwt-phone")]).toEqual([2, 1]);
+    now = 61_000;
+    await check("jwt-phone");
+    await check("jwt-laptop");
+    expect([probes("jwt-laptop"), probes("jwt-phone")]).toEqual([2, 2]);
   });
 
   it("never caches unavailable", async () => {

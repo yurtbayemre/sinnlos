@@ -12,24 +12,25 @@
  * user and an invalid or expired token alike (strategies/users-permissions
  * `authenticate`), so all of them lose the files.
  *
- * One page shows many images, so the answer is remembered per user id for
- * BLOCK_STATUS_TTL_MS (60 s): a block reaches the files within a minute.
- * What is kept is the status only (`active` | `blocked`), never a Strapi
- * response, in a plain Map in this process:
- *   - bounded: at most BLOCK_STATUS_MAX_ENTRIES users, the oldest write goes
- *     first, an expired entry is dropped when read;
- *   - bound to the JWT: an entry carries a hash of the JWT it was checked
- *     with and answers only for that JWT, so another session of the same
- *     user (a fresh sign-in after an unblock, a stale tab with an old token)
- *     is checked on its own and cannot poison or reuse the entry;
- *   - one request in flight per (user, JWT): a page's images wait for the
- *     same check instead of sending one each;
+ * One page shows many images, so the answer is remembered per session
+ * token for BLOCK_STATUS_TTL_MS (60 s): a block reaches the files within a
+ * minute. What is kept is the status only (`active` | `blocked`), never a
+ * Strapi response, in a plain Map in this process:
+ *   - keyed by the user id AND a hash of the JWT it was checked with: every
+ *     session of a user (laptop and phone, a fresh sign-in after an
+ *     unblock, a stale tab with an old token) has its own entry, is checked
+ *     on its own, and can neither reuse nor evict another session's entry;
+ *   - bounded: at most BLOCK_STATUS_MAX_ENTRIES tokens, the oldest write
+ *     goes first, an expired entry is dropped when read;
+ *   - one request in flight per (user, JWT), the same key: a page's images
+ *     wait for the same check instead of sending one each;
  *   - never next/cache or fetch caching (D-DC01, decisions/03-caching.md:
  *     a data-cache entry would outlive the block and be keyed per JWT).
  * Anything else (a 403, a 5xx, a timeout, cms unreachable) is `unavailable`:
  * not cached, and the route answers 503 without serving bytes.
  *
- * With several web replicas each has its own map; the bound stays one TTL.
+ * Cost: at most one cms request per session token and minute, per web
+ * replica; each replica has its own map, and the bound stays one TTL.
  */
 import { createHash } from "node:crypto";
 
@@ -42,14 +43,16 @@ export const BLOCK_STATUS_MAX_ENTRIES = 1000;
 export const BLOCK_CHECK_TIMEOUT_MS = 10_000;
 
 interface Entry {
-  tag: string;
   status: AccountStatus;
   expiresAt: number;
 }
 
-/** A bounded map user id → account status of one JWT, with a TTL. */
+/** One session token: the user id and the tag of its JWT. */
+const entryKey = (userId: number, tag: string) => `${userId}:${tag}`;
+
+/** A bounded map (user id, JWT tag) → account status, with a TTL. */
 export class BlockStatusCache {
-  private readonly entries = new Map<number, Entry>();
+  private readonly entries = new Map<string, Entry>();
 
   constructor(
     private readonly ttlMs: number = BLOCK_STATUS_TTL_MS,
@@ -59,19 +62,21 @@ export class BlockStatusCache {
 
   /** The status remembered for this user AND this JWT, while it is fresh. */
   get(userId: number, tag: string): AccountStatus | undefined {
-    const entry = this.entries.get(userId);
+    const key = entryKey(userId, tag);
+    const entry = this.entries.get(key);
     if (!entry) return undefined;
     if (entry.expiresAt <= this.now()) {
-      this.entries.delete(userId);
+      this.entries.delete(key);
       return undefined;
     }
-    return entry.tag === tag ? entry.status : undefined;
+    return entry.status;
   }
 
   set(userId: number, tag: string, status: AccountStatus): void {
-    // Re-inserting moves the user to the end: the first key is the oldest write.
-    this.entries.delete(userId);
-    this.entries.set(userId, { tag, status, expiresAt: this.now() + this.ttlMs });
+    const key = entryKey(userId, tag);
+    // Re-inserting moves the token to the end: the first key is the oldest write.
+    this.entries.delete(key);
+    this.entries.set(key, { status, expiresAt: this.now() + this.ttlMs });
     while (this.entries.size > this.maxEntries) {
       const oldest = this.entries.keys().next();
       if (oldest.done) break;
@@ -162,7 +167,7 @@ export async function checkUploadAccess({
   const cached = cache.get(userId, tag);
   if (cached) return cached;
 
-  const key = `${userId}:${tag}`;
+  const key = entryKey(userId, tag);
   const running = inflight.get(key);
   if (running) return running;
   const check = probeAccountStatus(strapiUrl, jwt, fetchImpl)

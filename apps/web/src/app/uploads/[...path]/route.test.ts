@@ -11,8 +11,9 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *      or rejected account gets 401 and no bytes, a cms that cannot say
  *      gets 503 and no bytes,
  *   3. the answer is reused for 60 s per user and JWT (one check for a
- *      page of images), so a block reaches the files within the TTL, and a
- *      new sign-in (another JWT) is checked on its own,
+ *      page of images), so a block reaches the files within the TTL, a new
+ *      sign-in (another JWT) is checked on its own, and two sessions of the
+ *      same user do not evict each other,
  *   4. an accepted request streams the bytes as before (S06 headers).
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth), as are
@@ -138,6 +139,20 @@ describe("GET /uploads/[...path] (FX41)", () => {
     expect(
       fetchMock.mock.calls.filter(([url]) => url === CHECK).map(([, init]) => init.headers),
     ).toEqual([{ Authorization: "Bearer jwt-7" }, { Authorization: "Bearer jwt-7-new" }]);
+  });
+
+  it("two interleaved sessions of one user: one check each, not one per switch", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (let i = 0; i < 5; i++) {
+      getStrapiTokenMock.mockResolvedValue("jwt-7-laptop");
+      expect((await get()).status).toBe(200);
+      getStrapiTokenMock.mockResolvedValue("jwt-7-phone");
+      expect((await get()).status).toBe(200);
+    }
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === CHECK).map(([, init]) => init.headers),
+    ).toEqual([{ Authorization: "Bearer jwt-7-laptop" }, { Authorization: "Bearer jwt-7-phone" }]);
+    expect(urls().filter((url) => url === FILE)).toHaveLength(10);
   });
 
   it("answers 401 without a session or without a Strapi JWT, before any cms request", async () => {

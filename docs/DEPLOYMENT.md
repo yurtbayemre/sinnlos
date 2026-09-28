@@ -914,11 +914,12 @@ This release (branch `fix/user-data-and-search-hardening`, on `batch/6`
 - **Blocked accounts lose `/uploads` within a minute (FX41).** Before it
   streams a file, the web now asks the cms whether the session's Strapi
   token is still accepted (`GET /api/users/me`, uncached) and remembers the
-  answer for 60 s per user, in the web process. A blocked or deleted account
-  gets 401 for files within a minute (its pages already sent it to sign-in);
-  before, it kept file access until its session expired (up to 7 days).
+  answer for 60 s per session token, in the web process. A blocked or
+  deleted account gets 401 for files within a minute (its pages already
+  sent it to sign-in); before, it kept file access until its session
+  expired (up to 7 days).
   While the cms cannot answer, `/uploads` answers 503. Cost: at most one cms
-  request per signed-in user and minute.
+  request per session token and minute, per web replica.
 
 **Nothing else is needed: a normal deploy.** No env change (the existing
 `INTERNAL_UPLOAD_TOKEN` is reused), no permission, edge or Traefik change.
