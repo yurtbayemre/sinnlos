@@ -49,9 +49,15 @@ import type {
  *   4. schema.json enums against the web unions and constants (types.ts,
  *      AD_CATEGORIES, ALL_EMOJIS, the kudos form values, the RSVP statuses,
  *      the quick-link CATEGORY_ORDER, the live CHANNEL_RE, poll audience and
- *      the guest flags). A web union is compared at compile time
- *      (unionValues) AND against the schema at run time, so neither side can
- *      drift alone;
+ *      the guest flags). A web union is pinned in two halves: its
+ *      hand-written unionValues list is checked against the union at COMPILE
+ *      time only, by `pnpm typecheck` (the typecheck:tests step,
+ *      tsconfig.test.json; CI's build job runs it), not by `pnpm test`, which
+ *      strips types; `pnpm test` compares that list with the schema at run
+ *      time. So a web union change needs `pnpm typecheck`, a schema enum
+ *      change `pnpm test`, and CI runs both. The constants read from source
+ *      (event-actions STATUSES, give-kudos VALUES) and the exported ones are
+ *      compared with the schema at run time;
  *   5. every mappedBy has its inversedBy and back (KNOWN gaps listed);
  *   6. the web role sets against PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS
  *      (KNOWN gaps listed until SH02).
@@ -137,18 +143,19 @@ type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 /**
  * The members of a string union as a list. It compiles only when the list
  * names every member and nothing else, so the web union cannot change
- * without this file; the list is then compared with the schema at run time.
+ * without this file. That half is a TYPE check: `pnpm typecheck`
+ * (typecheck:tests) enforces it, `pnpm test` does not, because Vitest strips
+ * types. The returned list is compared with the schema at run time.
  */
 function unionValues<U extends string>() {
   return <const V extends readonly U[]>(
     values: V,
-    ...mismatch: Exactly<U, V[number]> extends true
+    // Type level only: a list that differs from the union demands this extra
+    // argument, so the call does not compile. Nothing is passed at run time.
+    ..._mismatch: Exactly<U, V[number]> extends true
       ? []
       : [error: "the list does not match the union"]
-  ): readonly string[] => {
-    expect(mismatch).toEqual([]);
-    return values;
-  };
+  ): readonly string[] => values;
 }
 
 const sorted = (values: Iterable<string>) => [...values].sort();
