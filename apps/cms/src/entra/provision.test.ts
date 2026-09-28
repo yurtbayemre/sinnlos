@@ -470,3 +470,63 @@ describe("runEntraExchange: error log lines (spec N)", () => {
     expect(logged(host)).not.toMatch(/Pat Example|pat@entra|Secret Title|0f0f-4000/);
   });
 });
+
+describe("runEntraExchange: ENTRA_GROUP_ROLES through the exchange (spec G, H, K)", () => {
+  const GROUP = "22222222-3333-4444-8555-666666666666";
+  const OTHER_GROUP = "33333333-4444-4555-8666-777777777777";
+  const withGroups = () =>
+    settings({ ENTRA_GROUP_ROLES: `team_lead:${GROUP},editor:${OTHER_GROUP}` });
+
+  it("asks checkMemberGroups for the configured groups and grants the matching role", async () => {
+    const host = fakeHost();
+    const pending = run(host, { ...PERSON, groups: [GROUP.toUpperCase()] }, withGroups());
+    const outcome = await pending;
+    expect(outcome.status).toBe(200);
+    expect(pending.graph.requests).toContainEqual({
+      call: "POST /v1.0/me/checkMemberGroups",
+      body: { groupIds: [GROUP, OTHER_GROUP] },
+    });
+    expect(host.users[0]).toMatchObject({
+      role: roleId("team_lead"),
+      roleSource: "entra",
+      entraAppliedRole: "team_lead",
+    });
+    expect(auditLine(host)).toMatch(
+      new RegExp(
+        `result=created role=new->team_lead via=group:${GROUP} mode=on graph=me:ok,groups:ok,manager:off`,
+      ),
+    );
+  });
+
+  it("does not ask Graph for groups without ENTRA_GROUP_ROLES", async () => {
+    const host = fakeHost();
+    const pending = run(host, { ...PERSON, groups: [GROUP] });
+    expect((await pending).status).toBe(200);
+    expect(pending.graph.requests.map((request) => request.call)).toEqual(["GET /v1.0/me"]);
+    expect(auditLine(host)).toMatch(/via=default .*groups:off/);
+  });
+
+  it("refuses a new user with 503 when the configured group check fails", async () => {
+    const host = fakeHost();
+    const outcome = await run(
+      host,
+      { ...PERSON, roles: ["Intranet.Member"], groups: 500 },
+      withGroups(),
+    );
+    expect([outcome.status, outcome.body]).toEqual([503, { error: "unavailable" }]);
+    expect(host.calls.create).toBe(0);
+    expect(auditLine(host)).toMatch(/user=new .*result=unavailable .*groups:500/);
+  });
+
+  it("keeps an existing Entra user's role when the group check fails, and signs them in", async () => {
+    const seeded = { role: roleId("team_lead"), entraAppliedRole: "team_lead" };
+    const host = fakeHost([entraRow(seeded)]);
+    const outcome = await run(host, { ...PERSON, groups: 500 }, withGroups());
+    expect(outcome.status).toBe(200);
+    expect(host.users[0]).toMatchObject({ ...seeded, roleSource: "entra" });
+    expect(
+      host.calls.update.filter((call) => "role" in call.data || "roleSource" in call.data),
+    ).toEqual([]);
+    expect(auditLine(host)).toMatch(/user=7 .*result=existing role=keep via=- .*groups:500/);
+  });
+});
