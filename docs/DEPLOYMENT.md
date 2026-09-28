@@ -993,9 +993,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 needs undoing: the previous cms runs no DDL for the extra column (it stays
 unused, `forceMigration` is off) and reads every manager link as before;
 rolling forward again runs no DDL either (both checked on Postgres 16 and
-SQLite). The previous release shows no *Direct reports* card again, lets
-guests filter by contact fields again and gives blocked accounts their
-files until their session ends.
+SQLite). The `searchable: false` flags on `microsoftOid` and
+`digestFrequency` are no column property: no DDL in either direction
+(checked on Postgres 16). The previous release shows no *Direct reports*
+card again, lets guests filter by contact fields again, lets every other
+role find users by Entra id or digest frequency with `_q` again and gives
+blocked accounts their files until their session ends.
 
 #### Upgrading to the cms input hardening (2026-09-28)
 
