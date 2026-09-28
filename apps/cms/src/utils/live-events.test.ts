@@ -262,17 +262,53 @@ describe("live subscriber: filtering and failure", () => {
   });
 });
 
-describe("live subscriber: pings and the write transaction", () => {
-  it("queues the ping while the write is still open, so a rollback pings anyway", async () => {
+describe("live subscriber: pings go out after the commit (LF02)", () => {
+  it("nothing is queued while the write is open; the commit queues the ping", async () => {
     const h = subscriberHarness();
-    let queuedBeforeCommit: LiveEvent[] = [];
+    let queuedBeforeCommit: LiveEvent[] = [{ kind: "announcements" }];
+    await h.strapi.db.transaction(async () => {
+      await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
+      await h.fire("afterCreate", NOTIFICATION, {
+        result: { id: 3 },
+        params: { data: { recipient: 7 } },
+      });
+      queuedBeforeCommit = await h.emitted();
+    });
+    expect(queuedBeforeCommit).toEqual([]);
+    expect(await h.emitted()).toEqual([
+      { kind: "announcements" },
+      { kind: "notification", recipientId: 7 },
+    ]);
+  });
+
+  it("a nested transaction defers to the OUTER commit", async () => {
+    const h = subscriberHarness();
+    let afterInner: LiveEvent[] = [{ kind: "announcements" }];
+    await h.strapi.db.transaction(async () => {
+      await h.strapi.db.transaction(async () => {
+        await h.fire("afterCreate", COMMENT, { result: { id: 1, ...ANCHOR } });
+      });
+      afterInner = await h.emitted();
+    });
+    expect(afterInner).toEqual([]);
+    expect(await h.emitted()).toEqual([{ kind: "content", ...ANCHOR }]);
+  });
+
+  it("a rollback pings nothing", async () => {
+    const h = subscriberHarness();
     await expect(
       h.strapi.db.transaction(async () => {
         await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
-        queuedBeforeCommit = await h.emitted();
         throw new Error("validation failed");
       }),
     ).rejects.toThrow("validation failed");
-    expect(queuedBeforeCommit).toEqual([{ kind: "announcements" }]);
+    expect(await h.emitted()).toEqual([]);
+  });
+
+  it("without a transaction the ping is queued right away", async () => {
+    const h = subscriberHarness();
+    await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
+    expect(h.strapi.db.inTransaction()).toBe(false);
+    expect(await h.emitted()).toEqual([{ kind: "announcements" }]);
   });
 });

@@ -1,4 +1,8 @@
-import { runSourceFanout, type SourceAudience } from "../../../../utils/notify";
+import {
+  publishedRowWhere,
+  scheduleSourceFanout,
+  type SourceAudience,
+} from "../../../../utils/notify";
 import {
   ANNOUNCEMENT_FIND,
   announcementRecipients,
@@ -55,15 +59,19 @@ export default {
  * get strictly the targeted audience (owner default). The author is not
  * notified.
  *
- * A row that cannot be re-read has unknown targeting: nobody is notified
- * (fail-closed; before FX19 it targeted everyone).
+ * The fan-out runs after the publish committed (LF02), so it re-reads the
+ * document's CURRENT published row by documentId: a quicker second publish
+ * may already have replaced the row id it was started for. A row that
+ * cannot be re-read (unpublished or deleted in between) has unknown
+ * targeting: nobody is notified (fail-closed; before FX19 it targeted
+ * everyone).
  */
 async function loadAnnouncementAudience(
   announcement: AnnouncementRow,
 ): Promise<SourceAudience<AnnouncementRow>> {
   const [full, scopes, grants] = await Promise.all([
     strapi.db.query("api::announcement.announcement").findOne({
-      where: { id: announcement.id },
+      where: publishedRowWhere(announcement),
       populate: {
         department: { select: ["id"] },
         team: { select: ["id"] },
@@ -98,7 +106,9 @@ async function loadAnnouncementAudience(
  * title-based backfill, §7b / issue #12).
  */
 function notifyForAnnouncement(announcement: AnnouncementRow): Promise<void> {
-  return runSourceFanout({
+  // After the commit (LF02): nothing the fan-out does can fail the publish,
+  // and a publish that rolls back notifies nobody.
+  return scheduleSourceFanout({
     strapi,
     sourceType: "announcement",
     row: announcement,

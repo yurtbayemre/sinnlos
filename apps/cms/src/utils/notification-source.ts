@@ -32,8 +32,11 @@
  *   - A fan-out that dies half-way (k of n rows written) used to leave the
  *     source permanently "done". Per recipient this is SELF-HEALING: the next
  *     publish sees the k written rows and delivers exactly the missing n−k.
- *     That self-healing is why the fan-out needs no transaction bracket — a
- *     partial write is a recoverable state, not a corrupt one.
+ *     That self-healing is why the fan-out needs no transaction bracket
+ *     around its loop — a partial write is a recoverable state, not a
+ *     corrupt one. Since LF02 the fan-out runs after the publish committed
+ *     and each row in a transaction of its own (utils/notify.ts), so a
+ *     failing row costs that recipient only, never the publish.
  *
  * Known limit, unchanged and accepted: this is check-then-insert, so two
  * publishes racing each other can both read the same "already notified" set

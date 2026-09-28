@@ -16,7 +16,15 @@
  * announcement publish fans out to N notification rows, and the seed /
  * bulk paths fire the DB lifecycle subscriber too — without batching
  * that would be N POSTs instead of one.
+ *
+ * Post-commit (LF02): the DB subscriber runs inside the write's
+ * transaction, so it queues a ping only once that transaction commits
+ * (utils/after-commit.ts); a rollback pings nothing, and a client that
+ * refetches on the ping sees the committed rows. Outside a transaction it
+ * pings right away. emitLiveEvent itself queues immediately: the
+ * controllers call it after their writes returned.
  */
+import { afterCommit, type CommitAwareDb } from "./after-commit";
 
 export type LiveEvent =
   | { kind: "content"; targetType: string; targetDocumentId: string }
@@ -122,7 +130,7 @@ function relationId(value: unknown): number | null {
   // lifecycle fix a195dca).
   if (typeof value === "number") return value;
   if (value && typeof value === "object") {
-    const v = value as any;
+    const v = value as { id?: unknown; set?: { id?: unknown }[]; connect?: { id?: unknown }[] };
     if (typeof v.id === "number") return v.id;
     if (Array.isArray(v.set) && typeof v.set[0]?.id === "number") return v.set[0].id;
     if (Array.isArray(v.connect) && typeof v.connect[0]?.id === "number") return v.connect[0].id;
@@ -130,31 +138,61 @@ function relationId(value: unknown): number | null {
   return null;
 }
 
+/** A DB lifecycle event as @strapi/database hands it to a subscriber (the parts read here). */
+export interface LiveLifecycleEvent {
+  action?: string;
+  model?: { uid?: string } | null;
+  result?: Record<string, unknown> | null;
+  params?: { data?: Record<string, unknown> | null } | null;
+}
+
+/** A function subscriber (every event of every model). */
+export type LiveSubscriber = (event: LiveLifecycleEvent) => Promise<void>;
+
+/** The slice of the Strapi instance the subscriber needs. */
+export interface LiveSubscriberStrapi {
+  db: CommitAwareDb & {
+    lifecycles: { subscribe(subscriber: LiveSubscriber): unknown };
+    query(uid: string): { findOne(params: Record<string, unknown>): Promise<unknown> };
+  };
+  log?: { info?(message: string): void; warn?(message: string): void };
+}
+
 /**
  * Global DB-lifecycle subscriber — the one chokepoint that sees every
  * write path, including the `strapi.db.query` bypasses (reaction
  * toggle-off delete, notification creates from lifecycles). Registered
  * from bootstrap (see src/index.ts). Must never throw into a write.
+ * Pings go out after the write's transaction commits (LF02).
  */
-export function registerLiveEventSubscriber(strapi: any): void {
-  strapi.db.lifecycles.subscribe(async (event: any) => {
+export function registerLiveEventSubscriber(strapi: LiveSubscriberStrapi): void {
+  const emit = (event: LiveEvent) =>
+    afterCommit(
+      strapi.db,
+      () => emitLiveEvent(event),
+      (err) =>
+        strapi.log?.warn?.(`[live-emit] post-commit ping failed: ${(err as Error)?.message}`),
+    );
+
+  strapi.db.lifecycles.subscribe(async (event: LiveLifecycleEvent) => {
     try {
-      const uid: string | undefined = event?.model?.uid;
+      const uid = event?.model?.uid;
       if (!uid || !WATCHED_UIDS.has(uid)) return;
       if (!liveEventsEnabled()) return;
 
-      const action: string = event.action;
-      const row = event.result ?? {};
+      const action = event.action;
+      const row: Record<string, unknown> = event.result ?? {};
+      const data: Record<string, unknown> = event.params?.data ?? {};
 
       if (uid === "api::comment.comment" || uid === "api::reaction.reaction") {
         if (action !== "afterCreate" && action !== "afterDelete" && action !== "afterUpdate")
           return;
-        const targetType = row.targetType ?? event.params?.data?.targetType;
-        const targetDocumentId = row.targetDocumentId ?? event.params?.data?.targetDocumentId;
+        const targetType = row.targetType ?? data.targetType;
+        const targetDocumentId = row.targetDocumentId ?? data.targetDocumentId;
         // deleteMany / rows without an anchor: nothing to address a channel
         // with — the polling backstop covers these rare paths.
         if (typeof targetType !== "string" || typeof targetDocumentId !== "string") return;
-        emitLiveEvent({ kind: "content", targetType, targetDocumentId });
+        await emit({ kind: "content", targetType, targetDocumentId });
         return;
       }
 
@@ -163,17 +201,17 @@ export function registerLiveEventSubscriber(strapi: any): void {
         // (afterUpdateMany carries no rows) — those emit straight from the
         // notification controller, which knows ctx.state.user.
         if (action !== "afterCreate") return;
-        let recipientId = relationId(event.params?.data?.recipient) ?? relationId(row.recipient);
+        let recipientId = relationId(data.recipient) ?? relationId(row.recipient);
         if (recipientId == null && row.id != null) {
           // Link-table caveat: the result row does not populate relations
           // (same reason the comment lifecycle re-reads its row).
-          const full = await strapi.db.query("api::notification.notification").findOne({
+          const full = (await strapi.db.query("api::notification.notification").findOne({
             where: { id: row.id },
             populate: { recipient: true },
-          });
+          })) as { recipient?: { id?: number } | null } | null;
           recipientId = full?.recipient?.id ?? null;
         }
-        if (recipientId != null) emitLiveEvent({ kind: "notification", recipientId });
+        if (recipientId != null) await emit({ kind: "notification", recipientId });
         return;
       }
 
@@ -183,7 +221,7 @@ export function registerLiveEventSubscriber(strapi: any): void {
         // entirely to avoid phantom events on every re-publish.
         if (action !== "afterCreate") return;
         if (!row.publishedAt) return;
-        emitLiveEvent({ kind: "announcements" });
+        await emit({ kind: "announcements" });
       }
     } catch (err) {
       strapi.log?.warn?.(`[live-emit] subscriber error: ${(err as Error).message}`);

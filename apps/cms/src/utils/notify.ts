@@ -16,12 +16,18 @@
  *  - writeNotifications: one strapi.db.query(...).create() per row, NEVER
  *    createMany(): @strapi/database's createMany skips attachRelations, so
  *    `recipient`/`actor` (join-table relations) would be dropped and every
- *    row would be invisible to its recipient (§5.9).
+ *    row would be invisible to its recipient (§5.9). Each row in its own
+ *    transaction (LF02): a failing INSERT rolls back alone, is logged, and
+ *    the next recipient still gets theirs.
  *  - runSourceFanout: the audience-wide fan-out of a published announcement
  *    or event. Loads the audience, keeps the per-recipient re-publish dedup
  *    of resolveFanout (issue #12, §5.26) and fails open there; any error is
- *    logged and never thrown into the lifecycle.
+ *    logged and never thrown into the lifecycle. scheduleSourceFanout runs
+ *    it after the publish transaction commits (LF02, utils/after-commit.ts),
+ *    so nothing it does can fail the publish, and a publish that rolls back
+ *    notifies nobody.
  */
+import { afterCommit, inOwnTransaction, type CommitAwareDb } from "./after-commit";
 import {
   resolveFanout,
   type FanoutStrapi,
@@ -133,7 +139,7 @@ export function buildNotification(input: NotificationInput): NotificationData {
 
 /** The slice of the Strapi instance the writer needs (a superset of FanoutStrapi). */
 export interface NotifyStrapi extends FanoutStrapi {
-  db: {
+  db: CommitAwareDb & {
     query: (uid: string) => {
       findMany: (params: {
         where: Record<string, unknown>;
@@ -146,23 +152,52 @@ export interface NotifyStrapi extends FanoutStrapi {
 }
 
 /**
- * Writes the rows one create() at a time (never createMany, see the header)
- * and logs the result as
- * `[notifications] created <n> notification(s) for <label>`.
- * A failing create ends the loop and propagates: the rows written so far
- * anchor exactly their recipients, and the next publish delivers the rest
- * (the #12 dedup is per recipient).
+ * Writes the rows one create() at a time (never createMany, see the header),
+ * each in its own transaction, and logs the result as
+ * `[notifications] created <n> notification(s) for <label>` (plus
+ * `, <k> failed`). A failing row is logged as an error and skipped: it rolls
+ * back alone, the others are written, and the next publish delivers the
+ * missing ones (the #12 dedup is per recipient). Meant to run after the
+ * source's transaction committed; inside an open transaction the per-row
+ * transactions would join it.
  */
 export async function writeNotifications(
   strapi: NotifyStrapi,
   rows: readonly NotificationData[],
   label: string,
 ): Promise<number> {
+  let written = 0;
+  let failed = 0;
   for (const row of rows) {
-    await strapi.db.query(NOTIFICATION_UID).create({ data: row });
+    try {
+      await inOwnTransaction(strapi.db, () =>
+        strapi.db.query(NOTIFICATION_UID).create({ data: row }),
+      );
+      written += 1;
+    } catch (err) {
+      failed += 1;
+      strapi.log.error(
+        `[notifications] could not create the notification for user ${row.recipient} (${label}): ${(err as Error).message}`,
+      );
+    }
   }
-  strapi.log.info(`[notifications] created ${rows.length} notification(s) for ${label}`);
-  return rows.length;
+  strapi.log.info(
+    `[notifications] created ${written} notification(s) for ${label}` +
+      (failed > 0 ? `, ${failed} failed` : ""),
+  );
+  return written;
+}
+
+/**
+ * The `where` that re-reads a published source row after the commit: the
+ * document's current published row by documentId (the row id changes on
+ * every publish, §5.17), or the row id when the lifecycle row carries no
+ * documentId.
+ */
+export function publishedRowWhere(row: SourceRow): Record<string, unknown> {
+  const documentId = typeof row.documentId === "string" ? row.documentId.trim() : "";
+  if (documentId === "") return { id: row.id };
+  return { documentId, publishedAt: { $notNull: true } };
 }
 
 /** What a fan-out's audience loader returns. */
@@ -231,4 +266,48 @@ export async function runSourceFanout<TSource extends SourceRow>(
       `[notifications] failed to create notifications for ${sourceType}: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * Fan-outs of this process run one after the other. Commit callbacks are
+ * started without being awaited, so two fan-outs registered by one
+ * transaction (afterCreate and afterUpdate of an in-place publish) or by two
+ * quick publishes would otherwise run their check-then-insert dedup at the
+ * same time and notify twice; in sequence the second one finds the first
+ * one's rows. It also keeps a bulk publish from starting every fan-out at
+ * once.
+ */
+let fanoutChain: Promise<void> = Promise.resolve();
+
+function enqueueFanout(task: () => Promise<void>): Promise<void> {
+  const next = fanoutChain.then(task, task);
+  fanoutChain = next.catch(() => undefined);
+  return next;
+}
+
+/** Exposed for tests: resolves once every fan-out started so far has finished. */
+export function __fanoutsSettledForTest(): Promise<void> {
+  return fanoutChain;
+}
+
+/**
+ * runSourceFanout once the publish transaction has committed (LF02): the
+ * fan-out reads the committed audience, its INSERTs cannot fail the
+ * publish, and a publish that rolls back notifies nobody. Without an open
+ * transaction (a db-layer write from a script) it runs right away. Either
+ * way it waits for the fan-outs before it (enqueueFanout).
+ * Resolves when the fan-out is registered or, without a transaction, done.
+ */
+export function scheduleSourceFanout<TSource extends SourceRow>(
+  options: SourceFanoutOptions<TSource>,
+): Promise<void> {
+  const { strapi, sourceType } = options;
+  return afterCommit(
+    strapi.db,
+    () => enqueueFanout(() => runSourceFanout(options)),
+    (err) =>
+      strapi.log.error(
+        `[notifications] failed to create notifications for ${sourceType}: ${(err as Error)?.message}`,
+      ),
+  );
 }

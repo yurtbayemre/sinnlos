@@ -21,7 +21,7 @@ import {
   createOrgStub,
   recipientsOf,
 } from "../../../../test/org-fixtures.test.helper";
-import type { Row, StrapiStub } from "../../../../test/strapi-stub.test.helper";
+import type { Row, StrapiStub, TransactionScope } from "../../../../test/strapi-stub.test.helper";
 import lifecycles from "./lifecycles";
 
 afterEach(() => {
@@ -284,29 +284,45 @@ describe("announcement hooks", () => {
     );
   });
 
-  it("never throws: a failing insert is logged and the hook resolves", async () => {
+  it("never throws: a failing load is logged and the hook resolves", async () => {
     const strapi = setup();
     const row = publish(strapi, { department: { id: DEPT.sales } });
     const query = strapi.db.query.bind(strapi.db);
     strapi.db.query = (uid: string) => {
-      const q = query(uid);
-      if (uid !== NOTIFICATION_UID) return q;
-      return {
-        ...q,
-        create: async () => {
-          throw new Error("value too long for type character varying(255)");
-        },
-      };
+      if (uid === "plugin::users-permissions.permission") throw new Error("db down");
+      return query(uid);
     };
     await expect(lifecycles.afterCreate({ result: row })).resolves.toBeUndefined();
     expect(strapi.log.error).toHaveBeenCalledWith(
-      "[notifications] failed to create notifications for announcement: value too long for type character varying(255)",
+      "[notifications] failed to create notifications for announcement: db down",
     );
   });
 });
 
-describe("announcement fan-out and the publish transaction", () => {
-  it("runs INSIDE the publish transaction: the rows exist before the commit", async () => {
+/** Makes the notification INSERT for `recipient` fail like Postgres 22001; returns the undo. */
+function failInsertFor(strapi: StrapiStub, recipient: number): () => void {
+  const query = strapi.db.query.bind(strapi.db);
+  const original = strapi.db.query;
+  strapi.db.query = (uid: string) => {
+    const q = query(uid);
+    if (uid !== NOTIFICATION_UID) return q;
+    return {
+      ...q,
+      create: async (params: { data: Record<string, unknown> }) => {
+        if (params.data.recipient === recipient) {
+          throw new Error("value too long for type character varying(255)");
+        }
+        return q.create(params);
+      },
+    };
+  };
+  return () => {
+    strapi.db.query = original;
+  };
+}
+
+describe("announcement fan-out after the publish commits (LF02)", () => {
+  it("nothing is written while the publish is open; the commit runs the fan-out", async () => {
     const strapi = setup();
     const row = publish(strapi, { department: { id: DEPT.sales } });
     let rowsBeforeCommit = -1;
@@ -314,6 +330,88 @@ describe("announcement fan-out and the publish transaction", () => {
       await lifecycles.afterCreate({ result: row });
       rowsBeforeCommit = notificationRows(strapi).length;
     });
-    expect(rowsBeforeCommit).toBe(3);
+    expect(rowsBeforeCommit).toBe(0);
+    expect(recipientsOf(strapi)).toEqual([USER.bob, USER.dave, USER.anna]);
+  });
+
+  it("a nested transaction defers to the outer commit", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { department: { id: DEPT.sales } });
+    let afterInner = -1;
+    await strapi.db.transaction(async () => {
+      await strapi.db.transaction(() => lifecycles.afterCreate({ result: row }));
+      afterInner = notificationRows(strapi).length;
+    });
+    expect(afterInner).toBe(0);
+    expect(notificationRows(strapi)).toHaveLength(3);
+  });
+
+  it("a publish that rolls back notifies nobody", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { department: { id: DEPT.sales } });
+    await expect(
+      strapi.db.transaction(async () => {
+        await lifecycles.afterCreate({ result: row });
+        throw new Error("relation sync failed");
+      }),
+    ).rejects.toThrow("relation sync failed");
+    expect(notificationRows(strapi)).toEqual([]);
+    expect(strapi.calls.some((call) => call.uid === NOTIFICATION_UID)).toBe(false);
+  });
+
+  it("a throwing insert neither rolls back the publish nor stops the other rows", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { department: { id: DEPT.sales } });
+    const undo = failInsertFor(strapi, USER.dave);
+    const rolledBack = vi.fn();
+    await expect(
+      strapi.db.transaction(async ({ onRollback }) => {
+        onRollback(rolledBack);
+        await lifecycles.afterCreate({ result: row });
+        return "published";
+      }),
+    ).resolves.toBe("published");
+    expect(rolledBack).not.toHaveBeenCalled();
+    expect(recipientsOf(strapi)).toEqual([USER.bob, USER.anna]);
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      `[notifications] could not create the notification for user ${USER.dave} (announcement ${row.id} (source ${row.documentId})): value too long for type character varying(255)`,
+    );
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      `[notifications] created 2 notification(s) for announcement ${row.id} (source ${row.documentId}), 1 failed`,
+    );
+    // The next publish delivers the missing one (#12 dedup per recipient).
+    undo();
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual([USER.bob, USER.dave, USER.anna]);
+  });
+
+  it("each notification insert runs in a transaction of its own", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { department: { id: DEPT.sales } });
+    const transaction = strapi.db.transaction;
+    const depths: boolean[] = [];
+    strapi.db.transaction = <T>(callback: (scope: TransactionScope) => Promise<T> | T) =>
+      transaction((scope) => {
+        depths.push(strapi.db.inTransaction());
+        return callback(scope);
+      });
+    await lifecycles.afterCreate({ result: row });
+    // No publish transaction here: three per-row transactions, nothing else.
+    expect(depths).toEqual([true, true, true]);
+  });
+
+  it("the fan-out re-reads the CURRENT published row by documentId", async () => {
+    const strapi = setup();
+    const first = publish(strapi, { department: { id: DEPT.engineering } });
+    // A second publish retargets to Sales and replaces the row before the
+    // first publish's fan-out ran.
+    const draft = strapi.tables[ANNOUNCEMENT_UID].find(
+      (r) => r.documentId === first.documentId && r.publishedAt === null,
+    );
+    if (!draft) throw new Error("no draft");
+    draft.department = { id: DEPT.sales };
+    await strapi.documents(ANNOUNCEMENT_UID).publish({ documentId: String(first.documentId) });
+    await lifecycles.afterCreate({ result: first });
+    expect(recipientsOf(strapi)).toEqual([USER.bob, USER.dave, USER.anna]);
   });
 });

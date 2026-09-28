@@ -1,4 +1,8 @@
-import { runSourceFanout, type SourceAudience } from "../../../../utils/notify";
+import {
+  publishedRowWhere,
+  scheduleSourceFanout,
+  type SourceAudience,
+} from "../../../../utils/notify";
 import {
   EVENT_FIND,
   holdsGrant,
@@ -40,13 +44,15 @@ export default {
  * The event's audience (FX19): users of its departments, or everyone for an
  * event without departments, whose role holds event.find (the calendar's
  * read grant, which guest holds) and who are not blocked; the organizer is
- * excluded. A row that cannot be re-read has unknown targeting: nobody is
- * notified (fail-closed; before FX19 it notified everyone).
+ * excluded. Runs after the commit (LF02) and re-reads the document's
+ * current published row, like the announcement fan-out. A row that cannot
+ * be re-read has unknown targeting: nobody is notified (fail-closed; before
+ * FX19 it notified everyone).
  */
 async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>> {
   const [full, scopes, grants] = await Promise.all([
     strapi.db.query("api::event.event").findOne({
-      where: { id: ev.id },
+      where: publishedRowWhere(ev),
       populate: { departments: { select: ["id"] }, organizer: { select: ["id"] } },
     }),
     loadAllUserScopes(strapi),
@@ -83,7 +89,8 @@ async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>
  * heals on the next publish.
  */
 function notifyForEvent(ev: EventRow): Promise<void> {
-  return runSourceFanout({
+  // After the commit (LF02), see announcement/lifecycles.ts.
+  return scheduleSourceFanout({
     strapi,
     sourceType: "event",
     row: ev,

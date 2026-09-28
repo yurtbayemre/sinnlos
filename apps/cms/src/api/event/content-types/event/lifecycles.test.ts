@@ -159,15 +159,24 @@ describe("event afterCreate", () => {
     );
   });
 
-  it("runs inside the publish transaction and never throws", async () => {
+  it("runs after the publish commits (LF02), a rollback notifies nobody, never throws", async () => {
     const strapi = setup();
     const row = publish(strapi, { departments: [{ id: DEPT.sales }] });
+    await expect(
+      strapi.db.transaction(async () => {
+        await lifecycles.afterCreate({ result: row });
+        throw new Error("rolled back");
+      }),
+    ).rejects.toThrow("rolled back");
+    expect(notificationRows(strapi)).toEqual([]);
+
     let before = -1;
     await strapi.db.transaction(async () => {
       await lifecycles.afterCreate({ result: row });
       before = notificationRows(strapi).length;
     });
-    expect(before).toBe(3);
+    expect(before).toBe(0);
+    expect(notificationRows(strapi)).toHaveLength(3);
 
     const query = strapi.db.query.bind(strapi.db);
     strapi.db.query = (uid: string) => {

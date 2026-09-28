@@ -8,13 +8,17 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { createStrapiStub } from "../test/strapi-stub.test.helper";
+import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
+import type { CommitAwareDb } from "./after-commit";
 import {
   NOTIFICATION_TITLE_MAX,
   NOTIFICATION_UID,
+  __fanoutsSettledForTest,
   buildNotification,
   buildTitle,
+  publishedRowWhere,
   runSourceFanout,
+  scheduleSourceFanout,
   writeNotifications,
   type NotificationData,
 } from "./notify";
@@ -157,6 +161,107 @@ describe("writeNotifications", () => {
     expect(strapi.log.info).toHaveBeenCalledWith(
       "[notifications] created 2 notification(s) for event 3 (source e1)",
     );
+  });
+
+  it("each row in its own transaction; a failing row is logged and skipped (LF02)", async () => {
+    const strapi = createStrapiStub();
+    const create = strapi.db.query(NOTIFICATION_UID).create;
+    const inTransaction: boolean[] = [];
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => ({
+      ...query(uid),
+      create: async (params: { data: Record<string, unknown> }) => {
+        inTransaction.push(strapi.db.inTransaction());
+        if (params.data.recipient === 8) throw new Error("value too long");
+        return create(params);
+      },
+    });
+    await expect(
+      writeNotifications(strapi, [row(7), row(8), row(9)], "event 3 (source e1)"),
+    ).resolves.toBe(2);
+    expect(inTransaction).toEqual([true, true, true]);
+    expect(strapi.tables[NOTIFICATION_UID].map((n) => n.recipient)).toEqual([{ id: 7 }, { id: 9 }]);
+    expect(strapi.log.error).toHaveBeenCalledWith(
+      "[notifications] could not create the notification for user 8 (event 3 (source e1)): value too long",
+    );
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      "[notifications] created 2 notification(s) for event 3 (source e1), 1 failed",
+    );
+  });
+});
+
+describe("publishedRowWhere", () => {
+  it("the current published row by documentId, the row id without one", () => {
+    expect(publishedRowWhere({ id: 3, documentId: " doc1 " })).toEqual({
+      documentId: "doc1",
+      publishedAt: { $notNull: true },
+    });
+    expect(publishedRowWhere({ id: 3, documentId: null })).toEqual({ id: 3 });
+    expect(publishedRowWhere({ id: 3 })).toEqual({ id: 3 });
+  });
+});
+
+/**
+ * The stub's rows behind transactions as @strapi/database 5.55.1 runs them:
+ * nested calls join, and the commit callbacks are CALLED, not awaited
+ * (transaction-context.js `forEach(cb => cb())`), so they run concurrently.
+ */
+function strapiLike(stub: StrapiStub) {
+  let depth = 0;
+  let callbacks: Array<() => unknown> = [];
+  const transaction: NonNullable<CommitAwareDb["transaction"]> = async (callback) => {
+    depth += 1;
+    try {
+      const result = await callback({ onCommit: (fn) => callbacks.push(fn) });
+      depth -= 1;
+      if (depth === 0) {
+        const run = callbacks;
+        callbacks = [];
+        run.forEach((fn) => {
+          void fn();
+        });
+      }
+      return result;
+    } catch (err) {
+      depth -= 1;
+      if (depth === 0) callbacks = [];
+      throw err;
+    }
+  };
+  return {
+    log: stub.log,
+    db: { query: (uid: string) => stub.db.query(uid), inTransaction: () => depth > 0, transaction },
+  };
+}
+
+describe("scheduleSourceFanout (LF02)", () => {
+  const source = { id: 3, documentId: "a1", title: "Town hall" };
+  const options = (strapi: ReturnType<typeof strapiLike> | StrapiStub) => ({
+    strapi,
+    sourceType: "announcement" as const,
+    row: source,
+    loadAudience: async () => ({ source, recipients: [7, 8], actorId: 1 }),
+    titleParts: () => ["New announcement: Town hall"],
+    link: "/announcements",
+  });
+
+  it("nothing before the commit; two fan-outs of one commit run in turn, so the dedup holds", async () => {
+    const stub = createStrapiStub();
+    const host = strapiLike(stub);
+    await host.db.transaction(async () => {
+      // afterCreate and afterUpdate of an in-place publish, same transaction.
+      await scheduleSourceFanout(options(host));
+      await scheduleSourceFanout(options(host));
+      expect(stub.tables[NOTIFICATION_UID] ?? []).toEqual([]);
+    });
+    await __fanoutsSettledForTest();
+    expect(stub.tables[NOTIFICATION_UID].map((n) => n.recipient)).toEqual([{ id: 7 }, { id: 8 }]);
+  });
+
+  it("without a transaction it runs right away", async () => {
+    const strapi = createStrapiStub();
+    await scheduleSourceFanout(options(strapi));
+    expect(strapi.tables[NOTIFICATION_UID]).toHaveLength(2);
   });
 });
 
