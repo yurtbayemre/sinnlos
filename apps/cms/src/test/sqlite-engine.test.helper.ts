@@ -19,11 +19,21 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { vi } from "vitest";
 
+/**
+ * What knex emits per statement. (Its `__knexTxId` is no transaction marker
+ * on SQLite: the single pooled connection keeps the id of its last
+ * transaction, so look for BEGIN/SAVEPOINT statements instead.)
+ */
+export interface KnexQueryEvent {
+  sql: string;
+  bindings?: unknown[];
+}
+
 export interface EngineKnex {
   raw(sql: string, bindings?: readonly unknown[]): Promise<unknown>;
-  on(event: "query", listener: (query: { sql: string }) => void): unknown;
-  off(event: "query", listener: (query: { sql: string }) => void): unknown;
-  schema: { hasTable(table: string): Promise<boolean> };
+  on(event: "query", listener: (query: KnexQueryEvent) => void): unknown;
+  off(event: "query", listener: (query: KnexQueryEvent) => void): unknown;
+  schema: { hasTable(table: string): Promise<boolean>; hasColumn(table: string, column: string): Promise<boolean> };
 }
 
 export interface EngineQuery {
@@ -97,6 +107,11 @@ export function requirePackageFile<T>(packageDir: string, relativePath: string):
   return requireFromCms(join(packageDir, relativePath)) as T;
 }
 
+/** A module as an installed package resolves it (its own dependency tree). */
+export function requireFromPackage<T>(packageDir: string, id: string): T {
+  return createRequire(join(packageDir, "package.json"))(id) as T;
+}
+
 /** The version of an installed @strapi/* package. */
 export function strapiPackageVersion(name: string): string {
   return requirePackageFile<{ version: string }>(strapiPackageDir(name), "package.json").version;
@@ -114,7 +129,7 @@ export interface SqliteEngine {
   /** The temp dir (user migrations go to `<dir>/migrations`). */
   dir: string;
   /** Closes the engine and opens a new one on the SAME file (a later boot with other models). */
-  reopen(models: unknown[]): Promise<QueryEngine>;
+  reopen(models: ModelSource): Promise<QueryEngine>;
   close(): Promise<void>;
 }
 
@@ -127,12 +142,15 @@ function engineOn(file: string, migrationsDir: string): QueryEngine {
   });
 }
 
+/** Models, or a factory that builds them from the engine's identifiers (transformContentTypesToModels). */
+export type ModelSource = unknown[] | ((identifiers: unknown) => unknown[]);
+
 /**
  * A fresh SQLite database with `models` initialised. `create` builds the
  * schema directly; `sync` runs Strapi's own schema sync (migrations first).
  */
 export async function openSqliteEngine(
-  models: unknown[],
+  models: ModelSource,
   options: { schema?: "create" | "sync" | "none" } = {},
 ): Promise<SqliteEngine> {
   const dir = mkdtempSync(join(tmpdir(), "sinnlos-engine-"));
@@ -142,11 +160,11 @@ export async function openSqliteEngine(
   const closeEngines = async () => {
     for (const engine of engines.splice(0)) await engine.destroy();
   };
-  const open = async (list: unknown[]) => {
+  const open = async (source: ModelSource) => {
     await closeEngines();
     const db = engineOn(file, migrationsDir);
     engines.push(db);
-    await db.init({ models: list });
+    await db.init({ models: typeof source === "function" ? source(db.metadata.identifiers) : source });
     vi.stubGlobal("strapi", { db });
     return db;
   };
