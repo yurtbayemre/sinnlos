@@ -34,16 +34,18 @@ cannot offer; see the note there).
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first:
+> what the instance does not run yet, newest first: batch 6 (the first
+> note of [3.8 Updates](#38-updates)),
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
 > **guests no longer see any poll** until an admin or editor turns on
 > "Visible to guests" for it) and
 > [Upgrading to the ICS and cms start fixes (2026-09-27)](#upgrading-to-the-ics-and-cms-start-fixes-2026-09-27)
-> (the checks after the deploy and the rollback note). Deploying both
+> (the checks after the deploy and the rollback note). Deploying all of them
 > together is one normal deploy plus the read-only pre-deploy queries of the
-> poll targeting note. Coming from an older release,
+> poll targeting note and the optional poll query of the cms input
+> hardening. Coming from an older release,
 > work through the datetime runbook,
 > [Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release),
 > before you deploy: the datetime release introduces the
