@@ -2,8 +2,8 @@
  * Role-aware stripping of employee contact fields from content-api output
  * (GitHub issue #10 / P1.2 — "guests can read staff contact data").
  *
- * Pure, no Strapi runtime: `index.ts` registers a `content-api.output`
- * sanitizer factory that reads the caller's role from the request context
+ * Pure, no Strapi runtime: `bootstrap/user-contact-sanitizer.ts` registers a
+ * `content-api.output` sanitizer factory that reads the caller's role from the request context
  * and, for a non-privileged caller, hands the response entity to
  * `stripSensitiveUserFields`. The security decision (`shouldSanitizeForRole`)
  * and the field removal are therefore unit-testable without a running
@@ -37,6 +37,7 @@
  * on for every role (today `blocked`) must therefore never be added to the
  * list.
  */
+import { STAFF_ROLES } from "../bootstrap/roles";
 
 /** UID of the users-permissions user model. */
 export const USER_UID = "plugin::users-permissions.user";
@@ -67,20 +68,15 @@ export const SENSITIVE_USER_FIELDS = [
 
 /**
  * The employee roles that MAY read the fields above. Fail-closed: only a
- * caller whose `role.type` is in this set keeps the fields; `guest`, the
- * pre-role-mapping `authenticated` fallback, anonymous `public`, and any
- * unknown/undefined role are sanitized.
+ * caller whose `role.type` is in this set keeps the fields; `guest`,
+ * `authenticated` (held only by manual assignment or from before
+ * default_role), anonymous `public`, and any unknown/undefined role are
+ * sanitized.
  *
- * The exact type strings are the ones seeded in `src/index.ts` — note the
- * admin role is `admin_role`, not `admin`.
+ * These are the STAFF_ROLES of the role vocabulary (bootstrap/roles.ts,
+ * B02) — note the admin role is `admin_role`, not `admin`.
  */
-export const PRIVILEGED_ROLE_TYPES: ReadonlySet<string> = new Set([
-  "admin_role",
-  "editor",
-  "department_head",
-  "team_lead",
-  "member",
-]);
+export const PRIVILEGED_ROLE_TYPES: ReadonlySet<string> = new Set<string>(STAFF_ROLES);
 
 /** True when a caller with this `role.type` must have the fields stripped. */
 export function shouldSanitizeForRole(roleType: string | null | undefined): boolean {

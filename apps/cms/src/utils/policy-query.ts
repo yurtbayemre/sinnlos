@@ -98,10 +98,10 @@ export function restrictiveIdFilter(idList: number[]): Record<string, any> {
  * inert in v5 (no occurrence anywhere in @strapi/core, @strapi/utils or
  * @strapi/database 5.49 or 5.55.1), and the core does not strip it: this CMS sets no
  * `api.rest.strictParams`, so `sanitizeQuery` keeps unknown keys. The
- * sanitize.query wrapper in src/index.ts now drops every non-REST root key
- * (utils/rest-query-params.ts); deleting it here as well keeps a future
- * back-compat shim (or a plugin honouring the legacy name) from
- * re-opening the hole should that pick ever change.
+ * sanitize.query wrapper in bootstrap/restricted-relation-guard.ts now
+ * drops every non-REST root key (utils/rest-query-params.ts); deleting it
+ * here as well keeps a future back-compat shim (or a plugin honouring the
+ * legacy name) from re-opening the hole should that pick ever change.
  *
  * `publicationFilter` (and its deprecated boolean form `hasPublishedVersion`)
  * are live content-api keys (`SHARED_QUERY_PARAM_KEYS`, @strapi/utils

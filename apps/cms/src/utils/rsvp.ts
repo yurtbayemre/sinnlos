@@ -12,6 +12,7 @@
  * counts; the next upsert heals the duplicates (pickSurvivor's order).
  */
 
+import { ADMIN } from "../bootstrap/roles";
 import { isDocumentId } from "./entry-id";
 
 export const RSVP_STATUSES = ["yes", "no", "maybe"] as const;
@@ -114,7 +115,7 @@ export function capacityDecision(capacity: unknown, yesUsers: number): "open" | 
  * decliners do not leak.
  */
 export function stripPrivateUsers(rows: unknown[], caller: RsvpCaller | null | undefined): void {
-  if (caller?.role?.type === "admin_role") return;
+  if (caller?.role?.type === ADMIN) return;
   for (const row of rows) {
     if (!row || typeof row !== "object") continue;
     const record = row as { status?: unknown; user?: { id?: unknown } | null };

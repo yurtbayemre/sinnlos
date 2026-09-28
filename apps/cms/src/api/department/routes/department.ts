@@ -8,8 +8,9 @@ import { factories } from "@strapi/strapi";
  * `pages` (inverse of wiki-page.department) is cut for non-admin/editor
  * callers on EVERY content-api route — populate, filters and sort — by the
  * global relation guard (FX05, registerRestrictedRelationGuard in
- * src/index.ts), because /api/users, wiki-spaces, events, ... reach
- * `department.pages` just as well as these routes do.
+ * src/bootstrap/restricted-relation-guard.ts), because /api/users,
+ * wiki-spaces, events, ... reach `department.pages` just as well as these
+ * routes do.
  */
 export default factories.createCoreRouter("api::department.department", {
   config: {

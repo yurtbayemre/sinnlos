@@ -87,7 +87,7 @@ type RoleGrants = Record<string, Record<string, readonly string[] | undefined>>;
 const { PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS } = await cms<{
   PERMISSION_MATRIX: RoleGrants;
   CUSTOM_ACTION_GRANTS: Record<string, readonly string[] | "*" | undefined>;
-}>("index.ts");
+}>("bootstrap/permission-matrix.ts");
 
 const { isAnnouncementVisible } = await cms<{
   isAnnouncementVisible(announcement: AnnouncementAudience, scope: AudienceScope | null): boolean;

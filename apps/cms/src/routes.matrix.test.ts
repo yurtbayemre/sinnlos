@@ -1,7 +1,19 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { CUSTOM_ACTION_GRANTS, PERMISSION_MATRIX, REVOKED_PERMISSIONS } from "./index";
+import {
+  CUSTOM_ACTION_GRANTS,
+  PERMISSION_MATRIX,
+  REVOKED_PERMISSIONS,
+  computeDesiredGrants,
+} from "./bootstrap/permission-matrix";
+import { ADMIN, MODERATORS } from "./bootstrap/roles";
+import { knownActions, unknownActions } from "./bootstrap/sync-permissions";
+import {
+  cmsPackageDir,
+  requirePackageFile,
+  strapiPackageDir,
+} from "./test/sqlite-engine.test.helper";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
 
@@ -10,9 +22,10 @@ import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils
  *
  * Every content-API call passes two independent gates (docs/architecture.md
  * §5.8): the users-permissions GRANT (a permission row `<uid>.<action>`,
- * seeded by src/index.ts) and the route's POLICIES (`config.policies` in
- * src/api/*\/routes/*.ts). The shipped authorization defects sat in the seam
- * between the two — router config that the pure unit suite never sees:
+ * seeded from bootstrap/permission-matrix.ts) and the route's POLICIES
+ * (`config.policies` in src/api/*\/routes/*.ts). The shipped authorization
+ * defects sat in the seam between the two — router config that the pure
+ * unit suite never sees:
  *   - an action left out of a `createCoreRouter` config still EXISTS and
  *     runs WITHOUT policies unless the router uses `only:` (the forged
  *     POST /api/poll-votes hole),
@@ -108,8 +121,8 @@ const READ_ACTIONS = ["find", "findOne"];
 
 /**
  * Users-permissions reads every role receives on top of PERMISSION_MATRIX
- * (USER_READ_ACTIONS in src/index.ts, USER_READ_EXCLUDED_ROLES is empty on
- * purpose — see the guest OPEN ISSUE note there).
+ * (USER_READ_ACTIONS in bootstrap/permission-matrix.ts; no role is excluded,
+ * guest included — see the note on the guest matrix there).
  */
 const USER_READ_GRANTS = [
   "plugin::users-permissions.user.find",
@@ -134,6 +147,28 @@ interface Loaded {
   /** Controller uid → own (overriding or custom) method names. */
   controllerMethods: Map<string, string[]>;
   schemas: Map<string, ContentTypeSchema>;
+}
+
+/**
+ * An installed plugin's server controllers, instantiated like Strapi's
+ * controller registry does (a factory is called with `{ strapi }`; the
+ * factories only build closures). The dist index either exports them as
+ * `controllers` (upload) or behind a lazy `__require` (users-permissions).
+ */
+function installedControllers(packageDir: string): Record<string, object> {
+  const loaded = requirePackageFile<{
+    controllers?: Record<string, unknown>;
+    __require?: () => Record<string, unknown>;
+  }>(packageDir, "dist/server/controllers/index.js");
+  const controllers = loaded.controllers ?? loaded.__require?.() ?? {};
+  return Object.fromEntries(
+    Object.entries(controllers).map(([name, controller]) => [
+      name,
+      typeof controller === "function"
+        ? (controller as (deps: { strapi: object }) => object)({ strapi: {} })
+        : (controller as object),
+    ]),
+  );
 }
 
 const tsModules = (dir: string) =>
@@ -425,13 +460,14 @@ const KNOWN_DRAFT_READS = new Set<string>([]);
 // policy domain hands the filtered rows out through populate, filters or
 // sort. It works from every route whose model reaches that relation, at any
 // depth, on writes as well as reads. So the check is per RELATION, not per
-// route: the global guard (registerRestrictedRelationGuard in src/index.ts,
-// pinned in index.register.test.ts) applies RESTRICTED_RELATION_TARGETS on
-// every content-api query, and this block derives every such relation from
-// the schemas (src/api + the users-permissions user extension). Coverage is
-// transitive: a path into a filtered type either crosses one of these
-// relations or starts at a root that the type's own policy narrows, and
-// every trusted source must itself sit in the target's policy domain.
+// route: the global guard (registerRestrictedRelationGuard in
+// bootstrap/restricted-relation-guard.ts, pinned in index.register.test.ts)
+// applies RESTRICTED_RELATION_TARGETS on every content-api query, and this
+// block derives every such relation from the schemas (src/api + the
+// users-permissions user extension). Coverage is transitive: a path into a
+// filtered type either crosses one of these relations or starts at a root
+// that the type's own policy narrows, and every trusted source must itself
+// sit in the target's policy domain.
 // ---------------------------------------------------------------------------
 
 /** Read policies that decide WHICH rows a caller may see. */
@@ -508,12 +544,16 @@ describe("route → policy matrix (S01)", async () => {
     }
   }
   const matrixRoles = Object.keys(PERMISSION_MATRIX);
-  const customGrantRoles = (grant: string[] | "*") => (grant === "*" ? matrixRoles : grant);
+  /** The matrix by any role string (the typed keys are pinned by tsc). */
+  const matrixByRole: Readonly<Record<string, Partial<Record<string, readonly string[]>>>> =
+    PERMISSION_MATRIX;
+  const customGrantRoles = (grant: readonly string[] | "*"): readonly string[] =>
+    grant === "*" ? matrixRoles : grant;
 
   /** Every action key a role holds after the bootstrap sync. */
   function effectiveGrants(role: string): Set<string> {
     const grants = new Set(USER_READ_GRANTS);
-    for (const [uid, actions] of Object.entries(PERMISSION_MATRIX[role] ?? {})) {
+    for (const [uid, actions] of Object.entries(matrixByRole[role] ?? {})) {
       for (const action of actions ?? []) grants.add(`${uid}.${action}`);
     }
     for (const [action, grant] of Object.entries(CUSTOM_ACTION_GRANTS)) {
@@ -623,6 +663,35 @@ describe("route → policy matrix (S01)", async () => {
       }
       expect(checked).toContain("/event-rsvps/summary");
       expect(misordered).toEqual([]);
+    });
+
+    /**
+     * B04 in CI for the keys the mocked routers cannot see: every plugin::
+     * grant must be an action of the INSTALLED plugin's controllers, loaded
+     * the way Strapi's controller registry instantiates them. The boot runs
+     * the same check (assertKnownActions) over everything Strapi loaded.
+     */
+    it("every plugin:: grant is an action of the installed plugin's controllers (B04)", () => {
+      const plugins = {
+        "users-permissions": {
+          controllers: installedControllers(cmsPackageDir("@strapi/plugin-users-permissions")),
+        },
+        upload: { controllers: installedControllers(strapiPackageDir("@strapi/upload")) },
+      };
+      const known = knownActions({ apis: {}, plugins });
+      expect(known.has("plugin::users-permissions.auth.register")).toBe(true);
+      const pluginGrants = computeDesiredGrants().filter((grant) =>
+        grant.action.startsWith("plugin::"),
+      );
+      expect([...new Set(pluginGrants.map((grant) => grant.action))].sort()).toEqual([
+        "plugin::upload.content-api.upload",
+        "plugin::users-permissions.auth.changePassword",
+        "plugin::users-permissions.role.find",
+        "plugin::users-permissions.user.find",
+        "plugin::users-permissions.user.findOne",
+        "plugin::users-permissions.user.me",
+      ]);
+      expect(unknownActions(pluginGrants, known)).toEqual([]);
     });
   });
 
@@ -932,6 +1001,15 @@ describe("route → policy matrix (S01)", async () => {
         [...(matrixGrants.get("api::event-rsvp.event-rsvp.find") ?? [])].sort(),
       );
       expect(holders).not.toContain("guest");
+    });
+
+    it("B02: the classified ownership bypasses are ADMIN (update) and MODERATORS (delete)", () => {
+      const bypassOf = (action: string) =>
+        policiesOf(action)
+          .map((spec) => (typeof spec === "string" ? undefined : spec.config?.bypassRoles))
+          .find((roles) => roles !== undefined);
+      expect(bypassOf("api::classified.classified.update")).toEqual([ADMIN]);
+      expect(bypassOf("api::classified.classified.delete")).toEqual([...MODERATORS]);
     });
 
     it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {

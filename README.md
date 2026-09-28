@@ -52,8 +52,9 @@ anonymous search analytics, and an **English/German UI**
 
 ## Prerequisites
 
-- Node.js 22.13+ or 24 LTS (root `engines`: `^22.13.0 || ^24.0.0`; CI and
-  the Docker images use Node 24; Node 20 is end-of-life)
+- Node.js 22.13+ or 24 LTS (root and `apps/cms` `engines`:
+  `^22.13.0 || ^24.0.0`; CI and the Docker images use Node 24; Node 20 is
+  end-of-life)
 - pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant with permission to register an app — only for
@@ -197,13 +198,25 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   the stored times once
   ([runbook](./docs/DEPLOYMENT.md#upgrading-an-existing-instance-to-this-release));
   a fresh install leaves them empty.
+- **cms network and storage:** `CORS_ORIGIN` lists the browser origins that
+  may call the cms API, comma-separated (compose sets it to
+  `WEB_PUBLIC_URL`; unset or empty means `http://localhost:3000`).
+  `DATABASE_FILENAME` (SQLite only) is relative to `apps/cms`, or an
+  absolute path. Releases before batch 8 placed an absolute value under
+  `apps/cms` (`/data/x.db` became `apps/cms/data/x.db`); on an existing
+  SQLite install, move that file to the absolute path, or switch to the
+  equivalent relative value, before upgrading, otherwise the cms starts on a
+  new, empty database. Relative values and Postgres are unaffected. The cms
+  sends no `X-Powered-By` header.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
-  enable the e-mail digests (dark without them). Once SMTP is set,
+  enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
+  implicit TLS, any other port (default 587) must offer STARTTLS. Once SMTP is set,
   `DIGEST_FROM` is required too (there is no built-in sender any more;
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
-  `DIGESTS_DISABLED=1` is the kill switch.
+  `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
+  `yes` and `on`; `infra/deploy.sh --check` still only knows `1`).
 
 ## 4. Run locally (two terminals)
 
@@ -424,12 +437,19 @@ one is older than this week's Monday, so a missed Monday is caught up the
 next morning.
 
 Six roles are created automatically on Strapi boot (see
-[`apps/cms/src/index.ts`](./apps/cms/src/index.ts)):
+[`apps/cms/src/bootstrap/roles.ts`](./apps/cms/src/bootstrap/roles.ts), the
+one role vocabulary the cms code decides by):
 `admin_role`, `editor`, `department_head`, `team_lead`, `member`, `guest`.
 The same bootstrap grants each role sensible default REST permissions on
 every intranet content type (broad reads, writes scoped per role — with the
 deliberate `guest` exceptions listed under the permission matrix below).
 Writes are then further gated by the route-level policies listed below.
+The boot refuses to start when a granted action matches no controller
+action it loaded (a typo or a renamed action, listed in the error), writes
+all missing grants and revocations in one transaction, and logs one
+`[bootstrap] permission drift` line: `none`, or the grants on actions the
+code manages that it does not want (report-only, e.g. added in the admin
+panel).
 
 Policies at `apps/cms/src/policies/` enforce scoped access.
 
@@ -568,7 +588,8 @@ byte-identical copy).
 
 Global guards that apply to **every** content-API route, not per route:
 
-- **Relation guard** (`registerRestrictedRelationGuard` in `src/index.ts`,
+- **Relation guard** (`registerRestrictedRelationGuard` in
+  `src/bootstrap/restricted-relation-guard.ts`,
   rules in `utils/restricted-relations.ts`) — a relation into a
   visibility-filtered type is only followed from that type's own filter
   domain. Today this protects wiki pages: `department.pages`/`team.pages`
@@ -671,7 +692,7 @@ an admin (or an older version) put there. Its permissions mirror
 `member`-level read access so the dashboard still works for such accounts.
 
 **Strapi role capabilities** (REST API permissions seeded by
-`PERMISSION_MATRIX` in `apps/cms/src/index.ts`, further gated by the policies
+`PERMISSION_MATRIX` in `apps/cms/src/bootstrap/permission-matrix.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
 | Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos | Notifications | Courses · Lessons / Progress | Search-log |
@@ -726,13 +747,14 @@ an admin or editor opened to them (poll guest access above, in the poll's
 audience like everyone else; a rollback to a cms from before guest access
 removes the vote grant first). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
-`REVOKED_PERMISSIONS` mechanism in the same file (`ensurePermission` only ever
+`REVOKED_PERMISSIONS` mechanism in the same file (the boot sync only ever
 *adds* rows, so revocations must be listed explicitly to take effect on
-existing databases).
+existing databases; any other grant the code does not want is only reported
+by the boot's `[bootstrap] permission drift` line).
 
 Every role in the matrix — **including `guest`** — additionally gets
-`user.find`/`findOne` (so populated relations like author/lead/head survive);
-this also powers the people directory. `USER_READ_EXCLUDED_ROLES` is empty:
+`user.find`/`findOne`/`me` (so populated relations like author/lead/head
+survive); this also powers the people directory. No role is excluded:
 an earlier audit attempt to revoke the grant from `guest` turned every guest
 read that populates a user relation (and the notification visibility
 filter) into a 400, because Strapi's core controllers run
@@ -949,6 +971,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
   (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
   pin fails first on purpose.
+- `apps/cms/src/bootstrap.permissions.test.ts` runs the real permission
+  sync against the stub: the role|action set it writes on a fresh database
+  is a file snapshot (`src/__snapshots__/bootstrap.permissions.txt`), a
+  second run writes nothing, revocations, the one-transaction rollback, the
+  unknown-action refusal and the advanced settings are pinned.
+  `index.lifecycle.test.ts` pins the order of `register()` and
+  `bootstrap()`. After a deliberate grant change, rewrite both snapshots:
+  `pnpm vitest run apps/cms/src/bootstrap.permissions.test.ts apps/cms/src/prod-perm-diff.test.ts -u`.
 - `apps/cms/src/middlewares/sensitive-query-guard.test.ts` also reads
   `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
   global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)

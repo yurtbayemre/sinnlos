@@ -17,9 +17,9 @@
  *                107 anna   admin_role  Sales
  *
  * `grants` seeds plugin::users-permissions.permission rows the way the
- * bootstrap matrix does today (apps/cms/src/index.ts PERMISSION_MATRIX):
- * announcement.find and kudos.find for every role but guest, event.find
- * for every role.
+ * bootstrap matrix does today (PERMISSION_MATRIX in
+ * apps/cms/src/bootstrap/permission-matrix.ts): announcement.find and
+ * kudos.find for every role but guest, event.find for every role.
  */
 import {
   createStrapiStub,

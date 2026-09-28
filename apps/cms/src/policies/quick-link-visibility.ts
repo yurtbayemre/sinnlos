@@ -1,3 +1,4 @@
+import { MODERATORS } from "../bootstrap/roles";
 import {
   forcePublishedStatus,
   getMutableQuery,
@@ -50,7 +51,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const user = policyContext.state?.user;
 
   // admin_role / editor see everything, no filter needed.
-  if (user && ["admin_role", "editor"].includes(user.role?.type)) return true;
+  if (user && MODERATORS.includes(user.role?.type)) return true;
 
   let departmentId: number | undefined;
   if (user) {

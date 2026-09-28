@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ROLE_PRIVILEGE_ORDER, isRoleType } from "../src/bootstrap/roles";
 import rules, {
   DEFAULT_ROLE,
   resolveRoleType,
@@ -85,5 +86,15 @@ describe("resolveRoleType", () => {
       ["Department-Heads", "department_head"],
       ["Team-Leads", "team_lead"],
     ]);
+  });
+
+  it("lists the rules in privilege order and maps only to seeded roles (B02)", () => {
+    // First match wins, so the rule order must BE the privilege order:
+    // otherwise a user in two groups gets the lower role.
+    const ranks = rules.map((rule) => ROLE_PRIVILEGE_ORDER.indexOf(rule.role));
+    expect(ranks.every((rank) => rank >= 0)).toBe(true);
+    expect(ranks).toEqual([...ranks].sort((a, b) => a - b));
+    expect(new Set(ranks).size).toBe(ranks.length);
+    expect(isRoleType(DEFAULT_ROLE)).toBe(true);
   });
 });

@@ -28,6 +28,7 @@
  * A new column on the user model is therefore invisible here until someone
  * adds it to an allowlist on purpose.
  */
+import { GUEST } from "../../../bootstrap/roles";
 import {
   SENSITIVE_USER_FIELDS,
   USER_UID,
@@ -66,7 +67,7 @@ export const DIGEST_FIELDS = [
 ] as const satisfies readonly (typeof EDITABLE_FIELDS)[number][];
 
 /** Role types whose digest opt-ins updateMe ignores. */
-export const DIGEST_IGNORED_ROLE_TYPES: readonly string[] = ["guest"];
+export const DIGEST_IGNORED_ROLE_TYPES: readonly string[] = [GUEST];
 
 /**
  * Free-text fields of PUT /api/me (FX26): trimmed, `null` clears them, and

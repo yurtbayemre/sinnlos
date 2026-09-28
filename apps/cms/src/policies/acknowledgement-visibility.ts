@@ -1,3 +1,4 @@
+import { ADMIN } from "../bootstrap/roles";
 import { getMutableQuery } from "../utils/policy-query";
 
 /**
@@ -23,7 +24,7 @@ export default async (policyContext: any, _config: unknown, _deps: any) => {
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  if (user.role?.type === "admin_role") return true;
+  if (user.role?.type === ADMIN) return true;
 
   const query = getMutableQuery(policyContext);
   // $and instead of a spread merge so an incoming `user` filter can

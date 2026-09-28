@@ -905,6 +905,100 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to the cms bootstrap split (batch 8, lane 3B)
+
+This release (branch `refactor/cms-bootstrap`, on `batch/7` `0ea7107`)
+restructures how the cms seeds its roles and permissions and tidies its
+config. Nobody's permissions change:
+
+- **Bootstrap modules and one role vocabulary (S02, B01, B02).** The grant
+  tables moved from `apps/cms/src/index.ts` to
+  `apps/cms/src/bootstrap/permission-matrix.ts` (still re-exported by
+  `index.ts`), the role names to `bootstrap/roles.ts`. The boot order is
+  unchanged; `infra/diagnostics/prod-perm-diff.sql` regenerates
+  byte-identical.
+- **Unknown actions stop the boot (B04).** Before it writes anything, the
+  permission sync checks every granted action against the controllers
+  Strapi loaded. A mismatch (a typo, a renamed action, a changed plugin)
+  refuses to start with `[bootstrap] N granted action(s) match no loaded
+  controller action: <list>` instead of leaving the feature at 403.
+- **One transaction, far fewer queries (B03).** The sync reads the roles
+  and the permissions once, computes what is missing and what to revoke,
+  and writes only that, in one transaction; a failed write rolls the whole
+  sync back and stops the boot. A boot on an up-to-date database runs 3
+  statements on `up_permissions` instead of about 600.
+- **Drift line.** Every boot reports grants on actions the code manages
+  that it does not want, for example one added in the admin panel. It only
+  reports them; nothing is revoked that is not listed in
+  `REVOKED_PERMISSIONS`.
+- **Config (B05).** The cms no longer sends `X-Powered-By`. `CORS_ORIGIN`
+  is read through Strapi's `env()` (same values; blanks around commas are
+  ignored). An absolute SQLite `DATABASE_FILENAME` is used as given. Until
+  this release an absolute value was placed under `apps/cms` (`/data/x.db`
+  became `apps/cms/data/x.db`); on an existing SQLite install, move that
+  file to the absolute path, or switch to the equivalent relative value,
+  before upgrading, otherwise the cms starts on a new, empty database.
+  Relative values and Postgres (production) are unaffected. SMTP on
+  port 465 now uses implicit TLS; any other port, the default 587 included,
+  still requires STARTTLS as before. `DIGESTS_DISABLED` also accepts
+  `true`, `yes` and `on` (`infra/deploy.sh --check` still only knows `1`).
+  `apps/cms` declares `engines` `^22.13.0 || ^24.0.0` like the root.
+
+**A normal deploy with `infra/deploy.sh`.** Only the cms changes; no
+schema, edge or grant change, nothing to migrate. The checks use the
+helpers of the batch 7 section below (on a standalone Caddy box, drop the
+second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+1. **Before:** check `SMTP_PORT` in `infra/.env`. With `587` (or unset)
+   nothing changes. With `465` the digests could not be sent before (the
+   connection timed out waiting for a plain-text greeting); from this
+   deploy on they are, so the next 07:30 run mails the users who opted in.
+   Also run `grep -E '^DIGESTS_DISABLED=' infra/.env`. Unset, empty, `0`
+   and a plain `1` behave as before. `true`, `yes` or `on` (any case), and
+   `1` with blanks around it, used to leave the digests on and switch them
+   off from this deploy on: set `0` to keep them, or `1` to switch them off.
+   `infra/deploy.sh --check` still only understands `1` until batch 5.
+2. **Deploy:** `infra/deploy.sh`.
+3. **Boot log:** `"${COMPOSE[@]}" logs cms | grep '\[bootstrap\]'`. On a
+   database that booted batch 7, expect no `granted` or `revoked` line and
+   exactly one `[bootstrap] permission drift: none (report-only check of
+   117 managed actions)`. A drift warning instead lists
+   `<role> <action>` pairs: grants someone added in the admin panel on an
+   action the code manages; decide per pair (keep, or remove in the admin
+   panel). The two `authenticated` rows `auth.getSessions`/`revokeSession`
+   are plugin defaults, not managed, and never appear there. The line covers
+   only managed actions and never reports duplicate rows; the
+   `prod-perm-diff.sql` run of step 4 remains the complete check.
+4. **After:** `psql_db -X < infra/diagnostics/prod-perm-diff.sql` gives the
+   same result as after the batch 7 deploy (on production only the two
+   informational `MISSING_IN_DB` `authenticated` rows above).
+   `curl -sI https://<your web origin>/api/events | grep -i x-powered-by`
+   prints nothing (the edge sends `/api/*` to the cms).
+
+**Rollback:** the batch 7 image runs on the same database as it is (no
+schema or data change; its sync finds nothing to do), with the commands
+`infra/deploy.sh` prints. With `SMTP_PORT=465` the digests stop again, and
+a `DIGESTS_DISABLED` of `true`/`yes`/`on` no longer switches them off.
+
+**Rehearsal (Postgres 16 stand-in, database first booted by the batch 7
+code `0ea7107`):** the branch boot left `up_permissions` identical (515
+rows, the S02 snapshot plus the 13 plugin first-boot defaults), wrote no
+permission row and ran 152 SQL statements instead of 844 (3 instead of 598
+on `up_permissions`); a fresh database received the same 515 rows in one
+transaction; a leftover revoked grant was deleted and an admin-panel grant
+reported (the same pair `prod-perm-diff.sql` lists as `EXTRA_IN_DB`); a
+build with two bogus actions refused to start and named both; the CORS
+header for the configured origin was unchanged and `X-Powered-By` gone;
+against smtp4dev the new transport sent on 587 (STARTTLS) and 465
+(implicit TLS), the batch 7 transport failed on 465; SQLite booted with an
+absolute `DATABASE_FILENAME`.
+
 #### Deploying batch 7 (2026-09-28)
 
 Batch 7 (branch `batch/7`, on `main` `a88d45a`, which production runs since

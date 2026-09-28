@@ -499,15 +499,22 @@ const POLICY_NAMES = readdirSync(__dirname)
 
 const policies = new Map<string, PolicyFn>();
 
+// Loads every policy module in parallel. The budget is 30 s, not the 10 s
+// hook default: under a full parallel run the cold transform of the policies
+// and their imports (@strapi/utils and friends) has taken longer than 10 s.
 beforeAll(async () => {
-  for (const name of POLICY_NAMES) {
-    const loaded: unknown = await import(join(__dirname, `${name}.ts`));
-    const handler = (loaded as { default?: unknown }).default;
+  const loaded = await Promise.all(
+    POLICY_NAMES.map(async (name) => {
+      const module: unknown = await import(join(__dirname, `${name}.ts`));
+      return [name, (module as { default?: unknown }).default] as const;
+    }),
+  );
+  for (const [name, handler] of loaded) {
     if (typeof handler !== "function")
       throw new Error(`${name}: the default export is not a policy function`);
     policies.set(name, handler as PolicyFn);
   }
-});
+}, 30_000);
 
 const policyOf = (name: string): PolicyFn => {
   const policy = policies.get(name);
