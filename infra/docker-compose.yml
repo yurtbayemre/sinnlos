@@ -220,6 +220,11 @@ services:
     depends_on:
       - web
       - cms
+    environment:
+      # The site address of infra/Caddyfile: a real host name gets a Let's
+      # Encrypt certificate (and HSTS), unset means localhost with Caddy's
+      # internal CA, http://localhost plain HTTP.
+      DOMAIN: ${DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -227,6 +232,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   pgdata:
