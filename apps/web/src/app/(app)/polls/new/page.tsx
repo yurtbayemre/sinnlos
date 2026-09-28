@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import { getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
+import { zonedDateKey } from "@/lib/plain-date";
 import { canCreatePolls } from "@/lib/roles";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
@@ -28,7 +30,13 @@ export default async function NewPollPage() {
   return (
     <div className="space-y-8">
       <PageHeader title={t("newPoll")} description={t("newPollDescription")} />
-      <PollForm departments={departments} departmentsUnavailable={failed} />
+      {/* The earliest closing day is today in APP_TIME_ZONE (the form cannot
+          know the zone; poll-actions.ts turns day D into D 23:59:59 there). */}
+      <PollForm
+        departments={departments}
+        departmentsUnavailable={failed}
+        minDate={zonedDateKey(new Date(), appTimeZone())}
+      />
     </div>
   );
 }
