@@ -1332,8 +1332,9 @@ a problem after the deploy points to one of them only.
 schema or permission change, nothing in the database changes. The web
 container is recreated with `TZ=UTC`. The cms image is rebuilt as in every
 deploy (the calendar helper module it shares with the web gained functions
-only the web uses), so compose recreates the cms container too; its
-behaviour, schema and permissions are unchanged.
+only the web uses), so compose recreates the cms container too; this lane
+changes none of its behaviour, schema or permissions (batch 8's cms
+changes come from lane 3B).
 
 **After the deploy:**
 
@@ -1396,10 +1397,11 @@ the [update procedure](#74-update-procedure-production-safe). When a deploy fail
 `deploy.sh` prints the rollback commands with this override whenever
 `infra-web:rollback` lacks the `org.sinnlos.datetime` label, or when it
 cannot check the image (the override is harmless for a newer web image: it
-only logs the warning above). The cms needs no rollback for this release
-(it is unchanged). Roll forward with `infra/deploy.sh` as usual: it uses the
-live compose files only, so the web runs in UTC again. Nothing in the
-database needs undoing.
+only logs the warning above). This lane alone leaves the cms unchanged,
+but batch 8 ships it with the cms bootstrap split: roll back cms and web
+together as in [Deploying batch 8](#deploying-batch-8-2026-09-28). Roll
+forward with `infra/deploy.sh` as usual: it uses the live compose files
+only, so the web runs in UTC again. Nothing in the database needs undoing.
 
 #### Deploying batch 7 (2026-09-28)
 
