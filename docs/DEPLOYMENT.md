@@ -1032,8 +1032,10 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    announcement bells and no digests: a guest row with `digest_opt_ins`
    loses its digest (tell them if that matters). Production had no guests
    and no digest opt-ins when this batch was planned (2026-09-28), so nothing
-   visible changes there apart from the live pings arriving after the save. The
-   `weekly_due_next_morning` users get a catch-up digest the next morning.
+   visible changes there apart from the live pings arriving after the save.
+   At most the `weekly_due_next_morning` users get a catch-up digest the
+   next morning (guests, roles without `announcement.find` and users with
+   nothing new get none).
 
 **Deploy**
 
@@ -1306,7 +1308,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 2. **Optional, read-only: who is affected.** The roles that hold the read
    grants (the new audience), the guests, blocked users and digest opt-ins
-   per role, and the weekly subscribers who will get a catch-up digest the
+   per role, and the weekly subscribers who are due a catch-up digest the
    next morning (replace `Europe/Berlin` with your `APP_TIME_ZONE`):
 
    ```bash
@@ -1347,6 +1349,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    getting digests; tell them if that matters. The owner instance had no
    guests and no opt-ins at the 2026-09-28 deploy, so nothing visible
    changes there apart from the live pings arriving after the save.
+   `weekly_due_next_morning` is an upper bound: guests, roles without
+   `announcement.find` and users with nothing new get no digest.
 
 **Deploy**
 
