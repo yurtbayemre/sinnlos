@@ -205,7 +205,8 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   absolute path. The cms sends no `X-Powered-By` header.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
-  enable the e-mail digests (dark without them). Once SMTP is set,
+  enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
+  implicit TLS, any other port (default 587) must offer STARTTLS. Once SMTP is set,
   `DIGEST_FROM` is required too (there is no built-in sender any more;
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
