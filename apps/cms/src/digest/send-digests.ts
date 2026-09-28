@@ -41,7 +41,7 @@
  * republish's fan-out notifies them), still see a republish once.
  *
  * Off switch: without SMTP_HOST/SMTP_USER/SMTP_PASS (or with
- * DIGESTS_DISABLED=1) the run is a logged no-op — the feature ships
+ * DIGESTS_DISABLED=1, or true/yes/on) the run is a logged no-op — the feature ships
  * dark until the mailbox app-password lands in infra/.env. The gate runs
  * before any DB or SMTP access.
  *
@@ -95,8 +95,19 @@ export type DigestGate =
   | { kind: "send"; baseUrl: string }
   | { kind: "skip" | "misconfigured"; reason: string };
 
+/**
+ * An on/off env switch (B05): "1", "true", "yes" and "on" (any case,
+ * surrounding blanks ignored) switch it on; anything else, unset included,
+ * leaves it off. "1" is what compose, the docs and infra/deploy.sh use.
+ */
+export function parseEnvFlag(value: string | undefined): boolean {
+  return ["1", "true", "yes", "on"].includes((value ?? "").trim().toLowerCase());
+}
+
 export function digestsEnabled(env: Record<string, string | undefined> = process.env): DigestGate {
-  if (env.DIGESTS_DISABLED === "1") return { kind: "skip", reason: "DIGESTS_DISABLED=1" };
+  if (parseEnvFlag(env.DIGESTS_DISABLED)) {
+    return { kind: "skip", reason: `DIGESTS_DISABLED=${(env.DIGESTS_DISABLED ?? "").trim()}` };
+  }
   if (!env.SMTP_HOST || !env.SMTP_USER || !env.SMTP_PASS) {
     return { kind: "skip", reason: "SMTP env incomplete (SMTP_HOST/USER/PASS)" };
   }

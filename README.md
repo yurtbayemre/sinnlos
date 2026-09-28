@@ -210,7 +210,8 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   `DIGEST_FROM` is required too (there is no built-in sender any more;
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
-  `DIGESTS_DISABLED=1` is the kill switch.
+  `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
+  `yes` and `on`; `infra/deploy.sh --check` still only knows `1`).
 
 ## 4. Run locally (two terminals)
 
