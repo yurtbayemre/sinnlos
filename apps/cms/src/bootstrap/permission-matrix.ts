@@ -406,7 +406,7 @@ export const USER_READ_EXCLUDED_ROLES: string[] = [];
  *   - comment/kudos/reaction update, lesson-progress update/delete.
  * Their permission rows are revoked for EVERY role below: a removed route
  * leaves its row behind (users-permissions only prunes rows of vanished
- * controller actions), and deleteMany is a no-op where none exists.
+ * controller actions), and a revocation without a row costs nothing.
  */
 const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
   "api::poll-vote.poll-vote": ALL_ACTIONS,
@@ -419,13 +419,15 @@ const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
 
 /**
  * Permissions granted by earlier versions of this bootstrap that must be
- * removed again. `ensurePermission` only ever ADDS rows, so deleting an
- * entry from the matrix above does not revoke anything on an existing
- * database — list the obsolete (role → action) pairs here instead.
+ * removed again. The sync (bootstrap/sync-permissions.ts) only ever ADDS
+ * rows, so deleting an entry from the matrix above does not revoke
+ * anything on an existing database — list the obsolete (role → action)
+ * pairs here instead. A grant the code does not want and does not list
+ * here is only reported at boot (the drift line), never deleted.
  *
  * Must stay disjoint from PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS and the
- * user reads (otherwise every boot re-adds and deletes the same row) —
- * pinned by routes.matrix.test.ts.
+ * user reads — pinned by routes.matrix.test.ts. (A pair that is both
+ * revoked and a custom grant stays granted: the sync keeps it.)
  */
 const LEGACY_REVOKED_PERMISSIONS: Partial<Record<MatrixRoleType, string[]>> = {
   guest: [

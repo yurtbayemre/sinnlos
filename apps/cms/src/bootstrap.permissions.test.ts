@@ -10,9 +10,11 @@ import {
 } from "./bootstrap/permission-matrix";
 import { ROLES } from "./bootstrap/roles";
 import {
+  REVOKE_CHUNK_SIZE,
   assertKnownActions,
   ensureRoles,
   knownActions,
+  planPermissionSync,
   syncRolePermissions,
   unknownActions,
   type ControllerRegistry,
@@ -140,7 +142,7 @@ describe("syncRolePermissions on a fresh database (S02)", () => {
     await syncRolePermissions(strapi);
     expect(creates(strapi)).toEqual([]);
     expect(pairsOf(strapi)).toEqual(before);
-    expect(strapi.log.info).not.toHaveBeenCalled();
+    expect(strapi.log.info).not.toHaveBeenCalledWith(expect.stringMatching(/granted|revoked/));
   });
 
   it("skips a missing role with a warning and grants the others", async () => {
@@ -436,5 +438,202 @@ describe("granted actions are checked against the loaded controllers (B04)", () 
   it("refuses to run without the controller registries", () => {
     expect(() => assertKnownActions({})).toThrow(/strapi\.apis \/ strapi\.plugins not found/);
     expect(() => assertKnownActions({ apis: {} })).toThrow(/not found/);
+  });
+});
+
+describe("set-based reconciliation in one transaction (B03)", () => {
+  const WRITES = new Set(["create", "createMany", "update", "updateMany", "delete", "deleteMany"]);
+
+  /**
+   * A fake database around the stub: every permission call is logged with
+   * whether it ran inside db.transaction, and a failing transaction
+   * restores the rows it started with (the stub itself does not roll back).
+   */
+  function fakeDb(
+    strapi: StrapiStub,
+    options: { failOnCreate?: number; failOnDelete?: boolean } = {},
+  ) {
+    const log: { method: string; inTransaction: boolean; params: unknown }[] = [];
+    const query = strapi.db.query.bind(strapi.db);
+    let creates = 0;
+    strapi.db.query = (uid: string) => {
+      const inner = query(uid);
+      if (uid !== PERMISSION_UID) return inner;
+      const record = (method: string, params: unknown) => {
+        log.push({ method, inTransaction: strapi.db.inTransaction(), params });
+      };
+      return {
+        ...inner,
+        findMany: async (params) => {
+          record("findMany", params);
+          return inner.findMany(params);
+        },
+        create: async (params) => {
+          record("create", params);
+          creates += 1;
+          if (creates === options.failOnCreate) throw new Error("insert failed");
+          return inner.create(params);
+        },
+        deleteMany: async (params) => {
+          record("deleteMany", params);
+          if (options.failOnDelete) throw new Error("delete failed");
+          return inner.deleteMany(params);
+        },
+      };
+    };
+    const transaction = strapi.db.transaction.bind(strapi.db);
+    const transactions = { count: 0 };
+    strapi.db.transaction = async (callback) => {
+      transactions.count += 1;
+      const snapshot = (strapi.tables[PERMISSION_UID] ?? []).map((row) => ({ ...row }));
+      try {
+        return await transaction(callback);
+      } catch (error) {
+        strapi.tables[PERMISSION_UID] = snapshot;
+        throw error;
+      }
+    };
+    return { log, transactions, writes: () => log.filter((entry) => WRITES.has(entry.method)) };
+  }
+
+  it("fresh database: two reads, then every create inside one transaction", async () => {
+    const strapi = permissionStub();
+    const db = fakeDb(strapi);
+    await syncRolePermissions(strapi);
+    const roleReads = strapi.calls.filter((c) => c.uid === ROLE_UID && c.method === "findMany");
+    expect(roleReads).toHaveLength(1);
+    expect(db.log.filter((entry) => entry.method === "findMany")).toHaveLength(1);
+    expect(db.transactions.count).toBe(1);
+    const writes = db.writes();
+    expect(writes.map((entry) => entry.method)).toEqual(
+      new Array(computeDesiredGrants().length).fill("create"),
+    );
+    expect(writes.every((entry) => entry.inTransaction)).toBe(true);
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      `[bootstrap] granted ${writes.length} permission(s) across intranet roles`,
+    );
+  });
+
+  it("a second run makes 0 writes and opens no transaction", async () => {
+    const strapi = permissionStub();
+    await syncRolePermissions(strapi);
+    const db = fakeDb(strapi);
+    strapi.log.info.mockClear();
+    await syncRolePermissions(strapi);
+    expect(db.writes()).toEqual([]);
+    expect(db.transactions.count).toBe(0);
+    expect(strapi.log.info.mock.calls.map(([message]) => String(message))).toEqual([
+      expect.stringMatching(/^\[bootstrap\] permission drift: none \(report-only check of \d+ managed actions\)$/),
+    ]);
+  });
+
+  it("counts the grants and the revocations of a partly synced database", async () => {
+    const desired = computeDesiredGrants().map((grant) => `${grant.role}|${grant.action}`);
+    const present = desired.filter((_, index) => index % 3 !== 0);
+    const revoked = ["guest|api::kudos.kudos.find", "member|api::poll-vote.poll-vote.create"];
+    const strapi = permissionStub(rowsFor([...present, ...revoked]));
+    const db = fakeDb(strapi);
+    await syncRolePermissions(strapi);
+    expect(pairsOf(strapi)).toEqual([...desired].sort());
+    expect(db.writes().filter((entry) => entry.method === "create")).toHaveLength(
+      desired.length - present.length,
+    );
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      `[bootstrap] granted ${desired.length - present.length} permission(s) across intranet roles`,
+    );
+    expect(strapi.log.info).toHaveBeenCalledWith("[bootstrap] revoked 2 obsolete permission(s)");
+    expect(db.writes().every((entry) => entry.inTransaction)).toBe(true);
+  });
+
+  it("revokes in chunks of REVOKE_CHUNK_SIZE ids", async () => {
+    const pair = "guest|api::kudos.kudos.find";
+    const count = REVOKE_CHUNK_SIZE * 2 + 7;
+    const strapi = permissionStub(rowsFor(new Array(count).fill(pair)));
+    const db = fakeDb(strapi);
+    await syncRolePermissions(strapi);
+    const deletes = db.writes().filter((entry) => entry.method === "deleteMany");
+    const sizes = deletes.map(
+      (entry) => ((entry.params as { where: { id: { $in: number[] } } }).where.id.$in).length,
+    );
+    expect(sizes).toEqual([REVOKE_CHUNK_SIZE, REVOKE_CHUNK_SIZE, 7]);
+    expect(strapi.log.info).toHaveBeenCalledWith(`[bootstrap] revoked ${count} obsolete permission(s)`);
+    expect(pairsOf(strapi)).not.toContain(pair);
+  });
+
+  it.each([
+    ["a create", { failOnCreate: 3 }, "insert failed"],
+    ["the revocation after every create", { failOnDelete: true }, "delete failed"],
+  ] as const)("an error in %s rolls the whole sync back and fails the boot", async (_, options, error) => {
+    const revoked = "guest|api::kudos.kudos.find";
+    const strapi = permissionStub(rowsFor([revoked]));
+    const before = pairsOf(strapi);
+    const db = fakeDb(strapi, options);
+    await expect(syncRolePermissions(strapi)).rejects.toThrow(error);
+    expect(db.transactions.count).toBe(1);
+    expect(db.writes().length).toBeGreaterThan(1);
+    expect(db.writes().every((entry) => entry.inTransaction)).toBe(true);
+    expect(pairsOf(strapi)).toEqual(before);
+    expect(strapi.log.info).not.toHaveBeenCalledWith(expect.stringMatching(/granted|revoked/));
+  });
+
+  it("never uses createMany (it would drop the role link)", async () => {
+    const strapi = permissionStub(rowsFor(["guest|api::kudos.kudos.find"]));
+    await syncRolePermissions(strapi);
+    const methods = new Set(strapi.calls.filter((c) => c.uid === PERMISSION_UID).map((c) => c.method));
+    expect([...methods].sort()).toEqual(["create", "deleteMany", "findMany"]);
+  });
+
+  it("reports drift on managed actions and revokes nothing for it", async () => {
+    const drift = [
+      "public|api::announcement.announcement.find",
+      "guest|api::event-rsvp.event-rsvp.find",
+      "guest|api::event-rsvp.event-rsvp.find",
+    ];
+    const untouched = ["authenticated|plugin::users-permissions.auth.logout"];
+    const desired = computeDesiredGrants().map((grant) => `${grant.role}|${grant.action}`);
+    const strapi = permissionStub(rowsFor([...desired, ...drift, ...untouched]));
+    const db = fakeDb(strapi);
+    await syncRolePermissions(strapi);
+    expect(db.writes()).toEqual([]);
+    expect(strapi.log.warn).toHaveBeenCalledTimes(1);
+    const [message] = strapi.log.warn.mock.calls[0];
+    expect(message).toContain(
+      "[bootstrap] permission drift (report-only, nothing revoked): 2 grant(s) on managed actions that the code does not grant: " +
+        "guest api::event-rsvp.event-rsvp.find, public api::announcement.announcement.find.",
+    );
+    expect(message).not.toContain("auth.logout");
+  });
+});
+
+describe("planPermissionSync (B03)", () => {
+  const roleIdByType = new Map([
+    ["member", 5],
+    ["guest", 6],
+  ]);
+
+  it("creates missing pairs of existing roles, keeps a revoked pair that is also desired", () => {
+    const plan = planPermissionSync({
+      desired: [
+        { role: "member", action: "api::a.a.find" },
+        { role: "member", action: "api::a.a.delete" },
+        { role: "team_lead", action: "api::a.a.find" },
+      ],
+      revocations: [
+        { role: "member", action: "api::a.a.delete" },
+        { role: "guest", action: "api::a.a.find" },
+      ],
+      roleIdByType,
+      existing: [
+        { id: 1, action: "api::a.a.delete", roleType: "member" },
+        { id: 2, action: "api::a.a.find", roleType: "guest" },
+        { id: 3, action: "api::a.a.find", roleType: "guest" },
+        { id: 4, action: "api::a.a.find", roleType: null },
+        { id: 5, action: "api::other.other.find", roleType: "guest" },
+      ],
+    });
+    expect(plan.create).toEqual([{ roleType: "member", roleId: 5, action: "api::a.a.find" }]);
+    expect(plan.revokeIds).toEqual([2, 3]);
+    expect(plan.drift).toEqual([]);
+    expect(plan.managedActions).toBe(2);
   });
 });
