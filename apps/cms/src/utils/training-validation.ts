@@ -4,9 +4,10 @@
  *
  * WHY LIFECYCLES NEED THIS: admin-panel writes bypass every content-api
  * controller override, and until this module the repo had NO validation
- * that applies to admin writes at all (quick-link.url and poll.options
- * are unvalidated for exactly that reason). The lesson lifecycle is the
- * repo's first validating beforeCreate/beforeUpdate.
+ * that applies to admin writes at all (quick-link.url is still unvalidated
+ * for exactly that reason; poll.options has its own validating lifecycle
+ * since FX20, 2026-09-28). The lesson lifecycle is the repo's first
+ * validating beforeCreate/beforeUpdate.
  *
  * MIRROR-PAIR RULE (like audience.ts ↔ announcement-audience.ts): the
  * web player's <LessonVideo> render gate re-validates videoUrl with the
