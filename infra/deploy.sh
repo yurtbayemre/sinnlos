@@ -44,6 +44,9 @@ COMPOSE_BASE="${SCRIPT_DIR}/docker-compose.yml"
 COMPOSE_TRAEFIK="${SCRIPT_DIR}/docker-compose.traefik.yml"
 # Rollback only: runs a pre-datetime-contract cms image in its old zone.
 COMPOSE_LEGACY_TZ="${SCRIPT_DIR}/docker-compose.cms-legacy-tz.yml"
+# Rollback only: runs a web image from before the web's datetime port
+# (phase 2) in APP_TIME_ZONE again.
+COMPOSE_WEB_LEGACY_TZ="${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml"
 BACKUP_SCRIPT="${SCRIPT_DIR}/backup/pg-backup.sh"
 
 # Compose project name — must stay 'infra' so container/image names are stable
@@ -219,6 +222,23 @@ datetime_repair_env_missing() {
 # would have told as unknown and prints the safe variant.
 PROBE_TIMEOUT=(timeout -k 5 15)
 
+# Datetime phase 2: a web image that renders every date in APP_TIME_ZONE by
+# itself runs in UTC and says so with this label (apps/web/Dockerfile). An
+# older web image renders in its process zone: under compose's TZ=UTC it
+# refuses to start (from the datetime release on) or quietly shows UTC
+# times (before it); it runs only with COMPOSE_WEB_LEGACY_TZ on top.
+WEB_DATETIME_LABEL="org.sinnlos.datetime"
+WEB_DATETIME_VALUE="zone-explicit"
+
+# Whether a web image renders in APP_TIME_ZONE by itself (the label): exit 0
+# yes, 1 no (it predates the web's datetime port), anything else unknown (no
+# such image here, docker failed or timed out, no `timeout`). Never pulls.
+image_web_zone_explicit() {
+  local label
+  label="$("${PROBE_TIMEOUT[@]}" docker image inspect -f "{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}" "$1" 2>/dev/null)" || return 2
+  [[ "${label}" == "${WEB_DATETIME_VALUE}" ]]
+}
+
 # Whether a cms image knows poll guest access (its poll schema has
 # visibleToGuests): exit 0 yes, 1 no, anything else unknown (no such image
 # here, another layout, docker failed or timed out, no `timeout`). Never
@@ -283,13 +303,19 @@ print_guest_vote_recheck_hint() {
 # on the same day as the fix. A :rollback cms from before poll guest access,
 # or one that cannot be checked, gets the guest vote row removed before the
 # retag and once more after the start (print_guest_vote_revoke_hint).
+# A :rollback web from before the web's datetime port, or one that cannot
+# be checked, gets the web legacy-zone override: that web must run in
+# APP_TIME_ZONE (in UTC it refuses to start, or, before the datetime
+# release, quietly shows UTC times), and the override is harmless for a
+# newer one (it only warns).
 # Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
 # prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
-  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0
+  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0
   naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
   cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${PROJECT}-cms:rollback" 2>/dev/null || true)"
   image_has_poll_guest_access "${PROJECT}-cms:rollback" || guest_access=$?
+  image_web_zone_explicit "${PROJECT}-web:rollback" || web_zone=$?
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_revoke_hint "${guest_access}"
   fi
@@ -302,6 +328,18 @@ print_rollback_hint() {
     echo "       (the database could not be asked whether the datetime repair has run; if it has not, the" >&2
     echo "       previous cms must run in DATETIME_LEGACY_ZONE: add -f ${COMPOSE_LEGACY_TZ} before up," >&2
     echo "       docs/DEPLOYMENT.md, \"Rolling back this release\")" >&2
+  fi
+  if [[ "${web_zone}" != "0" ]]; then
+    rollback+=(-f "${COMPOSE_WEB_LEGACY_TZ}")
+    if [[ "${web_zone}" == "1" ]]; then
+      echo "       (${PROJECT}-web:rollback predates the web's datetime port: it renders dates in its process" >&2
+      echo "       zone, so in UTC it fails to start or shows UTC times; hence the web override, which runs it in APP_TIME_ZONE)" >&2
+    else
+      echo "       (${PROJECT}-web:rollback could not be checked for the web's datetime port, so the web" >&2
+      echo "       override is included: in UTC a web from before it fails to start or shows UTC times, a newer one only" >&2
+      echo "       warns. Check: docker image inspect -f '{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}' ${PROJECT}-web:rollback" >&2
+      echo "       prints ${WEB_DATETIME_VALUE} for a web that needs no override)" >&2
+    fi
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2

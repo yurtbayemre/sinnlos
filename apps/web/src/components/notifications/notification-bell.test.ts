@@ -69,7 +69,12 @@ vi.mock("next/navigation", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/navigation")>()),
   useRouter: () => ({ push: pushMock }),
 }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+  // relativeTime labels: the app locale and APP_TIME_ZONE come from the provider.
+  useLocale: () => "en",
+  useTimeZone: () => "Europe/Berlin",
+}));
 
 const { NotificationBell } = await import("./notification-bell");
 

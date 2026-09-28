@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ClipboardCheck, Clock, UserX } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { teamIdsByUser } from "@/lib/audience";
+import { formatDateOnly, LONG_DAY } from "@/lib/date-format";
 import {
   buildAckReportRows,
   eligibleReportUsers,
@@ -151,12 +152,8 @@ export default async function AcknowledgementReportPage() {
     announcementsTruncated: announcementsResult.data?.truncated ?? false,
   });
 
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale, {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+  // ackDeadline is a calendar date: shown as that day, never moved by a zone.
+  const deadlineLabel = (a: ReportAnnouncement) => formatDateOnly(locale, a.ackDeadline, LONG_DAY);
   const userName = (u: ReportUser) => u.displayName ?? u.username ?? u.email ?? `#${u.id}`;
 
   /**
@@ -240,10 +237,10 @@ export default async function AcknowledgementReportPage() {
                         {audienceLabels(a).map((label) => (
                           <span key={label}>{label}</span>
                         ))}
-                        {a.ackDeadline && (
+                        {deadlineLabel(a) && (
                           <span className="inline-flex items-center gap-1">
                             <Clock className="h-3 w-3" aria-hidden="true" />
-                            {t("deadline", { date: formatDate(a.ackDeadline) })}
+                            {t("deadline", { date: deadlineLabel(a) ?? "" })}
                           </span>
                         )}
                       </div>

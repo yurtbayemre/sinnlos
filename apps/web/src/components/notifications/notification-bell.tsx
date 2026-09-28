@@ -6,9 +6,10 @@ import type { Route } from "next";
 import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { markNotificationsRead, markAllNotificationsRead } from "@/lib/notification-actions";
+import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
 import { relativeTime } from "@/lib/relative-time";
 import type { Notification } from "@/lib/types";
-import { useTranslations } from "next-intl";
+import { useLocale, useTimeZone, useTranslations } from "next-intl";
 
 const typeIcon: Record<string, typeof Bell> = {
   announcement: Megaphone,
@@ -38,6 +39,10 @@ export function NotificationBell({
 }) {
   const t = useTranslations("notifications");
   const tRel = useTranslations("relativeTime");
+  // The app locale and APP_TIME_ZONE from the provider (i18n/request.ts;
+  // the root layout always sets the zone, the fallback is its default).
+  const locale = useLocale();
+  const timeZone = useTimeZone() ?? DEFAULT_APP_TIME_ZONE;
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const ref = useRef<HTMLDivElement>(null);
@@ -180,7 +185,7 @@ export function NotificationBell({
                         {n.title}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {relativeTime(n.createdAt, tRel, { granularity: "minute" })}
+                        {relativeTime(n.createdAt, tRel, { granularity: "minute", locale, timeZone })}
                       </div>
                     </div>
                     {!n.readAt && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}

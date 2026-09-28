@@ -5,7 +5,8 @@ import remarkGfm from "remark-gfm";
 import rehypeSlug from "rehype-slug";
 import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { ArrowLeft } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
+import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import type { WikiPage as WikiPageEntry } from "@/lib/types";
 
@@ -15,10 +16,11 @@ interface Props {
 
 export default async function WikiPage({ params }: Props) {
   const { space, slug } = await params;
-  const [t, tCommon, locale] = await Promise.all([
+  // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
+  const [t, tCommon, format] = await Promise.all([
     getTranslations("wiki"),
     getTranslations("common"),
-    getLocale(),
+    getFormatter(),
   ]);
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
@@ -32,7 +34,8 @@ export default async function WikiPage({ params }: Props) {
   // response, so an identity check showed "last edited by" on every page,
   // the author's own edits included.
   const showLastEditor = !!lastEditor && lastEditor.id !== author?.id;
-  const updated = entry.updatedAt ? new Date(entry.updatedAt) : null;
+  // An instant, shown as its day in APP_TIME_ZONE (next-intl's formatter).
+  const updated = formatInstant(format, entry.updatedAt, LONG_DAY);
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -59,16 +62,7 @@ export default async function WikiPage({ params }: Props) {
               · {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}
             </span>
           ) : null}
-          {updated ? (
-            <span>
-              ·{" "}
-              {updated.toLocaleDateString(locale, {
-                year: "numeric",
-                month: "long",
-                day: "numeric",
-              })}
-            </span>
-          ) : null}
+          {updated ? <span>· {updated}</span> : null}
         </div>
       </header>
 

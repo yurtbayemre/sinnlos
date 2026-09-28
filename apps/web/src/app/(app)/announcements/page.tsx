@@ -1,5 +1,6 @@
 import { CheckCircle2, Megaphone, Pin } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getLocale, getTranslations } from "next-intl/server";
+import { formatDateOnly, formatInstant, LONG_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
@@ -22,7 +23,7 @@ export async function generateMetadata() {
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
   const tCommon = await getTranslations("common");
-  const locale = await getLocale();
+  const [locale, format] = await Promise.all([getLocale(), getFormatter()]);
   // No audience argument: the CMS `announcement-visibility` policy filters
   // both queries down to what this user may see.
   const [{ data, failed }, requiringAckResult, acksResult] = await Promise.all([
@@ -41,12 +42,9 @@ export default async function AnnouncementsPage() {
     myAcks.set(ack.targetDocumentId, ack);
   }
 
-  const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale, {
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-    });
+  // Instants in APP_TIME_ZONE (next-intl's formatter); ackDeadline is a
+  // calendar date and is shown as that day (datetime contract, phase 2).
+  const formatDay = (iso: string | null | undefined) => formatInstant(format, iso, LONG_DAY);
 
   const renderAck = (a: Announcement) => {
     if (!a.requiresAck || !a.documentId) return null;
@@ -55,8 +53,8 @@ export default async function AnnouncementsPage() {
     return (
       <AckButton
         announcementDocumentId={a.documentId}
-        acknowledgedAtLabel={ackedAt ? formatDate(ackedAt) : null}
-        deadlineLabel={a.ackDeadline ? formatDate(a.ackDeadline) : null}
+        acknowledgedAtLabel={formatDay(ackedAt)}
+        deadlineLabel={formatDateOnly(locale, a.ackDeadline, LONG_DAY)}
       />
     );
   };
@@ -104,7 +102,7 @@ export default async function AnnouncementsPage() {
                     key={a.documentId ?? a.id}
                     item={a}
                     pinned
-                    locale={locale}
+                    createdAtLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -131,7 +129,7 @@ export default async function AnnouncementsPage() {
                     key={a.id}
                     item={a}
                     pinned
-                    locale={locale}
+                    createdAtLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -150,7 +148,7 @@ export default async function AnnouncementsPage() {
                   <AnnouncementCard
                     key={a.id}
                     item={a}
-                    locale={locale}
+                    createdAtLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -169,21 +167,21 @@ export default async function AnnouncementsPage() {
 function AnnouncementCard({
   item,
   pinned = false,
-  locale,
+  createdAtLabel,
   unknownLabel,
   ack,
   children,
 }: {
   item: Announcement;
   pinned?: boolean;
-  locale: string;
+  /** createdAt, formatted in APP_TIME_ZONE by the page (null: none). */
+  createdAtLabel: string | null;
   unknownLabel: string;
   ack?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   const author = item.author ?? null;
   const authorName = author?.displayName ?? author?.username ?? author?.email ?? unknownLabel;
-  const createdAt = item.createdAt ? new Date(item.createdAt) : null;
 
   return (
     <Card className={pinned ? "border-primary/30 bg-primary/[0.02]" : undefined}>
@@ -194,15 +192,7 @@ function AnnouncementCard({
               {pinned && <Pin className="h-4 w-4 text-primary" />}
               {item.title}
             </CardTitle>
-            <CardDescription>
-              {createdAt
-                ? createdAt.toLocaleDateString(locale, {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })
-                : null}
-            </CardDescription>
+            <CardDescription>{createdAtLabel}</CardDescription>
           </div>
           <div className="flex items-center gap-2">
             <div className="hidden text-right text-xs text-muted-foreground sm:block">

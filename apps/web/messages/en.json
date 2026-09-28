@@ -121,7 +121,10 @@
     "expand": "Expand",
     "emptyTitle": "No people yet",
     "emptyHint": "Users will appear here once they sign in.",
-    "filterByDepartment": "Filter by department"
+    "filterByDepartment": "Filter by department",
+    "orgChartIssues": "{count, plural, one {# person is} other {# people are}} shown at the top level because a manager assignment is inconsistent (a loop, or someone set as their own manager). An admin can fix the Manager field in the admin panel.",
+    "orgCycle": "Manager chain loops back here",
+    "orgSelfManager": "Set as their own manager"
   },
   "events": {
     "title": "Events",

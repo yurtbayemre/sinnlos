@@ -12,10 +12,12 @@ import { relativeTime } from "@/lib/relative-time";
 import {
   AD_CATEGORIES,
   AD_CATEGORY_KEYS,
+  classifiedToday,
+  formatAdExpiry,
   isClassifiedCategory,
   isClassifiedExpired,
-  localDateString,
 } from "@/lib/classified-shared";
+import { appTimeZone } from "@/lib/app-time-zone";
 import type { Classified } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
@@ -56,7 +58,10 @@ export default async function MarketplacePage({
   const { category: rawCategory } = await searchParams;
   const category = rawCategory && isClassifiedCategory(rawCategory) ? rawCategory : undefined;
 
-  const today = localDateString(new Date());
+  // Today in APP_TIME_ZONE: the list shows ads with expiresAt >= today, the
+  // same day the cms clamps against (datetime contract, phase 2).
+  const timeZone = appTimeZone();
+  const today = classifiedToday(timeZone);
 
   // The ad list needs no role, so it runs alongside getViewer()'s
   // /api/me read; only the "mine" fetch waits for the role gate.
@@ -68,7 +73,7 @@ export default async function MarketplacePage({
     getViewer(),
     tryFetch(() => api.classifieds.list(today, category), "classifieds"),
   ]);
-  const relative = (d: string | undefined) => relativeTime(d, tRel);
+  const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
 
   const userId = session?.user?.id;
   // Fail-closed allowlist (lib/roles.ts): guest, the `authenticated`
@@ -125,7 +130,7 @@ export default async function MarketplacePage({
           </div>
           <div className="space-y-2">
             {myAds.map((ad) => {
-              const expired = isClassifiedExpired(ad.expiresAt);
+              const expired = isClassifiedExpired(ad.expiresAt, today);
               return (
                 <Card key={ad.id} className={expired ? "border-amber-500/40" : undefined}>
                   <CardContent className="flex flex-wrap items-center gap-3 p-4">
@@ -146,12 +151,8 @@ export default async function MarketplacePage({
                         </span>
                         {ad.expiresAt &&
                           (expired
-                            ? t("expiredOn", {
-                                date: new Date(ad.expiresAt).toLocaleDateString(locale),
-                              })
-                            : t("expiresOn", {
-                                date: new Date(ad.expiresAt).toLocaleDateString(locale),
-                              }))}
+                            ? t("expiredOn", { date: formatAdExpiry(ad.expiresAt, locale) })
+                            : t("expiresOn", { date: formatAdExpiry(ad.expiresAt, locale) }))}
                       </div>
                       {expired && (
                         <p className="mt-1 text-xs text-muted-foreground">{t("expiredHint")}</p>

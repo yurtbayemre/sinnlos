@@ -22,8 +22,15 @@ FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04
 # /api/auth/session). infra/deploy.sh demands a JWT_SECRET rotation when the
 # running web lacks this label, i.e. when it still exposed the JWTs.
 LABEL org.sinnlos.strapi-jwt="server-only"
+# Datetime contract, phase 2: this web renders every date with an explicit
+# zone (APP_TIME_ZONE), so it runs in UTC like the cms. The label tells
+# infra/deploy.sh's rollback hint that a :rollback web image with it needs no
+# legacy-zone override; one without it predates the port and refuses to
+# start in UTC (infra/docker-compose.web-legacy-tz.yml).
+LABEL org.sinnlos.datetime="zone-explicit"
 WORKDIR /app
 ENV NODE_ENV=production
+ENV TZ=UTC
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone /app
 COPY --from=builder --chown=node:node /app/apps/web/.next/static /app/apps/web/.next/static
 COPY --from=builder --chown=node:node /app/apps/web/public /app/apps/web/public

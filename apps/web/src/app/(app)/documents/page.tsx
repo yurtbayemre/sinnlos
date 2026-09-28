@@ -1,5 +1,6 @@
 import { FileText, Download, File } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
+import { formatInstant, SHORT_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { STRAPI_PUBLIC_URL } from "@/lib/config";
@@ -25,11 +26,13 @@ function formatSize(sizeInKb?: number) {
 }
 
 export default async function DocumentsPage() {
-  const [t, tCommon, locale] = await Promise.all([
+  // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
+  const [t, tCommon, format] = await Promise.all([
     getTranslations("documents"),
     getTranslations("common"),
-    getLocale(),
+    getFormatter(),
   ]);
+  const updatedLabel = (iso: string | undefined) => formatInstant(format, iso, SHORT_DAY);
   const { data, failed } = await tryFetch(() => api.documents.list(), "documents");
   const docs = (data?.data ?? []) as Document[];
 
@@ -78,14 +81,9 @@ export default async function DocumentsPage() {
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                           {doc.file?.name && <span>{doc.file.name}</span>}
                           {doc.file?.size && <span>{formatSize(doc.file.size)}</span>}
-                          {doc.updatedAt && (
+                          {updatedLabel(doc.updatedAt) && (
                             <span>
-                              {tCommon("updated")}{" "}
-                              {new Date(doc.updatedAt).toLocaleDateString(locale, {
-                                month: "short",
-                                day: "numeric",
-                                year: "numeric",
-                              })}
+                              {tCommon("updated")} {updatedLabel(doc.updatedAt)}
                             </span>
                           )}
                         </div>

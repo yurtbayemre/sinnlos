@@ -136,15 +136,17 @@ services:
         condition: service_healthy
     environment:
       NODE_ENV: production
-      # The web still renders dates in its process zone (events list/month
-      # grid, ad expiry), so until its datetime port (phase 2) makes every
-      # date explicit, the process zone IS the business zone. Only after that
-      # port may it switch to UTC like the cms. The web refuses to serve when
-      # Node does not run in APP_TIME_ZONE (src/instrumentation.ts): Node only
-      # knows the exact tz database spelling (Europe/Berlin, not europe/berlin).
-      TZ: ${APP_TIME_ZONE:-Europe/Berlin}
-      # Business zone, already used for the poll deadline ("closes on D" =
-      # D 23:59:59 there); validated at server start.
+      # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
+      # (phase 2) the web renders and computes every date in APP_TIME_ZONE
+      # explicitly, so its process runs in UTC like the cms (the image sets
+      # it too). A web image from BEFORE that port renders in its process
+      # zone and refuses to start in UTC: roll back to one only with
+      # infra/docker-compose.web-legacy-tz.yml on top (infra/deploy.sh prints
+      # it).
+      TZ: UTC
+      # Business and display zone: "today", event days, ad expiry, poll
+      # deadlines ("closes on D" = D 23:59:59 there), every rendered date;
+      # validated at server start (src/instrumentation.ts).
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
       HOSTNAME: 0.0.0.0
       PORT: 3000
