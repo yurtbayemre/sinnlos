@@ -10,7 +10,9 @@
  *    back still pinged;
  *  - the announcement/event fan-out inserted its notifications inside the
  *    publish transaction, where one failing INSERT (Postgres 22001, an
- *    aborted transaction despite the catch) failed the whole publish.
+ *    aborted transaction despite the catch) failed the whole publish; the
+ *    comment and kudos notification did the same to their comment or kudos,
+ *    silently (see below).
  *
  * afterCommit(db, task) registers the task with `onCommit` when a
  * transaction is open (the pattern Strapi itself uses for its entry.*
@@ -30,12 +32,19 @@
  *    the earlier siblings' callbacks again. Every registered task is
  *    therefore wrapped to run at most once.
  *
- * Not absorbed, so every task must re-read committed state: a failure AT
- * COMMIT (a deferred constraint) is not surfaced by knex 3.0.1 — trx.commit()
- * resolves — so the transaction resolves and the commit callbacks run
- * although nothing was committed (pinned on Postgres). The fan-out re-reads
- * its source and notifies nobody when it is gone; a live ping carries no
- * content, a phantom one only makes clients refetch.
+ * Not absorbed, so every task must re-read committed state: on Postgres a
+ * transaction can resolve, and run its commit callbacks, although nothing
+ * was committed. The everyday case is a statement error that code inside
+ * the transaction catches and swallows: Postgres has aborted the
+ * transaction, COMMIT turns into a ROLLBACK without an error, knex 3.0.1
+ * resolves trx.commit(), and the caller cannot tell (an API create answers
+ * 201 with a row that was never stored). A failure AT COMMIT (a deferred
+ * constraint) behaves the same. Both are pinned on Postgres in
+ * after-commit.engine.test.ts. The fan-out re-reads its source and acts
+ * only on committed state: the current published row (whose audience the
+ * dedup has already served), or nobody when there is none. The comment and
+ * kudos notifications re-read their row and write nothing when it is gone.
+ * A live ping carries no content; a phantom one only makes clients refetch.
  */
 
 /** The slice of `strapi.db` this needs; both members are optional for test doubles. */

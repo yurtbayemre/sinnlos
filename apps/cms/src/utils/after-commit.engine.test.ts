@@ -18,9 +18,10 @@
  *    started after a commit in the same async context inherits the finished
  *    transaction's callback list, so sibling commits run earlier callbacks
  *    again (the raw count), while afterCommit's tasks run once each;
- *  - Postgres only: a failure AT COMMIT (deferred constraint) resolves the
- *    transaction and runs the commit callbacks anyway (knex 3.0.1), which is
- *    why post-commit tasks re-read committed state.
+ *  - Postgres only: a statement error swallowed inside the transaction, and
+ *    a failure AT COMMIT (deferred constraint), both resolve the transaction
+ *    and run the commit callbacks although nothing was committed (knex
+ *    3.0.1), which is why post-commit tasks re-read committed state.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -376,12 +377,39 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
         expect(await engine.query(ANNOUNCEMENT_UID).count()).toBe(0);
       }, 30_000);
 
+      it("Postgres: a swallowed statement error commits nothing, silently, and still runs the commit callbacks", async () => {
+        // The everyday form of a failure at commit (the pre-LF02 comment and
+        // kudos notification): the failing statement is caught, the create
+        // returns, and the transaction, already aborted by Postgres, ends
+        // with a COMMIT that Postgres turns into a ROLLBACK without an error.
+        const task = vi.fn();
+        await expect(
+          engine.transaction(async () => {
+            await engine.query(ANNOUNCEMENT_UID).create({
+              data: { documentId: "doc-w", title: "w", publishedAt: new Date().toISOString() },
+            });
+            try {
+              await engine.query(NOTIFICATION_UID).create({
+                data: { type: "comment", title: "t".repeat(300), recipient: 1 },
+              });
+            } catch {
+              // Swallowed, as the lifecycle's catch did.
+            }
+            await afterCommit(engine, task, () => undefined);
+            return "created";
+          }),
+        ).resolves.toBe("created");
+        await vi.waitFor(() => expect(task).toHaveBeenCalledTimes(1));
+        expect(await engine.query(ANNOUNCEMENT_UID).count()).toBe(0);
+        expect(await notificationCount()).toBe(0);
+      }, 30_000);
+
       it("Postgres: a failure AT COMMIT is not surfaced and still runs the commit callbacks", async () => {
         // knex 3.0.1 resolves trx.commit() when COMMIT fails (the error goes
         // to the transaction's own promise), so @strapi/database resolves the
         // transaction and runs onCommit although nothing was committed. A
-        // post-commit task therefore re-reads committed state: the fan-out
-        // re-reads its source and notifies nobody when it is gone.
+        // post-commit task therefore re-reads committed state and acts only
+        // on it (the fan-out: the current published row, or nobody).
         const { sql, schema } = opened;
         if (!sql || !schema) throw new Error("no raw SQL on this engine");
         await sql(`CREATE FUNCTION "${schema}".refuse_at_commit() RETURNS trigger AS $$
