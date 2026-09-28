@@ -41,6 +41,14 @@ const config: Config = {
           foreground: "hsl(var(--card-foreground))",
         },
       },
+      // Text utilities get text-safe tokens (FX31, see globals.css):
+      // `text-primary` / `text-destructive` (with opacity modifiers) read
+      // --primary-text / --destructive-text; bg-, border- and ring- keep the
+      // fill tokens, and `text-*-foreground` is merged in from `colors`.
+      textColor: {
+        primary: { DEFAULT: "hsl(var(--primary-text))" },
+        destructive: { DEFAULT: "hsl(var(--destructive-text))" },
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
@@ -51,13 +59,7 @@ const config: Config = {
         // --font-geist-mono was never defined (no next/font wiring), so the
         // mono stack fell through to the system monospace anyway. Point it at
         // an explicit system monospace stack and drop the dead CSS var.
-        mono: [
-          "ui-monospace",
-          "SFMono-Regular",
-          "Menlo",
-          "Consolas",
-          "monospace",
-        ],
+        mono: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
       },
       keyframes: {
         "accordion-down": {
