@@ -136,4 +136,27 @@ describe("/polls poll addresses (DA01)", () => {
       "k3m9x0000000000000000002",
     ]);
   });
+
+  it("keys each card by its documentId, which a republish keeps (the refused vote's message survives the refresh)", async () => {
+    listMock.mockResolvedValue({
+      data: [
+        { ...poll(21), documentId: "k3m9x0000000000000000001" },
+        { ...poll(7), documentId: "k3m9x0000000000000000002" },
+      ],
+    });
+    resultsMock.mockImplementation(async (ref) =>
+      results(ref === "k3m9x0000000000000000001" ? 21 : 7),
+    );
+    const { PollCard } = await import("@/components/polls/poll-card");
+    const keys: unknown[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (typeof node !== "object" || node === null || !("props" in node)) return;
+      const element = node as { type: unknown; key: unknown; props: { children?: unknown } };
+      if (element.type === PollCard) keys.push(element.key);
+      walk(element.props.children);
+    };
+    walk(await PollsPage());
+    expect(keys).toEqual(["k3m9x0000000000000000001", "k3m9x0000000000000000002"]);
+  });
 });

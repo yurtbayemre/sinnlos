@@ -63,10 +63,15 @@ export default async function PollsPage() {
     if (results) resultsMap.set(p.id, results);
   });
   // A poll without results (404 race or failed read) renders no card.
+  // Keyed by the poll's address (its documentId), which a republish keeps:
+  // a card whose vote was refused because the options changed keeps its
+  // voteFailed message through the refresh that shows the new options,
+  // instead of remounting under the new published row id.
   const card = (p: Poll) => {
     const results = resultsMap.get(p.id);
+    const ref = pollRef(p);
     return results ? (
-      <PollCard key={p.id} results={results} pollRef={pollRef(p)} viewerRole={viewer.role} />
+      <PollCard key={ref} results={results} pollRef={ref} viewerRole={viewer.role} />
     ) : null;
   };
 
