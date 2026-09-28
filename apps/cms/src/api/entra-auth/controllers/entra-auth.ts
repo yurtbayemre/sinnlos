@@ -4,11 +4,14 @@
  *   - answers 404 like a missing route while Entra is off (ENTRA_ENABLED is
  *     not '1'): no JWKS or Graph traffic, nothing logged per request;
  *   - maps every unexpected error to 503 {error:'unavailable'} with one
- *     error line that never contains a token.
+ *     error line: the error's code or class name (errorLabel), never its
+ *     message, which for a failed query carries the SQL and the profile
+ *     values bound to it; never a token.
  */
 import { EntraConfigError, parseEntraConfig } from "../../../entra/config";
 import {
   EXCHANGE_SECRET_HEADER,
+  errorLabel,
   runEntraExchange,
   type ExchangeDeps,
   type ExchangeHost,
@@ -59,9 +62,7 @@ export async function handleExchange(
     ctx.status = outcome.status;
     ctx.body = outcome.body;
   } catch (err) {
-    host.log.error(
-      `[entra] exchange failed: ${err instanceof Error ? err.message : "unknown error"}`,
-    );
+    host.log.error(`[entra] exchange failed (${errorLabel(err)})`);
     ctx.status = 503;
     ctx.body = { error: "unavailable" };
   }

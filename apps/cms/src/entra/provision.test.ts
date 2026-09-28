@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, type Mock } from "vitest";
+import { handleExchange, type ExchangeContext } from "../api/entra-auth/controllers/entra-auth";
 import { parseEntraConfig, type EntraConfig } from "./config";
 import type { EntraIdClaims } from "./id-token";
 import {
@@ -46,8 +47,7 @@ function matches(row: Row, where: Where): boolean {
     if (isRecord(condition)) {
       if ("$eqi" in condition) {
         return (
-          typeof value === "string" &&
-          value.toLowerCase() === String(condition.$eqi).toLowerCase()
+          typeof value === "string" && value.toLowerCase() === String(condition.$eqi).toLowerCase()
         );
       }
       if ("$ne" in condition) return value !== condition.$ne;
@@ -226,15 +226,16 @@ function fakeHost(seed: Row[] = [], options: FakeOptions = {}): FakeHost {
   };
 }
 
+const ENV = {
+  ENTRA_ENABLED: "1",
+  MS_TENANT_ID: TENANT,
+  MS_CLIENT_ID: CLIENT,
+  ENTRA_EXCHANGE_SECRET: SECRET,
+  ENTRA_SYNC_MODE: "on",
+};
+
 function settings(env: Record<string, string> = {}): EntraConfig {
-  const parsed = parseEntraConfig({
-    ENTRA_ENABLED: "1",
-    MS_TENANT_ID: TENANT,
-    MS_CLIENT_ID: CLIENT,
-    ENTRA_EXCHANGE_SECRET: SECRET,
-    ENTRA_SYNC_MODE: "on",
-    ...env,
-  });
+  const parsed = parseEntraConfig({ ...ENV, ...env });
   if (!parsed.enabled) throw new Error("expected an enabled configuration");
   return parsed;
 }
@@ -279,11 +280,10 @@ function graphFor(who: Person) {
   return { requests, fetch: fetchImpl as typeof fetch };
 }
 
-function run(
-  host: FakeHost,
-  who: Person = PERSON,
-  config: EntraConfig = settings(),
-): Promise<ExchangeOutcome> & { graph: ReturnType<typeof graphFor> } {
+const BODY = { idToken: "unit-id-token", accessToken: "unit-access-token" };
+
+/** A verified ID token of `who` and Graph answering for them. */
+function exchangeDeps(who: Person): ExchangeDeps & { graph: ReturnType<typeof graphFor> } {
   const graph = graphFor(who);
   const claims: EntraIdClaims = {
     tid: TENANT,
@@ -293,17 +293,17 @@ function run(
     preferredUsername: who.mail,
     roles: who.roles ?? [],
   };
-  const deps: ExchangeDeps = {
-    verify: async () => ({ ok: true, claims }),
-    graph: { fetch: graph.fetch },
-  };
-  const outcome = runEntraExchange(
-    host,
-    config,
-    { secret: SECRET, body: { idToken: "unit-id-token", accessToken: "unit-access-token" } },
-    deps,
-  );
-  return Object.assign(outcome, { graph });
+  return { verify: async () => ({ ok: true, claims }), graph };
+}
+
+function run(
+  host: FakeHost,
+  who: Person = PERSON,
+  config: EntraConfig = settings(),
+): Promise<ExchangeOutcome> & { graph: ReturnType<typeof graphFor> } {
+  const deps = exchangeDeps(who);
+  const outcome = runEntraExchange(host, config, { secret: SECRET, body: BODY }, deps);
+  return Object.assign(outcome, { graph: deps.graph });
 }
 
 /** The one audit line of the last exchange. */
@@ -432,5 +432,41 @@ describe("runEntraExchange: role writes are atomic (spec I)", () => {
       entraAppliedRole: null,
     });
     expect(host.calls.update.find((call) => "roleSource" in call.data)?.inTransaction).toBe(true);
+  });
+});
+
+describe("runEntraExchange: error log lines (spec N)", () => {
+  /** A failed write as knex reports it: the SQL with every bound value. */
+  const knexError = () =>
+    Object.assign(
+      new Error(
+        `update "up_users" set "display_name" = '${PERSON.name}', "email" = '${PERSON.mail}', "job_title" = 'Secret Title', "microsoft_oid" = '${OID}' where "id" = 7 - value too long for type character varying(255)`,
+      ),
+      { code: "22001" },
+    );
+  const logged = (host: FakeHost) =>
+    JSON.stringify([host.log.info.mock.calls, host.log.warn.mock.calls, host.log.error.mock.calls]);
+
+  it("logs a failed profile write by step, user and code, never the profile", async () => {
+    const host = fakeHost([entraRow()], { failProfileUpdate: knexError() });
+    const outcome = await run(host, { ...PERSON, jobTitle: "Secret Title" });
+    expect(outcome.status).toBe(200);
+    expect(host.log.error.mock.calls).toEqual([["[entra] user=7: profile sync failed (22001)"]]);
+    expect(logged(host)).not.toMatch(/Pat Example|pat@entra|Secret Title|0f0f-4000/);
+  });
+
+  it("logs a failed create (re-thrown to the controller) by its code only", async () => {
+    const host = fakeHost([], { failCreate: knexError() });
+    const ctx: ExchangeContext = {
+      get: (field) => (field === "x-entra-exchange-secret" ? SECRET : ""),
+      request: { body: BODY },
+      status: 0,
+      body: undefined,
+      notFound: () => undefined,
+    };
+    await handleExchange(ctx, host, ENV, exchangeDeps({ ...PERSON, jobTitle: "Secret Title" }));
+    expect([ctx.status, ctx.body]).toEqual([503, { error: "unavailable" }]);
+    expect(host.log.error.mock.calls).toEqual([["[entra] exchange failed (22001)"]]);
+    expect(logged(host)).not.toMatch(/Pat Example|pat@entra|Secret Title|0f0f-4000/);
   });
 });

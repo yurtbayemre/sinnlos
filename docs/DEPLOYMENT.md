@@ -321,6 +321,13 @@ release or a self-registration) is never trusted.
 | *could not be verified* (`entra_invalid`) | The ID token was refused (clock skew over 5 minutes, another app's token) or Graph `/me` is another user |
 | *unavailable right now* (`entra_unavailable`) | The cms is unreachable or cannot reach Microsoft, the two `ENTRA_EXCHANGE_SECRET` values differ (the web logs it), `ENTRA_ENABLED` is not `1` for the cms, or a new user's role could not be decided because the Graph group check failed |
 
+A failed database write shows in the cms log as `[entra] exchange failed (<code>)`
+(the sign-in answered *unavailable*) or `[entra] user=<id>: <step> failed (<code>)`
+(an optional profile, department or manager write; the sign-in went on).
+`<code>` is a Postgres SQLSTATE such as `22001` (value too long), a SQLite or
+Node error code, or an error class name; the SQL and the profile values are
+never logged.
+
 ---
 
 ## 1. Bare-Metal Local Development

@@ -31,7 +31,9 @@
  *     existing one, and only logs department and manager;
  *   - a Strapi JWT for ENTRA_SESSION_TTL, and an explicit response body.
  * One audit line per exchange (`[entra] user=… oid=… result=…`); no token,
- * no Graph payload and no JWT is ever logged or stored.
+ * no Graph payload and no JWT is ever logged or stored. A failed write logs
+ * the step, the user id and the error's code (errorLabel), never its
+ * message: knex puts the SQL and its bound values (the profile) there.
  *
  * No enclosing transaction, only two short ones: around the identity insert
  * (row and role link commit together) and around an existing user's role
@@ -198,6 +200,34 @@ function jwtExp(jwt: string): number | null {
 }
 
 const stringOf = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+const SAFE_LABEL = /^[A-Za-z0-9_.:-]{1,64}$/;
+
+/**
+ * What a log line may say about an error: its code (a Postgres SQLSTATE, a
+ * SQLite or Node code) or its class name, never its message. knex prefixes
+ * the message of a failed query with the SQL and every bound value, i.e.
+ * the e-mail, name, job title, phone, office, tenant and object id of the
+ * Graph profile being written (spec N: no Graph payload in a log line).
+ */
+export function errorLabel(err: unknown): string {
+  const code =
+    typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+  if (typeof code === "number" && Number.isFinite(code)) return String(code);
+  if (typeof code === "string" && SAFE_LABEL.test(code)) return code;
+  const name = err instanceof Error ? err.name : "";
+  return SAFE_LABEL.test(name) ? name : "unknown";
+}
+
+/** A broken invariant of the exchange; its code is what the log line shows. */
+export class ExchangeInvariantError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(code);
+    this.name = "ExchangeInvariantError";
+    this.code = code;
+  }
+}
 const relationId = (value: unknown): number | null =>
   isRecord(value) && typeof value.id === "number" ? value.id : null;
 const relationDocumentId = (value: unknown): string | null =>
@@ -393,7 +423,7 @@ async function provision(
       if (outcome.kind === "refused") return outcome;
       created = outcome.created;
       user = await findIdentity();
-      if (!user) throw new Error("the provisioned user row could not be read back");
+      if (!user) throw new ExchangeInvariantError("readback_failed");
     }
   }
 
@@ -468,7 +498,7 @@ async function createIdentity(
     return { kind: "refused", status: decision.status, error: decision.error };
   }
   if (decision.kind !== "create")
-    throw new Error(`unexpected role decision ${decision.kind} for a new user`);
+    throw new ExchangeInvariantError(`new_user_decision_${decision.kind}`);
   const roleId = await roleIdOf(strapi, decision.role);
   if (roleId === null) {
     strapi.log.error(`[entra] role ${decision.role} does not exist; refusing the sign-in`);
@@ -553,7 +583,7 @@ async function writeRole(
       select: ["id", "roleSource", "entraAppliedRole"],
       populate: { role: { select: ["id", "type"] } },
     });
-    if (!row) throw new Error("the user row vanished during the sign-in");
+    if (!row) throw new ExchangeInvariantError("user_vanished");
     const decision = decideRoleWrite(
       {
         roleType: isRecord(row.role) ? stringOf(row.role.type) : null,
@@ -614,12 +644,12 @@ async function syncProfile(strapi: ExchangeHost, user: Row, me: GraphMe): Promis
       }
     }
   } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: e-mail check failed: ${(err as Error).message}`);
+    strapi.log.error(`[entra] user=${user.id}: e-mail check failed (${errorLabel(err)})`);
   }
   try {
     await users.update({ where: { id: user.id }, data });
   } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: profile sync failed: ${(err as Error).message}`);
+    strapi.log.error(`[entra] user=${user.id}: profile sync failed (${errorLabel(err)})`);
   }
 }
 
@@ -658,7 +688,7 @@ async function syncDepartment(
     await strapi.documents(USER_UID).update({ documentId, data: { department: next } });
     return verb === "set" ? "set" : "cleared";
   } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: department sync failed: ${(err as Error).message}`);
+    strapi.log.error(`[entra] user=${user.id}: department sync failed (${errorLabel(err)})`);
     return "failed";
   }
 }
@@ -707,7 +737,7 @@ async function syncManager(
       }
     }
   } catch (err) {
-    strapi.log.error(`[entra] user=${user.id}: manager sync failed: ${(err as Error).message}`);
+    strapi.log.error(`[entra] user=${user.id}: manager sync failed (${errorLabel(err)})`);
     outcome = "failed";
   }
   if (!mayWrite) return outcome;
@@ -725,9 +755,7 @@ async function syncManager(
     }
     if (linked > 0) return `${outcome} backfilled=${linked}`;
   } catch (err) {
-    strapi.log.error(
-      `[entra] user=${user.id}: manager back-fill failed: ${(err as Error).message}`,
-    );
+    strapi.log.error(`[entra] user=${user.id}: manager back-fill failed (${errorLabel(err)})`);
   }
   return outcome;
 }

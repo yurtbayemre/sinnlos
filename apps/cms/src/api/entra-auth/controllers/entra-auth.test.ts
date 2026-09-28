@@ -171,12 +171,32 @@ describe("POST /api/auth/entra/exchange: front door", () => {
     }
   });
 
-  it("maps an unexpected error to 503 unavailable with one error line", async () => {
-    const ctx = context(withSecret, goodBody);
-    const h = host();
-    await handleExchange(ctx, h, ENV, deps(new Error("database is down")));
-    expect([ctx.status, ctx.body]).toEqual([503, { error: "unavailable" }]);
-    expect(h.log.error).toHaveBeenCalledWith("[entra] exchange failed: database is down");
+  it("maps an unexpected error to 503 unavailable with one error line: its code, never its message", async () => {
+    // knex puts the SQL and every bound value into a failed query's message.
+    const knexStyle = Object.assign(
+      new Error(
+        `insert into "up_users" ("display_name", "email") values ('Pat Example', 'pat@entra.unit.test') - value too long`,
+      ),
+      { code: "22001" },
+    );
+    for (const [err, line] of [
+      [knexStyle, "[entra] exchange failed (22001)"],
+      [
+        new TypeError("pat@entra.unit.test is not a function"),
+        "[entra] exchange failed (TypeError)",
+      ],
+      [
+        Object.assign(new Error("Pat Example"), { code: "not a code: pat@entra.unit.test" }),
+        "[entra] exchange failed (Error)",
+      ],
+    ] as const) {
+      const ctx = context(withSecret, goodBody);
+      const h = host();
+      await handleExchange(ctx, h, ENV, deps(err));
+      expect([ctx.status, ctx.body]).toEqual([503, { error: "unavailable" }]);
+      expect(h.log.error.mock.calls).toEqual([[line]]);
+      expect(logText(h)).not.toMatch(/Pat Example|pat@entra/);
+    }
   });
 
   it("answers 503 when the env turned invalid after the boot", async () => {
