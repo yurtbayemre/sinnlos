@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
+import { MAX_EVENTS_PER_EMIT } from "./live-contract";
 import {
   __flushLiveEventsForTest,
   emitLiveEvent,
@@ -43,6 +44,63 @@ describe("emitLiveEvent batching", () => {
     expect(init.headers["x-revalidate-secret"]).toBe("test-secret");
     const { events } = JSON.parse(init.body);
     expect(events).toHaveLength(4);
+  });
+
+  it("sends a burst of more than 1000 events in POSTs of at most 1000, in order (LF01)", async () => {
+    // The web refuses a list longer than MAX_EVENTS_PER_EMIT with 400
+    // (lib/live-bus.ts parseLiveEvents), which used to lose the whole burst.
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    for (let recipientId = 1; recipientId <= 2500; recipientId += 1) {
+      emitLiveEvent({ kind: "notification", recipientId });
+    }
+    emitLiveEvent({ kind: "announcements" });
+    await __flushLiveEventsForTest();
+
+    const bodies = fetchMock.mock.calls.map(
+      ([, init]) => (JSON.parse((init as { body: string }).body) as { events: LiveEvent[] }).events,
+    );
+    expect(bodies.map((events) => events.length)).toEqual([MAX_EVENTS_PER_EMIT, 1000, 501]);
+    const sent = bodies.flat();
+    expect(sent[0]).toEqual({ kind: "notification", recipientId: 1 });
+    expect(sent[2499]).toEqual({ kind: "notification", recipientId: 2500 });
+    expect(sent[2500]).toEqual({ kind: "announcements" });
+    expect(info).toHaveBeenCalledWith("[live-emit] 2501 events in 3 POSTs (at most 1000 each)");
+    info.mockRestore();
+  });
+
+  it("sends the POSTs one after the other, and a failed one does not stop the rest", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    let open = 0;
+    let maxOpen = 0;
+    fetchMock.mockImplementation(async () => {
+      open += 1;
+      maxOpen = Math.max(maxOpen, open);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      open -= 1;
+      if (fetchMock.mock.calls.length === 1) throw new Error("ECONNRESET");
+      return { ok: true, status: 204 };
+    });
+    for (let recipientId = 1; recipientId <= 2001; recipientId += 1) {
+      emitLiveEvent({ kind: "notification", recipientId });
+    }
+    await __flushLiveEventsForTest();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(maxOpen).toBe(1);
+    expect(warn).toHaveBeenCalledWith("[live-emit] failed (1000 event(s)): ECONNRESET");
+    warn.mockRestore();
+    info.mockRestore();
+  });
+
+  it("sends exactly 1000 events in one POST without the chunk log", async () => {
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    for (let recipientId = 1; recipientId <= MAX_EVENTS_PER_EMIT; recipientId += 1) {
+      emitLiveEvent({ kind: "notification", recipientId });
+    }
+    await __flushLiveEventsForTest();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(info).not.toHaveBeenCalled();
+    info.mockRestore();
   });
 
   it("drops a content event whose target has no channel (nobody could subscribe to it)", async () => {
