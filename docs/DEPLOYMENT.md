@@ -972,7 +972,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    `<role> <action>` pairs: grants someone added in the admin panel on an
    action the code manages; decide per pair (keep, or remove in the admin
    panel). The two `authenticated` rows `auth.getSessions`/`revokeSession`
-   are plugin defaults, not managed, and never appear there.
+   are plugin defaults, not managed, and never appear there. The line covers
+   only managed actions and never reports duplicate rows; the
+   `prod-perm-diff.sql` run of step 4 remains the complete check.
 4. **After:** `psql_db -X < infra/diagnostics/prod-perm-diff.sql` gives the
    same result as after the batch 7 deploy (on production only the two
    informational `MISSING_IN_DB` `authenticated` rows above).
