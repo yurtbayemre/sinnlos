@@ -890,10 +890,12 @@ This release (branch `fix/user-data-and-search-hardening`, on `batch/6`
   is not affected. Each refusal is logged without the value, for example
   `[sensitive-query-guard] 400 Invalid key email on GET /api/users
   (plugin::users-permissions.user, role guest)`. `microsoftOid` and the
-  digest opt-ins are now schema-`private`: no role reads or filters them
-  through the content API any more (the sign-in extension, `/api/me` and
-  the digest cron read them directly). `blocked`, `provider` and
-  `confirmed` stay filterable.
+  digest opt-ins are now schema-`private`: no role reads, filters or
+  `_q`-searches them through the content API any more (the sign-in
+  extension, `/api/me` and the digest cron read them directly). The search
+  box of the admin panel no longer matches an Entra id either; a filter on
+  `microsoftOid` there still works. `blocked`, `provider` and `confirmed`
+  stay filterable.
 - **Direct reports (FX23).** `user.manager` is now paired with its inverse
   `directReports`; before, the *Direct reports* card on `/people/<id>`
   never showed. The first boot adds one nullable column and its index to

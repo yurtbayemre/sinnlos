@@ -69,7 +69,8 @@
     "microsoftOid": {
       "type": "string",
       "unique": true,
-      "private": true
+      "private": true,
+      "searchable": false
     },
     "displayName": {
       "type": "string"
@@ -147,7 +148,8 @@
       "type": "enumeration",
       "enum": ["daily", "weekly"],
       "default": "weekly",
-      "private": true
+      "private": true,
+      "searchable": false
     },
     "lastDigestAt": {
       "type": "datetime",

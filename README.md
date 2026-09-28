@@ -404,7 +404,8 @@ the same rules module): polls are **hidden from guests** (role type exactly
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart; paired with its inverse
 `directReports`, which the person page shows as *Direct reports*), the
-schema-`private` `microsoftOid` (read only by the sign-in extension), and the
+schema-`private` `microsoftOid` (read only by the sign-in extension; like
+`digestFrequency` also `searchable: false`, so no `_q` finds it), and the
 schema-`private` pair `birthday` / `birthdayVisible`: birthdays are strictly
 **opt-in** (maintained via `/api/me`, never exposed through user reads) and
 only surface — without the year of birth — in the celebrations feed when

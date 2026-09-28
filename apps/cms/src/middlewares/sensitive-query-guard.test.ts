@@ -11,8 +11,10 @@ import sensitiveQueryGuard, {
 } from "./sensitive-query-guard";
 import {
   cmsPackageDir,
+  openSqliteEngine,
   requirePackageFile,
   strapiPackageDir,
+  type SqliteEngine,
 } from "../test/sqlite-engine.test.helper";
 import {
   PRIVILEGED_ROLE_TYPES,
@@ -36,7 +38,9 @@ import {
  *      @strapi/core, users-permissions and upload packages: global
  *      middlewares run before authentication, their factories are
  *      instantiated at boot before the routes, and every content-API
- *      controller resolves `strapi.contentAPI.validate.query` at call time.
+ *      controller resolves `strapi.contentAPI.validate.query` at call time,
+ *   4. the schema-private user fields are no `_q` target for any role:
+ *      `searchable: false`, checked on the installed @strapi/database.
  */
 
 const CMS_SRC = join(__dirname, "..");
@@ -319,6 +323,30 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
     expect((user().attributes[field] as { private?: boolean }).private).toBe(true);
   });
 
+  it("no private user attribute the db search reads is searchable (`_q` is no oracle for any role)", () => {
+    // @strapi/database's `_q` searches every string-typed (enumeration
+    // included) and, for a numeric term, every number-typed column unless it
+    // is `searchable: false`; `private` is not checked, and the core
+    // validator never looks at `_q`. The type lists are the installed ones.
+    const { isString, isNumber } = requirePackageFile<{
+      isString(type: string): boolean;
+      isNumber(type: string): boolean;
+    }>(strapiPackageDir("@strapi/database"), "dist/utils/types.js");
+    const privateSearchTargets = Object.entries(user().attributes).filter(([, attribute]) => {
+      const { type, private: isPrivate } = attribute as { type: string; private?: boolean };
+      return isPrivate === true && (isString(type) || isNumber(type));
+    });
+    expect(privateSearchTargets.map(([name]) => name)).toEqual(
+      expect.arrayContaining(["microsoftOid", "digestFrequency", "resetPasswordToken"]),
+    );
+    for (const [name, attribute] of privateSearchTargets) {
+      expect({ name, searchable: (attribute as { searchable?: boolean }).searchable }).toEqual({
+        name,
+        searchable: false,
+      });
+    }
+  });
+
   it.each(["admin_role", "member", "guest"])("%s cannot filter or sort by them", async (role) => {
     for (const field of PRIVATE) {
       await expect(check(role, { filters: { [field]: { $eq: "x" } } })).rejects.toThrow(
@@ -349,6 +377,57 @@ describe("schema-private user fields (FX22): the core refuses them for every rol
     )) as Record<string, unknown>;
     expect(out).toEqual({ id: 7, username: "ada", displayName: "Ada", blocked: false });
   });
+});
+
+describe("installed @strapi/database: `_q` on /api/users (FX22)", () => {
+  let engine: SqliteEngine | undefined;
+
+  afterEach(async () => {
+    await engine?.close();
+    engine = undefined;
+  });
+
+  it("finds no user by microsoftOid or digestFrequency (below every role check)", async () => {
+    // The users-permissions user service (fetchAll) passes `_q`, one of
+    // ALLOWED_QUERY_PARAM_KEYS, on to db.query().findMany, and the core
+    // validator never checks it: the schema flag is the only stop. The user
+    // model as the core builds it, without its relations.
+    const { transformContentTypesToModels } = requirePackageFile<{
+      transformContentTypesToModels(contentTypes: unknown[], identifiers: unknown): unknown[];
+    }>(strapiPackageDir("@strapi/core"), "dist/utils/transform-content-types-to-models.js");
+    const scalar = Object.fromEntries(
+      Object.entries(user().attributes).filter(
+        ([, attribute]) => !["relation", "media"].includes((attribute as { type: string }).type),
+      ),
+    );
+    const userType = {
+      ...user(),
+      modelName: "user",
+      globalId: "UsersPermissionsUser",
+      attributes: scalar,
+    };
+    engine = await openSqliteEngine((identifiers) =>
+      transformContentTypesToModels([userType], identifiers),
+    );
+    const users = engine.db.query(USER_UID);
+    await users.create({
+      data: {
+        documentId: "user-ada",
+        username: "ada",
+        email: "ada@example.com",
+        displayName: "Ada Lovelace",
+        microsoftOid: "3f5e1c2a-7b7d-4c1e-9d0f-oid000004711",
+        digestFrequency: "daily",
+      },
+    });
+    const search = async (term: string) =>
+      (await users.findMany({ _q: term })).map((row) => row.username);
+
+    expect(await search("Lovelace")).toEqual(["ada"]);
+    expect(await search("7b7d-4c1e")).toEqual([]);
+    expect(await search("oid000004711")).toEqual([]);
+    expect(await search("daily")).toEqual([]);
+  }, 30_000);
 });
 
 describe("registration", () => {
