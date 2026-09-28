@@ -5,6 +5,7 @@ import {
   USER_READ_ACTIONS,
   USER_READ_EXCLUDED_ROLES,
   USER_UID,
+  computeDesiredGrants,
 } from "./permission-matrix";
 import { ROLES } from "./roles";
 
@@ -13,6 +14,8 @@ import { ROLES } from "./roles";
  * ensureRoles seeds the six intranet roles, syncRolePermissions converges
  * the permission rows to bootstrap/permission-matrix.ts. Both only ADD
  * roles and grants; revocations are the explicit REVOKED_PERMISSIONS list.
+ * Before it writes anything, the sync checks every granted action against
+ * the controllers Strapi actually loaded (B04, assertKnownActions).
  */
 
 export const ROLE_UID = "plugin::users-permissions.role";
@@ -31,10 +34,91 @@ export interface BootstrapQuery {
   deleteMany(params: { where: Record<string, unknown> }): Promise<{ count?: number | null }>;
 }
 
+/** An api or plugin module as `strapi.apis` / `strapi.plugins` hold it. */
+export interface ControllerModule {
+  /** Controller name → instance; its own keys are the action names. */
+  controllers?: Record<string, object | undefined>;
+}
+
+/** The two registries users-permissions derives its action list from. */
+export interface ControllerRegistry {
+  apis: Record<string, ControllerModule | undefined>;
+  plugins: Record<string, ControllerModule | undefined>;
+}
+
 /** The slice of the Strapi instance the role seed and the sync touch. */
-export interface PermissionSyncHost {
+export interface PermissionSyncHost extends Partial<ControllerRegistry> {
   db: { query(uid: string): BootstrapQuery };
   log: { info(message: string): void; warn(message: string): void };
+}
+
+/**
+ * Every content-API action users-permissions knows (roadmap B04), built the
+ * way its own syncPermissions builds it (@strapi/plugin-users-permissions
+ * 5.55.1 dist/server/services/users-permissions.js syncPermissions):
+ * `api::<api>.<controller>.<action>` from strapi.apis and
+ * `plugin::<plugin>.<controller>.<action>` from strapi.plugins, one action
+ * per own key of each controller instance. That syncPermissions runs in the
+ * plugin's bootstrap, before ours, and deletes every permission row whose
+ * action is not in this set; a grant outside it would be re-created and
+ * deleted on every boot and would never let a request through.
+ */
+export function knownActions(registry: ControllerRegistry): Set<string> {
+  const actions = new Set<string>();
+  const collect = (prefix: "api" | "plugin", modules: ControllerRegistry["apis"]) => {
+    for (const [moduleName, module] of Object.entries(modules)) {
+      for (const [controllerName, controller] of Object.entries(module?.controllers ?? {})) {
+        for (const action of Object.keys(controller ?? {})) {
+          actions.add(`${prefix}::${moduleName}.${controllerName}.${action}`);
+        }
+      }
+    }
+  };
+  collect("api", registry.apis);
+  collect("plugin", registry.plugins);
+  return actions;
+}
+
+/**
+ * The granted actions `known` lacks, sorted and unique. REVOKED_PERMISSIONS
+ * is not checked: revoking an action that no longer exists is harmless.
+ */
+export function unknownActions(
+  grants: readonly { action: string }[],
+  known: ReadonlySet<string>,
+): string[] {
+  return [...new Set(grants.map((grant) => grant.action))]
+    .filter((action) => !known.has(action))
+    .sort();
+}
+
+const isRecord = (value: unknown): value is Record<string, ControllerModule | undefined> =>
+  typeof value === "object" && value !== null;
+
+/**
+ * Refuses the boot when a desired grant (PERMISSION_MATRIX, the user reads,
+ * CUSTOM_ACTION_GRANTS) names an action no loaded controller has, listing
+ * all of them: a typo or a renamed controller method fails the deploy
+ * instead of 403ing the feature for everyone. Also refuses when the
+ * registries are gone (a Strapi upgrade), instead of skipping the check.
+ */
+export function assertKnownActions(
+  host: Partial<ControllerRegistry>,
+  grants: readonly { action: string }[] = computeDesiredGrants(),
+): void {
+  const { apis, plugins } = host;
+  if (!isRecord(apis) || !isRecord(plugins)) {
+    throw new Error(
+      "[bootstrap] strapi.apis / strapi.plugins not found — refusing to sync permissions without checking the granted actions",
+    );
+  }
+  const unknown = unknownActions(grants, knownActions({ apis, plugins }));
+  if (unknown.length > 0) {
+    throw new Error(
+      `[bootstrap] ${unknown.length} granted action(s) match no loaded controller action: ${unknown.join(", ")}. ` +
+        "Fix bootstrap/permission-matrix.ts (a typo, or a controller action that was renamed or removed).",
+    );
+  }
 }
 
 /** Creates every role of ROLES that does not exist yet (by `type`). */
@@ -66,6 +150,7 @@ async function findRole(strapi: PermissionSyncHost, roleType: string): Promise<S
 }
 
 export async function syncRolePermissions(strapi: PermissionSyncHost): Promise<void> {
+  assertKnownActions(strapi);
   let granted = 0;
   for (const [roleType, matrix] of Object.entries(PERMISSION_MATRIX)) {
     const role = await findRole(strapi, roleType);

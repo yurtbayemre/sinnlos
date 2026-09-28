@@ -9,7 +9,14 @@ import {
   type PermissionConstants,
 } from "./bootstrap/permission-matrix";
 import { ROLES } from "./bootstrap/roles";
-import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
+import {
+  assertKnownActions,
+  ensureRoles,
+  knownActions,
+  syncRolePermissions,
+  unknownActions,
+  type ControllerRegistry,
+} from "./bootstrap/sync-permissions";
 import { PERMISSION_SCHEMAS, PERMISSION_UID, ROLE_UID } from "./test/org-fixtures.test.helper";
 import { createStrapiStub, type Row, type StrapiStub } from "./test/strapi-stub.test.helper";
 import { PRIVILEGED_ROLE_TYPES } from "./utils/sanitize-user-contact";
@@ -35,11 +42,34 @@ function roleRows(types: readonly string[] = [...ROLES.map((r) => r.type), "auth
   return types.map((type, index) => ({ id: index + 1, type, name: type }));
 }
 
-function permissionStub(permissions: Row[] = [], roles: Row[] = roleRows()): StrapiStub {
-  return createStrapiStub({
+/** strapi.apis / strapi.plugins holding exactly the given action keys. */
+function registryFor(actions: readonly string[]): ControllerRegistry {
+  const registry: ControllerRegistry = { apis: {}, plugins: {} };
+  for (const key of actions) {
+    const match = /^(api|plugin)::([^.]+)\.([^.]+)\.([^.]+)$/.exec(key);
+    if (!match) throw new Error(`unparsable action ${key}`);
+    const [, prefix, moduleName, controllerName, action] = match;
+    const modules = prefix === "api" ? registry.apis : registry.plugins;
+    const module = (modules[moduleName] ??= { controllers: {} });
+    const controllers = (module.controllers ??= {});
+    controllers[controllerName] = { ...controllers[controllerName], [action]: () => undefined };
+  }
+  return registry;
+}
+
+/** Every desired action, as the loaded controllers of this cms provide them. */
+const fullRegistry = () => registryFor(computeDesiredGrants().map((grant) => grant.action));
+
+function permissionStub(
+  permissions: Row[] = [],
+  roles: Row[] = roleRows(),
+  registry: ControllerRegistry = fullRegistry(),
+): StrapiStub & ControllerRegistry {
+  const stub = createStrapiStub({
     schemas: PERMISSION_SCHEMAS,
     tables: { [ROLE_UID]: roles, [PERMISSION_UID]: permissions },
   });
+  return Object.assign(stub, registry);
 }
 
 /** Every permission row as "roleType|action", sorted (code-unit order). */
@@ -347,5 +377,64 @@ describe("computeDesiredGrants / computeRevocations (B01)", () => {
     expect(computeRevocations().map(({ role, action }) => `${role}|${action}`)).toEqual(
       revokedPairs(),
     );
+  });
+});
+
+describe("granted actions are checked against the loaded controllers (B04)", () => {
+  it("knownActions lists api:: and plugin:: actions like users-permissions does", () => {
+    const base = { find() {}, findOne() {} };
+    const custom = Object.assign(Object.create(base) as object, { ics() {} });
+    const known = knownActions({
+      apis: { event: { controllers: { event: custom } }, empty: {}, gone: undefined },
+      plugins: { upload: { controllers: { "content-api": { upload() {} }, broken: undefined } } },
+    });
+    // Own keys only, like lodash `_.keys` in syncPermissions (the core
+    // controller factory copies the base actions onto the instance).
+    expect([...known].sort()).toEqual(["api::event.event.ics", "plugin::upload.content-api.upload"]);
+  });
+
+  it("unknownActions returns each missing action once, sorted", () => {
+    const known = new Set(["api::a.a.find"]);
+    expect(
+      unknownActions(
+        [{ action: "api::b.b.x" }, { action: "api::a.a.find" }, { action: "api::a.a.typo" }, { action: "api::b.b.x" }],
+        known,
+      ),
+    ).toEqual(["api::a.a.typo", "api::b.b.x"]);
+  });
+
+  it("the sync refuses to write when a granted action is unknown, listing every one", async () => {
+    const missing = ["api::event.event.ics", "plugin::users-permissions.role.find"];
+    const registry = registryFor(
+      computeDesiredGrants()
+        .map((grant) => grant.action)
+        .filter((action) => !missing.includes(action)),
+    );
+    const strapi = permissionStub([], roleRows(), registry);
+    const sync = syncRolePermissions(strapi);
+    await expect(sync).rejects.toThrow(
+      "[bootstrap] 2 granted action(s) match no loaded controller action: api::event.event.ics, plugin::users-permissions.role.find.",
+    );
+    expect(strapi.calls).toEqual([]);
+  });
+
+  it("does not check REVOKED_PERMISSIONS: a revoked action may be gone", async () => {
+    const revokedOnly = new Set(
+      computeRevocations()
+        .map(({ action }) => action)
+        .filter((action) => !computeDesiredGrants().some((grant) => grant.action === action)),
+    );
+    expect(revokedOnly.has("api::poll-vote.poll-vote.create")).toBe(true);
+    const registry = registryFor(
+      computeDesiredGrants()
+        .map((grant) => grant.action)
+        .filter((action) => !revokedOnly.has(action)),
+    );
+    await expect(syncRolePermissions(permissionStub([], roleRows(), registry))).resolves.toBeUndefined();
+  });
+
+  it("refuses to run without the controller registries", () => {
+    expect(() => assertKnownActions({})).toThrow(/strapi\.apis \/ strapi\.plugins not found/);
+    expect(() => assertKnownActions({ apis: {} })).toThrow(/not found/);
   });
 });

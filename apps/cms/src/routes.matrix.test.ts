@@ -5,8 +5,15 @@ import {
   CUSTOM_ACTION_GRANTS,
   PERMISSION_MATRIX,
   REVOKED_PERMISSIONS,
+  computeDesiredGrants,
 } from "./bootstrap/permission-matrix";
 import { ADMIN, MODERATORS } from "./bootstrap/roles";
+import { knownActions, unknownActions } from "./bootstrap/sync-permissions";
+import {
+  cmsPackageDir,
+  requirePackageFile,
+  strapiPackageDir,
+} from "./test/sqlite-engine.test.helper";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
 
@@ -140,6 +147,28 @@ interface Loaded {
   /** Controller uid → own (overriding or custom) method names. */
   controllerMethods: Map<string, string[]>;
   schemas: Map<string, ContentTypeSchema>;
+}
+
+/**
+ * An installed plugin's server controllers, instantiated like Strapi's
+ * controller registry does (a factory is called with `{ strapi }`; the
+ * factories only build closures). The dist index either exports them as
+ * `controllers` (upload) or behind a lazy `__require` (users-permissions).
+ */
+function installedControllers(packageDir: string): Record<string, object> {
+  const loaded = requirePackageFile<{
+    controllers?: Record<string, unknown>;
+    __require?: () => Record<string, unknown>;
+  }>(packageDir, "dist/server/controllers/index.js");
+  const controllers = loaded.controllers ?? loaded.__require?.() ?? {};
+  return Object.fromEntries(
+    Object.entries(controllers).map(([name, controller]) => [
+      name,
+      typeof controller === "function"
+        ? (controller as (deps: { strapi: object }) => object)({ strapi: {} })
+        : (controller as object),
+    ]),
+  );
 }
 
 const tsModules = (dir: string) =>
@@ -634,6 +663,35 @@ describe("route → policy matrix (S01)", async () => {
       }
       expect(checked).toContain("/event-rsvps/summary");
       expect(misordered).toEqual([]);
+    });
+
+    /**
+     * B04 in CI for the keys the mocked routers cannot see: every plugin::
+     * grant must be an action of the INSTALLED plugin's controllers, loaded
+     * the way Strapi's controller registry instantiates them. The boot runs
+     * the same check (assertKnownActions) over everything Strapi loaded.
+     */
+    it("every plugin:: grant is an action of the installed plugin's controllers (B04)", () => {
+      const plugins = {
+        "users-permissions": {
+          controllers: installedControllers(cmsPackageDir("@strapi/plugin-users-permissions")),
+        },
+        upload: { controllers: installedControllers(strapiPackageDir("@strapi/upload")) },
+      };
+      const known = knownActions({ apis: {}, plugins });
+      expect(known.has("plugin::users-permissions.auth.register")).toBe(true);
+      const pluginGrants = computeDesiredGrants().filter((grant) =>
+        grant.action.startsWith("plugin::"),
+      );
+      expect([...new Set(pluginGrants.map((grant) => grant.action))].sort()).toEqual([
+        "plugin::upload.content-api.upload",
+        "plugin::users-permissions.auth.changePassword",
+        "plugin::users-permissions.role.find",
+        "plugin::users-permissions.user.find",
+        "plugin::users-permissions.user.findOne",
+        "plugin::users-permissions.user.me",
+      ]);
+      expect(unknownActions(pluginGrants, known)).toEqual([]);
     });
   });
 
