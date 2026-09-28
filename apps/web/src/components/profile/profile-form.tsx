@@ -38,6 +38,9 @@ export const DIGEST_ROLES: ReadonlySet<string> = new Set([
   "authenticated",
 ]);
 
+/** The digest checkboxes (the frequency is the fourth digest field). */
+const DIGEST_OPT_INS = ["digestAnnouncements", "digestMentions", "digestKudos"] as const;
+
 export function ProfileForm({
   initial,
   viewerRole,
@@ -135,6 +138,24 @@ export function ProfileForm({
         </span>
       </label>
 
+      {!showDigest && (
+        // Not offered, but submitted as stored: updateProfile maps an absent
+        // checkbox to false, so without these a save would clear the opt-ins
+        // of a reader whose role could not be read (or a role this copy does
+        // not know yet). The cms ignores them for guests.
+        <>
+          {DIGEST_OPT_INS.map((name) =>
+            (v ? v[name] : initial[name]) === true ? (
+              <input key={name} type="hidden" name={name} value="on" />
+            ) : null,
+          )}
+          <input
+            type="hidden"
+            name="digestFrequency"
+            value={(v?.digestFrequency ?? initial.digestFrequency) === "daily" ? "daily" : "weekly"}
+          />
+        </>
+      )}
       {showDigest && (
         <fieldset className="space-y-3 rounded-xl border p-4">
           <legend className="px-1 text-sm font-medium">{tProfile("digestSection")}</legend>

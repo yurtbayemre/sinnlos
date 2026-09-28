@@ -42,8 +42,10 @@ describe("ProfileForm digest options", () => {
     for (const role of DIGEST_ROLES) {
       const html = form(role);
       expect(html, role).toContain("<fieldset");
-      expect(html, role).toContain('name="digestAnnouncements"');
+      expect(html, role).toMatch(/type="checkbox"[^>]*name="digestAnnouncements"/);
       expect(html, role).toContain(en.profile.digestSection);
+      // No hidden copy next to the controls (FormData.get would read the first).
+      expect(html, role).not.toContain('type="hidden" name="digest');
     }
   });
 
@@ -51,11 +53,36 @@ describe("ProfileForm digest options", () => {
     for (const role of ["guest", "Guest", "public", "", null, undefined]) {
       const html = form(role);
       expect(html, String(role)).not.toContain("<fieldset");
-      expect(html, String(role)).not.toContain('name="digest');
+      expect(html, String(role)).not.toMatch(/type="(checkbox|radio)"[^>]*name="digest/);
       expect(html, String(role)).not.toContain(en.profile.digestSection);
       // The rest of the form stays.
       expect(html, String(role)).toContain('name="displayName"');
     }
+  });
+
+  it("a hidden section still submits the stored opt-ins, so a save keeps them", () => {
+    // updateProfile maps an absent checkbox to false: without the hidden
+    // fields a member whose role could not be read lost every opt-in on save.
+    const html = form(null);
+    expect(html).toContain('<input type="hidden" name="digestAnnouncements" value="on"/>');
+    expect(html).not.toContain('name="digestMentions"');
+    expect(html).not.toContain('name="digestKudos"');
+    expect(html).toContain('<input type="hidden" name="digestFrequency" value="weekly"/>');
+
+    const daily = render(
+      createElement(ProfileForm, {
+        initial: {
+          ...initial,
+          digestAnnouncements: false,
+          digestKudos: true,
+          digestFrequency: "daily",
+        },
+        viewerRole: "guest",
+      }),
+    );
+    expect(daily).not.toContain('name="digestAnnouncements"');
+    expect(daily).toContain('<input type="hidden" name="digestKudos" value="on"/>');
+    expect(daily).toContain('<input type="hidden" name="digestFrequency" value="daily"/>');
   });
 
   it("the digest roles are the announcement readers of the cms matrix", () => {
