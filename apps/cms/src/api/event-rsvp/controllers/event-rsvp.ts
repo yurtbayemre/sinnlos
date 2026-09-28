@@ -6,7 +6,9 @@ import {
   distinctYesUsers,
   isRsvpStatus,
   newestFirst,
+  parseSummaryTargets,
   stripPrivateUsers,
+  summarizeRsvps,
   type RsvpRow,
 } from "../../../utils/rsvp";
 
@@ -68,6 +70,43 @@ async function isAtCapacity(strapi: any, event: any, userId: number): Promise<bo
 }
 
 export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
+  /**
+   * GET /api/event-rsvps/summary?targets=<documentIds> (FX21): per event the
+   * counts, the names of the "yes" answers and the caller's own answer,
+   * aggregated here instead of shipping every row to the web (which walked
+   * up to 3000 rows per view). Decliners stay private: no maybe/no name
+   * ever leaves the CMS (utils/rsvp.ts summarizeRsvps).
+   *
+   * Only PUBLISHED events are summarised; a missing or draft-only target is
+   * left out of the answer, identically, so the endpoint is no existence
+   * oracle for draft documentIds. Granted like event-rsvp find
+   * (CUSTOM_ACTION_GRANTS, never guest); no route policy, the rows are
+   * read through strapi.db.query and only the aggregate is returned.
+   */
+  async summary(ctx) {
+    const user = ctx.state.user;
+    if (!user) return ctx.unauthorized();
+
+    const parsed = parseSummaryTargets(ctx.query?.targets);
+    if ("error" in parsed) return ctx.badRequest(parsed.error);
+
+    const events: { documentId: string }[] = await strapi.db.query(EVENT_UID).findMany({
+      where: { documentId: { $in: parsed.targets }, publishedAt: { $notNull: true } },
+      select: ["documentId"],
+    });
+    const published = new Set(events.map((event) => event.documentId));
+    const targets = parsed.targets.filter((target) => published.has(target));
+    if (targets.length === 0) return ctx.send({ data: [] });
+
+    const rows: RsvpRow[] = await strapi.db.query(RSVP_UID).findMany({
+      where: { targetDocumentId: { $in: targets } },
+      select: ["id", "targetDocumentId", "status", "respondedAt"],
+      populate: { user: { select: ["id", "displayName"] } },
+    });
+    const callerId = typeof user.id === "number" ? user.id : null;
+    return ctx.send({ data: summarizeRsvps(rows, targets, callerId) });
+  },
+
   /** Core find, post-filtered: see stripPrivateUsers in utils/rsvp.ts. */
   async find(ctx) {
     const response = await super.find(ctx);

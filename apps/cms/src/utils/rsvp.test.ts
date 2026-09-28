@@ -1,14 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  MAX_SUMMARY_TARGETS,
   RSVP_STATUSES,
   capacityDecision,
   compareNewestFirst,
   distinctYesUsers,
   isRsvpStatus,
   newestFirst,
+  parseSummaryTargets,
   pickSurvivor,
   rowUserId,
   stripPrivateUsers,
+  summarizeRsvps,
   type RsvpRow,
 } from "./rsvp";
 
@@ -147,5 +150,172 @@ describe("stripPrivateUsers", () => {
     stripPrivateUsers(list, { id: 5, role: { type: "member" } });
     expect(Object.keys(list[0] as object)).not.toContain("user");
     expect(list.slice(1)).toEqual([null, "x", 3]);
+  });
+});
+
+describe("parseSummaryTargets", () => {
+  const A = "aaaaaaaaaaaaaaaaaaaaaaaa";
+  const B = "bbbbbbbbbbbbbbbbbbbbbbbb";
+
+  it("reads a comma list and repeated params, keeps the order and drops duplicates", () => {
+    expect(parseSummaryTargets(`${A},${B}`)).toEqual({ targets: [A, B] });
+    expect(parseSummaryTargets([B, `${A},${B}`])).toEqual({ targets: [B, A] });
+    expect(parseSummaryTargets(`${A},${A}`)).toEqual({ targets: [A] });
+  });
+
+  it.each([
+    [undefined, "targets required"],
+    [null, "targets required"],
+    [[], "targets required"],
+    ["", "Invalid targets"],
+    [" ", "Invalid targets"],
+    [`${A}, ${B}`, "Invalid targets"],
+    [`${A},`, "Invalid targets"],
+    ["12", "Invalid targets"],
+    [A.toUpperCase(), "Invalid targets"],
+    ["__proto__", "Invalid targets"],
+    [{ 0: A }, "Invalid targets"],
+    [[A, 1], "Invalid targets"],
+    [42, "Invalid targets"],
+  ])("refuses %j", (raw, error) => {
+    expect(parseSummaryTargets(raw)).toEqual({ error });
+  });
+
+  it(`takes at most ${MAX_SUMMARY_TARGETS} distinct targets`, () => {
+    const ids = Array.from(
+      { length: MAX_SUMMARY_TARGETS + 1 },
+      (_, i) => `t${String(i).padStart(23, "0")}`,
+    );
+    expect(parseSummaryTargets(ids.slice(0, MAX_SUMMARY_TARGETS).join(","))).toEqual({
+      targets: ids.slice(0, MAX_SUMMARY_TARGETS),
+    });
+    expect(parseSummaryTargets(ids.join(","))).toEqual({
+      error: `At most ${MAX_SUMMARY_TARGETS} targets`,
+    });
+  });
+});
+
+/**
+ * summarizeRsvps replaces the web's buildRsvpSummaries (WD02). The same
+ * cases as its characterisation suite (apps/web/src/lib/event-rsvp.test.ts
+ * until the switch), with two deliberate differences: the CMS sees every
+ * user, so decliners dedupe per user instead of per row, and every
+ * requested target gets a summary.
+ */
+describe("summarizeRsvps", () => {
+  const EVT_A = "evta00000000000000000000";
+  const EVT_B = "evtb00000000000000000000";
+  let nextId = 1;
+  const answer = (
+    target: string,
+    status: string,
+    user: { id: number; displayName?: string } | null,
+    respondedAt: string | null = null,
+  ): RsvpRow => ({ id: nextId++, targetDocumentId: target, status, respondedAt, user });
+
+  it("counts each bucket, lists the yes names and returns every target in order", () => {
+    const [b, a] = summarizeRsvps(
+      [
+        answer(EVT_A, "yes", { id: 1, displayName: "Ada" }, "2026-09-10T09:00:00.000Z"),
+        answer(EVT_A, "yes", { id: 2, displayName: "Grace" }, "2026-09-10T10:00:00.000Z"),
+        answer(EVT_A, "maybe", { id: 3, displayName: "Unsure" }),
+        answer(EVT_A, "no", { id: 4, displayName: "Decliner" }),
+      ],
+      [EVT_B, EVT_A],
+      null,
+    );
+    expect(a).toEqual({
+      targetDocumentId: EVT_A,
+      yesCount: 2,
+      maybeCount: 1,
+      noCount: 1,
+      yesNames: ["Ada", "Grace"],
+      myStatus: null,
+    });
+    expect(b).toEqual({
+      targetDocumentId: EVT_B,
+      yesCount: 0,
+      maybeCount: 0,
+      noCount: 0,
+      yesNames: [],
+      myStatus: null,
+    });
+  });
+
+  it("collapses a user's duplicate rows to the newest, a tie to the higher id", () => {
+    const at = "2026-09-10T10:00:00.000Z";
+    const [summary] = summarizeRsvps(
+      [
+        answer(EVT_A, "yes", { id: 1 }, "2026-09-10T09:00:00.000Z"),
+        answer(EVT_A, "no", { id: 1 }, "2026-09-10T11:00:00.000Z"),
+        answer(EVT_A, "no", { id: 2, displayName: "Grace" }, at),
+        answer(EVT_A, "yes", { id: 2, displayName: "Grace" }, at),
+        answer(EVT_A, "maybe", { id: 3 }, null),
+        answer(EVT_A, "yes", { id: 3 }, "2026-01-01T00:00:00.000Z"),
+      ],
+      [EVT_A],
+      null,
+    );
+    expect(summary).toMatchObject({ yesCount: 2, maybeCount: 0, noCount: 1, yesNames: ["Grace"] });
+  });
+
+  it("dedupes decliners per user (the web could only count their stripped rows)", () => {
+    const [summary] = summarizeRsvps(
+      [
+        answer(EVT_A, "no", { id: 4 }),
+        answer(EVT_A, "no", { id: 4 }),
+        answer(EVT_A, "maybe", { id: 5 }),
+      ],
+      [EVT_A],
+      null,
+    );
+    expect(summary).toMatchObject({ maybeCount: 1, noCount: 1 });
+  });
+
+  it("counts every row whose user is gone on its own, without a name", () => {
+    const [summary] = summarizeRsvps(
+      [answer(EVT_A, "yes", null), answer(EVT_A, "yes", null), answer(EVT_A, "no", null)],
+      [EVT_A],
+      7,
+    );
+    expect(summary).toMatchObject({ yesCount: 2, noCount: 1, yesNames: [], myStatus: null });
+  });
+
+  it("derives myStatus from the caller's newest row only", () => {
+    const [summary] = summarizeRsvps(
+      [
+        answer(EVT_A, "yes", { id: 7, displayName: "Me" }, "2026-09-10T10:00:00.000Z"),
+        answer(EVT_A, "maybe", { id: 7, displayName: "Me" }, "2026-09-10T12:00:00.000Z"),
+        answer(EVT_A, "yes", { id: 1, displayName: "Ada" }, "2026-09-10T13:00:00.000Z"),
+      ],
+      [EVT_A],
+      7,
+    );
+    expect(summary).toMatchObject({ myStatus: "maybe", yesNames: ["Ada"], maybeCount: 1 });
+    expect(
+      summarizeRsvps([answer(EVT_A, "yes", { id: 7 })], [EVT_A], null)[0]?.myStatus,
+    ).toBeNull();
+  });
+
+  it("ignores rows of other targets and rows with an unknown status", () => {
+    const [summary] = summarizeRsvps(
+      [
+        answer(EVT_B, "yes", { id: 1, displayName: "Ada" }),
+        answer(EVT_A, "attending", { id: 2 }),
+        { id: 99, status: "yes", user: { id: 3 } },
+      ],
+      [EVT_A],
+      null,
+    );
+    expect(summary).toMatchObject({ yesCount: 0, maybeCount: 0, noCount: 0, yesNames: [] });
+  });
+
+  it("names a yes only with a non-empty display name", () => {
+    const [summary] = summarizeRsvps(
+      [answer(EVT_A, "yes", { id: 1, displayName: "" }), answer(EVT_A, "yes", { id: 2 })],
+      [EVT_A],
+      null,
+    );
+    expect(summary).toMatchObject({ yesCount: 2, yesNames: [] });
   });
 });

@@ -12,6 +12,8 @@
  * counts; the next upsert heals the duplicates (pickSurvivor's order).
  */
 
+import { isDocumentId } from "./entry-id";
+
 export const RSVP_STATUSES = ["yes", "no", "maybe"] as const;
 export type RsvpStatus = (typeof RSVP_STATUSES)[number];
 
@@ -110,4 +112,104 @@ export function stripPrivateUsers(rows: unknown[], caller: RsvpCaller | null | u
     if (caller && record.user?.id === caller.id) continue;
     delete record.user;
   }
+}
+
+// ---------------------------------------------------------------------------
+// The summary endpoint: GET /api/event-rsvps/summary?targets=<documentIds>
+// ---------------------------------------------------------------------------
+
+/** Most events one summary request may name (the events list shows at most 50). */
+export const MAX_SUMMARY_TARGETS = 50;
+
+/**
+ * The `targets` query parameter: event documentIds, comma-separated
+ * (`targets=a,b`) or repeated (`targets[0]=a&targets[1]=b`). Duplicates
+ * collapse, the order is kept. Anything but documentId-shaped strings, no
+ * target at all, or more than MAX_SUMMARY_TARGETS distinct ones is an
+ * error: the endpoint answers it with 400 before any query.
+ */
+export function parseSummaryTargets(raw: unknown): { targets: string[] } | { error: string } {
+  const parts: unknown[] =
+    typeof raw === "string" ? [raw] : Array.isArray(raw) ? raw : raw == null ? [] : [raw];
+  const targets: string[] = [];
+  for (const part of parts) {
+    if (typeof part !== "string") return { error: "Invalid targets" };
+    for (const id of part.split(",")) {
+      if (!isDocumentId(id)) return { error: "Invalid targets" };
+      if (!targets.includes(id)) targets.push(id);
+    }
+  }
+  if (targets.length === 0) return { error: "targets required" };
+  if (targets.length > MAX_SUMMARY_TARGETS) {
+    return { error: `At most ${MAX_SUMMARY_TARGETS} targets` };
+  }
+  return { targets };
+}
+
+/** One event's aggregate, as the summary endpoint returns it. */
+export interface RsvpSummary {
+  targetDocumentId: string;
+  yesCount: number;
+  maybeCount: number;
+  noCount: number;
+  /** Display names of the "yes" answers, oldest answer first (attendance is public). */
+  yesNames: string[];
+  /** The caller's own answer, if any. */
+  myStatus: RsvpStatus | null;
+}
+
+/**
+ * One summary per target, in the order given, computed from every RSVP row
+ * of those targets. Only the survivor of each (event, user) counts
+ * (pickSurvivor), so duplicate rows never inflate a bucket; a row whose
+ * user is gone counts on its own. The only names that leave the CMS are
+ * those of "yes" answers with a display name: who answered maybe or no
+ * stays private (as stripPrivateUsers keeps it for the raw reads), and the
+ * caller learns only their own answer (myStatus).
+ */
+export function summarizeRsvps(
+  rows: readonly RsvpRow[],
+  targets: readonly string[],
+  callerId: number | null,
+): RsvpSummary[] {
+  const byTarget = new Map<string, RsvpSummary>();
+  for (const targetDocumentId of targets) {
+    byTarget.set(targetDocumentId, {
+      targetDocumentId,
+      yesCount: 0,
+      maybeCount: 0,
+      noCount: 0,
+      yesNames: [],
+      myStatus: null,
+    });
+  }
+
+  const answers = new Map<string, RsvpRow[]>();
+  for (const row of rows) {
+    const target = row.targetDocumentId;
+    if (typeof target !== "string" || !byTarget.has(target)) continue;
+    const userId = rowUserId(row);
+    const key = `${target}\u0000${userId ?? `row-${row.id}`}`;
+    const list = answers.get(key);
+    if (list) list.push(row);
+    else answers.set(key, [row]);
+  }
+
+  // Oldest answer first, so the yes names read in answer order.
+  const survivors = [...answers.values()]
+    .map((list) => pickSurvivor(list))
+    .filter((row): row is RsvpRow => row !== null)
+    .sort((a, b) => compareNewestFirst(b, a));
+  for (const row of survivors) {
+    const summary = byTarget.get(row.targetDocumentId as string);
+    if (!summary || !isRsvpStatus(row.status)) continue;
+    if (row.status === "yes") {
+      summary.yesCount += 1;
+      const name = row.user?.displayName;
+      if (typeof name === "string" && name !== "") summary.yesNames.push(name);
+    } else if (row.status === "maybe") summary.maybeCount += 1;
+    else summary.noCount += 1;
+    if (callerId !== null && rowUserId(row) === callerId) summary.myStatus = row.status;
+  }
+  return targets.map((target) => byTarget.get(target) as RsvpSummary);
 }

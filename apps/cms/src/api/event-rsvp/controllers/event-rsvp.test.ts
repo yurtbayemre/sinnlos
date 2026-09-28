@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createStrapiStub, type Row as StubRow } from "../../../test/strapi-stub.test.helper";
 import { MALFORMED_ENTRY_IDS, failLikePostgres } from "../../../utils/entry-id.test.helper";
+import { MAX_SUMMARY_TARGETS } from "../../../utils/rsvp";
 import eventRsvpController from "./event-rsvp";
 
 /**
@@ -430,5 +432,241 @@ describe("event-rsvp find/findOne: stripPrivateUsers (S09)", () => {
     expect((await controller.findOne(ctx)).data.user).toEqual({ id: OWNER.id });
     mocks.superFindOne.mockResolvedValueOnce({ data: null });
     expect((await controller.findOne(ctx)).data).toBeNull();
+  });
+});
+
+/**
+ * FX21: GET /api/event-rsvps/summary on the shared stub (S03). The stub
+ * evaluates the where clauses, `select` and the user populate like the query
+ * engine, and records every call.
+ */
+describe("event-rsvp summary (FX21)", () => {
+  const USER_UID = "plugin::users-permissions.user";
+  const EVT_1 = "e1e1e1e1e1e1e1e1e1e1e1e1";
+  const EVT_2 = "e2e2e2e2e2e2e2e2e2e2e2e2";
+  const DRAFT = "e3e3e3e3e3e3e3e3e3e3e3e3";
+  const MISSING = "e4e4e4e4e4e4e4e4e4e4e4e4";
+
+  function setupSummary(rsvps: StubRow[], caller: { id?: number; role?: { type: string } } | null) {
+    const strapi = createStrapiStub({
+      tables: {
+        [USER_UID]: [
+          { id: 5, username: "owner", displayName: "Owner" },
+          { id: 8, username: "ada", displayName: "Ada" },
+          { id: 9, username: "grace", displayName: "Grace" },
+          { id: 10, username: "decliner", displayName: "Decliner" },
+          { id: 11, username: "unsure", displayName: "Unsure" },
+          { id: 12, username: "nameless" },
+        ],
+        [RSVP_UID]: rsvps,
+      },
+    });
+    const published = { status: "published" as const };
+    strapi.seedDocument(
+      EVENT_UID,
+      { title: "One", rsvpEnabled: true },
+      { ...published, documentId: EVT_1 },
+    );
+    strapi.seedDocument(
+      EVENT_UID,
+      { title: "Two", rsvpEnabled: true },
+      { ...published, documentId: EVT_2 },
+    );
+    strapi.seedDocument(EVENT_UID, { title: "Draft", rsvpEnabled: true }, { documentId: DRAFT });
+    const controller = (
+      eventRsvpController as unknown as (deps: { strapi: unknown }) => {
+        summary(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi });
+    const ctx = (targets: unknown) => ({
+      state: { user: caller ?? undefined },
+      query: { targets },
+      badRequest: vi.fn((message: string) => ({ status: 400, message })),
+      unauthorized: vi.fn(() => ({ status: 401 })),
+      send: vi.fn((payload: unknown) => payload),
+    });
+    return { strapi, controller, ctx };
+  }
+
+  let rowId = 100;
+  const at = (hour: number) => `2026-09-10T${String(hour).padStart(2, "0")}:00:00.000Z`;
+  const answer = (
+    target: string,
+    userId: number | null,
+    status: string,
+    hour: number,
+  ): StubRow => ({
+    id: rowId++,
+    targetDocumentId: target,
+    status,
+    respondedAt: at(hour),
+    user: userId === null ? null : { id: userId },
+  });
+
+  it("answers counts, yes names and the caller's own answer per published event", async () => {
+    const { controller, ctx } = setupSummary(
+      [
+        answer(EVT_1, 8, "yes", 9),
+        answer(EVT_1, 9, "yes", 8),
+        answer(EVT_1, 10, "no", 10),
+        answer(EVT_1, 11, "maybe", 11),
+        answer(EVT_1, OWNER.id, "maybe", 12),
+        answer(EVT_2, 10, "no", 9),
+      ],
+      OWNER,
+    );
+    const c = ctx(`${EVT_1},${EVT_2}`);
+    const response = await controller.summary(c);
+    expect(c.badRequest).not.toHaveBeenCalled();
+    expect(response).toEqual({
+      data: [
+        {
+          targetDocumentId: EVT_1,
+          yesCount: 2,
+          maybeCount: 2,
+          noCount: 1,
+          // Oldest answer first.
+          yesNames: ["Grace", "Ada"],
+          myStatus: "maybe",
+        },
+        {
+          targetDocumentId: EVT_2,
+          yesCount: 0,
+          maybeCount: 0,
+          noCount: 1,
+          yesNames: [],
+          myStatus: null,
+        },
+      ],
+    });
+  });
+
+  it("never lets a maybe/no name or a user id leave the CMS, not even for admin_role", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(EVT_1, 10, "no", 9), answer(EVT_1, 11, "maybe", 10), answer(EVT_1, 8, "yes", 11)],
+      { id: 77, role: { type: "admin_role" } },
+    );
+    const json = JSON.stringify(await controller.summary(ctx(EVT_1)));
+    expect(json).toContain("Ada");
+    expect(json).not.toContain("Decliner");
+    expect(json).not.toContain("Unsure");
+    expect(json).not.toMatch(/"user"|"id"/);
+  });
+
+  it("counts a user's duplicate rows once, by the newest answer", async () => {
+    const { controller, ctx } = setupSummary(
+      [
+        answer(EVT_1, 8, "yes", 9),
+        answer(EVT_1, 8, "no", 12),
+        answer(EVT_1, 8, "maybe", 10),
+        answer(EVT_1, OWNER.id, "no", 9),
+        answer(EVT_1, OWNER.id, "yes", 11),
+      ],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(EVT_1))) as { data: unknown[] };
+    expect(response.data[0]).toMatchObject({
+      yesCount: 1,
+      maybeCount: 0,
+      noCount: 1,
+      yesNames: ["Owner"],
+      myStatus: "yes",
+    });
+  });
+
+  it("counts answers whose user is gone, and a yes without a display name, without a name", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(EVT_1, null, "yes", 9), answer(EVT_1, null, "yes", 10), answer(EVT_1, 12, "yes", 11)],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(EVT_1))) as { data: unknown[] };
+    expect(response.data[0]).toMatchObject({ yesCount: 3, yesNames: [] });
+  });
+
+  it("leaves draft-only and unknown events out, identically, and keeps the requested order", async () => {
+    const { controller, ctx } = setupSummary(
+      [answer(DRAFT, 8, "yes", 9), answer(MISSING, 8, "yes", 9), answer(EVT_1, 8, "yes", 9)],
+      OWNER,
+    );
+    const response = (await controller.summary(ctx(`${EVT_2},${DRAFT},${MISSING},${EVT_1}`))) as {
+      data: { targetDocumentId: string }[];
+    };
+    expect(response.data.map((s) => s.targetDocumentId)).toEqual([EVT_2, EVT_1]);
+    expect(await controller.summary(ctx(`${DRAFT},${MISSING}`))).toEqual({ data: [] });
+  });
+
+  it("accepts repeated targets and collapses duplicates", async () => {
+    const { controller, ctx } = setupSummary([answer(EVT_1, 8, "yes", 9)], OWNER);
+    const response = (await controller.summary(ctx([EVT_1, `${EVT_2},${EVT_1}`]))) as {
+      data: { targetDocumentId: string; yesCount: number }[];
+    };
+    expect(response.data.map((s) => [s.targetDocumentId, s.yesCount])).toEqual([
+      [EVT_1, 1],
+      [EVT_2, 0],
+    ]);
+  });
+
+  it("reads published events and the targets' rows only, with the user's id and display name", async () => {
+    const { strapi, controller, ctx } = setupSummary([answer(EVT_1, 8, "yes", 9)], OWNER);
+    await controller.summary(ctx(EVT_1));
+    expect(strapi.calls.map((call) => [call.uid, call.method, call.params])).toEqual([
+      [
+        EVENT_UID,
+        "findMany",
+        {
+          where: { documentId: { $in: [EVT_1] }, publishedAt: { $notNull: true } },
+          select: ["documentId"],
+        },
+      ],
+      [
+        RSVP_UID,
+        "findMany",
+        {
+          where: { targetDocumentId: { $in: [EVT_1] } },
+          select: ["id", "targetDocumentId", "status", "respondedAt"],
+          populate: { user: { select: ["id", "displayName"] } },
+        },
+      ],
+    ]);
+  });
+
+  it.each([
+    ["no targets", undefined, "targets required"],
+    ["an empty list", "", "Invalid targets"],
+    ["a malformed id", "abc", "Invalid targets"],
+    ["a numeric id", "12", "Invalid targets"],
+    ["an empty segment", `${EVT_1},`, "Invalid targets"],
+    ["a non-string", { 0: EVT_1 }, "Invalid targets"],
+    ["a prototype key", "constructor", "Invalid targets"],
+  ])("answers %s with 400 before any query", async (_label, targets, message) => {
+    const { strapi, controller, ctx } = setupSummary([], OWNER);
+    const c = ctx(targets);
+    await controller.summary(c);
+    expect(c.badRequest).toHaveBeenCalledWith(message);
+    expect(strapi.calls).toEqual([]);
+  });
+
+  it(`takes at most ${MAX_SUMMARY_TARGETS} distinct targets`, async () => {
+    const ids = Array.from(
+      { length: MAX_SUMMARY_TARGETS + 1 },
+      (_, i) => `e${String(i).padStart(23, "0")}`,
+    );
+    const { strapi, controller, ctx } = setupSummary([], OWNER);
+    const tooMany = ctx(ids.join(","));
+    await controller.summary(tooMany);
+    expect(tooMany.badRequest).toHaveBeenCalledWith(`At most ${MAX_SUMMARY_TARGETS} targets`);
+    expect(strapi.calls).toEqual([]);
+
+    const enough = ctx([...ids.slice(0, MAX_SUMMARY_TARGETS), ids[0]].join(","));
+    await controller.summary(enough);
+    expect(enough.badRequest).not.toHaveBeenCalled();
+  });
+
+  it("answers 401 without a caller", async () => {
+    const { strapi, controller, ctx } = setupSummary([], null);
+    const c = ctx(EVT_1);
+    await controller.summary(c);
+    expect(c.unauthorized).toHaveBeenCalled();
+    expect(strapi.calls).toEqual([]);
   });
 });

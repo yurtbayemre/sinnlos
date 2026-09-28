@@ -76,6 +76,7 @@ interface AttributeSchema {
 }
 
 interface ContentTypeSchema {
+  info?: { pluralName?: string };
   options?: { draftAndPublish?: boolean };
   attributes: Record<string, AttributeSchema>;
 }
@@ -123,6 +124,9 @@ interface RouteEntry {
   /** Router file relative to src/api — for failure messages. */
   source: string;
   config: RouteConfig;
+  /** Custom routes only: the declared method and path. */
+  method?: string;
+  path?: string;
 }
 
 interface Loaded {
@@ -183,7 +187,14 @@ async function load(): Promise<Loaded> {
         }
       } else {
         for (const route of (mod.default as { routes: CustomRoute[] }).routes) {
-          add({ action: route.handler, kind: "custom", source, config: route.config ?? {} });
+          add({
+            action: route.handler,
+            kind: "custom",
+            source,
+            config: route.config ?? {},
+            method: route.method,
+            path: route.path,
+          });
         }
       }
     }
@@ -273,6 +284,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::event-rsvp.event-rsvp.create": [],
   "api::event-rsvp.event-rsvp.update": ["global::is-event-rsvp-owner"],
   "api::event-rsvp.event-rsvp.delete": [],
+  "api::event-rsvp.event-rsvp.summary": [],
 
   "api::kudos.kudos.find": [],
   "api::kudos.kudos.findOne": [],
@@ -581,6 +593,36 @@ describe("route → policy matrix (S01)", async () => {
         .filter((role) => !matrixRoles.includes(role));
       expect(unknown).toEqual([]);
     });
+
+    /**
+     * A custom `GET /<plural>/<word>` also matches the core
+     * `GET /<plural>/:id` of the same type. @strapi/core registers an API's
+     * route files in file-name order (loaders/apis.js readdir, which libuv
+     * returns sorted) and @koa/router runs the first matching route, so the
+     * custom file must sort before the core router file — otherwise the
+     * core findOne answers with "<word>" as the id.
+     */
+    it("a custom GET route shadowing a core findOne comes from a file that sorts first", () => {
+      const checked: string[] = [];
+      const misordered: string[] = [];
+      for (const entry of routes.values()) {
+        if (entry.kind !== "custom" || entry.method !== "GET" || !entry.path) continue;
+        const [plural, word, ...rest] = entry.path.split("/").filter(Boolean);
+        if (!plural || !word || rest.length > 0 || word.startsWith(":")) continue;
+        for (const [uid, schema] of schemas) {
+          const core = routes.get(`${uid}.findOne`);
+          if (core?.kind !== "core" || schema.info?.pluralName !== plural) continue;
+          checked.push(entry.path);
+          const [customApi, , customFile] = entry.source.split("/");
+          const [coreApi, , coreFile] = core.source.split("/");
+          if (customApi !== coreApi || !(customFile! < coreFile!)) {
+            misordered.push(`${entry.source} ${entry.path} vs ${core.source}`);
+          }
+        }
+      }
+      expect(checked).toContain("/event-rsvps/summary");
+      expect(misordered).toEqual([]);
+    });
   });
 
   describe("(d) REVOKED_PERMISSIONS", () => {
@@ -869,6 +911,17 @@ describe("route → policy matrix (S01)", async () => {
       expect(controllerMethods.get("api::poll-vote.poll-vote")).toEqual(
         expect.arrayContaining(["vote", "results"]),
       );
+    });
+
+    it("FX21: the RSVP summary is granted exactly like event-rsvp find, never to guest", () => {
+      const summary = "api::event-rsvp.event-rsvp.summary";
+      expect(routes.get(summary)?.kind).toBe("custom");
+      expect(controllerMethods.get("api::event-rsvp.event-rsvp")).toContain("summary");
+      const holders = matrixRoles.filter((role) => effectiveGrants(role).has(summary)).sort();
+      expect(holders).toEqual(
+        [...(matrixGrants.get("api::event-rsvp.event-rsvp.find") ?? [])].sort(),
+      );
+      expect(holders).not.toContain("guest");
     });
 
     it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {
