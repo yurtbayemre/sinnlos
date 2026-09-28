@@ -628,6 +628,22 @@ export function hasTargetId(idParam: unknown): boolean {
  * controllers translate a numeric id to the documentId before the core
  * update (PL01); the wiki-page update does not, so a numeric id passes
  * can-edit-wiki and the core update then answers 404.
+ *
+ * Why this is not parseEntryRef (utils/entry-id.ts), which every other
+ * id-addressed policy and controller uses (PL01 reconciliation): row ids
+ * follow ONE rule in both (parseRowId: canonical decimal within int4, the
+ * only values that could fail a Postgres lookup), so both refuse exactly
+ * the same numeric-looking values. They differ only in how early a
+ * documentId that Strapi never generates is refused. parseEntryRef takes
+ * Strapi's own shape (cuid2, 24 characters) and answers anything else
+ * before a query; this function reads the route id with the relation-ref
+ * rule of the payloads above, which must accept what Strapi's relation
+ * input accepts, and lets the lookup find nothing for such a value (a
+ * varchar comparison never fails). Every id parseEntryRef accepts, this
+ * accepts with the same result (write-allowlist.test.ts pins the subset);
+ * the outcome for the wider rest is the same refusal, one query later.
+ * The FX07 gates keep it so a route id and a payload ref of the same row
+ * are read alike.
  */
 export function targetRowWhere(idParam: unknown): RelationRef | null {
   if (!hasTargetId(idParam)) return null;
