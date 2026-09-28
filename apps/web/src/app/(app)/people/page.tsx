@@ -1,5 +1,6 @@
 import { Contact } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { PEOPLE_QUERY, toPersonCards } from "@/lib/people-dto";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
@@ -15,14 +16,11 @@ export async function generateMetadata() {
 
 export default async function PeoplePage() {
   const t = await getTranslations("people");
-  const { data, failed } = await tryFetch(
-    () =>
-      fetchAllUsers(
-        "populate[department]=true&populate[avatar]=true&populate[role]=true&sort=displayName:asc",
-      ),
-    "people",
-  );
-  const people = (data?.users ?? []) as UserLite[];
+  // Field-limited fetch and a lean card DTO before the client boundary
+  // (WD05): the grid gets name, job title, email (search only; stripped by
+  // the CMS for non-staff), department and the avatar thumbnail per person.
+  const { data, failed } = await tryFetch(() => fetchAllUsers<UserLite>(PEOPLE_QUERY), "people");
+  const people = toPersonCards(data?.users ?? []);
 
   return (
     <div className="space-y-6">

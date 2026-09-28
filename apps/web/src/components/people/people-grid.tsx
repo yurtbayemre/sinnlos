@@ -8,14 +8,21 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { SelectMenu } from "@/components/ui/select-menu";
 import { initials } from "@/lib/utils";
-import { avatarThumbUrl } from "@/lib/config";
-import type { UserLite } from "@/lib/types";
+import { PEOPLE_PAGE_SIZE, visibleCount, type PersonCard } from "@/lib/people-dto";
 
-export function PeopleGrid({ people }: { people: UserLite[] }) {
+/**
+ * The /people grid over the lean card DTO (lib/people-dto.ts, WD05). It
+ * renders PEOPLE_PAGE_SIZE cards per step instead of mounting the whole
+ * directory at once; the count line counts every match, and search and
+ * the department filter run over the whole list (a change starts again at
+ * the first step).
+ */
+export function PeopleGrid({ people }: { people: PersonCard[] }) {
   const tPeople = useTranslations("people");
   const tCommon = useTranslations("common");
   const [search, setSearch] = useState("");
   const [dept, setDept] = useState<string>("all");
+  const [pages, setPages] = useState(1);
 
   const departments = useMemo(() => {
     const set = new Map<string, string>();
@@ -32,13 +39,16 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
     return people.filter((p) => {
       if (dept !== "all" && (p.department?.slug ?? p.department?.name) !== dept) return false;
       if (!q) return true;
-      const hay = [p.displayName, p.email, p.jobTitle, p.department?.name]
+      const hay = [p.name, p.email, p.jobTitle, p.department?.name]
         .filter(Boolean)
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
     });
   }, [people, search, dept]);
+
+  const shown = visibleCount(filtered.length, pages);
+  const next = Math.min(PEOPLE_PAGE_SIZE, filtered.length - shown);
 
   return (
     <div className="space-y-4">
@@ -53,14 +63,20 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
             aria-label={tPeople("searchPlaceholder")}
             placeholder={tPeople("searchPlaceholder")}
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setPages(1);
+            }}
             className="h-10 w-full rounded-xl border bg-muted/40 pl-9 pr-3 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring"
           />
         </div>
         {departments.length > 1 && (
           <SelectMenu
             value={dept}
-            onChange={setDept}
+            onChange={(value) => {
+              setDept(value);
+              setPages(1);
+            }}
             ariaLabel={tPeople("filterByDepartment")}
             align="right"
             buttonClassName="w-full sm:w-52"
@@ -77,15 +93,16 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
       </p>
 
       <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-        {filtered.map((p) => {
-          const name = p.displayName ?? p.username ?? p.email ?? tCommon("unknown");
-          const avatarUrl = avatarThumbUrl(p.avatar);
+        {filtered.slice(0, shown).map((p) => {
+          const name = p.name ?? tCommon("unknown");
           return (
             <Link key={p.id} href={`/people/${p.id}`} className="focus-card group block">
               <Card className="card-lift h-full">
                 <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
                   <Avatar className="h-16 w-16">
-                    {avatarUrl ? <AvatarImage src={avatarUrl} alt={name} loading="lazy" /> : null}
+                    {p.avatarUrl ? (
+                      <AvatarImage src={p.avatarUrl} alt={name} loading="lazy" />
+                    ) : null}
                     <AvatarFallback className="text-lg">{initials(name)}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
@@ -107,6 +124,18 @@ export function PeopleGrid({ people }: { people: UserLite[] }) {
           );
         })}
       </div>
+
+      {next > 0 && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setPages((current) => current + 1)}
+            className="rounded-xl border px-4 py-2 text-sm font-medium outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            + {tCommon("person", { count: next })}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

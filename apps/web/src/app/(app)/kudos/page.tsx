@@ -1,6 +1,8 @@
 import { Award, PartyPopper } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
+import { kudosRecipientQuery, toKudosRecipients } from "@/lib/people-dto";
+import { getSession } from "@/lib/session";
 import { fetchAllUsers } from "@/lib/users";
 import { relativeTime } from "@/lib/relative-time";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -39,15 +41,19 @@ export default async function KudosPage() {
   const tCommon = await getTranslations("common");
   const tRel = await getTranslations("relativeTime");
   const relative = (d: string | undefined) => relativeTime(d, tRel);
+  const session = await getSession();
+  const selfId = typeof session?.user?.id === "number" ? session.user.id : null;
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
     tryFetch(() => api.celebrations(), "celebrations"),
-    tryFetch(() => fetchAllUsers("populate[department]=true&sort=displayName:asc"), "people"),
+    // The picker gets a lean DTO (WD05): name, job title, avatar thumbnail
+    // of every active colleague but the caller.
+    tryFetch(() => fetchAllUsers<UserLite>(kudosRecipientQuery(selfId)), "people"),
   ]);
 
   const kudosList = (kudosResult.data?.data ?? []) as Kudos[];
   const celebrations = (celebrationsResult.data?.data ?? []) as Celebration[];
-  const people = (peopleResult.data?.users ?? []) as UserLite[];
+  const people = toKudosRecipients(peopleResult.data?.users ?? [], selfId);
   const anyFailed = kudosResult.failed || celebrationsResult.failed;
 
   return (
