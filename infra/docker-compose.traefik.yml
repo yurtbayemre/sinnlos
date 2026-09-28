@@ -2,6 +2,10 @@
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 # Routing spiegelt das Caddyfile: /api/auth/* -> web, Strapi-Pfade -> cms,
 # Rest -> web. TLS via Host-Traefik (certresolver lehttp).
+# Host: jede Router-Regel nimmt den Hostnamen aus DOMAIN in infra/.env (der
+# nackte Name wie sinnlos.yurtbay.dev, ohne Schema und Port). Ohne DOMAIN
+# rendert compose diese Datei nicht (${DOMAIN:?}), und deploy.sh bricht im
+# Preflight ab, bevor etwas geändert ist.
 # Voraussetzung (FX11): der websecure-Entrypoint des Host-Traefik darf
 # client-gesetzte X-Forwarded-* NICHT übernehmen — kein
 # forwardedHeaders.insecure, trustedIPs nur für Proxys, die den Header
@@ -58,14 +62,14 @@ services:
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.average=10"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.burst=20"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.period=1s"
-      - "traefik.http.routers.sinnlos-signin.rule=Host(`sinnlos.yurtbay.dev`) && (Path(`/sign-in`) || Path(`/register`)) && Method(`POST`)"
+      - "traefik.http.routers.sinnlos-signin.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && (Path(`/sign-in`) || Path(`/register`)) && Method(`POST`)"
       - "traefik.http.routers.sinnlos-signin.priority=90"
       - "traefik.http.routers.sinnlos-signin.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-signin.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-signin.service=sinnlos-web"
       - "traefik.http.routers.sinnlos-signin.middlewares=sinnlos-headers,sinnlos-authlimit,sinnlos-compress"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
-      - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.sinnlos-auth.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.sinnlos-auth.priority=100"
       - "traefik.http.routers.sinnlos-auth.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
@@ -74,14 +78,14 @@ services:
       # Live-SSE (/live/stream, /live/subscribe; FX34): eigener Router OHNE
       # Kompression und ohne Rate-Limit (wie bisher im Catch-all), vor dem
       # Catch-all. Nie Puffer- oder Kompressions-Middleware davor.
-      - "traefik.http.routers.sinnlos-live.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/live/`)"
+      - "traefik.http.routers.sinnlos-live.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && PathPrefix(`/live/`)"
       - "traefik.http.routers.sinnlos-live.priority=10"
       - "traefik.http.routers.sinnlos-live.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-live.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-live.service=sinnlos-web"
       - "traefik.http.routers.sinnlos-live.middlewares=sinnlos-headers"
       # Catch-all -> Next.js
-      - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
+      - "traefik.http.routers.sinnlos-web.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`)"
       - "traefik.http.routers.sinnlos-web.priority=1"
       - "traefik.http.routers.sinnlos-web.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-web.tls.certresolver=lehttp"
@@ -127,7 +131,7 @@ services:
       # `/emailXYZ`), so `PathPrefix(`/upload`)` would still swallow
       # `/uploads` — hence the segment-exact `Path(`/upload`) ||
       # PathPrefix(`/upload/`)` pair. Guarded by infra/routing-parity.test.ts.
-      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || Path(`/upload`) || PathPrefix(`/upload/`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
+      - "traefik.http.routers.sinnlos-cms.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || Path(`/upload`) || PathPrefix(`/upload/`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
       - "traefik.http.routers.sinnlos-cms.priority=50"
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"

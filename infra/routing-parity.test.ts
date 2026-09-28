@@ -497,8 +497,43 @@ interface TraefikModel {
  */
 const IGNORED_ROUTER_OPTIONS = new Set(["tls.certresolver"]);
 
-function parseTraefik(source = readInfraFile("docker-compose.traefik.yml")): TraefikModel {
-  const labels = parseTraefikLabels(source);
+/** The infra/.env the model renders the labels with (see interpolateCompose). */
+const TRAEFIK_ENV: Readonly<Record<string, string>> = { DOMAIN: "intranet.example.com" };
+
+/**
+ * Docker Compose variable interpolation, as `docker compose` applies it to
+ * the label values before Traefik ever sees them: `${VAR}`, `${VAR:-default}`,
+ * `${VAR-default}`, `${VAR:?message}` (unset or empty refuses to render),
+ * `${VAR?message}` (unset refuses) and `$$` for a literal `$`. Anything else
+ * with a `$` (`$VAR`, an unterminated `${`, nested defaults) throws, so the
+ * model never guesses what compose renders.
+ */
+function interpolateCompose(value: string, env: Readonly<Record<string, string>>): string {
+  return value.replace(
+    /\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-|:\?|\?)([^${}]*))?\}|\$/g,
+    (match: string, name?: string, op?: string, arg?: string): string => {
+      if (match === "$$") return "$";
+      if (name === undefined) throw new Error(`unmodelled "$" in compose value: ${value}`);
+      const raw = Object.hasOwn(env, name) ? env[name] : undefined;
+      const unsetOrEmpty = raw === undefined || raw === "";
+      if ((op === ":?" && unsetOrEmpty) || (op === "?" && raw === undefined)) {
+        throw new Error(`required variable ${name} is missing a value: ${arg ?? ""}`);
+      }
+      if (op === ":-" && unsetOrEmpty) return arg ?? "";
+      if (op === "-" && raw === undefined) return arg ?? "";
+      return raw ?? "";
+    },
+  );
+}
+
+function parseTraefik(
+  source = readInfraFile("docker-compose.traefik.yml"),
+  env: Readonly<Record<string, string>> = TRAEFIK_ENV,
+): TraefikModel {
+  const labels = parseTraefikLabels(source).map((label) => {
+    if (label.key.includes("$")) throw new Error(`unmodelled "$" in traefik label key ${label.key}`);
+    return { ...label, value: interpolateCompose(label.value, env) };
+  });
   expect(labels.length, "traefik.* labels in docker-compose.traefik.yml").toBeGreaterThan(0);
 
   const partial = new Map<string, Partial<TraefikRouter> & { container: string }>();
@@ -943,11 +978,45 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     });
 
     it("serves one host on the websecure entrypoint from every router", () => {
-      expect(hosts).toHaveLength(1);
+      expect(hosts).toEqual([TRAEFIK_ENV.DOMAIN]);
       for (const router of traefik.routers.values()) {
         expect(hostsOf(router.rule), `Host() in ${router.name}`).toEqual(hosts);
         expect(router.entrypoints, `entrypoints of ${router.name}`).toBe("websecure");
       }
+    });
+
+    // One compose file for every instance (the owner's and the employer's):
+    // the host comes from infra/.env. Required, never defaulted, so an
+    // instance without DOMAIN fails to render instead of answering on
+    // another instance's domain.
+    it("takes every Host() from a required DOMAIN, never a literal host", () => {
+      const rules = parseTraefikLabels(readInfraFile("docker-compose.traefik.yml")).filter(
+        ({ key }) => /^http\.routers\.[^.]+\.rule$/.test(key),
+      );
+      const rawHosts = rules.flatMap(({ value }) =>
+        [...value.matchAll(/Host\(`([^`]*)`\)/g)].map((host) => host[1]),
+      );
+      expect(rawHosts).toHaveLength(traefik.routers.size);
+      for (const raw of rawHosts) expect(raw).toMatch(/^\$\{DOMAIN:\?[^}]+\}$/);
+    });
+
+    it.each(["intranet.example.com", "sinnlos.example.org"])(
+      "renders every Host() with DOMAIN=%s",
+      (domain) => {
+        const model = parseTraefik(undefined, { DOMAIN: domain });
+        for (const router of model.routers.values()) {
+          expect(hostsOf(router.rule), router.name).toEqual([domain]);
+        }
+      },
+    );
+
+    it.each([
+      ["unset", {}],
+      ["empty", { DOMAIN: "" }],
+    ])("refuses to render with DOMAIN %s, as docker compose does", (_what, env) => {
+      expect(() => parseTraefik(undefined, env)).toThrow(
+        /required variable DOMAIN is missing a value/,
+      );
     });
 
     it.each(TRAEFIK_ROUTER_PROBES)("%s %s is handled by %s", (method, path, name) => {
@@ -1245,5 +1314,28 @@ describe("Traefik label parser fails closed (S10 review)", () => {
     const cmsRule = "Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api`)";
     const source = cmsLabels(`- "traefik.http.routers.sinnlos-cms.rule=${cmsRule}"`, label);
     expect(() => parseTraefik(source)).toThrow(error);
+  });
+
+  it.each([
+    ["${DOMAIN}", { DOMAIN: "a.example" }, "a.example"],
+    ["${DOMAIN:?set it}", { DOMAIN: "a.example" }, "a.example"],
+    ["${DOMAIN:-b.example}", {}, "b.example"],
+    ["${DOMAIN:-b.example}", { DOMAIN: "" }, "b.example"],
+    ["${DOMAIN-b.example}", { DOMAIN: "" }, ""],
+    ["${DOMAIN-b.example}", {}, "b.example"],
+    ["Host(`${DOMAIN}`) costs $$5", { DOMAIN: "a.example" }, "Host(`a.example`) costs $5"],
+  ])("interpolates %s like docker compose", (value, env, expected) => {
+    expect(interpolateCompose(value, env)).toBe(expected);
+  });
+
+  it.each([
+    ["an unbraced variable", "$DOMAIN", { DOMAIN: "a.example" }],
+    ["an unterminated brace", "${DOMAIN", { DOMAIN: "a.example" }],
+    ["a nested default", "${DOMAIN:-${OTHER}}", {}],
+    ["a required variable that is unset", "${DOMAIN:?set it}", {}],
+    ["a required variable that is empty", "${DOMAIN:?set it}", { DOMAIN: "" }],
+    ["an unset ?-variable", "${DOMAIN?set it}", {}],
+  ])("rejects %s", (_what, value, env) => {
+    expect(() => interpolateCompose(value, env)).toThrow();
   });
 });
