@@ -68,26 +68,36 @@ export function rowUserId(row: RsvpRow): number | null {
 }
 
 /**
- * How many DISTINCT users have a "yes" row, not counting `excludeUserId`
- * (the caller: their own switch to "yes" must not count against them).
- * Distinct users, not rows: duplicates from the race above would overstate
- * the occupancy. A row without a user (the user was deleted) holds no seat.
+ * How many users hold a seat: users whose answer, the newest of their rows
+ * (pickSurvivor), is "yes", not counting `excludeUserId` (the caller: their
+ * own switch to "yes" must not count against them). Takes an event's rows
+ * of EVERY status. This is the rule summarizeRsvps counts by, so the gate
+ * and the numbers the events page shows agree: a user's duplicate rows from
+ * the race above count once, and an older "yes" row keeps no seat once a
+ * newer row says "no" or "maybe". A row without a user (the user was
+ * deleted) holds no seat.
  */
-export function distinctYesUsers(rows: readonly RsvpRow[], excludeUserId?: number | null): number {
-  const userIds = new Set<number>();
+export function seatHolders(rows: readonly RsvpRow[], excludeUserId?: number | null): number {
+  const byUser = new Map<number, RsvpRow[]>();
   for (const row of rows) {
-    if (row.status !== "yes") continue;
     const id = rowUserId(row);
-    if (id !== null && id !== excludeUserId) userIds.add(id);
+    if (id === null || id === excludeUserId) continue;
+    const list = byUser.get(id);
+    if (list) list.push(row);
+    else byUser.set(id, [row]);
   }
-  return userIds.size;
+  let seats = 0;
+  for (const list of byUser.values()) {
+    if (pickSurvivor(list)?.status === "yes") seats += 1;
+  }
+  return seats;
 }
 
 /**
  * The capacity gate for a transition INTO "yes": "full" when the event has
- * a positive integer capacity and at least that many other distinct users
- * already answered "yes". No (or a non-positive, non-integer) capacity
- * means no limit.
+ * a positive integer capacity and at least that many other users hold a
+ * seat (seatHolders). No (or a non-positive, non-integer) capacity means no
+ * limit.
  */
 export function capacityDecision(capacity: unknown, yesUsers: number): "open" | "full" {
   if (typeof capacity !== "number" || !Number.isInteger(capacity) || capacity <= 0) {

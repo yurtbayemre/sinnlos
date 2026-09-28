@@ -3,11 +3,11 @@ import { factories } from "@strapi/strapi";
 import { parseEntryRef } from "../../../utils/entry-id";
 import {
   capacityDecision,
-  distinctYesUsers,
   isRsvpStatus,
   newestFirst,
   parseSummaryTargets,
   requestsLegacyFormat,
+  seatHolders,
   stripPrivateUsers,
   summarizeRsvps,
   type RsvpRow,
@@ -32,22 +32,25 @@ const RSVP_UID = "api::event-rsvp.event-rsvp";
 const EVENT_UID = "api::event.event";
 
 /**
- * Count how many DISTINCT users currently answer "yes" for the event,
- * excluding `excludeUserId` (the caller — their own switch to "yes" must
- * not count against themselves). Distinct users, not rows: the accepted
- * check-then-insert race (below) can leave duplicate rows per user until
- * the next upsert heals them (utils/rsvp.ts distinctYesUsers).
+ * Count how many users currently hold a seat for the event, excluding
+ * `excludeUserId` (the caller — their own switch to "yes" must not count
+ * against themselves). Per user only the newest row counts, the rule the
+ * summary counts by (utils/rsvp.ts seatHolders, summarizeRsvps): the
+ * accepted check-then-insert race (below) can leave duplicate rows per
+ * user until the next upsert heals them, and an older "yes" next to a
+ * newer "no" or "maybe" holds no seat. Therefore rows of EVERY status.
  */
 async function countYesUsers(
   strapi: any,
   targetDocumentId: string,
   excludeUserId: number,
 ): Promise<number> {
-  const rows = await strapi.db.query(RSVP_UID).findMany({
-    where: { targetDocumentId, status: "yes" },
-    populate: { user: true },
+  const rows: RsvpRow[] = await strapi.db.query(RSVP_UID).findMany({
+    where: { targetDocumentId },
+    select: ["id", "status", "respondedAt"],
+    populate: { user: { select: ["id"] } },
   });
-  return distinctYesUsers(rows, excludeUserId);
+  return seatHolders(rows, excludeUserId);
 }
 
 /**
@@ -218,8 +221,8 @@ export default factories.createCoreController(RSVP_UID, ({ strapi }) => ({
     // the same (user, targetDocumentId), and two concurrent "yes" switches
     // can overshoot a capacity by one (poll-vote precedent). Duplicates
     // are healed by the findMany cleanup above on the user's next upsert;
-    // until then consumers (events page summary) dedupe by user id keeping
-    // the latest respondedAt, and countYesUsers counts distinct users.
+    // until then the summary and countYesUsers both read only the newest
+    // row per user (respondedAt, then id; utils/rsvp.ts pickSurvivor).
     const created = await strapi.db.query(RSVP_UID).create({
       data: { user: user.id, targetDocumentId, status, respondedAt },
     });

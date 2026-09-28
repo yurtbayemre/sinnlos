@@ -4,7 +4,6 @@ import {
   RSVP_STATUSES,
   capacityDecision,
   compareNewestFirst,
-  distinctYesUsers,
   filtersReferenceUser,
   isRsvpStatus,
   newestFirst,
@@ -12,6 +11,7 @@ import {
   pickSurvivor,
   requestsLegacyFormat,
   rowUserId,
+  seatHolders,
   stripPrivateUsers,
   summarizeRsvps,
   type RsvpRow,
@@ -20,8 +20,8 @@ import {
 /**
  * Pure RSVP rules (FX21). The controller suite (event-rsvp.test.ts) pins
  * them through the upsert, the capacity gate and the read filter; these pin
- * the rules themselves, including the healing order and distinct-user
- * capacity.
+ * the rules themselves, including the healing order and the seat count
+ * (one answer per user, the newest, as in the summary).
  */
 
 const row = (
@@ -87,27 +87,62 @@ describe("healing order: pickSurvivor / newestFirst", () => {
   });
 });
 
-describe("distinctYesUsers", () => {
+describe("seatHolders", () => {
   it("counts users, not rows", () => {
     expect(
-      distinctYesUsers([row(1, 8, "yes"), row(2, 8, "yes"), row(3, 9, "yes"), row(4, 10, "no")]),
+      seatHolders([row(1, 8, "yes"), row(2, 8, "yes"), row(3, 9, "yes"), row(4, 10, "no")]),
     ).toBe(2);
   });
 
   it("never counts the excluded caller, and ignores rows without a user", () => {
     const rows = [row(1, 8, "yes"), row(2, 5, "yes"), row(3, null, "yes")];
-    expect(distinctYesUsers(rows, 5)).toBe(1);
-    expect(distinctYesUsers(rows)).toBe(2);
-    expect(distinctYesUsers(rows, null)).toBe(2);
+    expect(seatHolders(rows, 5)).toBe(1);
+    expect(seatHolders(rows)).toBe(2);
+    expect(seatHolders(rows, null)).toBe(2);
   });
 
-  it("counts yes rows only", () => {
-    expect(distinctYesUsers([row(1, 8, "maybe"), row(2, 9, "no")])).toBe(0);
+  it("counts yes answers only", () => {
+    expect(seatHolders([row(1, 8, "maybe"), row(2, 9, "no")])).toBe(0);
+  });
+
+  it("reads only a user's newest row, like the summary", () => {
+    const older = "2026-09-10T10:00:00.000Z";
+    const newer = "2026-09-10T11:00:00.000Z";
+    // An older yes next to a newer no or maybe holds no seat.
+    expect(seatHolders([row(1, 8, "yes", older), row(2, 8, "no", newer)])).toBe(0);
+    expect(seatHolders([row(2, 8, "maybe", newer), row(1, 8, "yes", older)])).toBe(0);
+    // An older no next to a newer yes holds one.
+    expect(seatHolders([row(1, 8, "no", older), row(2, 8, "yes", newer)])).toBe(1);
+    // A respondedAt tie goes to the higher id; no time at all is the oldest.
+    expect(seatHolders([row(7, 8, "yes", older), row(3, 8, "no", older)])).toBe(1);
+    expect(seatHolders([row(3, 8, "yes", older), row(7, 8, "no", older)])).toBe(0);
+    expect(seatHolders([row(9, 8, "yes"), row(2, 8, "no", older)])).toBe(0);
+  });
+
+  it("agrees with the summary's yesCount, except for rows whose user is gone", () => {
+    const target = "evtc00000000000000000000";
+    const onTarget = (r: RsvpRow): RsvpRow => ({ ...r, targetDocumentId: target });
+    const rows = [
+      row(1, 8, "yes", "2026-09-10T10:00:00.000Z"),
+      row(2, 8, "no", "2026-09-10T11:00:00.000Z"),
+      row(3, 9, "no", "2026-09-10T10:00:00.000Z"),
+      row(4, 9, "yes", "2026-09-10T11:00:00.000Z"),
+      row(5, 10, "yes", "2026-09-10T10:00:00.000Z"),
+      row(6, 10, "yes", "2026-09-10T10:00:00.000Z"),
+      row(7, 11, "maybe", "2026-09-10T12:00:00.000Z"),
+    ].map(onTarget);
+    expect(seatHolders(rows)).toBe(2);
+    expect(summarizeRsvps(rows, [target], null)[0]?.yesCount).toBe(2);
+    // The known difference: a deleted user's yes counts in the summary but
+    // holds no seat (unchanged since a88d45a).
+    const withOrphan = [...rows, onTarget(row(8, null, "yes", "2026-09-10T13:00:00.000Z"))];
+    expect(seatHolders(withOrphan)).toBe(2);
+    expect(summarizeRsvps(withOrphan, [target], null)[0]?.yesCount).toBe(3);
   });
 });
 
 describe("capacityDecision", () => {
-  it("is full once the other distinct yes users reach the capacity", () => {
+  it("is full once the other seat holders reach the capacity", () => {
     expect(capacityDecision(2, 1)).toBe("open");
     expect(capacityDecision(2, 2)).toBe("full");
     expect(capacityDecision(2, 3)).toBe("full");

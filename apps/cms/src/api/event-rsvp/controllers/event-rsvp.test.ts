@@ -302,8 +302,9 @@ describe("event-rsvp create: target and payload checks (S09)", () => {
   });
 });
 
-describe("event-rsvp create: capacity counts distinct yes users (S09)", () => {
+describe("event-rsvp create: capacity counts each user's newest answer (S09)", () => {
   const full = event({ capacity: 2 });
+  const yes = { data: { targetDocumentId: EVENT_DOC, status: "yes" } };
 
   it("counts a user with duplicate yes rows once", async () => {
     const { ctx } = await answer(
@@ -363,6 +364,50 @@ describe("event-rsvp create: capacity counts distinct yes users (S09)", () => {
       },
     );
     expect(withDuplicate.ctx.badRequest).not.toHaveBeenCalled();
+  });
+
+  it("reads every status of the event's rows, with only the user id", async () => {
+    const { log } = await answer(yes, { events: [full] });
+    // [0] is the caller's own rows (the upsert), [1] the seat count.
+    expect(ops(log, "findMany")[1]?.params).toEqual({
+      where: { targetDocumentId: EVENT_DOC },
+      select: ["id", "status", "respondedAt"],
+      populate: { user: { select: ["id"] } },
+    });
+  });
+
+  it("frees the seat of an older yes that a newer no replaced, as the summary shows it", async () => {
+    const single = event({ capacity: 1 });
+    const freed = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(1, 8, "yes", "2026-09-10T10:00:00.000Z"),
+        rsvp(2, 8, "no", "2026-09-10T11:00:00.000Z"),
+      ],
+    });
+    expect(freed.ctx.badRequest).not.toHaveBeenCalled();
+    expect(ops(freed.log, "create")).toHaveLength(1);
+
+    // The reverse order: the newer row says yes, so the seat stays taken.
+    const held = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(1, 8, "no", "2026-09-10T10:00:00.000Z"),
+        rsvp(2, 8, "yes", "2026-09-10T11:00:00.000Z"),
+      ],
+    });
+    expect(held.ctx.badRequest).toHaveBeenCalledWith("Event is at capacity");
+    expect(ops(held.log, "create")).toEqual([]);
+
+    // A respondedAt tie goes to the higher id, as in the summary.
+    const tie = await answer(yes, {
+      events: [single],
+      rsvps: [
+        rsvp(4, 8, "no", "2026-09-10T10:00:00.000Z"),
+        rsvp(3, 8, "yes", "2026-09-10T10:00:00.000Z"),
+      ],
+    });
+    expect(tie.ctx.badRequest).not.toHaveBeenCalled();
   });
 
   it("has no limit without a positive integer capacity", async () => {
