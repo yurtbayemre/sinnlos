@@ -28,10 +28,11 @@ import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
 /**
  * Framework contract (roadmap S04): the Strapi behaviour this cms is built
  * on, pinned against the INSTALLED packages (@strapi/utils, @strapi/core,
- * @strapi/database, @strapi/plugin-users-permissions 5.55.1). Each block
- * names the code that relies on it. The utils and core traps run the real
- * modules; the database traps run @strapi/database on a throwaway SQLite
- * file (src/test/sqlite-engine.test.helper.ts), like
+ * @strapi/database, @strapi/upload, @strapi/plugin-users-permissions
+ * 5.55.1). Each block names the code that relies on it. The utils, core and
+ * upload traps run the real modules; the database traps run
+ * @strapi/database on a throwaway SQLite file
+ * (src/test/sqlite-engine.test.helper.ts), like
  * utils/poll-audience-backfill-sqlite.test.ts.
  *
  * RUN THIS BEFORE EVERY @strapi/* BUMP. The version pin below fails first on
@@ -53,7 +54,13 @@ const coreDir = () => strapiPackageDir("@strapi/core");
 const upDir = () => cmsPackageDir("@strapi/plugin-users-permissions");
 
 describe("installed versions (bump only after this whole file passes)", () => {
-  it.each(["@strapi/core", "@strapi/utils", "@strapi/database", "@strapi/strapi"])("%s", (name) => {
+  it.each([
+    "@strapi/core",
+    "@strapi/utils",
+    "@strapi/database",
+    "@strapi/strapi",
+    "@strapi/upload",
+  ])("%s", (name) => {
     expect(strapiPackageVersion(name)).toBe(STRAPI_VERSION);
   });
 
@@ -341,7 +348,7 @@ describe("@strapi/core sanitizers registry: add() on an unset path is a silent n
   });
 });
 
-describe("@strapi/core strapi::public registers routes, mounted after every global middleware (uploads-auth)", () => {
+describe("@strapi/core strapi::public and @strapi/upload register routes, mounted after every global middleware (uploads-auth)", () => {
   interface Server {
     app: { callback(): RequestListener };
     use(middleware: unknown): Server;
@@ -454,6 +461,11 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
       expect(await fetchPath(server, "/api/%2e%2e/uploads/secret.pdf")).toMatchObject({
         status: 404,
       });
+      // koa-send finds public/uploads under any casing on a case-insensitive
+      // file system (Windows, macOS); the gate ignores case too.
+      expect(await fetchPath(server, "/api/../UPLOADS/secret.pdf")).toMatchObject({
+        status: 404,
+      });
       // The web proxy's internal token still gets through; unrelated public files too.
       expect(
         await fetchPath(server, "/api/../uploads/secret.pdf", {
@@ -464,6 +476,45 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
         body: "%PDF-SECRET",
       });
       expect(await fetchPath(server, "/robots.txt")).toEqual({ status: 200, body: "ROBOTS" });
+    },
+  );
+
+  /** @strapi/upload's register() hands the direct `/uploads/(.*)` to this (CJS default export). */
+  const registerUploadRoute = (strapi: unknown) =>
+    requirePackageFile<(deps: { strapi: unknown }) => void>(
+      strapiPackageDir("@strapi/upload"),
+      "dist/server/middlewares/upload.js",
+    )({ strapi });
+
+  it("@strapi/upload serves the direct `/uploads/(.*)` through a route, not app.use", async () => {
+    const { server, strapi } = strapiServer();
+    registerUploadRoute(strapi);
+    // A route on the router, not an app.use middleware (which would run
+    // wherever the plugin's register phase put it, before the global ones).
+    expect(server.listRoutes().map((layer) => layer.path)).toContain("/uploads/(.*)");
+    server.mount();
+    expect(await fetchPath(server, "/uploads/secret.pdf")).toEqual({
+      status: 200,
+      body: "%PDF-SECRET",
+    });
+  });
+
+  it.each(["before", "after"] as const)(
+    "uploads-auth protects the upload plugin's direct path in any position (%s @strapi/upload)",
+    async (position) => {
+      vi.stubEnv("INTERNAL_UPLOAD_TOKEN", "t0k3n");
+      const { server, strapi } = strapiServer();
+      const gate = uploadsAuth(undefined, { strapi }) as Middleware;
+      if (position === "before") server.use(gate);
+      registerUploadRoute(strapi);
+      if (position === "after") server.use(gate);
+      server.mount();
+      for (const path of ["/uploads/secret.pdf", "/UPLOADS/secret.pdf"]) {
+        expect(await fetchPath(server, path), path).toEqual({ status: 404, body: "Not Found" });
+      }
+      expect(
+        await fetchPath(server, "/uploads/secret.pdf", { "x-internal-upload-token": "t0k3n" }),
+      ).toEqual({ status: 200, body: "%PDF-SECRET" });
     },
   );
 

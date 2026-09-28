@@ -39,10 +39,10 @@
  * middleware, and Strapi mounts every route, the upload plugin's
  * `/uploads/(.*)` included, after all global middlewares
  * (@strapi/core 5.55.1 middlewares/public.js and services/server/index.js
- * `mount()`, pinned in src/framework-contract.test.ts). So this gate runs
- * before each of those handlers wherever it is listed. Turning it into a
- * route middleware would lose that: it would then only guard the routes it
- * is attached to.
+ * `mount()`, @strapi/upload 5.55.1 server/middlewares/upload.js; each pinned
+ * in src/framework-contract.test.ts). So this gate runs before each of those
+ * handlers wherever it is listed. Turning it into a route middleware would
+ * lose that: it would then only guard the routes it is attached to.
  */
 import { timingSafeEqual } from "node:crypto";
 import { posix } from "node:path";
