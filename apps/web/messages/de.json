@@ -374,6 +374,8 @@
     "confirmPassword": "Neues Passwort bestätigen",
     "changePassword": "Passwort ändern",
     "profileUpdated": "Profil aktualisiert.",
+    "error_tooLong": "{field} darf höchstens {max} Zeichen lang sein.",
+    "error_invalid": "Einige Angaben konnten nicht gespeichert werden – bitte prüfen Sie Ihre Eingaben.",
     "passwordRateLimited": "Zu viele Versuche, das Passwort zu ändern – bitte warten Sie eine Minute und versuchen Sie es erneut.",
     "digestSection": "E-Mail-Zusammenfassungen",
     "digestHint": "Erhalte morgens eine Zusammenfassung per E-Mail — täglich oder wöchentlich (montags). Ohne Auswahl wird nichts versendet.",
