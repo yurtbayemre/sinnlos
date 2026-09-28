@@ -42,7 +42,9 @@ describe("sendKudos", () => {
     const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
     expect(path).toBe("/api/kudos-entries");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ data: { to: 42, message: "Thanks for the help!", value: "teamwork" } });
+    expect(JSON.parse(init.body)).toEqual({
+      data: { to: 42, message: "Thanks for the help!", value: "teamwork" },
+    });
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 

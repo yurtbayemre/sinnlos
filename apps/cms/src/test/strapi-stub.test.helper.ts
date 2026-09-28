@@ -74,7 +74,10 @@ export type Where = Record<string, unknown>;
 
 type Direction = "asc" | "desc";
 
-export type OrderBy = string | Record<string, Direction> | ReadonlyArray<string | Record<string, Direction>>;
+export type OrderBy =
+  | string
+  | Record<string, Direction>
+  | ReadonlyArray<string | Record<string, Direction>>;
 
 /** Nested populate options, as the query engine takes them. */
 export interface PopulateOptions {
@@ -130,7 +133,9 @@ export interface StubDocuments {
   findMany(params?: DocumentParams): Promise<Row[]>;
   count(params?: DocumentParams): Promise<number>;
   create(params: DocumentParams & { data: Record<string, unknown> }): Promise<Row>;
-  update(params: DocumentParams & { documentId: string; data: Record<string, unknown> }): Promise<Row | null>;
+  update(
+    params: DocumentParams & { documentId: string; data: Record<string, unknown> },
+  ): Promise<Row | null>;
   delete(params: { documentId: string }): Promise<DocumentResult>;
   publish(params: { documentId: string }): Promise<DocumentResult>;
   unpublish(params: { documentId: string }): Promise<DocumentResult>;
@@ -249,12 +254,23 @@ export function loadContentTypeSchemas(): Record<string, ContentTypeSchema> {
     if (!existsSync(typesDir)) continue;
     for (const type of readdirSync(typesDir)) {
       const file = join(typesDir, type, "schema.json");
-      if (existsSync(file)) schemas[`api::${api}.${type}`] = readSchema(file, `api::${api}.${type}`);
+      if (existsSync(file))
+        schemas[`api::${api}.${type}`] = readSchema(file, `api::${api}.${type}`);
     }
   }
-  const userFile = join(SRC_DIR, "extensions", "users-permissions", "content-types", "user", "schema.json");
+  const userFile = join(
+    SRC_DIR,
+    "extensions",
+    "users-permissions",
+    "content-types",
+    "user",
+    "schema.json",
+  );
   if (existsSync(userFile)) {
-    schemas["plugin::users-permissions.user"] = readSchema(userFile, "plugin::users-permissions.user");
+    schemas["plugin::users-permissions.user"] = readSchema(
+      userFile,
+      "plugin::users-permissions.user",
+    );
   }
   return schemas;
 }
@@ -271,7 +287,8 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 /** Array.isArray that also narrows readonly arrays. */
 const isList = (value: unknown): value is readonly unknown[] => Array.isArray(value);
 
-const hasNumericId = (value: unknown): value is Row => isPlainObject(value) && typeof value.id === "number";
+const hasNumericId = (value: unknown): value is Row =>
+  isPlainObject(value) && typeof value.id === "number";
 
 const castArray = (value: unknown): readonly unknown[] => (isList(value) ? value : [value]);
 
@@ -298,7 +315,8 @@ const isOperator = (key: string) => key.startsWith("$");
 function comparable(value: unknown): number | string | boolean | null {
   if (isNull(value)) return null;
   if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" || typeof value === "string" || typeof value === "boolean") return value;
+  if (typeof value === "number" || typeof value === "string" || typeof value === "boolean")
+    return value;
   throw new Error(`strapi-stub: cannot compare ${JSON.stringify(value)}`);
 }
 
@@ -319,7 +337,8 @@ function sqlCompare(left: unknown, right: unknown, op: "$lt" | "$lte" | "$gt" | 
   if (a === null || b === null) return false;
   const x = typeof a === "boolean" ? Number(a) : a;
   const y = typeof b === "boolean" ? Number(b) : b;
-  if (typeof x !== typeof y) throw new Error(`strapi-stub: ${op} between ${typeof x} and ${typeof y}`);
+  if (typeof x !== typeof y)
+    throw new Error(`strapi-stub: ${op} between ${typeof x} and ${typeof y}`);
   if (op === "$lt") return x < y;
   if (op === "$lte") return x <= y;
   if (op === "$gt") return x > y;
@@ -372,7 +391,12 @@ const NULL_ROW = { id: null } as unknown as Row;
 
 export interface Evaluator {
   matchWhere(uid: string | null, row: Row, where: Where | readonly Where[] | undefined): boolean;
-  project(uid: string | null, row: Row, select: string | readonly string[] | undefined, populate: Populate | undefined): Row;
+  project(
+    uid: string | null,
+    row: Row,
+    select: string | readonly string[] | undefined,
+    populate: Populate | undefined,
+  ): Row;
   sortRows(rows: Row[], orderBy: OrderBy | undefined): Row[];
   relationKeys(uid: string): Set<string> | null;
 }
@@ -386,7 +410,10 @@ export type RowLookup = (uid: string, id: number) => Row | undefined;
  * then populates with every column, like a join); otherwise the embedded
  * object is used as it is.
  */
-export function createEvaluator(schemas: Record<string, ContentTypeSchema>, lookup?: RowLookup): Evaluator {
+export function createEvaluator(
+  schemas: Record<string, ContentTypeSchema>,
+  lookup?: RowLookup,
+): Evaluator {
   /** The related rows of `row[key]`, a bare id counting as `{ id }`. */
   const relatedRows = (targetUid: string | null, value: unknown): Row[] => {
     if (isNull(value)) return [];
@@ -409,7 +436,8 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
   const attributeOf = (uid: string | null, key: string): AttributeSchema | undefined =>
     uid ? schemas[uid]?.attributes[key] : undefined;
 
-  const targetOf = (uid: string | null, key: string): string | null => attributeOf(uid, key)?.target ?? null;
+  const targetOf = (uid: string | null, key: string): string | null =>
+    attributeOf(uid, key)?.target ?? null;
 
   const isToMany = (uid: string | null, key: string): boolean => {
     const relation = attributeOf(uid, key)?.relation;
@@ -431,7 +459,8 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
     if (isList(where)) return where.some((sub) => touchesRelation(uid, row, sub));
     if (!isPlainObject(where)) return false;
     return Object.entries(where).some(([key, condition]) => {
-      if (key === "$and" || key === "$or" || key === "$not") return touchesRelation(uid, row, condition);
+      if (key === "$and" || key === "$or" || key === "$not")
+        return touchesRelation(uid, row, condition);
       if (isOperator(key)) return false;
       return isRelationKey(uid, key, row[key]) || isNestedWhere(condition);
     });
@@ -448,31 +477,45 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
   const matchRelation = (targetUid: string | null, value: unknown, condition: unknown): boolean => {
     const found = relatedRows(targetUid, value);
     const related: Row[] = found.length > 0 ? found : [NULL_ROW];
-    if (!isPlainObject(condition)) return related.some((row) => matchOperator(row.id, "$eq", condition));
+    if (!isPlainObject(condition))
+      return related.some((row) => matchOperator(row.id, "$eq", condition));
     const keys = Object.keys(condition);
     const operatorKeys = keys.filter(isOperator);
     if (operatorKeys.length > 0 && operatorKeys.length !== keys.length) {
       throw new Error("strapi-stub: operator and non-operator keys mixed in a relation where");
     }
     const [operator] = operatorKeys;
-    if (operatorKeys.length === 1 && operator !== "$and" && operator !== "$or" && operator !== "$not") {
+    if (
+      operatorKeys.length === 1 &&
+      operator !== "$and" &&
+      operator !== "$or" &&
+      operator !== "$not"
+    ) {
       return related.some((row) => matchOperator(row.id, operator, condition[operator]));
     }
     return related.some((row) => matchWhere(targetUid, row, condition));
   };
 
-  function matchWhere(uid: string | null, row: Row, where: Where | readonly Where[] | undefined): boolean {
+  function matchWhere(
+    uid: string | null,
+    row: Row,
+    where: Where | readonly Where[] | undefined,
+  ): boolean {
     if (where === undefined) return true;
     if (isList(where)) return where.every((sub) => matchWhere(uid, row, sub as Where));
     if (!isPlainObject(where)) throw new Error("strapi-stub: where must be an object or an array");
     return Object.entries(where).every(([key, condition]) => {
-      if (key === "$and") return castArray(condition).every((sub) => matchWhere(uid, row, sub as Where));
-      if (key === "$or") return castArray(condition).some((sub) => matchWhere(uid, row, sub as Where));
+      if (key === "$and")
+        return castArray(condition).every((sub) => matchWhere(uid, row, sub as Where));
+      if (key === "$or")
+        return castArray(condition).some((sub) => matchWhere(uid, row, sub as Where));
       if (key === "$not") {
         // SQL evaluates NOT per joined row (a to-many row with ANY other
         // related row matches, a row with none does not): not modelled.
         if (touchesRelation(uid, row, condition)) {
-          throw new Error("strapi-stub: $not over a relation is not modelled (SQL NOT runs per joined row)");
+          throw new Error(
+            "strapi-stub: $not over a relation is not modelled (SQL NOT runs per joined row)",
+          );
         }
         return !matchWhere(uid, row, condition as Where);
       }
@@ -484,11 +527,17 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
     });
   }
 
-  const populateEntries = (populate: Populate | undefined, row: Row, uid: string | null): Array<[string, PopulateOptions]> => {
+  const populateEntries = (
+    populate: Populate | undefined,
+    row: Row,
+    uid: string | null,
+  ): Array<[string, PopulateOptions]> => {
     if (populate === undefined) return [];
     if (populate === true || populate === "*") {
       const keys = uid ? relationKeys(uid) : null;
-      const all = keys ? [...keys] : Object.keys(row).filter((key) => isRelationKey(uid, key, row[key]));
+      const all = keys
+        ? [...keys]
+        : Object.keys(row).filter((key) => isRelationKey(uid, key, row[key]));
       return all.map((key) => [key, {}]);
     }
     if (isList(populate)) return populate.map((key) => [String(key), {}]);
@@ -513,7 +562,8 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
     populate: Populate | undefined,
   ): Row {
     const out: Row = { id: row.id };
-    const selected = select === undefined ? null : typeof select === "string" ? [select] : [...select];
+    const selected =
+      select === undefined ? null : typeof select === "string" ? [select] : [...select];
     for (const [key, value] of Object.entries(row)) {
       if (isRelationKey(uid, key, value)) continue;
       if (selected && !selected.includes(key)) continue;
@@ -527,7 +577,8 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
       const value = row[key];
       if (isToMany(uid, key) || isList(value)) {
         let related = relatedRows(target, value);
-        if (options.where) related = related.filter((item) => matchWhere(target, item, options.where));
+        if (options.where)
+          related = related.filter((item) => matchWhere(target, item, options.where));
         if (options.orderBy) related = sortRows(related, options.orderBy);
         out[key] = related.map((item) => project(target, item, options.select, options.populate));
       } else {
@@ -544,14 +595,16 @@ export function createEvaluator(schemas: Record<string, ContentTypeSchema>, look
     for (const item of items) {
       if (typeof item === "string") entries.push([item, "asc"]);
       else if (isPlainObject(item)) {
-        for (const [key, direction] of Object.entries(item)) entries.push([key, direction === "desc" ? "desc" : "asc"]);
+        for (const [key, direction] of Object.entries(item))
+          entries.push([key, direction === "desc" ? "desc" : "asc"]);
       }
     }
     return entries;
   };
 
   function sortRows(rows: Row[], orderBy: OrderBy | undefined): Row[] {
-    const entries: Array<[string, Direction]> = orderBy === undefined ? [["id", "asc"]] : orderEntries(orderBy);
+    const entries: Array<[string, Direction]> =
+      orderBy === undefined ? [["id", "asc"]] : orderEntries(orderBy);
     return [...rows].sort((a, b) => {
       for (const [key, direction] of entries) {
         const x = comparable(a[key]);
@@ -596,7 +649,9 @@ const isPublishedRow = (row: Row) => !isNull(row.publishedAt);
 
 export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   const schemas: Record<string, ContentTypeSchema> = { ...CMS_SCHEMAS, ...options.schemas };
-  const evaluator = createEvaluator(schemas, (uid, id) => tables[uid]?.find((row) => row.id === id));
+  const evaluator = createEvaluator(schemas, (uid, id) =>
+    tables[uid]?.find((row) => row.id === id),
+  );
   const tables = copyTables(options.tables);
   const calls: StubCall[] = [];
   const now = options.now ?? (() => FIXED_NOW);
@@ -619,7 +674,8 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     for (const [key, value] of Object.entries(data)) {
       const relation = relations?.has(key) ?? false;
       if (relation && typeof value === "number") out[key] = { id: value };
-      else if (relation && isList(value)) out[key] = value.map((item) => (typeof item === "number" ? { id: item } : item));
+      else if (relation && isList(value))
+        out[key] = value.map((item) => (typeof item === "number" ? { id: item } : item));
       else out[key] = value;
     }
     return out;
@@ -627,7 +683,10 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
 
   const hasDraftAndPublish = (uid: string): boolean => {
     const schema = schemas[uid];
-    if (!schema) throw new Error(`strapi-stub: unknown content type ${uid} (pass its schema in options.schemas)`);
+    if (!schema)
+      throw new Error(
+        `strapi-stub: unknown content type ${uid} (pass its schema in options.schemas)`,
+      );
     return schema.options?.draftAndPublish === true;
   };
 
@@ -705,10 +764,12 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
 
   // Documents ---------------------------------------------------------------
 
-  const documentRows = (uid: string, documentId: string) => rowsOf(uid).filter((row) => row.documentId === documentId);
+  const documentRows = (uid: string, documentId: string) =>
+    rowsOf(uid).filter((row) => row.documentId === documentId);
   const draftOf = (uid: string, documentId: string) =>
     documentRows(uid, documentId).find((row) => !isPublishedRow(row)) ?? null;
-  const publishedOf = (uid: string, documentId: string) => documentRows(uid, documentId).find(isPublishedRow) ?? null;
+  const publishedOf = (uid: string, documentId: string) =>
+    documentRows(uid, documentId).find(isPublishedRow) ?? null;
 
   const cloneAs = (uid: string, source: Row, publishedAt: string | null): Row => {
     const { id: _id, ...fields } = JSON.parse(JSON.stringify(source)) as Row;
@@ -718,7 +779,9 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   /** Document Service default: the draft. Types without draft & publish ignore status. */
   const statusWhere = (uid: string, status: DocumentStatus | undefined): Where => {
     if (!hasDraftAndPublish(uid)) return {};
-    return status === "published" ? { publishedAt: { $notNull: true } } : { publishedAt: { $null: true } };
+    return status === "published"
+      ? { publishedAt: { $notNull: true } }
+      : { publishedAt: { $null: true } };
   };
 
   const documentWhere = (uid: string, params: DocumentParams): Where => ({
@@ -743,7 +806,8 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
       return { documentId, draft: null, published: insert(uid, { ...base, publishedAt: stamp }) };
     }
     const draft = insert(uid, { ...base, publishedAt: null });
-    const published = seedOptions.status === "published" ? insert(uid, { ...base, publishedAt: stamp }) : null;
+    const published =
+      seedOptions.status === "published" ? insert(uid, { ...base, publishedAt: stamp }) : null;
     return { documentId, draft, published };
   };
 
@@ -768,8 +832,8 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async findMany(params = {}) {
       record("documents", uid, "findMany", params);
-      return selectRows(uid, { where: documentWhere(uid, params), orderBy: params.sort }).map((row) =>
-        project(uid, row, documentProjection(params)),
+      return selectRows(uid, { where: documentWhere(uid, params), orderBy: params.sort }).map(
+        (row) => project(uid, row, documentProjection(params)),
       );
     },
     async count(params = {}) {
@@ -779,7 +843,8 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     async create(params) {
       record("documents", uid, "create", params);
       const seeded = seedDocument(uid, params.data, { status: params.status });
-      const row = params.status === "published" || !hasDraftAndPublish(uid) ? seeded.published : seeded.draft;
+      const row =
+        params.status === "published" || !hasDraftAndPublish(uid) ? seeded.published : seeded.draft;
       if (!row) throw new Error("strapi-stub: create produced no row");
       return project(uid, row, documentProjection(params));
     },
@@ -814,7 +879,10 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async delete(params) {
       record("documents", uid, "delete", params);
-      return { documentId: params.documentId, entries: remove(uid, (row) => row.documentId === params.documentId) };
+      return {
+        documentId: params.documentId,
+        entries: remove(uid, (row) => row.documentId === params.documentId),
+      };
     },
     async publish(params) {
       record("documents", uid, "publish", params);
@@ -822,7 +890,10 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
     },
     async unpublish(params) {
       record("documents", uid, "unpublish", params);
-      const entries = remove(uid, (row) => row.documentId === params.documentId && isPublishedRow(row));
+      const entries = remove(
+        uid,
+        (row) => row.documentId === params.documentId && isPublishedRow(row),
+      );
       return { documentId: params.documentId, entries };
     },
     async discardDraft(params) {
@@ -840,7 +911,9 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   let commitQueue: Array<() => unknown> = [];
   let rollbackQueue: Array<() => unknown> = [];
 
-  const transaction = async <T>(callback: (scope: TransactionScope) => Promise<T> | T): Promise<T> => {
+  const transaction = async <T>(
+    callback: (scope: TransactionScope) => Promise<T> | T,
+  ): Promise<T> => {
     if (depth === 0) {
       commitQueue = [];
       rollbackQueue = [];
@@ -872,7 +945,8 @@ export function createStrapiStub(options: StrapiStubOptions = {}): StrapiStub {
   const plugin = (name: string) => ({
     service(serviceName: string): object {
       const found = options.plugins?.[name]?.[serviceName];
-      if (!found) throw new Error(`strapi-stub: plugin service ${name}.${serviceName} is not stubbed`);
+      if (!found)
+        throw new Error(`strapi-stub: plugin service ${name}.${serviceName} is not stubbed`);
       return found;
     },
   });
@@ -939,7 +1013,10 @@ export interface PolicyContextOptions {
  * is Koa's ctx.request (shared with the controller), `query` a decoy.
  * `user` undefined = no `state` at all, null = `state` without a user.
  */
-export function policyContext(user: StubUser | null | undefined, options: PolicyContextOptions = {}): StubPolicyContext {
+export function policyContext(
+  user: StubUser | null | undefined,
+  options: PolicyContextOptions = {},
+): StubPolicyContext {
   const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
   return {
     ...(user === undefined ? {} : { state: user === null ? {} : { user } }),

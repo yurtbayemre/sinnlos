@@ -33,7 +33,10 @@ export interface EngineKnex {
   raw(sql: string, bindings?: readonly unknown[]): Promise<unknown>;
   on(event: "query", listener: (query: KnexQueryEvent) => void): unknown;
   off(event: "query", listener: (query: KnexQueryEvent) => void): unknown;
-  schema: { hasTable(table: string): Promise<boolean>; hasColumn(table: string, column: string): Promise<boolean> };
+  schema: {
+    hasTable(table: string): Promise<boolean>;
+    hasColumn(table: string, column: string): Promise<boolean>;
+  };
 }
 
 export interface EngineQuery {
@@ -50,7 +53,10 @@ export interface SchemaDiffResult {
     tables: {
       updated: Array<{
         name: string;
-        columns: { updated: Array<{ name: string; object: Record<string, unknown> }>; added: unknown[] };
+        columns: {
+          updated: Array<{ name: string; object: Record<string, unknown> }>;
+          added: unknown[];
+        };
       }>;
     };
   };
@@ -70,7 +76,11 @@ export interface QueryEngine {
     syncSchema(): Promise<"CHANGED" | "UNCHANGED">;
     schemaStorage: { read(): Promise<{ schema: unknown } | null> };
     schemaDiff: {
-      diff(schemas: { previousSchema: unknown; databaseSchema: unknown; userSchema: unknown }): Promise<SchemaDiffResult>;
+      diff(schemas: {
+        previousSchema: unknown;
+        databaseSchema: unknown;
+        userSchema: unknown;
+      }): Promise<SchemaDiffResult>;
     };
   };
   dialect: { schemaInspector: { getSchema(): Promise<unknown> } };
@@ -164,7 +174,9 @@ export async function openSqliteEngine(
     await closeEngines();
     const db = engineOn(file, migrationsDir);
     engines.push(db);
-    await db.init({ models: typeof source === "function" ? source(db.metadata.identifiers) : source });
+    await db.init({
+      models: typeof source === "function" ? source(db.metadata.identifiers) : source,
+    });
     vi.stubGlobal("strapi", { db });
     return db;
   };

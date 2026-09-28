@@ -29,7 +29,9 @@ vi.mock("@/lib/config", () => ({ DEMO_MODE: false, STRAPI_URL: "http://cms.test"
 vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 vi.stubGlobal("fetch", fetchMock);
 
-const { createClassified, deleteClassified, renewClassified, updateClassified } = await import("./classified-actions");
+const { createClassified, deleteClassified, renewClassified, updateClassified } = await import(
+  "./classified-actions"
+);
 
 const NOW = new Date("2026-09-28T10:00:00.000Z");
 
@@ -44,9 +46,11 @@ function signInRedirect(): unknown {
 
 const digestOf = (error: unknown) => String((error as { digest?: unknown }).digest);
 
-const cmsError = (status: number) => new StrapiError(status, "Error", JSON.stringify({ error: { status } }));
+const cmsError = (status: number) =>
+  new StrapiError(status, "Error", JSON.stringify({ error: { status } }));
 
-const image = (name: string, type = "image/jpeg", size = 16) => new File([new Uint8Array(size)], name, { type });
+const image = (name: string, type = "image/jpeg", size = 16) =>
+  new File([new Uint8Array(size)], name, { type });
 
 interface FormInput {
   title?: string;
@@ -78,11 +82,18 @@ function form(input: FormInput = {}): FormData {
 const strapiCalls = () =>
   strapiMock.mock.calls.map((call) => {
     const [path, init] = call as [string, { method?: string; body?: string } | undefined];
-    return [path, init?.method ?? "GET", init?.body ? (JSON.parse(init.body) as unknown) : undefined] as const;
+    return [
+      path,
+      init?.method ?? "GET",
+      init?.body ? (JSON.parse(init.body) as unknown) : undefined,
+    ] as const;
   });
 
 const uploadAnswers = (ids: number[]) =>
-  new Response(JSON.stringify(ids.map((id) => ({ id }))), { status: 200, headers: { "content-type": "application/json" } });
+  new Response(JSON.stringify(ids.map((id) => ({ id }))), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -111,25 +122,40 @@ describe("createClassified: form parsing (parseAdForm)", () => {
     ["a negative price", { price: "-1" }, "invalidPrice"],
     ["a non-numeric price", { price: "abc" }, "invalidPrice"],
     ["an infinite price", { price: "Infinity" }, "invalidPrice"],
-    ["five images", { images: [image("1.jpg"), image("2.jpg"), image("3.jpg"), image("4.jpg"), image("5.jpg")] }, "imageCount"],
-    ["new plus kept images over four", { images: [image("1.jpg"), image("2.jpg")], keepImages: ["7", "8", "9"] }, "imageCount"],
+    [
+      "five images",
+      { images: [image("1.jpg"), image("2.jpg"), image("3.jpg"), image("4.jpg"), image("5.jpg")] },
+      "imageCount",
+    ],
+    [
+      "new plus kept images over four",
+      { images: [image("1.jpg"), image("2.jpg")], keepImages: ["7", "8", "9"] },
+      "imageCount",
+    ],
     ["a gif", { images: [image("a.gif", "image/gif")] }, "imageType"],
-    ["an image over 5 MB", { images: [image("big.jpg", "image/jpeg", MAX_AD_IMAGE_BYTES + 1)] }, "imageSize"],
-  ])("answers %s with its code, replays the values and sends nothing", async (_label, input, code) => {
-    const result = await createClassified({}, form(input));
-    expect(result.error).toBe(code);
-    expect(result.values).toEqual({
-      title: input.title ?? "Bike",
-      description: input.description ?? "Barely used",
-      category: input.category ?? "sale",
-      price: input.price ?? "",
-      priceNegotiable: false,
-      location: "",
-      days: "",
-    });
-    expect(strapiMock).not.toHaveBeenCalled();
-    expect(fetchMock).not.toHaveBeenCalled();
-  });
+    [
+      "an image over 5 MB",
+      { images: [image("big.jpg", "image/jpeg", MAX_AD_IMAGE_BYTES + 1)] },
+      "imageSize",
+    ],
+  ])(
+    "answers %s with its code, replays the values and sends nothing",
+    async (_label, input, code) => {
+      const result = await createClassified({}, form(input));
+      expect(result.error).toBe(code);
+      expect(result.values).toEqual({
+        title: input.title ?? "Bike",
+        description: input.description ?? "Barely used",
+        category: input.category ?? "sale",
+        price: input.price ?? "",
+        priceNegotiable: false,
+        location: "",
+        days: "",
+      });
+      expect(strapiMock).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each<[string, string, number | null]>([
     ["empty", "", null],
@@ -173,7 +199,14 @@ describe("createClassified: the two-step write", () => {
     refreshMock.mockImplementation(() => order.push("refresh"));
     const error = await createClassified(
       {},
-      form({ title: " Bike ", description: " Red ", price: "20", priceNegotiable: true, location: " HQ ", days: "7" }),
+      form({
+        title: " Bike ",
+        description: " Red ",
+        price: "20",
+        priceNegotiable: true,
+        location: " HQ ",
+        days: "7",
+      }),
     ).catch((caught: unknown) => caught);
     order.push("redirect");
     expect(digestOf(error)).toContain("NEXT_REDIRECT");
@@ -201,9 +234,9 @@ describe("createClassified: the two-step write", () => {
   });
 
   it("uploads the images first, with the caller's JWT, and posts their ids", async () => {
-    await expect(createClassified({}, form({ images: [image("a.jpg"), image("b.png", "image/png")] }))).rejects.toThrow(
-      "NEXT_REDIRECT",
-    );
+    await expect(
+      createClassified({}, form({ images: [image("a.jpg"), image("b.png", "image/png")] })),
+    ).rejects.toThrow("NEXT_REDIRECT");
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://cms.test/api/upload");
@@ -227,27 +260,35 @@ describe("createClassified: the two-step write", () => {
 
   it("does not sweep when the upload itself failed (nothing was stored)", async () => {
     fetchMock.mockResolvedValueOnce(new Response("too large", { status: 413 }));
-    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({ error: "failed" });
+    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({
+      error: "failed",
+    });
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it("fails without a Strapi JWT before uploading", async () => {
     tokenMock.mockResolvedValueOnce(null);
-    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({ error: "failed" });
+    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({
+      error: "failed",
+    });
     expect(fetchMock).not.toHaveBeenCalled();
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it("swallows a failing sweep: the answer stays 'failed'", async () => {
     strapiMock.mockRejectedValueOnce(cmsError(400)).mockRejectedValueOnce(cmsError(500));
-    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({ error: "failed" });
+    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).resolves.toMatchObject({
+      error: "failed",
+    });
     expect(strapiMock).toHaveBeenCalledTimes(2);
   });
 
   it("lets a 401 redirect from the ad write propagate, before any sweep", async () => {
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValueOnce(redirectError);
-    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).rejects.toBe(redirectError);
+    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).rejects.toBe(
+      redirectError,
+    );
     expect(strapiCalls().map(([path]) => path)).toEqual(["/api/classifieds"]);
     expect(refreshMock).not.toHaveBeenCalled();
   });
@@ -255,7 +296,9 @@ describe("createClassified: the two-step write", () => {
   it("lets a 401 redirect from the sweep propagate", async () => {
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValueOnce(cmsError(400)).mockRejectedValueOnce(redirectError);
-    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).rejects.toBe(redirectError);
+    await expect(createClassified({}, form({ images: [image("a.jpg")] }))).rejects.toBe(
+      redirectError,
+    );
   });
 });
 
@@ -263,7 +306,9 @@ describe("updateClassified", () => {
   beforeEach(() => {
     // The ad currently holds images 3, 4 and 5.
     strapiMock.mockImplementation(async (path: string) =>
-      path.startsWith("/api/classifieds?") ? { data: [{ images: [{ id: 3 }, { id: 4 }, { id: 5 }] }] } : { data: {} },
+      path.startsWith("/api/classifieds?")
+        ? { data: [{ images: [{ id: 3 }, { id: 4 }, { id: 5 }] }] }
+        : { data: {} },
     );
   });
 
@@ -276,7 +321,11 @@ describe("updateClassified", () => {
     expect(digestOf(error)).toContain("/marketplace/9");
     expect(strapiCalls()).toEqual([
       ["/api/classifieds?filters[id][$eq]=9&populate[images][fields][0]=id", "GET", undefined],
-      ["/api/classifieds/9", "PUT", { data: expect.objectContaining({ images: [3, 11, 12], expiresAt: dateInDays(30) }) }],
+      [
+        "/api/classifieds/9",
+        "PUT",
+        { data: expect.objectContaining({ images: [3, 11, 12], expiresAt: dateInDays(30) }) },
+      ],
       ["/api/classifieds/cleanup-uploads", "POST", { imageIds: [4, 5] }],
     ]);
     expect(refreshMock).toHaveBeenCalledTimes(1);
@@ -284,27 +333,36 @@ describe("updateClassified", () => {
 
   it("leaves the expiry alone without a picked lifetime, and sweeps nothing when nothing was deselected", async () => {
     fetchMock.mockResolvedValue(uploadAnswers([]));
-    await expect(updateClassified(9, {}, form({ keepImages: ["3", "4", "5"] }))).rejects.toThrow("NEXT_REDIRECT");
+    await expect(updateClassified(9, {}, form({ keepImages: ["3", "4", "5"] }))).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
     const calls = strapiCalls();
     expect(calls.map(([path]) => path)).toEqual([
       "/api/classifieds?filters[id][$eq]=9&populate[images][fields][0]=id",
       "/api/classifieds/9",
     ]);
-    expect(calls[1][2]).toEqual({ data: expect.not.objectContaining({ expiresAt: expect.anything() }) });
+    expect(calls[1][2]).toEqual({
+      data: expect.not.objectContaining({ expiresAt: expect.anything() }),
+    });
   });
 
   it("stops at a form error before reading anything", async () => {
-    await expect(updateClassified(9, {}, form({ title: "" }))).resolves.toMatchObject({ error: "missingFields" });
+    await expect(updateClassified(9, {}, form({ title: "" }))).resolves.toMatchObject({
+      error: "missingFields",
+    });
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it("sweeps only the NEW uploads when the PUT fails, never the deselected ones", async () => {
     strapiMock.mockImplementation(async (path: string, init?: { method?: string }) => {
-      if (path.startsWith("/api/classifieds?")) return { data: [{ images: [{ id: 3 }, { id: 4 }] }] };
+      if (path.startsWith("/api/classifieds?"))
+        return { data: [{ images: [{ id: 3 }, { id: 4 }] }] };
       if (init?.method === "PUT") throw cmsError(403);
       return { data: {} };
     });
-    await expect(updateClassified(9, {}, form({ images: [image("n.jpg")], keepImages: ["3"] }))).resolves.toMatchObject({
+    await expect(
+      updateClassified(9, {}, form({ images: [image("n.jpg")], keepImages: ["3"] })),
+    ).resolves.toMatchObject({
       error: "failed",
     });
     expect(strapiCalls().slice(1)).toEqual([
@@ -319,7 +377,9 @@ describe("updateClassified", () => {
       if (path.startsWith("/api/classifieds?")) throw cmsError(500);
       return { data: {} };
     });
-    await expect(updateClassified(9, {}, form({ keepImages: [] }))).rejects.toThrow("NEXT_REDIRECT");
+    await expect(updateClassified(9, {}, form({ keepImages: [] }))).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
     expect(strapiCalls().map(([path]) => path)).not.toContain("/api/classifieds/cleanup-uploads");
   });
 
@@ -334,9 +394,13 @@ describe("updateClassified", () => {
     const redirectError = signInRedirect();
     strapiMock.mockImplementation(async (path: string, init?: { method?: string }) => {
       if (init?.method === "PUT") throw redirectError;
-      return path.startsWith("/api/classifieds?") ? { data: [{ images: [{ id: 3 }] }] } : { data: {} };
+      return path.startsWith("/api/classifieds?")
+        ? { data: [{ images: [{ id: 3 }] }] }
+        : { data: {} };
     });
-    await expect(updateClassified(9, {}, form({ images: [image("n.jpg")] }))).rejects.toBe(redirectError);
+    await expect(updateClassified(9, {}, form({ images: [image("n.jpg")] }))).rejects.toBe(
+      redirectError,
+    );
     expect(strapiCalls().map(([path]) => path)).not.toContain("/api/classifieds/cleanup-uploads");
     expect(refreshMock).not.toHaveBeenCalled();
   });

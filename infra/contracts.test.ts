@@ -9,7 +9,10 @@ import {
   type AudienceScope,
 } from "../apps/web/src/lib/audience";
 import { AD_CATEGORIES, AD_CATEGORY_KEYS } from "../apps/web/src/lib/classified-shared";
-import { anchorOf, type CommentTargetType as WebCommentTargetType } from "../apps/web/src/lib/comment-target";
+import {
+  anchorOf,
+  type CommentTargetType as WebCommentTargetType,
+} from "../apps/web/src/lib/comment-target";
 import { NO_GUEST_ACCESS, normalizeGuestAccess } from "../apps/web/src/lib/poll-guest-access";
 import { ALL_EMOJIS } from "../apps/web/src/lib/reaction-summary";
 import * as webRoles from "../apps/web/src/lib/roles";
@@ -95,16 +98,17 @@ interface GuestFlags {
   guestsCanVote?: boolean | null;
 }
 
-const { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS, canGuestsVoteOnPoll, isPollVisibleToGuests } = await cms<{
-  POLL_AUDIENCE_ALL: string;
-  POLL_AUDIENCE_DEPARTMENTS: string;
-  canGuestsVoteOnPoll(poll: GuestFlags): boolean;
-  isPollVisibleToGuests(poll: GuestFlags): boolean;
-}>("utils/poll-audience.ts");
+const { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS, canGuestsVoteOnPoll, isPollVisibleToGuests } =
+  await cms<{
+    POLL_AUDIENCE_ALL: string;
+    POLL_AUDIENCE_DEPARTMENTS: string;
+    canGuestsVoteOnPoll(poll: GuestFlags): boolean;
+    isPollVisibleToGuests(poll: GuestFlags): boolean;
+  }>("utils/poll-audience.ts");
 
-const { youtubeVideoId: cmsYoutubeVideoId } = await cms<{ youtubeVideoId(rawUrl: unknown): string | null }>(
-  "utils/training-validation.ts",
-);
+const { youtubeVideoId: cmsYoutubeVideoId } = await cms<{
+  youtubeVideoId(rawUrl: unknown): string | null;
+}>("utils/training-validation.ts");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -122,9 +126,11 @@ function prng(seed: number): () => number {
   };
 }
 
-const pick = <T>(random: () => number, list: readonly T[]): T => list[Math.floor(random() * list.length)];
+const pick = <T>(random: () => number, list: readonly T[]): T =>
+  list[Math.floor(random() * list.length)];
 
-const subset = <T>(random: () => number, list: readonly T[]): T[] => list.filter(() => random() < 0.4);
+const subset = <T>(random: () => number, list: readonly T[]): T[] =>
+  list.filter(() => random() < 0.4);
 
 type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 
@@ -136,7 +142,9 @@ type Exactly<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 function unionValues<U extends string>() {
   return <const V extends readonly U[]>(
     values: V,
-    ...mismatch: Exactly<U, V[number]> extends true ? [] : [error: "the list does not match the union"]
+    ...mismatch: Exactly<U, V[number]> extends true
+      ? []
+      : [error: "the list does not match the union"]
   ): readonly string[] => {
     expect(mismatch).toEqual([]);
     return values;
@@ -183,7 +191,9 @@ function cmsSchemas(): Record<string, ContentTypeSchema> {
 /** The users-permissions plugin's own role and permission types (targets of user.role). */
 function pluginSchemas(): Record<string, ContentTypeSchema> {
   const requireFromCms = createRequire(join(ROOT, "apps", "cms", "package.json"));
-  const pluginDir = dirname(requireFromCms.resolve("@strapi/plugin-users-permissions/package.json"));
+  const pluginDir = dirname(
+    requireFromCms.resolve("@strapi/plugin-users-permissions/package.json"),
+  );
   const load = (name: string) =>
     (
       requireFromCms(join(pluginDir, "dist", "server", "content-types", name, "index.js")) as {
@@ -208,7 +218,8 @@ function enumOf(uid: string, attribute: string): string[] {
 function sourceStrings(file: string, pattern: RegExp, literal = /"([^"]*)"/g): string[] {
   const source = readFileSync(join(ROOT, file), "utf8");
   const match = pattern.exec(source);
-  if (!match) throw new Error(`${file}: ${pattern} not found; update infra/contracts.test.ts with the move`);
+  if (!match)
+    throw new Error(`${file}: ${pattern} not found; update infra/contracts.test.ts with the move`);
   return [...match[1].matchAll(literal)].map((found) => found[1]);
 }
 
@@ -219,7 +230,11 @@ function sourceStrings(file: string, pattern: RegExp, literal = /"([^"]*)"/g): s
 describe("announcement audience: cms announcement-audience.ts = web audience.ts", () => {
   const MEMBER_ROLE = 5;
   const GUEST_ROLE = 6;
-  const scope = (departmentId: number | null, teamIds: number[], roleId: number | null): AudienceScope => ({
+  const scope = (
+    departmentId: number | null,
+    teamIds: number[],
+    roleId: number | null,
+  ): AudienceScope => ({
     departmentId,
     teamIds,
     roleId,
@@ -228,22 +243,62 @@ describe("announcement audience: cms announcement-audience.ts = web audience.ts"
   const TABLE: Array<[string, AnnouncementAudience, AudienceScope | null, boolean]> = [
     ["untargeted, anonymous", {}, null, true],
     ["untargeted, any caller", { audience: "all" }, scope(11, [], GUEST_ROLE), true],
-    ["audience 'departments' without a department link stays company-wide", { audience: "departments" }, scope(11, [], 1), true],
+    [
+      "audience 'departments' without a department link stays company-wide",
+      { audience: "departments" },
+      scope(11, [], 1),
+      true,
+    ],
     ["department, anonymous", { department: { id: 10 } }, null, false],
     ["department, member of it", { department: { id: 10 } }, scope(10, [], MEMBER_ROLE), true],
-    ["department, member of another", { department: { id: 10 } }, scope(11, [], MEMBER_ROLE), false],
-    ["department, caller without one", { department: { id: 10 } }, scope(null, [], MEMBER_ROLE), false],
-    ["a department restricts even with audience 'all'", { audience: "all", department: { id: 10 } }, scope(11, [], 1), false],
+    [
+      "department, member of another",
+      { department: { id: 10 } },
+      scope(11, [], MEMBER_ROLE),
+      false,
+    ],
+    [
+      "department, caller without one",
+      { department: { id: 10 } },
+      scope(null, [], MEMBER_ROLE),
+      false,
+    ],
+    [
+      "a department restricts even with audience 'all'",
+      { audience: "all", department: { id: 10 } },
+      scope(11, [], 1),
+      false,
+    ],
     ["team, member or lead", { team: { id: 30 } }, scope(null, [30], MEMBER_ROLE), true],
     ["team, outsider", { team: { id: 30 } }, scope(10, [31], MEMBER_ROLE), false],
     ["team, anonymous", { team: { id: 30 } }, null, false],
     ["roles, holder", { audienceRoles: [{ id: MEMBER_ROLE }] }, scope(null, [], MEMBER_ROLE), true],
-    ["roles, other role", { audienceRoles: [{ id: MEMBER_ROLE }] }, scope(10, [30], GUEST_ROLE), false],
-    ["roles, caller without a role", { audienceRoles: [{ id: MEMBER_ROLE }] }, scope(10, [30], null), false],
+    [
+      "roles, other role",
+      { audienceRoles: [{ id: MEMBER_ROLE }] },
+      scope(10, [30], GUEST_ROLE),
+      false,
+    ],
+    [
+      "roles, caller without a role",
+      { audienceRoles: [{ id: MEMBER_ROLE }] },
+      scope(10, [30], null),
+      false,
+    ],
     ["roles, anonymous", { audienceRoles: [{ id: MEMBER_ROLE }] }, null, false],
     ["an empty role list does not restrict", { audienceRoles: [] }, scope(null, [], null), true],
-    ["department AND team: team missing", { department: { id: 10 }, team: { id: 30 } }, scope(10, [], 5), false],
-    ["department AND team: both", { department: { id: 10 }, team: { id: 30 } }, scope(10, [30], 5), true],
+    [
+      "department AND team: team missing",
+      { department: { id: 10 }, team: { id: 30 } },
+      scope(10, [], 5),
+      false,
+    ],
+    [
+      "department AND team: both",
+      { department: { id: 10 }, team: { id: 30 } },
+      scope(10, [30], 5),
+      true,
+    ],
     [
       "all three criteria met",
       { department: { id: 10 }, team: { id: 30 }, audienceRoles: [{ id: 5 }, { id: 6 }] },
@@ -256,7 +311,12 @@ describe("announcement audience: cms announcement-audience.ts = web audience.ts"
       scope(10, [30], 6),
       false,
     ],
-    ["null relations count as unset", { department: null, team: null, audienceRoles: null }, null, true],
+    [
+      "null relations count as unset",
+      { department: null, team: null, audienceRoles: null },
+      null,
+      true,
+    ],
   ];
 
   it.each(TABLE)("%s", (_label, announcement, callerScope, expected) => {
@@ -284,7 +344,10 @@ describe("announcement audience: cms announcement-audience.ts = web audience.ts"
               teamIds: subset(random, ids),
             };
       const cms = isAnnouncementVisible(announcement, callerScope);
-      expect(isAnnouncementVisibleTo(announcement, callerScope), JSON.stringify({ announcement, callerScope })).toBe(cms);
+      expect(
+        isAnnouncementVisibleTo(announcement, callerScope),
+        JSON.stringify({ announcement, callerScope }),
+      ).toBe(cms);
       outcomes.add(cms);
     }
     expect(outcomes).toEqual(new Set([true, false]));
@@ -347,7 +410,16 @@ describe("youtubeVideoId: cms training-validation.ts = web training-shared.ts", 
   it("agrees on 3000 seeded random URLs", () => {
     const random = prng(0x7a1e);
     const schemes = ["https://", "http://", "HTTPS://", "", "//", "javascript:"];
-    const hosts = ["www.youtube.com", "youtube.com", "m.youtube.com", "www.youtube-nocookie.com", "youtu.be", "evil.example", "www.youtube.com.evil.example", "music.youtube.com"];
+    const hosts = [
+      "www.youtube.com",
+      "youtube.com",
+      "m.youtube.com",
+      "www.youtube-nocookie.com",
+      "youtu.be",
+      "evil.example",
+      "www.youtube.com.evil.example",
+      "music.youtube.com",
+    ];
     const alphabet = "abcXYZ019_-<>\"'% /?&=#";
     const randomId = () => {
       const length = pick(random, [0, 10, 11, 11, 11, 12]);
@@ -409,7 +481,8 @@ describe("comment/reaction anchors: cms targetAnchor = web anchorOf", () => {
     }
     for (const type of web) expect(isCommentTargetType(type), type).toBe(true);
     // Plain non-members only; prototype keys are pinned in comment-target.test.ts (FX27).
-    for (const type of ["document", "Announcement", "wiki_page", ""]) expect(isCommentTargetType(type), type).toBe(false);
+    for (const type of ["document", "Announcement", "wiki_page", ""])
+      expect(isCommentTargetType(type), type).toBe(false);
   });
 });
 
@@ -419,40 +492,138 @@ describe("comment/reaction anchors: cms targetAnchor = web anchorOf", () => {
 
 describe("schema.json enums = web unions and constants", () => {
   const CASES: Array<[string, readonly string[], string, string]> = [
-    ["types.ts WikiSpace.visibility", unionValues<NonNullable<WikiSpace["visibility"]>>()(["public", "role", "department", "team"]), "api::wiki-space.wiki-space", "visibility"],
-    ["types.ts Acknowledgement.targetType", unionValues<Acknowledgement["targetType"]>()(["announcement", "document"]), "api::acknowledgement.acknowledgement", "targetType"],
-    ["types.ts Comment.targetType", unionValues<Comment["targetType"]>()(["announcement", "wiki-page"]), "api::comment.comment", "targetType"],
-    ["types.ts Reaction.targetType", unionValues<Reaction["targetType"]>()(["announcement", "wiki-page"]), "api::reaction.reaction", "targetType"],
-    ["types.ts EmojiType", unionValues<EmojiType>()(["thumbsup", "heart", "celebrate", "lightbulb", "laugh"]), "api::reaction.reaction", "emoji"],
-    ["types.ts RsvpStatus", unionValues<RsvpStatus>()(["yes", "no", "maybe"]), "api::event-rsvp.event-rsvp", "status"],
-    ["types.ts Notification.type", unionValues<Notification["type"]>()(["announcement", "comment", "event", "kudos"]), "api::notification.notification", "type"],
-    ["types.ts Poll.audience", unionValues<NonNullable<Poll["audience"]>>()(["all", "departments"]), "api::poll.poll", "audience"],
-    ["types.ts Document.category", unionValues<NonNullable<Document["category"]>>()(["policy", "form", "template", "guide", "other"]), "api::document.document", "category"],
-    ["types.ts ClassifiedCategory", unionValues<ClassifiedCategory>()(["sale", "giveaway", "wanted", "service-offer", "service-wanted"]), "api::classified.classified", "category"],
-    ["types.ts KudosValue", unionValues<KudosValue>()(["teamwork", "innovation", "leadership", "customer-focus", "excellence"]), "api::kudos.kudos", "value"],
-    ["types.ts Course.completionMode", unionValues<NonNullable<Course["completionMode"]>>()(["confirm", "quizGate"]), "api::course.course", "completionMode"],
+    [
+      "types.ts WikiSpace.visibility",
+      unionValues<NonNullable<WikiSpace["visibility"]>>()(["public", "role", "department", "team"]),
+      "api::wiki-space.wiki-space",
+      "visibility",
+    ],
+    [
+      "types.ts Acknowledgement.targetType",
+      unionValues<Acknowledgement["targetType"]>()(["announcement", "document"]),
+      "api::acknowledgement.acknowledgement",
+      "targetType",
+    ],
+    [
+      "types.ts Comment.targetType",
+      unionValues<Comment["targetType"]>()(["announcement", "wiki-page"]),
+      "api::comment.comment",
+      "targetType",
+    ],
+    [
+      "types.ts Reaction.targetType",
+      unionValues<Reaction["targetType"]>()(["announcement", "wiki-page"]),
+      "api::reaction.reaction",
+      "targetType",
+    ],
+    [
+      "types.ts EmojiType",
+      unionValues<EmojiType>()(["thumbsup", "heart", "celebrate", "lightbulb", "laugh"]),
+      "api::reaction.reaction",
+      "emoji",
+    ],
+    [
+      "types.ts RsvpStatus",
+      unionValues<RsvpStatus>()(["yes", "no", "maybe"]),
+      "api::event-rsvp.event-rsvp",
+      "status",
+    ],
+    [
+      "types.ts Notification.type",
+      unionValues<Notification["type"]>()(["announcement", "comment", "event", "kudos"]),
+      "api::notification.notification",
+      "type",
+    ],
+    [
+      "types.ts Poll.audience",
+      unionValues<NonNullable<Poll["audience"]>>()(["all", "departments"]),
+      "api::poll.poll",
+      "audience",
+    ],
+    [
+      "types.ts Document.category",
+      unionValues<NonNullable<Document["category"]>>()([
+        "policy",
+        "form",
+        "template",
+        "guide",
+        "other",
+      ]),
+      "api::document.document",
+      "category",
+    ],
+    [
+      "types.ts ClassifiedCategory",
+      unionValues<ClassifiedCategory>()([
+        "sale",
+        "giveaway",
+        "wanted",
+        "service-offer",
+        "service-wanted",
+      ]),
+      "api::classified.classified",
+      "category",
+    ],
+    [
+      "types.ts KudosValue",
+      unionValues<KudosValue>()([
+        "teamwork",
+        "innovation",
+        "leadership",
+        "customer-focus",
+        "excellence",
+      ]),
+      "api::kudos.kudos",
+      "value",
+    ],
+    [
+      "types.ts Course.completionMode",
+      unionValues<NonNullable<Course["completionMode"]>>()(["confirm", "quizGate"]),
+      "api::course.course",
+      "completionMode",
+    ],
     ["classified-shared AD_CATEGORIES", AD_CATEGORIES, "api::classified.classified", "category"],
-    ["classified-shared AD_CATEGORY_KEYS", Object.keys(AD_CATEGORY_KEYS), "api::classified.classified", "category"],
+    [
+      "classified-shared AD_CATEGORY_KEYS",
+      Object.keys(AD_CATEGORY_KEYS),
+      "api::classified.classified",
+      "category",
+    ],
     ["reaction-summary ALL_EMOJIS", ALL_EMOJIS, "api::reaction.reaction", "emoji"],
     [
       "give-kudos.tsx VALUES",
-      sourceStrings("apps/web/src/components/kudos/give-kudos.tsx", /const VALUES:[\s\S]*?= \[([\s\S]*?)\];/, /value: "([^"]*)"/g),
+      sourceStrings(
+        "apps/web/src/components/kudos/give-kudos.tsx",
+        /const VALUES:[\s\S]*?= \[([\s\S]*?)\];/,
+        /value: "([^"]*)"/g,
+      ),
       "api::kudos.kudos",
       "value",
     ],
     [
       "event-actions.ts STATUSES",
-      sourceStrings("apps/web/src/lib/event-actions.ts", /const STATUSES: RsvpStatus\[\] = \[([^\]]*)\]/),
+      sourceStrings(
+        "apps/web/src/lib/event-actions.ts",
+        /const STATUSES: RsvpStatus\[\] = \[([^\]]*)\]/,
+      ),
       "api::event-rsvp.event-rsvp",
       "status",
     ],
     [
       "quick-links.tsx CATEGORY_ORDER",
-      sourceStrings("apps/web/src/components/dashboard/quick-links.tsx", /const CATEGORY_ORDER = \[([^\]]*)\]/),
+      sourceStrings(
+        "apps/web/src/components/dashboard/quick-links.tsx",
+        /const CATEGORY_ORDER = \[([^\]]*)\]/,
+      ),
       "api::quick-link.quick-link",
       "category",
     ],
-    ["cms poll-audience.ts constants", [POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS], "api::poll.poll", "audience"],
+    [
+      "cms poll-audience.ts constants",
+      [POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS],
+      "api::poll.poll",
+      "audience",
+    ],
   ];
 
   it.each(CASES)("%s", (_label, web, uid, attribute) => {
@@ -465,7 +636,11 @@ describe("schema.json enums = web unions and constants", () => {
   });
 
   it("the live CHANNEL_RE accepts exactly the comment/reaction target types with a real documentId", () => {
-    const [source] = sourceStrings("apps/web/src/app/live/subscribe/route.ts", /const CHANNEL_RE = \/(.+)\/;/, /^(.*)$/g);
+    const [source] = sourceStrings(
+      "apps/web/src/app/live/subscribe/route.ts",
+      /const CHANNEL_RE = \/(.+)\/;/,
+      /^(.*)$/g,
+    );
     const channel = new RegExp(source);
     const documentId = "k3m9x0000000000000000000";
     for (const type of enumOf("api::comment.comment", "targetType")) {
@@ -473,8 +648,15 @@ describe("schema.json enums = web unions and constants", () => {
     }
     // The alternation names the same types, nothing more.
     const alternation = /^\^\(([^)]*)\)/.exec(source)?.[1] ?? "";
-    expect(sorted(alternation.split("|"))).toEqual(sorted(enumOf("api::reaction.reaction", "targetType")));
-    for (const bad of [`document:${documentId}`, `announcement:`, `announcement:${documentId}/x`, `wiki-page:${"a".repeat(65)}`]) {
+    expect(sorted(alternation.split("|"))).toEqual(
+      sorted(enumOf("api::reaction.reaction", "targetType")),
+    );
+    for (const bad of [
+      `document:${documentId}`,
+      `announcement:`,
+      `announcement:${documentId}/x`,
+      `wiki-page:${"a".repeat(65)}`,
+    ]) {
       expect(channel.test(bad), bad).toBe(false);
     }
   });
@@ -520,7 +702,10 @@ describe("relations: every mappedBy has its inversedBy and back", () => {
    * and comment.replies -> comment.parent (writes to parent are blocked by
    * FX04; DA02 decides). Remove an entry when its pair is fixed.
    */
-  const KNOWN_UNPAIRED = ["api::comment.comment.replies", "plugin::users-permissions.user.directReports"];
+  const KNOWN_UNPAIRED = [
+    "api::comment.comment.replies",
+    "plugin::users-permissions.user.directReports",
+  ];
 
   it("finds exactly the known unpaired sides", () => {
     const all = { ...pluginSchemas(), ...SCHEMAS };
@@ -531,11 +716,13 @@ describe("relations: every mappedBy has its inversedBy and back", () => {
         const target = all[attribute.target];
         if (attribute.mappedBy) {
           const owner = target?.attributes[attribute.mappedBy];
-          if (!owner || owner.target !== uid || owner.inversedBy !== name) problems.push(`${uid}.${name}`);
+          if (!owner || owner.target !== uid || owner.inversedBy !== name)
+            problems.push(`${uid}.${name}`);
         }
         if (attribute.inversedBy) {
           const inverse = target?.attributes[attribute.inversedBy];
-          if (!inverse || inverse.target !== uid || inverse.mappedBy !== name) problems.push(`${uid}.${name}`);
+          if (!inverse || inverse.target !== uid || inverse.mappedBy !== name)
+            problems.push(`${uid}.${name}`);
         }
       }
     }
@@ -551,11 +738,7 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
   const MATRIX_ROLES = Object.keys(PERMISSION_MATRIX);
 
   const rolesWith = (uid: string, action: string) =>
-    sorted(
-      MATRIX_ROLES.filter((role) =>
-        PERMISSION_MATRIX[role]?.[uid]?.includes(action),
-      ),
-    );
+    sorted(MATRIX_ROLES.filter((role) => PERMISSION_MATRIX[role]?.[uid]?.includes(action)));
 
   const grantedTo = (key: string) => {
     const grant = CUSTOM_ACTION_GRANTS[key];
@@ -563,7 +746,8 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
     return sorted(grant === "*" ? MATRIX_ROLES : grant);
   };
 
-  const intersect = (a: readonly string[], b: readonly string[]) => a.filter((role) => b.includes(role));
+  const intersect = (a: readonly string[], b: readonly string[]) =>
+    a.filter((role) => b.includes(role));
 
   /** The is-classified-author bypass per route (api/classified/routes/classified.ts). */
   const classifiedBypass = (action: "update" | "delete") =>
@@ -593,9 +777,14 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
   });
 
   it("AD_POSTER_ROLES: classified create AND the upload grant; the cleanup grant too", () => {
-    const posters = intersect(rolesWith("api::classified.classified", "create"), grantedTo("plugin::upload.content-api.upload"));
+    const posters = intersect(
+      rolesWith("api::classified.classified", "create"),
+      grantedTo("plugin::upload.content-api.upload"),
+    );
     expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(posters);
-    expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(grantedTo("api::classified.classified.cleanupUploads"));
+    expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(
+      grantedTo("api::classified.classified.cleanupUploads"),
+    );
   });
 
   it("GUEST_ROLES: a real matrix role", () => {
@@ -634,10 +823,19 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
    */
   it("KNOWN gaps (SH02) are exactly these", () => {
     const exported = Object.keys(webRoles);
-    for (const missing of ["ANNOUNCEMENT_READER_ROLES", "TRAINING_ROLES", "canComment", "canReact", "canDeleteAnyAd", "canEditAnyAd", "canTrain"]) {
+    for (const missing of [
+      "ANNOUNCEMENT_READER_ROLES",
+      "TRAINING_ROLES",
+      "canComment",
+      "canReact",
+      "canDeleteAnyAd",
+      "canEditAnyAd",
+      "canTrain",
+    ]) {
       expect(exported, missing).not.toContain(missing);
     }
-    const withoutCreate = (uid: string) => MATRIX_ROLES.filter((role) => !rolesWith(uid, "create").includes(role));
+    const withoutCreate = (uid: string) =>
+      MATRIX_ROLES.filter((role) => !rolesWith(uid, "create").includes(role));
     expect(withoutCreate("api::comment.comment")).toEqual(["guest"]);
     expect(withoutCreate("api::reaction.reaction")).toEqual(["guest"]);
     const deleteBypass = classifiedBypass("delete");

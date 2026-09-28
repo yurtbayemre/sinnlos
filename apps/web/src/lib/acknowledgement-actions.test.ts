@@ -45,12 +45,18 @@ describe("acknowledgeAnnouncement", () => {
     const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
     expect(path).toBe("/api/acknowledgements");
     expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ data: { targetType: "announcement", targetDocumentId: DOC } });
+    expect(JSON.parse(init.body)).toEqual({
+      data: { targetType: "announcement", targetDocumentId: DOC },
+    });
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
   it("rejects with the cms's 400 and does not refresh", async () => {
-    const error = new StrapiError(400, "Bad Request", '{"error":{"message":"Target not available for acknowledgement"}}');
+    const error = new StrapiError(
+      400,
+      "Bad Request",
+      '{"error":{"message":"Target not available for acknowledgement"}}',
+    );
     strapiMock.mockRejectedValue(error);
     await expect(acknowledgeAnnouncement(DOC)).rejects.toBe(error);
     expect(refreshMock).not.toHaveBeenCalled();

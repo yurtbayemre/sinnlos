@@ -71,7 +71,9 @@ function stubThings(): Row[] {
   return THINGS.map((thing) => ({
     ...thing,
     group: GROUPS.find((group) => group.id === thing.group) ?? null,
-    tags: thing.tags.map((id) => TAGS.find((tag) => tag.id === id)).filter((tag) => tag !== undefined),
+    tags: thing.tags
+      .map((id) => TAGS.find((tag) => tag.id === id))
+      .filter((tag) => tag !== undefined),
   }));
 }
 
@@ -102,7 +104,10 @@ const WHERE_CASES: Array<[string, Where]> = [
   ["$and", { $and: [{ rank: { $gte: 1 } }, { note: "x" }] }],
   ["$or", { $or: [{ name: "alpha" }, { rank: { $gt: 2 } }] }],
   ["$not on a column", { $not: { name: "beta" } }],
-  ["nested $and/$or", { $or: [{ $and: [{ note: "x" }, { rank: { $null: true } }] }, { name: "beta" }] }],
+  [
+    "nested $and/$or",
+    { $or: [{ $and: [{ note: "x" }, { rank: { $null: true } }] }, { name: "beta" }] },
+  ],
   ["to-one by id", { group: { id: 1 } }],
   ["to-one scalar = related id", { group: 2 }],
   ["to-one by column", { group: { name: "G2" } }],
@@ -158,7 +163,9 @@ describe("strapi-stub where evaluator = @strapi/database 5.55.1 on SQLite", () =
     const params = { where, select: ["id"], orderBy: { id: "asc" as const } };
     const real = (await engine.db.query(THING).findMany(params)).map((row) => row.id);
     const embedded = (await stub().db.query(THING).findMany(params)).map((row) => row.id);
-    const referenced = (await referencingStub().db.query(THING).findMany(params)).map((row) => row.id);
+    const referenced = (await referencingStub().db.query(THING).findMany(params)).map(
+      (row) => row.id,
+    );
     expect(embedded).toEqual(real);
     expect(referenced).toEqual(real);
   });
@@ -170,7 +177,9 @@ describe("strapi-stub where evaluator = @strapi/database 5.55.1 on SQLite", () =
     // SQL applies NOT per joined row: the engine answers 1, 2 and 4 here (1
     // has a non-red tag, 3 has no joined row at all); "not any red" would say 2 and 3.
     expect(() => match(THING, row, { $not: { tags: { label: "red" } } })).toThrow(/not modelled/);
-    expect(() => match(THING, { id: 3, tags: [] }, { $not: { tags: { label: "red" } } })).toThrow(/not modelled/);
+    expect(() => match(THING, { id: 3, tags: [] }, { $not: { tags: { label: "red" } } })).toThrow(
+      /not modelled/,
+    );
     expect(() => match(THING, row, { $eq: 1 })).toThrow(/root level/);
     // Column operators only: $or belongs at root level (the engine throws too).
     expect(() => match(THING, row, { name: { $or: ["a", "b"] } })).toThrow(/not modelled/);
@@ -178,7 +187,9 @@ describe("strapi-stub where evaluator = @strapi/database 5.55.1 on SQLite", () =
 
   it("uses the real schemas for real uids (matchWhere export)", () => {
     const user: Row = { id: 7, department: null, teams: [] };
-    expect(matchWhere("plugin::users-permissions.user", user, { department: { id: { $null: true } } })).toBe(true);
+    expect(
+      matchWhere("plugin::users-permissions.user", user, { department: { id: { $null: true } } }),
+    ).toBe(true);
     expect(matchWhere("plugin::users-permissions.user", user, { teams: { id: 3 } })).toBe(false);
   });
 });
@@ -187,14 +198,20 @@ describe("strapi-stub projection = the query engine's", () => {
   const cases: Array<[string, Record<string, unknown>]> = [
     ["no select, no populate: scalars only", { where: { id: 1 } }],
     ["select without id", { where: { id: 1 }, select: ["name"] }],
-    ["select + populate adds the id", { where: { id: 1 }, select: ["name"], populate: { group: true } }],
+    [
+      "select + populate adds the id",
+      { where: { id: 1 }, select: ["name"], populate: { group: true } },
+    ],
     [
       "nested select",
       { where: { id: 1 }, populate: { group: { select: ["name"] }, tags: { select: ["label"] } } },
     ],
     ["populate: true", { where: { id: 1 }, populate: true }],
     ["populate as a list", { where: { id: 3 }, populate: ["group", "tags"] }],
-    ["populate with a where", { where: { id: 1 }, populate: { tags: { where: { label: "blue" } } } }],
+    [
+      "populate with a where",
+      { where: { id: 1 }, populate: { tags: { where: { label: "blue" } } } },
+    ],
   ];
 
   it.each(cases)("%s", async (_label, params) => {
@@ -211,16 +228,24 @@ describe("strapi-stub projection = the query engine's", () => {
       { orderBy: { id: "asc" }, limit: 2, offset: 1, select: ["id"] },
     ]) {
       const real = await engine.db.query(THING).findMany(params);
-      const fake = await stub().db.query(THING).findMany(params as never);
+      const fake = await stub()
+        .db.query(THING)
+        .findMany(params as never);
       expect(fake, JSON.stringify(params)).toEqual(real);
     }
   });
 
   it("counts and misses like the engine", async () => {
-    expect(await stub().db.query(THING).count({ where: { rank: { $gte: 2 } } })).toBe(
-      await engine.db.query(THING).count({ where: { rank: { $gte: 2 } } }),
-    );
-    expect(await stub().db.query(THING).findOne({ where: { name: "zzz" } })).toBeNull();
+    expect(
+      await stub()
+        .db.query(THING)
+        .count({ where: { rank: { $gte: 2 } } }),
+    ).toBe(await engine.db.query(THING).count({ where: { rank: { $gte: 2 } } }));
+    expect(
+      await stub()
+        .db.query(THING)
+        .findOne({ where: { name: "zzz" } }),
+    ).toBeNull();
     expect(await engine.db.query(THING).findOne({ where: { name: "zzz" } })).toBeNull();
   });
 });
@@ -231,12 +256,25 @@ describe("strapi-stub writes", () => {
       tables: { "api::notification.notification": [{ id: 4, title: "old", recipient: { id: 7 } }] },
     });
     const query = strapi.db.query("api::notification.notification");
-    const created = await query.create({ data: { title: "new", recipient: 8 }, populate: { recipient: true } });
+    const created = await query.create({
+      data: { title: "new", recipient: 8 },
+      populate: { recipient: true },
+    });
     expect(created).toEqual({ id: 5, title: "new", recipient: { id: 8 } });
-    expect(await query.findMany({ where: { recipient: { id: 8 } }, select: ["id"] })).toEqual([{ id: 5 }]);
+    expect(await query.findMany({ where: { recipient: { id: 8 } }, select: ["id"] })).toEqual([
+      { id: 5 },
+    ]);
 
-    expect(await query.update({ where: { id: 4 }, data: { title: "changed" } })).toEqual({ id: 4, title: "changed" });
-    expect(await query.updateMany({ where: { title: { $in: ["changed", "new"] } }, data: { read: true } })).toEqual({
+    expect(await query.update({ where: { id: 4 }, data: { title: "changed" } })).toEqual({
+      id: 4,
+      title: "changed",
+    });
+    expect(
+      await query.updateMany({
+        where: { title: { $in: ["changed", "new"] } },
+        data: { read: true },
+      }),
+    ).toEqual({
       count: 2,
     });
     expect(await query.delete({ where: { id: 4 } })).toMatchObject({ id: 4 });
@@ -246,7 +284,9 @@ describe("strapi-stub writes", () => {
 
   it("returns relations only when populated (a missing populate is visible in tests)", async () => {
     const strapi = createStrapiStub({
-      tables: { "plugin::users-permissions.user": [{ id: 7, username: "ada", department: { id: 10 } }] },
+      tables: {
+        "plugin::users-permissions.user": [{ id: 7, username: "ada", department: { id: 10 } }],
+      },
     });
     const query = strapi.db.query("plugin::users-permissions.user");
     expect(await query.findOne({ where: { id: 7 } })).toEqual({ id: 7, username: "ada" });
@@ -256,7 +296,9 @@ describe("strapi-stub writes", () => {
       department: { id: 10 },
     });
     // A relation that is not set populates as null (to-one) or [] (to-many, from the schema).
-    expect(await query.findOne({ where: { id: 7 }, populate: { manager: true, teams: true } })).toEqual({
+    expect(
+      await query.findOne({ where: { id: 7 }, populate: { manager: true, teams: true } }),
+    ).toEqual({
       id: 7,
       username: "ada",
       manager: null,
@@ -290,7 +332,9 @@ describe("strapi-stub documents(): draft & publish twins", () => {
 
   it("creates a draft row and a published twin with DIFFERENT ids and one documentId", async () => {
     const strapi = createStrapiStub();
-    const created = await strapi.documents(ANNOUNCEMENT).create({ data: { title: "Hi" }, status: "published" });
+    const created = await strapi
+      .documents(ANNOUNCEMENT)
+      .create({ data: { title: "Hi" }, status: "published" });
     const rows = strapi.tables[ANNOUNCEMENT];
     expect(rows).toHaveLength(2);
     const [draft, published] = rows;
@@ -304,7 +348,11 @@ describe("strapi-stub documents(): draft & publish twins", () => {
 
   it("defaults to the draft (Document Service), and publish recreates the published row with a new id", async () => {
     const strapi = createStrapiStub();
-    const { documentId, draft, published } = strapi.seedDocument(ANNOUNCEMENT, { title: "v1" }, { status: "published" });
+    const { documentId, draft, published } = strapi.seedDocument(
+      ANNOUNCEMENT,
+      { title: "v1" },
+      { status: "published" },
+    );
     const documents = strapi.documents(ANNOUNCEMENT);
     expect((await documents.findOne({ documentId }))?.id).toBe(draft?.id);
     expect((await documents.findOne({ documentId, status: "published" }))?.id).toBe(published?.id);
@@ -314,21 +362,33 @@ describe("strapi-stub documents(): draft & publish twins", () => {
     const [republished] = (await documents.publish({ documentId })).entries;
     expect(republished.title).toBe("v2");
     expect(republished.id).not.toBe(published?.id);
-    expect(strapi.tables[ANNOUNCEMENT].filter((row) => row.documentId === documentId)).toHaveLength(2);
+    expect(strapi.tables[ANNOUNCEMENT].filter((row) => row.documentId === documentId)).toHaveLength(
+      2,
+    );
   });
 
   it("writes a payload-only draft for a published-only document (Strapi 5.55.1, FX38)", async () => {
     const strapi = createStrapiStub();
-    const { documentId } = strapi.seedDocument(ANNOUNCEMENT, { title: "t", body: "b" }, { status: "published" });
-    strapi.tables[ANNOUNCEMENT] = strapi.tables[ANNOUNCEMENT].filter((row) => row.publishedAt !== null);
-    const draft = await strapi.documents(ANNOUNCEMENT).update({ documentId, data: { title: "t2" } });
+    const { documentId } = strapi.seedDocument(
+      ANNOUNCEMENT,
+      { title: "t", body: "b" },
+      { status: "published" },
+    );
+    strapi.tables[ANNOUNCEMENT] = strapi.tables[ANNOUNCEMENT].filter(
+      (row) => row.publishedAt !== null,
+    );
+    const draft = await strapi
+      .documents(ANNOUNCEMENT)
+      .update({ documentId, data: { title: "t2" } });
     expect(draft).toMatchObject({ title: "t2", publishedAt: null });
     expect(draft?.body).toBeUndefined();
   });
 
   it("keeps department and team single-row: one row, publishedAt set, status ignored", async () => {
     const strapi = createStrapiStub();
-    const department = await strapi.documents("api::department.department").create({ data: { name: "Eng" } });
+    const department = await strapi
+      .documents("api::department.department")
+      .create({ data: { name: "Eng" } });
     expect(strapi.tables["api::department.department"]).toHaveLength(1);
     expect(department.publishedAt).not.toBeNull();
     const documentId = String(department.documentId);
@@ -345,7 +405,9 @@ describe("strapi-stub documents(): draft & publish twins", () => {
     const documents = strapi.documents(ANNOUNCEMENT);
     const a = strapi.seedDocument(ANNOUNCEMENT, { title: "a" }, { status: "published" });
     strapi.seedDocument(ANNOUNCEMENT, { title: "b" });
-    expect((await documents.findMany({ status: "published" })).map((row) => row.title)).toEqual(["a"]);
+    expect((await documents.findMany({ status: "published" })).map((row) => row.title)).toEqual([
+      "a",
+    ]);
     expect(await documents.count({ filters: { title: { $in: ["a", "b"] } } })).toBe(2);
 
     await documents.update({ documentId: a.documentId, data: { title: "a-edit" } });
@@ -395,7 +457,10 @@ describe("strapi-stub transactions, services and logs", () => {
 
   it("serves only the services a test stubs", () => {
     const users = { fetch: () => null };
-    const strapi = createStrapiStub({ plugins: { "users-permissions": { user: users } }, services: { "api::poll.poll": {} } });
+    const strapi = createStrapiStub({
+      plugins: { "users-permissions": { user: users } },
+      services: { "api::poll.poll": {} },
+    });
     expect(strapi.plugin("users-permissions").service("user")).toBe(users);
     expect(strapi.service("api::poll.poll")).toEqual({});
     expect(() => strapi.plugin("upload").service("upload")).toThrow(/not stubbed/);
@@ -412,7 +477,10 @@ describe("strapi-stub transactions, services and logs", () => {
 
   it("builds policy contexts the way createPolicyContext does (request shared, query a decoy)", () => {
     const decoy = { filters: "DECOY" };
-    const ctx = policyContext({ id: 1, role: { type: "member" } }, { query: { a: 1 }, params: { id: "3" }, decoy });
+    const ctx = policyContext(
+      { id: 1, role: { type: "member" } },
+      { query: { a: 1 }, params: { id: "3" }, decoy },
+    );
     expect(ctx).toEqual({
       state: { user: { id: 1, role: { type: "member" } } },
       params: { id: "3" },

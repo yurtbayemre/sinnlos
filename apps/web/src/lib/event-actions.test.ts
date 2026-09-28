@@ -37,7 +37,11 @@ function signInRedirect(): unknown {
 }
 
 const cmsError = (status: number, message: string) =>
-  new StrapiError(status, status === 400 ? "Bad Request" : "Error", JSON.stringify({ error: { status, message } }));
+  new StrapiError(
+    status,
+    status === 400 ? "Bad Request" : "Error",
+    JSON.stringify({ error: { status, message } }),
+  );
 
 beforeEach(() => {
   strapiMock.mockReset();
@@ -51,21 +55,27 @@ afterEach(() => {
 });
 
 describe("rsvpToEvent", () => {
-  it.each(["yes", "no", "maybe"] as const)("posts %s for the target and refreshes", async (status) => {
-    await expect(rsvpToEvent(DOC, status)).resolves.toEqual({});
-    expect(strapiMock).toHaveBeenCalledTimes(1);
-    const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
-    expect(path).toBe("/api/event-rsvps");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(init.body)).toEqual({ data: { targetDocumentId: DOC, status } });
-    expect(refreshMock).toHaveBeenCalledTimes(1);
-  });
+  it.each(["yes", "no", "maybe"] as const)(
+    "posts %s for the target and refreshes",
+    async (status) => {
+      await expect(rsvpToEvent(DOC, status)).resolves.toEqual({});
+      expect(strapiMock).toHaveBeenCalledTimes(1);
+      const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
+      expect(path).toBe("/api/event-rsvps");
+      expect(init.method).toBe("POST");
+      expect(JSON.parse(init.body)).toEqual({ data: { targetDocumentId: DOC, status } });
+      expect(refreshMock).toHaveBeenCalledTimes(1);
+    },
+  );
 
-  it.each(["YES", "", "attending", "__proto__", "declined"])("refuses status %j before any request", async (status) => {
-    await expect(rsvpToEvent(DOC, status as "yes")).resolves.toEqual({ error: "failed" });
-    expect(strapiMock).not.toHaveBeenCalled();
-    expect(refreshMock).not.toHaveBeenCalled();
-  });
+  it.each(["YES", "", "attending", "__proto__", "declined"])(
+    "refuses status %j before any request",
+    async (status) => {
+      await expect(rsvpToEvent(DOC, status as "yes")).resolves.toEqual({ error: "failed" });
+      expect(strapiMock).not.toHaveBeenCalled();
+      expect(refreshMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("refuses an empty target before any request", async () => {
     await expect(rsvpToEvent("", "yes")).resolves.toEqual({ error: "failed" });

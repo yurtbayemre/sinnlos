@@ -1,5 +1,11 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { IncomingMessage, ServerResponse, createServer as createHttpServer, request, type RequestListener } from "node:http";
+import {
+  IncomingMessage,
+  ServerResponse,
+  createServer as createHttpServer,
+  request,
+  type RequestListener,
+} from "node:http";
 import { Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -129,7 +135,11 @@ describe("@strapi/utils sanitizeQuery: empty array operands are stripped (why re
     expect(injected).toEqual({ id: { $eq: -1 } });
     const out = await sanitizers().query({ filters: injected }, article(), {});
     expect(out.filters).toEqual({ id: { $eq: -1 } });
-    const listed = await sanitizers().query({ filters: restrictiveIdFilter([3, 4]) }, article(), {});
+    const listed = await sanitizers().query(
+      { filters: restrictiveIdFilter([3, 4]) },
+      article(),
+      {},
+    );
     expect(listed.filters).toEqual({ id: { $in: [3, 4] } });
   });
 });
@@ -138,16 +148,24 @@ describe("@strapi/utils + @strapi/core: a client `status` beats the published de
   it("validateQuery accepts `status`, sanitizeQuery passes it through verbatim", async () => {
     const { auth } = stubAuth([]);
     expect(ALLOWED_QUERY_PARAM_KEYS).toContain("status");
-    await expect(validators().query({ status: "draft" }, article(), { auth })).resolves.toBeUndefined();
-    const out = await sanitizers().query({ status: "draft", publicationFilter: "never-published" }, article(), {
-      auth,
-    });
+    await expect(
+      validators().query({ status: "draft" }, article(), { auth }),
+    ).resolves.toBeUndefined();
+    const out = await sanitizers().query(
+      { status: "draft", publicationFilter: "never-published" },
+      article(),
+      {
+        auth,
+      },
+    );
     expect(out).toMatchObject({ status: "draft", publicationFilter: "never-published" });
   });
 
   it("the core service merges the client params OVER its default", () => {
     const { CoreService } = requirePackageFile<{
-      CoreService: new () => { getFetchParams(params?: Record<string, unknown>): Record<string, unknown> };
+      CoreService: new () => {
+        getFetchParams(params?: Record<string, unknown>): Record<string, unknown>;
+      };
     }>(coreDir(), "dist/core-api/service/core-service.js");
     const service = new CoreService();
     expect(service.getFetchParams({})).toEqual({ status: "published" });
@@ -165,7 +183,9 @@ describe("@strapi/utils validateQuery: filters through a relation need the targe
 
   it("passes the same filter with the find scope, and never checks populate (5.55.1)", async () => {
     const { auth, asked } = stubAuth([`${USER_UID}.find`]);
-    await expect(validators().query({ filters: { author: { id: 1 } } }, article(), { auth })).resolves.toBeUndefined();
+    await expect(
+      validators().query({ filters: { author: { id: 1 } } }, article(), { auth }),
+    ).resolves.toBeUndefined();
     expect(asked).toEqual([`${USER_UID}.find`]);
 
     const denied = stubAuth([]);
@@ -210,10 +230,9 @@ describe("@strapi/utils createPolicyContext + Koa: only request.query reaches th
     const Koa = requireFromPackage<new () => KoaApp>(coreDir(), "koa");
     const app = new Koa();
     // strapi::query installs the qs parser Strapi uses (cached per querystring).
-    const { query } = requirePackageFile<{ query(config: unknown, deps: { strapi: unknown }): void }>(
-      coreDir(),
-      "dist/middlewares/query.js",
-    );
+    const { query } = requirePackageFile<{
+      query(config: unknown, deps: { strapi: unknown }): void;
+    }>(coreDir(), "dist/middlewares/query.js");
     query({}, { strapi: { server: { app } } });
     const req = new IncomingMessage(new Socket());
     req.url = url;
@@ -227,7 +246,10 @@ describe("@strapi/utils createPolicyContext + Koa: only request.query reaches th
       const ctx = koaContext(url);
       const before = JSON.stringify(ctx.query);
       // Typed as a plain object by @strapi/utils; it is ctx's own properties plus is/type.
-      const policyContext = policy.createPolicyContext("koa", ctx) as unknown as { query?: unknown; request: unknown };
+      const policyContext = policy.createPolicyContext("koa", ctx) as unknown as {
+        query?: unknown;
+        request: unknown;
+      };
       expect(Object.prototype.hasOwnProperty.call(policyContext, "query")).toBe(false);
       expect(policyContext.request).toBe(ctx.request);
 
@@ -250,7 +272,10 @@ describe("@strapi/utils createPolicyContext + Koa: only request.query reaches th
 describe("@strapi/core policies: only `false`-ish results refuse, undefined PASSES (strict booleans)", () => {
   type Middleware = (ctx: unknown, next: () => Promise<void>) => Promise<void>;
   const { createPolicicesMiddleware } = requirePackageFile<{
-    createPolicicesMiddleware(route: { config?: { policies?: unknown[] } }, strapi: unknown): Middleware;
+    createPolicicesMiddleware(
+      route: { config?: { policies?: unknown[] } },
+      strapi: unknown,
+    ): Middleware;
   }>(strapiPackageDir("@strapi/core"), "dist/services/server/policy.js");
 
   async function passes(result: unknown): Promise<boolean> {
@@ -293,7 +318,10 @@ describe("@strapi/core sanitizers registry: add() on an unset path is a silent n
     has(path: string): boolean;
   }
   const createRegistry = () =>
-    requirePackageFile<() => Registry>(strapiPackageDir("@strapi/core"), "dist/registries/sanitizers.js")();
+    requirePackageFile<() => Registry>(
+      strapiPackageDir("@strapi/core"),
+      "dist/registries/sanitizers.js",
+    )();
 
   it("drops a sanitizer added to a path nobody set (why index.ts uses get()+set())", () => {
     const registry = createRegistry();
@@ -331,12 +359,21 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
     writeFileSync(join(publicDir, "robots.txt"), "ROBOTS");
     const strapi: Record<string, unknown> = {
       config: { get: (_key: string, fallback?: unknown) => fallback },
-      log: { warn: () => undefined, info: () => undefined, error: () => undefined, debug: () => undefined },
+      log: {
+        warn: () => undefined,
+        info: () => undefined,
+        error: () => undefined,
+        debug: () => undefined,
+      },
       dirs: { static: { public: publicDir } },
       get(name: string) {
         if (name === "policies") return { resolve: () => [] };
         if (name === "middlewares") return { resolve: () => [], get: () => undefined };
-        if (name === "auth") return { authenticate: (_ctx: unknown, next: () => unknown) => next(), verify: async () => undefined };
+        if (name === "auth")
+          return {
+            authenticate: (_ctx: unknown, next: () => unknown) => next(),
+            verify: async () => undefined,
+          };
         throw new Error(`strapi.get(${name}) not stubbed`);
       },
     };
@@ -346,10 +383,9 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
     );
     const server = createServer(strapi);
     strapi.server = server;
-    const { publicStatic } = requirePackageFile<{ publicStatic(config: unknown, deps: { strapi: unknown }): unknown }>(
-      coreDir(),
-      "dist/middlewares/public.js",
-    );
+    const { publicStatic } = requirePackageFile<{
+      publicStatic(config: unknown, deps: { strapi: unknown }): unknown;
+    }>(coreDir(), "dist/middlewares/public.js");
     return { server, strapi, publicStatic: () => publicStatic({}, { strapi }) };
   }
 
@@ -362,11 +398,14 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
       return await new Promise<{ status: number; body: string }>((resolve, reject) => {
         // `path` goes out exactly as written: no client-side dot-segment
         // cleaning. No keep-alive agent, so close() does not wait on it.
-        const req = request({ host: "127.0.0.1", port, path, method: "GET", headers, agent: false }, (res) => {
-          let body = "";
-          res.on("data", (chunk: Buffer) => (body += chunk.toString()));
-          res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
-        });
+        const req = request(
+          { host: "127.0.0.1", port, path, method: "GET", headers, agent: false },
+          (res) => {
+            let body = "";
+            res.on("data", (chunk: Buffer) => (body += chunk.toString()));
+            res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+          },
+        );
         req.on("error", reject);
         req.end();
       });
@@ -392,7 +431,10 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
     const { server, publicStatic } = strapiServer();
     publicStatic();
     server.mount();
-    expect(await fetchPath(server, "/api/../uploads/secret.pdf")).toEqual({ status: 200, body: "%PDF-SECRET" });
+    expect(await fetchPath(server, "/api/../uploads/secret.pdf")).toEqual({
+      status: 200,
+      body: "%PDF-SECRET",
+    });
   });
 
   it.each(["before", "after"] as const)(
@@ -405,10 +447,19 @@ describe("@strapi/core strapi::public registers routes, mounted after every glob
       publicStatic();
       if (position === "after") server.use(gate);
       server.mount();
-      expect(await fetchPath(server, "/api/../uploads/secret.pdf")).toEqual({ status: 404, body: "Not Found" });
-      expect(await fetchPath(server, "/api/%2e%2e/uploads/secret.pdf")).toMatchObject({ status: 404 });
+      expect(await fetchPath(server, "/api/../uploads/secret.pdf")).toEqual({
+        status: 404,
+        body: "Not Found",
+      });
+      expect(await fetchPath(server, "/api/%2e%2e/uploads/secret.pdf")).toMatchObject({
+        status: 404,
+      });
       // The web proxy's internal token still gets through; unrelated public files too.
-      expect(await fetchPath(server, "/api/../uploads/secret.pdf", { "x-internal-upload-token": "t0k3n" })).toEqual({
+      expect(
+        await fetchPath(server, "/api/../uploads/secret.pdf", {
+          "x-internal-upload-token": "t0k3n",
+        }),
+      ).toEqual({
         status: 200,
         body: "%PDF-SECRET",
       });
@@ -446,15 +497,22 @@ describe("@strapi/core: turning draft & publish off deletes drafts in beforeSync
     engine = await openSqliteEngine([NOTE_MODEL]);
     const { db } = engine;
     await db.query(NOTE).create({ data: { documentId: "a", title: "draft", publishedAt: null } });
-    await db.query(NOTE).create({ data: { documentId: "a", title: "published", publishedAt: new Date() } });
-    await db.query(NOTE).create({ data: { documentId: "b", title: "draft only", publishedAt: null } });
+    await db
+      .query(NOTE)
+      .create({ data: { documentId: "a", title: "published", publishedAt: new Date() } });
+    await db
+      .query(NOTE)
+      .create({ data: { documentId: "b", title: "draft only", publishedAt: null } });
 
     const statements: KnexQueryEvent[] = [];
     const listener = (event: KnexQueryEvent) => statements.push(event);
     db.connection.on("query", listener);
     const transaction = vi.spyOn(db, "transaction");
     const { disable } = requirePackageFile<{
-      disable(args: { oldContentTypes: Record<string, unknown>; contentTypes: Record<string, unknown> }): Promise<void>;
+      disable(args: {
+        oldContentTypes: Record<string, unknown>;
+        contentTypes: Record<string, unknown>;
+      }): Promise<void>;
     }>(coreDir(), "dist/migrations/draft-publish.js");
     await disable({
       oldContentTypes: { [NOTE]: { options: { draftAndPublish: true } } },
@@ -462,16 +520,22 @@ describe("@strapi/core: turning draft & publish off deletes drafts in beforeSync
     });
     db.connection.off("query", listener);
 
-    expect((await db.query(NOTE).findMany({ select: ["title"] })).map((row) => row.title)).toEqual(["published"]);
+    expect((await db.query(NOTE).findMany({ select: ["title"] })).map((row) => row.title)).toEqual([
+      "published",
+    ]);
     // One bare DELETE: no strapi.db.transaction, no BEGIN/SAVEPOINT around it,
     // so it commits on its own even if the schema sync after it fails.
     expect(transaction).not.toHaveBeenCalled();
-    expect(statements.map((event) => event.sql)).toEqual(["delete from `notes` where (`published_at` is null)"]);
+    expect(statements.map((event) => event.sql)).toEqual([
+      "delete from `notes` where (`published_at` is null)",
+    ]);
   });
 
   it("is wired to beforeSync, which Strapi calls before db.schema.sync()", () => {
     const registries = readFileSync(join(coreDir(), "dist/providers/registries.js"), "utf8");
-    expect(registries).toMatch(/hook\('strapi::content-types\.beforeSync'\)\.register\([\w$]+\.disable\)/);
+    expect(registries).toMatch(
+      /hook\('strapi::content-types\.beforeSync'\)\.register\([\w$]+\.disable\)/,
+    );
     const migrations = readFileSync(join(coreDir(), "dist/migrations/index.js"), "utf8");
     expect(migrations).toMatch(/const disable = [\s\S]*?draftPublish\.disable\(/);
     const boot = readFileSync(join(coreDir(), "dist/Strapi.js"), "utf8");
@@ -528,7 +592,9 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     const { transformContentTypesToModels } = requirePackageFile<{
       transformContentTypesToModels(contentTypes: unknown[], identifiers: unknown): unknown[];
     }>(coreDir(), "dist/utils/transform-content-types-to-models.js");
-    engine = await openSqliteEngine((identifiers) => transformContentTypesToModels([NOTE_TYPE], identifiers));
+    engine = await openSqliteEngine((identifiers) =>
+      transformContentTypesToModels([NOTE_TYPE], identifiers),
+    );
     const { db } = engine;
     const contentTypes: Record<string, unknown> = { [NOTE]: NOTE_TYPE };
     const fake: Record<string, unknown> = {
@@ -539,7 +605,12 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
       getModel: (uid: string) => contentTypes[uid],
       config: { get: (_key: string, fallback?: unknown) => fallback },
       eventHub: { emit: async () => undefined },
-      log: { warn: () => undefined, info: () => undefined, error: () => undefined, debug: () => undefined },
+      log: {
+        warn: () => undefined,
+        info: () => undefined,
+        error: () => undefined,
+        debug: () => undefined,
+      },
       // i18n is always installed; this type is not localized.
       plugin: (name: string) =>
         name === "i18n"
@@ -551,7 +622,10 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
             }
           : undefined,
     };
-    const queryParams = requirePackageFile<(strapi: unknown) => unknown>(coreDir(), "dist/services/query-params.js")(fake);
+    const queryParams = requirePackageFile<(strapi: unknown) => unknown>(
+      coreDir(),
+      "dist/services/query-params.js",
+    )(fake);
     fake.get = (name: string) => {
       if (name === "query-params") return queryParams;
       throw new Error(`strapi.get(${name}) not stubbed`);
@@ -566,7 +640,9 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
   it("publishing keeps a draft row and a published row with different ids (§5.17, §5.36)", async () => {
     const { docs, db } = await documents();
     const published = await docs.create({ data: { title: "T", body: "B" }, status: "published" });
-    const rows = (await db.query(NOTE).findMany({ orderBy: { id: "asc" } })) as unknown as DocumentEntry[];
+    const rows = (await db
+      .query(NOTE)
+      .findMany({ orderBy: { id: "asc" } })) as unknown as DocumentEntry[];
     expect(rows).toHaveLength(2);
     expect(rows.map((row) => row.documentId)).toEqual([published.documentId, published.documentId]);
     expect(rows[0].publishedAt).toBeNull();
@@ -589,9 +665,16 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
 
     // The Content Manager and the REST update both land here.
     const draft = await docs.update({ documentId: published.documentId, data: { title: "T2" } });
-    expect(draft).toMatchObject({ documentId: published.documentId, title: "T2", body: null, publishedAt: null });
+    expect(draft).toMatchObject({
+      documentId: published.documentId,
+      title: "T2",
+      body: null,
+      publishedAt: null,
+    });
     expect(draft?.id).not.toBe(published.id);
-    const rows = (await db.query(NOTE).findMany({ orderBy: { id: "asc" } })) as unknown as DocumentEntry[];
+    const rows = (await db
+      .query(NOTE)
+      .findMany({ orderBy: { id: "asc" } })) as unknown as DocumentEntry[];
     expect(rows.map(({ title, body }) => ({ title, body }))).toEqual([
       { title: "T", body: "B" },
       { title: "T2", body: null },
@@ -648,7 +731,10 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
   /** knex (as @strapi/database resolves it) rendering Postgres DDL without a server. */
   function pgKnex(): PgKnex {
     const databaseDir = strapiPackageDir("@strapi/database");
-    return requireFromPackage<(config: Record<string, unknown>) => PgKnex>(databaseDir, "knex")({ client: "pg" });
+    return requireFromPackage<(config: Record<string, unknown>) => PgKnex>(
+      databaseDir,
+      "knex",
+    )({ client: "pg" });
   }
 
   /** The column as builder.js createColumn hands it to knex: tableBuilder[type](name, ...args). */
@@ -659,13 +745,19 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
 
   it("creates every datetime column naive: useTz false, timestamp(6) without time zone", async () => {
     engine = await openSqliteEngine([thingModel()]);
-    const schema = engine.db.schema.schema as { tables: Array<{ name: string; columns: SchemaColumn[] }> };
-    const column = schema.tables.find((table) => table.name === "things")?.columns.find((c) => c.name === "happened_at");
+    const schema = engine.db.schema.schema as {
+      tables: Array<{ name: string; columns: SchemaColumn[] }>;
+    };
+    const column = schema.tables
+      .find((table) => table.name === "things")
+      ?.columns.find((c) => c.name === "happened_at");
     expect(column).toMatchObject({ type: "datetime", args: [{ useTz: false, precision: 6 }] });
 
     const pg = pgKnex();
     try {
-      const ddl = pg.schema.createTable("things", (table) => renderColumn(table, column as SchemaColumn)).toString();
+      const ddl = pg.schema
+        .createTable("things", (table) => renderColumn(table, column as SchemaColumn))
+        .toString();
       expect(ddl).toBe('create table "things" ("happened_at" timestamp(6) null)');
     } finally {
       await pg.destroy();
@@ -691,10 +783,15 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
       userSchema: db.schema.schema,
     });
     expect(status).toBe("CHANGED");
-    const updated = diff.tables.updated.find((table) => table.name === "things")?.columns.updated ?? [];
+    const updated =
+      diff.tables.updated.find((table) => table.name === "things")?.columns.updated ?? [];
     expect(updated.map((column) => column.name)).toEqual(["happened_at"]);
     const column = updated[0].object as unknown as SchemaColumn;
-    expect(column).toMatchObject({ type: "datetime", args: [{ useTz: false, precision: 6 }], notNullable: true });
+    expect(column).toMatchObject({
+      type: "datetime",
+      args: [{ useTz: false, precision: 6 }],
+      notNullable: true,
+    });
 
     // builder.js runs createColumn(...).alter() for every updated column
     // (on SQLite knex rebuilds the table to alter it) ...
@@ -708,8 +805,12 @@ describe("@strapi/database schema sync (datetime contract, decision 04)", () => 
     // ... which on Postgres turns a timestamptz column back into timestamp(6).
     const pg = pgKnex();
     try {
-      const ddl = pg.schema.alterTable("things", (table) => renderColumn(table, column).alter()).toString();
-      expect(ddl).toContain('alter column "happened_at" type timestamp(6) using ("happened_at"::timestamp(6))');
+      const ddl = pg.schema
+        .alterTable("things", (table) => renderColumn(table, column).alter())
+        .toString();
+      expect(ddl).toContain(
+        'alter column "happened_at" type timestamp(6) using ("happened_at"::timestamp(6))',
+      );
       expect(ddl).not.toContain("timestamptz");
     } finally {
       await pg.destroy();
@@ -745,7 +846,12 @@ describe("@strapi/database query engine: a joined select adds DISTINCT without t
   const POLL = "api::poll.poll";
   const VOTE = "api::poll-vote.poll-vote";
   const MODELS_WITH_JOIN = [
-    { uid: POLL, singularName: "poll", tableName: "polls", attributes: { id: { type: "increments" } } },
+    {
+      uid: POLL,
+      singularName: "poll",
+      tableName: "polls",
+      attributes: { id: { type: "increments" } },
+    },
     {
       uid: VOTE,
       singularName: "poll-vote",
@@ -781,14 +887,22 @@ describe("@strapi/database query engine: a joined select adds DISTINCT without t
     const statements: string[] = [];
     const listener = (event: KnexQueryEvent) => statements.push(event.sql);
     db.connection.on("query", listener);
-    const joined = await db.query(VOTE).findMany({ select: ["optionIndex"], where: { poll: { id: 1 } } });
+    const joined = await db
+      .query(VOTE)
+      .findMany({ select: ["optionIndex"], where: { poll: { id: 1 } } });
     db.connection.off("query", listener);
     expect(joined).toHaveLength(2);
     expect(statements.some((sql) => /select distinct/i.test(sql))).toBe(true);
 
     // With the id selected, or without a join, every vote is there.
-    expect(await db.query(VOTE).findMany({ select: ["id", "optionIndex"], where: { poll: { id: 1 } } })).toHaveLength(3);
-    expect(await db.query(VOTE).findMany({ select: ["optionIndex"], where: { optionIndex: { $gte: 0 } } })).toHaveLength(4);
+    expect(
+      await db.query(VOTE).findMany({ select: ["id", "optionIndex"], where: { poll: { id: 1 } } }),
+    ).toHaveLength(3);
+    expect(
+      await db
+        .query(VOTE)
+        .findMany({ select: ["optionIndex"], where: { optionIndex: { $gte: 0 } } }),
+    ).toHaveLength(4);
     expect(await db.query(VOTE).count({ where: { poll: { id: 1 } } })).toBe(3);
   });
 });
@@ -806,12 +920,28 @@ describe("users-permissions rateLimit: the throttle key (config/server.ts proxy 
     ).__require().buildPrefixKey;
 
   it.each([
-    ["/api/auth/local", { identifier: "ada", email: "x@y.z" }, "noIdentifier:/api/auth/local:10.0.0.7"],
+    [
+      "/api/auth/local",
+      { identifier: "ada", email: "x@y.z" },
+      "noIdentifier:/api/auth/local:10.0.0.7",
+    ],
     ["/API/Auth/Local/", { identifier: "ada" }, "noIdentifier:/api/auth/local:10.0.0.7"],
-    ["/api/auth/reset-password", { email: "x@y.z" }, "noIdentifier:/api/auth/reset-password:10.0.0.7"],
+    [
+      "/api/auth/reset-password",
+      { email: "x@y.z" },
+      "noIdentifier:/api/auth/reset-password:10.0.0.7",
+    ],
     ["/api/auth/change-password", {}, "noIdentifier:/api/auth/change-password:10.0.0.7"],
-    ["/api/connect/microsoft/callback", { email: "x@y.z" }, "noIdentifier:/api/connect/microsoft/callback:10.0.0.7"],
-    ["/api/auth/forgot-password", { email: "Ada@Example.org" }, "ada@example.org:/api/auth/forgot-password:10.0.0.7"],
+    [
+      "/api/connect/microsoft/callback",
+      { email: "x@y.z" },
+      "noIdentifier:/api/connect/microsoft/callback:10.0.0.7",
+    ],
+    [
+      "/api/auth/forgot-password",
+      { email: "Ada@Example.org" },
+      "ada@example.org:/api/auth/forgot-password:10.0.0.7",
+    ],
     ["/api/auth/forgot-password", {}, "unknownIdentifier:/api/auth/forgot-password:10.0.0.7"],
   ])("%s -> %s", (path, body, key) => {
     expect(buildPrefixKey()({ request: { path, ip: "10.0.0.7", body } })).toBe(key);
@@ -821,22 +951,41 @@ describe("users-permissions rateLimit: the throttle key (config/server.ts proxy 
 describe("users-permissions 5.51+: no server-side provider access-token exchange", () => {
   it("refuses a provider callback without a completed grant session, whatever token the request carries", async () => {
     const store = {
-      get: async ({ key }: { key: string }) => (key === "grant" ? { microsoft: { enabled: true } } : {}),
+      get: async ({ key }: { key: string }) =>
+        key === "grant" ? { microsoft: { enabled: true } } : {},
     };
-    const strapi = { store: () => store, config: { get: (_key: string, fallback?: unknown) => fallback } };
+    const strapi = {
+      store: () => store,
+      config: { get: (_key: string, fallback?: unknown) => fallback },
+    };
     vi.stubGlobal("strapi", strapi);
     const controller = requirePackageFile<{
       __require(): (deps: { strapi: unknown }) => { callback(ctx: unknown): Promise<unknown> };
     }>(upDir(), "dist/server/controllers/auth.js").__require()({ strapi });
 
     for (const ctx of [
-      { params: { provider: "microsoft" }, query: { access_token: "stolen" }, request: { body: {} } },
-      { params: { provider: "microsoft" }, query: {}, request: { body: { access_token: "stolen" } } },
-      { params: { provider: "microsoft" }, query: { code: "x" }, request: { body: {} }, session: {} },
+      {
+        params: { provider: "microsoft" },
+        query: { access_token: "stolen" },
+        request: { body: {} },
+      },
+      {
+        params: { provider: "microsoft" },
+        query: {},
+        request: { body: { access_token: "stolen" } },
+      },
+      {
+        params: { provider: "microsoft" },
+        query: { code: "x" },
+        request: { body: {} },
+        session: {},
+      },
     ]) {
       const attempt = controller.callback(ctx);
       await expect(attempt).rejects.toBeInstanceOf(errors.ApplicationError);
-      await expect(attempt).rejects.toThrow("OAuth authentication requires a completed provider session");
+      await expect(attempt).rejects.toThrow(
+        "OAuth authentication requires a completed provider session",
+      );
     }
   });
 });

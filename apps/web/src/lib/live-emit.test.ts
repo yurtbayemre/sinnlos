@@ -135,7 +135,10 @@ describe.each([
     ["no events", { body: {} }],
     ["an empty batch", { body: { events: [] } }],
     ["an unknown kind", { body: { events: [{ kind: "wipe" }] } }],
-    ["a content event without an anchor", { body: { events: [{ kind: "content", targetType: "announcement" }] } }],
+    [
+      "a content event without an anchor",
+      { body: { events: [{ kind: "content", targetType: "announcement" }] } },
+    ],
   ])("answers 400 for %s", async (_case, request) => {
     const publish = vi.spyOn(getLiveBus(), "publish");
     const res = await emit(emitRequest(request));

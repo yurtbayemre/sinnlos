@@ -21,7 +21,9 @@ const sessionMock = vi.fn();
 vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
 vi.mock("@/lib/session", () => ({ getSession: () => sessionMock() }));
 
-const { getNotifications, markAllNotificationsRead, markNotificationsRead } = await import("./notification-actions");
+const { getNotifications, markAllNotificationsRead, markNotificationsRead } = await import(
+  "./notification-actions"
+);
 
 function signInRedirect(): unknown {
   try {
@@ -32,7 +34,8 @@ function signInRedirect(): unknown {
   throw new Error("redirect() did not throw");
 }
 
-const cmsError = (status: number) => new StrapiError(status, "Error", JSON.stringify({ error: { status } }));
+const cmsError = (status: number) =>
+  new StrapiError(status, "Error", JSON.stringify({ error: { status } }));
 
 const ROWS = [{ id: 2, type: "kudos", title: "Kudos" }];
 
@@ -84,13 +87,26 @@ describe("getNotifications", () => {
 });
 
 describe.each([
-  ["markNotificationsRead", () => markNotificationsRead([3, 4]), "/api/notifications/mark-read", { ids: [3, 4] }],
-  ["markAllNotificationsRead", () => markAllNotificationsRead(), "/api/notifications/mark-all-read", {}],
+  [
+    "markNotificationsRead",
+    () => markNotificationsRead([3, 4]),
+    "/api/notifications/mark-read",
+    { ids: [3, 4] },
+  ],
+  [
+    "markAllNotificationsRead",
+    () => markAllNotificationsRead(),
+    "/api/notifications/mark-all-read",
+    {},
+  ],
 ])("%s", (_label, action, path, body) => {
   it("posts to its custom route", async () => {
     await expect(action()).resolves.toBeUndefined();
     expect(strapiMock).toHaveBeenCalledTimes(1);
-    const [calledPath, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
+    const [calledPath, init] = strapiMock.mock.calls[0] as [
+      string,
+      { method: string; body: string },
+    ];
     expect(calledPath).toBe(path);
     expect(init.method).toBe("POST");
     expect(JSON.parse(init.body)).toEqual(body);

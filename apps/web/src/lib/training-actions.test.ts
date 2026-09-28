@@ -50,7 +50,11 @@ describe("completeLesson", () => {
   });
 
   it("rejects with the cms's 400 and does not refresh", async () => {
-    const error = new StrapiError(400, "Bad Request", '{"error":{"message":"Lesson not available"}}');
+    const error = new StrapiError(
+      400,
+      "Bad Request",
+      '{"error":{"message":"Lesson not available"}}',
+    );
     strapiMock.mockRejectedValue(error);
     await expect(completeLesson(LESSON)).rejects.toBe(error);
     expect(refreshMock).not.toHaveBeenCalled();

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createStrapiStub, policyContext, type StubPolicyContext } from "../test/strapi-stub.test.helper";
+import {
+  createStrapiStub,
+  policyContext,
+  type StubPolicyContext,
+} from "../test/strapi-stub.test.helper";
 import lessonProgressVisibility from "./lesson-progress-visibility";
 
 /**
@@ -15,7 +19,9 @@ import lessonProgressVisibility from "./lesson-progress-visibility";
 const LESSON_PROGRESS_UID = "api::lesson-progress.lesson-progress";
 
 function run(ctx: StubPolicyContext) {
-  const strapi = createStrapiStub({ tables: { [LESSON_PROGRESS_UID]: [{ id: 1, user: { id: 42 } }] } });
+  const strapi = createStrapiStub({
+    tables: { [LESSON_PROGRESS_UID]: [{ id: 1, user: { id: 42 } }] },
+  });
   // The policy's own parameter type is the loose Strapi context.
   const result = lessonProgressVisibility(ctx, undefined, { strapi });
   return { result, strapi };
@@ -47,14 +53,19 @@ describe("lesson-progress-visibility policy", () => {
     expect(ctx.request.query.filters).toEqual({ user: { id: 7 } });
   });
 
-  it.each(["department_head", "team_lead", "member", "guest", "authenticated", "Admin_role", "admin"])(
-    "narrows %s to its own receipts",
-    async (type) => {
-      const ctx = policyContext({ id: 9, role: { id: 99, type } });
-      await expect(run(ctx).result).resolves.toBe(true);
-      expect(ctx.request.query.filters).toEqual({ user: { id: 9 } });
-    },
-  );
+  it.each([
+    "department_head",
+    "team_lead",
+    "member",
+    "guest",
+    "authenticated",
+    "Admin_role",
+    "admin",
+  ])("narrows %s to its own receipts", async (type) => {
+    const ctx = policyContext({ id: 9, role: { id: 99, type } });
+    await expect(run(ctx).result).resolves.toBe(true);
+    expect(ctx.request.query.filters).toEqual({ user: { id: 9 } });
+  });
 
   it("narrows a caller without a role like any other non-admin", async () => {
     for (const user of [{ id: 9 }, { id: 9, role: null }, { id: 9, role: { id: 5 } }]) {
@@ -65,7 +76,9 @@ describe("lesson-progress-visibility policy", () => {
   });
 
   it("only NARROWS a client filter via $and, so a client `user` filter cannot widen it", async () => {
-    const ctx = policyContext(member, { query: { filters: { user: { id: { $in: [1, 2, 42] } } } } });
+    const ctx = policyContext(member, {
+      query: { filters: { user: { id: { $in: [1, 2, 42] } } } },
+    });
     await run(ctx).result;
     expect(ctx.request.query.filters).toEqual({
       $and: [{ user: { id: { $in: [1, 2, 42] } } }, { user: { id: 42 } }],
@@ -82,13 +95,18 @@ describe("lesson-progress-visibility policy", () => {
   });
 
   it("creates request.query for a bare request stub (getMutableQuery fallback)", async () => {
-    const ctx: StubPolicyContext = { state: { user: member }, request: { query: undefined as unknown as Record<string, unknown> } };
+    const ctx: StubPolicyContext = {
+      state: { user: member },
+      request: { query: undefined as unknown as Record<string, unknown> },
+    };
     await expect(run(ctx).result).resolves.toBe(true);
     expect(ctx.request.query).toEqual({ filters: { user: { id: 42 } } });
   });
 
   it("does not pin a status (no draft & publish) and reads no data", async () => {
-    const ctx = policyContext(member, { query: { status: "draft", publicationFilter: "never-published" } });
+    const ctx = policyContext(member, {
+      query: { status: "draft", publicationFilter: "never-published" },
+    });
     const { result, strapi } = run(ctx);
     await expect(result).resolves.toBe(true);
     expect(ctx.request.query).toEqual({

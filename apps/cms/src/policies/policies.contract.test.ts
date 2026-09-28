@@ -55,7 +55,16 @@ const ROLE_TYPES = [
 type RoleType = (typeof ROLE_TYPES)[number];
 
 /** Spellings that must never be read as a role (every check is exact). */
-const LOOKALIKE_ROLES = ["Admin_role", "ADMIN_ROLE", "admin", " editor", "Editor", "public", "superuser", ""];
+const LOOKALIKE_ROLES = [
+  "Admin_role",
+  "ADMIN_ROLE",
+  "admin",
+  " editor",
+  "Editor",
+  "public",
+  "superuser",
+  "",
+];
 
 const ROLE_ID: Record<RoleType, number> = {
   admin_role: 1,
@@ -125,8 +134,18 @@ function fixture(): Fixture {
         user(STRANGER, "member", 11),
       ],
       [DEPARTMENT]: [
-        { id: 10, documentId: DEPT_ENG, name: "Engineering", publishedAt: "2026-01-01T00:00:00.000Z" },
-        { id: 11, documentId: DEPT_OPS, name: "Operations", publishedAt: "2026-01-01T00:00:00.000Z" },
+        {
+          id: 10,
+          documentId: DEPT_ENG,
+          name: "Engineering",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+        },
+        {
+          id: 11,
+          documentId: DEPT_OPS,
+          name: "Operations",
+          publishedAt: "2026-01-01T00:00:00.000Z",
+        },
       ],
       [TEAM]: [
         {
@@ -163,32 +182,69 @@ function fixture(): Fixture {
   });
 
   const published = { status: "published" as const };
-  const spacePublic = strapi.seedDocument(WIKI_SPACE, { title: "Handbook", visibility: "public" }, published);
+  const spacePublic = strapi.seedDocument(
+    WIKI_SPACE,
+    { title: "Handbook", visibility: "public" },
+    published,
+  );
   const spaceOps = strapi.seedDocument(
     WIKI_SPACE,
     { title: "Ops", visibility: "department", department: { id: 11 } },
     published,
   );
-  const spaceRef = (seeded: { published: { id: number } | null }) => ({ id: seeded.published?.id ?? 0 });
+  const spaceRef = (seeded: { published: { id: number } | null }) => ({
+    id: seeded.published?.id ?? 0,
+  });
   const pageOwn = strapi.seedDocument(
     WIKI_PAGE,
-    { title: "Own", space: spaceRef(spacePublic), author: { id: OWNER }, department: { id: 10 }, team: { id: 30 } },
+    {
+      title: "Own",
+      space: spaceRef(spacePublic),
+      author: { id: OWNER },
+      department: { id: 10 },
+      team: { id: 30 },
+    },
     published,
   );
   const pageForeign = strapi.seedDocument(
     WIKI_PAGE,
-    { title: "Foreign", space: spaceRef(spaceOps), author: { id: STRANGER }, department: { id: 11 } },
+    {
+      title: "Foreign",
+      space: spaceRef(spaceOps),
+      author: { id: STRANGER },
+      department: { id: 11 },
+    },
     published,
   );
-  strapi.seedDocument("api::wiki-revision.wiki-revision", { page: { id: pageOwn.published?.id ?? 0 } }, published);
+  strapi.seedDocument(
+    "api::wiki-revision.wiki-revision",
+    { page: { id: pageOwn.published?.id ?? 0 } },
+    published,
+  );
 
   strapi.seedDocument("api::announcement.announcement", { title: "All" }, published);
-  strapi.seedDocument("api::announcement.announcement", { title: "Ops", department: { id: 11 } }, published);
+  strapi.seedDocument(
+    "api::announcement.announcement",
+    { title: "Ops", department: { id: 11 } },
+    published,
+  );
   strapi.seedDocument("api::document.document", { title: "All", departments: [] }, published);
-  strapi.seedDocument("api::document.document", { title: "Ops", departments: [{ id: 11 }] }, published);
+  strapi.seedDocument(
+    "api::document.document",
+    { title: "Ops", departments: [{ id: 11 }] },
+    published,
+  );
   strapi.seedDocument("api::quick-link.quick-link", { title: "All", departments: [] }, published);
-  strapi.seedDocument("api::quick-link.quick-link", { title: "Ops", departments: [{ id: 11 }] }, published);
-  strapi.seedDocument("api::poll.poll", { question: "All", audience: "all", departments: [] }, published);
+  strapi.seedDocument(
+    "api::quick-link.quick-link",
+    { title: "Ops", departments: [{ id: 11 }] },
+    published,
+  );
+  strapi.seedDocument(
+    "api::poll.poll",
+    { question: "All", audience: "all", departments: [] },
+    published,
+  );
   strapi.seedDocument(
     "api::poll.poll",
     { question: "Ops", audience: "departments", departments: [{ id: 11 }] },
@@ -200,9 +256,16 @@ function fixture(): Fixture {
     published,
   );
   const course = strapi.seedDocument("api::course.course", { title: "Course" }, published);
-  strapi.seedDocument("api::lesson.lesson", { title: "Lesson", course: { id: course.published?.id ?? 0 } }, published);
+  strapi.seedDocument(
+    "api::lesson.lesson",
+    { title: "Lesson", course: { id: course.published?.id ?? 0 } },
+    published,
+  );
   const draftCourse = strapi.seedDocument("api::course.course", { title: "Draft course" });
-  strapi.seedDocument("api::lesson.lesson", { title: "Orphan", course: { id: draftCourse.draft?.id ?? 0 } });
+  strapi.seedDocument("api::lesson.lesson", {
+    title: "Orphan",
+    course: { id: draftCourse.draft?.id ?? 0 },
+  });
 
   return {
     strapi,
@@ -240,13 +303,20 @@ interface PolicyContract {
   anonymous: "deny" | "filter";
   cases: readonly ContractCase[];
   /** A request the member (105) may make: params and body for the positive branch. */
-  ownRequest?: (ids: Record<string, string>) => { params?: Record<string, unknown>; body?: unknown };
+  ownRequest?: (ids: Record<string, string>) => {
+    params?: Record<string, unknown>;
+    body?: unknown;
+  };
 }
 
 const ADMIN_EDITOR = ["admin_role", "editor"] as const;
 const ADMIN_ONLY = ["admin_role"] as const;
 
-const read = (bypass: readonly RoleType[], pinsStatus: boolean, config?: Record<string, unknown>): ContractCase => ({
+const read = (
+  bypass: readonly RoleType[],
+  pinsStatus: boolean,
+  config?: Record<string, unknown>,
+): ContractCase => ({
   config,
   bypass,
   injectsFilter: true,
@@ -255,15 +325,43 @@ const read = (bypass: readonly RoleType[], pinsStatus: boolean, config?: Record<
 
 const CONTRACTS: Record<string, PolicyContract> = {
   // Personal data: admin_role only (the /manage report), never editor.
-  "acknowledgement-visibility": { kind: "read-filter", anonymous: "deny", cases: [read(ADMIN_ONLY, false)] },
-  "lesson-progress-visibility": { kind: "read-filter", anonymous: "deny", cases: [read(ADMIN_ONLY, false)] },
-  "notification-visibility": { kind: "read-filter", anonymous: "deny", cases: [read(ADMIN_ONLY, false)] },
+  "acknowledgement-visibility": {
+    kind: "read-filter",
+    anonymous: "deny",
+    cases: [read(ADMIN_ONLY, false)],
+  },
+  "lesson-progress-visibility": {
+    kind: "read-filter",
+    anonymous: "deny",
+    cases: [read(ADMIN_ONLY, false)],
+  },
+  "notification-visibility": {
+    kind: "read-filter",
+    anonymous: "deny",
+    cases: [read(ADMIN_ONLY, false)],
+  },
   // Content visibility: admin_role and editor author and moderate.
-  "announcement-visibility": { kind: "read-filter", anonymous: "filter", cases: [read(ADMIN_EDITOR, true)] },
-  "document-visibility": { kind: "read-filter", anonymous: "filter", cases: [read(ADMIN_EDITOR, true)] },
-  "quick-link-visibility": { kind: "read-filter", anonymous: "filter", cases: [read(ADMIN_EDITOR, true)] },
+  "announcement-visibility": {
+    kind: "read-filter",
+    anonymous: "filter",
+    cases: [read(ADMIN_EDITOR, true)],
+  },
+  "document-visibility": {
+    kind: "read-filter",
+    anonymous: "filter",
+    cases: [read(ADMIN_EDITOR, true)],
+  },
+  "quick-link-visibility": {
+    kind: "read-filter",
+    anonymous: "filter",
+    cases: [read(ADMIN_EDITOR, true)],
+  },
   // comment/reaction have no draft & publish: no status pin.
-  "comment-target-visibility": { kind: "read-filter", anonymous: "filter", cases: [read(ADMIN_EDITOR, false)] },
+  "comment-target-visibility": {
+    kind: "read-filter",
+    anonymous: "filter",
+    cases: [read(ADMIN_EDITOR, false)],
+  },
   // Decision 02: admin_role/editor read every poll (authoring); nobody reads anonymously.
   "poll-visibility": { kind: "read-filter", anonymous: "deny", cases: [read(ADMIN_EDITOR, true)] },
   "wiki-visibility": {
@@ -301,7 +399,12 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [
       { bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false },
       // update: editing an ad is an owner/admin matter.
-      { config: { bypassRoles: ["admin_role"] }, bypass: ADMIN_ONLY, injectsFilter: false, pinsStatus: false },
+      {
+        config: { bypassRoles: ["admin_role"] },
+        bypass: ADMIN_ONLY,
+        injectsFilter: false,
+        pinsStatus: false,
+      },
       // delete: editors keep the takedown.
       {
         config: { bypassRoles: ["admin_role", "editor"] },
@@ -390,7 +493,8 @@ beforeAll(async () => {
   for (const name of POLICY_NAMES) {
     const loaded: unknown = await import(join(__dirname, `${name}.ts`));
     const handler = (loaded as { default?: unknown }).default;
-    if (typeof handler !== "function") throw new Error(`${name}: the default export is not a policy function`);
+    if (typeof handler !== "function")
+      throw new Error(`${name}: the default export is not a policy function`);
     policies.set(name, handler as PolicyFn);
   }
 });
@@ -447,7 +551,10 @@ const IDLESS: Caller[] = ROLE_TYPES.map((type) => ({
 const ROLE_CALLERS: Caller[] = [
   ...ROLE_TYPES.map((type) => ({ label: type, user: { id: USER_ID[type], role: roleOf(type) } })),
   { label: "stranger member", user: { id: STRANGER, role: roleOf("member") } },
-  ...LOOKALIKE_ROLES.map((type) => ({ label: `lookalike "${type}"`, user: { id: OWNER, role: { id: 99, type } } })),
+  ...LOOKALIKE_ROLES.map((type) => ({
+    label: `lookalike "${type}"`,
+    user: { id: OWNER, role: { id: 99, type } },
+  })),
 ];
 
 const ALL_CALLERS = [...ANONYMOUS, ...ROLELESS, ...IDLESS, ...ROLE_CALLERS];
@@ -519,7 +626,8 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
             const ok =
               "result" in outcome
                 ? typeof outcome.result === "boolean"
-                : contract.kind === "write-allowlist" && outcome.error instanceof errors.ValidationError;
+                : contract.kind === "write-allowlist" &&
+                  outcome.error instanceof errors.ValidationError;
             if (!ok) {
               failures.push(
                 `${caller.label} params=${JSON.stringify(param)} body=${JSON.stringify(body)} ` +
@@ -564,24 +672,33 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     // Without a numeric id the caller owns nothing, not even a row whose
     // owner is gone. users-permissions always sets a database user, so this
     // is defence in depth.
-    (KNOWN_IDLESS_OWNERS.has(name) ? it.fails : it)("never lets a caller without an id own a row", async () => {
-      const { strapi, ids } = fixture();
-      const own = contract.ownRequest?.(ids) ?? {};
-      const passed: string[] = [];
-      for (const { config, bypass } of contract.cases) {
-        for (const caller of IDLESS) {
-          if (bypass.includes(caller.user?.role?.type as RoleType)) continue;
-          for (const param of targetParams(ids)) {
-            const ctx = policyContext(caller.user, { query: CLIENT_QUERY, params: param, body: own.body });
-            const outcome = await run(name, config, ctx, strapi);
-            if ("result" in outcome && outcome.result === true) {
-              passed.push(`${caller.label} params=${JSON.stringify(param)} config=${JSON.stringify(config)}`);
+    (KNOWN_IDLESS_OWNERS.has(name) ? it.fails : it)(
+      "never lets a caller without an id own a row",
+      async () => {
+        const { strapi, ids } = fixture();
+        const own = contract.ownRequest?.(ids) ?? {};
+        const passed: string[] = [];
+        for (const { config, bypass } of contract.cases) {
+          for (const caller of IDLESS) {
+            if (bypass.includes(caller.user?.role?.type as RoleType)) continue;
+            for (const param of targetParams(ids)) {
+              const ctx = policyContext(caller.user, {
+                query: CLIENT_QUERY,
+                params: param,
+                body: own.body,
+              });
+              const outcome = await run(name, config, ctx, strapi);
+              if ("result" in outcome && outcome.result === true) {
+                passed.push(
+                  `${caller.label} params=${JSON.stringify(param)} config=${JSON.stringify(config)}`,
+                );
+              }
             }
           }
         }
-      }
-      expect(passed).toEqual([]);
-    });
+        expect(passed).toEqual([]);
+      },
+    );
   }
 
   it.each(contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const))(
@@ -599,7 +716,12 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
         const untouched =
           JSON.stringify(ctx.request.query) === JSON.stringify(CLIENT_QUERY) &&
           JSON.stringify(ctx.request.body) === JSON.stringify(body);
-        if ("result" in outcome && outcome.result === true && untouched && strapi.calls.length === 0) {
+        if (
+          "result" in outcome &&
+          outcome.result === true &&
+          untouched &&
+          strapi.calls.length === 0
+        ) {
           bypassed.push(String(caller.user?.role?.type));
         }
       }
@@ -611,7 +733,9 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     it.each(contract.cases.map((c) => [JSON.stringify(c.config ?? null), c] as const))(
       "writes onto the real request query, $and-narrowing the client filter (config %s)",
       async (_config, contractCase) => {
-        const callers: Caller[] = [{ label: "member", user: { id: OWNER, role: roleOf("member") } }];
+        const callers: Caller[] = [
+          { label: "member", user: { id: OWNER, role: roleOf("member") } },
+        ];
         if (contract.anonymous === "filter") callers.push({ label: "anonymous", user: undefined });
         for (const caller of callers) {
           const decoy = { filters: "DECOY", status: "DECOY" };
@@ -641,7 +765,9 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
           // Without a client filter the clause stands alone (never an empty $and).
           if (contractCase.injectsFilter) {
             const bare = policyContext(caller.user, {});
-            expect(await run(name, contractCase.config, bare), caller.label).toEqual({ result: true });
+            expect(await run(name, contractCase.config, bare), caller.label).toEqual({
+              result: true,
+            });
             expect(bare.request.query.filters, caller.label).toBeDefined();
             expect(bare.request.query.filters, caller.label).not.toHaveProperty("$and");
           }
@@ -658,7 +784,10 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
       for (const { config, bypass } of contract.cases) {
         if (bypass.includes(type)) continue;
         const decoy = { filters: "DECOY" };
-        const ctx = policyContext({ id: USER_ID[type], role: roleOf(type) }, { ...own, query: CLIENT_QUERY, decoy });
+        const ctx = policyContext(
+          { id: USER_ID[type], role: roleOf(type) },
+          { ...own, query: CLIENT_QUERY, decoy },
+        );
         const body = ctx.request.body as { data?: unknown } | undefined;
         const sent = body?.data;
         expect(await run(name, config, ctx)).toEqual({ result: true });
