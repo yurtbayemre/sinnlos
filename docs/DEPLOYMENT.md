@@ -158,13 +158,23 @@ sign-in is unaffected.
    (`MS_TENANT_ID`) and the **Application (client) ID** (`MS_CLIENT_ID`),
    both GUIDs.
 
-### Step 2 — Front-channel logout URL
+### Step 2 — Sign-out redirect URI
 
-**Authentication** → **Front-channel logout URL**: `${WEB_PUBLIC_URL}/sign-in`.
-Sign-out sends Microsoft users to
-`https://login.microsoftonline.com/<tenant>/oauth2/v2.0/logout`, which returns
-them there. Without it the intranet session ends but the Microsoft session
-stays, and the next sign-in skips the password prompt.
+**Authentication** → platform **Web** → **Add URI**:
+`${WEB_PUBLIC_URL}/sign-in`, a second redirect URI next to the callback of
+step 1 (and `http://localhost:3000/sign-in` for local development). *Sign
+out* ends the intranet session, then sends Microsoft users to
+`https://login.microsoftonline.com/<tenant>/oauth2/v2.0/logout` with
+`post_logout_redirect_uri=${WEB_PUBLIC_URL}/sign-in`, which ends their
+Microsoft session as well. Microsoft only sends them back to that address
+when it is one of the app's registered redirect URIs; without it they stay
+on Microsoft's generic "You signed out" page (the intranet session is gone
+either way).
+
+Leave the **Front-channel logout URL** empty. It is a different mechanism
+(single sign-out: Microsoft calls it when the user signs out of *another*
+app), which Sinnlos does not implement: signing out elsewhere does not end
+an intranet session, `ENTRA_SESSION_TTL` does.
 
 ### Step 3 — Client secret
 
@@ -287,11 +297,14 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
    plus `department=` / `manager=` when those syncs are on. In dry-run,
    `role=would member->editor` or `role=new->member would new->admin_role`
    shows what `on` would do; nothing is changed for existing users.
-4. Switch to `ENTRA_SYNC_MODE=on` and deploy. The next sign-in of each user
+4. Sign out as a Microsoft user: the browser passes Microsoft's sign-out and
+   lands on `/sign-in`. Staying on Microsoft's "You signed out" page means
+   `${WEB_PUBLIC_URL}/sign-in` is missing from the redirect URIs (step 2).
+5. Switch to `ENTRA_SYNC_MODE=on` and deploy. The next sign-in of each user
    applies the role (`role=member->editor`); new users get their full role.
-5. Check a manual override: change a user's role in the admin panel, sign
+6. Check a manual override: change a user's role in the admin panel, sign
    them in again: `role=manual-override`, and the role stays.
-6. Then production, the same way (dry-run first if it holds existing users).
+7. Then production, the same way (dry-run first if it holds existing users).
 
 ### An e-mail address that already has an account (409)
 
@@ -790,12 +803,13 @@ DIGESTS_DISABLED=0
 > Strapi secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a
 > template placeholder (`<…>`, `change-me…`, `toBeModified…`).
 
-With Microsoft sign-in, register the production redirect URI and
-front-channel logout URL in the app registration (no cms redirect URI):
+With Microsoft sign-in, register both production redirect URIs (platform
+*Web*) in the app registration (no cms redirect URI, no front-channel logout
+URL):
 
 ```
 https://intranet.example.com/api/auth/callback/microsoft-entra-id
-https://intranet.example.com/sign-in   (front-channel logout URL)
+https://intranet.example.com/sign-in   (where sign-out returns to)
 ```
 
 ### 3.6 Deploy
@@ -5570,10 +5584,10 @@ az containerapp update \
 
 **Optional: Microsoft sign-in.** Both apps above run with `ENTRA_ENABLED=0`.
 To switch it on, follow [Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in):
-register `https://<web-fqdn>/api/auth/callback/microsoft-entra-id` as the
-redirect URI and `https://<web-fqdn>/sign-in` as the front-channel logout URL
-(`<web-fqdn>` is `$WEB_FQDN` above; without the redirect URI Microsoft
-answers `AADSTS50011`), then set on the cms `ENTRA_ENABLED=1`,
+register `https://<web-fqdn>/api/auth/callback/microsoft-entra-id` and
+`https://<web-fqdn>/sign-in` (where sign-out returns to) as Web redirect URIs
+(`<web-fqdn>` is `$WEB_FQDN` above; without the first Microsoft answers
+`AADSTS50011`), then set on the cms `ENTRA_ENABLED=1`,
 `MS_TENANT_ID`, `MS_CLIENT_ID`, `ENTRA_EXCHANGE_SECRET` and
 `ENTRA_SYNC_MODE=dry-run`, and on the web `ENTRA_ENABLED=1`,
 `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
@@ -5780,6 +5794,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `/admin` returns 502 for 60+ seconds | Strapi still building admin panel — wait and check `docker compose logs -f cms` |
 | `/sign-in` redirects loop | `AUTH_URL` doesn't match the host header — check env vars |
 | MS login `AADSTS50011` | Redirect URI missing in the Entra app registration — add `<WEB_PUBLIC_URL>/api/auth/callback/microsoft-entra-id` ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 1) |
+| Microsoft sign-out ends on Microsoft's "You signed out" page instead of `/sign-in` | `<WEB_PUBLIC_URL>/sign-in` is not a registered Web redirect URI of the app ([Microsoft Entra ID sign-in](#microsoft-entra-id-sign-in), step 2); the intranet session is already gone |
 | cms stops at boot with `[entra] ENTRA_ENABLED=1, but the Entra configuration is invalid: …`, or every web request answers 500 with `[auth] ENTRA_ENABLED=1, but …` in the web log | The named Entra setting is invalid (a tenant `common` or a non-GUID, a short `ENTRA_EXCHANGE_SECRET`, …). Fix it in `infra/.env` (`infra/deploy.sh --check` names the keys) or unset `ENTRA_ENABLED` |
 | `infra/deploy.sh` stops with `ERROR: ENTRA_ENABLED=1, but these Entra settings in infra/.env are invalid: …` | The same check before the deploy ([§3.6](#36-deploy)) |
 | Microsoft sign-in lands on `/sign-in` with *"Microsoft sign-in is unavailable right now"* | The web log says why: the cms is unreachable, the two `ENTRA_EXCHANGE_SECRET` values differ (401 unauthorized), or `ENTRA_ENABLED` is not `1` for the cms (404); or the cms could not reach Microsoft (its log: `[entra] exchange failed …`). See [the sign-in errors](#microsoft-entra-id-sign-in) |

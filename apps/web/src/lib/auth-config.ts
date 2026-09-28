@@ -110,7 +110,10 @@ export function parseEntraWebConfig(env: Env): EntraWebConfig | null {
 
 /**
  * Microsoft's end-session URL for the tenant, returning the browser to
- * `postLogoutRedirect` (register it as the app's front-channel logout URL).
+ * `postLogoutRedirect`. Microsoft only redirects there when it is one of the
+ * app registration's (Web) redirect URIs, so `${WEB_PUBLIC_URL}/sign-in` is
+ * registered as a second redirect URI. Not as the front-channel logout URL:
+ * that is Microsoft's single sign-out call, which this app does not use.
  */
 export function entraLogoutUrl(tenantId: string, postLogoutRedirect: string): string {
   const url = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/logout`);

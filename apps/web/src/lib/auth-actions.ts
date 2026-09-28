@@ -155,10 +155,11 @@ export async function registerLocalAccount(
  * /sign-in — the local session is still cleared.
  *
  * Note: the `post_logout_redirect_uri` value MUST be registered in the
- * Entra app registration under **Authentication → Front-channel logout
- * URL** (or the legacy **Logout URL** field). Otherwise Microsoft
- * silently ignores the parameter and lands the user on a generic
- * Microsoft "signed out" page instead of /sign-in.
+ * Entra app registration as one of its **Web redirect URIs** (next to the
+ * Auth.js callback). Otherwise Microsoft ignores the parameter and leaves
+ * the user on a generic Microsoft "signed out" page instead of /sign-in.
+ * The Front-channel logout URL is a different setting (single sign-out,
+ * called when the user signs out of another app) and is not used.
  */
 export async function signOutAction() {
   const session = await getSession();

@@ -89,9 +89,12 @@ In the Microsoft Entra admin center:
    `http://localhost:3000/api/auth/callback/microsoft-entra-id` (and the
    production equivalent). No cms redirect URI: Strapi's own Microsoft
    provider is not used and stays disabled.
-3. **Front-channel logout URL** (same blade): `http://localhost:3000/sign-in`.
-   Without it "Sign out" ends the intranet session but leaves the Microsoft
-   session, and the next sign-in skips the password prompt.
+3. **A second Web redirect URI** (same blade): `http://localhost:3000/sign-in`
+   (and the production equivalent). "Sign out" ends the intranet session and
+   the Microsoft session and returns there; Microsoft only redirects to a
+   registered redirect URI, so without it users end on Microsoft's "signed
+   out" page. Leave the *Front-channel logout URL* empty: single sign-out is
+   not implemented.
 4. **API permissions (delegated)**: `openid`, `profile`, `email`, `User.Read`;
    `User.Read.All` only with `ENTRA_SYNC_MANAGER=1`. Grant admin consent.
    (`GroupMember.Read.All` is not needed.)
