@@ -20,8 +20,9 @@ import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restr
  *     a poll to a guest; a new consumer (a notification, a digest section, a
  *     dashboard endpoint, a search index) fails this test until it is
  *     reviewed and decides through utils/poll-audience.ts,
- *   - notifications: no notification type or source is a poll, and polls
- *     have no lifecycles that could fan one out,
+ *   - notifications: no notification type or source is a poll, poll votes
+ *     have no lifecycle, and the poll lifecycle only validates `options`
+ *     before a write (FX20), so none can fan one out,
  *   - comments, reactions and read receipts cannot anchor on a poll,
  *   - live (SSE) pings: poll and poll-vote writes emit nothing, and the
  *     pings carry no content anyway (utils/live-events.ts),
@@ -145,10 +146,26 @@ describe("notifications", () => {
     }
   });
 
-  it("cannot be fanned out by a poll or vote lifecycle: neither type has one", () => {
-    for (const type of ["poll/content-types/poll", "poll-vote/content-types/poll-vote"]) {
-      expect(readdirSync(join(API_DIR, type)).sort(), type).toEqual(["schema.json"]);
-    }
+  it("cannot be fanned out by a poll or vote lifecycle: votes have none, polls only validate", async () => {
+    expect(readdirSync(join(API_DIR, "poll-vote/content-types/poll-vote")).sort()).toEqual([
+      "schema.json",
+    ]);
+    expect(readdirSync(join(API_DIR, "poll/content-types/poll")).sort()).toEqual([
+      "lifecycles.test.ts",
+      "lifecycles.ts",
+      "schema.json",
+    ]);
+    // FX20: the options check runs before the write; no after* hook, and it
+    // imports nothing but the pure rules.
+    const { default: hooks } = await import("./api/poll/content-types/poll/lifecycles");
+    expect(Object.keys(hooks).sort()).toEqual(["beforeCreate", "beforeUpdate"]);
+    const source = readFileSync(join(API_DIR, "poll/content-types/poll/lifecycles.ts"), "utf8");
+    const imports = [...source.matchAll(/from "([^"]+)"/g)].map((match) => match[1]).sort();
+    expect(imports).toEqual([
+      "../../../../utils/json-field",
+      "../../../../utils/poll-options",
+      "@strapi/utils",
+    ]);
   });
 });
 
