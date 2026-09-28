@@ -1,0 +1,183 @@
+## api.departments.list
+GET http://cms.test/api/departments?populate[head][fields][0]=displayName&populate[head][fields][1]=jobTitle&populate[teams]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.departments.one
+GET http://cms.test/api/departments?filters[slug][$eq]=research%20%26%20development&populate[head]=true&populate[teams][populate][lead]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.teams.list
+GET http://cms.test/api/teams?populate[department]=true&populate[lead][fields][0]=displayName&populate[lead][fields][1]=jobTitle&populate[members][fields][0]=displayName&populate[members][fields][1]=jobTitle&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.teams.one
+GET http://cms.test/api/teams?filters[slug][$eq]=platform&populate[department]=true&populate[lead]=true&populate[members]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.wiki.spaces
+GET http://cms.test/api/wiki-spaces?populate[department]=true&populate[team]=true&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.wiki.space
+GET http://cms.test/api/wiki-spaces?filters[slug][$eq]=hand%2Fbook&populate[pages][fields][0]=title&populate[pages][fields][1]=slug&populate[pages][fields][2]=summary cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.wiki.page
+GET http://cms.test/api/wiki-pages?filters[space][slug][$eq]=handbook&filters[slug][$eq]=on%20boarding&populate[author][fields][0]=displayName&populate[author][fields][1]=username&populate[lastEditor][fields][0]=displayName&populate[lastEditor][fields][1]=username&populate[space][fields][0]=name&populate[space][fields][1]=slug cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.announcements.list
+GET http://cms.test/api/announcements?populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort=pinned:desc,createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.announcements.requiringAck
+GET http://cms.test/api/announcements?filters[requiresAck][$eq]=true&populate[author][fields][0]=username&populate[author][fields][1]=email&populate[author][fields][2]=displayName&populate[author][fields][3]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.events.upcoming
+GET http://cms.test/api/events?filters[$or][0][start][$gte]=2026-09-27T22%3A00%3A00.000Z&filters[$or][1][end][$gte]=2026-09-28T10%3A00%3A00.000Z&filters[$or][2][allDay][$eq]=true&filters[$or][2][end][$gte]=2026-09-27T22%3A00%3A00.000Z&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.events.past
+GET http://cms.test/api/events?filters[start][$lt]=2026-09-27T22%3A00%3A00.000Z&filters[$or][0][end][$null]=true&filters[$or][1][end][$lt]=2026-09-27T22%3A00%3A00.000Z&filters[$or][2][end][$lt]=2026-09-28T10%3A00%3A00.000Z&filters[$or][2][allDay][$eq]=false&filters[$or][3][end][$lt]=2026-09-28T10%3A00%3A00.000Z&filters[$or][3][allDay][$null]=true&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=10 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.events.window
+GET http://cms.test/api/events?filters[start][$lt]=2026-09-28T10%3A00%3A00.000Z&filters[$or][0][end][$gte]=2026-08-31T22%3A00%3A00.000Z&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=2026-08-31T22%3A00%3A00.000Z&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.events.rsvpSummaries
+GET http://cms.test/api/event-rsvps/summary?targets=k3m9x0000000000000000000,k3m9x0000000000000000001,k3m9x0000000000000000002,k3m9x0000000000000000003,k3m9x0000000000000000004,k3m9x0000000000000000005,k3m9x0000000000000000006,k3m9x0000000000000000007,k3m9x0000000000000000008,k3m9x0000000000000000009,k3m9x0000000000000000010,k3m9x0000000000000000011,k3m9x0000000000000000012,k3m9x0000000000000000013,k3m9x0000000000000000014,k3m9x0000000000000000015,k3m9x0000000000000000016,k3m9x0000000000000000017,k3m9x0000000000000000018,k3m9x0000000000000000019,k3m9x0000000000000000020,k3m9x0000000000000000021,k3m9x0000000000000000022,k3m9x0000000000000000023,k3m9x0000000000000000024,k3m9x0000000000000000025,k3m9x0000000000000000026,k3m9x0000000000000000027,k3m9x0000000000000000028,k3m9x0000000000000000029,k3m9x0000000000000000030,k3m9x0000000000000000031,k3m9x0000000000000000032,k3m9x0000000000000000033,k3m9x0000000000000000034,k3m9x0000000000000000035,k3m9x0000000000000000036,k3m9x0000000000000000037,k3m9x0000000000000000038,k3m9x0000000000000000039,k3m9x0000000000000000040,k3m9x0000000000000000041,k3m9x0000000000000000042,k3m9x0000000000000000043,k3m9x0000000000000000044,k3m9x0000000000000000045,k3m9x0000000000000000046,k3m9x0000000000000000047,k3m9x0000000000000000048,k3m9x0000000000000000049 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/event-rsvps/summary?targets=k3m9x0000000000000000050,k3m9x0000000000000000051 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.polls.list
+GET http://cms.test/api/polls?sort=createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.polls.results
+GET http://cms.test/api/polls/7/results cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/polls/k3m9x0000000000000000001/results cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.documents.list
+GET http://cms.test/api/documents?populate[file]=true&populate[departments]=true&populate[uploadedBy]=true&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.kudos.list
+GET http://cms.test/api/kudos-entries?populate[from]=true&populate[to]=true&sort=createdAt:desc&pagination[pageSize]=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.classifieds.list
+GET http://cms.test/api/classifieds?filters[expiresAt][$gte]=2026-09-28&filters[category][$eq]=service-offer&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/classifieds?filters[expiresAt][$gte]=2026-09-28&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.classifieds.mine
+GET http://cms.test/api/classifieds?filters[author][id][$eq]=7&populate[images]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.classifieds.one
+GET http://cms.test/api/classifieds?filters[id][$eq]=12&populate[images]=true&populate[author][fields][0]=displayName&populate[author][fields][1]=email&populate[author][fields][2]=jobTitle cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.quickLinks.list
+GET http://cms.test/api/quick-links?sort[0]=order:asc&sort[1]=label:asc&sort[2]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## api.celebrations
+GET http://cms.test/api/celebrations?window=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## teams.fetchAllTeams
+GET http://cms.test/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## users.fetchAllUsers()
+GET http://cms.test/api/users?sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## users.fetchAllUsers(fields[0]=id)
+GET http://cms.test/api/users?fields[0]=id&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## users.fetchAllUsers(sorted)
+GET http://cms.test/api/users?fields[0]=displayName&sort=displayName:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## acknowledgements.fetchMyAnnouncementAcks
+GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&sort=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## acknowledgements.fetchAnnouncementAckIndex
+GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann%20doc%200&filters[targetDocumentId][$in][1]=ann%20doc%201&filters[targetDocumentId][$in][2]=ann%20doc%202&filters[targetDocumentId][$in][3]=ann%20doc%203&filters[targetDocumentId][$in][4]=ann%20doc%204&filters[targetDocumentId][$in][5]=ann%20doc%205&filters[targetDocumentId][$in][6]=ann%20doc%206&filters[targetDocumentId][$in][7]=ann%20doc%207&filters[targetDocumentId][$in][8]=ann%20doc%208&filters[targetDocumentId][$in][9]=ann%20doc%209&filters[targetDocumentId][$in][10]=ann%20doc%2010&filters[targetDocumentId][$in][11]=ann%20doc%2011&filters[targetDocumentId][$in][12]=ann%20doc%2012&filters[targetDocumentId][$in][13]=ann%20doc%2013&filters[targetDocumentId][$in][14]=ann%20doc%2014&filters[targetDocumentId][$in][15]=ann%20doc%2015&filters[targetDocumentId][$in][16]=ann%20doc%2016&filters[targetDocumentId][$in][17]=ann%20doc%2017&filters[targetDocumentId][$in][18]=ann%20doc%2018&filters[targetDocumentId][$in][19]=ann%20doc%2019&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann%20doc%2020&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.fetchCourses
+GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.fetchCourseBySlug
+GET http://cms.test/api/courses?filters[slug][$eq]=security%20%26%20safety&populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.fetchLessonByDocumentId
+GET http://cms.test/api/lessons?filters[documentId][$eq]=lesson%2Fdoc%201&populate[course][fields][0]=title&populate[course][fields][1]=slug&populate[course][fields][2]=documentId cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.fetchCourseProgress
+GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&filters[targetDocumentId][$in][1]=lesson%20doc%202&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## training.fetchMyProgress
+GET http://cms.test/api/lesson-progresses?fields[0]=targetDocumentId&fields[1]=completedAt&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## viewer.getViewer
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## topbar.getNotifications
+GET http://cms.test/api/notifications?filters[recipient][id][$eq]=1&filters[readAt][$null]=true&fields[0]=id&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/notifications?filters[recipient][id][$eq]=1&sort=createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(department)
+GET http://cms.test/api/departments?fields[0]=name&fields[1]=slug&fields[2]=description&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(team)
+GET http://cms.test/api/teams?fields[0]=name&fields[1]=slug&fields[2]=description&populate[department][fields][0]=name&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(wiki-space)
+GET http://cms.test/api/wiki-spaces?fields[0]=name&fields[1]=slug&fields[2]=description&sort[0]=name:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(wiki-page)
+GET http://cms.test/api/wiki-pages?fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&sort[1]=id:asc&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(announcement)
+GET http://cms.test/api/announcements?fields[0]=title&populate[author][fields][0]=displayName&sort[0]=pinned:desc&sort[1]=createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(event)
+GET http://cms.test/api/events?filters[start][$gte]=2026-09-27T22%3A00%3A00.000Z&fields[0]=title&fields[1]=start&sort[0]=start:asc&pagination[pageSize]=50 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(poll)
+GET http://cms.test/api/polls?fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&pagination[pageSize]=20 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.loadPreload(document)
+GET http://cms.test/api/documents?fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=updatedAt:desc&sort[1]=id:desc&pagination[pageSize]=50 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.searchLive(member)
+GET http://cms.test/api/announcements?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][description][$containsi]=Ab%26c&fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/events?filters[title][$containsi]=Ab%26c&fields[0]=title&fields[1]=start&sort[0]=start:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/polls?filters[question][$containsi]=Ab%26c&fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/users?filters[$or][0][displayName][$containsi]=Ab%26c&filters[$or][1][jobTitle][$containsi]=Ab%26c&filters[$or][2][email][$containsi]=Ab%26c&fields[0]=displayName&fields[1]=username&fields[2]=jobTitle&populate[department][fields][0]=name&sort[0]=displayName:asc&sort[1]=id:asc&start=0&limit=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/wiki-pages?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## search.searchLive(guest)
+GET http://cms.test/api/announcements?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][description][$containsi]=Ab%26c&fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/events?filters[title][$containsi]=Ab%26c&fields[0]=title&fields[1]=start&sort[0]=start:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/polls?filters[question][$containsi]=Ab%26c&fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/users?filters[$or][0][displayName][$containsi]=Ab%26c&filters[$or][1][jobTitle][$containsi]=Ab%26c&fields[0]=displayName&fields[1]=username&fields[2]=jobTitle&populate[department][fields][0]=name&sort[0]=displayName:asc&sort[1]=id:asc&start=0&limit=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/wiki-pages?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.manage/acknowledgements
+GET http://cms.test/api/acknowledgements?filters[targetType][$eq]=announcement&filters[targetDocumentId][$in][0]=ann-doc-1&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/teams?populate[lead][fields][0]=username&populate[members][fields][0]=username&sort=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/users?fields[0]=id&fields[1]=username&fields[2]=displayName&fields[3]=email&fields[4]=blocked&populate[department][fields][0]=name&populate[role]=true&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.manage/analytics
+GET http://cms.test/api/announcements?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/comments?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/comments?sort=createdAt:desc&pagination[pageSize]=5&populate[author]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/documents?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/events?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/notifications?sort=createdAt:desc&pagination[pageSize]=1&filters[readAt][$null]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/polls?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/reactions?sort=createdAt:desc&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/search-logs/summary?days=30 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/wiki-pages?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/wiki-spaces?&pagination[pageSize]=1 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.manage/training
+GET http://cms.test/api/courses?populate[lessons][fields][0]=documentId&populate[lessons][fields][1]=title&populate[lessons][fields][2]=order&populate[coverImage]=true&sort[0]=title:asc&sort[1]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/lesson-progresses?filters[targetDocumentId][$in][0]=lesson-doc-1&fields[0]=targetDocumentId&populate[user][fields][0]=id&sort[0]=id:asc&pagination[page]=1&pagination[pageSize]=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/users?populate[role]=true&fields[0]=displayName&fields[1]=email&fields[2]=blocked&sort=id:asc&start=0&limit=100 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.people/[id]
+GET http://cms.test/api/users/7?populate[department]=true&populate[avatar]=true&populate[manager][populate][avatar]=true&populate[directReports][populate][avatar]=true&populate[teams][populate][department]=true&populate[role]=true cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+
+## page.profile
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
+GET http://cms.test/api/me cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
