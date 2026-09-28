@@ -838,7 +838,10 @@ departments, the guest-access fields), so an admin or editor outside a
 poll's departments, and a guest on a poll without guest voting, see its
 results with the vote buttons disabled. The page and the card address each
 poll by its documentId, so a republish while the page is open does not
-break the vote.
+break the vote, unless it changed the options: the card also sends the
+answer text it showed, and when a reorder or replacement moved that text
+the cms refuses the vote ("Poll options changed") and the card reloads,
+instead of recording whatever answer now sits at that position.
 
 The marketplace detail/edit pages show the edit/delete controls to the ad's
 owner and to `admin_role` (editors can still delete through the API, but the

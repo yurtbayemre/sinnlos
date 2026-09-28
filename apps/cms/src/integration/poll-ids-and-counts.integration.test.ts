@@ -14,7 +14,8 @@ import {
  *     or its published row id (the fallback); a vote by documentId lands on
  *     the published row, before and after an editor republishes the poll;
  *     a draft-only document and the draft row's id answer like a missing
- *     poll;
+ *     poll; a vote carrying the option text its card showed is refused
+ *     ("Poll options changed") after a republish moved that text;
  *   - FX20: the results come from one GROUP BY statement; for every poll the
  *     totals equal the plain row count per option (SELECT count(*) over the
  *     joined vote rows) and the rows the query engine returns for the poll,
@@ -141,6 +142,38 @@ describe.each(testEngines())("poll ids and counts on %s", (engine) => {
         });
         expect((await vote("department_head", String(ref), 0)).status, String(ref)).toBe(404);
       }
+    });
+
+    it("refuses a vote whose shown option a republish moved, and records it where the option now is", async () => {
+      const reordered = await t.strapi.documents(POLL).create({
+        data: { question: "IT reordered", options: ["A", "B", "C"] },
+        status: "published",
+      });
+      // An admin-panel edit reorders the answers while a card showing the
+      // old order is open.
+      await t.strapi.documents(POLL).update({
+        documentId: reordered.documentId,
+        data: { options: ["C", "A", "B"] },
+      });
+      await t.strapi.documents(POLL).publish({ documentId: reordered.documentId });
+      const { published } = await rowIds(reordered.documentId);
+
+      const stale = await t.api<{ error?: { message?: string } }>(
+        "member",
+        `/api/polls/${reordered.documentId}/vote`,
+        { json: { optionIndex: 0, option: "A" } },
+      );
+      expect(stale.status).toBe(400);
+      expect(stale.body.error?.message).toBe("Poll options changed");
+      expect(await pollOfVotes(t.fixtures.users.member.id)).not.toContain(published[0]);
+
+      // The reloaded card sends the new index of the same answer.
+      const fresh = await t.api("member", `/api/polls/${reordered.documentId}/vote`, {
+        json: { optionIndex: 1, option: "A" },
+      });
+      expect(fresh.status).toBe(200);
+      const results = await t.api<Results>("member", `/api/polls/${reordered.documentId}/results`);
+      expect(results.body).toMatchObject({ counts: [0, 1, 0], total: 1, myVoteIndex: 1 });
     });
   });
 

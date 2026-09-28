@@ -98,19 +98,36 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
 }
 
 /**
+ * Longest option text a vote carries. The poll form caps an answer at 120
+ * characters; the admin panel has no cap, so this only bounds what a crafted
+ * call can make the action forward.
+ */
+const MAX_OPTION_TEXT = 10_000;
+
+/**
  * Casts the caller's vote. `pollRef` is the poll's documentId (DA01, the
  * address that survives a republish) or, from a card rendered before DA01,
  * the published row's numeric id; the cms accepts both and stores the vote
  * on the published row. A Server Action's arguments come from the client,
  * so anything else is refused before a request.
+ *
+ * `option` is the answer text the card showed at `optionIndex`. The cms
+ * stores the index, so after an edit that reordered or replaced the options
+ * it refuses a vote whose text no longer sits there (400 "Poll options
+ * changed") instead of recording a different answer; the card then shows
+ * voteFailed and reloads. Without it (an older card) the cms does not
+ * compare.
  */
-export async function votePoll(pollRef: string | number, optionIndex: number) {
+export async function votePoll(pollRef: string | number, optionIndex: number, option?: string) {
   const ref = parseEntryRef(pollRef);
   if (!ref) throw new Error("invalid poll reference");
+  if (option !== undefined && (typeof option !== "string" || option.length > MAX_OPTION_TEXT)) {
+    throw new Error("invalid poll option");
+  }
   const address = "documentId" in ref ? ref.documentId : String(ref.id);
   const result = await strapi<unknown>(`/api/polls/${address}/vote`, {
     method: "POST",
-    body: JSON.stringify({ optionIndex }),
+    body: JSON.stringify(option === undefined ? { optionIndex } : { optionIndex, option }),
   });
   // Poll results are read uncached (D-DC01) — refresh so a revisit and the
   // other polls on the page show current counts without a manual reload.

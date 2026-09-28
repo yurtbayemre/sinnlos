@@ -13,6 +13,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * An expired session (strapi()'s redirect on 401) escapes the action
  * instead of becoming "failed" (FX47).
  *
+ * votePoll addresses the poll by documentId (DA01) and carries the option
+ * text the card showed (the cms refuses the vote when an edit moved it);
+ * a bad reference or option text is refused before any request.
+ *
  * `@/lib/strapi`, `@/lib/viewer` and `next/cache` are mocked: only the
  * request the action builds matters here. `next/navigation` is the real
  * module, so the redirect error and unstable_rethrow are Next's own.
@@ -185,6 +189,29 @@ describe("votePoll", () => {
       method: "POST",
       body: JSON.stringify({ optionIndex: 0 }),
     });
+  });
+
+  it("sends the option text the card showed, so the cms can refuse a moved option", async () => {
+    await votePoll("k3m9x0000000000000000001", 1, "Sushi");
+    expect(strapiMock).toHaveBeenCalledWith("/api/polls/k3m9x0000000000000000001/vote", {
+      method: "POST",
+      body: JSON.stringify({ optionIndex: 1, option: "Sushi" }),
+    });
+    expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses an option that is not a string or is oversized, without a request", async () => {
+    for (const option of [1, null, { text: "Sushi" }, "x".repeat(10_001)]) {
+      await expect(
+        votePoll("k3m9x0000000000000000001", 0, option as unknown as string),
+        typeof option,
+      ).rejects.toThrow("invalid poll option");
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+    // The longest text the action forwards.
+    await votePoll("k3m9x0000000000000000001", 0, "x".repeat(10_000));
+    expect(strapiMock).toHaveBeenCalledTimes(1);
   });
 
   it("refuses a reference that is neither a documentId nor a row id, without a request", async () => {

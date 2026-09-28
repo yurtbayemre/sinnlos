@@ -1215,8 +1215,13 @@ change:
   `GET /api/polls/:id/results` take the poll's documentId, which the web now
   sends, or, as before, the numeric id of its published row. The vote still
   lands on the published row. An editor republishing a poll while someone
-  has `/polls` open no longer breaks that person's vote. A draft row's id
-  and a poll that was never published answer 404, like a missing poll.
+  has `/polls` open no longer breaks that person's vote, unless the
+  republish reordered or replaced the answers: the web also sends the
+  answer text the card showed, and the cms refuses a vote whose text is no
+  longer at that position (400 `Poll options changed`; the card shows its
+  error and reloads) instead of recording a different answer. A draft
+  row's id and a poll that was never published answer 404, like a missing
+  poll.
 - **Poll results in one SQL statement (FX20).** The database counts the
   results with one `GROUP BY` statement. The rule is the one of batch 8
   (each voter's first vote counts; votes of a deleted account count on

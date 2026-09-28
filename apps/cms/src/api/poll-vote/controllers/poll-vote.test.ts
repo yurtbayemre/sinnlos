@@ -23,6 +23,11 @@ import pollVoteController from "./poll-vote";
  *     cannot vote on this poll" on a visible poll without guest voting;
  *     results carry both flags and `canVote` from the same rule,
  *   - the voter is always the caller, whatever the body says,
+ *   - a vote that names the option text its card showed (`option`) is
+ *     refused with 400 "Poll options changed" when that text is no longer
+ *     at the index (options reordered or replaced after the card rendered),
+ *     before any vote query; a body without a string `option` is not
+ *     compared,
  *   - results never carry voter identities, but do carry the caller's own
  *     vote even on anonymous polls,
  *   - results count one ballot per voter: the voter's first ballot (the
@@ -491,6 +496,71 @@ describe("vote", () => {
     });
 
     for (const { votes } of [outOfBounds, closed, again]) expect(votes.create).not.toHaveBeenCalled();
+  });
+
+  it('refuses a vote whose shown option is no longer at its index ("Poll options changed")', async () => {
+    // OPEN's options are ["yes", "no"]; the cards rendered before an admin
+    // edit showed them reordered (["no", "yes"]) or with one replaced
+    // (["yes", "maybe"]). Both addresses resolve to the current options.
+    const cases: { id: unknown; body: { optionIndex: number; option: string } }[] = [
+      { id: OPEN.id, body: { optionIndex: 0, option: "no" } },
+      { id: OPEN.id, body: { optionIndex: 1, option: "yes" } },
+      { id: OPEN.id, body: { optionIndex: 1, option: "maybe" } },
+      { id: TWIN_DOCUMENT_ID, body: { optionIndex: 0, option: "no" } },
+    ];
+    for (const { id, body } of cases) {
+      const { controller, ctx, votes } = setup({ id, body });
+      await controller.vote(ctx);
+      const label = `${String(id)} ${JSON.stringify(body)}`;
+      expect(ctx.badRequest, label).toHaveBeenCalledWith("Poll options changed");
+      expect(votes.findOne, label).not.toHaveBeenCalled();
+      expect(votes.create, label).not.toHaveBeenCalled();
+      expect(ctx.send, label).not.toHaveBeenCalled();
+    }
+  });
+
+  it("records the vote after a republish that kept the shown option at its index (DA01)", async () => {
+    const { controller, ctx, votes } = setup({
+      id: TWIN_DOCUMENT_ID,
+      body: { optionIndex: 1, option: "no" },
+    });
+    await controller.vote(ctx);
+    expect(votes.create).toHaveBeenCalledWith({
+      data: { poll: TWIN_PUBLISHED.id, optionIndex: 1, voter: ENGINEER.id },
+    });
+    for (const spy of errorSpies) expect(ctx[spy], spy).not.toHaveBeenCalled();
+    expect(ctx.send).toHaveBeenCalledOnce();
+  });
+
+  it("does not compare a body without a string option (a web from before the check)", async () => {
+    for (const body of [
+      { optionIndex: 1 },
+      { optionIndex: 1, option: null },
+      { optionIndex: 1, option: 0 },
+    ]) {
+      const { controller, ctx, votes } = setup({ id: OPEN.id, body });
+      await controller.vote(ctx);
+      expect(votes.create, JSON.stringify(body)).toHaveBeenCalledWith({
+        data: { poll: OPEN.id, optionIndex: 1, voter: ENGINEER.id },
+      });
+      for (const spy of errorSpies) expect(ctx[spy], spy).not.toHaveBeenCalled();
+    }
+  });
+
+  it("checks the shown option only after the audience and bounds checks", async () => {
+    const outside = setup({
+      id: ENG_ONLY.id,
+      user: DESIGNER,
+      body: { optionIndex: 0, option: "stale" },
+    });
+    await outside.controller.vote(outside.ctx);
+    expect(outside.ctx.notFound).toHaveBeenCalledWith();
+    expect(outside.ctx.badRequest).not.toHaveBeenCalled();
+
+    const outOfBounds = setup({ id: OPEN.id, body: { optionIndex: 2, option: "maybe" } });
+    await outOfBounds.controller.vote(outOfBounds.ctx);
+    expect(outOfBounds.ctx.badRequest).toHaveBeenCalledWith("Invalid optionIndex");
+    expect(outOfBounds.ctx.badRequest).toHaveBeenCalledOnce();
   });
 
   it("records a member's vote in the audience with the caller as voter, ignoring body poll/voter", async () => {

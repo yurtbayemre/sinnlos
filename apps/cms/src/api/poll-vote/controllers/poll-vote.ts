@@ -32,7 +32,14 @@ import { isPollClosed } from "../../../utils/poll-close";
  *   - a guest who sees a poll votes only when guests may vote on it (403
  *     "Guests cannot vote on this poll" otherwise; only a guest gets there);
  *   - the voter is always the caller: the body's `poll`/`voter` are never
- *     read.
+ *     read;
+ *   - a vote stores an option INDEX, and the documentId address survives a
+ *     republish, so the web also sends the option text its card showed
+ *     (`option`): when the poll's options changed since (reordered or
+ *     replaced in the admin panel), that text no longer sits at the index
+ *     and the vote is refused with 400 "Poll options changed" instead of
+ *     recording a different answer (the card then reloads). A body without
+ *     a string `option` (a web from before this check) is not compared.
  * Results never name a voter. They include the caller's own vote even on
  * anonymous polls (FX20: the card needs it to show "you voted").
  *
@@ -46,8 +53,11 @@ import { isPollClosed } from "../../../utils/poll-close";
  * shows up as a ballot of a deleted account.
  */
 
-interface OptionIndexRow {
+/** The vote body the handler reads; anything else in it is ignored. */
+interface VoteBody {
   optionIndex?: unknown;
+  /** The option text the voter saw at `optionIndex` (optional, see above). */
+  option?: unknown;
 }
 
 interface IdRow {
@@ -62,8 +72,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     if (!user) return ctx.unauthorized();
 
     const body: unknown = ctx.request.body;
-    const optionIndex =
-      typeof body === "object" && body !== null ? (body as OptionIndexRow).optionIndex : undefined;
+    const fields: VoteBody = typeof body === "object" && body !== null ? (body as VoteBody) : {};
+    const { optionIndex, option: shownOption } = fields;
     if (!isOptionIndex(optionIndex)) return ctx.badRequest("optionIndex required");
 
     const [poll, viewer] = await Promise.all([
@@ -76,7 +86,13 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     // Only a guest can see a poll it may not vote on (guestsCanVote off).
     if (!canVoteOnPoll(poll, viewer)) return ctx.forbidden("Guests cannot vote on this poll");
 
-    if (optionIndex >= pollOptions(poll.options).length) return ctx.badRequest("Invalid optionIndex");
+    const options = pollOptions(poll.options);
+    if (optionIndex >= options.length) return ctx.badRequest("Invalid optionIndex");
+    // The card showed a different option at this index: the options were
+    // reordered or replaced after it rendered. Refused before any write.
+    if (typeof shownOption === "string" && options[optionIndex] !== shownOption) {
+      return ctx.badRequest("Poll options changed");
+    }
 
     // Closed iff now >= closesAt, the same rule as the web (utils/poll-close.ts).
     if (isPollClosed(poll.closesAt)) return ctx.badRequest("Poll is closed");
