@@ -900,6 +900,8 @@ pnpm typecheck:tests   # type-check every *.test.ts: tsconfig.test.json (web + i
 pnpm test              # vitest 4 unit tests from the repo root (also run in CI)
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
                        # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
+pnpm test:integration  # the real cms booted in process, driven over HTTP per role, on
+                       # SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job `integration`
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
@@ -930,6 +932,26 @@ declares Vite as a peer, and without the root devDependency pnpm would reuse
 Strapi's Vite 5. File snapshots (`toMatchFileSnapshot`, e.g.
 `infra/diagnostics/prod-perm-diff.sql`) are compared verbatim, with no
 trimming.
+
+`pnpm test:integration` (roadmap S11, `vitest.integration.config.ts`) is kept
+out of `pnpm test`. It compiles the cms once into a temp directory, then each
+suite in `apps/cms/src/integration/*.integration.test.ts` boots the real cms
+in the test process: `createStrapi` without the admin panel, the real
+`register()`/`bootstrap()`, a fresh SQLite file and, when
+`SINNLOS_TEST_PG_URL` is set, also a fresh Postgres 16 schema (same
+throwaway container as above). One account per role signs in through
+`/api/auth/local`, and the suites call the API over HTTP. They cover the
+demo seed's draft/published pairs, restarts and the org draft/publish boot
+guard, the removed generic routes, `?status=draft` on every draft & publish
+type, relation side channels, contact-field filters, guest polls, RSVP
+privacy, publish cycles (comment/reaction anchors, votes, RSVPs,
+notifications after the commit) and concurrent votes, RSVPs and reactions.
+The run is hermetic: loopback only, temp files and schemas removed, and the
+process pinned to `TZ=UTC` like the container. A run on both engines takes
+about one and a half minutes, most of it the per-suite boots. New suites use
+the harness in `apps/cms/src/integration/harness.test.helper.ts`
+(`createTestStrapi`, `loginAs`, `api`, `stop`; its header documents the
+fixtures and the stub seam for outbound calls).
 
 Safety nets for refactors (roadmap S03–S06, S09):
 
