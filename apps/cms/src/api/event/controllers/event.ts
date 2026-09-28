@@ -1,7 +1,8 @@
 import { factories } from "@strapi/strapi";
 
 import { parseEntryRef } from "../../../utils/entry-id";
-import { icsEventDateLines } from "../../../utils/ics-dates";
+import { buildIcs } from "../../../utils/ics";
+import { appTimeZone } from "../../../utils/time";
 
 export default factories.createCoreController("api::event.event", ({ strapi }) => ({
   /**
@@ -23,27 +24,11 @@ export default factories.createCoreController("api::event.event", ({ strapi }) =
     });
     if (!entry) return ctx.notFound();
 
-    // The documentId, not the row id: publishing re-creates the published
-    // row with a new id, and a calendar client would then import the same
-    // event a second time.
-    const uid = `event-${entry.documentId}@sinnlos`;
-
-    const lines = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//Sinnlos//Events//EN",
-      "BEGIN:VEVENT",
-      `UID:${uid}`,
-      // Timed events in UTC; all-day events as calendar days of APP_TIME_ZONE.
-      ...icsEventDateLines(entry, new Date()),
-      `SUMMARY:${(entry.title ?? "").replace(/[,;\\]/g, "\\$&")}`,
-    ];
-    if (entry.location) lines.push(`LOCATION:${entry.location.replace(/[,;\\]/g, "\\$&")}`);
-    if (entry.url) lines.push(`URL:${entry.url}`);
-    lines.push("END:VEVENT", "END:VCALENDAR");
-
-    ctx.set("Content-Type", "text/calendar; charset=utf-8");
-    ctx.set("Content-Disposition", `attachment; filename="${entry.title ?? "event"}.ics"`);
-    ctx.body = lines.join("\r\n");
+    // The file itself (UID by documentId, dates, escaping, folding, the
+    // RFC 6266 file name) is built by the pure utils/ics.ts (FX12).
+    const file = buildIcs(entry, { tz: appTimeZone(), now: new Date() });
+    ctx.set("Content-Type", file.contentType);
+    ctx.set("Content-Disposition", file.contentDisposition);
+    ctx.body = file.body;
   },
 }));
