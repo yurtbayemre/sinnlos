@@ -288,26 +288,26 @@ Strapi ships 22 collection types plus one routes-only API
 | **department** | Top-level org unit with head, members, teams, pages. Master data **without draft & publish**: one row per department with a stable id; saving in the admin is live immediately (no Publish/Unpublish), hiding a unit means deleting it |
 | **team** | Belongs to a department, has a lead and members. Like department: **no draft & publish**, one row per team, a save is live |
 | **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`) |
-| **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created |
+| **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement |
 | **comment** | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28) |
-| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement |
-| **kudos** | Peer recognition (`from` → `to` user, message, company value) |
-| **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles |
-| **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
+| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement. `create` toggles; with the optional boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store it; each create keeps the oldest copy and deletes the others right after its insert. Removing deletes every copy (also copies from an older release). Delete takes the documentId or the numeric id |
+| **kudos** | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id |
+| **notification** | Per-user notification rows (recipient, actor, link), fan-out via lifecycles. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
+| **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
 | **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**, capacity counts distinct "yes" users |
-| **poll** | Question + options, `closesAt`, `anonymous` flag, **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
+| **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
 | **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes. There are no generic `/api/poll-votes` routes |
 | **document** | File library entry; `departments` m2m — no relation = company-wide |
 | **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
 | **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
 | **course** | Training course (draft & publish): ordered lessons, `mandatory` flag, `completionMode` (`confirm` \| `quizGate` — quiz must be passed before completion unlocks). Maintained in the Strapi admin panel; the content api is read-only |
-| **lesson** | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check. First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers) |
+| **lesson** | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check (quiz text typed in the admin panel is parsed and stored as the array; a cleared quiz is stored as null). First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers) |
 | **lesson-progress** | Completion receipt per user + lesson, anchored on the lesson's `documentId` (survives re-publish); own-rows read policy, admin report at `/manage/training`. Course completion is derived at read time — a lesson added later re-opens the course |
 | **search-log** | Anonymous search telemetry (term + result count, deliberately NO user relation): write-only content api, aggregated admin-only `/search-logs/summary`, 90-day retention cron. Feeds the Meilisearch go/no-go decision |
 | **wiki-space** | Namespace for wiki pages with scoped visibility |
 | **wiki-page** | Markdown body, tags, parent/children, author, revisions |
 | **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below) |
+| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only |
 
 **Draft & publish.** announcement, course, document, event, lesson, poll,
 quick-link, wiki-space, wiki-page and wiki-revision keep Strapi's draft &
@@ -900,6 +900,40 @@ Strapi's Vite 5. File snapshots (`toMatchFileSnapshot`, e.g.
 `infra/diagnostics/prod-perm-diff.sql`) are compared verbatim, with no
 trimming.
 
+Safety nets for refactors (roadmap S03–S06, S09):
+
+- `apps/cms/src/test/strapi-stub.test.helper.ts` is the shared, typed Strapi
+  stub for cms unit tests: `db.query` with a where evaluator, select and
+  populate like the query engine, a `documents()` service with draft and
+  published twins, stubbed services, log spies and transactions with
+  `onCommit`. `strapi-stub.test.ts` checks it against the real
+  `@strapi/database` on SQLite. What it does not model throws: an unknown
+  operator, an `orderBy` on an unknown column or through a relation, a
+  Document Service param such as `locale` or `pagination`.
+- `apps/cms/src/policies/policies.contract.test.ts` holds every policy in
+  `src/policies` to strict booleans, its bypass table and the
+  `request.query` rules, and fails for a policy without a table entry.
+- `apps/cms/src/framework-contract.test.ts` pins the Strapi behaviour the
+  cms relies on, against the installed packages, `@strapi/upload`'s
+  `/uploads/(.*)` route included. **Run it before every `@strapi/*` bump**
+  (`pnpm vitest run apps/cms/src/framework-contract.test.ts`); its version
+  pin fails first on purpose.
+- `infra/contracts.test.ts` pins what the cms and the web both state: the
+  announcement audience rule, the YouTube parser, comment anchors, schema
+  enums against the web unions and constants, relation pairs, and the web
+  role sets against the permission matrix. Known gaps are listed in the file
+  and asserted as they are, so closing one means removing its entry. A web
+  union is checked against its list in the file only by `pnpm typecheck`
+  (the `typecheck:tests` step); `pnpm test` checks that list against the
+  schema. After changing a union in `apps/web/src/lib/types.ts`, run both.
+- The server actions in `apps/web/src/lib` have characterisation tests next
+  to them: the event, classified, acknowledgement, kudos, training and
+  notification actions (S09), and the auth, comment, poll and profile
+  actions. `announcement-live-actions.ts`, `locale-actions.ts` and
+  `search-action.ts` have none yet (search: roadmap WD06).
+  `/api/live/emit` is covered by `apps/web/src/lib/live-emit.test.ts`; its
+  logic lives in `live-emit.ts`.
+
 ## 8. Verification checklist
 
 - [ ] `pnpm install` completes cleanly
@@ -952,3 +986,15 @@ trimming.
       is an all-day entry
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
       `UID` is `event-<documentId>@sinnlos`, and `/events/abc/ics` answers 404
+- [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
+      real domain, since localhost can hide the Referer effect
+- [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`
+      show the *Page not found* card (like every `notFound()` page here
+      with HTTP status 200 and `noindex`: `loading.tsx` streams the shell
+      first) and send no request to the cms; with the cms stopped, `/profile` shows the error banner
+      and no editable profile form; stopping the cms after a page loaded, a
+      reaction click or *Mark all read* shows an inline error while the
+      page stays
+- [ ] The first Tab on an app page shows *Skip to content*; the theme
+      toggle switches on the first click also for a user whose system theme
+      is dark

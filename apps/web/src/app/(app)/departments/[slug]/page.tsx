@@ -4,6 +4,7 @@ import { Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { avatarThumbUrl } from "@/lib/config";
+import { tryFetch } from "@/lib/safe-fetch";
 import type { Department } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -13,13 +14,25 @@ interface Props {
   params: Promise<{ slug: string }>;
 }
 
+export async function generateMetadata({ params }: Props) {
+  const { slug } = await params;
+  // Same GET as the page's, sent once per render (Next's fetch dedupe).
+  const [t, { data }] = await Promise.all([
+    getTranslations("departments"),
+    tryFetch(() => api.departments.one(slug), "department-meta"),
+  ]);
+  const entry = data?.data?.[0] as Department | undefined;
+  return { title: entry?.name ?? t("title") };
+}
+
 export default async function DepartmentPage({ params }: Props) {
   const { slug } = await params;
   const t = await getTranslations("departments");
   const tTeams = await getTranslations("teams");
   const tCommon = await getTranslations("common");
-  // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
-  // retry prompt instead of a misleading 404.
+  // Detail-page error strategy (WD07, same on all detail pages): fetch
+  // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the
+  // page again, instead of a misleading 404; an unknown slug is a 404.
   const data = await api.departments.one(slug);
   const entry = data.data?.[0] as Department | undefined;
   if (!entry) notFound();

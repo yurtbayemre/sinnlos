@@ -3,32 +3,40 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
-import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchMyProgress } from "@/lib/training";
 import { courseCompletion, sortLessons } from "@/lib/training-shared";
 
+type Params = { params: Promise<{ slug: string }> };
+
+export async function generateMetadata({ params }: Params) {
+  const { slug } = await params;
+  // Same GET as the page's, sent once per render (Next's fetch dedupe).
+  const [t, { data }] = await Promise.all([
+    getTranslations("training"),
+    tryFetch(() => fetchCourseBySlug(slug), "course-meta"),
+  ]);
+  return { title: data?.title ?? t("title") };
+}
+
 /**
  * Course detail: ordered lesson list with per-lesson completion state
  * and a "continue" CTA pointing at the first open lesson (issue #29).
+ *
+ * Detail-page error strategy (WD07, same on all detail pages): an unknown
+ * course is a 404; a failed course read goes to (app)/error.tsx, whose
+ * "Try again" fetches the page again. The caller's progress is secondary:
+ * without it the status shows "–".
  */
-export default async function CoursePage({ params }: { params: Promise<{ slug: string }> }) {
+export default async function CoursePage({ params }: Params) {
   const { slug } = await params;
   const t = await getTranslations("training");
 
-  const [courseResult, progressResult] = await Promise.all([
-    tryFetch(() => fetchCourseBySlug(slug), "training"),
+  const [course, progressResult] = await Promise.all([
+    fetchCourseBySlug(slug),
     tryFetch(() => fetchMyProgress(), "training"),
   ]);
-  if (courseResult.failed) {
-    return (
-      <div className="space-y-6">
-        <FetchErrorBanner />
-      </div>
-    );
-  }
-  const course = courseResult.data;
   if (!course) notFound();
 
   const lessons = sortLessons(course.lessons ?? []);

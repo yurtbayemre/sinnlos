@@ -39,3 +39,30 @@ export function summarize(
     ...map.get(emoji)!,
   }));
 }
+
+/**
+ * Marks the emojis of the caller's own reactions that `summary` missed:
+ * getCommentSection summarises only the newest rows of a target, and an
+ * older own reaction must still show as pressed, or the next click asks for
+ * `reacted: true`, which the CMS answers with a no-op (FX28), and the user
+ * can never remove it. `ownRows` are the caller's rows of this target; each
+ * is re-checked for the target and the author (defense-in-depth, as in
+ * summarize). A row the summary missed was not counted either, so the
+ * count grows by one.
+ */
+export function withOwnReactions(
+  summary: ReactionSummary[],
+  ownRows: Reaction[],
+  userId: number,
+  target: CommentTarget,
+): ReactionSummary[] {
+  const own = new Set<EmojiType>();
+  for (const r of ownRows) {
+    if (matchesTarget(r, target) && r.author?.id === userId) own.add(r.emoji);
+  }
+  return summary.map((entry) =>
+    entry.reacted || !own.has(entry.emoji)
+      ? entry
+      : { ...entry, reacted: true, count: entry.count + 1 },
+  );
+}

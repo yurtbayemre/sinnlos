@@ -11,13 +11,17 @@
  * this point (bilingual text is hardcoded per the docs' guidance to
  * keep global-error minimal), styling is inline (globals.css/fonts come
  * from the root layout, which just failed).
+ *
+ * "Try again" calls `retry()` (Next 16.3), as (app)/error.tsx does (FX47):
+ * `reset()` only re-rendered the client tree without fetching the server
+ * content again, so after a CMS outage the button stayed on this page.
  */
 export default function GlobalError({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   return (
     <html lang="de">
@@ -41,11 +45,10 @@ export default function GlobalError({
             Etwas ist schiefgelaufen / Something went wrong
           </h1>
           <p style={{ fontSize: 14, color: "#9ca3af", margin: "0 0 16px" }}>
-            Das Intranet hat einen unerwarteten Fehler. Bitte erneut versuchen —
-            wenn es bleibt, sag der IT Bescheid.
+            Das Intranet hat einen unerwarteten Fehler. Bitte erneut versuchen — wenn es bleibt, sag
+            der IT Bescheid.
             <br />
-            The intranet hit an unexpected error. Please retry — if it persists,
-            tell IT.
+            The intranet hit an unexpected error. Please retry — if it persists, tell IT.
             {error.digest ? (
               <>
                 <br />
@@ -54,7 +57,7 @@ export default function GlobalError({
             ) : null}
           </p>
           <button
-            onClick={() => reset()}
+            onClick={() => retry()}
             style={{
               padding: "10px 18px",
               borderRadius: 12,

@@ -1,12 +1,14 @@
 import Link from "next/link";
+import { unstable_rethrow } from "next/navigation";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { canCreatePolls } from "@/lib/roles";
 import { api } from "@/lib/strapi";
+import { StrapiError } from "@/lib/strapi-error";
 import { getViewer } from "@/lib/viewer";
 import { isPollClosed } from "@/lib/poll-close";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Poll } from "@/lib/types";
+import type { Poll, PollResults } from "@/lib/types";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { PollCard } from "@/components/polls/poll-card";
@@ -29,17 +31,39 @@ export default async function PollsPage() {
   const canCreate = canCreatePolls(viewer.role);
   const polls = (data?.data ?? []) as Poll[];
 
-  const resultsArr = await Promise.all(polls.map((p) => api.polls.results(p.id).catch(() => null)));
+  // Per poll (FX47): an expired session's redirect (NEXT_REDIRECT) must
+  // reach Next.js; a 404 is a race (the poll was deleted, unpublished or
+  // retargeted after the list read, decision 02) and just drops the card;
+  // any other failure also shows the error banner.
+  let resultsFailed = false;
+  const resultsArr = await Promise.all(
+    polls.map((p) =>
+      api.polls.results(p.id).catch((e: unknown): PollResults | null => {
+        unstable_rethrow(e);
+        if (!(e instanceof StrapiError && e.status === 404)) {
+          console.error("[polls] results fetch failed", e);
+          resultsFailed = true;
+        }
+        return null;
+      }),
+    ),
+  );
 
   // Closed iff now >= closesAt: the rule the cms vote handler and the card use.
   const now = new Date();
   const active = polls.filter((p) => !isPollClosed(p.closesAt, now));
   const closed = polls.filter((p) => isPollClosed(p.closesAt, now));
 
-  const resultsMap = new Map<number, any>();
+  const resultsMap = new Map<number, PollResults>();
   polls.forEach((p, i) => {
-    if (resultsArr[i]) resultsMap.set(p.id, resultsArr[i]);
+    const results = resultsArr[i];
+    if (results) resultsMap.set(p.id, results);
   });
+  // A poll without results (404 race or failed read) renders no card.
+  const card = (p: Poll) => {
+    const results = resultsMap.get(p.id);
+    return results ? <PollCard key={p.id} results={results} viewerRole={viewer.role} /> : null;
+  };
 
   return (
     <div className="space-y-8">
@@ -55,7 +79,7 @@ export default async function PollsPage() {
         )}
       </PageHeader>
 
-      {failed && <FetchErrorBanner />}
+      {(failed || resultsFailed) && <FetchErrorBanner />}
 
       {polls.length === 0 ? (
         <PollsEmptyState viewerRole={viewer.role} />
@@ -67,26 +91,14 @@ export default async function PollsPage() {
                 <BarChart3 className="h-3.5 w-3.5" />
                 {t("active")}
               </div>
-              <div className="stagger grid gap-4 md:grid-cols-2">
-                {active.map((p) =>
-                  resultsMap.has(p.id) ? (
-                    <PollCard key={p.id} results={resultsMap.get(p.id)} viewerRole={viewer.role} />
-                  ) : null,
-                )}
-              </div>
+              <div className="stagger grid gap-4 md:grid-cols-2">{active.map(card)}</div>
             </section>
           )}
 
           {closed.length > 0 && (
             <section className="space-y-3">
               <div className="text-sm font-medium text-muted-foreground">{t("closed")}</div>
-              <div className="stagger grid gap-4 md:grid-cols-2">
-                {closed.map((p) =>
-                  resultsMap.has(p.id) ? (
-                    <PollCard key={p.id} results={resultsMap.get(p.id)} viewerRole={viewer.role} />
-                  ) : null,
-                )}
-              </div>
+              <div className="stagger grid gap-4 md:grid-cols-2">{closed.map(card)}</div>
             </section>
           )}
         </>

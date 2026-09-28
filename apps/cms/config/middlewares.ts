@@ -52,10 +52,14 @@ export default ({ env }: { env: Env }) => {
     },
     "strapi::session",
     "strapi::favicon",
-    // Routing-independent gate on the /uploads bytes (issue #21, K1): must run
-    // BEFORE strapi::public so it intercepts the koa-static route that would
-    // otherwise resolve `/api/../uploads/x` back into public/uploads and serve
-    // the bytes without a session. See src/middlewares/uploads-auth.ts.
+    // Routing-independent gate on the /uploads bytes (issue #21, K1). It must
+    // stay a GLOBAL middleware (listed here, not a route middleware): that is
+    // what lets it see `/api/../uploads/x` before any route handler, including
+    // the koa-static route that would resolve it back into public/uploads.
+    // Its position in this list does not matter: strapi::public registers
+    // routes instead of a middleware, and Strapi mounts all routes after all
+    // global middlewares (pinned in src/framework-contract.test.ts). See
+    // src/middlewares/uploads-auth.ts.
     "global::uploads-auth",
     // Case-variant / encoded spellings of Strapi's own /api/auth/* routes get
     // a 404 (D-EDGE-01): Traefik's PathPrefix(`/api/auth`) is case-sensitive,

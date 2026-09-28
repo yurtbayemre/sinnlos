@@ -3,6 +3,20 @@
 @tailwind utilities;
 
 @layer base {
+  /* Colour tokens are bare HSL triplets (`H S% L%`), used as
+     hsl(var(--x) / <alpha>) by tailwind.config.ts.
+
+     Text tokens (FX31): `text-primary` and `text-destructive` read
+     --primary-text / --destructive-text (tailwind.config.ts textColor),
+     while bg-, border- and ring- utilities keep the fill tokens. A fill
+     carries light text and wants a darker colour; text on the page
+     background wants a lighter one in dark mode. One token could not do
+     both (dark text-destructive was 1.9:1).
+
+     Contrast (WCAG AA, 4.5:1 for text) is pinned by
+     src/lib/theme-contrast.test.ts: foreground on its surface, each
+     *-foreground on its fill, each text token on background, card and the
+     tints the UI puts it on. Change a value here only together with it. */
   :root {
     --background: 0 0% 100%;
     --foreground: 222.2 47.4% 11.2%;
@@ -10,14 +24,19 @@
     --card-foreground: 222.2 47.4% 11.2%;
     --primary: 243 75% 59%;
     --primary-foreground: 210 40% 98%;
+    --primary-text: 243 75% 59%;
     --secondary: 210 40% 96.1%;
     --secondary-foreground: 222.2 47.4% 11.2%;
     --muted: 210 40% 96.1%;
     --muted-foreground: 215.4 16.3% 46.9%;
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
+    /* Darker than the former 0 84.2% 60.2% (3.8:1 as text, 3.6:1 under
+       white labels). The text token is darker still: the fetch-error
+       banner sets it at 80% opacity on a 5% destructive tint. */
+    --destructive: 0 72% 45%;
     --destructive-foreground: 210 40% 98%;
+    --destructive-text: 0 72% 40%;
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 243 75% 59%;
@@ -33,19 +52,25 @@
     --foreground: 210 40% 98%;
     --card: 222.2 47.4% 11%;
     --card-foreground: 210 40% 98%;
-    --primary: 243 75% 65%;
+    /* 63% (was 65%): white labels on bg-primary reach 4.9:1 (were 4.4:1). */
+    --primary: 243 75% 63%;
     /* Must stay light: dark indigo primary needs white label text — the old
        navy value put #0f172a on indigo (~3.9:1, below AA) on every
        bg-primary button in dark mode. */
     --primary-foreground: 210 40% 98%;
+    /* Lighter than the fill: text-primary on the dark page was 4.1:1. */
+    --primary-text: 243 85% 74%;
     --secondary: 217.2 32.6% 17.5%;
     --secondary-foreground: 210 40% 98%;
     --muted: 217.2 32.6% 17.5%;
     --muted-foreground: 215 20.2% 65.1%;
     --accent: 217.2 32.6% 17.5%;
     --accent-foreground: 210 40% 98%;
+    /* The dark fill stays (white labels 9.6:1); text gets its own light red
+       (text-destructive was 1.9:1 on the dark page). */
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 210 40% 98%;
+    --destructive-text: 0 91% 71%;
     --border: 217.2 32.6% 17.5%;
     --input: 217.2 32.6% 17.5%;
     --ring: 243 75% 65%;
@@ -100,9 +125,13 @@
 }
 
 @layer utilities {
-  /* Staggered entrance for grid/list children. Apply to the container. */
+  /* Staggered entrance for grid/list children. Apply to the container.
+     `backwards` (UI01, see the fade-in-up animation in tailwind.config.ts):
+     hidden during the delay, and no transform left on the children after
+     the animation, which would make each card the containing block of any
+     `fixed` descendant. */
   .stagger > * {
-    animation: fade-in-up 0.35s ease-out both;
+    animation: fade-in-up 0.35s ease-out backwards;
   }
   .stagger > *:nth-child(1) {
     animation-delay: 0ms;

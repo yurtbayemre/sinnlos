@@ -11,8 +11,8 @@ import uploadsAuth, { targetsUploads, tokenMatches } from "./uploads-auth";
  * layer that stops that: any path that DECODES + NORMALISES under /uploads/
  * needs the shared x-internal-upload-token, which only the web proxy route
  * sends. These tests pin (S06):
- *   1. targetsUploads over raw, encoded, double-encoded and traversal forms,
- *      and /upload (media-library admin API) vs /uploads,
+ *   1. targetsUploads over raw, encoded, double-encoded, traversal and
+ *      upper-case forms, and /upload (media-library admin API) vs /uploads,
  *   2. tokenMatches (constant-time, length-guarded, empty never matches),
  *   3. the middleware: 404 (never 401) without a matching token, prod
  *      fail-closed when the secret is unset, dev no-op with a single warning.
@@ -71,6 +71,23 @@ describe("targetsUploads — what counts as the upload bytes path", () => {
       "/%2e/uploads/x.pdf",
     ]) {
       expect(targetsUploads(path)).toBe(true);
+    }
+  });
+
+  it("ignores case, like the router's `/uploads/(.*)` match", () => {
+    // On a case-insensitive file system koa-send serves public/uploads for
+    // any of these; on Linux they are a 404 either way.
+    for (const path of [
+      "/UPLOADS/x.pdf",
+      "/Uploads/x.pdf",
+      "/api/../UPLOADS/x.pdf",
+      "/api/%2e%2e/UpLoads/x.pdf",
+      "/%55ploads/x.pdf",
+    ]) {
+      expect(targetsUploads(path), path).toBe(true);
+    }
+    for (const path of ["/UPLOAD/files", "/API/UPLOAD", "/UPLOADSX", "/Uploads-archive/x.pdf"]) {
+      expect(targetsUploads(path), path).toBe(false);
     }
   });
 
@@ -182,6 +199,8 @@ describe("uploads-auth middleware", () => {
       "/api/../uploads/x.pdf",
       "/api/%2e%2e/uploads/x.pdf",
       "/api/..%2fuploads/x.pdf",
+      "/UPLOADS/x.pdf",
+      "/api/../Uploads/x.pdf",
     ]) {
       const ctx = makeCtx(path);
       const next = await run(ctx);
