@@ -924,7 +924,10 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   formatted by next-intl in `APP_TIME_ZONE`; calendar dates (an ad's expiry,
   an announcement's confirmation deadline) are shown as the day they name.
   The formats are the ones you know: with `APP_TIME_ZONE=Europe/Berlin` the
-  pages show the same dates and times as before.
+  pages show the same dates and times as before (rehearsed page by page
+  against the batch 7 web). With a zone west of UTC, such as
+  `America/New_York`, the old web showed every ad's expiry one day early;
+  that is fixed.
 - **"Today" and day windows** (the events list and month view, the
   dashboard, the ⌘K event preload, ad expiry, the earliest closing day of
   the poll form, the dashboard greeting) are `APP_TIME_ZONE` days; around
