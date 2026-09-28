@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useState } from "react";
 import { getCommentSection } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
+import { applyLatest, createSeqGuard } from "@/lib/optimistic";
 import type { CommentSectionData } from "@/lib/reaction-summary";
 import { useLiveChannel } from "@/components/live/live-events-provider";
 import { CommentThread } from "./comment-thread";
@@ -38,21 +39,29 @@ export function LiveCommentSection({
   const { type, documentId } = target;
   const stableTarget = useMemo<CommentTarget>(() => ({ type, documentId }), [type, documentId]);
 
-  // Monotonic request counter: a ping-triggered refetch can overlap the
-  // post-mutation one, and applying an older snapshot out of order would
-  // visibly roll back the user's own just-posted comment.
-  const seqRef = useRef(0);
+  // Overlapping refetches (a live ping during a mutation's own refetch) are
+  // applied newest-first by lastAppliedSeq (FX28, lib/optimistic.ts): an
+  // older snapshot never overwrites a newer one, and the mutation's
+  // snapshot is no longer dropped just because a later request is in
+  // flight.
+  const [guard] = useState(createSeqGuard);
 
   const refetch = useCallback(async () => {
-    const seq = ++seqRef.current;
     try {
-      const fresh = await getCommentSection(stableTarget);
-      if (seq === seqRef.current) setData(fresh);
+      await applyLatest(
+        guard,
+        () => getCommentSection(stableTarget),
+        // Inside a transition: when the refetch runs within a mutation's
+        // action (ReactionBar), the new base state and the end of the
+        // optimistic state commit together, without a flash of the old
+        // state in between.
+        (fresh) => startTransition(() => setData(fresh)),
+      );
     } catch {
       // Transient fetch errors just mean we keep showing the current state
       // until the next poll.
     }
-  }, [stableTarget]);
+  }, [guard, stableTarget]);
 
   const healthy = useLiveChannel(`${type}:${documentId}`, refetch);
 

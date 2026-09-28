@@ -468,6 +468,7 @@
     "sendComment": "Send comment",
     "sendFailed": "Couldn't post your comment — please try again.",
     "deleteFailed": "Couldn't delete the comment — please try again.",
+    "reactionFailed": "Couldn't save your reaction — please try again.",
     "today": "today",
     "yesterday": "yesterday",
     "daysAgo": "{days}d ago"
@@ -483,6 +484,7 @@
   "notifications": {
     "title": "Notifications",
     "markAllRead": "Mark all read",
+    "markReadFailed": "Couldn't mark as read — please try again.",
     "noNotificationsYet": "No notifications yet",
     "unread": "unread",
     "justNow": "just now",

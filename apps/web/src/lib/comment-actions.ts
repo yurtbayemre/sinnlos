@@ -106,12 +106,19 @@ export async function deleteComment(commentId: number) {
   });
 }
 
-export async function toggleReaction(target: CommentTarget, emoji: EmojiType) {
+/**
+ * Sets the caller's reaction to `reacted` (FX28): the desired end state,
+ * not a toggle, so a repeated request cannot undo the first one. The CMS
+ * creates the row, deletes it or does nothing; one that predates the key
+ * ignores it and toggles, which is what the button asked for anyway.
+ */
+export async function toggleReaction(target: CommentTarget, emoji: EmojiType, reacted: boolean) {
   const targetDocumentId = requireAnchor(target);
   await strapi("/api/reactions", {
     method: "POST",
     body: JSON.stringify({
-      data: { emoji, targetType: target.type, targetDocumentId },
+      // Strict boolean whatever a crafted action call passes.
+      data: { emoji, targetType: target.type, targetDocumentId, reacted: reacted === true },
     }),
   });
 }
