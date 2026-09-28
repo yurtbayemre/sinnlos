@@ -1089,7 +1089,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 5. Run `infra/deploy.sh` on the Traefik host. It runs the preflight, takes
    the pre-deploy backup, tags the running images `:rollback`, rebuilds and
-   restarts **cms and web together**, and runs `infra/live-smoke.sh`. On a
+   restarts **cms and web together**, and runs `infra/live-smoke.sh` when
+   the demo credentials file is readable (otherwise it logs `live-smoke
+   SKIPPED`: run `infra/live-smoke.sh` by hand). On a
    standalone Caddy box, run `infra/backup/pg-backup.sh`, then
    `docker compose up -d --build` from `infra/`. If the new cms does not
    start and its log shows `[bootstrap] N granted action(s) match no loaded
