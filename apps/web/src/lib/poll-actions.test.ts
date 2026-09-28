@@ -10,8 +10,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * `guestsCanVote` are always sent as strict booleans, hidden by default,
  * guest voting only together with visibility.
  *
+ * An expired session (strapi()'s redirect on 401) escapes the action
+ * instead of becoming "failed" (FX47).
+ *
  * `@/lib/strapi`, `@/lib/viewer` and `next/cache` are mocked: only the
- * request the action builds matters here.
+ * request the action builds matters here. `next/navigation` is the real
+ * module, so the redirect error and unstable_rethrow are Next's own.
  */
 const strapiMock = vi.fn();
 const viewerMock = vi.fn();
@@ -28,6 +32,17 @@ vi.mock("next/cache", () => ({
 }));
 
 const { createPoll, votePoll } = await import("./poll-actions");
+const { redirect } = await import("next/navigation");
+
+/** The error Next's redirect() throws (NEXT_REDIRECT digest). */
+function captureRedirect(url: string): unknown {
+  try {
+    redirect(url);
+  } catch (e) {
+    return e;
+  }
+  throw new Error("redirect() did not throw");
+}
 
 const input = (departmentIds: number[]) => ({
   question: "Pizza or sushi?",
@@ -110,9 +125,11 @@ describe("createPoll", () => {
   });
 
   it("sends strict booleans only, whatever a crafted call passes", async () => {
-    const crafted = { ...input([]), visibleToGuests: "true", guestsCanVote: 1 } as unknown as Parameters<
-      typeof createPoll
-    >[0];
+    const crafted = {
+      ...input([]),
+      visibleToGuests: "true",
+      guestsCanVote: 1,
+    } as unknown as Parameters<typeof createPoll>[0];
     await createPoll(crafted);
     const data = sentData();
     expect(data.visibleToGuests).toBe(false);
@@ -134,6 +151,14 @@ describe("createPoll", () => {
   it("answers failed when the CMS refuses the write", async () => {
     strapiMock.mockRejectedValue(new Error("400"));
     await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code: "failed" });
+  });
+
+  it("lets the expired-session redirect escape instead of answering failed (FX47)", async () => {
+    // What strapi() throws on a 401 with a token: the real redirect() error,
+    // checked by the real unstable_rethrow.
+    const expired = captureRedirect("/sign-in?expired=1");
+    strapiMock.mockRejectedValue(expired);
+    await expect(createPoll(input([3]))).rejects.toBe(expired);
   });
 
   it("neither refreshes nor tags a cache", async () => {
