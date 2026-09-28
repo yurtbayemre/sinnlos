@@ -7,13 +7,18 @@ import {
   isInPollAudience,
   isPollTargeted,
 } from "../../../utils/poll-audience";
-import { isOptionIndex, tallyBallots, type BallotRow } from "../../../utils/poll-ballots";
+import { countPollBallots, isOptionIndex } from "../../../utils/poll-ballots";
 import { isPollClosed } from "../../../utils/poll-close";
 
 /**
  * The only interface to poll votes (the generic /api/poll-votes routes do
  * not exist, routes/poll-vote.ts): POST /polls/:id/vote and
- * GET /polls/:id/results, `:id` = the numeric id of the PUBLISHED poll row.
+ * GET /polls/:id/results. `:id` addresses the poll by its documentId (DA01:
+ * the address the web sends, stable across publishes) or, as the fallback
+ * for older callers, by the numeric id of its PUBLISHED row
+ * (utils/poll-access.ts loadPublishedPoll). Either way the handlers work
+ * with the published row: the vote stores its id, the results count its
+ * votes.
  *
  * Department targeting (decision 02) and guest access (owner decision
  * 2026-09-27), rules in utils/poll-audience.ts, are checked here, not by a
@@ -27,7 +32,14 @@ import { isPollClosed } from "../../../utils/poll-close";
  *   - a guest who sees a poll votes only when guests may vote on it (403
  *     "Guests cannot vote on this poll" otherwise; only a guest gets there);
  *   - the voter is always the caller: the body's `poll`/`voter` are never
- *     read.
+ *     read;
+ *   - a vote stores an option INDEX, and the documentId address survives a
+ *     republish, so the web also sends the option text its card showed
+ *     (`option`): when the poll's options changed since (reordered or
+ *     replaced in the admin panel), that text no longer sits at the index
+ *     and the vote is refused with 400 "Poll options changed" instead of
+ *     recording a different answer (the card then reloads). A body without
+ *     a string `option` (a web from before this check) is not compared.
  * Results never name a voter. They include the caller's own vote even on
  * anonymous polls (FX20: the card needs it to show "you voted").
  *
@@ -35,11 +47,17 @@ import { isPollClosed } from "../../../utils/poll-close";
  * a voter's first accepted ballot (the row with the lowest id) is the one
  * the results count, whatever duplicates a parallel race stored. The vote
  * handler also deletes a voter's later rows right after its insert, so
- * stored duplicates converge to that ballot.
+ * stored duplicates converge to that ballot. The results count in ONE SQL
+ * statement with a GROUP BY (countPollBallots, FX20): rows and voters from
+ * one snapshot, so a duplicate a parallel cleanup deletes mid-read never
+ * shows up as a ballot of a deleted account.
  */
 
-interface OptionIndexRow {
+/** The vote body the handler reads; anything else in it is ignored. */
+interface VoteBody {
   optionIndex?: unknown;
+  /** The option text the voter saw at `optionIndex` (optional, see above). */
+  option?: unknown;
 }
 
 interface IdRow {
@@ -54,8 +72,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     if (!user) return ctx.unauthorized();
 
     const body: unknown = ctx.request.body;
-    const optionIndex =
-      typeof body === "object" && body !== null ? (body as OptionIndexRow).optionIndex : undefined;
+    const fields: VoteBody = typeof body === "object" && body !== null ? (body as VoteBody) : {};
+    const { optionIndex, option: shownOption } = fields;
     if (!isOptionIndex(optionIndex)) return ctx.badRequest("optionIndex required");
 
     const [poll, viewer] = await Promise.all([
@@ -68,7 +86,13 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     // Only a guest can see a poll it may not vote on (guestsCanVote off).
     if (!canVoteOnPoll(poll, viewer)) return ctx.forbidden("Guests cannot vote on this poll");
 
-    if (optionIndex >= pollOptions(poll.options).length) return ctx.badRequest("Invalid optionIndex");
+    const options = pollOptions(poll.options);
+    if (optionIndex >= options.length) return ctx.badRequest("Invalid optionIndex");
+    // The card showed a different option at this index: the options were
+    // reordered or replaced after it rendered. Refused before any write.
+    if (typeof shownOption === "string" && options[optionIndex] !== shownOption) {
+      return ctx.badRequest("Poll options changed");
+    }
 
     // Closed iff now >= closesAt, the same rule as the web (utils/poll-close.ts).
     if (isPollClosed(poll.closesAt)) return ctx.badRequest("Poll is closed");
@@ -123,21 +147,17 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     ]);
     if (!poll || !canSeePoll(poll, viewer)) return ctx.notFound();
 
-    // The voter's id only, to count one ballot per voter (tallyBallots) and
-    // find the caller's own: it never leaves this handler. The response
-    // carries counts and the caller's own vote only, whatever `anonymous`
-    // says.
-    // id must stay in the select: a relation filter makes @strapi/database
-    // add DISTINCT (query-builder.js shouldUseDistinct), and without the
-    // primary key identical votes collapse into one row.
-    const rows = (await strapi.db.query("api::poll-vote.poll-vote").findMany({
-      where: { poll: poll.id },
-      select: ["id", "optionIndex"],
-      populate: { voter: { select: ["id"] } },
-    })) as BallotRow[];
-
+    // Counted in the database: ballots per option, one per voter, and the
+    // caller's own option (FX20). No voter id leaves the statement; the
+    // response carries counts and the caller's own vote only, whatever
+    // `anonymous` says.
     const options = pollOptions(poll.options);
-    const { counts, total, myVoteIndex } = tallyBallots(rows, options.length, user.id);
+    const { counts, total, myVoteIndex } = await countPollBallots(
+      strapi,
+      poll.id,
+      user.id,
+      options.length,
+    );
 
     return ctx.send({
       poll: {

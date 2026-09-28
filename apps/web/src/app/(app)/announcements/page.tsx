@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { CheckCircle2, Megaphone, Pin } from "lucide-react";
 import { getFormatter, getLocale, getTranslations } from "next-intl/server";
 import { formatDateOnly, formatInstant, LONG_DAY } from "@/lib/date-format";
@@ -10,7 +11,12 @@ import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { CommentSection } from "@/components/comments/comment-section";
+import {
+  CommentSection,
+  CommentSectionFallback,
+  loadCommentSections,
+} from "@/components/comments/comment-section";
+import { CommentSectionsProvider } from "@/components/comments/live-comment-section";
 import { AckButton } from "@/components/announcements/ack-button";
 import { AnnouncementsLiveHint } from "@/components/announcements/announcements-live-hint";
 import { initials } from "@/lib/utils";
@@ -76,6 +82,24 @@ export default async function AnnouncementsPage() {
   const pinned = remaining.filter((a) => a.pinned);
   const rest = remaining.filter((a) => !a.pinned);
 
+  // Comment sections (WD04): every card's comments and reactions in ONE
+  // batched load (one reactions request per 50 cards plus each card's
+  // comment window, instead of two requests per card), started now and
+  // awaited by each section inside its own Suspense boundary, so the cards
+  // render first. On the client, CommentSectionsProvider keeps them fresh
+  // with one poll interval and one live subscription set for the page.
+  const sectionTarget = (a: Announcement) => ({
+    type: "announcement" as const,
+    documentId: a.documentId,
+  });
+  const shown = [...openAck, ...pinned, ...rest];
+  const sections = shown.length > 0 ? loadCommentSections(shown.map(sectionTarget)) : undefined;
+  const commentSection = (a: Announcement) => (
+    <Suspense fallback={<CommentSectionFallback />}>
+      <CommentSection target={sectionTarget(a)} sections={sections} />
+    </Suspense>
+  );
+
   return (
     <div className="space-y-8">
       <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
@@ -89,7 +113,7 @@ export default async function AnnouncementsPage() {
       {items.length === 0 && openAck.length === 0 ? (
         <EmptyState icon={Megaphone} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
-        <>
+        <CommentSectionsProvider>
           {openAck.length > 0 && (
             <section className="space-y-3">
               <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
@@ -106,7 +130,7 @@ export default async function AnnouncementsPage() {
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
-                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
+                    {commentSection(a)}
                   </AnnouncementCard>
                 ))}
               </div>
@@ -133,7 +157,7 @@ export default async function AnnouncementsPage() {
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
-                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
+                    {commentSection(a)}
                   </AnnouncementCard>
                 ))}
               </div>
@@ -152,13 +176,13 @@ export default async function AnnouncementsPage() {
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
-                    <CommentSection target={{ type: "announcement", documentId: a.documentId }} />
+                    {commentSection(a)}
                   </AnnouncementCard>
                 ))}
               </div>
             </section>
           )}
-        </>
+        </CommentSectionsProvider>
       )}
     </div>
   );
