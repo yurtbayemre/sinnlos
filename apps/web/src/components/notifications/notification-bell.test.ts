@@ -95,9 +95,9 @@ function* elements(node: ReactNode): Generator<ReactElement<Props>> {
 }
 
 /** One render of the bell: the handlers and what the panel shows. */
-function render(notifications: Notification[] = [unread]) {
+function render(notifications: Notification[] = [unread], unreadTotal = 1) {
   harness.begin();
-  const tree = NotificationBell({ notifications, onChanged: async () => {} });
+  const tree = NotificationBell({ notifications, unreadTotal, onChanged: async () => {} });
   const all = [...elements(tree)];
   const find = (predicate: (props: Props, el: ReactElement<Props>) => boolean) =>
     all.find((el) => predicate(el.props, el));
@@ -105,15 +105,56 @@ function render(notifications: Notification[] = [unread]) {
     expect(el).toBeDefined();
     (el!.props.onClick as () => void)();
   };
+  const bell = find((p) => String(p["aria-label"] ?? "").startsWith("title"));
+  const badge = bell
+    ? [...elements(bell.props.children)].find((el) => el.type === "span")
+    : undefined;
   const panelOpen = all.some((el) => el.props.children === "markAllRead");
   return {
     panelOpen,
+    badge: badge ? String(badge.props.children) : null,
+    label: bell ? String(bell.props["aria-label"]) : null,
     showsError: all.some((el) => el.props.role === "alert"),
-    clickBell: () => click(find((p) => String(p["aria-label"] ?? "").startsWith("title"))),
+    clickBell: () => click(bell),
     clickNotification: () => click(find((_, el) => el.key === String(unread.id))),
     clickMarkAll: () => click(find((p) => p.children === "markAllRead")),
   };
 }
+
+const read = (id: number): Notification => ({ ...unread, id, readAt: "2026-09-28T09:00:00.000Z" });
+
+describe("NotificationBell badge: the unread total (WD10)", () => {
+  it("shows every unread notification, not only the unread among the 20 loaded", () => {
+    const loaded = [unread, ...Array.from({ length: 19 }, (_, i) => read(i + 2))];
+    const bell = render(loaded, 25);
+    expect(bell.badge).toBe("25");
+    expect(bell.label).toBe("title (25 unread)");
+  });
+
+  it("caps the badge at 99+ and keeps the exact count for screen readers", () => {
+    const bell = render([unread], 150);
+    expect(bell.badge).toBe("99+");
+    expect(bell.label).toBe("title (150 unread)");
+    expect(render([unread], 99).badge).toBe("99");
+  });
+
+  it("never shows fewer than the panel's own unread items", () => {
+    expect(render([unread], 0).badge).toBe("1");
+  });
+
+  it("shows no badge and no Mark all read without unread notifications", () => {
+    const bell = render([read(2)], 0);
+    expect(bell.badge).toBeNull();
+    expect(bell.label).toBe("title");
+    bell.clickBell();
+    expect(render([read(2)], 0).panelOpen).toBe(false);
+  });
+
+  it("offers Mark all read when only older, unloaded notifications are unread", () => {
+    render([read(2)], 3).clickBell();
+    expect(render([read(2)], 3).panelOpen).toBe(true);
+  });
+});
 
 beforeEach(() => {
   harness.reset();
