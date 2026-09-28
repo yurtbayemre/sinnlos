@@ -31,9 +31,10 @@ import {
  *
  * Observed in the lane rehearsal (2026-09-28, 8 parallel requests): SQLite
  * serialises the requests and showed no race at all (1 stored vote, 1 RSVP
- * row, 1 seat at capacity 1); Postgres 16 stored 8 of 8 votes of the same
- * user (all counted in the results), 8 RSVP rows, and seated 5 of 5 at
- * capacity 1. The assertions hold for every outcome in between.
+ * row, 1 seat at capacity 1); Postgres 16 stored 4-8 of 8 votes of the same
+ * user (varies per run; all counted in the results), 8 RSVP rows, and
+ * seated 5 of 5 at capacity 1. The assertions hold for every outcome in
+ * between.
  */
 
 const PARALLEL = 8;

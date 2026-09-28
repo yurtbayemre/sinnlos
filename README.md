@@ -948,7 +948,9 @@ privacy, publish cycles (comment/reaction anchors, votes, RSVPs,
 notifications after the commit) and concurrent votes, RSVPs and reactions.
 The run is hermetic: loopback only, temp files and schemas removed, and the
 process pinned to `TZ=UTC` like the container. A run on both engines takes
-about one and a half minutes, most of it the per-suite boots. New suites use
+about one and a half minutes on a fast local machine and about 2.5-4 minutes
+(plus about 45 s install) on a 4-vCPU CI-sized machine, most of it the
+per-suite boots. New suites use
 the harness in `apps/cms/src/integration/harness.test.helper.ts`
 (`createTestStrapi`, `loginAs`, `api`, `stop`; its header documents the
 fixtures and the stub seam for outbound calls).
