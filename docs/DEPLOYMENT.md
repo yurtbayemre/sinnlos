@@ -927,7 +927,8 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   an announcement's confirmation deadline) are shown as the day they name.
   The formats are the ones you know: with `APP_TIME_ZONE=Europe/Berlin` the
   pages show the same dates and times as before, apart from the display
-  fixes below (rehearsed page by page against the batch 7 web). With a
+  fixes below (rehearsed page by page against the batch 7 web, also with
+  faked clocks around midnight and the October DST change). With a
   zone west of UTC, such as `America/New_York`, the old web showed every
   ad's expiry and every announcement confirmation deadline (on the
   announcements page and `/manage/acknowledgements`) one day early; that
