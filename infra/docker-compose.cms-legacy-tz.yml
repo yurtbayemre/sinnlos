@@ -4,7 +4,13 @@
 #
 #   docker compose -p infra -f infra/docker-compose.yml \
 #     -f infra/docker-compose.traefik.yml \
-#     -f infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms
+#     -f infra/docker-compose.cms-legacy-tz.yml \
+#     -f infra/docker-compose.web-legacy-tz.yml \
+#     up -d --no-build web cms
+#
+# Since batch 8 the web runs in UTC too: a web image from before the web
+# datetime port also needs infra/docker-compose.web-legacy-tz.yml
+# (docs/DEPLOYMENT.md §7.4).
 #
 # That image has no TZ of its own and wrote naive timestamp columns as wall
 # clocks of its process zone; its compose file ran it in Europe/Berlin.
