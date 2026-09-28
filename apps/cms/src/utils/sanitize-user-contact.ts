@@ -27,6 +27,15 @@
  * and after the core sanitizers (private/restricted-relation removal). It
  * covers BOTH the directory itself (/api/users*, /api/users/me) AND every
  * populated user relation inside any content type.
+ *
+ * Output alone is not enough: a caller who may not READ a field could still
+ * filter, sort or `_q`-search by it and learn it from which rows come back.
+ * The query side (FX22) is middlewares/sensitive-query-guard.ts: for the
+ * same callers (`shouldSanitizeForRole`) and the same SENSITIVE_USER_FIELDS
+ * it refuses such a query with a 400 `Invalid key`. Both halves must keep
+ * using this module's list and role rule. A field the web filters or sorts
+ * on for every role (today `blocked`) must therefore never be added to the
+ * list.
  */
 
 /** UID of the users-permissions user model. */
