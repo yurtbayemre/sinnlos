@@ -9,12 +9,36 @@ import {
   targetFilterQuery,
   type CommentTarget,
 } from "@/lib/comment-target";
-import { summarize, type CommentSectionData } from "@/lib/reaction-summary";
+import { summarize, withOwnReactions, type CommentSectionData } from "@/lib/reaction-summary";
 import type { Comment, EmojiType, Reaction } from "@/lib/types";
 
 // No refresh()/revalidate here: the LiveCommentSection owns this data on the
 // client and refetches just itself — after its own mutations and on a poll
 // interval, so other sessions' comments show up without a page reload.
+
+/** Rows of one target the reaction summary reads, newest first. */
+const REACTION_WINDOW = 500;
+/**
+ * Page size of the caller's own-reaction lookup: one row per emoji, with
+ * room for duplicates from the create race (check-then-insert, §7b P2).
+ */
+const OWN_REACTIONS_PAGE = 25;
+
+/** A reaction list answer, or the empty fallback of a failed read. */
+type ReactionPage = {
+  data?: Reaction[] | null;
+  meta?: { pagination?: { total?: number } };
+};
+
+/** GET /api/reactions; a failed read gives an empty page, NEXT_REDIRECT escapes. */
+function readReactions(query: string): Promise<ReactionPage> {
+  return strapi<StrapiListResponse<Reaction>>(`/api/reactions?${query}`).catch(
+    (e: unknown): ReactionPage => {
+      unstable_rethrow(e);
+      return { data: [] };
+    },
+  );
+}
 
 /**
  * Comments and reactions are addressed by the target's documentId (issue
@@ -51,16 +75,28 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
     }),
     // Newest-500 reaction window. The explicit sort makes the window
     // deterministic (unsorted, Postgres returns rows in arbitrary order).
-    // The cap is accepted: past 500 rows the summary counters can
-    // undercount, and summarize() may miss the caller's own OLD reaction —
-    // display only; toggleReaction writes server-side and stays correct.
-    strapi<StrapiListResponse<Reaction>>(
-      `/api/reactions?${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=500`,
-    ).catch((e) => {
-      unstable_rethrow(e);
-      return { data: [] as Reaction[] };
-    }),
+    // Past 500 rows the counters can undercount (accepted, display only).
+    readReactions(
+      `${filters}&populate[author]=true&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[pageSize]=${REACTION_WINDOW}`,
+    ),
   ]);
+
+  const windowRows = reactionsRes.data ?? [];
+  let reactions = summarize(windowRows, userId, target);
+  // The caller's own reaction may be older than the window. `reacted` is
+  // not display only: the reaction bar sends its negation as the desired
+  // state (FX28), and the CMS answers `reacted: true` on an existing row
+  // with a no-op, so a missed own row could never be removed. When the
+  // window overflowed, the caller's rows of this target are read on their
+  // own (no extra request otherwise). A failed lookup keeps the window's
+  // answer, as before.
+  const total = reactionsRes.meta?.pagination?.total;
+  if (userId != null && typeof total === "number" && total > windowRows.length) {
+    const own = await readReactions(
+      `${filters}&filters[author][id][$eq]=${userId}&populate[author]=true&pagination[pageSize]=${OWN_REACTIONS_PAGE}`,
+    );
+    reactions = withOwnReactions(reactions, own.data ?? [], userId, target);
+  }
 
   return {
     // Re-check the anchor per row (matchesTarget = permanent
@@ -71,7 +107,7 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
     comments: (((commentsRes as any).data ?? []) as Comment[])
       .filter((c) => matchesTarget(c, target))
       .reverse(),
-    reactions: summarize((reactionsRes as any).data ?? [], userId, target),
+    reactions,
   };
 }
 
