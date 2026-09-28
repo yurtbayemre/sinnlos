@@ -83,9 +83,10 @@ export interface SectionsRefresher {
  * for BATCH_DELAY_MS and loaded with one `load` call (at most
  * MAX_TARGETS_PER_LOAD targets each), single-flight: channels that come due
  * while a batch runs go into the next one. Every section on a channel gets
- * the channel's snapshot through its own sequence guard. A failed load keeps
- * the current state; the next ping or tick retries. Pure (no React), so it
- * is unit tested on its own.
+ * the channel's snapshot through its own sequence guard. A channel whose
+ * sections all unmounted while an earlier chunk loaded is left out of its
+ * chunk. A failed load keeps the current state; the next ping or tick
+ * retries. Pure (no React), so it is unit tested on its own.
  */
 export function createSectionsRefresher(
   load: (targets: CommentTarget[]) => Promise<CommentSectionData[]>,
@@ -111,8 +112,15 @@ export function createSectionsRefresher(
     inflight = true;
     try {
       for (let i = 0; i < channels.length; i += MAX_TARGETS_PER_LOAD) {
-        const chunk = channels.slice(i, i + MAX_TARGETS_PER_LOAD);
-        const handles = chunk.map((channel) => [...(sections.get(channel) ?? [])]);
+        // A channel whose last section unmounted while an earlier chunk
+        // loaded is gone (remove); leave it out, so its empty handle list
+        // cannot fail the whole chunk. Handles, sequence numbers and
+        // targets all come from `live`, so their indices stay aligned.
+        const live = channels
+          .slice(i, i + MAX_TARGETS_PER_LOAD)
+          .filter((channel) => sections.has(channel));
+        if (live.length === 0) continue;
+        const handles = live.map((channel) => [...(sections.get(channel) ?? [])]);
         const begun = handles.map((list) =>
           list.map((section) => ({ section, seq: section.guard.begin() })),
         );

@@ -194,6 +194,54 @@ describe("createSectionsRefresher", () => {
     expect(load.mock.calls.map(([targets]) => targets.length)).toEqual([200, 200, 50]);
   });
 
+  it("leaves out a channel that emptied while an earlier chunk loaded, and loads the rest of its chunk", async () => {
+    let release: (() => void) | undefined;
+    const load = vi.fn<Load>(async (targets) => {
+      if (load.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve));
+      return targets.map((t) => snapshot(t.documentId ?? ""));
+    });
+    const refresher = createSectionsRefresher(load, DELAY);
+    const cards = Array.from({ length: 203 }, (_, i) => section(i + 1));
+    cards.forEach((card, i) => refresher.add(channel(i + 1), card.handle));
+
+    refresher.refreshAll();
+    await vi.advanceTimersByTimeAsync(DELAY);
+    expect(load).toHaveBeenCalledTimes(1);
+    // Card 201, the first of the second chunk, unmounts during that load.
+    expect(refresher.remove(channel(201), cards[200]!.handle)).toBe(true);
+    release?.();
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(load.mock.calls[1]?.[0]).toEqual([target(202), target(203)]);
+    expect(cards[200]?.applied).toEqual([]);
+    expect(cards[201]?.applied.map((data) => data.comments[0]?.body)).toEqual(["doc-202"]);
+    expect(cards[202]?.applied.map((data) => data.comments[0]?.body)).toEqual(["doc-203"]);
+  });
+
+  it("skips a chunk whose channels all emptied, and stays usable", async () => {
+    let release: (() => void) | undefined;
+    const load = vi.fn<Load>(async (targets) => {
+      if (load.mock.calls.length === 1) await new Promise<void>((resolve) => (release = resolve));
+      return targets.map((t) => snapshot(t.documentId ?? ""));
+    });
+    const refresher = createSectionsRefresher(load, DELAY);
+    const cards = Array.from({ length: 201 }, (_, i) => section(i + 1));
+    cards.forEach((card, i) => refresher.add(channel(i + 1), card.handle));
+
+    refresher.refreshAll();
+    await vi.advanceTimersByTimeAsync(DELAY);
+    refresher.remove(channel(201), cards[200]!.handle);
+    release?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(load).toHaveBeenCalledTimes(1);
+
+    refresher.refresh([channel(1)]);
+    await vi.advanceTimersByTimeAsync(DELAY);
+    expect(load).toHaveBeenCalledTimes(2);
+    expect(load.mock.calls[1]?.[0]).toEqual([target(1)]);
+  });
+
   it("stop() drops a pending batch", async () => {
     const load = vi.fn<Load>(async (targets) => targets.map((t) => snapshot(t.documentId ?? "")));
     const refresher = createSectionsRefresher(load, DELAY);
