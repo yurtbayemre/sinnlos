@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { errors, strings } from "@strapi/utils";
-import { MODERATORS } from "../bootstrap/roles";
+import { MODERATORS, hasRole, type RoleType } from "../bootstrap/roles";
 import { parseRowId } from "./entry-id";
 import { forcePublishedStatus, getMutableQuery } from "./policy-query";
 
@@ -78,12 +78,17 @@ export const WIKI_PAGE_UID = "api::wiki-page.wiki-page";
 
 /**
  * Roles that skip the allowlist entirely (they also author in the admin
- * panel): the MODERATORS of the role vocabulary (bootstrap/roles.ts).
+ * panel): the MODERATORS of the role vocabulary (bootstrap/roles.ts). The
+ * write policies check them with `hasRole(user, WRITE_BYPASS_ROLES)`.
  */
-export const WRITE_BYPASS_ROLES: readonly string[] = MODERATORS;
+export const WRITE_BYPASS_ROLES: readonly RoleType[] = MODERATORS;
 
+/**
+ * The same check for a bare role type, for the route matrix
+ * (routes.matrix.test.ts derives which grants the allowlist must cover).
+ */
 export const isWriteBypassRole = (roleType: unknown): boolean =>
-  typeof roleType === "string" && WRITE_BYPASS_ROLES.includes(roleType);
+  hasRole({ role: { type: roleType } }, WRITE_BYPASS_ROLES);
 
 export type WriteAction = "create" | "update";
 

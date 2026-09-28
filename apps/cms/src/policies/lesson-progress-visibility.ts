@@ -1,4 +1,4 @@
-import { ADMIN } from "../bootstrap/roles";
+import { ADMIN, hasRole } from "../bootstrap/roles";
 import { getMutableQuery } from "../utils/policy-query";
 
 /**
@@ -21,7 +21,7 @@ export default async (policyContext: any, _config: unknown, _deps: any) => {
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  if (user.role?.type === ADMIN) return true;
+  if (hasRole(user, [ADMIN])) return true;
 
   const query = getMutableQuery(policyContext);
   // $and so an incoming `user` filter can only narrow, never widen.

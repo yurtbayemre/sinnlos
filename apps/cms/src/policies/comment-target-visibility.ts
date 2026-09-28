@@ -1,4 +1,4 @@
-import { hasAudienceBypass } from "../utils/announcement-audience";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { getMutableQuery, restrictiveIdFilter } from "../utils/policy-query";
 import { visibleTargetAnchors } from "../utils/target-visibility";
 
@@ -34,7 +34,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const user = policyContext.state?.user;
 
   // admin_role / editor moderate everything, no filter needed.
-  if (hasAudienceBypass(user?.role?.type)) return true;
+  if (hasRole(user, MODERATORS)) return true;
 
   const anchors = await visibleTargetAnchors(strapi, user ?? null);
 

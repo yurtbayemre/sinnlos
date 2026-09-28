@@ -1,4 +1,4 @@
-import { hasAudienceBypass } from "../utils/announcement-audience";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { loadPollViewer, POLL_UID, type PollCaller } from "../utils/poll-access";
 import { canSeePoll, type PollTargeting } from "../utils/poll-audience";
 import {
@@ -80,7 +80,7 @@ export default async (
   if (!user) return false;
 
   // admin_role / editor see every poll; drafts too (they author them).
-  if (hasAudienceBypass(user.role?.type)) return true;
+  if (hasRole(user, MODERATORS)) return true;
 
   const viewer = await loadPollViewer(strapi, user);
   const rows = await strapi.db.query(POLL_UID).findMany({

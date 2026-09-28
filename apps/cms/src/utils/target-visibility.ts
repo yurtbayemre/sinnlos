@@ -21,11 +21,8 @@
  * never disagree.
  */
 
-import {
-  hasAudienceBypass,
-  isAnnouncementVisible,
-  type AudienceScope,
-} from "./announcement-audience";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
+import { isAnnouncementVisible, type AudienceScope } from "./announcement-audience";
 import { loadUserScope, visibleWikiSpaceIds, type UserScope } from "./visible-ids";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 
@@ -134,7 +131,7 @@ export async function isTargetVisible(
   targetDocumentId: string,
   user: CallerUser | null | undefined,
 ): Promise<boolean> {
-  if (hasAudienceBypass(user?.role?.type)) return true;
+  if (hasRole(user, MODERATORS)) return true;
   const raw = user ? await loadUserScope(strapi, user.id) : null;
 
   if (targetType === "announcement") {

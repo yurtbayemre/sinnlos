@@ -1,4 +1,4 @@
-import { MODERATORS } from "../bootstrap/roles";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
   forcePublishedStatus,
   getMutableQuery,
@@ -36,7 +36,7 @@ export default async (
 ) => {
   const user = policyContext.state?.user;
 
-  if (user && MODERATORS.includes(user.role?.type)) return true;
+  if (hasRole(user, MODERATORS)) return true;
 
   const query = getMutableQuery(policyContext);
   const level: TrainingLevel = config?.level ?? "course";

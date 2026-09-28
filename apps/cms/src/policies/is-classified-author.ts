@@ -1,4 +1,4 @@
-import { MODERATORS } from "../bootstrap/roles";
+import { MODERATORS, hasRole, isRoleType, type RoleType } from "../bootstrap/roles";
 import { parseEntryRef } from "../utils/entry-id";
 
 /**
@@ -11,18 +11,18 @@ import { parseEntryRef } from "../utils/entry-id";
  *     stays an editor moderation tool (same semantics as
  *     is-reaction-author / comment delete).
  * Default (no config) keeps the historical admin+editor bypass (MODERATORS,
- * bootstrap/roles.ts).
+ * bootstrap/roles.ts). A configured entry that is not a role type bypasses
+ * nobody, and a configured value that is not a list bypasses nobody either.
  */
 export default async (
   policyContext: any,
-  config: { bypassRoles?: string[] } | undefined,
+  config: { bypassRoles?: unknown } | undefined,
   { strapi }: any,
 ) => {
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  const bypassRoles: readonly string[] = config?.bypassRoles ?? MODERATORS;
-  if (bypassRoles.includes(user.role?.type)) return true;
+  if (hasRole(user, bypassRolesOf(config))) return true;
 
   // v5 routes carry a documentId; the web app sends numeric ids — accept
   // both (same gotcha as in the comment controller). A missing or
@@ -39,3 +39,10 @@ export default async (
 
   return classified.author?.id === user.id;
 };
+
+/** The route's bypass roles: MODERATORS without config, else its valid role types. */
+function bypassRolesOf(config: { bypassRoles?: unknown } | undefined): readonly RoleType[] {
+  const roles = config?.bypassRoles;
+  if (roles == null) return MODERATORS;
+  return Array.isArray(roles) ? roles.filter(isRoleType) : [];
+}

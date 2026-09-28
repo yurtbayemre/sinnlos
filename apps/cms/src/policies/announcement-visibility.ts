@@ -1,5 +1,5 @@
+import { MODERATORS, hasRole } from "../bootstrap/roles";
 import {
-  hasAudienceBypass,
   isAnnouncementVisible,
   type AudienceScope,
   type AnnouncementTargeting,
@@ -59,7 +59,7 @@ export default async (policyContext: any, _config: unknown, { strapi }: any) => 
   const user = policyContext.state?.user;
 
   // admin_role / editor see everything, no filter needed.
-  if (hasAudienceBypass(user?.role?.type)) return true;
+  if (hasRole(user, MODERATORS)) return true;
 
   // Anonymous callers get a null scope → only untargeted announcements.
   // (No role currently reads announcements anonymously — guest has no

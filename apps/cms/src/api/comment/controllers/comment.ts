@@ -1,5 +1,5 @@
 import { factories } from "@strapi/strapi";
-import { MODERATORS } from "../../../bootstrap/roles";
+import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
 import { parseEntryRef } from "../../../utils/entry-id";
 import { isTargetVisible } from "../../../utils/target-visibility";
@@ -67,7 +67,7 @@ export default factories.createCoreController("api::comment.comment", ({ strapi 
     if (!entity) return ctx.notFound();
     const user = ctx.state.user;
     const isOwner = entity.author?.id === user?.id;
-    const isPrivileged = MODERATORS.includes(user?.role?.type);
+    const isPrivileged = hasRole(user, MODERATORS);
     if (!isOwner && !isPrivileged) return ctx.forbidden();
     // The v5 core controller resolves by documentId — a numeric id deletes
     // nothing while still answering 204, so translate before delegating.

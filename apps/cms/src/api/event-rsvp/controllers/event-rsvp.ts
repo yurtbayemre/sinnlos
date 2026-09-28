@@ -1,6 +1,6 @@
 import { factories } from "@strapi/strapi";
 
-import { ADMIN } from "../../../bootstrap/roles";
+import { ADMIN, hasRole } from "../../../bootstrap/roles";
 import { parseEntryRef } from "../../../utils/entry-id";
 import {
   capacityDecision,
@@ -79,7 +79,7 @@ function refusesLegacyFormat(ctx: {
   headers?: unknown;
   state?: { user?: { role?: { type?: unknown } | null } | null };
 }): boolean {
-  if (ctx.state?.user?.role?.type === ADMIN) return false;
+  if (hasRole(ctx.state?.user, [ADMIN])) return false;
   return requestsLegacyFormat(ctx.headers);
 }
 

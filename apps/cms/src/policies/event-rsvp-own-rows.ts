@@ -1,5 +1,5 @@
 import { errors } from "@strapi/utils";
-import { ADMIN } from "../bootstrap/roles";
+import { ADMIN, hasRole } from "../bootstrap/roles";
 import { getMutableQuery } from "../utils/policy-query";
 import { filtersReferenceUser } from "../utils/rsvp";
 
@@ -38,7 +38,7 @@ export default async (
   const user = policyContext.state?.user;
   if (!user) return false;
 
-  if (user.role?.type === ADMIN) return true;
+  if (hasRole(user, [ADMIN])) return true;
 
   // Without a numeric id the caller owns no row (defence in depth:
   // users-permissions always sets a database user).
