@@ -926,10 +926,12 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   formatted by next-intl in `APP_TIME_ZONE`; calendar dates (an ad's expiry,
   an announcement's confirmation deadline) are shown as the day they name.
   The formats are the ones you know: with `APP_TIME_ZONE=Europe/Berlin` the
-  pages show the same dates and times as before (rehearsed page by page
-  against the batch 7 web). With a zone west of UTC, such as
-  `America/New_York`, the old web showed every ad's expiry one day early;
-  that is fixed.
+  pages show the same dates and times as before, apart from the display
+  fixes below (rehearsed page by page against the batch 7 web). With a
+  zone west of UTC, such as `America/New_York`, the old web showed every
+  ad's expiry and every announcement confirmation deadline (on the
+  announcements page and `/manage/acknowledgements`) one day early; that
+  is fixed.
 - **"Today" and day windows** (the events list and month view, the
   dashboard, the ⌘K event preload, ad expiry, the earliest closing day of
   the poll form, the dashboard greeting) are `APP_TIME_ZONE` days; around
@@ -938,7 +940,9 @@ explicitly in `APP_TIME_ZONE` and runs in UTC like the cms.
   (a multi-day event on its second day, an all-day event on its last day)
   stays under *Upcoming* instead of *Past*, and the dashboard's event count
   includes it; an event that ends on a later day shows that day ("Mon, Oct
-  5, 2026, 09:00 – Wed, Oct 7, 2026, 17:00"); relative times count calendar
+  5, 2026, 09:00 – Wed, Oct 7, 2026, 17:00"); an event whose end equals its
+  start shows only the start time (no longer "03:01 PM – 03:01 PM"; the
+  demo seed has four such events); relative times count calendar
   days ("yesterday" at 00:10 for a comment from 23:50) in the user's
   language; the org chart no longer drops people whose manager assignments
   form a loop or who are set as their own manager (until now they vanished
