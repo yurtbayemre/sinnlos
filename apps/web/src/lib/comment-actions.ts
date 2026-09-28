@@ -38,6 +38,12 @@ const MAX_SECTIONS = 200;
  * query string far below the 16 KB request-header limit of the cms.
  */
 const REACTION_BATCH = 50;
+/**
+ * Comment windows read at the same time: a page's cards in one round (as
+ * many as the sections used to read in parallel), a long list in a bounded
+ * stream instead of up to 200 requests at once.
+ */
+const COMMENT_READS_IN_PARALLEL = 25;
 
 /** A target that can be queried: a comment target type and a usable documentId. */
 type AnchoredTarget = CommentTarget & { documentId: string };
@@ -72,6 +78,25 @@ function anchored(target: unknown): AnchoredTarget | null {
 }
 
 const keyOf = (target: AnchoredTarget) => `${target.type}:${target.documentId}`;
+
+/** `fn` over `items`, at most `limit` at a time, results in input order. */
+async function mapLimited<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await fn(items[index]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 /**
  * The newest-100 comment window of one target, displayed oldest first.
@@ -226,7 +251,7 @@ export async function getCommentSections(targets: CommentTarget[]): Promise<Comm
     batches.push(list.slice(i, i + REACTION_BATCH));
   }
   const [comments, reactions] = await Promise.all([
-    Promise.all(list.map(readCommentWindow)),
+    mapLimited(list, COMMENT_READS_IN_PARALLEL, readCommentWindow),
     Promise.all(batches.map((batch) => readReactionBatch(batch, userId))).then((all) => all.flat()),
   ]);
 

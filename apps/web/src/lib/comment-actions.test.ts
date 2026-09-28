@@ -370,6 +370,23 @@ describe("getCommentSections (batched, WD04)", () => {
     ).toHaveLength(1);
   });
 
+  it("reads at most 25 comment windows at a time", async () => {
+    let open = 0;
+    let maxOpen = 0;
+    strapiMock.mockImplementation(async (url: string) => {
+      if (!url.startsWith("/api/comments")) return { data: [] };
+      open += 1;
+      maxOpen = Math.max(maxOpen, open);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      open -= 1;
+      return { data: [] };
+    });
+    const sections = await getCommentSections(Array.from({ length: 60 }, (_, i) => t(`doc-${i}`)));
+    expect(sections).toHaveLength(60);
+    expect(commentUrls()).toHaveLength(60);
+    expect(maxOpen).toBe(25);
+  });
+
   it("refuses a list that is not an array or longer than 200 targets, before any read", async () => {
     const tooMany = Array.from({ length: 201 }, (_, i) => t(`doc-${i}`));
     await expect(getCommentSections(tooMany)).rejects.toThrow("invalid comment section targets");
