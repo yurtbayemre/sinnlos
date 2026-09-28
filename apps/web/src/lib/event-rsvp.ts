@@ -1,8 +1,11 @@
-import type { EventRsvp, EventRsvpSummary } from "@/lib/types";
+import type { EventRsvpSummary, RsvpStatus } from "@/lib/types";
 
 /**
- * RSVP aggregation for the events page (WD02: moved out of
- * app/(app)/events/page.tsx unchanged, so it can be tested).
+ * RSVP summaries for the events page. Since FX21 the CMS aggregates them
+ * (GET /api/event-rsvps/summary, apps/cms/src/utils/rsvp.ts
+ * summarizeRsvps): one answer per user (the newest), the names of the
+ * "yes" answers only, and the caller's own answer. The web no longer sees
+ * a single RSVP row; this module only maps the response.
  */
 
 /** The summary of an event nobody has answered yet (shared: never mutate it). */
@@ -14,42 +17,35 @@ export const EMPTY_RSVP_SUMMARY: EventRsvpSummary = {
   myStatus: null,
 };
 
-/**
- * Collapse the raw RSVP rows into one summary per event documentId.
- * Dedupe per (event, user) keeping the LATEST respondedAt: the CMS accepts
- * a benign create race that can leave duplicate rows per user, so counting
- * rows directly would overstate the buckets. The rows arrive sorted by
- * respondedAt, then id, so on a tie the later row wins, like the CMS's own
- * healing order. A row whose user the CMS stripped (a maybe/no of someone
- * else) is its own bucket entry: it counts, but carries no name.
- */
-export function buildRsvpSummaries(
-  rows: EventRsvp[],
-  myUserId: number | null,
-): Map<string, EventRsvpSummary> {
-  const latest = new Map<string, EventRsvp>();
-  for (const row of rows) {
-    if (!row.targetDocumentId) continue;
-    const key = `${row.targetDocumentId}:${row.user?.id ?? `row-${row.id}`}`;
-    const prev = latest.get(key);
-    const rowTime = row.respondedAt ? new Date(row.respondedAt).getTime() : 0;
-    const prevTime = prev?.respondedAt ? new Date(prev.respondedAt).getTime() : 0;
-    if (!prev || rowTime >= prevTime) latest.set(key, row);
-  }
+const STATUSES: readonly RsvpStatus[] = ["yes", "no", "maybe"];
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function count(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+/**
+ * Event documentId → summary, from the summary endpoint's `data`. A row
+ * that is not a well-formed summary is dropped (its event then shows the
+ * empty summary), never half-read; an event the CMS left out (not
+ * published) gets none either.
+ */
+export function rsvpSummaryMap(rows: unknown[]): Map<string, EventRsvpSummary> {
   const map = new Map<string, EventRsvpSummary>();
-  for (const row of latest.values()) {
-    let summary = map.get(row.targetDocumentId);
-    if (!summary) {
-      summary = { yesNames: [], yesCount: 0, maybeCount: 0, noCount: 0, myStatus: null };
-      map.set(row.targetDocumentId, summary);
-    }
-    if (row.status === "yes") {
-      summary.yesCount += 1;
-      if (row.user?.displayName) summary.yesNames.push(row.user.displayName);
-    } else if (row.status === "maybe") summary.maybeCount += 1;
-    else if (row.status === "no") summary.noCount += 1;
-    if (myUserId != null && row.user?.id === myUserId) summary.myStatus = row.status;
+  for (const row of rows) {
+    if (!isRecord(row) || typeof row.targetDocumentId !== "string") continue;
+    const yesCount = count(row.yesCount);
+    const maybeCount = count(row.maybeCount);
+    const noCount = count(row.noCount);
+    if (yesCount === null || maybeCount === null || noCount === null) continue;
+    const yesNames = Array.isArray(row.yesNames)
+      ? row.yesNames.filter((name): name is string => typeof name === "string")
+      : [];
+    const myStatus = STATUSES.find((status) => status === row.myStatus) ?? null;
+    map.set(row.targetDocumentId, { yesNames, yesCount, maybeCount, noCount, myStatus });
   }
   return map;
 }

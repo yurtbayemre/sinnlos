@@ -95,6 +95,9 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
   return (text ? JSON.parse(text) : undefined) as T;
 }
 
+/** Most event documentIds per RSVP summary request (the cms caps it at 50). */
+const RSVP_SUMMARY_CHUNK = 50;
+
 /**
  * Convenience helpers for the main collections. Every read is uncached
  * (contract above); the field-limited user populates below are data
@@ -279,28 +282,27 @@ export const api = {
       strapi<StrapiListResponse<any>>(
         `/api/events?filters[start][$lt]=${encodeURIComponent(toIso)}&filters[$or][0][end][$gte]=${encodeURIComponent(fromIso)}&filters[$or][1][end][$null]=true&filters[$or][1][start][$gte]=${encodeURIComponent(fromIso)}&populate[departments]=true&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=100`,
       ),
-    // RSVP rows for a set of events. Per-user: the response contains the
-    // caller's own answer (myStatus is derived from it). The filter targets
-    // the plain string column targetDocumentId (no relation traversal);
-    // the user populate is field-limited to displayName. Guests never call
-    // this (no event-rsvp.find grant — the page skips the fetch).
-    // A single request is bounded by its pageSize, so this walks the
-    // pagination. Hard upper bound: 30 pages x 100 rows = 3000 rows,
-    // comfortably above 50 visible events with full attendance while still
-    // bounding a runaway loop (issue #14).
-    rsvps: (documentIds: string[]): Promise<WalkResult<any>> => {
-      const filters = documentIds
-        .map((d, i) => `filters[targetDocumentId][$in][${i}]=${encodeURIComponent(d)}`)
-        .join("&");
-      return walkAllPages<any>(
-        (page) =>
-          strapi<StrapiListResponse<any>>(
-            // Secondary sort on id keeps the page walk stable when many
-            // rows share the same respondedAt (no skips/duplicates).
-            `/api/event-rsvps?${filters}&populate[user][fields][0]=displayName&sort[0]=respondedAt:asc&sort[1]=id:asc&pagination[page]=${page}&pagination[pageSize]=100`,
+    // RSVP summaries for a set of events (FX21): the CMS aggregates the
+    // counts, the "yes" names and the caller's own answer
+    // (GET /api/event-rsvps/summary), so no RSVP row and no decliner name
+    // reaches the web; this replaced a walk of up to 3000 rows per view.
+    // Per-user (myStatus). Guests never call this (no summary grant — the
+    // page skips the fetch). The endpoint takes at most 50 targets per
+    // request; the events list shows at most 50, so this is one request,
+    // chunked only as a safeguard.
+    rsvpSummaries: async (documentIds: string[]): Promise<{ data: unknown[] }> => {
+      const chunks: string[][] = [];
+      for (let i = 0; i < documentIds.length; i += RSVP_SUMMARY_CHUNK) {
+        chunks.push(documentIds.slice(i, i + RSVP_SUMMARY_CHUNK));
+      }
+      const pages = await Promise.all(
+        chunks.map((chunk) =>
+          strapi<{ data?: unknown }>(
+            `/api/event-rsvps/summary?targets=${chunk.map(encodeURIComponent).join(",")}`,
           ),
-        { maxPages: 30, label: "event RSVPs" },
+        ),
       );
+      return { data: pages.flatMap((page) => (Array.isArray(page?.data) ? page.data : [])) };
     },
   },
   polls: {

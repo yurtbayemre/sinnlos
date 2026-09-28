@@ -71,7 +71,7 @@ const READS: Record<string, () => Promise<unknown>> = {
   "events.upcoming": () => api.events.upcoming(iso),
   "events.past": () => api.events.past(iso),
   "events.window": () => api.events.window(iso, iso),
-  "events.rsvps": () => api.events.rsvps(["doc-1"]),
+  "events.rsvpSummaries": () => api.events.rsvpSummaries(["doc-1"]),
   "polls.list": () => api.polls.list(),
   "polls.results": () => api.polls.results(1),
   "documents.list": () => api.documents.list(),

@@ -2,14 +2,14 @@ import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
 import { icsHref } from "@/lib/event-ics";
-import { EMPTY_RSVP_SUMMARY, buildRsvpSummaries } from "@/lib/event-rsvp";
+import { EMPTY_RSVP_SUMMARY, rsvpSummaryMap } from "@/lib/event-rsvp";
 import { buildMonthGrid } from "@/lib/month-grid";
 import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Event, EventRsvp, EventRsvpSummary } from "@/lib/types";
+import type { Event, EventRsvpSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -96,7 +96,8 @@ export default async function EventsPage({
   const selfName = session?.user?.name ?? null;
 
   // RSVPs are only rendered in the list view and only on UPCOMING cards;
-  // the month view shows compact chips without attendance.
+  // the month view shows compact chips without attendance. The CMS
+  // aggregates them per event (FX21): counts, "yes" names and my answer.
   const rsvpDocIds = isMonthView
     ? []
     : [
@@ -108,9 +109,9 @@ export default async function EventsPage({
       ];
   const rsvpResult =
     canRsvp && rsvpDocIds.length > 0
-      ? await tryFetch(() => api.events.rsvps(rsvpDocIds), "event-rsvps")
+      ? await tryFetch(() => api.events.rsvpSummaries(rsvpDocIds), "event-rsvps")
       : { data: null, failed: false };
-  const summaries = buildRsvpSummaries((rsvpResult.data?.data ?? []) as EventRsvp[], userId);
+  const summaries = rsvpSummaryMap(rsvpResult.data?.data ?? []);
   const anyFailed = failed || rsvpResult.failed;
 
   const switchLinkClass = (active: boolean) =>
