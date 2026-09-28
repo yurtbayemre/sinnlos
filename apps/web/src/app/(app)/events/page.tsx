@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
-import { getLocale, getTranslations } from "next-intl/server";
+import { getFormatter, getTranslations } from "next-intl/server";
+import { appTimeZone } from "@/lib/app-time-zone";
+import { eventBadge, eventTimeLabel, type DateTimeFormatter } from "@/lib/event-dates";
 import { icsHref } from "@/lib/event-ics";
 import { EMPTY_RSVP_SUMMARY, rsvpSummaryMap } from "@/lib/event-rsvp";
-import { buildMonthGrid } from "@/lib/month-grid";
+import { buildMonthGrid, type MonthGrid } from "@/lib/month-grid";
+import { zonedDateKey, zonedDayStart } from "@/lib/plain-date";
 import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
@@ -23,26 +26,6 @@ export async function generateMetadata() {
   return { title: t("title") };
 }
 
-function formatDate(iso: string, locale: string, allDay?: boolean) {
-  const d = new Date(iso);
-  if (allDay) {
-    return d.toLocaleDateString(locale, {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-  }
-  return d.toLocaleDateString(locale, {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export default async function EventsPage({
   searchParams,
 }: {
@@ -51,27 +34,33 @@ export default async function EventsPage({
   const { view, month } = await searchParams;
   const isMonthView = view === "month";
 
-  const [t, locale, session, viewer] = await Promise.all([
+  const [t, format, session, viewer] = await Promise.all([
     getTranslations("events"),
-    getLocale(),
+    getFormatter(),
     getSession(),
     getViewer(),
   ]);
 
   // Time-window fetches (see api.events): a global "first 50 by start asc"
-  // list would show the 50 OLDEST events forever. The list view gets all
-  // upcoming events (start >= local start of today, soonest first) plus a
-  // short tail of the most recent past ones; the month view fetches exactly
-  // the visible grid window including overlapping multi-day events.
+  // list would show the 50 OLDEST events forever. The list view gets the
+  // upcoming events (start >= the start of today, or still running; soonest
+  // first) plus a short tail of the most recent past ones; the month view
+  // fetches exactly the visible grid window including overlapping multi-day
+  // events. "Today" and every window are APP_TIME_ZONE days (datetime
+  // contract, phase 2), never the process zone's.
+  const timeZone = appTimeZone();
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const today = zonedDateKey(now, timeZone);
+  const startOfToday = zonedDayStart(today, timeZone).toISOString();
 
   let upcoming: Event[] = [];
   let past: Event[] = [];
   let monthEvents: Event[] = [];
+  let grid: MonthGrid | null = null;
   let failed = false;
   if (isMonthView) {
-    const range = buildMonthGrid(month, now);
+    const range = buildMonthGrid(month, today, timeZone);
+    grid = range;
     const res = await tryFetch(
       () => api.events.window(range.from.toISOString(), range.until.toISOString()),
       "events",
@@ -79,9 +68,10 @@ export default async function EventsPage({
     monthEvents = (res.data?.data ?? []) as Event[];
     failed = res.failed;
   } else {
+    const nowIso = now.toISOString();
     const [upcomingRes, pastRes] = await Promise.all([
-      tryFetch(() => api.events.upcoming(startOfToday.toISOString()), "events"),
-      tryFetch(() => api.events.past(startOfToday.toISOString()), "events-past"),
+      tryFetch(() => api.events.upcoming(startOfToday, nowIso), "events"),
+      tryFetch(() => api.events.past(startOfToday, nowIso), "events-past"),
     ]);
     upcoming = (upcomingRes.data?.data ?? []) as Event[];
     past = (pastRes.data?.data ?? []) as Event[];
@@ -150,8 +140,8 @@ export default async function EventsPage({
 
       {anyFailed && <FetchErrorBanner />}
 
-      {isMonthView ? (
-        <EventsMonthView events={monthEvents} monthParam={month} />
+      {grid ? (
+        <EventsMonthView events={monthEvents} grid={grid} today={today} timeZone={timeZone} />
       ) : upcoming.length === 0 && past.length === 0 ? (
         <EmptyState icon={Calendar} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
@@ -168,7 +158,8 @@ export default async function EventsPage({
                     key={e.id}
                     event={e}
                     t={t}
-                    locale={locale}
+                    format={format}
+                    timeZone={timeZone}
                     rsvp={
                       canRsvp && e.rsvpEnabled && typeof e.documentId === "string"
                         ? {
@@ -188,7 +179,15 @@ export default async function EventsPage({
               <div className="text-sm font-medium text-muted-foreground">{t("past")}</div>
               <div className="stagger space-y-3">
                 {past.map((e) => (
-                  <EventCard key={e.id} event={e} muted t={t} locale={locale} rsvp={null} />
+                  <EventCard
+                    key={e.id}
+                    event={e}
+                    muted
+                    t={t}
+                    format={format}
+                    timeZone={timeZone}
+                    rsvp={null}
+                  />
                 ))}
               </div>
             </section>
@@ -203,43 +202,35 @@ function EventCard({
   event,
   muted = false,
   t,
-  locale,
+  format,
+  timeZone,
   rsvp,
 }: {
   event: Event;
   muted?: boolean;
   t: (key: string, values?: Record<string, string>) => string;
-  locale: string;
+  /** next-intl's formatter: formats in APP_TIME_ZONE. */
+  format: DateTimeFormatter;
+  /** APP_TIME_ZONE, for the calendar-day comparisons. */
+  timeZone: string;
   /** null = no RSVP UI (disabled, guest, past event). */
   rsvp: { summary: EventRsvpSummary; selfName: string | null } | null;
 }) {
-  const startDate = new Date(event.start);
-  const month = startDate.toLocaleDateString(locale, { month: "short" });
-  const day = startDate.getDate();
+  const badge = eventBadge(event, format, timeZone);
 
   return (
     <Card className={muted ? "opacity-60" : undefined}>
       <CardContent className="flex items-start gap-4 p-4 sm:p-6">
         <div className="flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl bg-primary/10 text-primary">
-          <span className="text-[10px] font-semibold uppercase leading-none">{month}</span>
-          <span className="text-xl font-bold leading-tight">{day}</span>
+          <span className="text-[10px] font-semibold uppercase leading-none">{badge?.month}</span>
+          <span className="text-xl font-bold leading-tight">{badge?.day}</span>
         </div>
         <div className="min-w-0 flex-1">
           <div className="font-medium">{event.title}</div>
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" aria-hidden="true" />
-              {formatDate(event.start, locale, event.allDay)}
-              {event.end && !event.allDay && (
-                <>
-                  {" "}
-                  &ndash;{" "}
-                  {new Date(event.end).toLocaleTimeString(locale, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </>
-              )}
+              {eventTimeLabel(event, format, timeZone)}
             </span>
             {event.location && (
               <span className="inline-flex items-center gap-1">

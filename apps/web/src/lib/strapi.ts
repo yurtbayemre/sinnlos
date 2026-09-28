@@ -99,6 +99,39 @@ export async function strapi<T>(path: string, init: StrapiInit = {}): Promise<T>
 const RSVP_SUMMARY_CHUNK = 50;
 
 /**
+ * The /events list split (FX49). "Running": a timed event whose end is
+ * still ahead (end >= now), or an all-day event whose last day is today or
+ * later (end >= the start of today; all-day days are the APP_TIME_ZONE days
+ * of start through end, decision 04 C7, and its end may be any time on its
+ * last day). Upcoming = started today or later, or running. Past = the
+ * exact complement: started before today and not running, spelled out for
+ * SQL's three-valued logic: no end, an end before today, or an end before
+ * now on an event that is not all-day (allDay false, or NULL on rows older
+ * than the attribute). Both take ISO-Z instants.
+ */
+export function eventsUpcomingFilter(startOfTodayIso: string, nowIso: string): string {
+  const today = encodeURIComponent(startOfTodayIso);
+  const now = encodeURIComponent(nowIso);
+  return (
+    `filters[$or][0][start][$gte]=${today}` +
+    `&filters[$or][1][end][$gte]=${now}` +
+    `&filters[$or][2][allDay][$eq]=true&filters[$or][2][end][$gte]=${today}`
+  );
+}
+
+export function eventsPastFilter(startOfTodayIso: string, nowIso: string): string {
+  const today = encodeURIComponent(startOfTodayIso);
+  const now = encodeURIComponent(nowIso);
+  return (
+    `filters[start][$lt]=${today}` +
+    `&filters[$or][0][end][$null]=true` +
+    `&filters[$or][1][end][$lt]=${today}` +
+    `&filters[$or][2][end][$lt]=${now}&filters[$or][2][allDay][$eq]=false` +
+    `&filters[$or][3][end][$lt]=${now}&filters[$or][3][allDay][$null]=true`
+  );
+}
+
+/**
  * Convenience helpers for the main collections. Every read is uncached
  * (contract above); the field-limited user populates below are data
  * minimisation — a consumer gets only the columns it renders.
@@ -252,26 +285,32 @@ export const api = {
   events: {
     // Time-window fetches instead of one global list: a plain
     // sort=start:asc&pageSize=50 returns the 50 OLDEST events and starves
-    // the calendar once history grows. Callers pass local start-of-day ISO
-    // stamps, so events that began earlier today still count as upcoming.
+    // the calendar once history grows. Callers pass the first instant of
+    // today in APP_TIME_ZONE (plain-date.zonedDayStart) and now, both ISO-Z,
+    // so events that began earlier today still count as upcoming.
     //
     // The `organizer` user relation is field-limited to displayName — the only
     // organizer field any events consumer renders (`organizedBy { name }`). No
     // sensitive user field enters the payload (data minimisation, issue #10 /
     // F1). No departments populate (WD05): no events consumer renders them.
     //
-    // Upcoming events (start >= from), soonest first. pageSize=50 is a
-    // deliberate feed/render cap (issue #26) — counts must come from
-    // `meta.pagination.total`, never `data.length` (see the dashboard).
-    upcoming: (fromIso: string) =>
+    // Upcoming events, soonest first: start >= the start of today, OR still
+    // running (FX49): a timed event whose end is still ahead, an all-day
+    // event whose last day is today or later (C7: its days run through the
+    // day of its end). Before, a multi-day event dropped under "Past" on its
+    // second day. pageSize=50 is a deliberate feed/render cap (issue #26) —
+    // counts must come from `meta.pagination.total`, never `data.length`
+    // (see the dashboard).
+    upcoming: (startOfTodayIso: string, nowIso: string) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$gte]=${encodeURIComponent(fromIso)}&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
+        `/api/events?${eventsUpcomingFilter(startOfTodayIso, nowIso)}&populate[organizer][fields][0]=displayName&sort=start:asc&pagination[pageSize]=50`,
       ),
-    // The most recent past events (start < before), newest first — the
-    // list view shows only this small tail of history.
-    past: (beforeIso: string, limit = 10) =>
+    // The most recent past events, newest first — the list view shows only
+    // this small tail of history: started before today and not running, the
+    // exact complement of `upcoming` (no event is listed twice, none is lost).
+    past: (startOfTodayIso: string, nowIso: string, limit = 10) =>
       strapi<StrapiListResponse<any>>(
-        `/api/events?filters[start][$lt]=${encodeURIComponent(beforeIso)}&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=${limit}`,
+        `/api/events?${eventsPastFilter(startOfTodayIso, nowIso)}&populate[organizer][fields][0]=displayName&sort=start:desc&pagination[pageSize]=${limit}`,
       ),
     // Events overlapping the half-open window [from, to) for the month
     // grid — multi-day spans included: start < window end AND
