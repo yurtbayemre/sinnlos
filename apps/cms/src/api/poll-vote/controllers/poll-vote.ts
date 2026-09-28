@@ -7,6 +7,7 @@ import {
   isInPollAudience,
   isPollTargeted,
 } from "../../../utils/poll-audience";
+import { isOptionIndex, tallyBallots, type BallotRow } from "../../../utils/poll-ballots";
 import { isPollClosed } from "../../../utils/poll-close";
 
 /**
@@ -29,14 +30,15 @@ import { isPollClosed } from "../../../utils/poll-close";
  *     read.
  * Results never name a voter. They include the caller's own vote even on
  * anonymous polls (FX20: the card needs it to show "you voted").
+ *
+ * One ballot per voter (utils/poll-ballots.ts): a vote cannot be changed, so
+ * a voter's first accepted ballot (the row with the lowest id) is the one
+ * the results count, whatever duplicates a parallel race stored.
  */
 
 interface OptionIndexRow {
   optionIndex?: unknown;
 }
-
-const isOptionIndex = (value: unknown): value is number =>
-  typeof value === "number" && Number.isInteger(value) && value >= 0;
 
 const pollOptions = (options: unknown): unknown[] => (Array.isArray(options) ? options : []);
 
@@ -91,19 +93,21 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     ]);
     if (!poll || !canSeePoll(poll, viewer)) return ctx.notFound();
 
-    // Never populate `voter`: the response carries counts and the caller's
-    // own vote only, whatever `anonymous` says.
+    // The voter's id only, to count one ballot per voter (tallyBallots) and
+    // find the caller's own: it never leaves this handler. The response
+    // carries counts and the caller's own vote only, whatever `anonymous`
+    // says.
     // id must stay in the select: a relation filter makes @strapi/database
     // add DISTINCT (query-builder.js shouldUseDistinct), and without the
     // primary key identical votes collapse into one row.
-    const votes = strapi.db.query("api::poll-vote.poll-vote");
-    const [rows, mine] = (await Promise.all([
-      votes.findMany({ where: { poll: poll.id }, select: ["id", "optionIndex"] }),
-      votes.findOne({ where: { poll: poll.id, voter: user.id }, select: ["optionIndex"] }),
-    ])) as [OptionIndexRow[], OptionIndexRow | null];
+    const rows = (await strapi.db.query("api::poll-vote.poll-vote").findMany({
+      where: { poll: poll.id },
+      select: ["id", "optionIndex"],
+      populate: { voter: { select: ["id"] } },
+    })) as BallotRow[];
 
     const options = pollOptions(poll.options);
-    const counts = options.map((_, i) => rows.filter((row) => row.optionIndex === i).length);
+    const { counts, total, myVoteIndex } = tallyBallots(rows, options.length, user.id);
 
     return ctx.send({
       poll: {
@@ -118,8 +122,8 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
         guestsCanVote: poll.guestsCanVote,
       },
       counts,
-      total: rows.length,
-      myVoteIndex: isOptionIndex(mine?.optionIndex) ? mine.optionIndex : null,
+      total,
+      myVoteIndex,
       canVote: canVoteOnPoll(poll, viewer),
       audience: {
         targeted: isPollTargeted(poll),

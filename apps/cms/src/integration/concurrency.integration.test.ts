@@ -18,7 +18,8 @@ import {
  *   - poll vote (check-then-insert): parallel votes of ONE user may store
  *     more than one row; each stored row is one 200, every other answer is
  *     the 400 "Already voted", and once the race is over the next vote is
- *     refused. The results count rows, so every duplicate counts;
+ *     refused. The results count one ballot per voter, the first one
+ *     (utils/poll-ballots.ts), so a duplicate never counts;
  *   - RSVP upsert: parallel answers of one user may store duplicate rows;
  *     the summary and the capacity gate count only the newest row per user,
  *     and the user's next answer heals the duplicates;
@@ -32,7 +33,8 @@ import {
  * Observed in the lane rehearsal (2026-09-28, 8 parallel requests): SQLite
  * serialises the requests and showed no race at all (1 stored vote, 1 RSVP
  * row, 1 seat at capacity 1); Postgres 16 stored 4-8 of 8 votes of the same
- * user (varies per run; all counted in the results), 8 RSVP rows, and
+ * user (varies per run; until batch 8 all of them counted in the
+ * results), 8 RSVP rows, and
  * seated 5 of 5 at capacity 1. The assertions hold for every outcome in
  * between.
  */
@@ -91,9 +93,37 @@ describe.each(testEngines())("concurrent writes on %s", (engine) => {
       "member",
       `/api/polls/${poll.id}/results`,
     );
-    expect(results.body).toMatchObject({ total: accepted, counts: [0, accepted], myVoteIndex: 1 });
+    // One counted ballot, however many rows the race stored.
+    expect(results.body).toMatchObject({ total: 1, counts: [0, 1], myVoteIndex: 1 });
     const later = await t.api("member", `/api/polls/${poll.id}/vote`, { json: { optionIndex: 0 } });
     expect(later.status).toBe(400);
+  });
+
+  it("stored duplicate ballots count once: the voter's first ballot wins", async () => {
+    // Duplicates as a race (or a release before the cleanup on the vote
+    // path) leaves them, written straight into the table like the seed
+    // does: the member's first ballot is option 0, the later ones option 1.
+    const poll = await createPoll("IT race: stored duplicates");
+    const votes = t.strapi.db.query("api::poll-vote.poll-vote");
+    const { member, editor } = t.fixtures.users;
+    for (const [voter, optionIndex] of [
+      [member.id, 0],
+      [editor.id, 1],
+      [member.id, 1],
+      [member.id, 1],
+    ] as const) {
+      await votes.create({ data: { poll: poll.id, optionIndex, voter } });
+    }
+    expect(await votes.count({ where: { poll: poll.id, voter: member.id } })).toBe(3);
+
+    type Results = { total: number; counts: number[]; myVoteIndex: number | null };
+    const asMember = await t.api<Results>("member", `/api/polls/${poll.id}/results`);
+    expect(asMember.status).toBe(200);
+    expect(asMember.body).toMatchObject({ total: 2, counts: [1, 1], myVoteIndex: 0 });
+    const asEditor = await t.api<Results>("editor", `/api/polls/${poll.id}/results`);
+    expect(asEditor.body).toMatchObject({ total: 2, counts: [1, 1], myVoteIndex: 1 });
+    // The response names no voter.
+    expect(asMember.text).not.toContain("voter");
   });
 
   it("parallel votes of different users all count", async () => {
