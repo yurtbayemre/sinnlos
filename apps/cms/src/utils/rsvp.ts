@@ -122,11 +122,10 @@ export function stripPrivateUsers(rows: unknown[], caller: RsvpCaller | null | u
  * Whether a client `filters` tree names the `user` relation anywhere: at
  * the root, inside $and/$or/$not, in list form or in the object form qs
  * produces for long lists. The raw reads refuse such a filter for every
- * role but admin_role (policies/event-rsvp-own-rows.ts): it can only
- * narrow the caller's own rows, so it has no use, and before the own-rows
- * restriction it was the way to learn who declined. Walks iteratively and
- * visits each object once (a parsed query is a tree, but a hand-built one
- * need not be).
+ * role but admin_role (policies/event-rsvp-own-rows.ts): on the caller's
+ * own rows it has no use, so the read guard accepts none. Walks
+ * iteratively and visits each object once (a parsed query is a tree, but
+ * a hand-built one need not be).
  */
 export function filtersReferenceUser(filters: unknown): boolean {
   const pending: unknown[] = [filters];

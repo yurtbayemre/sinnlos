@@ -67,8 +67,8 @@ const LEGACY_FORMAT_MESSAGE = "Strapi-Response-Format is not supported here";
 
 /**
  * The raw reads refuse the Strapi-Response-Format header for every role but
- * admin_role (FX21): the v4 shape nests `user` under `attributes`, where no
- * post-filter written for the v5 shape looks (utils/rsvp.ts
+ * admin_role (FX21), so they only ever answer in the response shape the
+ * backstop post-filter below is written for (utils/rsvp.ts
  * requestsLegacyFormat).
  */
 function refusesLegacyFormat(ctx: {

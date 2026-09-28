@@ -6,10 +6,10 @@ import { filtersReferenceUser } from "../utils/rsvp";
  * Read guard for the raw RSVP rows (FX21): GET /api/event-rsvps and
  * /api/event-rsvps/:id return only the CALLER's own rows. Who else answered
  * what is served solely aggregated, by GET /api/event-rsvps/summary (counts
- * plus the names of "yes" answers). Until now every role holding
+ * plus the names of "yes" answers). Before, every role holding
  * event-rsvp.find read every row and only an output post-filter
- * (stripPrivateUsers) removed the names of decliners, so a filter on the
- * user relation, or the v4 response shape, could still tell who declined.
+ * (stripPrivateUsers) kept the names of decliners private; the rows are
+ * now narrowed in the query itself.
  *
  * admin_role bypasses (it may correct RSVPs and reads every name, as
  * before); editors get NO bypass: an RSVP is a personal statement, not
