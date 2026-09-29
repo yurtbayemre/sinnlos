@@ -664,17 +664,26 @@ interface CaddyRoute {
 
 /**
  * A named matcher block (`@name { … }`) used by a `header` directive. Only
- * `protocol http|https` and `not host <hosts…>` are modelled; all conditions
- * of one block must hold (Caddy ANDs them).
+ * `protocol http|https`, `host <hosts…>` and `not host <hosts…>` are
+ * modelled; all conditions of one block must hold (Caddy ANDs them).
  */
 interface CaddyCondition {
   protocol?: "http" | "https";
+  /** lowercased; empty = any host */
+  hosts: string[];
+  /** lowercased */
   notHosts: string[];
 }
 
 interface CaddyHeaderSet {
   value: string;
   /** condition matcher of the `header @name { … }` block, if any */
+  matcher?: string;
+}
+
+interface CaddyHeaderRemoval {
+  /** lowercased header name */
+  name: string;
   matcher?: string;
 }
 
@@ -696,7 +705,7 @@ interface CaddyModel {
   routes: CaddyRoute[];
   /** lowercased header name → value (and the block's matcher) */
   headerSets: Map<string, CaddyHeaderSet>;
-  headerRemovals: string[];
+  headerRemovals: CaddyHeaderRemoval[];
   headerBlocks: CaddyHeaderBlock[];
 }
 
@@ -707,9 +716,9 @@ type CaddyBlock =
 /**
  * Parses the flat Caddyfile used here. Only the directives below are
  * modelled; anything else (handle, route, redir, a single-line matcher other
- * than `path`, a matcher block condition other than `protocol`/`not host`, a
- * header directive outside a block, …) throws, so a structural change forces
- * a conscious model update.
+ * than `path`, a matcher block condition other than `protocol`, `host` or
+ * `not host`, a header directive outside a block, …) throws, so a structural
+ * change forces a conscious model update.
  */
 function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
   const lines = source.split(/\r?\n/);
@@ -717,7 +726,7 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
   const conditions = new Map<string, CaddyCondition>();
   const routes: CaddyRoute[] = [];
   const headerSets = new Map<string, CaddyHeaderSet>();
-  const headerRemovals: string[] = [];
+  const headerRemovals: CaddyHeaderRemoval[] = [];
   const headerBlocks: CaddyHeaderBlock[] = [];
   let block: CaddyBlock | undefined;
 
@@ -737,7 +746,7 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
       const removal = text.match(/^-(\S+)$/);
       if (removal) {
         block.removes = true;
-        headerRemovals.push(removal[1].toLowerCase());
+        headerRemovals.push({ name: removal[1].toLowerCase(), matcher: block.matcher });
         return;
       }
       const set = text.match(/^([A-Za-z0-9-]+)\s+(?:"([^"]*)"|(\S+))$/);
@@ -758,9 +767,10 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
         block.condition.protocol = protocol[1] as "http" | "https";
         return;
       }
-      const notHost = text.match(/^not\s+host\s+(.+)$/);
-      if (notHost) {
-        block.condition.notHosts.push(...notHost[1].trim().toLowerCase().split(/\s+/));
+      const host = text.match(/^(not\s+)?host\s+(.+)$/);
+      if (host) {
+        const hosts = host[2].trim().toLowerCase().split(/\s+/);
+        (host[1] ? block.condition.notHosts : block.condition.hosts).push(...hosts);
         return;
       }
       throw new Error(`unmodelled condition in Caddy matcher @${block.name}: ${text}`);
@@ -774,7 +784,11 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
     }
     const matcherBlock = text.match(/^@(\S+)\s*\{$/);
     if (matcherBlock) {
-      block = { kind: "matcher", name: matcherBlock[1], condition: { notHosts: [] } };
+      block = {
+        kind: "matcher",
+        name: matcherBlock[1],
+        condition: { hosts: [], notHosts: [] },
+      };
       return;
     }
     const matcher = text.match(/^@(\S+)\s+(\S+)\s+(.+)$/);
@@ -809,22 +823,38 @@ function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
   return { matchers, conditions, routes, headerSets, headerRemovals, headerBlocks };
 }
 
-/** Response headers Caddy sets for a request on `host` over `protocol`. */
+/**
+ * The response headers after Caddy's (deferred) header blocks, for a request
+ * on `host` over `protocol` whose upstream answered with `upstream`
+ * (lowercased names): removals and sets of every block whose matcher holds.
+ * No header is both set and removed under conditions that can hold together
+ * (checked), so the order of the blocks does not matter.
+ */
 function caddyResponseHeaders(
   model: CaddyModel,
   protocol: "http" | "https",
   host: string,
+  upstream: ReadonlyMap<string, string> = new Map(),
 ): Map<string, string> {
-  const holds = (name: string): boolean => {
+  const requestHost = host.toLowerCase();
+  const holds = (name: string | undefined): boolean => {
+    if (name === undefined) return true;
     const condition = model.conditions.get(name)!;
     return (
       (condition.protocol === undefined || condition.protocol === protocol) &&
-      !condition.notHosts.includes(host.toLowerCase())
+      (condition.hosts.length === 0 || condition.hosts.includes(requestHost)) &&
+      !condition.notHosts.includes(requestHost)
     );
   };
-  const headers = new Map<string, string>();
+  const headers = new Map(upstream);
+  for (const { name, matcher } of model.headerRemovals) {
+    if (!holds(matcher)) continue;
+    const set = model.headerSets.get(name);
+    if (set && holds(set.matcher)) throw new Error(`Caddy both sets and removes ${name}`);
+    headers.delete(name);
+  }
   for (const [name, set] of model.headerSets) {
-    if (set.matcher === undefined || holds(set.matcher)) headers.set(name, set.value);
+    if (holds(set.matcher)) headers.set(name, set.value);
   }
   return headers;
 }
@@ -1164,20 +1194,40 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
 
     // Traefik only serves the TLS websecure entrypoint for a real host. Caddy
     // also serves localhost (internal CA) and plain HTTP, where HSTS would
-    // pin the browser to HTTPS on every local port (or is ignored).
+    // pin the browser to HTTPS on every local port (or is ignored). Strapi's
+    // security middleware sends its own HSTS on cms responses (the upstream
+    // below, as measured through Caddy on 2026-09-29), so on localhost that
+    // one has to go too.
+    const STRAPI_UPSTREAM = new Map([
+      ["strict-transport-security", "max-age=31536000; includeSubDomains"],
+      ["x-frame-options", "SAMEORIGIN"],
+      ["referrer-policy", "no-referrer"],
+      ["x-content-type-options", "nosniff"],
+    ]);
     it.each([
       ["https", "intranet.example.com", true],
       ["https", "localhost", false],
       ["https", "LOCALHOST", false],
-      ["http", "intranet.example.com", false],
       ["http", "localhost", false],
     ] as const)("Caddy over %s for %s sends HSTS: %s", (protocol, requestHost, hsts) => {
-      const headers = caddyResponseHeaders(caddy, protocol, requestHost);
-      expect(headers.has("strict-transport-security")).toBe(hsts);
-      // Every other header is unconditional.
-      for (const name of traefikHeaders.keys()) {
-        if (name !== "strict-transport-security") expect(headers.get(name), name).toBeDefined();
+      for (const upstream of [new Map<string, string>(), STRAPI_UPSTREAM]) {
+        const headers = caddyResponseHeaders(caddy, protocol, requestHost, upstream);
+        expect(headers.get("strict-transport-security")).toBe(
+          hsts ? traefikHeaders.get("strict-transport-security") : undefined,
+        );
+        // Every other header is unconditional, with the edge's value.
+        for (const [name, value] of traefikHeaders) {
+          if (name !== "strict-transport-security") expect(headers.get(name), name).toBe(value);
+        }
       }
+    });
+
+    // Plain HTTP on a real host name: browsers ignore HSTS there, and Caddy
+    // redirects to HTTPS anyway; the edge adds none.
+    it("adds no HSTS over plain HTTP on a real host name", () => {
+      expect(caddyResponseHeaders(caddy, "http", "intranet.example.com").has(
+        "strict-transport-security",
+      )).toBe(false);
     });
 
     it("defers every Caddy header block, so its values replace the upstream's", () => {
@@ -1189,8 +1239,15 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
       }
     });
 
-    it("only strips Caddy's own Server header", () => {
-      expect(caddy.headerRemovals).toEqual(["server"]);
+    it("strips only Caddy's own Server header, and HSTS on localhost", () => {
+      expect(caddy.headerRemovals).toEqual([
+        { name: "server", matcher: undefined },
+        { name: "strict-transport-security", matcher: "localhost" },
+      ]);
+      expect(caddy.conditions.get("localhost")).toEqual({
+        hosts: ["localhost"],
+        notHosts: [],
+      });
     });
   });
 });
@@ -1215,6 +1272,7 @@ describe("Caddyfile parser fails closed (FX33)", () => {
     );
     expect(model.conditions.get("secure")).toEqual({
       protocol: "https",
+      hosts: [],
       notHosts: ["localhost", "other.local"],
     });
     expect(model.headerSets.get("x-test")).toEqual({ value: "1", matcher: "secure" });

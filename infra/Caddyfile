@@ -42,7 +42,8 @@
 
     # HSTS only for a real domain over HTTPS. Not for localhost (internal
     # CA): a browser would then refuse plain HTTP to every local port for a
-    # year. A browser ignores HSTS over plain HTTP anyway.
+    # year; so on localhost the one Strapi's security middleware adds to cms
+    # responses goes too. A browser ignores HSTS over plain HTTP anyway.
     @hsts {
         protocol https
         not host localhost
@@ -50,5 +51,11 @@
     header @hsts {
         Strict-Transport-Security "max-age=31536000; includeSubDomains"
         defer
+    }
+    @localhost {
+        host localhost
+    }
+    header @localhost {
+        -Strict-Transport-Security
     }
 }
