@@ -59,6 +59,7 @@ admin_role|api::notification.notification.markAllRead
 admin_role|api::notification.notification.markRead
 admin_role|api::poll-vote.poll-vote.results
 admin_role|api::poll-vote.poll-vote.vote
+admin_role|api::poll.poll.batchResults
 admin_role|api::poll.poll.create
 admin_role|api::poll.poll.delete
 admin_role|api::poll.poll.find
@@ -141,6 +142,7 @@ authenticated|api::notification.notification.markAllRead
 authenticated|api::notification.notification.markRead
 authenticated|api::poll-vote.poll-vote.results
 authenticated|api::poll-vote.poll-vote.vote
+authenticated|api::poll.poll.batchResults
 authenticated|api::poll.poll.find
 authenticated|api::poll.poll.findOne
 authenticated|api::profile.profile.me
@@ -209,6 +211,7 @@ department_head|api::notification.notification.markAllRead
 department_head|api::notification.notification.markRead
 department_head|api::poll-vote.poll-vote.results
 department_head|api::poll-vote.poll-vote.vote
+department_head|api::poll.poll.batchResults
 department_head|api::poll.poll.find
 department_head|api::poll.poll.findOne
 department_head|api::profile.profile.me
@@ -291,6 +294,7 @@ editor|api::notification.notification.markAllRead
 editor|api::notification.notification.markRead
 editor|api::poll-vote.poll-vote.results
 editor|api::poll-vote.poll-vote.vote
+editor|api::poll.poll.batchResults
 editor|api::poll.poll.create
 editor|api::poll.poll.delete
 editor|api::poll.poll.find
@@ -343,6 +347,7 @@ guest|api::notification.notification.markAllRead
 guest|api::notification.notification.markRead
 guest|api::poll-vote.poll-vote.results
 guest|api::poll-vote.poll-vote.vote
+guest|api::poll.poll.batchResults
 guest|api::poll.poll.find
 guest|api::poll.poll.findOne
 guest|api::profile.profile.me
@@ -405,6 +410,7 @@ member|api::notification.notification.markAllRead
 member|api::notification.notification.markRead
 member|api::poll-vote.poll-vote.results
 member|api::poll-vote.poll-vote.vote
+member|api::poll.poll.batchResults
 member|api::poll.poll.find
 member|api::poll.poll.findOne
 member|api::profile.profile.me
@@ -475,6 +481,7 @@ team_lead|api::notification.notification.markAllRead
 team_lead|api::notification.notification.markRead
 team_lead|api::poll-vote.poll-vote.results
 team_lead|api::poll-vote.poll-vote.vote
+team_lead|api::poll.poll.batchResults
 team_lead|api::poll.poll.find
 team_lead|api::poll.poll.findOne
 team_lead|api::profile.profile.me

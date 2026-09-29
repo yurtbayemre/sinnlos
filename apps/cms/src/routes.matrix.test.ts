@@ -349,6 +349,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::poll.poll.create": ADMIN_OR_EDITOR,
   "api::poll.poll.update": ADMIN_OR_EDITOR,
   "api::poll.poll.delete": ADMIN_OR_EDITOR,
+  // WD04: canSeePoll per poll in the controller, like the single results.
+  "api::poll.poll.batchResults": [],
 
   "api::poll-vote.poll-vote.vote": [],
   "api::poll-vote.poll-vote.results": [],
@@ -1012,6 +1014,23 @@ describe("route → policy matrix (S01)", async () => {
           expect(effectiveGrants(role).has(action), `${role}: ${action}`).toBe(true);
         }
       }
+    });
+
+    it("WD04: the batched results are granted like poll reads today, guest included", () => {
+      const batch = "api::poll.poll.batchResults";
+      expect(routes.get(batch)).toMatchObject({
+        kind: "custom",
+        method: "GET",
+        path: "/poll-results",
+      });
+      expect(controllerMethods.get("api::poll.poll")).toContain("batchResults");
+      expect(CUSTOM_ACTION_GRANTS[batch]).toBe("*");
+      const holders = matrixRoles.filter((role) => effectiveGrants(role).has(batch)).sort();
+      expect(holders).toEqual([...(matrixGrants.get("api::poll.poll.find") ?? [])].sort());
+      for (const role of holders) {
+        expect(effectiveGrants(role).has("api::poll-vote.poll-vote.results"), role).toBe(true);
+      }
+      expect(holders).toContain("guest");
     });
 
     it("decision 02: vote and results stay custom routes on the poll-vote controller", () => {

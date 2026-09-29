@@ -833,6 +833,9 @@ describe("results", () => {
     expect(sent(ctx)).toEqual({
       poll: {
         id: OPEN.id,
+        // The poll's address (DA01), since the body is shared with the
+        // batched GET /api/poll-results (WD04).
+        documentId: OPEN.documentId,
         question: OPEN.question,
         options: OPEN.options,
         closesAt: null,
