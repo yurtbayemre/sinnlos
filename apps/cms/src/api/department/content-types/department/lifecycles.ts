@@ -26,10 +26,13 @@ import { flagPollsOfDeletedDepartments } from "../../../../utils/poll-department
  * Service write links, in the same transaction, which also covers a poll
  * linked concurrently with the delete. The poll hook catches rows linked
  * outside the Document Service (a previous cms during a rollback, raw SQL).
- * Documents and quick links have no write-time guard; this hook is their
- * only one. It locks the department rows on Postgres before it reads their
- * links, so a document or quick link linked concurrently with the delete is
- * either flagged or refused by the foreign key check
+ * The same for documents and quick links since the batch 12 review
+ * (B12-01): their write-time guard (utils/department-audience-guard.ts)
+ * and boot backfill keep every linked row flagged, which also covers a
+ * publish or an admin form that copied a row before the delete. Their hook
+ * also locks the department rows on Postgres before it reads their links,
+ * so a link written around the Document Service concurrently with the
+ * delete is either flagged or refused by the foreign key check
  * (utils/department-delete-restrict.ts, CONCURRENT LINKS).
  */
 

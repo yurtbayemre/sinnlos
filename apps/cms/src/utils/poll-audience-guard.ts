@@ -77,13 +77,21 @@ import { POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  * only stamps array payloads), so the admin panel keeps showing Published,
  * not Modified. The action's own result is patched to the stored flag, so
  * the admin form and the API response show what was saved.
+ *
+ * SHARED. `createAudienceGuard` builds this middleware for any list of
+ * content types with a `departments` relation and an `audience` flag:
+ * documents and quick links use it too, with their own log prefix
+ * (utils/department-audience-guard.ts).
  */
 
 export const POLL_AUDIENCE_GUARD_LOG = "[poll-audience]";
 
 const POLL_UID = "api::poll.poll";
 
-/** Document Service actions that write poll rows (see the header). */
+/**
+ * Document Service actions that write rows (see the header), the same for
+ * every type the guard covers.
+ */
 export const POLL_WRITE_ACTIONS: readonly string[] = [
   "create",
   "update",
@@ -130,6 +138,12 @@ export interface PollAudienceGuardRegistrationHost extends PollAudienceGuardHost
   documents?: { use?: (middleware: DocumentMiddleware) => unknown } | null;
 }
 
+/** A content type the guard covers: its uid and the label its log line names. */
+export interface AudienceGuardType {
+  uid: string;
+  label: string;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -158,19 +172,20 @@ export async function setDepartmentsFlag(
 }
 
 /**
- * Flags every row (draft and published alike) of the given poll documents
- * that links at least one department and is not flagged 'departments' yet.
- * Returns the ids of the rows it flagged.
+ * Flags every row (draft and published alike) of the given documents of
+ * `uid` that links at least one department and is not flagged
+ * 'departments' yet. Returns the ids of the rows it flagged.
  *
  * The departments come from a populate (a query of their own), so the row
  * select joins nothing and cannot turn DISTINCT (§5.39); the populate keeps
  * `id` in its select all the same.
  */
-export async function flagLinkedPollRows(
+export async function flagLinkedRows(
   strapi: Pick<PollAudienceGuardHost, "db">,
+  uid: string,
   documentIds: readonly string[],
 ): Promise<number[]> {
-  const query = strapi.db.query(POLL_UID);
+  const query = strapi.db.query(uid);
   const toFlag: number[] = [];
   for (let start = 0; start < documentIds.length; start += POLL_AUDIENCE_GUARD_CHUNK) {
     const chunk = documentIds.slice(start, start + POLL_AUDIENCE_GUARD_CHUNK);
@@ -187,6 +202,14 @@ export async function flagLinkedPollRows(
   }
   if (toFlag.length > 0) await setDepartmentsFlag(query, toFlag);
   return toFlag;
+}
+
+/** `flagLinkedRows` of polls. */
+export function flagLinkedPollRows(
+  strapi: Pick<PollAudienceGuardHost, "db">,
+  documentIds: readonly string[],
+): Promise<number[]> {
+  return flagLinkedRows(strapi, POLL_UID, documentIds);
 }
 
 /** The poll documents an action touched: its params and its result. */
@@ -216,18 +239,27 @@ function patchResult(result: unknown, flagged: ReadonlySet<number>): void {
   }
 }
 
-/** The middleware (see the header). */
-export function createPollAudienceGuard(strapi: PollAudienceGuardHost): DocumentMiddleware {
+/**
+ * The middleware (see the header) for `types`, logging
+ * `<log> <label> <action>: set the audience of N <label> row(s) …`.
+ */
+export function createAudienceGuard(
+  strapi: PollAudienceGuardHost,
+  log: string,
+  types: readonly AudienceGuardType[],
+): DocumentMiddleware {
   return async (context, next) => {
     const action = context.action ?? "";
-    if (context.uid !== POLL_UID || !POLL_WRITE_ACTIONS.includes(action)) return next();
+    const type = types.find((candidate) => candidate.uid === context.uid);
+    if (!type || !POLL_WRITE_ACTIONS.includes(action)) return next();
     return strapi.db.transaction(async () => {
       const result = await next();
-      const flagged = await flagLinkedPollRows(strapi, affectedDocumentIds(context.params, result));
+      const documentIds = affectedDocumentIds(context.params, result);
+      const flagged = await flagLinkedRows(strapi, type.uid, documentIds);
       if (flagged.length > 0) {
         patchResult(result, new Set(flagged));
         strapi.log.info(
-          `${POLL_AUDIENCE_GUARD_LOG} poll ${action}: set the audience of ${flagged.length} poll row(s) ` +
+          `${log} ${type.label} ${action}: set the audience of ${flagged.length} ${type.label} row(s) ` +
             `to 'departments' (they link a department)`,
         );
       }
@@ -236,16 +268,34 @@ export function createPollAudienceGuard(strapi: PollAudienceGuardHost): Document
   };
 }
 
+/** The poll guard. */
+export function createPollAudienceGuard(strapi: PollAudienceGuardHost): DocumentMiddleware {
+  return createAudienceGuard(strapi, POLL_AUDIENCE_GUARD_LOG, [{ uid: POLL_UID, label: "poll" }]);
+}
+
+/**
+ * Hangs `middleware` onto the Document Service, or throws `refusal` when
+ * the Document Service has no `use` (a Strapi upgrade moved it): the cms
+ * must not run without its guards.
+ */
+export function useDocumentMiddleware(
+  strapi: PollAudienceGuardRegistrationHost,
+  middleware: DocumentMiddleware,
+  refusal: string,
+): void {
+  const documents = strapi.documents;
+  if (!documents || typeof documents.use !== "function") throw new Error(refusal);
+  documents.use(middleware);
+}
+
 /**
  * Registers the guard. Fails the boot when the Document Service has no
  * `use` (a Strapi upgrade moved it): the cms must not run without it.
  */
 export function registerPollAudienceGuard(strapi: PollAudienceGuardRegistrationHost): void {
-  const documents = strapi.documents;
-  if (!documents || typeof documents.use !== "function") {
-    throw new Error(
-      `${POLL_AUDIENCE_GUARD_LOG} strapi.documents.use not found — refusing to boot without the write-time poll audience guard`,
-    );
-  }
-  documents.use(createPollAudienceGuard(strapi));
+  useDocumentMiddleware(
+    strapi,
+    createPollAudienceGuard(strapi),
+    `${POLL_AUDIENCE_GUARD_LOG} strapi.documents.use not found — refusing to boot without the write-time poll audience guard`,
+  );
 }

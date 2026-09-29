@@ -284,7 +284,9 @@ export const DEPARTMENTS_AUDIENCE = "departments";
  * 2026-09-29 (b)): a row is targeted when it links a department OR its
  * `audience` flag says 'departments'. Deleting a department cascades its
  * link rows away, so a row targeted only by that department would turn
- * company-wide; the department delete hook sets the flag first
+ * company-wide; every row that links a department carries the flag
+ * already (the write-time guard utils/department-audience-guard.ts and its
+ * boot backfill), and the department delete hook sets it once more
  * (utils/department-delete-restrict.ts). A flagged row without departments
  * is visible to no one here, i.e. to admin_role and editor only (the
  * policy's bypass), until a moderator re-targets it (links departments, or

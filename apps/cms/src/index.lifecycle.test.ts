@@ -39,6 +39,9 @@ vi.mock("./bootstrap/restricted-relation-guard", () => ({
 vi.mock("./utils/poll-audience-guard", () => ({
   registerPollAudienceGuard: step("registerPollAudienceGuard"),
 }));
+vi.mock("./utils/department-audience-guard", () => ({
+  registerDepartmentAudienceGuard: syncStep("registerDepartmentAudienceGuard"),
+}));
 vi.mock("./utils/live-events", () => ({
   registerLiveEventSubscriber: step("registerLiveEventSubscriber"),
 }));
@@ -60,6 +63,9 @@ vi.mock("./bootstrap/entra-identity-index", () => ({
 vi.mock("./utils/poll-audience-backfill", () => ({
   backfillPollAudience: step("backfillPollAudience"),
 }));
+vi.mock("./utils/department-audience-backfill", () => ({
+  backfillDepartmentAudience: step("backfillDepartmentAudience"),
+}));
 vi.mock("./utils/admin-seed", () => ({ seedAdminUser: step("seedAdminUser") }));
 vi.mock("./digest/send-digests", () => ({ reportDigestConfig: step("reportDigestConfig") }));
 vi.mock("./seed-demo", () => ({ seedDemoData: step("seedDemoData") }));
@@ -73,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
-  it("register(): the org draft guard first, the poll audience guard last", async () => {
+  it("register(): the org draft guard first, the audience guards last", async () => {
     await lifecycle.register({ strapi });
     expect(calls).toEqual([
       "assertNoOrgDrafts",
@@ -84,6 +90,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
       "registerPollAudienceGuard",
+      "registerDepartmentAudienceGuard",
     ]);
   });
 
@@ -99,6 +106,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "syncAuthProviders",
       "reportEntraStatus",
       "backfillPollAudience",
+      "backfillDepartmentAudience",
       "seedAdminUser",
       "reportDigestConfig",
       "seedDemoData",

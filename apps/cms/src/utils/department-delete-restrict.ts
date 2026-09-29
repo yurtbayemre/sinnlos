@@ -24,6 +24,21 @@ import { DEPARTMENTS_AUDIENCE } from "./policy-factories";
  * the next publish clones the flagged draft, "Discard changes" the flagged
  * published row, so neither reopens the row.
  *
+ * DEFENCE IN DEPTH since the batch 12 review (B12-01). A flag set only
+ * here came too late for a write that copied a row before the delete: a
+ * publish or "Discard changes" that read the row (Audience `all`, linking
+ * the department) before the delete committed recreates it from that copy
+ * afterwards, and Strapi drops the missing department from the copy
+ * (@strapi/core 5.55.1 transformData, `allowMissingId: true`); an admin
+ * form opened before the delete sends its Audience `all` back with the
+ * next save. Both turned the row company-wide. Now every row that links a
+ * department carries the flag at all times, so every such copy carries it
+ * too: the write-time guard (utils/department-audience-guard.ts) sets it
+ * in the transaction of each Document Service write, and the boot backfill
+ * (utils/department-audience-backfill.ts) on the rows written before it.
+ * This hook still flags what they did not (links written outside the
+ * Document Service: raw SQL, a previous cms during a rollback).
+ *
  * Same mechanics as the poll hook (utils/poll-department-delete.ts), which
  * see for the reasoning:
  *   - BOUNDED: the departments the delete's `where` matches are read in id
@@ -41,10 +56,10 @@ import { DEPARTMENTS_AUDIENCE } from "./policy-factories";
  *   - flagging a row that also links a surviving department changes
  *     nothing for its readers (its links restrict it already).
  *
- * CONCURRENT LINKS (Postgres). Documents and quick links have no
- * write-time guard like polls (utils/poll-audience-guard.ts). Under Read
- * Committed a link that another transaction commits after the link scan
- * would still be cascaded away by the delete, without the flag, and the
+ * CONCURRENT LINKS (Postgres). Under Read Committed a link that another
+ * transaction commits after the link scan would still be cascaded away by
+ * the delete. A Document Service write commits the flag with its link
+ * (the write-time guard); a link written around it would lose it, and the
  * row would turn company-wide. So on Postgres each page of matched
  * departments is locked `FOR UPDATE` before its link tables are read, in
  * the delete's transaction (the query builder joins it). Inserting a link
@@ -77,7 +92,7 @@ export const DEPARTMENT_SCOPED_TYPES = [
 /** Ids per page and per `$in` of the department and link lookups. */
 export const DEPARTMENT_DELETE_PAGE = 500;
 
-interface LookupQuery {
+export interface LookupQuery {
   findMany(params: Record<string, unknown>): Promise<unknown>;
   updateMany(params: Record<string, unknown>): Promise<{ count?: number } | undefined>;
 }
@@ -116,10 +131,14 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const isName = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
-/** The link table of `<uid>.departments`, or a thrown error (fail closed). */
+/**
+ * The link table of `<uid>.departments`, or a thrown error (fail closed)
+ * that ends with `refusal` (what is refused without it).
+ */
 export function departmentLinkTable(
-  strapi: Pick<DepartmentDeleteHost, "db">,
+  strapi: { db: Pick<DepartmentDeleteHost["db"], "metadata"> },
   uid: string,
+  refusal = "refusing to delete a department without keeping its rows restricted",
 ): DepartmentLinkTable {
   const field = (value: unknown, key: string): unknown =>
     isRecord(value) ? value[key] : undefined;
@@ -132,8 +151,7 @@ export function departmentLinkTable(
   const departmentColumn = field(field(joinTable, "inverseJoinColumn"), "name");
   if (!isName(table) || !isName(rowColumn) || !isName(departmentColumn)) {
     throw new Error(
-      `${DEPARTMENT_DELETE_LOG} the link table of ${uid}.departments is unknown; ` +
-        "refusing to delete a department without keeping its rows restricted",
+      `${DEPARTMENT_DELETE_LOG} the link table of ${uid}.departments is unknown; ${refusal}`,
     );
   }
   return { uid: table, rowColumn, departmentColumn };
@@ -167,21 +185,24 @@ async function setDepartmentsAudience(query: LookupQuery, ids: readonly number[]
 
 /**
  * Flags the rows of `uid` linking any of `departmentIds` (at most one
- * page), reading the link table in id pages. Returns the rows changed.
+ * page), or any department at all for `null` (the boot backfill, utils/
+ * department-audience-backfill.ts), reading the link table in id pages.
+ * Returns the rows changed.
  */
-async function restrictRowsLinking(
-  strapi: Pick<DepartmentDeleteHost, "db">,
+export async function restrictRowsLinking(
+  strapi: { db: Pick<DepartmentDeleteHost["db"], "query"> },
   uid: string,
   link: DepartmentLinkTable,
-  departmentIds: number[],
+  departmentIds: readonly number[] | null,
 ): Promise<number> {
   const links = strapi.db.query(link.uid);
   const rows = strapi.db.query(uid);
   let flagged = 0;
   let afterLinkId = 0;
   for (;;) {
+    const after = { id: { $gt: afterLinkId } };
     const page = await links.findMany({
-      where: { [link.departmentColumn]: { $in: departmentIds }, id: { $gt: afterLinkId } },
+      where: departmentIds ? { [link.departmentColumn]: { $in: departmentIds }, ...after } : after,
       select: ["id", link.rowColumn],
       orderBy: { id: "asc" },
       limit: DEPARTMENT_DELETE_PAGE,

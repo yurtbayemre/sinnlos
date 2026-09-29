@@ -414,29 +414,67 @@ describe("org draft guard in register() (decision 05)", () => {
 });
 
 /**
- * Wiring test for the write-time poll audience guard (decision 02, Codex
- * review finding 1; utils/poll-audience-guard.ts): register() hangs exactly
- * one Document Service middleware onto `strapi.documents`, before any
- * plugin bootstrap or our own bootstrap writes a poll, and refuses to boot
- * without the registry.
+ * Wiring test for the write-time audience guards (decision 02, Codex
+ * review finding 1; utils/poll-audience-guard.ts; for documents and quick
+ * links the batch 12 review B12-01, utils/department-audience-guard.ts):
+ * register() hangs two Document Service middlewares onto
+ * `strapi.documents`, one for polls and one for documents and quick links,
+ * before any plugin bootstrap or our own bootstrap writes a row, and
+ * refuses to boot without the registry.
  */
-describe("poll audience guard in register() (decision 02)", () => {
+describe("audience guards in register() (decision 02, FX29 residual)", () => {
   function guardHost(documents: unknown) {
+    const stub = datetimeHost();
+    const transaction = vi.fn(async (callback: () => Promise<unknown>) => callback());
     return {
-      ...datetimeHost(),
+      ...stub,
+      db: {
+        ...stub.db,
+        transaction,
+        query: () => ({ findMany: async () => [], updateMany: async () => ({ count: 0 }) }),
+      },
       getModel: () => undefined,
       requestContext: { get: () => undefined },
       sanitizers: makeSanitizers(),
       contentAPI: { sanitize: { query: vi.fn(async (query: unknown) => query) } },
       documents,
+      transaction,
     };
   }
 
-  it("registers exactly one Document Service middleware", async () => {
+  type Middleware = (
+    context: { uid: string; action: string; params: unknown },
+    next: () => Promise<unknown>,
+  ) => Promise<unknown>;
+
+  it("registers one middleware for polls and one for documents and quick links", async () => {
     const use = vi.fn();
-    await lifecycle.register({ strapi: guardHost({ use }) });
-    expect(use).toHaveBeenCalledOnce();
-    expect(typeof use.mock.calls[0]?.[0]).toBe("function");
+    const strapi = guardHost({ use });
+    await lifecycle.register({ strapi });
+    expect(use).toHaveBeenCalledTimes(2);
+    const [polls, departmentScoped] = use.mock.calls.map((call) => call[0] as Middleware);
+    // Which uids each one guards: a guarded write runs in its transaction.
+    const guards = async (middleware: Middleware, uid: string) => {
+      strapi.transaction.mockClear();
+      await middleware({ uid, action: "publish", params: { documentId: "d1" } }, async () => null);
+      return strapi.transaction.mock.calls.length === 1;
+    };
+    const uids = [
+      "api::poll.poll",
+      "api::document.document",
+      "api::quick-link.quick-link",
+      "api::announcement.announcement",
+    ];
+    const guarded = async (middleware: Middleware) => {
+      const hits: string[] = [];
+      for (const uid of uids) if (await guards(middleware, uid)) hits.push(uid);
+      return hits;
+    };
+    expect(await guarded(polls)).toEqual(["api::poll.poll"]);
+    expect(await guarded(departmentScoped)).toEqual([
+      "api::document.document",
+      "api::quick-link.quick-link",
+    ]);
   });
 
   it("refuses to boot when strapi.documents.use is gone", async () => {
