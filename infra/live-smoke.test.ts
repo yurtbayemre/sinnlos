@@ -117,6 +117,10 @@ describe("live-smoke.sh: what it touches", () => {
     expect(SCRIPT).toMatch(/curl -sS -N --compressed -D "\$\{STREAM_HEADERS\}"/);
     expect(SCRIPT).toContain("grep -qi '^content-type: *text/event-stream'");
     expect(SCRIPT).toContain("if grep -qi '^content-encoding:' \"${HEADERS}\"; then");
+    // The failure names the edge fix.
+    expect(SCRIPT).toContain(
+      "/live/ needs a router without the sinnlos-compress middleware (sinnlos-live in infra/docker-compose.traefik.yml",
+    );
   });
 
   it("removes only this run's comment notifications of the smoke author", () => {

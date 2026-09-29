@@ -331,7 +331,7 @@ STREAM_STATUS="$(sed -n '1s/^HTTP\/[0-9.]* \([0-9][0-9][0-9]\).*/\1/p' "${HEADER
 grep -qi '^content-type: *text/event-stream' "${HEADERS}" ||
   fail "subscribe: ${BASE_URL}/live/stream is not text/event-stream ($(grep -i '^content-type:' "${HEADERS}" || echo 'no Content-Type'))"
 if grep -qi '^content-encoding:' "${HEADERS}"; then
-  fail "subscribe: ${BASE_URL}/live/stream came back compressed ($(grep -i '^content-encoding:' "${HEADERS}")): the edge must not compress text/event-stream, or pings wait in the encoder's buffer"
+  fail "subscribe: ${BASE_URL}/live/stream came back compressed ($(grep -i '^content-encoding:' "${HEADERS}")): the edge must not compress text/event-stream, or pings wait in the encoder's buffer. Behind Traefik, /live/ needs a router without the sinnlos-compress middleware (sinnlos-live in infra/docker-compose.traefik.yml, batch 10 lane 5A); with Caddy, its encode must leave text/event-stream alone"
 fi
 
 CONN_ID=""

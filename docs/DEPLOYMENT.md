@@ -1351,7 +1351,12 @@ is degraded while the new cms boots. For the manual production-safe sequence
 Lane 5B of batch 10 (branch `ops/deploy-backup-cron`, on `batch/9`
 `5be7dc7`) changes the host scripts and the cms's cron wiring. No schema,
 grant, env, compose or edge change; web and cms images are rebuilt as
-usual.
+usual. It does depend on one edge change: live-smoke now requires an edge
+that does not compress `text/event-stream`, which is lane 5A's
+`sinnlos-live` router (Traefik; Caddy's `encode` already leaves the
+stream alone). A deploy of this lane without it fails at live-smoke by
+design (`came back compressed (content-encoding: gzip)`) and prints the
+rollback; merged in order (5A, then 5B), batch 10 ships both together.
 
 - **`infra/deploy.sh`** ([§3.6](#36-deploy)): after the env preflight it
   takes a lock per compose project, refuses a checkout with changed tracked
