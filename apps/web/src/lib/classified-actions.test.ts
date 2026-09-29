@@ -14,7 +14,9 @@ import { StrapiError } from "@/lib/strapi-error";
  *     failure is swallowed (the cms janitor is the net);
  *   - strapi()'s 401 sign-in redirect (NEXT_REDIRECT) propagates from every
  *     strapi() call, before any cleanup; the success redirect is a real
- *     NEXT_REDIRECT too, after refresh().
+ *     NEXT_REDIRECT too, after refresh();
+ *   - the delete redirects to /marketplace the same way (UI07) and answers
+ *     a refusal or an outage as an AC01 ActionResult.
  * strapi(), the session, config and next/cache are mocked, fetch is stubbed;
  * next/navigation is the real one.
  */
@@ -414,13 +416,46 @@ describe("updateClassified", () => {
   });
 });
 
-describe("deleteClassified / renewClassified", () => {
-  it("deletes by id and refreshes", async () => {
-    await expect(deleteClassified(4)).resolves.toEqual({});
-    expect(strapiCalls()).toEqual([["/api/classifieds/4", "DELETE", undefined]]);
-    expect(refreshMock).toHaveBeenCalledTimes(1);
+describe("deleteClassified (UI07: server-side redirect, AC01 failures)", () => {
+  beforeEach(() => {
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
   });
 
+  it("deletes by id, refreshes, then redirects to /marketplace", async () => {
+    const order: string[] = [];
+    refreshMock.mockImplementation(() => order.push("refresh"));
+    const error = await deleteClassified(4).catch((caught: unknown) => caught);
+    order.push("redirect");
+    expect(digestOf(error)).toMatch(/^NEXT_REDIRECT;\w+;\/marketplace;/);
+    expect(strapiCalls()).toEqual([["/api/classifieds/4", "DELETE", undefined]]);
+    expect(order).toEqual(["refresh", "redirect"]);
+  });
+
+  it.each([
+    [400, "invalid"],
+    [403, "forbidden"],
+    [404, "notFound"],
+    [500, "unavailable"],
+  ])("answers a %s as %s and stays (no refresh, no redirect)", async (status, code) => {
+    strapiMock.mockRejectedValueOnce(cmsError(status));
+    await expect(deleteClassified(4)).resolves.toEqual({ ok: false, code });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("answers an unreachable cms as unavailable", async () => {
+    strapiMock.mockRejectedValueOnce(new TypeError("fetch failed"));
+    await expect(deleteClassified(4)).resolves.toEqual({ ok: false, code: "unavailable" });
+  });
+
+  it("lets strapi()'s 401 sign-in redirect propagate", async () => {
+    const redirectError = signInRedirect();
+    strapiMock.mockRejectedValueOnce(redirectError);
+    await expect(deleteClassified(4)).rejects.toBe(redirectError);
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("renewClassified", () => {
   it("renews for the default lifetime and refreshes", async () => {
     await expect(renewClassified(4)).resolves.toEqual({});
     expect(strapiCalls()).toEqual([
@@ -433,15 +468,12 @@ describe("deleteClassified / renewClassified", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it.each([
-    ["delete", () => deleteClassified(4)],
-    ["renew", () => renewClassified(4)],
-  ])("%s answers 'failed' for a 400 and propagates a 401 redirect", async (_label, action) => {
+  it("answers 'failed' for a 400 and propagates a 401 redirect", async () => {
     strapiMock.mockRejectedValueOnce(cmsError(400));
-    await expect(action()).resolves.toEqual({ error: "failed" });
+    await expect(renewClassified(4)).resolves.toEqual({ error: "failed" });
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValueOnce(redirectError);
-    await expect(action()).rejects.toBe(redirectError);
+    await expect(renewClassified(4)).rejects.toBe(redirectError);
     expect(refreshMock).not.toHaveBeenCalled();
   });
 });

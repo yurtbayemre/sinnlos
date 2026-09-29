@@ -2,23 +2,24 @@
 
 import { useEffect, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Trash2, X } from "lucide-react";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { deleteClassified } from "@/lib/classified-actions";
 
 /**
  * Delete button with a confirmation dialog (give-kudos modal pattern:
  * role=dialog, aria-modal, Escape + backdrop close, overlay portaled to
- * <body>). Navigation happens client-side after the action confirms
- * success — the action itself only deletes and refresh()es.
+ * <body>). A successful delete redirects server-side to /marketplace
+ * (UI07; startCmsAction rethrows that redirect); a refused or failed one
+ * answers a code (AC01) and the dialog stays open with its text.
  */
 export function DeleteClassified({ id, title }: { id: number; title: string }) {
   const t = useTranslations("marketplace");
   const tCommon = useTranslations("common");
-  const router = useRouter();
+  const tErrors = useTranslations("actionErrors");
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState(false);
+  const [error, setError] = useState<CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -39,14 +40,10 @@ export function DeleteClassified({ id, title }: { id: number; title: string }) {
   }, [open]);
 
   const confirmDelete = () => {
-    startTransition(async () => {
-      setError(false);
-      const result = await deleteClassified(id);
-      if (result?.error) {
-        setError(true);
-        return;
-      }
-      router.push("/marketplace");
+    setError(null);
+    startCmsAction(startTransition, {
+      action: () => deleteClassified(id),
+      onFailure: setError,
     });
   };
 
@@ -99,7 +96,7 @@ export function DeleteClassified({ id, title }: { id: number; title: string }) {
 
               {error && (
                 <p role="alert" className="mt-3 text-sm text-destructive">
-                  {t("deleteFailed")}
+                  {isSharedErrorCode(error) ? tErrors(error) : t("deleteFailed")}
                 </p>
               )}
 

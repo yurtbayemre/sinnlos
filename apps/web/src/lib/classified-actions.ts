@@ -14,7 +14,8 @@
  *      author server-side and clamps expiresAt to [today, +90 days].
  *
  * Error contract: actions return machine codes (ClassifiedErrorCode); the
- * form translates them (i18n rule — no user-facing strings here).
+ * form translates them (i18n rule — no user-facing strings here). The
+ * delete answers the common ActionResult (AC01) and redirects on success.
  *
  * Orphan handling (issue #13): if step 2 fails after step 1 succeeded (or
  * an update deselects images), the action best-effort POSTs the ids to
@@ -27,6 +28,7 @@
  */
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
+import { runCmsAction, type ActionResult } from "@/lib/action-result";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { getStrapiToken } from "@/lib/session";
@@ -283,16 +285,28 @@ export async function updateClassified(
   redirect(`/marketplace/${id}`);
 }
 
-export async function deleteClassified(id: number): Promise<{ error?: "failed" }> {
-  try {
-    await strapi(`/api/classifieds/${id}`, { method: "DELETE" });
-  } catch (e) {
-    unstable_rethrow(e);
-    console.error("[classifieds] delete failed", e);
-    return { error: "failed" };
-  }
+/**
+ * Deletes ad `id` and sends the caller to /marketplace, server-side
+ * (UI07): the redirect's answer is the list page itself. It used to
+ * refresh() and answer {}, so the action response re-rendered the page the
+ * delete came from — the ad's edit page, now a notFound — before the
+ * client's router.push("/marketplace") ran: a visible "not found" flash.
+ *
+ * A refused or failed delete answers an ActionResult (AC01: 403 forbidden,
+ * 404 notFound, 5xx or no answer unavailable, …) and stays on the page.
+ * The success redirect is Next's control flow: on the client the action
+ * call rejects with it, and startCmsAction rethrows it (never reports it
+ * as a failure). strapi()'s 401 sign-in redirect propagates as before.
+ */
+export async function deleteClassified(id: number): Promise<ActionResult> {
+  const result = await runCmsAction(() => strapi(`/api/classifieds/${id}`, { method: "DELETE" }), {
+    label: "[classifieds] delete",
+  });
+  if (!result.ok) return result;
+  // Dynamic data the client still holds (the ad's page in its router
+  // cache) is stale now.
   refresh();
-  return {};
+  redirect("/marketplace");
 }
 
 /** Re-arm an (expired) ad for another 30 days — a plain ownership-gated update. */
