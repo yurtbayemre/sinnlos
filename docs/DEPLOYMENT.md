@@ -1102,11 +1102,14 @@ systemctl start docker
 
 > **Deploying the deploy, backup and cron hardening (batch 10, lane 5B)?**
 > A normal `infra/deploy.sh` run, with the new script itself: no schema,
-> grant, env or edge change; the cms image changes only its cron wiring.
+> grant or env change, and it needs lane 5A's edge (its live-smoke refuses
+> a compressed stream); the cms image changes only its cron wiring.
 > Its first run has no last-known-good state yet and rolls back to
 > `:rollback` as before; from its success on, a failed deploy rolls back
 > to the SHA tags of the last good one. It refuses a checkout with changed
-> tracked files or untracked files under `apps/` and needs `flock`. The next morning, check `backup.log`
+> tracked files or untracked files or directories under `apps/`, needs
+> `flock`, and checks the notification frame when the demo credentials
+> file has a line for `alex.morgan`. The next morning, check `backup.log`
 > and the new `last-success` file. Follow
 > [Upgrading to the deploy, backup and cron hardening (batch 10, lane 5B)](#upgrading-to-the-deploy-backup-and-cron-hardening-batch-10-lane-5b).
 >
@@ -1525,6 +1528,31 @@ live-smoke left two notifications per run and showed the demo password in
 frame with an announcement author as `SMOKE_EMAIL`, skipped its sign-in
 steps for an Entra-only web, and failed with `came back compressed` on a
 gzip-encoded stream.
+
+**Fix round, verified** (throwaway compose project `b10-5b-fix` with its
+own volumes, a test key and backup dir, the web on `127.0.0.1:8511`,
+`deploy.sh` run in a Linux container against Docker 29.7.2 with the
+containerd image store): the lane head's `deploy.sh` reproduced the
+re-run failure (`No such image` in `record` after a deploy that failed
+after `up`); the fixed script records such a re-run, also with BuildKit's
+attestations switched back on (the `:pre-deploy` tag alone), keeps both
+image ids on an unchanged rebuild, and after the lane head's failure
+names the lost image and the `--force-recreate` recovery. A staging
+project without `SMOKE_URL` and `SINNLOS_BACKUP_DIR` was refused. An
+untracked file under `apps/web` was refused; an empty `apps/web/app/` left
+behind broke the next web build (HTTP 500 on every page: the smoke check
+stopped the deploy and the printed rollback restored the stack), hence
+the directory check. Without the credentials file nothing was recorded,
+and `--record-without-live-smoke` recorded; a credentials file without
+`alex.morgan` recorded `passed (notification frame not checked)` with the
+warning. Without a state, two failed runs kept the first `:rollback`, and
+the passing third one deleted the marker. A linked worktree planned with
+the clone's state. A pre-deploy backup wrote only
+`last-success-predeploy`. The §7.3 snippet left `0600` files in a `700`
+directory, and the uploads stream restored the volume, while `tar xzf`
+fails on the decrypted `.tar`. A SIGKILLed backup left a dump that the
+next run reported. Four live-smoke runs within 6 s passed (two cms
+sign-ins each), where the lane head's hit HTTP 429 on the fourth.
 
 #### Deploying batch 9 (2026-09-28)
 
