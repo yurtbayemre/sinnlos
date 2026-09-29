@@ -52,7 +52,9 @@ updates:
       - dependency-name: node
         update-types: ["version-update:semver-major"]
 
-  # The actions used in .github/workflows, in one pull request.
+  # The actions used in .github/workflows, in one pull request. They are
+  # pinned to commit SHAs with the tag in a trailing comment
+  # (`uses: owner/action@<sha> # vX.Y.Z`); Dependabot updates both.
   - package-ecosystem: github-actions
     directory: /
     schedule:

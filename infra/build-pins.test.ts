@@ -9,9 +9,12 @@
  *      deps stage (a layer that changes only with the lockfile) and the app
  *      as one more layer from the builder's /out, never the builder's whole
  *      /app;
- *   3. .dockerignore keeps local state and caches out of the build context.
+ *   3. .dockerignore keeps local state and caches out of the build context;
+ *   4. every GitHub Action in the workflows runs at a full commit SHA with
+ *      its release tag in a trailing comment (the form Dependabot updates),
+ *      never at a movable tag or branch.
  */
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const read = (relative: string) =>
@@ -91,6 +94,40 @@ describe("cms runtime layers", () => {
     }
     expect(script).toContain("mkdir -p /out/apps/cms/public/uploads");
     expect(script).toContain("../../packages/domain/package.json ../../packages/domain/dist");
+  });
+});
+
+describe("GitHub Actions", () => {
+  const WORKFLOWS_DIR = new URL("../.github/workflows/", import.meta.url);
+  const workflows = readdirSync(WORKFLOWS_DIR).filter((name) => /\.ya?ml$/.test(name));
+  const uses = workflows.flatMap((name) =>
+    read(`../.github/workflows/${name}`)
+      .split("\n")
+      .filter((line) => /^\s*(- )?uses:/.test(line))
+      .map((line) => ({ name, line: line.trim().replace(/^- /, "") })),
+  );
+
+  it("are used at all (the workflow still parses as expected)", () => {
+    expect(workflows).toContain("ci.yml");
+    expect(uses.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("run at a full commit SHA with the release tag in a trailing comment", () => {
+    for (const { name, line } of uses) {
+      expect(line, `${name}: ${line}`).toMatch(
+        /^uses: [\w.-]+\/[\w.-]+(\/[\w./-]+)?@[0-9a-f]{40} # v\d+\.\d+\.\d+$/,
+      );
+    }
+  });
+
+  it("pin one SHA per action", () => {
+    const shaByAction = new Map<string, Set<string>>();
+    for (const { line } of uses) {
+      const [, action, sha] = /^uses: (\S+)@([0-9a-f]{40})/.exec(line) ?? [];
+      if (!action || !sha) continue;
+      shaByAction.set(action, (shaByAction.get(action) ?? new Set()).add(sha));
+    }
+    for (const [action, shas] of shaByAction) expect(shas.size, action).toBe(1);
   });
 });
 
