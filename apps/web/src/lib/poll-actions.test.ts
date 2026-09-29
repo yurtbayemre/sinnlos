@@ -1,4 +1,8 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { StrapiError } from "@/lib/strapi-error";
 
 /**
  * createPoll (decision 02): the payload carries the explicit `audience`
@@ -14,8 +18,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * instead of becoming "failed" (FX47).
  *
  * votePoll addresses the poll by documentId (DA01) and carries the option
- * text the card showed (the cms refuses the vote when an edit moved it);
- * a bad reference or option text is refused before any request.
+ * text the card showed (the cms refuses the vote when an edit moved it,
+ * which answers its own code, pollOptionsChanged); a bad reference or
+ * option text is "invalid" before any request. Both answer ActionResults
+ * (AC01).
  *
  * `@/lib/strapi`, `@/lib/viewer` and `next/cache` are mocked: only the
  * request the action builds matters here. `next/navigation` is the real
@@ -73,7 +79,24 @@ beforeEach(() => {
   refreshMock.mockReset();
   updateTagMock.mockReset();
   revalidateTagMock.mockReset();
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+/** A Strapi error envelope as ctx.badRequest()/forbidden() send it. */
+const cmsError = (status: number, message: string) =>
+  new StrapiError(
+    status,
+    "Error",
+    JSON.stringify({
+      data: null,
+      error: { status, name: status === 400 ? "BadRequestError" : "Error", message, details: {} },
+    }),
+  );
 
 describe("createPoll", () => {
   it("sends audience 'departments' with the chosen department ids", async () => {
@@ -152,9 +175,23 @@ describe("createPoll", () => {
     }
   });
 
-  it("answers failed when the CMS refuses the write", async () => {
-    strapiMock.mockRejectedValue(new Error("400"));
-    await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code: "failed" });
+  it.each([
+    ["a 400", cmsError(400, "Invalid options"), "invalid"],
+    ["a 403", cmsError(403, "Forbidden"), "forbidden"],
+    ["a 500", cmsError(500, "Internal Server Error"), "unavailable"],
+    ["a network error", new TypeError("fetch failed"), "unavailable"],
+    ["an unexpected error", new Error("boom"), "failed"],
+  ])("answers %s as %s", async (_label, error, code) => {
+    strapiMock.mockRejectedValue(error);
+    await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code });
+  });
+
+  it("refuses a closing day that is no date before any request", async () => {
+    await expect(createPoll({ ...input([]), closesAt: "2026-02-31" })).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+    });
+    expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it("lets the expired-session redirect escape instead of answering failed (FX47)", async () => {
@@ -175,7 +212,7 @@ describe("createPoll", () => {
 
 describe("votePoll", () => {
   it("posts the option to the custom vote route and refreshes the page", async () => {
-    await votePoll(4, 1);
+    await expect(votePoll(4, 1)).resolves.toEqual({ ok: true });
     expect(strapiMock).toHaveBeenCalledWith("/api/polls/4/vote", {
       method: "POST",
       body: JSON.stringify({ optionIndex: 1 }),
@@ -205,7 +242,7 @@ describe("votePoll", () => {
       await expect(
         votePoll("k3m9x0000000000000000001", 0, option as unknown as string),
         typeof option,
-      ).rejects.toThrow("invalid poll option");
+      ).resolves.toEqual({ ok: false, code: "invalid" });
     }
     expect(strapiMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
@@ -216,12 +253,54 @@ describe("votePoll", () => {
 
   it("refuses a reference that is neither a documentId nor a row id, without a request", async () => {
     for (const ref of ["../polls", "1/vote", "abc", "0", "1.5", "", "K3M9X0000000000000000001"]) {
-      await expect(votePoll(ref, 0), ref).rejects.toThrow("invalid poll reference");
+      await expect(votePoll(ref, 0), ref).resolves.toEqual({ ok: false, code: "invalid" });
     }
     for (const ref of [0, -1, 1.5, Number.NaN]) {
-      await expect(votePoll(ref, 0), String(ref)).rejects.toThrow("invalid poll reference");
+      await expect(votePoll(ref, 0), String(ref)).resolves.toEqual({
+        ok: false,
+        code: "invalid",
+      });
     }
     expect(strapiMock).not.toHaveBeenCalled();
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("answers the stale-card refusal with its own code, pollOptionsChanged", async () => {
+    strapiMock.mockRejectedValue(cmsError(400, "Poll options changed"));
+    await expect(votePoll("k3m9x0000000000000000001", 1, "Sushi")).resolves.toEqual({
+      ok: false,
+      code: "pollOptionsChanged",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["already voted", cmsError(400, "Already voted"), "invalid"],
+    ["a closed poll", cmsError(400, "Poll is closed"), "invalid"],
+    ["outside the audience", cmsError(403, "Not in poll audience"), "forbidden"],
+    ["an invisible poll", cmsError(404, "Not Found"), "notFound"],
+    ["a network error", new TypeError("fetch failed"), "unavailable"],
+  ])("answers %s as %s", async (_label, error, code) => {
+    strapiMock.mockRejectedValue(error);
+    await expect(votePoll("k3m9x0000000000000000001", 0, "Pizza")).resolves.toEqual({
+      ok: false,
+      code,
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("lets the expired-session redirect escape (NEXT_REDIRECT)", async () => {
+    const expired = captureRedirect("/sign-in?expired=1");
+    strapiMock.mockRejectedValue(expired);
+    await expect(votePoll("k3m9x0000000000000000001", 0)).rejects.toBe(expired);
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("pins the stale-card text the cms controller sends", () => {
+    const controller = readFileSync(
+      join(__dirname, "../../../cms/src/api/poll-vote/controllers/poll-vote.ts"),
+      "utf8",
+    );
+    expect(controller).toContain('ctx.badRequest("Poll options changed")');
   });
 });

@@ -318,6 +318,7 @@
     "emptyTitleGuest": "Noch keine Umfragen für Sie",
     "emptyHintGuest": "Umfragen, an denen Sie teilnehmen können, erscheinen hier.",
     "voteFailed": "Ihre Stimme konnte nicht gespeichert werden – vielleicht haben Sie bereits abgestimmt.",
+    "pollOptionsChanged": "Die Antworten dieser Umfrage wurden inzwischen geändert – bitte prüfen Sie die aktualisierte Umfrage und stimmen Sie erneut ab.",
     "audienceDepartments": "Nur für: {departments}",
     "notInAudience": "Nur Mitglieder dieser Abteilungen können abstimmen.",
     "audienceMissing": "Die Zielabteilung existiert nicht mehr – niemand kann abstimmen. Abteilungen neu wählen und erneut veröffentlichen.",
@@ -350,6 +351,10 @@
     "formError_missingQuestion": "Bitte gib eine Frage ein.",
     "formError_tooFewOptions": "Bitte gib mindestens zwei verschiedene Antwortmöglichkeiten an.",
     "formError_forbidden": "Nur Admins und Editoren können Umfragen erstellen.",
+    "formError_invalid": "Die Umfrage konnte nicht gespeichert werden – bitte prüfen Sie Ihre Eingaben.",
+    "formError_notFound": "Etwas, auf das sich die Umfrage bezieht, existiert nicht mehr – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "formError_conflict": "Jemand hat das inzwischen geändert – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "formError_unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal.",
     "formError_failed": "Die Umfrage konnte nicht erstellt werden. Bitte versuche es erneut."
   },
   "documents": {
