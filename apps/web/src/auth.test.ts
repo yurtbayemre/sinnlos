@@ -72,15 +72,27 @@ const stub = vi.hoisted(() => ({
   exchangeCalls: [] as { headers: Headers; body: string }[],
 }));
 
-vi.mock("next/headers", () => ({
-  headers: async () => stub.headers,
-  cookies: async () => ({
-    get: () => undefined,
-    getAll: () => [],
-    has: () => false,
-    set: () => {},
-  }),
-}));
+// cookies() holds the request's cookies, like Next's cookie jar outside a
+// Server Action (lib/strapi-token.ts reads the jar since FX40).
+vi.mock("next/headers", () => {
+  const requestCookies = () =>
+    (stub.headers.get("cookie") ?? "")
+      .split(/;\s*/)
+      .filter((pair) => pair.includes("="))
+      .map((pair) => {
+        const i = pair.indexOf("=");
+        return { name: pair.slice(0, i), value: decodeURIComponent(pair.slice(i + 1)) };
+      });
+  return {
+    headers: async () => stub.headers,
+    cookies: async () => ({
+      get: (name: string) => requestCookies().find((cookie) => cookie.name === name),
+      getAll: requestCookies,
+      has: (name: string) => requestCookies().some((cookie) => cookie.name === name),
+      set: () => {},
+    }),
+  };
+});
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });

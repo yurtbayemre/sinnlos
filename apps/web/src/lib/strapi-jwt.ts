@@ -10,6 +10,11 @@
  * null, for the local and the Microsoft path alike.
  *
  * Pure (no Next/Auth.js imports) so the jwt callback and the tests share it.
+ *
+ * Since FX40 a password change revokes the user's older Strapi JWTs (the
+ * cms's token version); the session of the tab that changed it takes the
+ * new JWT through a session update, which the jwt callback accepts only for
+ * the session's own user (strapiJwtUserId).
  */
 
 /** The token fields the expiry decision reads (a subset of the Auth.js JWT). */
@@ -17,6 +22,20 @@ export type StrapiSessionToken = {
   strapiJwt?: unknown;
   strapiJwtExp?: unknown;
 };
+
+/** A Strapi JWT's payload, base64url-decoded WITHOUT verifying it; undefined when malformed. */
+function strapiJwtPayload(jwt: string): Record<string, unknown> | undefined {
+  const parts = jwt.split(".");
+  if (parts.length !== 3 || !parts[1]) return undefined;
+  try {
+    const payload: unknown = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+    return payload !== null && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * `exp` (epoch seconds) from a Strapi JWT's payload — base64url-decoded
@@ -27,16 +46,20 @@ export type StrapiSessionToken = {
  * without a numeric exp.
  */
 export function strapiJwtExp(jwt: string): number | undefined {
-  const parts = jwt.split(".");
-  if (parts.length !== 3 || !parts[1]) return undefined;
-  try {
-    const payload: unknown = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-    if (payload === null || typeof payload !== "object") return undefined;
-    const exp = (payload as { exp?: unknown }).exp;
-    return typeof exp === "number" && Number.isFinite(exp) ? exp : undefined;
-  } catch {
-    return undefined;
-  }
+  const exp = strapiJwtPayload(jwt)?.exp;
+  return typeof exp === "number" && Number.isFinite(exp) ? exp : undefined;
+}
+
+/**
+ * The user id (`id`) from a Strapi JWT's payload, unverified like
+ * strapiJwtExp(): the session update after a password change (FX40) takes a
+ * JWT only when it names the session's own user, so no session can be made
+ * to carry another user's token; Strapi still verifies the signature on
+ * every request. undefined for anything malformed or without a numeric id.
+ */
+export function strapiJwtUserId(jwt: string): number | undefined {
+  const id = strapiJwtPayload(jwt)?.id;
+  return typeof id === "number" && Number.isSafeInteger(id) ? id : undefined;
 }
 
 /**

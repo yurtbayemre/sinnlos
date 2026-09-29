@@ -9,8 +9,10 @@ import { StrapiError } from "./strapi-error";
  * for the profile save: trimmed values, the 255-character limit answered
  * before any write, and a CMS 400 told apart from an outage. Both answer
  * machine codes (AC02); the forms translate them
- * (lib/auth/form-messages.ts, whose test checks both catalogs).
- * `@/lib/strapi` is mocked; its StrapiError is the real class.
+ * (lib/auth/form-messages.ts, whose test checks both catalogs). FX40: the
+ * JWT the cms answers a password change with goes into this tab's session
+ * (unstable_update), and nothing about it can turn the change into an error.
+ * `@/lib/strapi` and `@/auth` are mocked; StrapiError is the real class.
  */
 const strapiMock = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 const state = vi.hoisted(() => ({ headers: new Headers() }));
@@ -26,6 +28,8 @@ vi.mock("next/navigation", () => ({
     if (e instanceof Error && e.message.startsWith("NEXT_REDIRECT")) throw e;
   },
 }));
+const updateMock = vi.fn<(data: unknown) => Promise<unknown>>();
+vi.mock("@/auth", () => ({ unstable_update: (data: unknown) => updateMock(data) }));
 
 const { changePassword, updateProfile } = await import("./profile-actions");
 
@@ -45,6 +49,8 @@ beforeEach(() => {
   strapiMock.mockReset();
   strapiMock.mockResolvedValue({ jwt: "x" });
   refreshMock.mockReset();
+  updateMock.mockReset();
+  updateMock.mockResolvedValue(null);
   state.headers = new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.2" });
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
@@ -192,6 +198,45 @@ describe("changePassword", () => {
 
   it("lets strapi()'s expired-session redirect escape", async () => {
     strapiMock.mockRejectedValue(new Error("NEXT_REDIRECT /sign-in?expired=1"));
+    await expect(changePassword({}, form())).rejects.toThrow("NEXT_REDIRECT");
+  });
+
+  it("keeps this tab signed in: the JWT of the answer goes into the session (FX40)", async () => {
+    strapiMock.mockResolvedValue({ jwt: "new.jwt.value", user: { id: 7 } });
+    await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
+    expect(updateMock).toHaveBeenCalledTimes(1);
+    expect(updateMock).toHaveBeenCalledWith({ strapiJwt: "new.jwt.value" });
+    // No re-render of cms data after the change (refresh would not help:
+    // the request still carries the revoked JWT in its Cookie header).
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("touches no session when the change is refused", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(400, "Bad Request", "{}"));
+    await changePassword({}, form());
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("still reports the change when the session cannot take the new JWT", async () => {
+    strapiMock.mockResolvedValue({ user: { id: 7 } });
+    await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[profile] change password: the cms answered without a JWT; this session ends with its next request",
+    );
+
+    strapiMock.mockResolvedValue({ jwt: "new.jwt.value" });
+    updateMock.mockRejectedValue(new Error("session store down"));
+    await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
+    expect(console.error).toHaveBeenCalledWith(
+      "[profile] change password: could not store the new JWT in the session",
+      expect.any(Error),
+    );
+  });
+
+  it("lets a redirect from the session update escape", async () => {
+    strapiMock.mockResolvedValue({ jwt: "new.jwt.value" });
+    updateMock.mockRejectedValue(new Error("NEXT_REDIRECT /sign-in"));
     await expect(changePassword({}, form())).rejects.toThrow("NEXT_REDIRECT");
   });
 

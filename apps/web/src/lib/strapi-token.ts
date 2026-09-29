@@ -12,7 +12,7 @@
  */
 import "server-only";
 import { cache } from "react";
-import { headers } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { getToken } from "next-auth/jwt";
 
 type Env = Record<string, string | undefined>;
@@ -69,11 +69,40 @@ export async function readStrapiJwt(
   return typeof token?.strapiJwt === "string" && token.strapiJwt !== "" ? token.strapiJwt : null;
 }
 
+/** A cookie jar as next/headers cookies() hands it out (the part used here). */
+interface CookieJar {
+  getAll(): { name: string; value: string }[];
+}
+
+/**
+ * The request headers with the Cookie header rebuilt from the request's
+ * cookie jar. They differ in one case: a Server Action that set a cookie.
+ * Next then renders the page again in the same request with cookies()
+ * updated but headers() as it arrived (next 16.3.4 request-store.js
+ * synchronizeMutableCookies, "does this need to update headers as well?").
+ * The password change (FX40, lib/profile-actions.ts) sets the session cookie
+ * with the new Strapi JWT, and the cms has just revoked the old one: read
+ * from the raw header, that re-render sent the revoked JWT, got 401 and
+ * redirected the very tab that changed the password to /sign-in?expired=1.
+ */
+export function withJarCookies(requestHeaders: Headers, jar: CookieJar): Headers {
+  const effective = new Headers(requestHeaders);
+  const cookie = jar
+    .getAll()
+    .map(({ name, value }) => `${name}=${encodeURIComponent(value)}`)
+    .join("; ");
+  if (cookie) effective.set("cookie", cookie);
+  else effective.delete("cookie");
+  return effective;
+}
+
 /**
  * readStrapiJwt() for the current request, decrypted once per RSC render
  * (React cache(), same scope as getSession()). No Strapi response is memoised
- * here — it is a pure function of the request's cookie.
+ * here — it is a pure function of the request's cookies, as the cookie jar
+ * holds them (withJarCookies: the session a Server Action just set).
  */
-export const getStrapiJwt = cache(
-  async (): Promise<string | null> => readStrapiJwt(await headers()),
-);
+export const getStrapiJwt = cache(async (): Promise<string | null> => {
+  const [requestHeaders, jar] = await Promise.all([headers(), cookies()]);
+  return readStrapiJwt(withJarCookies(requestHeaders, jar));
+});

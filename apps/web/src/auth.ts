@@ -156,7 +156,9 @@ if (LOCAL_ENABLED) {
  */
 export const callbacks = createAuthCallbacks({ entra: ENTRA, strapiUrl: STRAPI_URL });
 
-export const { handlers, auth, signIn, signOut } = NextAuth({
+// unstable_update: lib/profile-actions.ts hands the Strapi JWT of a password
+// change to the session (FX40; the jwt callback's update branch decides).
+export const { handlers, auth, signIn, signOut, unstable_update } = NextAuth({
   trustHost: true,
   // Upper bound only: 7 days = the local Strapi JWT's expiresIn
   // (apps/cms/config/plugins.ts; Entra sign-ins get ENTRA_SESSION_TTL, at

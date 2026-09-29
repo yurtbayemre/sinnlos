@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { strapiJwtExp, strapiSessionExpired } from "./strapi-jwt";
+import { strapiJwtExp, strapiJwtUserId, strapiSessionExpired } from "./strapi-jwt";
 
 /**
  * Expiry logic behind "the Auth.js session ends with the Strapi JWT"
@@ -33,6 +33,26 @@ describe("strapiJwtExp", () => {
       jwtWith({ exp: String(EXP) }),
     ]) {
       expect(strapiJwtExp(jwt), jwt).toBeUndefined();
+    }
+  });
+});
+
+describe("strapiJwtUserId (FX40)", () => {
+  it("decodes the numeric user id without verifying it", () => {
+    expect(strapiJwtUserId(jwtWith({ id: 7, tv: 1, exp: EXP }))).toBe(7);
+  });
+
+  it("is undefined for malformed tokens or a missing/non-numeric id", () => {
+    for (const jwt of [
+      "",
+      "a.b",
+      jwtWith(null),
+      jwtWith({ exp: EXP }),
+      jwtWith({ id: "7" }),
+      jwtWith({ id: 7.5 }),
+      jwtWith({ id: Number.MAX_SAFE_INTEGER + 1 }),
+    ]) {
+      expect(strapiJwtUserId(jwt), jwt).toBeUndefined();
     }
   });
 });

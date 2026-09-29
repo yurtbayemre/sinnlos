@@ -7,14 +7,21 @@
  *  - updateProfile → PUT /api/me, a whitelisted self-update route
  *    (apps/cms/src/api/profile) so users can't touch their own role.
  *  - changePassword → Strapi's built-in users-permissions endpoint;
- *    only meaningful for local-credentials accounts.
+ *    only meaningful for local-credentials accounts. Since FX40 the cms
+ *    then revokes every older JWT of the user (its token version) and
+ *    answers with a new one, which goes into this tab's Auth.js session
+ *    (keepSessionSignedIn): this tab stays signed in, every other session
+ *    of the user lands on /sign-in?expired=1 with its next cms request.
  *
  * Both answer machine codes (AC02); the forms translate them through
  * lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
 import { refresh } from "next/cache";
 import { headers } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
+import { unstable_update } from "@/auth";
 import { runCmsAction } from "@/lib/action-result";
+import type { StrapiJwtUpdate } from "@/lib/auth/callbacks";
 import { PASSWORD_MIN_LENGTH, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
 import { clientIpFrom } from "@/lib/login-rate-limit";
 import { strapi } from "@/lib/strapi";
@@ -116,6 +123,33 @@ export async function updateProfile(
   return { error: result.code === "invalid" ? "invalid" : "profileSaveFailed", values };
 }
 
+/**
+ * Hands the Strapi JWT of a password change to this tab's Auth.js session
+ * (FX40): unstable_update() runs the jwt callback with trigger "update",
+ * which takes it for a local session of the same user
+ * (lib/auth/callbacks.ts applyStrapiJwtUpdate) and re-issues the session
+ * cookie with it. Nothing after this in the same request may call the cms:
+ * the request still carries the old cookie, whose JWT the cms has just
+ * revoked (changePassword re-renders nothing). Never throws: the password
+ * did change, and without the new JWT this session merely ends with its
+ * next cms request (/sign-in?expired=1), like every other one of the user.
+ */
+async function keepSessionSignedIn(jwt: unknown): Promise<void> {
+  if (typeof jwt !== "string" || jwt === "") {
+    console.error(
+      "[profile] change password: the cms answered without a JWT; this session ends with its next request",
+    );
+    return;
+  }
+  const update: StrapiJwtUpdate = { strapiJwt: jwt };
+  try {
+    await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[profile] change password: could not store the new JWT in the session", error);
+  }
+}
+
 export async function changePassword(
   _prev: PasswordFormState,
   formData: FormData,
@@ -126,9 +160,9 @@ export async function changePassword(
   if (password.length < PASSWORD_MIN_LENGTH) return { error: "passwordTooShort" };
   if (password !== passwordConfirmation) return { error: "passwordMismatch" };
   const clientIp = clientIpFrom(await headers());
-  const result = await runCmsAction<"passwordRateLimited">(
+  const result = await runCmsAction<"passwordRateLimited", { jwt?: unknown } | null>(
     () =>
-      strapi("/api/auth/change-password", {
+      strapi<{ jwt?: unknown } | null>("/api/auth/change-password", {
         method: "POST",
         // Real client IP, like sign-in/register (FX11): the CMS trusts it
         // via server.proxy.koa. The throttle key here is path +
@@ -143,6 +177,8 @@ export async function changePassword(
       // Strapi's throttle (10 attempts/min): say so instead of blaming the
       // current password (FX11).
       mapError: (cms) => (cms.status === 429 ? "passwordRateLimited" : undefined),
+      // FX40: the cms revoked the session's JWT; keep this tab signed in.
+      after: (answer) => keepSessionSignedIn(answer?.jwt),
     },
   );
   if (result.ok) return { success: "passwordChanged" };

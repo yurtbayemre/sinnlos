@@ -15,18 +15,67 @@
  *    and it is gone with the request. On every later session read the
  *    session ends with the Strapi JWT it carries (D-SESSION-01, batch 10):
  *    null makes Auth.js clear the cookie and auth() yield null.
+ *  - jwt, trigger "update" (FX40): after a password change the cms revokes
+ *    the user's older Strapi JWTs and answers with a new one, which
+ *    lib/profile-actions.ts hands over through unstable_update(). The
+ *    token takes it only for a local session and only when the new JWT
+ *    names the session's own user and has not expired (applyStrapiJwtUpdate).
+ *    A Microsoft session keeps its JWT: the one of the answer has the local
+ *    7-day lifetime, not ENTRA_SESSION_TTL (that session then ends with its
+ *    next cms request and signs in again). The same trigger also comes from
+ *    a POST /api/auth/session of the browser, so nothing else of the update
+ *    is ever read.
  *  - session: only id and provider reach the (public) Session object.
  */
 import type { NextAuthConfig, Session } from "next-auth";
 import type { EntraWebConfig } from "@/lib/auth-config";
 import { exchangeEntraSignIn, type EntraExchangeSuccess } from "@/lib/entra-exchange";
-import { strapiJwtExp, strapiSessionExpired } from "@/lib/strapi-jwt";
+import { strapiJwtExp, strapiJwtUserId, strapiSessionExpired } from "@/lib/strapi-jwt";
 
 /** The Auth.js provider id of the Microsoft sign-in. */
 export const ENTRA_PROVIDER_ID = "microsoft-entra-id";
 
 /** /sign-in with an error code the page explains (pages.error is /sign-in too). */
 export const signInError = (code: string) => `/sign-in?error=${encodeURIComponent(code)}`;
+
+/**
+ * The data of the session update that hands a new Strapi JWT to the
+ * session (FX40, lib/profile-actions.ts). unstable_update() types its
+ * argument as a partial Session, which this is not: the one cast is there.
+ */
+export type StrapiJwtUpdate = { strapiJwt: string };
+
+/** The token fields applyStrapiJwtUpdate reads and writes (a subset of the Auth.js JWT). */
+type UpdatableToken = {
+  provider?: unknown;
+  strapiUserId?: unknown;
+  strapiJwt?: unknown;
+  strapiJwtExp?: unknown;
+};
+
+/**
+ * Takes the Strapi JWT of a session update into `token` (see the header):
+ * true when it did. Refused, and the token left as it was: a Microsoft
+ * session, an update without a string `strapiJwt`, a JWT of another user
+ * or without a user id, and one without a future `exp`.
+ */
+export function applyStrapiJwtUpdate(
+  token: UpdatableToken,
+  update: unknown,
+  nowMs: number = Date.now(),
+): boolean {
+  if (token.provider === ENTRA_PROVIDER_ID) return false;
+  if (typeof update !== "object" || update === null) return false;
+  const jwt = (update as { strapiJwt?: unknown }).strapiJwt;
+  if (typeof jwt !== "string" || jwt === "") return false;
+  const exp = strapiJwtExp(jwt);
+  const userId = strapiJwtUserId(jwt);
+  if (exp === undefined || nowMs >= exp * 1000) return false;
+  if (userId === undefined || userId !== token.strapiUserId) return false;
+  token.strapiJwt = jwt;
+  token.strapiJwtExp = exp;
+  return true;
+}
 
 export interface AuthCallbackDeps {
   /** The Microsoft sign-in configuration, null while it is off. */
@@ -67,7 +116,7 @@ export function createAuthCallbacks({
       entraResults.set(account, result.data);
       return true;
     },
-    async jwt({ token, account, user }) {
+    async jwt({ token, account, user, trigger, session }) {
       if (account?.provider === ENTRA_PROVIDER_ID) {
         // The signIn callback of this same sign-in stored the cms's answer.
         const result = entraResults.get(account);
@@ -86,6 +135,18 @@ export function createAuthCallbacks({
         token.strapiUserId = user.strapiUserId;
         token.strapiJwtExp = strapiJwtExp(user.strapiJwt);
         token.provider = "local";
+      } else if (
+        trigger === "update" &&
+        session &&
+        typeof session === "object" &&
+        "strapiJwt" in session
+      ) {
+        // FX40: the JWT the cms answered a password change with.
+        if (!applyStrapiJwtUpdate(token, session)) {
+          console.warn(
+            "[auth] session update refused: not a current Strapi JWT of this local session",
+          );
+        }
       }
       // Runs on sign-in AND on every later session read (auth(), proxy,
       // /api/auth/session): the Auth.js session ends with the Strapi JWT it

@@ -4,7 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EntraWebConfig } from "@/lib/auth-config";
 import type { EntraExchangeResult, exchangeEntraSignIn } from "@/lib/entra-exchange";
-import { createAuthCallbacks, ENTRA_PROVIDER_ID, signInError } from "./callbacks";
+import {
+  applyStrapiJwtUpdate,
+  createAuthCallbacks,
+  ENTRA_PROVIDER_ID,
+  signInError,
+} from "./callbacks";
 
 /**
  * The Auth.js callbacks without Auth.js (WD09); auth.test.ts drives the same
@@ -16,6 +21,8 @@ import { createAuthCallbacks, ENTRA_PROVIDER_ID, signInError } from "./callbacks
  *     `account`, once, and refuses an account signIn did not exchange;
  *   - the session ends with the Strapi JWT (batch 10): an expired or
  *     missing JWT makes jwt answer null;
+ *   - the session update after a password change (FX40): a local session
+ *     takes a current JWT of its own user, nothing else;
  *   - session copies only id and provider.
  */
 const TENANT = "11111111-2222-4333-8444-555555555555";
@@ -31,9 +38,9 @@ const ENTRA: EntraWebConfig = {
   scope: "openid profile email User.Read",
 };
 
-function fakeStrapiJwt(exp: number): string {
+function fakeStrapiJwt(exp: number, id = 42): string {
   const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
-  return `${b64({ alg: "HS256" })}.${b64({ id: 42, exp })}.sig`;
+  return `${b64({ alg: "HS256" })}.${b64({ id, exp })}.sig`;
 }
 
 const account = (overrides: Partial<Account> = {}): Account => ({
@@ -195,6 +202,64 @@ describe("jwt", () => {
     const acc = account();
     await callbacks.signIn(signInArgs(acc, { tid: TENANT }));
     await expect(callbacks.jwt(jwtArgs({ sub: "x" }, { account: acc }))).resolves.toBeNull();
+  });
+});
+
+describe("jwt: the session update after a password change (FX40)", () => {
+  const oldExp = nowSec() + 3600;
+  const localToken = (): JWT => ({
+    sub: "7",
+    strapiJwt: fakeStrapiJwt(oldExp, 7),
+    strapiJwtExp: oldExp,
+    strapiUserId: 7,
+    provider: "local",
+  });
+  const update = (token: JWT, session: unknown) =>
+    callbacksWith().jwt(jwtArgs(token, { trigger: "update", session }));
+
+  it("takes a current JWT of the session's own user, with its exp", async () => {
+    const exp = nowSec() + 7 * 24 * 3600;
+    const fresh = fakeStrapiJwt(exp, 7);
+    await expect(update(localToken(), { strapiJwt: fresh })).resolves.toMatchObject({
+      strapiJwt: fresh,
+      strapiJwtExp: exp,
+      strapiUserId: 7,
+      provider: "local",
+    });
+  });
+
+  it("keeps the token as it was for anything else", async () => {
+    const before = localToken();
+    for (const session of [
+      { strapiJwt: fakeStrapiJwt(nowSec() + 3600, 8) }, // another user
+      { strapiJwt: fakeStrapiJwt(nowSec() - 1, 7) }, // expired
+      { strapiJwt: "not-a-jwt" },
+      { strapiJwt: "" },
+      { strapiJwt: 7 },
+    ]) {
+      await expect(update(localToken(), session), JSON.stringify(session)).resolves.toEqual(before);
+    }
+    // An update that names no JWT (e.g. a client's session refresh) is no update at all.
+    await expect(update(localToken(), { user: { name: "x" } })).resolves.toEqual(before);
+    await expect(update(localToken(), undefined)).resolves.toEqual(before);
+    expect(console.warn).toHaveBeenCalledWith(
+      "[auth] session update refused: not a current Strapi JWT of this local session",
+    );
+  });
+
+  it("never gives a Microsoft session the local JWT: it keeps ENTRA_SESSION_TTL", async () => {
+    const entra: JWT = { ...localToken(), provider: ENTRA_PROVIDER_ID };
+    const fresh = fakeStrapiJwt(nowSec() + 7 * 24 * 3600, 7);
+    await expect(update({ ...entra }, { strapiJwt: fresh })).resolves.toEqual(entra);
+  });
+
+  it("applyStrapiJwtUpdate says whether it took the JWT", () => {
+    const token = localToken();
+    const fresh = fakeStrapiJwt(nowSec() + 60, 7);
+    expect(applyStrapiJwtUpdate(token, { strapiJwt: fresh })).toBe(true);
+    expect(token.strapiJwt).toBe(fresh);
+    expect(applyStrapiJwtUpdate(token, { strapiJwt: fakeStrapiJwt(nowSec() + 60, 9) })).toBe(false);
+    expect(token.strapiJwt).toBe(fresh);
   });
 });
 
