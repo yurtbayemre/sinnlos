@@ -66,7 +66,13 @@ export default async function TrainingReportPage() {
 
   const [coursesResult, usersResult] = await Promise.all([
     tryFetch(() => fetchCourses(), "training-report"),
-    tryFetch(() => fetchAllUsers("populate[role]=true&fields[0]=displayName&fields[1]=email&fields[2]=blocked"), "training-report"),
+    tryFetch(
+      () =>
+        fetchAllUsers(
+          "populate[role]=true&fields[0]=displayName&fields[1]=email&fields[2]=blocked",
+        ),
+      "training-report",
+    ),
   ]);
 
   if (coursesResult.failed || usersResult.failed) {

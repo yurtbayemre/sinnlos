@@ -13,7 +13,14 @@ import {
   type GuardHost,
   type SchemaSyncState,
 } from "./ensure-timestamptz";
-import { PG_URL, columnType, createTestKnex, isoOf, rows, uniqueSchema } from "./pg-test-db.test.helper";
+import {
+  PG_URL,
+  columnType,
+  createTestKnex,
+  isoOf,
+  rows,
+  uniqueSchema,
+} from "./pg-test-db.test.helper";
 import { type RawKnex } from "./strapi-knex.test.helper";
 
 /**
@@ -82,7 +89,9 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
       "up_users.last_digest_at",
     ]);
     expect(await isoOf(knex, schema, "events", "start", "id = 1")).toBe("2026-10-25T01:30:00Z");
-    expect(await isoOf(knex, schema, "up_users", "last_digest_at", "id = 1")).toBe("2026-09-24T05:30:00Z");
+    expect(await isoOf(knex, schema, "up_users", "last_digest_at", "id = 1")).toBe(
+      "2026-09-24T05:30:00Z",
+    );
     // Microseconds survive.
     const [micro] = await rows<{ v: string }>(
       knex,
@@ -91,9 +100,13 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     expect(micro.v).toBe("10:00:00.123456");
     // date, time and epoch columns are no instants; another schema is not ours.
     expect(await columnType(knex, schema, "up_users", "birthday")).toBe("date");
-    expect(await columnType(knex, schema, "up_users", "lesson_time")).toBe("time without time zone");
+    expect(await columnType(knex, schema, "up_users", "lesson_time")).toBe(
+      "time without time zone",
+    );
     expect(await columnType(knex, schema, "up_users", "epoch_ms")).toBe("bigint");
-    expect(await columnType(knex, otherSchema, "foreign_log", "at")).toBe("timestamp without time zone");
+    expect(await columnType(knex, otherSchema, "foreign_log", "at")).toBe(
+      "timestamp without time zone",
+    );
     // Idempotent: nothing left, no DDL on the next boot.
     expect(await convertNaiveColumns(strapi, UTC)).toEqual([]);
   });
@@ -103,9 +116,13 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     await convertNaiveColumns(strapi, UTC);
     // What knex emits for Strapi's datetime .alter(): a naive type, cast in
     // the (UTC) session.
-    await knex.raw(`ALTER TABLE "${schema}".events ALTER COLUMN start TYPE timestamp(6) USING start::timestamp(6)`);
+    await knex.raw(
+      `ALTER TABLE "${schema}".events ALTER COLUMN start TYPE timestamp(6) USING start::timestamp(6)`,
+    );
     await knex.raw(`ALTER TABLE "${schema}".events ADD COLUMN ends_at timestamp(6)`);
-    await knex.raw(`CREATE TABLE "${schema}".kudos (id serial PRIMARY KEY, created_at timestamp(6))`);
+    await knex.raw(
+      `CREATE TABLE "${schema}".kudos (id serial PRIMARY KEY, created_at timestamp(6))`,
+    );
     expect(await columnType(knex, schema, "events", "start")).toBe("timestamp without time zone");
 
     const converted = await convertNaiveColumns(strapi, UTC);
@@ -118,7 +135,9 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     expect(await columnType(knex, schema, "events", "created_at")).toBe("timestamp with time zone");
     // Re-created with data after the repair: converted, and said so with the count.
     expect(log.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/^\[datetime\] events \(start, ends_at\) is timestamp without time zone again and holds values in 1 row\(s\)/),
+      expect.stringMatching(
+        /^\[datetime\] events \(start, ends_at\) is timestamp without time zone again and holds values in 1 row\(s\)/,
+      ),
     );
   });
 
@@ -128,7 +147,10 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     // 01:30Z on 2026-10-25 is in Berlin's repeated hour: a naive column
     // written by a Berlin process could not tell it apart; timestamptz can.
     const instant = new Date("2026-10-25T01:30:00.000Z");
-    await knex.raw(`INSERT INTO "${schema}".events (start, created_at) VALUES (?, ?)`, [instant, new Date()]);
+    await knex.raw(`INSERT INTO "${schema}".events (start, created_at) VALUES (?, ?)`, [
+      instant,
+      new Date(),
+    ]);
     const found = await rows<{ start: Date }>(
       knex,
       `SELECT start FROM "${schema}".events WHERE start >= ? AND start < ? ORDER BY id`,
@@ -178,7 +200,9 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
       await locked;
       const converted = await convertNaiveColumns(strapi, UTC);
       expect(converted.map(({ table }) => table)).toEqual(["strapi_migrations", "up_users"]);
-      expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/could not convert events .*lock timeout/));
+      expect(log.error).toHaveBeenCalledWith(
+        expect.stringMatching(/could not convert events .*lock timeout/),
+      );
       await expect(assertTimestamptzContract(strapi, UTC)).rejects.toThrow(/events\.start/);
     } finally {
       release();
@@ -203,7 +227,12 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
       };
     };
     const dir = mkdtempSync(join(tmpdir(), "sinnlos-no-migrations-"));
-    const quiet = { info: () => undefined, warn: () => undefined, error: () => undefined, debug: () => undefined };
+    const quiet = {
+      info: () => undefined,
+      warn: () => undefined,
+      error: () => undefined,
+      debug: () => undefined,
+    };
     const db = new Database({
       connection: {
         client: "postgres",
@@ -228,13 +257,17 @@ describe.skipIf(!PG_URL)("timestamptz guard on Postgres 16", () => {
     try {
       await db.init({ models: [] });
       // Strapi's internal migrations have never run on this schema.
-      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(/runs database migrations/);
+      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(
+        /runs database migrations/,
+      );
       // After a UTC boot's sync nothing is pending and the stored hash matches.
       await db.schema.sync();
       await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).resolves.toBeUndefined();
       // Models that differ from the stored schema: a schema change.
       await knex.raw(`UPDATE "${schema}".strapi_database_schema SET hash = 'stale'`);
-      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(/changes the database schema/);
+      await expect(refuseNonUtcSchemaSync(strapi, BERLIN)).rejects.toThrow(
+        /changes the database schema/,
+      );
       await expect(refuseNonUtcSchemaSync(strapi, UTC)).resolves.toBeUndefined();
     } finally {
       await db.destroy();

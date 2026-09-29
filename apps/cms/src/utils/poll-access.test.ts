@@ -45,7 +45,9 @@ function host(rows: Partial<Record<string, unknown>>) {
 
 describe("loadUserDepartmentDocumentId", () => {
   it("reads the caller's department documentId through the user row", async () => {
-    const { strapi, queries } = host({ [USER_UID]: { id: 5, department: { documentId: "d-eng" } } });
+    const { strapi, queries } = host({
+      [USER_UID]: { id: 5, department: { documentId: "d-eng" } },
+    });
     await expect(loadUserDepartmentDocumentId(strapi, 5)).resolves.toBe("d-eng");
     expect(queries).toEqual([
       {
@@ -68,7 +70,10 @@ describe("loadUserDepartmentDocumentId", () => {
       { id: 5, department: { documentId: 7 } },
     ]) {
       const { strapi } = host({ [USER_UID]: row });
-      await expect(loadUserDepartmentDocumentId(strapi, 5), JSON.stringify(row)).resolves.toBeNull();
+      await expect(
+        loadUserDepartmentDocumentId(strapi, 5),
+        JSON.stringify(row),
+      ).resolves.toBeNull();
     }
   });
 });
@@ -188,7 +193,9 @@ describe("loadPublishedPoll", () => {
 
   it("reads the guest flags as strict booleans: only true is true (fail closed)", async () => {
     for (const value of [null, undefined, false, 1, "true", "1"]) {
-      const { strapi } = host({ [POLL_UID]: { ...row, visibleToGuests: value, guestsCanVote: value } });
+      const { strapi } = host({
+        [POLL_UID]: { ...row, visibleToGuests: value, guestsCanVote: value },
+      });
       const poll = await loadPublishedPoll(strapi, "12");
       expect(poll?.visibleToGuests, String(value)).toBe(false);
       expect(poll?.guestsCanVote, String(value)).toBe(false);
@@ -221,7 +228,15 @@ describe("loadPublishedPoll", () => {
 
   it("normalises a legacy row (NULL flag, no departments, no guest columns)", async () => {
     const { strapi } = host({
-      [POLL_UID]: { id: 3, documentId: "d", question: "q", options: [], closesAt: null, anonymous: null, audience: null },
+      [POLL_UID]: {
+        id: 3,
+        documentId: "d",
+        question: "q",
+        options: [],
+        closesAt: null,
+        anonymous: null,
+        audience: null,
+      },
     });
     await expect(loadPublishedPoll(strapi, 3)).resolves.toEqual({
       id: 3,

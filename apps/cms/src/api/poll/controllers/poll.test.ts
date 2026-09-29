@@ -189,10 +189,22 @@ const POLLS: PollRow[] = [
   BROKEN_OPTIONS,
 ];
 
-const ENGINEER: UserRow = { id: 11, role: { type: "member" }, department: { id: 1, documentId: "d-eng" } };
-const DESIGNER: UserRow = { id: 12, role: { type: "member" }, department: { id: 7, documentId: "d-design" } };
+const ENGINEER: UserRow = {
+  id: 11,
+  role: { type: "member" },
+  department: { id: 1, documentId: "d-eng" },
+};
+const DESIGNER: UserRow = {
+  id: 12,
+  role: { type: "member" },
+  department: { id: 7, documentId: "d-design" },
+};
 const GUEST: UserRow = { id: 13, role: { type: "guest" }, department: null };
-const GUEST_ENG: UserRow = { id: 14, role: { type: "guest" }, department: { id: 1, documentId: "d-eng" } };
+const GUEST_ENG: UserRow = {
+  id: 14,
+  role: { type: "guest" },
+  department: { id: 1, documentId: "d-eng" },
+};
 const EDITOR_USER: UserRow = { id: 15, role: { type: "editor" }, department: null };
 const ADMIN: UserRow = { id: 16, role: { type: "admin_role" }, department: null };
 const FALLBACK: UserRow = { id: 17, role: { type: "authenticated" }, department: null };
@@ -400,7 +412,9 @@ describe("GET /api/poll-results (WD04)", () => {
     expect(data[1]).toMatchObject({ counts: [0, 2, 0], myVoteIndex: 1, canVote: true });
     // One poll query, published rows only; one count for the visible polls.
     expect(pollFindMany).toHaveBeenCalledOnce();
-    expect(pollFindMany.mock.calls[0]?.[0].where).toMatchObject({ publishedAt: { $notNull: true } });
+    expect(pollFindMany.mock.calls[0]?.[0].where).toMatchObject({
+      publishedAt: { $notNull: true },
+    });
     expect(many).toHaveBeenCalledOnce();
     expect(many.mock.calls[0]?.slice(1)).toEqual([
       [

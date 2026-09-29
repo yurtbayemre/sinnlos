@@ -184,10 +184,7 @@ export function LiveEventsProvider({
     // Hoisted declaration so the completion callback can re-enter the
     // pump without the useCallback const referencing itself.
     function pump() {
-      while (
-        catchupActiveRef.current < CATCHUP_CONCURRENCY &&
-        catchupQueueRef.current.length > 0
-      ) {
+      while (catchupActiveRef.current < CATCHUP_CONCURRENCY && catchupQueueRef.current.length > 0) {
         const channel = catchupQueueRef.current.shift()!;
         catchupActiveRef.current += 1;
         void runChannel(channel).finally(() => {

@@ -18,7 +18,10 @@ export const POLL_CLOSING_TIME = "23:59:59";
  * Closed iff now >= closesAt. No closesAt, or one that is no instant (an
  * offset-less date-time, a bare calendar date, garbage): open, like the cms.
  */
-export function isPollClosed(closesAt: string | Date | null | undefined, now: Date = new Date()): boolean {
+export function isPollClosed(
+  closesAt: string | Date | null | undefined,
+  now: Date = new Date(),
+): boolean {
   if (closesAt == null || closesAt === "") return false;
   const closesAtMs = instantEpochMs(closesAt);
   if (closesAtMs === null) return false;

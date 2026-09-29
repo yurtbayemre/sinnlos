@@ -27,9 +27,10 @@ describe("normalizeGuestAccess", () => {
 
   it("clears guest voting whenever the poll is not visible to guests", () => {
     for (const visibleToGuests of [false, undefined, null]) {
-      expect(normalizeGuestAccess({ visibleToGuests, guestsCanVote: true }), String(visibleToGuests)).toEqual(
-        NO_GUEST_ACCESS,
-      );
+      expect(
+        normalizeGuestAccess({ visibleToGuests, guestsCanVote: true }),
+        String(visibleToGuests),
+      ).toEqual(NO_GUEST_ACCESS);
     }
   });
 
@@ -46,9 +47,10 @@ describe("normalizeGuestAccess", () => {
 
   it("accepts only a real true (no truthy strings or numbers from a crafted call)", () => {
     for (const value of ["true", "on", 1, {}, []] as unknown[]) {
-      expect(normalizeGuestAccess({ visibleToGuests: value, guestsCanVote: value }), JSON.stringify(value)).toEqual(
-        NO_GUEST_ACCESS,
-      );
+      expect(
+        normalizeGuestAccess({ visibleToGuests: value, guestsCanVote: value }),
+        JSON.stringify(value),
+      ).toEqual(NO_GUEST_ACCESS);
     }
   });
 });

@@ -65,9 +65,9 @@ describe("isAnnouncementVisible", () => {
     });
 
     it("hides it from a user without a department", () => {
-      expect(
-        isAnnouncementVisible(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] }),
-      ).toBe(false);
+      expect(isAnnouncementVisible(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] })).toBe(
+        false,
+      );
     });
 
     it("restricts on a department link even when audience is 'all'", () => {
@@ -112,9 +112,9 @@ describe("isAnnouncementVisible", () => {
     });
 
     it("hides it from someone in another team", () => {
-      expect(
-        isAnnouncementVisible(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] }),
-      ).toBe(false);
+      expect(isAnnouncementVisible(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] })).toBe(
+        false,
+      );
     });
 
     it("hides it from someone without any team", () => {
@@ -129,9 +129,7 @@ describe("isAnnouncementVisible", () => {
     });
 
     it("shows it to a user holding one of the listed roles", () => {
-      expect(isAnnouncementVisible(leadsOnly, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
-        true,
-      );
+      expect(isAnnouncementVisible(leadsOnly, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(true);
     });
 
     it("hides it from every other role", () => {
@@ -153,9 +151,7 @@ describe("isAnnouncementVisible", () => {
     });
 
     it("shows it only when every criterion matches", () => {
-      expect(isAnnouncementVisible(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
-        true,
-      );
+      expect(isAnnouncementVisible(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(true);
     });
 
     it("hides it when only the department matches", () => {
@@ -191,9 +187,9 @@ describe("isAnnouncementVisible", () => {
           null,
         ),
       ).toBe(false);
-      expect(
-        isAnnouncementVisible(announcement({ team: { id: FRONTEND_TEAM } }), null),
-      ).toBe(false);
+      expect(isAnnouncementVisible(announcement({ team: { id: FRONTEND_TEAM } }), null)).toBe(
+        false,
+      );
       expect(
         isAnnouncementVisible(announcement({ audienceRoles: [{ id: MEMBER_ROLE }] }), null),
       ).toBe(false);

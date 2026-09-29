@@ -56,15 +56,18 @@ function host(initial: PollRow[] = [], options: { failUpdate?: boolean } = {}) {
         departments: row.departments.map((documentId, index) => ({ id: index + 1, documentId })),
       }));
   });
-  const updateMany = vi.fn(async ({ where, data }: { where: Where; data: { audience: string } }) => {
-    events.push(`updateMany@${depth}`);
-    if (options.failUpdate) throw new Error("deadlock detected");
-    const hits = table.filter((row) => inList(where.id, row.id) && flagIsNot(row, "departments"));
-    for (const row of hits) row.audience = data.audience;
-    return { count: hits.length };
-  });
+  const updateMany = vi.fn(
+    async ({ where, data }: { where: Where; data: { audience: string } }) => {
+      events.push(`updateMany@${depth}`);
+      if (options.failUpdate) throw new Error("deadlock detected");
+      const hits = table.filter((row) => inList(where.id, row.id) && flagIsNot(row, "departments"));
+      for (const row of hits) row.audience = data.audience;
+      return { count: hits.length };
+    },
+  );
   const transaction = vi.fn(async (callback: () => Promise<unknown>): Promise<unknown> => {
-    const snapshot = depth === 0 ? table.map((row) => ({ ...row, departments: [...row.departments] })) : null;
+    const snapshot =
+      depth === 0 ? table.map((row) => ({ ...row, departments: [...row.departments] })) : null;
     depth += 1;
     try {
       return await callback();
@@ -113,15 +116,24 @@ function host(initial: PollRow[] = [], options: { failUpdate?: boolean } = {}) {
 
 /** The row as the action returns it (repository results carry the flag). */
 const asResult = (row: PollRow | null) =>
-  row && { id: row.id, documentId: row.documentId, audience: row.audience, publishedAt: row.published ? "now" : null };
+  row && {
+    id: row.id,
+    documentId: row.documentId,
+    audience: row.audience,
+    publishedAt: row.published ? "now" : null,
+  };
 
-const context = (action: string, params: Record<string, unknown> = {}): DocumentMiddlewareContext => ({
+const context = (
+  action: string,
+  params: Record<string, unknown> = {},
+): DocumentMiddlewareContext => ({
   uid: "api::poll.poll",
   action,
   params,
 });
 
-const flags = (rows: PollRow[]) => rows.map((row) => [row.id, row.published ? "published" : "draft", row.audience]);
+const flags = (rows: PollRow[]) =>
+  rows.map((row) => [row.id, row.published ? "published" : "draft", row.audience]);
 
 describe("poll audience guard: every writing action", () => {
   it("publish of a draft with departments and Audience 'all' flags the draft and the new published row", async () => {
@@ -148,7 +160,9 @@ describe("poll audience guard: every writing action", () => {
     const { strapi, rows } = host();
     const guard = createPollAudienceGuard(strapi);
     const draft = (await guard(context("create", { data: {}, status: "draft" }), async () =>
-      asResult(rows.insert({ documentId: "p2", published: false, audience: "all", departments: ["d-hr"] })),
+      asResult(
+        rows.insert({ documentId: "p2", published: false, audience: "all", departments: ["d-hr"] }),
+      ),
     )) as { audience: string };
     expect(draft.audience).toBe("departments");
     expect(flags(rows.of("p2"))).toEqual([[1, "draft", "departments"]]);
@@ -156,7 +170,12 @@ describe("poll audience guard: every writing action", () => {
     // repository.js create: create the draft, then publish inside the action;
     // the result is the published row, the documentId comes only from it.
     await guard(context("create", { data: {}, status: "published" }), async () => {
-      rows.insert({ documentId: "p3", published: false, audience: "all", departments: ["d-hr", "d-eng"] });
+      rows.insert({
+        documentId: "p3",
+        published: false,
+        audience: "all",
+        departments: ["d-hr", "d-eng"],
+      });
       return asResult(rows.publish("p3"));
     });
     expect(flags(rows.of("p3"))).toEqual([
@@ -167,15 +186,24 @@ describe("poll audience guard: every writing action", () => {
 
   it("update flags the draft, also when the save sets Audience back to 'all' with departments still selected", async () => {
     const { strapi, rows } = host([
-      { id: 1, documentId: "p1", published: false, audience: "departments", departments: ["d-eng"] },
+      {
+        id: 1,
+        documentId: "p1",
+        published: false,
+        audience: "departments",
+        departments: ["d-eng"],
+      },
       { id: 2, documentId: "p1", published: true, audience: "departments", departments: ["d-eng"] },
     ]);
     const guard = createPollAudienceGuard(strapi);
-    const result = (await guard(context("update", { documentId: "p1", data: { audience: "all" } }), async () => {
-      const draft = rows.of("p1").find((row) => !row.published) as PollRow;
-      draft.audience = "all";
-      return asResult(draft);
-    })) as { audience: string };
+    const result = (await guard(
+      context("update", { documentId: "p1", data: { audience: "all" } }),
+      async () => {
+        const draft = rows.of("p1").find((row) => !row.published) as PollRow;
+        draft.audience = "all";
+        return asResult(draft);
+      },
+    )) as { audience: string };
     expect(result.audience).toBe("departments");
     expect(flags(rows.of("p1"))).toEqual([
       [1, "draft", "departments"],
@@ -201,11 +229,22 @@ describe("poll audience guard: every writing action", () => {
 
   it("clone flags the new document (its documentId only in the result)", async () => {
     const { strapi, rows } = host([
-      { id: 1, documentId: "p1", published: false, audience: "departments", departments: ["d-eng"] },
+      {
+        id: 1,
+        documentId: "p1",
+        published: false,
+        audience: "departments",
+        departments: ["d-eng"],
+      },
     ]);
     const guard = createPollAudienceGuard(strapi);
     await guard(context("clone", { documentId: "p1", data: { audience: "all" } }), async () => {
-      const copy = rows.insert({ documentId: "p9", published: false, audience: "all", departments: ["d-eng"] });
+      const copy = rows.insert({
+        documentId: "p9",
+        published: false,
+        audience: "all",
+        departments: ["d-eng"],
+      });
       return { documentId: "p9", entries: [asResult(copy)] };
     });
     expect(flags(rows.of("p9"))).toEqual([[2, "draft", "departments"]]);
@@ -258,10 +297,19 @@ describe("poll audience guard: every writing action", () => {
     const targetedAfterCascade = async (guarded: boolean) => {
       const { strapi, rows } = host();
       const create = async () =>
-        asResult(rows.insert({ documentId: "late", published: false, audience: "all", departments: ["d-eng"] }));
-      if (guarded) await createPollAudienceGuard(strapi)(context("create", { status: "draft" }), create);
+        asResult(
+          rows.insert({
+            documentId: "late",
+            published: false,
+            audience: "all",
+            departments: ["d-eng"],
+          }),
+        );
+      if (guarded)
+        await createPollAudienceGuard(strapi)(context("create", { status: "draft" }), create);
       else await create();
-      for (const row of rows.all()) row.departments = row.departments.filter((id) => id !== "d-eng");
+      for (const row of rows.all())
+        row.departments = row.departments.filter((id) => id !== "d-eng");
       return rows.all().map((row) => isPollTargeted({ audience: row.audience, departments: [] }));
     };
     // Without the guard the poll turned company-wide; with it the flag
@@ -299,11 +347,20 @@ describe("poll audience guard: never widens, stays in its lane", () => {
 
   it("updates only rows that are not flagged yet, with a where that never widens", async () => {
     const { strapi, rows, updateMany } = host([
-      { id: 1, documentId: "p1", published: false, audience: "departments", departments: ["d-eng"] },
+      {
+        id: 1,
+        documentId: "p1",
+        published: false,
+        audience: "departments",
+        departments: ["d-eng"],
+      },
       { id: 2, documentId: "p1", published: true, audience: "all", departments: ["d-eng"] },
     ]);
     const guard = createPollAudienceGuard(strapi);
-    await guard(context("publish", { documentId: "p1" }), async () => ({ documentId: "p1", entries: [] }));
+    await guard(context("publish", { documentId: "p1" }), async () => ({
+      documentId: "p1",
+      entries: [],
+    }));
     expect(updateMany).toHaveBeenCalledExactlyOnceWith({
       where: {
         id: { $in: [2] },
@@ -354,7 +411,14 @@ describe("poll audience guard: one transaction with the action", () => {
     const { strapi, rows, events } = host();
     const guard = createPollAudienceGuard(strapi);
     await guard(context("create", { status: "draft" }), async () =>
-      asResult(rows.insert({ documentId: "p1", published: false, audience: "all", departments: ["d-eng"] })),
+      asResult(
+        rows.insert({
+          documentId: "p1",
+          published: false,
+          audience: "all",
+          departments: ["d-eng"],
+        }),
+      ),
     );
     expect(events).toEqual(["insert@1", "findMany@1", "updateMany@1"]);
   });
@@ -364,7 +428,14 @@ describe("poll audience guard: one transaction with the action", () => {
     const guard = createPollAudienceGuard(strapi);
     await expect(
       guard(context("create", { status: "draft" }), async () =>
-        asResult(rows.insert({ documentId: "p1", published: false, audience: "all", departments: ["d-eng"] })),
+        asResult(
+          rows.insert({
+            documentId: "p1",
+            published: false,
+            audience: "all",
+            departments: ["d-eng"],
+          }),
+        ),
       ),
     ).rejects.toThrow("deadlock detected");
     expect(rows.all()).toEqual([]);
@@ -375,7 +446,12 @@ describe("poll audience guard: one transaction with the action", () => {
     const guard = createPollAudienceGuard(strapi);
     await expect(
       guard(context("create", { status: "draft" }), async () => {
-        rows.insert({ documentId: "p1", published: false, audience: "all", departments: ["d-eng"] });
+        rows.insert({
+          documentId: "p1",
+          published: false,
+          audience: "all",
+          departments: ["d-eng"],
+        });
         throw new Error("ValidationError");
       }),
     ).rejects.toThrow("ValidationError");
@@ -386,13 +462,17 @@ describe("poll audience guard: one transaction with the action", () => {
 
 describe("affectedDocumentIds and bounds", () => {
   it("collects the documentId of the params, the result row and the result entries, once each", () => {
-    expect(affectedDocumentIds({ documentId: "src" }, { documentId: "new", entries: [{ documentId: "new" }] })).toEqual([
-      "src",
-      "new",
-    ]);
+    expect(
+      affectedDocumentIds(
+        { documentId: "src" },
+        { documentId: "new", entries: [{ documentId: "new" }] },
+      ),
+    ).toEqual(["src", "new"]);
     expect(affectedDocumentIds({}, { id: 3, documentId: "p3" })).toEqual(["p3"]);
     expect(affectedDocumentIds(undefined, null)).toEqual([]);
-    expect(affectedDocumentIds({ documentId: "" }, { entries: [null, { documentId: 7 }] })).toEqual([]);
+    expect(affectedDocumentIds({ documentId: "" }, { entries: [null, { documentId: 7 }] })).toEqual(
+      [],
+    );
   });
 
   it("does nothing without a documentId", async () => {
@@ -418,8 +498,14 @@ describe("affectedDocumentIds and bounds", () => {
     }));
     const sizes = (calls: Array<[{ where: Where }]>, key: string) =>
       calls.map(([params]) => ((params.where[key] as { $in: unknown[] }).$in ?? []).length);
-    expect(sizes(findMany.mock.calls as Array<[{ where: Where }]>, "documentId")).toEqual([POLL_AUDIENCE_GUARD_CHUNK, 1]);
-    expect(sizes(updateMany.mock.calls as Array<[{ where: Where }]>, "id")).toEqual([POLL_AUDIENCE_GUARD_CHUNK, 1]);
+    expect(sizes(findMany.mock.calls as Array<[{ where: Where }]>, "documentId")).toEqual([
+      POLL_AUDIENCE_GUARD_CHUNK,
+      1,
+    ]);
+    expect(sizes(updateMany.mock.calls as Array<[{ where: Where }]>, "id")).toEqual([
+      POLL_AUDIENCE_GUARD_CHUNK,
+      1,
+    ]);
   });
 });
 
@@ -437,6 +523,8 @@ describe("registerPollAudienceGuard", () => {
     expect(() => registerPollAudienceGuard({ ...strapi, documents: {} })).toThrow(
       /^\[poll-audience\] strapi\.documents\.use not found/,
     );
-    expect(() => registerPollAudienceGuard({ ...strapi, documents: null })).toThrow(/refusing to boot/);
+    expect(() => registerPollAudienceGuard({ ...strapi, documents: null })).toThrow(
+      /refusing to boot/,
+    );
   });
 });

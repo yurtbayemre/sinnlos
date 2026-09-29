@@ -220,7 +220,10 @@ describe("api.polls (decision 02)", () => {
 
   it("reads many polls' results in one request per 50, in order (WD04)", async () => {
     const refs = [
-      ...Array.from({ length: 51 }, (_, i) => `k3m9x00000000000000000${String(i).padStart(2, "0")}`),
+      ...Array.from(
+        { length: 51 },
+        (_, i) => `k3m9x00000000000000000${String(i).padStart(2, "0")}`,
+      ),
       7,
     ];
     const body = (n: number) => ({

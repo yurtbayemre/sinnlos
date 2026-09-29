@@ -15,7 +15,8 @@ const makeEnv = (store: EnvStore = {}) =>
   Object.assign((key: string, def?: unknown) => store[key] ?? def, {
     int: (key: string, def?: number) => (key in store ? parseInt(store[key], 10) : (def as number)),
     bool: (key: string, def?: boolean) => (key in store ? store[key] === "true" : (def as boolean)),
-    array: (key: string, def?: string[]) => (key in store ? store[key].split(",") : (def as string[])),
+    array: (key: string, def?: string[]) =>
+      key in store ? store[key].split(",") : (def as string[]),
   });
 
 type Entry = string | { name: string; config?: Record<string, unknown> };

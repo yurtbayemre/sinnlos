@@ -69,14 +69,17 @@ function fakeStrapi(overrides: Partial<FakeDbState> = {}, client = "postgres") {
     }
     if (sql.startsWith("ALTER TABLE")) {
       const table = /ALTER TABLE "public"\."([^"]+)"/.exec(sql)?.[1] ?? "";
-      if (state.failingTables.has(table)) throw new Error("canceling statement due to lock timeout");
+      if (state.failingTables.has(table))
+        throw new Error("canceling statement due to lock timeout");
       state.naive = state.naive.filter((col) => col.table !== table);
       return [];
     }
     return [];
   };
 
-  const raw = async (sql: string, bindings?: readonly unknown[]) => ({ rows: answer(sql, bindings) });
+  const raw = async (sql: string, bindings?: readonly unknown[]) => ({
+    rows: answer(sql, bindings),
+  });
   const connection = {
     raw,
     transaction: async <T>(handler: (trx: { raw: typeof raw }) => Promise<T>): Promise<T> => {
@@ -135,24 +138,35 @@ describe("prepareDatetimeContract (register)", () => {
     const { strapi, statements, log } = fakeStrapi({}, "sqlite");
     await prepareDatetimeContract(strapi, BERLIN);
     expect(statements).toEqual([]);
-    expect(log.info).toHaveBeenCalledWith("[datetime] process time zone Europe/Berlin, APP_TIME_ZONE Europe/Berlin");
+    expect(log.info).toHaveBeenCalledWith(
+      "[datetime] process time zone Europe/Berlin, APP_TIME_ZONE Europe/Berlin",
+    );
   });
 
   it("refuses a database session that is not in UTC", async () => {
     const { strapi } = fakeStrapi({ session: "Europe/Berlin" });
-    await expect(prepareDatetimeContract(strapi, UTC)).rejects.toThrow(/session runs in "Europe\/Berlin"/);
+    await expect(prepareDatetimeContract(strapi, UTC)).rejects.toThrow(
+      /session runs in "Europe\/Berlin"/,
+    );
   });
 
   it("refuses a non-UTC process on a fresh database and while the repair is pending", async () => {
     const fresh = fakeStrapi({ tables: new Set() });
-    await expect(prepareDatetimeContract(fresh.strapi, BERLIN)).rejects.toThrow(/creates the database schema/);
+    await expect(prepareDatetimeContract(fresh.strapi, BERLIN)).rejects.toThrow(
+      /creates the database schema/,
+    );
     const pending = fakeStrapi({ repairRecorded: false });
-    await expect(prepareDatetimeContract(pending.strapi, BERLIN)).rejects.toThrow(/one-time datetime repair/);
+    await expect(prepareDatetimeContract(pending.strapi, BERLIN)).rejects.toThrow(
+      /one-time datetime repair/,
+    );
   });
 
   it("only warns (production) for a non-UTC process on an ordinary boot", async () => {
     const { strapi, log } = fakeStrapi();
-    await prepareDatetimeContract(strapi, { processZone: "Europe/Berlin", env: { NODE_ENV: "production" } });
+    await prepareDatetimeContract(strapi, {
+      processZone: "Europe/Berlin",
+      env: { NODE_ENV: "production" },
+    });
     expect(log.warn).toHaveBeenCalledWith(expect.stringMatching(/runs in Europe\/Berlin, not UTC/));
     const quiet = fakeStrapi();
     await prepareDatetimeContract(quiet.strapi, BERLIN);
@@ -161,9 +175,9 @@ describe("prepareDatetimeContract (register)", () => {
 
   it("validates APP_TIME_ZONE", async () => {
     const { strapi } = fakeStrapi();
-    await expect(prepareDatetimeContract(strapi, { processZone: "UTC", env: { APP_TIME_ZONE: "Nowhere" } })).rejects.toThrow(
-      /APP_TIME_ZONE/,
-    );
+    await expect(
+      prepareDatetimeContract(strapi, { processZone: "UTC", env: { APP_TIME_ZONE: "Nowhere" } }),
+    ).rejects.toThrow(/APP_TIME_ZONE/);
   });
 });
 
@@ -198,12 +212,16 @@ describe("convertNaiveColumns (afterSync)", () => {
         `ALTER TABLE "public"."strapi_migrations" ALTER COLUMN "time" TYPE timestamptz(6) USING "time" AT TIME ZONE 'UTC'`,
       ],
     ]);
-    expect(log.info).toHaveBeenCalledWith(expect.stringMatching(/converted 3 column\(s\) to timestamptz/));
+    expect(log.info).toHaveBeenCalledWith(
+      expect.stringMatching(/converted 3 column\(s\) to timestamptz/),
+    );
   });
 
   it("refuses to convert in a non-UTC process", async () => {
     const { strapi } = fakeStrapi({ naive: [{ table: "events", column: "start" }] });
-    await expect(convertNaiveColumns(strapi, BERLIN)).rejects.toThrow(/only correct in a UTC process/);
+    await expect(convertNaiveColumns(strapi, BERLIN)).rejects.toThrow(
+      /only correct in a UTC process/,
+    );
   });
 
   it("refuses to read unrepaired legacy data as UTC (interlock)", async () => {
@@ -240,7 +258,9 @@ describe("convertNaiveColumns (afterSync)", () => {
     expect(await convertNaiveColumns(strapi, UTC)).toHaveLength(3);
     expect(log.warn).toHaveBeenCalledTimes(1);
     expect(log.warn).toHaveBeenCalledWith(
-      expect.stringMatching(/events \(start\) is timestamp without time zone again and holds values in 3 row\(s\).*manual ALTER in a non-UTC session/),
+      expect.stringMatching(
+        /events \(start\) is timestamp without time zone again and holds values in 3 row\(s\).*manual ALTER in a non-UTC session/,
+      ),
     );
   });
 
@@ -254,14 +274,18 @@ describe("convertNaiveColumns (afterSync)", () => {
     });
     const converted = await convertNaiveColumns(strapi, UTC);
     expect(converted).toEqual([{ table: "polls", column: "closes_at" }]);
-    expect(log.error).toHaveBeenCalledWith(expect.stringMatching(/could not convert events \(start\).*lock timeout/));
+    expect(log.error).toHaveBeenCalledWith(
+      expect.stringMatching(/could not convert events \(start\).*lock timeout/),
+    );
   });
 
   it("refuses a schema-changing boot in a non-UTC process", async () => {
     const { strapi, state } = fakeStrapi();
     await prepareDatetimeContract(strapi, BERLIN);
     state.schemaMarker = "2:def";
-    await expect(convertNaiveColumns(strapi, BERLIN)).rejects.toThrow(/changed the database schema/);
+    await expect(convertNaiveColumns(strapi, BERLIN)).rejects.toThrow(
+      /changed the database schema/,
+    );
   });
 });
 
@@ -281,9 +305,13 @@ describe("refuseNonUtcSchemaSync (beforeSync)", () => {
 
   it("refuses a non-UTC process before a schema change or a first schema", async () => {
     const changed = fakeStrapi({ modelHash: "def" });
-    await expect(refuseNonUtcSchemaSync(changed.strapi, BERLIN)).rejects.toThrow(/changes the database schema/);
+    await expect(refuseNonUtcSchemaSync(changed.strapi, BERLIN)).rejects.toThrow(
+      /changes the database schema/,
+    );
     const first = fakeStrapi({ storedHash: null });
-    await expect(refuseNonUtcSchemaSync(first.strapi, BERLIN)).rejects.toThrow(/creates the database schema/);
+    await expect(refuseNonUtcSchemaSync(first.strapi, BERLIN)).rejects.toThrow(
+      /creates the database schema/,
+    );
   });
 
   it("does not look in a UTC process or on SQLite", async () => {
@@ -298,7 +326,9 @@ describe("refuseNonUtcSchemaSync (beforeSync)", () => {
   it("fails closed when Strapi's migration or schema service is gone", async () => {
     const { strapi } = fakeStrapi();
     const bare: GuardHost = { ...strapi, db: { ...strapi.db, migrations: undefined } };
-    await expect(refuseNonUtcSchemaSync(bare, BERLIN)).rejects.toThrow(/Cannot tell whether this boot changes/);
+    await expect(refuseNonUtcSchemaSync(bare, BERLIN)).rejects.toThrow(
+      /Cannot tell whether this boot changes/,
+    );
   });
 });
 
@@ -314,17 +344,23 @@ describe("assertTimestamptzContract (bootstrap)", () => {
       naive: [{ table: "events", column: "start" }],
       failingTables: new Set(["events"]),
     });
-    await expect(assertTimestamptzContract(strapi, UTC)).rejects.toThrow(/still timestamp without time zone.*events\.start/);
+    await expect(assertTimestamptzContract(strapi, UTC)).rejects.toThrow(
+      /still timestamp without time zone.*events\.start/,
+    );
   });
 
   it("is a no-op on SQLite", async () => {
-    await expect(assertTimestamptzContract(fakeStrapi({}, "sqlite").strapi, UTC)).resolves.toBeUndefined();
+    await expect(
+      assertTimestamptzContract(fakeStrapi({}, "sqlite").strapi, UTC),
+    ).resolves.toBeUndefined();
   });
 });
 
 describe("registerTimestamptzGuard", () => {
   it("hooks the schema-change check into beforeSync and the conversion into afterSync", async () => {
-    const { strapi, handlers, hooked, state } = fakeStrapi({ naive: [{ table: "events", column: "start" }] });
+    const { strapi, handlers, hooked, state } = fakeStrapi({
+      naive: [{ table: "events", column: "start" }],
+    });
     registerTimestamptzGuard(strapi, UTC);
     expect(hooked).toEqual(["strapi::content-types.beforeSync", "strapi::content-types.afterSync"]);
     await handlers[0]({});

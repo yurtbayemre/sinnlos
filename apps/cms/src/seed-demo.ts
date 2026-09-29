@@ -26,11 +26,31 @@
 import { addCalendarDays, nowInstant, toIsoZ, todayIn } from "./utils/time";
 
 const DEPARTMENTS = [
-  { name: "Engineering", color: "#6366f1", description: "Software development, infrastructure, and technical architecture." },
-  { name: "Design", color: "#ec4899", description: "Product design, UX research, and brand identity." },
-  { name: "Marketing", color: "#f59e0b", description: "Brand strategy, content, campaigns, and analytics." },
-  { name: "Human Resources", color: "#10b981", description: "People operations, recruiting, culture, and employee development." },
-  { name: "Finance", color: "#3b82f6", description: "Accounting, budgeting, payroll, and financial planning." },
+  {
+    name: "Engineering",
+    color: "#6366f1",
+    description: "Software development, infrastructure, and technical architecture.",
+  },
+  {
+    name: "Design",
+    color: "#ec4899",
+    description: "Product design, UX research, and brand identity.",
+  },
+  {
+    name: "Marketing",
+    color: "#f59e0b",
+    description: "Brand strategy, content, campaigns, and analytics.",
+  },
+  {
+    name: "Human Resources",
+    color: "#10b981",
+    description: "People operations, recruiting, culture, and employee development.",
+  },
+  {
+    name: "Finance",
+    color: "#3b82f6",
+    description: "Accounting, budgeting, payroll, and financial planning.",
+  },
 ];
 
 const TEAMS = [
@@ -45,16 +65,96 @@ const TEAMS = [
 ];
 
 const USERS = [
-  { username: "alex.morgan", email: "alex.morgan@sinnlos.local", displayName: "Alex Morgan", jobTitle: "VP of Engineering", department: "Engineering", officeLocation: "Berlin HQ", phone: "+49 30 1234 001" },
-  { username: "sam.chen", email: "sam.chen@sinnlos.local", displayName: "Sam Chen", jobTitle: "Senior Frontend Engineer", department: "Engineering", officeLocation: "Berlin HQ", phone: "+49 30 1234 002" },
-  { username: "jordan.lee", email: "jordan.lee@sinnlos.local", displayName: "Jordan Lee", jobTitle: "Backend Engineer", department: "Engineering", officeLocation: "Remote", phone: "+49 30 1234 003" },
-  { username: "taylor.swift", email: "taylor.s@sinnlos.local", displayName: "Taylor Swift", jobTitle: "DevOps Engineer", department: "Engineering", officeLocation: "Berlin HQ", phone: "+49 30 1234 004" },
-  { username: "riley.kim", email: "riley.kim@sinnlos.local", displayName: "Riley Kim", jobTitle: "Head of Design", department: "Design", officeLocation: "Berlin HQ", phone: "+49 30 1234 005" },
-  { username: "casey.jones", email: "casey.jones@sinnlos.local", displayName: "Casey Jones", jobTitle: "UX Researcher", department: "Design", officeLocation: "Munich", phone: "+49 89 5678 001" },
-  { username: "jamie.garcia", email: "jamie.garcia@sinnlos.local", displayName: "Jamie Garcia", jobTitle: "Marketing Manager", department: "Marketing", officeLocation: "Berlin HQ", phone: "+49 30 1234 006" },
-  { username: "quinn.wilson", email: "quinn.wilson@sinnlos.local", displayName: "Quinn Wilson", jobTitle: "Content Strategist", department: "Marketing", officeLocation: "Remote", phone: "+49 30 1234 007" },
-  { username: "dana.patel", email: "dana.patel@sinnlos.local", displayName: "Dana Patel", jobTitle: "HR Director", department: "Human Resources", officeLocation: "Berlin HQ", phone: "+49 30 1234 008" },
-  { username: "morgan.brooks", email: "morgan.brooks@sinnlos.local", displayName: "Morgan Brooks", jobTitle: "Finance Lead", department: "Finance", officeLocation: "Berlin HQ", phone: "+49 30 1234 009" },
+  {
+    username: "alex.morgan",
+    email: "alex.morgan@sinnlos.local",
+    displayName: "Alex Morgan",
+    jobTitle: "VP of Engineering",
+    department: "Engineering",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 001",
+  },
+  {
+    username: "sam.chen",
+    email: "sam.chen@sinnlos.local",
+    displayName: "Sam Chen",
+    jobTitle: "Senior Frontend Engineer",
+    department: "Engineering",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 002",
+  },
+  {
+    username: "jordan.lee",
+    email: "jordan.lee@sinnlos.local",
+    displayName: "Jordan Lee",
+    jobTitle: "Backend Engineer",
+    department: "Engineering",
+    officeLocation: "Remote",
+    phone: "+49 30 1234 003",
+  },
+  {
+    username: "taylor.swift",
+    email: "taylor.s@sinnlos.local",
+    displayName: "Taylor Swift",
+    jobTitle: "DevOps Engineer",
+    department: "Engineering",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 004",
+  },
+  {
+    username: "riley.kim",
+    email: "riley.kim@sinnlos.local",
+    displayName: "Riley Kim",
+    jobTitle: "Head of Design",
+    department: "Design",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 005",
+  },
+  {
+    username: "casey.jones",
+    email: "casey.jones@sinnlos.local",
+    displayName: "Casey Jones",
+    jobTitle: "UX Researcher",
+    department: "Design",
+    officeLocation: "Munich",
+    phone: "+49 89 5678 001",
+  },
+  {
+    username: "jamie.garcia",
+    email: "jamie.garcia@sinnlos.local",
+    displayName: "Jamie Garcia",
+    jobTitle: "Marketing Manager",
+    department: "Marketing",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 006",
+  },
+  {
+    username: "quinn.wilson",
+    email: "quinn.wilson@sinnlos.local",
+    displayName: "Quinn Wilson",
+    jobTitle: "Content Strategist",
+    department: "Marketing",
+    officeLocation: "Remote",
+    phone: "+49 30 1234 007",
+  },
+  {
+    username: "dana.patel",
+    email: "dana.patel@sinnlos.local",
+    displayName: "Dana Patel",
+    jobTitle: "HR Director",
+    department: "Human Resources",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 008",
+  },
+  {
+    username: "morgan.brooks",
+    email: "morgan.brooks@sinnlos.local",
+    displayName: "Morgan Brooks",
+    jobTitle: "Finance Lead",
+    department: "Finance",
+    officeLocation: "Berlin HQ",
+    phone: "+49 30 1234 009",
+  },
 ];
 
 const PASSWORD = "demo1234";
@@ -118,9 +218,7 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   if (process.env.SEED_DEMO_DATA !== "1") return;
 
   const existingDepts = await strapi.db.query("api::department.department").count({});
-  const existingUsers = await strapi.db
-    .query("plugin::users-permissions.user")
-    .count({});
+  const existingUsers = await strapi.db.query("plugin::users-permissions.user").count({});
   if (existingDepts > 0 || existingUsers > 0) {
     strapi.log.info("[seed-demo] data already exists, skipping");
     return;
@@ -175,24 +273,21 @@ export async function seedDemoData(strapi: SeedDemoHost) {
       .subtract({ years: USERS.length - i })
       .with({ month: (i % 12) + 1 }, { overflow: "constrain" });
 
-    userMap[u.username] = await strapi
-      .plugin("users-permissions")
-      .service("user")
-      .add({
-        username: u.username,
-        email: u.email,
-        displayName: u.displayName,
-        jobTitle: u.jobTitle,
-        phone: u.phone,
-        officeLocation: u.officeLocation,
-        department: deptMap[u.department].id,
-        provider: "local",
-        password: PASSWORD,
-        confirmed: true,
-        blocked: false,
-        role: role?.id,
-        hireDate: hireDate.toString(),
-      });
+    userMap[u.username] = await strapi.plugin("users-permissions").service("user").add({
+      username: u.username,
+      email: u.email,
+      displayName: u.displayName,
+      jobTitle: u.jobTitle,
+      phone: u.phone,
+      officeLocation: u.officeLocation,
+      department: deptMap[u.department].id,
+      provider: "local",
+      password: PASSWORD,
+      confirmed: true,
+      blocked: false,
+      role: role?.id,
+      hireDate: hireDate.toString(),
+    });
   }
 
   // Manager hierarchy
@@ -209,27 +304,85 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   });
 
   // Department heads
-  await strapi.db.query("api::department.department").update({ where: { id: deptMap["Engineering"].id }, data: { head: alex.id } });
-  await strapi.db.query("api::department.department").update({ where: { id: deptMap["Design"].id }, data: { head: userMap["riley.kim"].id } });
-  await strapi.db.query("api::department.department").update({ where: { id: deptMap["Marketing"].id }, data: { head: userMap["jamie.garcia"].id } });
-  await strapi.db.query("api::department.department").update({ where: { id: deptMap["Human Resources"].id }, data: { head: userMap["dana.patel"].id } });
-  await strapi.db.query("api::department.department").update({ where: { id: deptMap["Finance"].id }, data: { head: userMap["morgan.brooks"].id } });
+  await strapi.db
+    .query("api::department.department")
+    .update({ where: { id: deptMap["Engineering"].id }, data: { head: alex.id } });
+  await strapi.db
+    .query("api::department.department")
+    .update({ where: { id: deptMap["Design"].id }, data: { head: userMap["riley.kim"].id } });
+  await strapi.db
+    .query("api::department.department")
+    .update({ where: { id: deptMap["Marketing"].id }, data: { head: userMap["jamie.garcia"].id } });
+  await strapi.db.query("api::department.department").update({
+    where: { id: deptMap["Human Resources"].id },
+    data: { head: userMap["dana.patel"].id },
+  });
+  await strapi.db
+    .query("api::department.department")
+    .update({ where: { id: deptMap["Finance"].id }, data: { head: userMap["morgan.brooks"].id } });
 
   // Team leads + members
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["Frontend"].id }, data: { lead: userMap["sam.chen"].id } });
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["Backend"].id }, data: { lead: userMap["jordan.lee"].id } });
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["Platform & DevOps"].id }, data: { lead: userMap["taylor.swift"].id } });
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["Product Design"].id }, data: { lead: userMap["riley.kim"].id } });
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["UX Research"].id }, data: { lead: userMap["casey.jones"].id } });
-  await strapi.db.query("api::team.team").update({ where: { id: teamMap["Brand & Content"].id }, data: { lead: userMap["quinn.wilson"].id } });
+  await strapi.db
+    .query("api::team.team")
+    .update({ where: { id: teamMap["Frontend"].id }, data: { lead: userMap["sam.chen"].id } });
+  await strapi.db
+    .query("api::team.team")
+    .update({ where: { id: teamMap["Backend"].id }, data: { lead: userMap["jordan.lee"].id } });
+  await strapi.db.query("api::team.team").update({
+    where: { id: teamMap["Platform & DevOps"].id },
+    data: { lead: userMap["taylor.swift"].id },
+  });
+  await strapi.db.query("api::team.team").update({
+    where: { id: teamMap["Product Design"].id },
+    data: { lead: userMap["riley.kim"].id },
+  });
+  await strapi.db.query("api::team.team").update({
+    where: { id: teamMap["UX Research"].id },
+    data: { lead: userMap["casey.jones"].id },
+  });
+  await strapi.db.query("api::team.team").update({
+    where: { id: teamMap["Brand & Content"].id },
+    data: { lead: userMap["quinn.wilson"].id },
+  });
 
   // --- Announcements ---
   const announcements = [
-    { title: "Welcome to Sinnlos Intranet!", body: "We're excited to launch our new intranet platform. Explore the sidebar to discover all features — from the people directory and org chart to polls, kudos, and our wiki. If you have questions, drop a comment below!", pinned: true, audience: "all" as const, author: userMap["dana.patel"].documentId },
-    { title: "Q3 All-Hands: Friday at 14:00", body: "Join us in the main conference room (or remotely) for the quarterly all-hands. Agenda: product roadmap update, hiring plan, and the new office kitchen reveal. Snacks provided!", pinned: false, audience: "all" as const, author: alex.documentId },
-    { title: "New Design System v2 is live", body: "The design team has shipped Design System v2 with updated tokens, component variants, and dark mode support. Check the wiki for migration guides. Reach out in #design-system on Slack for questions.", pinned: false, audience: "all" as const, author: userMap["riley.kim"].documentId },
-    { title: "Updated Travel & Expense Policy", body: "Please review the updated travel and expense policy in the Documents section. Key changes: meal per-diem increased to €50/day, economy-plus flights now approved for trips over 4 hours. Effective immediately.", pinned: false, audience: "all" as const, author: userMap["morgan.brooks"].documentId },
-    { title: "Engineering: Sprint Retro moved to Thursday", body: "This week's sprint retro is moved from Wednesday to Thursday 16:00 to accommodate the client demo. Same room, same agenda.", pinned: false, audience: "departments" as const, author: alex.documentId, department: deptMap["Engineering"].documentId },
+    {
+      title: "Welcome to Sinnlos Intranet!",
+      body: "We're excited to launch our new intranet platform. Explore the sidebar to discover all features — from the people directory and org chart to polls, kudos, and our wiki. If you have questions, drop a comment below!",
+      pinned: true,
+      audience: "all" as const,
+      author: userMap["dana.patel"].documentId,
+    },
+    {
+      title: "Q3 All-Hands: Friday at 14:00",
+      body: "Join us in the main conference room (or remotely) for the quarterly all-hands. Agenda: product roadmap update, hiring plan, and the new office kitchen reveal. Snacks provided!",
+      pinned: false,
+      audience: "all" as const,
+      author: alex.documentId,
+    },
+    {
+      title: "New Design System v2 is live",
+      body: "The design team has shipped Design System v2 with updated tokens, component variants, and dark mode support. Check the wiki for migration guides. Reach out in #design-system on Slack for questions.",
+      pinned: false,
+      audience: "all" as const,
+      author: userMap["riley.kim"].documentId,
+    },
+    {
+      title: "Updated Travel & Expense Policy",
+      body: "Please review the updated travel and expense policy in the Documents section. Key changes: meal per-diem increased to €50/day, economy-plus flights now approved for trips over 4 hours. Effective immediately.",
+      pinned: false,
+      audience: "all" as const,
+      author: userMap["morgan.brooks"].documentId,
+    },
+    {
+      title: "Engineering: Sprint Retro moved to Thursday",
+      body: "This week's sprint retro is moved from Wednesday to Thursday 16:00 to accommodate the client demo. Same room, same agenda.",
+      pinned: false,
+      audience: "departments" as const,
+      author: alex.documentId,
+      department: deptMap["Engineering"].documentId,
+    },
   ];
 
   // Published through the Document Service, which fans out the announcement
@@ -253,12 +406,60 @@ export async function seedDemoData(strapi: SeedDemoHost) {
 
   // --- Events ---
   const events = [
-    { title: "Q3 All-Hands Meeting", description: "Quarterly company all-hands with leadership updates, product demos, and Q&A.", start: daysFromNow(3), end: daysFromNow(3), location: "Main Conference Room / Zoom", organizer: alex.documentId },
-    { title: "Design System Workshop", description: "Hands-on workshop covering the new DS v2 tokens and component library. Bring your laptop!", start: daysFromNow(7), end: daysFromNow(7), location: "Design Lab, 3rd Floor", organizer: userMap["riley.kim"].documentId },
-    { title: "Summer Team Barbecue", description: "Annual summer barbecue on the rooftop terrace. Vegetarian and vegan options available. Families welcome!", start: daysFromNow(14), end: daysFromNow(14), allDay: true, location: "Rooftop Terrace", organizer: userMap["dana.patel"].documentId },
-    { title: "Frontend Guild: React 19 Deep Dive", description: "Monthly frontend guild session. This time: React 19 compiler, use() hook, and Server Components patterns.", start: daysFromNow(5), end: daysFromNow(5), location: "Room 42", organizer: userMap["sam.chen"].documentId },
-    { title: "Hiring Kickoff: Senior Backend Engineer", description: "Alignment meeting for the new Senior Backend role. We'll review the job description, interview loop, and sourcing strategy.", start: daysFromNow(2), end: daysFromNow(2), location: "HR Meeting Room", organizer: userMap["dana.patel"].documentId },
-    { title: "Finance: Month-End Close", description: "Monthly close process. All expense reports must be submitted by EOD the day before.", start: daysFromNow(18), end: daysFromNow(19), location: "Finance Office", organizer: userMap["morgan.brooks"].documentId },
+    {
+      title: "Q3 All-Hands Meeting",
+      description: "Quarterly company all-hands with leadership updates, product demos, and Q&A.",
+      start: daysFromNow(3),
+      end: daysFromNow(3),
+      location: "Main Conference Room / Zoom",
+      organizer: alex.documentId,
+    },
+    {
+      title: "Design System Workshop",
+      description:
+        "Hands-on workshop covering the new DS v2 tokens and component library. Bring your laptop!",
+      start: daysFromNow(7),
+      end: daysFromNow(7),
+      location: "Design Lab, 3rd Floor",
+      organizer: userMap["riley.kim"].documentId,
+    },
+    {
+      title: "Summer Team Barbecue",
+      description:
+        "Annual summer barbecue on the rooftop terrace. Vegetarian and vegan options available. Families welcome!",
+      start: daysFromNow(14),
+      end: daysFromNow(14),
+      allDay: true,
+      location: "Rooftop Terrace",
+      organizer: userMap["dana.patel"].documentId,
+    },
+    {
+      title: "Frontend Guild: React 19 Deep Dive",
+      description:
+        "Monthly frontend guild session. This time: React 19 compiler, use() hook, and Server Components patterns.",
+      start: daysFromNow(5),
+      end: daysFromNow(5),
+      location: "Room 42",
+      organizer: userMap["sam.chen"].documentId,
+    },
+    {
+      title: "Hiring Kickoff: Senior Backend Engineer",
+      description:
+        "Alignment meeting for the new Senior Backend role. We'll review the job description, interview loop, and sourcing strategy.",
+      start: daysFromNow(2),
+      end: daysFromNow(2),
+      location: "HR Meeting Room",
+      organizer: userMap["dana.patel"].documentId,
+    },
+    {
+      title: "Finance: Month-End Close",
+      description:
+        "Monthly close process. All expense reports must be submitted by EOD the day before.",
+      start: daysFromNow(18),
+      end: daysFromNow(19),
+      location: "Finance Office",
+      organizer: userMap["morgan.brooks"].documentId,
+    },
   ];
 
   // Published through the Document Service; the event notification fan-out
@@ -270,18 +471,73 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   // --- Wiki Spaces & Pages ---
   // Spaces first: a page's draft links the space's draft and its published
   // row the space's published row, so both have to exist.
-  const generalSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "General", slug: "general", icon: "book", description: "Company-wide knowledge base", visibility: "public" });
+  const generalSpace = await createPublished(strapi, WIKI_SPACE_UID, {
+    name: "General",
+    slug: "general",
+    icon: "book",
+    description: "Company-wide knowledge base",
+    visibility: "public",
+  });
 
-  const engSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "Engineering", slug: "engineering", icon: "code", description: "Technical documentation and architecture decisions", visibility: "public", department: deptMap["Engineering"].documentId });
+  const engSpace = await createPublished(strapi, WIKI_SPACE_UID, {
+    name: "Engineering",
+    slug: "engineering",
+    icon: "code",
+    description: "Technical documentation and architecture decisions",
+    visibility: "public",
+    department: deptMap["Engineering"].documentId,
+  });
 
-  const hrSpace = await createPublished(strapi, WIKI_SPACE_UID, { name: "People & Culture", slug: "people-culture", icon: "heart", description: "HR policies, onboarding guides, and culture handbook", visibility: "public", department: deptMap["Human Resources"].documentId });
+  const hrSpace = await createPublished(strapi, WIKI_SPACE_UID, {
+    name: "People & Culture",
+    slug: "people-culture",
+    icon: "heart",
+    description: "HR policies, onboarding guides, and culture handbook",
+    visibility: "public",
+    department: deptMap["Human Resources"].documentId,
+  });
 
   const wikiPages = [
-    { title: "Getting Started", slug: "getting-started", space: generalSpace.documentId, author: userMap["dana.patel"].documentId, order: 0, body: "# Welcome to Sinnlos\n\nThis is your company intranet. Here's how to get the most out of it:\n\n## Key Features\n\n- **People Directory** — Find colleagues, view the org chart, and see who reports to whom\n- **Announcements** — Stay up to date with company news; comment and react\n- **Events** — Browse upcoming events and download calendar invites (.ics)\n- **Wiki** — Browse and contribute to our knowledge base\n- **Kudos** — Recognize colleagues for great work\n- **Polls** — Vote on company decisions\n- **Documents** — Access policies, forms, and templates\n\n## Need Help?\n\nReach out to the HR team or drop a comment on any announcement." },
-    { title: "Code Review Guidelines", slug: "code-review-guidelines", space: engSpace.documentId, author: userMap["sam.chen"].documentId, order: 0, body: "# Code Review Guidelines\n\n## Philosophy\n\nCode reviews are about **knowledge sharing** first and quality second. Every review is a learning opportunity.\n\n## Expectations\n\n- Respond to review requests within **4 business hours**\n- Keep PRs under **400 lines** when possible\n- Use conventional comments: `nit:`, `suggestion:`, `question:`, `blocker:`\n\n## What to Look For\n\n1. **Correctness** — Does it do what the ticket says?\n2. **Security** — Any injection vectors, leaked secrets, missing auth checks?\n3. **Performance** — N+1 queries, unbounded loops, missing indexes?\n4. **Readability** — Could a new team member understand this in 6 months?\n\n## Approval\n\nOne approval required; two for infrastructure or auth changes." },
-    { title: "Architecture Decision Records", slug: "architecture-decision-records", space: engSpace.documentId, author: alex.documentId, order: 1, body: "# Architecture Decision Records (ADRs)\n\n## ADR-001: Strapi v5 as Headless CMS\n\n**Status:** Accepted\n\n**Context:** We need a content management backend that supports custom content types, role-based access, and can be self-hosted.\n\n**Decision:** Use Strapi v5 with PostgreSQL. The Document Service API gives us the flexibility for custom business logic while the admin panel provides a no-code editing experience for non-developers.\n\n**Consequences:** Tied to Node.js runtime for the CMS. Custom controllers needed for complex permissions beyond Strapi's built-in RBAC.\n\n---\n\n## ADR-002: Next.js for the Frontend\n\n**Status:** Accepted\n\n**Context:** We want server-side rendering for SEO-irrelevant pages too, because SSR gives us server-side auth checks and reduces client bundle size.\n\n**Decision:** Next.js with App Router and React Server Components. Auth.js (NextAuth v5) for authentication.\n\n**Consequences:** Requires Node.js runtime (no static export). Server Components simplify data fetching but limit interactivity to client component islands." },
-    { title: "Onboarding Checklist", slug: "onboarding-checklist", space: hrSpace.documentId, author: userMap["dana.patel"].documentId, order: 0, body: "# New Employee Onboarding\n\n## Week 1\n\n- [ ] Sign into the intranet and update your profile\n- [ ] Meet your manager and set up 1:1 cadence\n- [ ] Read the Employee Handbook (see Documents)\n- [ ] Complete IT security training\n- [ ] Join relevant department and team channels\n\n## Week 2\n\n- [ ] Shadow a colleague on a real task\n- [ ] Attend your first team standup\n- [ ] Give your first Kudos to someone who helped you\n\n## Month 1\n\n- [ ] Complete your first project or contribution\n- [ ] Set Q-goals with your manager\n- [ ] Attend an all-hands meeting" },
-    { title: "Remote Work Policy", slug: "remote-work-policy", space: hrSpace.documentId, author: userMap["dana.patel"].documentId, order: 1, body: "# Remote Work Policy\n\n## Overview\n\nWe trust our team to work from wherever they're most productive. This policy sets expectations for remote work.\n\n## Guidelines\n\n- **Core hours:** 10:00–15:00 CET — be available for meetings and collaboration\n- **Office days:** Teams may agree on 1–2 anchor days per week; no company-wide mandate\n- **Equipment:** We provide a €1,000 home-office budget (one-time, reimbursed)\n- **Communication:** Default to async. Use meetings only when async would take 3x longer\n\n## Expectations\n\n- Keep your calendar up to date\n- Respond to messages within 4 hours during core hours\n- Use video for 1:1s and team ceremonies\n\n## Coworking\n\nNeed a change of scenery? We reimburse up to €200/month for coworking spaces. Submit receipts via the expense form in Documents." },
+    {
+      title: "Getting Started",
+      slug: "getting-started",
+      space: generalSpace.documentId,
+      author: userMap["dana.patel"].documentId,
+      order: 0,
+      body: "# Welcome to Sinnlos\n\nThis is your company intranet. Here's how to get the most out of it:\n\n## Key Features\n\n- **People Directory** — Find colleagues, view the org chart, and see who reports to whom\n- **Announcements** — Stay up to date with company news; comment and react\n- **Events** — Browse upcoming events and download calendar invites (.ics)\n- **Wiki** — Browse and contribute to our knowledge base\n- **Kudos** — Recognize colleagues for great work\n- **Polls** — Vote on company decisions\n- **Documents** — Access policies, forms, and templates\n\n## Need Help?\n\nReach out to the HR team or drop a comment on any announcement.",
+    },
+    {
+      title: "Code Review Guidelines",
+      slug: "code-review-guidelines",
+      space: engSpace.documentId,
+      author: userMap["sam.chen"].documentId,
+      order: 0,
+      body: "# Code Review Guidelines\n\n## Philosophy\n\nCode reviews are about **knowledge sharing** first and quality second. Every review is a learning opportunity.\n\n## Expectations\n\n- Respond to review requests within **4 business hours**\n- Keep PRs under **400 lines** when possible\n- Use conventional comments: `nit:`, `suggestion:`, `question:`, `blocker:`\n\n## What to Look For\n\n1. **Correctness** — Does it do what the ticket says?\n2. **Security** — Any injection vectors, leaked secrets, missing auth checks?\n3. **Performance** — N+1 queries, unbounded loops, missing indexes?\n4. **Readability** — Could a new team member understand this in 6 months?\n\n## Approval\n\nOne approval required; two for infrastructure or auth changes.",
+    },
+    {
+      title: "Architecture Decision Records",
+      slug: "architecture-decision-records",
+      space: engSpace.documentId,
+      author: alex.documentId,
+      order: 1,
+      body: "# Architecture Decision Records (ADRs)\n\n## ADR-001: Strapi v5 as Headless CMS\n\n**Status:** Accepted\n\n**Context:** We need a content management backend that supports custom content types, role-based access, and can be self-hosted.\n\n**Decision:** Use Strapi v5 with PostgreSQL. The Document Service API gives us the flexibility for custom business logic while the admin panel provides a no-code editing experience for non-developers.\n\n**Consequences:** Tied to Node.js runtime for the CMS. Custom controllers needed for complex permissions beyond Strapi's built-in RBAC.\n\n---\n\n## ADR-002: Next.js for the Frontend\n\n**Status:** Accepted\n\n**Context:** We want server-side rendering for SEO-irrelevant pages too, because SSR gives us server-side auth checks and reduces client bundle size.\n\n**Decision:** Next.js with App Router and React Server Components. Auth.js (NextAuth v5) for authentication.\n\n**Consequences:** Requires Node.js runtime (no static export). Server Components simplify data fetching but limit interactivity to client component islands.",
+    },
+    {
+      title: "Onboarding Checklist",
+      slug: "onboarding-checklist",
+      space: hrSpace.documentId,
+      author: userMap["dana.patel"].documentId,
+      order: 0,
+      body: "# New Employee Onboarding\n\n## Week 1\n\n- [ ] Sign into the intranet and update your profile\n- [ ] Meet your manager and set up 1:1 cadence\n- [ ] Read the Employee Handbook (see Documents)\n- [ ] Complete IT security training\n- [ ] Join relevant department and team channels\n\n## Week 2\n\n- [ ] Shadow a colleague on a real task\n- [ ] Attend your first team standup\n- [ ] Give your first Kudos to someone who helped you\n\n## Month 1\n\n- [ ] Complete your first project or contribution\n- [ ] Set Q-goals with your manager\n- [ ] Attend an all-hands meeting",
+    },
+    {
+      title: "Remote Work Policy",
+      slug: "remote-work-policy",
+      space: hrSpace.documentId,
+      author: userMap["dana.patel"].documentId,
+      order: 1,
+      body: "# Remote Work Policy\n\n## Overview\n\nWe trust our team to work from wherever they're most productive. This policy sets expectations for remote work.\n\n## Guidelines\n\n- **Core hours:** 10:00–15:00 CET — be available for meetings and collaboration\n- **Office days:** Teams may agree on 1–2 anchor days per week; no company-wide mandate\n- **Equipment:** We provide a €1,000 home-office budget (one-time, reimbursed)\n- **Communication:** Default to async. Use meetings only when async would take 3x longer\n\n## Expectations\n\n- Keep your calendar up to date\n- Respond to messages within 4 hours during core hours\n- Use video for 1:1s and team ceremonies\n\n## Coworking\n\nNeed a change of scenery? We reimburse up to €200/month for coworking spaces. Submit receipts via the expense form in Documents.",
+    },
   ];
 
   // Creates only (no page update), so the revision snapshot
@@ -292,14 +548,62 @@ export async function seedDemoData(strapi: SeedDemoHost) {
 
   // --- Kudos ---
   const kudosList = [
-    { from: userMap["sam.chen"].id, to: userMap["jordan.lee"].id, message: "Jordan completely rebuilt our API caching layer over the weekend to fix the performance issue. Response times dropped by 80%. Incredible work!", value: "excellence" },
-    { from: userMap["riley.kim"].id, to: userMap["casey.jones"].id, message: "The usability study Casey ran this week surfaced three critical issues we would've shipped to production. Saved us weeks of bug reports!", value: "innovation" },
-    { from: userMap["dana.patel"].id, to: alex.id, message: "Alex mentored two junior engineers through their first production deployments this sprint. Both shipped with zero incidents. That's leadership!", value: "leadership" },
-    { from: userMap["jordan.lee"].id, to: userMap["sam.chen"].id, message: "Sam paired with me for two full days to unblock the SSR migration. Truly a team player.", value: "teamwork" },
-    { from: userMap["quinn.wilson"].id, to: userMap["jamie.garcia"].id, message: "Jamie's last-minute campaign pivot for the product launch was brilliant. We hit 150% of our signup target!", value: "customer-focus" },
-    { from: alex.id, to: userMap["taylor.swift"].id, message: "Taylor migrated our entire CI pipeline to the new runner in one afternoon with zero downtime. Chef's kiss.", value: "excellence" },
-    { from: userMap["morgan.brooks"].id, to: userMap["dana.patel"].id, message: "Dana streamlined the onboarding process and cut new-hire ramp-up time by two weeks. The new checklist is fantastic.", value: "innovation" },
-    { from: userMap["casey.jones"].id, to: userMap["riley.kim"].id, message: "Riley's design system workshop was the best internal training I've attended. Clear, practical, and everyone left with something to apply immediately.", value: "leadership" },
+    {
+      from: userMap["sam.chen"].id,
+      to: userMap["jordan.lee"].id,
+      message:
+        "Jordan completely rebuilt our API caching layer over the weekend to fix the performance issue. Response times dropped by 80%. Incredible work!",
+      value: "excellence",
+    },
+    {
+      from: userMap["riley.kim"].id,
+      to: userMap["casey.jones"].id,
+      message:
+        "The usability study Casey ran this week surfaced three critical issues we would've shipped to production. Saved us weeks of bug reports!",
+      value: "innovation",
+    },
+    {
+      from: userMap["dana.patel"].id,
+      to: alex.id,
+      message:
+        "Alex mentored two junior engineers through their first production deployments this sprint. Both shipped with zero incidents. That's leadership!",
+      value: "leadership",
+    },
+    {
+      from: userMap["jordan.lee"].id,
+      to: userMap["sam.chen"].id,
+      message:
+        "Sam paired with me for two full days to unblock the SSR migration. Truly a team player.",
+      value: "teamwork",
+    },
+    {
+      from: userMap["quinn.wilson"].id,
+      to: userMap["jamie.garcia"].id,
+      message:
+        "Jamie's last-minute campaign pivot for the product launch was brilliant. We hit 150% of our signup target!",
+      value: "customer-focus",
+    },
+    {
+      from: alex.id,
+      to: userMap["taylor.swift"].id,
+      message:
+        "Taylor migrated our entire CI pipeline to the new runner in one afternoon with zero downtime. Chef's kiss.",
+      value: "excellence",
+    },
+    {
+      from: userMap["morgan.brooks"].id,
+      to: userMap["dana.patel"].id,
+      message:
+        "Dana streamlined the onboarding process and cut new-hire ramp-up time by two weeks. The new checklist is fantastic.",
+      value: "innovation",
+    },
+    {
+      from: userMap["casey.jones"].id,
+      to: userMap["riley.kim"].id,
+      message:
+        "Riley's design system workshop was the best internal training I've attended. Clear, practical, and everyone left with something to apply immediately.",
+      value: "leadership",
+    },
   ];
 
   for (const k of kudosList) {
@@ -310,9 +614,34 @@ export async function seedDemoData(strapi: SeedDemoHost) {
 
   // --- Polls ---
   const polls = [
-    { question: "Which day works best for weekly team lunch?", options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"], author: userMap["dana.patel"].documentId, closesAt: daysFromNow(7) },
-    { question: "Should we adopt a 4-day work week trial?", options: ["Yes, let's try it for Q4", "Maybe, need more details first", "No, I prefer the current schedule"], author: alex.documentId, closesAt: daysFromNow(14) },
-    { question: "Preferred tech talk format?", options: ["30-min lightning talks", "60-min deep dives", "Mix of both", "Recorded async videos"], author: userMap["sam.chen"].documentId, anonymous: true, closesAt: daysFromNow(10) },
+    {
+      question: "Which day works best for weekly team lunch?",
+      options: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+      author: userMap["dana.patel"].documentId,
+      closesAt: daysFromNow(7),
+    },
+    {
+      question: "Should we adopt a 4-day work week trial?",
+      options: [
+        "Yes, let's try it for Q4",
+        "Maybe, need more details first",
+        "No, I prefer the current schedule",
+      ],
+      author: alex.documentId,
+      closesAt: daysFromNow(14),
+    },
+    {
+      question: "Preferred tech talk format?",
+      options: [
+        "30-min lightning talks",
+        "60-min deep dives",
+        "Mix of both",
+        "Recorded async videos",
+      ],
+      author: userMap["sam.chen"].documentId,
+      anonymous: true,
+      closesAt: daysFromNow(10),
+    },
   ];
 
   const pollEntities: SeedRow[] = [];
@@ -337,12 +666,42 @@ export async function seedDemoData(strapi: SeedDemoHost) {
 
   // --- Documents ---
   const documents = [
-    { title: "Employee Handbook 2024", description: "Comprehensive guide covering company policies, benefits, and expectations.", category: "policy", uploadedBy: userMap["dana.patel"].documentId },
-    { title: "Expense Report Template", description: "Standard template for submitting travel and business expenses.", category: "form", uploadedBy: userMap["morgan.brooks"].documentId },
-    { title: "Brand Guidelines", description: "Logo usage, color palette, typography, and tone of voice.", category: "guide", uploadedBy: userMap["jamie.garcia"].documentId },
-    { title: "Architecture Diagram Template", description: "Mermaid-based template for documenting system architecture.", category: "template", uploadedBy: alex.documentId },
-    { title: "Information Security Policy", description: "Data classification, access controls, incident response procedures.", category: "policy", uploadedBy: userMap["dana.patel"].documentId },
-    { title: "Meeting Notes Template", description: "Standard template for recording meeting agendas, decisions, and action items.", category: "template", uploadedBy: userMap["quinn.wilson"].documentId },
+    {
+      title: "Employee Handbook 2024",
+      description: "Comprehensive guide covering company policies, benefits, and expectations.",
+      category: "policy",
+      uploadedBy: userMap["dana.patel"].documentId,
+    },
+    {
+      title: "Expense Report Template",
+      description: "Standard template for submitting travel and business expenses.",
+      category: "form",
+      uploadedBy: userMap["morgan.brooks"].documentId,
+    },
+    {
+      title: "Brand Guidelines",
+      description: "Logo usage, color palette, typography, and tone of voice.",
+      category: "guide",
+      uploadedBy: userMap["jamie.garcia"].documentId,
+    },
+    {
+      title: "Architecture Diagram Template",
+      description: "Mermaid-based template for documenting system architecture.",
+      category: "template",
+      uploadedBy: alex.documentId,
+    },
+    {
+      title: "Information Security Policy",
+      description: "Data classification, access controls, incident response procedures.",
+      category: "policy",
+      uploadedBy: userMap["dana.patel"].documentId,
+    },
+    {
+      title: "Meeting Notes Template",
+      description: "Standard template for recording meeting agendas, decisions, and action items.",
+      category: "template",
+      uploadedBy: userMap["quinn.wilson"].documentId,
+    },
   ];
 
   for (const d of documents) {
@@ -354,11 +713,36 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   // publishing is delete+recreate in Strapi 5, so an id anchor detaches on
   // the next publish (issue #11, see utils/comment-target.ts).
   const comments = [
-    { body: "This is great! Love the new platform. The search is super fast.", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["sam.chen"].id },
-    { body: "Really nice work everyone. Quick question — can we customize the sidebar nav?", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["casey.jones"].id },
-    { body: "Will this be recorded? I have a conflict with a client call.", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: userMap["quinn.wilson"].id },
-    { body: "Yes, we'll record and post the link here afterwards!", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: alex.id },
-    { body: "The dark mode support is amazing. Huge quality-of-life improvement.", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["jordan.lee"].id },
+    {
+      body: "This is great! Love the new platform. The search is super fast.",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["sam.chen"].id,
+    },
+    {
+      body: "Really nice work everyone. Quick question — can we customize the sidebar nav?",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["casey.jones"].id,
+    },
+    {
+      body: "Will this be recorded? I have a conflict with a client call.",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[1].documentId,
+      author: userMap["quinn.wilson"].id,
+    },
+    {
+      body: "Yes, we'll record and post the link here afterwards!",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[1].documentId,
+      author: alex.id,
+    },
+    {
+      body: "The dark mode support is amazing. Huge quality-of-life improvement.",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[2].documentId,
+      author: userMap["jordan.lee"].id,
+    },
   ];
 
   for (const c of comments) {
@@ -369,15 +753,60 @@ export async function seedDemoData(strapi: SeedDemoHost) {
 
   // --- Reactions on announcements ---
   const reactions = [
-    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["sam.chen"].id },
-    { emoji: "heart", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["riley.kim"].id },
-    { emoji: "celebrate", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["jordan.lee"].id },
-    { emoji: "celebrate", targetType: "announcement", targetDocumentId: announcementEntities[0].documentId, author: userMap["casey.jones"].id },
-    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[1].documentId, author: userMap["dana.patel"].id },
-    { emoji: "lightbulb", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["sam.chen"].id },
-    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: userMap["taylor.swift"].id },
-    { emoji: "heart", targetType: "announcement", targetDocumentId: announcementEntities[2].documentId, author: alex.id },
-    { emoji: "thumbsup", targetType: "announcement", targetDocumentId: announcementEntities[3].documentId, author: userMap["quinn.wilson"].id },
+    {
+      emoji: "thumbsup",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["sam.chen"].id,
+    },
+    {
+      emoji: "heart",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["riley.kim"].id,
+    },
+    {
+      emoji: "celebrate",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["jordan.lee"].id,
+    },
+    {
+      emoji: "celebrate",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[0].documentId,
+      author: userMap["casey.jones"].id,
+    },
+    {
+      emoji: "thumbsup",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[1].documentId,
+      author: userMap["dana.patel"].id,
+    },
+    {
+      emoji: "lightbulb",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[2].documentId,
+      author: userMap["sam.chen"].id,
+    },
+    {
+      emoji: "thumbsup",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[2].documentId,
+      author: userMap["taylor.swift"].id,
+    },
+    {
+      emoji: "heart",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[2].documentId,
+      author: alex.id,
+    },
+    {
+      emoji: "thumbsup",
+      targetType: "announcement",
+      targetDocumentId: announcementEntities[3].documentId,
+      author: userMap["quinn.wilson"].id,
+    },
   ];
 
   for (const r of reactions) {
@@ -389,13 +818,16 @@ export async function seedDemoData(strapi: SeedDemoHost) {
   // Do NOT log the demo password — logs may be shipped/retained.
   strapi.log.info(
     `[seed-demo] done — ${USERS.length} users, ` +
-    `${DEPARTMENTS.length} departments, ${TEAMS.length} teams, ` +
-    `${announcements.length} announcements, ${events.length} events, ` +
-    `${wikiPages.length} wiki pages, ${kudosList.length} kudos, ` +
-    `${polls.length} polls, ${documents.length} documents`,
+      `${DEPARTMENTS.length} departments, ${TEAMS.length} teams, ` +
+      `${announcements.length} announcements, ${events.length} events, ` +
+      `${wikiPages.length} wiki pages, ${kudosList.length} kudos, ` +
+      `${polls.length} polls, ${documents.length} documents`,
   );
 }
 
 function slugify(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
+  return s
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }

@@ -45,10 +45,11 @@ export default async function TrainingPage() {
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
           {courses.map((course) => {
-            const { total, completed: doneCount, done } = courseCompletion(
-              course.lessons ?? [],
-              completed,
-            );
+            const {
+              total,
+              completed: doneCount,
+              done,
+            } = courseCompletion(course.lessons ?? [], completed);
             return (
               <Link key={course.id} href={`/training/${course.slug}`} className="focus-card">
                 <Card className="h-full transition-colors hover:border-primary/40">

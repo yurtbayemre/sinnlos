@@ -60,10 +60,14 @@ afterEach(async () => {
 
 describe("search-log time filters on SQLite (FX25)", () => {
   it("stores Strapi datetimes as epoch ms, so an ISO-string predicate matches nothing", async () => {
-    const [row] = (await knex.raw("select typeof(created_at) as t from search_logs limit 1")) as { t: string }[];
+    const [row] = (await knex.raw("select typeof(created_at) as t from search_logs limit 1")) as {
+      t: string;
+    }[];
     expect(row.t).toBe("integer");
     const iso = new Date(Date.now() - 30 * DAY_MS).toISOString();
-    const rows = (await knex.raw("select count(*) as n from search_logs where created_at >= ?", [iso])) as {
+    const rows = (await knex.raw("select count(*) as n from search_logs where created_at >= ?", [
+      iso,
+    ])) as {
       n: number;
     }[];
     expect(Number(rows[0].n)).toBe(0);
@@ -97,6 +101,8 @@ describe("search-log time filters on SQLite (FX25)", () => {
 
     const yearCtx = { query: { days: "365" }, send: vi.fn() };
     await controller.summary(yearCtx);
-    expect(yearCtx.send).toHaveBeenCalledWith(expect.objectContaining({ total: 2, zeroResultCount: 1 }));
+    expect(yearCtx.send).toHaveBeenCalledWith(
+      expect.objectContaining({ total: 2, zeroResultCount: 1 }),
+    );
   });
 });

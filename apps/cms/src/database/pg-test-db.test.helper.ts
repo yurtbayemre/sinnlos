@@ -10,7 +10,9 @@ import { loadStrapiKnex, type RawKnex } from "./strapi-knex.test.helper";
 export const PG_URL = process.env.SINNLOS_TEST_PG_URL ?? "";
 
 /** knex on the test database, with the session pin of config/database.ts. */
-export function createTestKnex(options: { pinUtc?: boolean; pool?: { min: number; max: number } } = {}): RawKnex {
+export function createTestKnex(
+  options: { pinUtc?: boolean; pool?: { min: number; max: number } } = {},
+): RawKnex {
   return loadStrapiKnex()({
     client: "pg",
     connection: {
@@ -25,13 +27,22 @@ export function uniqueSchema(prefix: string): string {
   return `${prefix}_${process.pid}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export async function rows<T>(knex: RawKnex, sql: string, bindings: readonly unknown[] = []): Promise<T[]> {
+export async function rows<T>(
+  knex: RawKnex,
+  sql: string,
+  bindings: readonly unknown[] = [],
+): Promise<T[]> {
   const result = (await knex.raw(sql, bindings)) as { rows: T[] };
   return result.rows;
 }
 
 /** A column's type as Postgres names it (e.g. "timestamp with time zone"). */
-export async function columnType(knex: RawKnex, schema: string, table: string, column: string): Promise<string> {
+export async function columnType(
+  knex: RawKnex,
+  schema: string,
+  table: string,
+  column: string,
+): Promise<string> {
   const [row] = await rows<{ data_type: string }>(
     knex,
     `SELECT data_type FROM information_schema.columns WHERE table_schema = ? AND table_name = ? AND column_name = ?`,

@@ -349,18 +349,11 @@ function isSpaceVisible(space: SpaceRow, scope: UserScope | null): boolean {
     case "public":
       return true;
     case "role":
-      return (
-        scope?.roleId != null &&
-        (space.allowedRoles ?? []).some((r) => r.id === scope.roleId)
-      );
+      return scope?.roleId != null && (space.allowedRoles ?? []).some((r) => r.id === scope.roleId);
     case "department":
       return scope?.departmentId != null && space.department?.id === scope.departmentId;
     case "team":
-      return (
-        scope != null &&
-        space.team?.id != null &&
-        scope.teamIds.includes(space.team.id)
-      );
+      return scope != null && space.team?.id != null && scope.teamIds.includes(space.team.id);
     default:
       return false;
   }
@@ -376,10 +369,7 @@ function isSpaceVisible(space: SpaceRow, scope: UserScope | null): boolean {
  *   - department → authenticated users whose department is `space.department`
  *   - team       → authenticated users one of whose teams is `space.team`
  */
-export async function visibleWikiSpaceIds(
-  strapi: any,
-  scope: UserScope | null,
-): Promise<number[]> {
+export async function visibleWikiSpaceIds(strapi: any, scope: UserScope | null): Promise<number[]> {
   const spaces: SpaceRow[] = await strapi.db.query("api::wiki-space.wiki-space").findMany({
     select: ["id", "visibility"],
     populate: {

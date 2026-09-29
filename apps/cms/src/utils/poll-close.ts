@@ -12,7 +12,10 @@
  */
 import { instantMsOrNull, type InstantInput } from "./time";
 
-export function isPollClosed(closesAt: InstantInput | null | undefined, now: Date = new Date()): boolean {
+export function isPollClosed(
+  closesAt: InstantInput | null | undefined,
+  now: Date = new Date(),
+): boolean {
   const closesAtMs = instantMsOrNull(closesAt);
   if (closesAtMs === null) return false;
   return now.getTime() >= closesAtMs;

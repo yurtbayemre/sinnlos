@@ -35,7 +35,11 @@ export function isPlainDate(value: unknown): value is string {
   const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
   if (month < 1 || month > 12 || day < 1) return false;
   const probe = new Date(Date.UTC(year, month - 1, day));
-  return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day;
+  return (
+    probe.getUTCFullYear() === year &&
+    probe.getUTCMonth() === month - 1 &&
+    probe.getUTCDate() === day
+  );
 }
 
 /** True when Intl knows the IANA zone name. */
@@ -138,7 +142,14 @@ function wallClockAt(epochMs: number, timeZone: string): WallClock {
 /** The zone's UTC offset in ms at the given instant (whole seconds). */
 function offsetMsAt(epochMs: number, timeZone: string): number {
   const wall = wallClockAt(epochMs, timeZone);
-  const wallAsUtc = Date.UTC(wall.year, wall.month - 1, wall.day, wall.hour, wall.minute, wall.second);
+  const wallAsUtc = Date.UTC(
+    wall.year,
+    wall.month - 1,
+    wall.day,
+    wall.hour,
+    wall.minute,
+    wall.second,
+  );
   return wallAsUtc - Math.floor(epochMs / 1000) * 1000;
 }
 
@@ -164,7 +175,9 @@ function toEpochMs(instant: Date | string): number {
   const ms = instantEpochMs(instant);
   if (ms !== null) return ms;
   if (instant instanceof Date) throw new RangeError("Invalid Date");
-  throw new RangeError(`Not an instant (ISO-8601 with a time and Z or an offset): ${String(instant)}`);
+  throw new RangeError(
+    `Not an instant (ISO-8601 with a time and Z or an offset): ${String(instant)}`,
+  );
 }
 
 function pad(value: number, width = 2): string {

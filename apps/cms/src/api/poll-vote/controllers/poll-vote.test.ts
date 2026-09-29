@@ -137,9 +137,19 @@ const ENG_ONLY: PollRow = {
   audience: "departments",
   departments: [ENG],
 };
-const CLOSED: PollRow = { ...OPEN, id: 5, documentId: "p-closed", closesAt: "2020-01-01T00:00:00.000Z" };
+const CLOSED: PollRow = {
+  ...OPEN,
+  id: 5,
+  documentId: "p-closed",
+  closesAt: "2020-01-01T00:00:00.000Z",
+};
 /** Guest access (owner decision 2026-09-27): visible to guests, no guest vote. */
-const GUEST_VISIBLE: PollRow = { ...OPEN, id: 6, documentId: "p-guest-read", visibleToGuests: true };
+const GUEST_VISIBLE: PollRow = {
+  ...OPEN,
+  id: 6,
+  documentId: "p-guest-read",
+  visibleToGuests: true,
+};
 /** Visible to guests, and guests may vote. */
 const GUEST_VOTABLE: PollRow = {
   ...OPEN,
@@ -149,7 +159,12 @@ const GUEST_VOTABLE: PollRow = {
   guestsCanVote: true,
 };
 /** guestsCanVote without visibleToGuests: inert, hidden from guests. */
-const GUEST_VOTE_ONLY: PollRow = { ...OPEN, id: 8, documentId: "p-guest-vote-only", guestsCanVote: true };
+const GUEST_VOTE_ONLY: PollRow = {
+  ...OPEN,
+  id: 8,
+  documentId: "p-guest-vote-only",
+  guestsCanVote: true,
+};
 /** A row from before the guest columns: NULL flags. */
 const GUEST_NULL: PollRow = {
   ...OPEN,
@@ -160,23 +175,45 @@ const GUEST_NULL: PollRow = {
   guestsCanVote: null,
 };
 /** Engineering only, open to guests (of Engineering) with voting. */
-const ENG_GUESTS: PollRow = { ...ENG_ONLY, id: 10, documentId: "p-eng-guests", visibleToGuests: true, guestsCanVote: true };
+const ENG_GUESTS: PollRow = {
+  ...ENG_ONLY,
+  id: 10,
+  documentId: "p-eng-guests",
+  visibleToGuests: true,
+  guestsCanVote: true,
+};
 /** Engineering only, visible to guests (of Engineering) without voting. */
-const ENG_GUESTS_READ: PollRow = { ...ENG_GUESTS, id: 11, documentId: "p-eng-guests-read", guestsCanVote: false };
+const ENG_GUESTS_READ: PollRow = {
+  ...ENG_GUESTS,
+  id: 11,
+  documentId: "p-eng-guests-read",
+  guestsCanVote: false,
+};
 /**
  * DA01: one poll document with both rows, addressed by its documentId. The
  * draft row comes first (lower id), as Strapi writes them; only the
  * published one may be voted on or counted.
  */
 const TWIN_DOCUMENT_ID = "k3m9x0000000000000000001";
-const TWIN_DRAFT: PollRow = { ...OPEN, id: 20, documentId: TWIN_DOCUMENT_ID, question: "Twin (draft)", publishedAt: null };
+const TWIN_DRAFT: PollRow = {
+  ...OPEN,
+  id: 20,
+  documentId: TWIN_DOCUMENT_ID,
+  question: "Twin (draft)",
+  publishedAt: null,
+};
 const TWIN_PUBLISHED: PollRow = { ...OPEN, id: 21, documentId: TWIN_DOCUMENT_ID, question: "Twin" };
 /** A document that was never published: a draft row only. */
 const DRAFT_ONLY_DOCUMENT_ID = "k3m9x0000000000000000002";
 const DRAFT_ONLY: PollRow = { ...DRAFT, id: 22, documentId: DRAFT_ONLY_DOCUMENT_ID };
 /** The Engineering-only poll as a document with both rows. */
 const ENG_TWIN_DOCUMENT_ID = "k3m9x0000000000000000003";
-const ENG_TWIN_DRAFT: PollRow = { ...ENG_ONLY, id: 23, documentId: ENG_TWIN_DOCUMENT_ID, publishedAt: null };
+const ENG_TWIN_DRAFT: PollRow = {
+  ...ENG_ONLY,
+  id: 23,
+  documentId: ENG_TWIN_DOCUMENT_ID,
+  publishedAt: null,
+};
 const ENG_TWIN_PUBLISHED: PollRow = { ...ENG_ONLY, id: 24, documentId: ENG_TWIN_DOCUMENT_ID };
 const POLLS = [
   TWIN_DRAFT,
@@ -201,15 +238,35 @@ const POLLS = [
  * Route ids that name no poll: neither a row id nor a documentId in
  * Strapi's shape (utils/entry-id.ts parseEntryRef).
  */
-const MALFORMED_POLL_IDS = [...MALFORMED_ENTRY_IDS, `${TWIN_DOCUMENT_ID}x`, TWIN_DOCUMENT_ID.toUpperCase()];
+const MALFORMED_POLL_IDS = [
+  ...MALFORMED_ENTRY_IDS,
+  `${TWIN_DOCUMENT_ID}x`,
+  TWIN_DOCUMENT_ID.toUpperCase(),
+];
 
 /** Row 1 of the Engineering document: the poll links the same documentId. */
-const ENGINEER: UserRow = { id: 5, role: { type: "member" }, department: { id: 1, documentId: "d-eng" } };
-const DESIGNER: UserRow = { id: 6, role: { type: "member" }, department: { id: 7, documentId: "d-design" } };
+const ENGINEER: UserRow = {
+  id: 5,
+  role: { type: "member" },
+  department: { id: 1, documentId: "d-eng" },
+};
+const DESIGNER: UserRow = {
+  id: 6,
+  role: { type: "member" },
+  department: { id: 7, documentId: "d-design" },
+};
 const GUEST: UserRow = { id: 7, role: { type: "guest" }, department: null };
 const EDITOR_OUTSIDE: UserRow = { id: 8, role: { type: "editor" }, department: null };
-const ADMIN_OUTSIDE: UserRow = { id: 9, role: { type: "admin_role" }, department: { id: 7, documentId: "d-design" } };
-const GUEST_ENG: UserRow = { id: 10, role: { type: "guest" }, department: { id: 1, documentId: "d-eng" } };
+const ADMIN_OUTSIDE: UserRow = {
+  id: 9,
+  role: { type: "admin_role" },
+  department: { id: 7, documentId: "d-design" },
+};
+const GUEST_ENG: UserRow = {
+  id: 10,
+  role: { type: "guest" },
+  department: { id: 1, documentId: "d-eng" },
+};
 const FALLBACK: UserRow = { id: 11, role: { type: "authenticated" }, department: null };
 const USERS = [ENGINEER, DESIGNER, GUEST, EDITOR_OUTSIDE, ADMIN_OUTSIDE, GUEST_ENG, FALLBACK];
 
@@ -238,7 +295,9 @@ function distinctProjection(rows: StoredVoteRow[], select: string[] | undefined)
   const seen = new Set<string>();
   const projected: object[] = [];
   for (const row of rows) {
-    const picked = Object.fromEntries(select.map((key) => [key, (row as unknown as Record<string, unknown>)[key]]));
+    const picked = Object.fromEntries(
+      select.map((key) => [key, (row as unknown as Record<string, unknown>)[key]]),
+    );
     const key = JSON.stringify(picked);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -270,17 +329,28 @@ function setup(options: {
    */
   deletedBeforeReadback?: boolean;
 }) {
-  const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({ id: 100 + i, ...row }));
+  const votesTable: StoredVoteRow[] = (options.votes ?? []).map((row, i) => ({
+    id: 100 + i,
+    ...row,
+  }));
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
     failLikePostgres(where);
     return POLLS.find((row) => matches(row, where)) ?? null;
   });
   const votes = {
-    findOne: vi.fn(async ({ where }: { where: Where }) =>
-      votesTable.find((row) => matches(row, where)) ?? null,
+    findOne: vi.fn(
+      async ({ where }: { where: Where }) => votesTable.find((row) => matches(row, where)) ?? null,
     ),
     findMany: vi.fn(
-      async ({ where, select, orderBy }: { where: Where; select?: string[]; orderBy?: { id: "asc" } }) => {
+      async ({
+        where,
+        select,
+        orderBy,
+      }: {
+        where: Where;
+        select?: string[];
+        orderBy?: { id: "asc" };
+      }) => {
         const found = votesTable.filter((row) => matches(row, where));
         if (orderBy) found.sort((a, b) => a.id - b.id);
         return distinctProjection(found, select);
@@ -289,7 +359,10 @@ function setup(options: {
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
       votesTable.push({ id: CREATED_ID, ...data }, ...(options.concurrent ?? []));
       if (options.deletedBeforeReadback) {
-        votesTable.splice(votesTable.findIndex((row) => row.id === CREATED_ID), 1);
+        votesTable.splice(
+          votesTable.findIndex((row) => row.id === CREATED_ID),
+          1,
+        );
         return null;
       }
       return { id: CREATED_ID, optionIndex: data.optionIndex };
@@ -301,7 +374,9 @@ function setup(options: {
     deleteMany: vi.fn(),
   };
   const users = {
-    findOne: vi.fn(async ({ where }: { where: { id: number } }) => USERS.find((u) => u.id === where.id) ?? null),
+    findOne: vi.fn(
+      async ({ where }: { where: { id: number } }) => USERS.find((u) => u.id === where.id) ?? null,
+    ),
   };
   const strapi = {
     db: {
@@ -360,7 +435,15 @@ describe("vote", () => {
   });
 
   it("requires an integer option index >= 0", async () => {
-    for (const body of [{ optionIndex: 1.5 }, { optionIndex: "1" }, { optionIndex: -1 }, { optionIndex: null }, {}, null, "0"]) {
+    for (const body of [
+      { optionIndex: 1.5 },
+      { optionIndex: "1" },
+      { optionIndex: -1 },
+      { optionIndex: null },
+      {},
+      null,
+      "0",
+    ]) {
       const { controller, ctx, votes, pollFindOne } = setup({ id: OPEN.id, body });
       await controller.vote(ctx);
       expect(ctx.badRequest, JSON.stringify(body)).toHaveBeenCalledWith("optionIndex required");
@@ -487,7 +570,10 @@ describe("vote", () => {
     await closed.controller.vote(closed.ctx);
     expect(closed.ctx.badRequest).toHaveBeenCalledWith("Poll is closed");
 
-    const again = setup({ id: OPEN.id, votes: [{ poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 }] });
+    const again = setup({
+      id: OPEN.id,
+      votes: [{ poll: OPEN.id, voter: ENGINEER.id, optionIndex: 1 }],
+    });
     await again.controller.vote(again.ctx);
     expect(again.ctx.badRequest).toHaveBeenCalledWith("Already voted");
     expect(again.votes.findOne).toHaveBeenCalledWith({
@@ -495,7 +581,8 @@ describe("vote", () => {
       select: ["id"],
     });
 
-    for (const { votes } of [outOfBounds, closed, again]) expect(votes.create).not.toHaveBeenCalled();
+    for (const { votes } of [outOfBounds, closed, again])
+      expect(votes.create).not.toHaveBeenCalled();
   });
 
   it('refuses a vote whose shown option is no longer at its index ("Poll options changed")', async () => {
@@ -585,7 +672,9 @@ describe("vote", () => {
     ] as const) {
       const { controller, ctx, votes } = setup({ id, user });
       await controller.vote(ctx);
-      expect(ctx.forbidden, `${id} as ${user.id}`).toHaveBeenCalledWith("Guests cannot vote on this poll");
+      expect(ctx.forbidden, `${id} as ${user.id}`).toHaveBeenCalledWith(
+        "Guests cannot vote on this poll",
+      );
       expect(ctx.notFound).not.toHaveBeenCalled();
       expect(votes.create).not.toHaveBeenCalled();
     }
@@ -759,7 +848,8 @@ describe("vote: close rule (datetime contract)", () => {
 });
 
 describe("results", () => {
-  const sent = (ctx: { send: ReturnType<typeof vi.fn> }) => ctx.send.mock.calls[0]?.[0] as Record<string, unknown>;
+  const sent = (ctx: { send: ReturnType<typeof vi.fn> }) =>
+    ctx.send.mock.calls[0]?.[0] as Record<string, unknown>;
 
   it("answers 401 without a signed-in user", async () => {
     const { controller, ctx, votes, countBallots } = setup({ id: OPEN.id, user: null });
@@ -1030,7 +1120,10 @@ describe("results", () => {
     for (const user of [FALLBACK, ENGINEER, DESIGNER]) {
       const { controller, ctx } = setup({ id: OPEN.id, user });
       await controller.results(ctx);
-      expect(sent(ctx), user.role.type).toMatchObject({ canVote: true, poll: { visibleToGuests: false } });
+      expect(sent(ctx), user.role.type).toMatchObject({
+        canVote: true,
+        poll: { visibleToGuests: false },
+      });
     }
   });
 });

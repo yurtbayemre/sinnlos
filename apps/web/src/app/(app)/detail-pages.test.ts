@@ -128,7 +128,12 @@ describe("/marketplace/[id] and /marketplace/[id]/edit", () => {
 });
 
 describe.each([
-  { route: "/departments/[slug]", page: department, read: departmentMock, section: "departments.title" },
+  {
+    route: "/departments/[slug]",
+    page: department,
+    read: departmentMock,
+    section: "departments.title",
+  },
   { route: "/teams/[slug]", page: team, read: teamMock, section: "teams.title" },
 ])("$route", ({ page, read, section }) => {
   it("titles the page with the entry, or the section when the read fails", async () => {

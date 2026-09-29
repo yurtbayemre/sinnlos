@@ -255,7 +255,7 @@ describe("event ics: output", () => {
     expect(ctx.notFound).not.toHaveBeenCalled();
     const disposition = ctx.set.mock.calls.find(([name]) => name === "Content-Disposition")?.[1];
     expect(disposition).toBe(
-      "attachment; filename=\"Sommerfest - 5 EUR.ics\"; " +
+      'attachment; filename="Sommerfest - 5 EUR.ics"; ' +
         "filename*=UTF-8''Sommerfest%20%E2%80%93%205%20%E2%82%AC%20%F0%9F%8E%89.ics",
     );
     expect(() => validateHeaderValue("Content-Disposition", disposition)).not.toThrow();

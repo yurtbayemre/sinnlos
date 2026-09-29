@@ -34,7 +34,16 @@ describe("PollsEmptyState", () => {
   });
 
   it("keeps the generic empty state for every other role and without a readable role", () => {
-    for (const role of ["admin_role", "editor", "member", "authenticated", "Guest", "", null, undefined]) {
+    for (const role of [
+      "admin_role",
+      "editor",
+      "member",
+      "authenticated",
+      "Guest",
+      "",
+      null,
+      undefined,
+    ]) {
       const html = render(role);
       expect(html, String(role)).toContain(en.polls.emptyTitle);
       expect(html, String(role)).toContain(en.polls.emptyHint);

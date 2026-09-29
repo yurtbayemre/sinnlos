@@ -31,7 +31,11 @@ function requestedDate(value: unknown, timeZone: string | undefined): PlainDate 
 }
 
 /** The clamped expiry date as 'YYYY-MM-DD'. */
-export function clampExpiresAt(value: unknown, today: PlainDate = todayIn(), timeZone?: string): string {
+export function clampExpiresAt(
+  value: unknown,
+  today: PlainDate = todayIn(),
+  timeZone?: string,
+): string {
   const max = today.add({ days: MAX_LIFETIME_DAYS });
   let candidate = requestedDate(value, timeZone) ?? today.add({ days: DEFAULT_LIFETIME_DAYS });
   if (comparePlainDates(candidate, max) > 0) candidate = max;

@@ -95,9 +95,7 @@ export function renderDigest(
   if (content.kudos.length > 0) {
     sections.push({
       heading: t.kudos,
-      lines: content.kudos.map(
-        (k) => `• "${k.message}"${k.from ? ` ${t.kudosFrom(k.from)}` : ""}`,
-      ),
+      lines: content.kudos.map((k) => `• "${k.message}"${k.from ? ` ${t.kudosFrom(k.from)}` : ""}`),
     });
   }
 

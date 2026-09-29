@@ -128,7 +128,8 @@ function filterTree(path: string): FilterNode {
 
 function holds(node: FilterNode, row: Row): boolean {
   return Object.entries(node).every(([key, value]) => {
-    if (key === "$or") return Object.values(value as FilterNode).some((c) => holds(c as FilterNode, row));
+    if (key === "$or")
+      return Object.values(value as FilterNode).some((c) => holds(c as FilterNode, row));
     const cell = row[key as keyof Row];
     return Object.entries(value as FilterNode).every(([op, raw]) => {
       if (op === "$null") return (cell === null) === (raw === "true");
@@ -163,18 +164,62 @@ describe("api.events.upcoming / past: running events stay upcoming (FX49)", () =
 
   const cases: [string, Row, "upcoming" | "past"][] = [
     ["later today", { start: "2026-10-06T14:00:00.000Z", end: null, allDay: false }, "upcoming"],
-    ["earlier today, over", { start: "2026-10-06T06:00:00.000Z", end: "2026-10-06T07:00:00.000Z", allDay: false }, "upcoming"],
-    ["multi-day, running", { start: "2026-10-04T07:00:00.000Z", end: "2026-10-07T15:00:00.000Z", allDay: false }, "upcoming"],
-    ["multi-day, ended this morning", { start: "2026-10-04T07:00:00.000Z", end: "2026-10-06T08:00:00.000Z", allDay: false }, "past"],
-    ["yesterday", { start: "2026-10-05T07:00:00.000Z", end: "2026-10-05T08:00:00.000Z", allDay: false }, "past"],
+    [
+      "earlier today, over",
+      { start: "2026-10-06T06:00:00.000Z", end: "2026-10-06T07:00:00.000Z", allDay: false },
+      "upcoming",
+    ],
+    [
+      "multi-day, running",
+      { start: "2026-10-04T07:00:00.000Z", end: "2026-10-07T15:00:00.000Z", allDay: false },
+      "upcoming",
+    ],
+    [
+      "multi-day, ended this morning",
+      { start: "2026-10-04T07:00:00.000Z", end: "2026-10-06T08:00:00.000Z", allDay: false },
+      "past",
+    ],
+    [
+      "yesterday",
+      { start: "2026-10-05T07:00:00.000Z", end: "2026-10-05T08:00:00.000Z", allDay: false },
+      "past",
+    ],
     ["yesterday, no end", { start: "2026-10-05T07:00:00.000Z", end: null, allDay: false }, "past"],
-    ["all-day, last day today", { start: "2026-10-03T22:00:00.000Z", end: "2026-10-05T22:00:00.000Z", allDay: true }, "upcoming"],
-    ["all-day, ended yesterday", { start: "2026-10-03T22:00:00.000Z", end: "2026-10-04T22:00:00.000Z", allDay: true }, "past"],
-    ["all-day, no end, yesterday", { start: "2026-10-04T22:00:00.000Z", end: null, allDay: true }, "past"],
-    ["allDay NULL, running", { start: "2026-10-04T07:00:00.000Z", end: "2026-10-07T15:00:00.000Z", allDay: null }, "upcoming"],
-    ["allDay NULL, ended this morning", { start: "2026-10-04T07:00:00.000Z", end: "2026-10-06T08:00:00.000Z", allDay: null }, "past"],
-    ["next week", { start: "2026-10-13T07:00:00.000Z", end: "2026-10-13T08:00:00.000Z", allDay: false }, "upcoming"],
-    ["all-day next week", { start: "2026-10-12T22:00:00.000Z", end: null, allDay: true }, "upcoming"],
+    [
+      "all-day, last day today",
+      { start: "2026-10-03T22:00:00.000Z", end: "2026-10-05T22:00:00.000Z", allDay: true },
+      "upcoming",
+    ],
+    [
+      "all-day, ended yesterday",
+      { start: "2026-10-03T22:00:00.000Z", end: "2026-10-04T22:00:00.000Z", allDay: true },
+      "past",
+    ],
+    [
+      "all-day, no end, yesterday",
+      { start: "2026-10-04T22:00:00.000Z", end: null, allDay: true },
+      "past",
+    ],
+    [
+      "allDay NULL, running",
+      { start: "2026-10-04T07:00:00.000Z", end: "2026-10-07T15:00:00.000Z", allDay: null },
+      "upcoming",
+    ],
+    [
+      "allDay NULL, ended this morning",
+      { start: "2026-10-04T07:00:00.000Z", end: "2026-10-06T08:00:00.000Z", allDay: null },
+      "past",
+    ],
+    [
+      "next week",
+      { start: "2026-10-13T07:00:00.000Z", end: "2026-10-13T08:00:00.000Z", allDay: false },
+      "upcoming",
+    ],
+    [
+      "all-day next week",
+      { start: "2026-10-12T22:00:00.000Z", end: null, allDay: true },
+      "upcoming",
+    ],
   ];
 
   it.each(cases)("lists %s under exactly one heading", async (_label, row, expected) => {

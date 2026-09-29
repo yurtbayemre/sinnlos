@@ -28,7 +28,9 @@ describe("APP_TIME_ZONE in the web", () => {
 
   it("rejects an empty or unknown zone and a UTC offset", () => {
     expect(() => checkWebTimeZones({ APP_TIME_ZONE: "" })).toThrow(/APP_TIME_ZONE/);
-    expect(() => checkWebTimeZones({ APP_TIME_ZONE: "Nowhere/Zone" })).toThrow(/IANA time zone name/);
+    expect(() => checkWebTimeZones({ APP_TIME_ZONE: "Nowhere/Zone" })).toThrow(
+      /IANA time zone name/,
+    );
     // Intl accepts '+02:00'; Postgres would read it as UTC-2.
     expect(() => checkWebTimeZones({ APP_TIME_ZONE: "+02:00" })).toThrow(/not a UTC offset/);
   });
@@ -60,7 +62,9 @@ describe("APP_TIME_ZONE in the web", () => {
     vi.stubEnv("APP_TIME_ZONE", "America/New_York");
     expect(() => register()).not.toThrow();
     expect(info).toHaveBeenCalledWith(
-      expect.stringMatching(/^\[datetime\] web process time zone .+, APP_TIME_ZONE America\/New_York$/),
+      expect.stringMatching(
+        /^\[datetime\] web process time zone .+, APP_TIME_ZONE America\/New_York$/,
+      ),
     );
     vi.stubEnv("APP_TIME_ZONE", "Nowhere/Zone");
     expect(() => register()).toThrow(/IANA time zone name/);

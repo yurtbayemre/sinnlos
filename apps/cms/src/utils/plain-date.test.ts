@@ -16,7 +16,16 @@ describe("plain-date", () => {
   it("isPlainDate accepts real days in YYYY-MM-DD only", () => {
     expect(isPlainDate("2026-09-30")).toBe(true);
     expect(isPlainDate("2028-02-29")).toBe(true);
-    for (const bad of ["2027-02-29", "2026-02-31", "2026-13-01", "2026-00-10", "2026-9-30", "", null, 20260930]) {
+    for (const bad of [
+      "2027-02-29",
+      "2026-02-31",
+      "2026-13-01",
+      "2026-00-10",
+      "2026-9-30",
+      "",
+      null,
+      20260930,
+    ]) {
       expect(isPlainDate(bad), String(bad)).toBe(false);
     }
   });
@@ -65,10 +74,12 @@ describe("plain-date", () => {
   });
 
   it("formatPlainDate never moves the day", () => {
-    expect(formatPlainDate("en-US", "2026-09-30", { month: "long", day: "numeric" })).toBe("September 30");
-    expect(formatPlainDate("en-US", "2026-01-01", { year: "numeric", month: "short", day: "numeric" })).toBe(
-      "Jan 1, 2026",
+    expect(formatPlainDate("en-US", "2026-09-30", { month: "long", day: "numeric" })).toBe(
+      "September 30",
     );
+    expect(
+      formatPlainDate("en-US", "2026-01-01", { year: "numeric", month: "short", day: "numeric" }),
+    ).toBe("Jan 1, 2026");
   });
 
   it("zonedWallTimeToInstant resolves DST like Temporal's 'compatible'", () => {

@@ -110,9 +110,10 @@ describe("time.ts and plain-date.ts agree", () => {
     for (const zone of ZONES) {
       for (const key of DATES) {
         for (const time of WALL_TIMES) {
-          expect(zonedWallTimeToInstant(key, time, zone).toISOString(), `${key} ${time} ${zone}`).toBe(
-            wallTimeToInstant(parsePlainDate(key), time, zone).toISOString(),
-          );
+          expect(
+            zonedWallTimeToInstant(key, time, zone).toISOString(),
+            `${key} ${time} ${zone}`,
+          ).toBe(wallTimeToInstant(parsePlainDate(key), time, zone).toISOString());
         }
       }
     }

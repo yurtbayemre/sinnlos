@@ -64,18 +64,16 @@ export default {
       // Trade-off: on Postgres a failing statement here aborts the delete's
       // transaction despite the catch below (the classifieds read always ran
       // in it); both are plain selects on tables Strapi owns.
-      event.state.imageFileIds = await strapi.db.transaction(
-        async ({ trx }: { trx: unknown }) => {
-          const rows = await strapi.db
-            .query("api::classified.classified")
-            .findMany({ where, select: ["id"] });
-          return classifiedImageFileIds(
-            strapi,
-            rows.map((row: { id: number }) => row.id),
-            trx,
-          );
-        },
-      );
+      event.state.imageFileIds = await strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
+        const rows = await strapi.db
+          .query("api::classified.classified")
+          .findMany({ where, select: ["id"] });
+        return classifiedImageFileIds(
+          strapi,
+          rows.map((row: { id: number }) => row.id),
+          trx,
+        );
+      });
     } catch (err) {
       // Fail open: a broken pre-scan must not block the delete; the
       // janitor sweeps whatever this misses.

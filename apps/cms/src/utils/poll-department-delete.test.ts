@@ -63,9 +63,14 @@ function matches(where: Where, row: Record<string, number>): boolean {
   });
 }
 
-function page<T extends { id: number }>(rows: T[], params: { where: Where; limit?: number; orderBy?: unknown }) {
+function page<T extends { id: number }>(
+  rows: T[],
+  params: { where: Where; limit?: number; orderBy?: unknown },
+) {
   expect(params.orderBy).toEqual({ id: "asc" });
-  const hits = rows.filter((row) => matches(params.where, row as unknown as Record<string, number>));
+  const hits = rows.filter((row) =>
+    matches(params.where, row as unknown as Record<string, number>),
+  );
   hits.sort((a, b) => a.id - b.id);
   return params.limit === undefined ? hits : hits.slice(0, params.limit);
 }
@@ -80,31 +85,44 @@ function host(options: {
   const links = (): LinkRow[] => {
     const rows: LinkRow[] = [];
     let id = 1;
-    for (const poll of polls) for (const departmentId of poll.departments) rows.push({ id: id++, poll_id: poll.id, department_id: departmentId });
+    for (const poll of polls)
+      for (const departmentId of poll.departments)
+        rows.push({ id: id++, poll_id: poll.id, department_id: departmentId });
     return rows;
   };
-  const departmentFindMany = vi.fn(async (params: { where: Where; limit?: number; orderBy?: unknown }) => {
-    if (options.failOn === "departments") throw new Error("connection reset");
-    return page(options.departments.map((id) => ({ id })), params);
-  });
-  const linkFindMany = vi.fn(async (params: { where: Where; select: string[]; limit?: number; orderBy?: unknown }) => {
-    if (options.failOn === "links") throw new Error("connection reset");
-    expect(params.select).toEqual(["id", "poll_id"]);
-    return page(links(), params).map((link) => ({ id: link.id, poll_id: link.poll_id }));
-  });
-  const updateMany = vi.fn(async ({ where, data }: { where: Where; data: { audience: string } }) => {
-    if (options.failOn === "update") throw new Error("deadlock detected");
-    const ids = (where.id as { $in: number[] }).$in;
-    const flagIsNotDepartments = (row: PollRow) => row.audience === null || row.audience !== "departments";
-    const hits = polls.filter((row) => ids.includes(row.id) && flagIsNotDepartments(row));
-    for (const row of hits) row.audience = data.audience;
-    return { count: hits.length };
-  });
+  const departmentFindMany = vi.fn(
+    async (params: { where: Where; limit?: number; orderBy?: unknown }) => {
+      if (options.failOn === "departments") throw new Error("connection reset");
+      return page(
+        options.departments.map((id) => ({ id })),
+        params,
+      );
+    },
+  );
+  const linkFindMany = vi.fn(
+    async (params: { where: Where; select: string[]; limit?: number; orderBy?: unknown }) => {
+      if (options.failOn === "links") throw new Error("connection reset");
+      expect(params.select).toEqual(["id", "poll_id"]);
+      return page(links(), params).map((link) => ({ id: link.id, poll_id: link.poll_id }));
+    },
+  );
+  const updateMany = vi.fn(
+    async ({ where, data }: { where: Where; data: { audience: string } }) => {
+      if (options.failOn === "update") throw new Error("deadlock detected");
+      const ids = (where.id as { $in: number[] }).$in;
+      const flagIsNotDepartments = (row: PollRow) =>
+        row.audience === null || row.audience !== "departments";
+      const hits = polls.filter((row) => ids.includes(row.id) && flagIsNotDepartments(row));
+      for (const row of hits) row.audience = data.audience;
+      return { count: hits.length };
+    },
+  );
   const log = { info: vi.fn() };
   const strapi: PollDepartmentDeleteHost = {
     db: {
       query: vi.fn((uid: string) => {
-        if (uid === "api::department.department") return { findMany: departmentFindMany, updateMany: vi.fn() };
+        if (uid === "api::department.department")
+          return { findMany: departmentFindMany, updateMany: vi.fn() };
         if (uid === LINK_UID) return { findMany: linkFindMany, updateMany: vi.fn() };
         return { findMany: vi.fn(), updateMany };
       }),
@@ -165,7 +183,10 @@ describe("flagPollsOfDeletedDepartments", () => {
   });
 
   it("pages the delete's where, reads the link table by department, and updates only rows not yet flagged", async () => {
-    const { strapi, departmentFindMany, linkFindMany, updateMany } = host({ departments: [1], polls: POLLS });
+    const { strapi, departmentFindMany, linkFindMany, updateMany } = host({
+      departments: [1],
+      polls: POLLS,
+    });
     await flagPollsOfDeletedDepartments(strapi, { id: 1 });
     expect(departmentFindMany).toHaveBeenCalledExactlyOnceWith({
       where: { $and: [{ id: 1 }, { id: { $gt: 0 } }] },
@@ -191,7 +212,10 @@ describe("flagPollsOfDeletedDepartments", () => {
   it("treats a missing or empty where as every department (an unfiltered deleteMany)", async () => {
     for (const where of [undefined, null, {}]) {
       const { strapi, departmentFindMany, polls } = host({ departments: [1, 2], polls: POLLS });
-      await expect(flagPollsOfDeletedDepartments(strapi, where), JSON.stringify(where)).resolves.toBe(3);
+      await expect(
+        flagPollsOfDeletedDepartments(strapi, where),
+        JSON.stringify(where),
+      ).resolves.toBe(3);
       expect(departmentFindMany.mock.calls[0]?.[0].where).toEqual({ id: { $gt: 0 } });
       expect(polls.find((row) => row.id === 13)?.audience).toBe("departments");
       expect(polls.find((row) => row.id === 14)?.audience).toBe("all");
@@ -204,7 +228,11 @@ describe("flagPollsOfDeletedDepartments", () => {
     // the link table has more rows than a page for the first two.
     const count = 2 * POLL_DEPARTMENT_DELETE_PAGE + 1;
     const departments = Array.from({ length: count }, (_, i) => i + 1);
-    const polls: PollRow[] = departments.map((id) => ({ id: 1000 + id, audience: "all", departments: [id] }));
+    const polls: PollRow[] = departments.map((id) => ({
+      id: 1000 + id,
+      audience: "all",
+      departments: [id],
+    }));
     polls.push({ id: 5000, audience: null, departments: [count] });
     const { strapi, departmentFindMany, linkFindMany, updateMany } = host({ departments, polls });
     await expect(flagPollsOfDeletedDepartments(strapi, {})).resolves.toBe(count + 1);
@@ -217,7 +245,9 @@ describe("flagPollsOfDeletedDepartments", () => {
       ([params]) => (params.where.department_id as { $in: number[] }).$in.length,
     );
     expect(Math.max(...departmentsPerLookup)).toBeLessThanOrEqual(POLL_DEPARTMENT_DELETE_PAGE);
-    const idsPerUpdate = updateMany.mock.calls.map(([params]) => (params.where.id as { $in: number[] }).$in.length);
+    const idsPerUpdate = updateMany.mock.calls.map(
+      ([params]) => (params.where.id as { $in: number[] }).$in.length,
+    );
     expect(Math.max(...idsPerUpdate)).toBeLessThanOrEqual(POLL_AUDIENCE_GUARD_CHUNK);
   });
 
@@ -229,7 +259,9 @@ describe("flagPollsOfDeletedDepartments", () => {
       departments: [7],
     }));
     const { strapi, linkFindMany } = host({ departments: [7], polls });
-    await expect(flagPollsOfDeletedDepartments(strapi, { id: 7 })).resolves.toBe(POLL_DEPARTMENT_DELETE_PAGE + 1);
+    await expect(flagPollsOfDeletedDepartments(strapi, { id: 7 })).resolves.toBe(
+      POLL_DEPARTMENT_DELETE_PAGE + 1,
+    );
     expect(linkFindMany.mock.calls.map(([params]) => params.where.id)).toEqual([
       { $gt: 0 },
       { $gt: POLL_DEPARTMENT_DELETE_PAGE },
@@ -249,7 +281,10 @@ describe("flagPollsOfDeletedDepartments", () => {
   });
 
   it("does not log when every linked poll was already flagged", async () => {
-    const { strapi, updateMany, log } = host({ departments: [1], polls: [{ id: 12, audience: "departments", departments: [1] }] });
+    const { strapi, updateMany, log } = host({
+      departments: [1],
+      polls: [{ id: 12, audience: "departments", departments: [1] }],
+    });
     await expect(flagPollsOfDeletedDepartments(strapi, { id: 1 })).resolves.toBe(0);
     expect(updateMany).toHaveBeenCalledOnce();
     expect(log.info).not.toHaveBeenCalled();
@@ -263,7 +298,11 @@ describe("flagPollsOfDeletedDepartments", () => {
   });
 
   it("refuses the delete when the link table is unknown (a Strapi upgrade renamed it)", async () => {
-    for (const metadata of [{}, { attributes: { departments: {} } }, { attributes: { departments: { joinTable: { name: LINK_UID } } } }]) {
+    for (const metadata of [
+      {},
+      { attributes: { departments: {} } },
+      { attributes: { departments: { joinTable: { name: LINK_UID } } } },
+    ]) {
       const { strapi, departmentFindMany } = host({ departments: [1], polls: POLLS, metadata });
       await expect(flagPollsOfDeletedDepartments(strapi, { id: 1 })).rejects.toThrow(
         /^\[poll-audience\] the link table of poll\.departments is unknown/,
@@ -274,7 +313,11 @@ describe("flagPollsOfDeletedDepartments", () => {
 
   it("reads the link table and its columns from the poll's metadata", () => {
     const { strapi } = host({ departments: [], polls: [] });
-    expect(pollDepartmentLinkTable(strapi)).toEqual({ uid: LINK_UID, pollColumn: "poll_id", departmentColumn: "department_id" });
+    expect(pollDepartmentLinkTable(strapi)).toEqual({
+      uid: LINK_UID,
+      pollColumn: "poll_id",
+      departmentColumn: "department_id",
+    });
   });
 });
 

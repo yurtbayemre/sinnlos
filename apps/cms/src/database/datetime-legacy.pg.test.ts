@@ -12,7 +12,14 @@ import {
   runLegacyDatetimeMigration,
 } from "./datetime-legacy";
 import { convertNaiveColumns } from "./ensure-timestamptz";
-import { PG_URL, columnType, createTestKnex, isoOf, rows, uniqueSchema } from "./pg-test-db.test.helper";
+import {
+  PG_URL,
+  columnType,
+  createTestKnex,
+  isoOf,
+  rows,
+  uniqueSchema,
+} from "./pg-test-db.test.helper";
 import { FIXTURE_ROWS, FIXTURE_TABLES } from "./legacy-fixture.test.helper";
 import { type RawKnex } from "./strapi-knex.test.helper";
 
@@ -60,7 +67,12 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
 
   async function migrate(env: Record<string, string | undefined>, processZone = "UTC") {
     return knex.transaction((trx) =>
-      runLegacyDatetimeMigration(trx, migrationDb(), { env, log: quietLog, processZone, now: new Date("2026-09-26T10:00:00Z") }),
+      runLegacyDatetimeMigration(trx, migrationDb(), {
+        env,
+        log: quietLog,
+        processZone,
+        now: new Date("2026-09-26T10:00:00Z"),
+      }),
     );
   }
 
@@ -91,7 +103,9 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     // Class B: untouched since before the switch, a UTC wall clock.
     expect(await iso("events", "start", "document_id = 'e1'")).toBe("2026-06-20T16:00:00Z");
     // Class C (both twins): re-published, value never re-entered: UTC.
-    expect(await iso("events", "start", "document_id = 'e2' AND published_at IS NULL")).toBe("2026-10-10T08:00:00Z");
+    expect(await iso("events", "start", "document_id = 'e2' AND published_at IS NULL")).toBe(
+      "2026-10-10T08:00:00Z",
+    );
     expect(await iso("events", "start", "document_id = 'e2' AND published_at IS NOT NULL")).toBe(
       "2026-10-10T08:00:00Z",
     );
@@ -110,16 +124,28 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     expect(await iso("events", "start", "document_id = 'e5'")).toBe("2026-09-30T22:00:00Z");
     // Poll deadline entered after the switch: 23:59:59 Berlin.
     expect(await iso("polls", "closes_at", "document_id = 'p1'")).toBe("2026-08-27T21:59:59Z");
-    expect(await iso("announcements", "expires_at", "document_id = 'a1'")).toBe("2026-12-01T00:00:00Z");
+    expect(await iso("announcements", "expires_at", "document_id = 'a1'")).toBe(
+      "2026-12-01T00:00:00Z",
+    );
     // Berlin-naive telemetry after the switch, UTC before it.
     expect(await iso("search_logs", "created_at", "term = 'after'")).toBe("2026-09-01T10:00:00Z");
-    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe("2026-08-15T18:40:00Z");
+    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe(
+      "2026-08-15T18:40:00Z",
+    );
     // Session expiries follow their row's created_at, not their own value.
-    expect(await iso("strapi_sessions", "expires_at", "session_id = 'new'")).toBe("2026-09-17T12:00:00Z");
-    expect(await iso("strapi_sessions", "absolute_expires_at", "session_id = 'new'")).toBe("2026-10-10T12:00:00Z");
-    expect(await iso("strapi_sessions", "expires_at", "session_id = 'old'")).toBe("2026-08-22T18:40:00Z");
+    expect(await iso("strapi_sessions", "expires_at", "session_id = 'new'")).toBe(
+      "2026-09-17T12:00:00Z",
+    );
+    expect(await iso("strapi_sessions", "absolute_expires_at", "session_id = 'new'")).toBe(
+      "2026-10-10T12:00:00Z",
+    );
+    expect(await iso("strapi_sessions", "expires_at", "session_id = 'old'")).toBe(
+      "2026-08-22T18:40:00Z",
+    );
     // The digest stamp (07:30 Berlin).
-    expect(await iso("up_users", "last_digest_at", "username = 'dana'")).toBe("2026-09-14T05:30:00Z");
+    expect(await iso("up_users", "last_digest_at", "username = 'dana'")).toBe(
+      "2026-09-14T05:30:00Z",
+    );
 
     // Calendar dates are untouched and stay `date`.
     const [user] = await rows<{ birthday: string; hire_date: string }>(
@@ -131,9 +157,15 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
 
     // Every app instant is timestamptz; bookkeeping is left to the guard.
     expect(await columnType(knex, schema, "events", "start")).toBe("timestamp with time zone");
-    expect(await columnType(knex, schema, "up_users", "last_digest_at")).toBe("timestamp with time zone");
-    expect(await columnType(knex, schema, "strapi_migrations", "time")).toBe("timestamp without time zone");
-    expect(await columnType(knex, schema, "strapi_database_schema", "time")).toBe("timestamp without time zone");
+    expect(await columnType(knex, schema, "up_users", "last_digest_at")).toBe(
+      "timestamp with time zone",
+    );
+    expect(await columnType(knex, schema, "strapi_migrations", "time")).toBe(
+      "timestamp without time zone",
+    );
+    expect(await columnType(knex, schema, "strapi_database_schema", "time")).toBe(
+      "timestamp without time zone",
+    );
 
     // The audit keeps every old value as text, with its class.
     const audit = await rows<{ class: string; n: string }>(
@@ -141,8 +173,20 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
       `SELECT class, count(*)::text AS n FROM "${schema}".datetime_migration_audit GROUP BY class ORDER BY class`,
     );
     const byClass = Object.fromEntries(audit.map((row) => [row.class, Number(row.n)]));
-    expect(byClass).toMatchObject({ A: 3, B: 2, C: 3, "C-allday": 1, "expiry-legacy": 2, "expiry-utc": 1 });
-    const [old] = await rows<{ old_naive: string; zone: string; document_id: string; label: string }>(
+    expect(byClass).toMatchObject({
+      A: 3,
+      B: 2,
+      C: 3,
+      "C-allday": 1,
+      "expiry-legacy": 2,
+      "expiry-utc": 1,
+    });
+    const [old] = await rows<{
+      old_naive: string;
+      zone: string;
+      document_id: string;
+      label: string;
+    }>(
       knex,
       `SELECT old_naive, zone, document_id, label FROM "${schema}".datetime_migration_audit
         WHERE table_name = 'events' AND column_name = 'start' AND class = 'A'`,
@@ -158,9 +202,16 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
 
   it("accepts any θ inside the switch stretch (18:40 to 20:50 stored)", async () => {
     await seed();
-    await migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T20:41:00Z" });
-    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe("2026-08-15T18:40:00Z");
-    expect(await iso("search_logs", "created_at", "term = 'first after'")).toBe("2026-08-15T18:50:00Z");
+    await migrate({
+      DATETIME_LEGACY_ZONE: "Europe/Berlin",
+      DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T20:41:00Z",
+    });
+    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe(
+      "2026-08-15T18:40:00Z",
+    );
+    expect(await iso("search_logs", "created_at", "term = 'first after'")).toBe(
+      "2026-08-15T18:50:00Z",
+    );
   });
 
   it("documents the limit: a θ in a long quiet stretch before the switch passes the check", async () => {
@@ -169,8 +220,13 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     // from the deploy time (pre-deploy backup; report --around), which is
     // why the runbook derives it from B and the report shows its stretch.
     await seed();
-    await migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T14:00:00+02:00" });
-    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe("2026-08-15T16:40:00Z");
+    await migrate({
+      DATETIME_LEGACY_ZONE: "Europe/Berlin",
+      DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T14:00:00+02:00",
+    });
+    expect(await iso("search_logs", "created_at", "term = 'last before'")).toBe(
+      "2026-08-15T16:40:00Z",
+    );
   });
 
   it("gap check: a θ whose empty stretch is shorter than the offset aborts, nothing changes", async () => {
@@ -193,11 +249,17 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     await seed();
     // Before every stamp (a year typo): the old check passed and read everything as legacy.
     await expect(
-      migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2025-08-15T21:46:42+02:00" }),
+      migrate({
+        DATETIME_LEGACY_ZONE: "Europe/Berlin",
+        DATETIME_LEGACY_UTC_UNTIL: "2025-08-15T21:46:42+02:00",
+      }),
     ).rejects.toThrow(/no write-time stamp lies before θ/);
     // In the future (the run's now is 2026-09-26): every stamp would count as UTC.
     await expect(
-      migrate({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2027-08-15T21:46:42+02:00" }),
+      migrate({
+        DATETIME_LEGACY_ZONE: "Europe/Berlin",
+        DATETIME_LEGACY_UTC_UNTIL: "2027-08-15T21:46:42+02:00",
+      }),
     ).rejects.toThrow(/lies in the future.*no write-time stamp lies at or after θ/);
     expect(await columnType(knex, schema, "events", "start")).toBe("timestamp without time zone");
     expect(await iso("search_logs", "created_at", "term = 'after'")).toBe("2026-09-01T12:00:00Z");
@@ -283,7 +345,15 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     try {
       // Another process has converted events (uncommitted, holding the table).
       const conversion = converter.transaction(async (trx) => {
-        await trx.raw(alterToTimestamptzSql(schema, "events", ["start", "end", "created_at", "updated_at", "published_at"]));
+        await trx.raw(
+          alterToTimestamptzSql(schema, "events", [
+            "start",
+            "end",
+            "created_at",
+            "updated_at",
+            "published_at",
+          ]),
+        );
         altered.open();
         await hold.opened;
       });
@@ -291,13 +361,19 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
       const plannerPid = await backendPid(planner);
       const settings = readLegacySettings(OWNER_ENV);
       const planned = planner.transaction((trx) =>
-        buildLegacyPlan(knexSqlClient(trx), schema, settings, { lock: true, now: new Date("2026-09-26T10:00:00Z") }),
+        buildLegacyPlan(knexSqlClient(trx), schema, settings, {
+          lock: true,
+          now: new Date("2026-09-26T10:00:00Z"),
+        }),
       );
       await waitForBlockedLock(plannerPid, "relation");
       hold.open();
       await conversion;
       const plan = await planned;
-      const plannedTables = [...plan.tables.map(({ table }) => table), ...plan.emptyTables.map(({ table }) => table)];
+      const plannedTables = [
+        ...plan.tables.map(({ table }) => table),
+        ...plan.emptyTables.map(({ table }) => table),
+      ];
       expect(plannedTables).not.toContain("events");
       expect(plannedTables).toContain("polls");
     } finally {
@@ -351,19 +427,28 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     const { createUserMigrationProvider } = requireFromStrapi(
       join(databaseDir, "dist", "migrations", "users.js"),
     ) as {
-      createUserMigrationProvider(db: unknown): { shouldRun(): Promise<boolean>; up(): Promise<void> };
+      createUserMigrationProvider(db: unknown): {
+        shouldRun(): Promise<boolean>;
+        up(): Promise<void>;
+      };
     };
 
     // The runner require()s the file by name; this stand-in has the real
     // name and hands Strapi's (trx, db) to the real repair.
     const dir = mkdtempSync(join(tmpdir(), "sinnlos-migrations-"));
-    const hook = globalThis as unknown as { __sinnlosRepairUnderTest?: (trx: unknown, db: unknown) => Promise<unknown> };
+    const hook = globalThis as unknown as {
+      __sinnlosRepairUnderTest?: (trx: unknown, db: unknown) => Promise<unknown>;
+    };
     hook.__sinnlosRepairUnderTest = (trx, db) =>
-      runLegacyDatetimeMigration(trx as RawKnex, db as { dialect: { client: string }; getSchemaName(): string }, {
-        env: OWNER_ENV,
-        log: quietLog,
-        processZone: "UTC",
-      });
+      runLegacyDatetimeMigration(
+        trx as RawKnex,
+        db as { dialect: { client: string }; getSchemaName(): string },
+        {
+          env: OWNER_ENV,
+          log: quietLog,
+          processZone: "UTC",
+        },
+      );
     writeFileSync(
       join(dir, LEGACY_MIGRATION_NAME),
       "module.exports = { up: (trx, db) => globalThis.__sinnlosRepairUnderTest(trx, db) };\n",
@@ -383,7 +468,10 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
       await provider.up();
       expect(await provider.shouldRun()).toBe(false);
 
-      const recorded = await rows<{ name: string }>(knex, `SELECT name FROM "${schema}".strapi_migrations ORDER BY id`);
+      const recorded = await rows<{ name: string }>(
+        knex,
+        `SELECT name FROM "${schema}".strapi_migrations ORDER BY id`,
+      );
       expect(recorded.map((row) => row.name)).toEqual(["earlier.js", LEGACY_MIGRATION_NAME]);
       expect(await iso("events", "start", "document_id = 'e3'")).toBe("2026-11-05T17:00:00Z");
 

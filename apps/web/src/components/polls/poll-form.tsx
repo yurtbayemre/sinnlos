@@ -6,7 +6,11 @@ import { Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { createPoll, type CreatePollErrorCode } from "@/lib/poll-actions";
-import { NO_GUEST_ACCESS, normalizeGuestAccess, type PollGuestAccess } from "@/lib/poll-guest-access";
+import {
+  NO_GUEST_ACCESS,
+  normalizeGuestAccess,
+  type PollGuestAccess,
+} from "@/lib/poll-guest-access";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";

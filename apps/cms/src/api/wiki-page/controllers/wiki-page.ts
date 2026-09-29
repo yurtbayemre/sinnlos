@@ -23,8 +23,6 @@ export default factories.createCoreController("api::wiki-page.wiki-page", () => 
       if (user) data.lastEditor = user.id;
     }
 
-    return wikiEditContext.run({ editorId: user?.id, revisionSummary }, () =>
-      super.update(ctx),
-    );
+    return wikiEditContext.run({ editorId: user?.id, revisionSummary }, () => super.update(ctx));
   },
 }));

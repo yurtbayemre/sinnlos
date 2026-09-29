@@ -121,11 +121,7 @@ interface BackfillCounts {
 const isNullFlagRead = (row: unknown): row is NullFlagRead =>
   typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "number";
 
-async function setAudience(
-  query: BackfillQuery,
-  ids: number[],
-  audience: string,
-): Promise<number> {
+async function setAudience(query: BackfillQuery, ids: number[], audience: string): Promise<number> {
   let updated = 0;
   for (let start = 0; start < ids.length; start += POLL_AUDIENCE_BACKFILL_CHUNK) {
     const chunk = ids.slice(start, start + POLL_AUDIENCE_BACKFILL_CHUNK);
@@ -138,7 +134,8 @@ async function setAudience(
   return updated;
 }
 
-const isDocumentId = (value: unknown): value is string => typeof value === "string" && value.length > 0;
+const isDocumentId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
 
 /**
  * The documentIds among `documentIds` that have a row flagged
@@ -146,7 +143,10 @@ const isDocumentId = (value: unknown): value is string => typeof value === "stri
  * its links in the same run never counts (first-boot semantics stay per
  * row).
  */
-async function restrictedDocuments(query: BackfillQuery, documentIds: string[]): Promise<Set<string>> {
+async function restrictedDocuments(
+  query: BackfillQuery,
+  documentIds: string[],
+): Promise<Set<string>> {
   const restricted = new Set<string>();
   for (let start = 0; start < documentIds.length; start += POLL_AUDIENCE_BACKFILL_CHUNK) {
     const chunk = documentIds.slice(start, start + POLL_AUDIENCE_BACKFILL_CHUNK);
@@ -184,7 +184,11 @@ async function readNullFlagRows(query: BackfillQuery): Promise<NullFlagRow[]> {
     let lastId = afterId;
     for (const row of page) {
       if (!isNullFlagRead(row)) continue;
-      rows.push({ id: row.id, documentId: row.documentId, linked: (row.departments ?? []).length > 0 });
+      rows.push({
+        id: row.id,
+        documentId: row.documentId,
+        linked: (row.departments ?? []).length > 0,
+      });
       lastId = Math.max(lastId, row.id);
     }
     if (page.length < POLL_AUDIENCE_BACKFILL_CHUNK) return rows;
@@ -203,7 +207,12 @@ async function classifyAndUpdate(query: BackfillQuery): Promise<BackfillCounts |
   if (rows.length === 0) return null;
 
   const unlinkedDocumentIds = [
-    ...new Set(rows.filter((row) => !row.linked).map((row) => row.documentId).filter(isDocumentId)),
+    ...new Set(
+      rows
+        .filter((row) => !row.linked)
+        .map((row) => row.documentId)
+        .filter(isDocumentId),
+    ),
   ];
   const restricted = await restrictedDocuments(query, unlinkedDocumentIds);
   const bySibling = (row: NullFlagRow) =>
@@ -241,7 +250,9 @@ export async function backfillPollAudience(strapi: PollAudienceBackfillHost): Pr
   if (counts === null) return;
   const { departments, siblings, all } = counts;
   const siblingNote =
-    siblings > 0 ? `${siblings} to 'departments' (the other row of their poll is restricted), ` : "";
+    siblings > 0
+      ? `${siblings} to 'departments' (the other row of their poll is restricted), `
+      : "";
   strapi.log.info(
     `${POLL_AUDIENCE_BACKFILL_LOG} set the audience of ${departments + siblings + all} existing poll row(s): ` +
       `${departments} to 'departments' (they link a department), ${siblingNote}${all} to 'all'`,

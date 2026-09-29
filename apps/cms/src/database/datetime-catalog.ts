@@ -19,7 +19,10 @@
 
 /** Runs one SQL statement with `?` placeholders and returns its rows. */
 export interface SqlClient {
-  query<Row extends object = Record<string, unknown>>(sql: string, bindings?: readonly unknown[]): Promise<Row[]>;
+  query<Row extends object = Record<string, unknown>>(
+    sql: string,
+    bindings?: readonly unknown[],
+  ): Promise<Row[]>;
 }
 
 /** The part of a knex instance or knex transaction the adapters use. */
@@ -30,7 +33,10 @@ export interface KnexRawLike {
 /** A knex instance or transaction as a SqlClient (knex keeps `?` placeholders). */
 export function knexSqlClient(knex: KnexRawLike): SqlClient {
   return {
-    async query<Row extends object>(sql: string, bindings: readonly unknown[] = []): Promise<Row[]> {
+    async query<Row extends object>(
+      sql: string,
+      bindings: readonly unknown[] = [],
+    ): Promise<Row[]> {
       // knex expands an array binding into a list, so array values are
       // always passed as Postgres array literals (pgArrayLiteral) instead.
       const result = (await knex.raw(sql, bindings as unknown[])) as { rows?: Row[] } | undefined;
@@ -47,7 +53,10 @@ export interface PgQueryable {
 /** A node-postgres client as a SqlClient (`?` becomes `$1..$n`). */
 export function pgSqlClient(client: PgQueryable): SqlClient {
   return {
-    async query<Row extends object>(sql: string, bindings: readonly unknown[] = []): Promise<Row[]> {
+    async query<Row extends object>(
+      sql: string,
+      bindings: readonly unknown[] = [],
+    ): Promise<Row[]> {
       let index = 0;
       const text = sql.replace(/\?/g, () => `$${++index}`);
       const result = await client.query(text, [...bindings]);
@@ -92,7 +101,9 @@ export function qualifiedTable(schema: string, table: string): string {
 /** A Postgres array literal for a knex/pg binding ('{1,2}' or '{"a","b"}'). */
 export function pgArrayLiteral(values: readonly (string | number)[]): string {
   const items = values.map((value) =>
-    typeof value === "number" ? String(value) : `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
+    typeof value === "number"
+      ? String(value)
+      : `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`,
   );
   return `{${items.join(",")}}`;
 }
@@ -117,7 +128,11 @@ export async function listNaiveColumns(sql: SqlClient, schema: string): Promise<
 }
 
 /** Column name -> Postgres type name for one table. */
-export async function tableColumnTypes(sql: SqlClient, schema: string, table: string): Promise<Map<string, string>> {
+export async function tableColumnTypes(
+  sql: SqlClient,
+  schema: string,
+  table: string,
+): Promise<Map<string, string>> {
   const rows = await sql.query<{ column_name: string; type_name: string }>(
     `SELECT a.attname AS column_name, format_type(a.atttypid, a.atttypmod) AS type_name
        FROM pg_catalog.pg_attribute a
@@ -188,9 +203,14 @@ export function groupByTable(columns: readonly NaiveColumn[]): Map<string, strin
  * values: the guard's (every writer runs in UTC) and the repaired legacy
  * values.
  */
-export function alterToTimestamptzSql(schema: string, table: string, columns: readonly string[]): string {
+export function alterToTimestamptzSql(
+  schema: string,
+  table: string,
+  columns: readonly string[],
+): string {
   const clauses = columns.map(
-    (column) => `ALTER COLUMN ${quoteIdent(column)} TYPE timestamptz(6) USING ${quoteIdent(column)} AT TIME ZONE 'UTC'`,
+    (column) =>
+      `ALTER COLUMN ${quoteIdent(column)} TYPE timestamptz(6) USING ${quoteIdent(column)} AT TIME ZONE 'UTC'`,
   );
   return `ALTER TABLE ${qualifiedTable(schema, table)} ${clauses.join(", ")}`;
 }

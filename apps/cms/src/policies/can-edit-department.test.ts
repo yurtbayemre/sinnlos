@@ -167,10 +167,9 @@ describe("can-edit-department policy", () => {
     it("returns false for a malformed or out-of-range id, without a lookup", async () => {
       departmentLookups.length = 0;
       for (const id of MALFORMED_ROW_IDS) {
-        await expect(
-          run(context(head, id, { description: "x" }), ownDepartment),
-          id,
-        ).resolves.toBe(false);
+        await expect(run(context(head, id, { description: "x" }), ownDepartment), id).resolves.toBe(
+          false,
+        );
       }
       expect(departmentLookups).toEqual([]);
     });

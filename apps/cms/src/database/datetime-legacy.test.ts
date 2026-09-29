@@ -24,7 +24,9 @@ const OWNER: LegacySettings = readLegacySettings({
   DATETIME_LEGACY_ZONE: "Europe/Berlin",
   DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42+02:00",
 });
-const WHOLE_DB_LEGACY: LegacySettings = readLegacySettings({ DATETIME_LEGACY_ZONE: "Europe/Berlin" });
+const WHOLE_DB_LEGACY: LegacySettings = readLegacySettings({
+  DATETIME_LEGACY_ZONE: "Europe/Berlin",
+});
 
 const PRE = "2026-07-01T09:00:00.000000"; // UTC wall clock, before the switch
 const POST = "2026-09-01T12:00:00.000000"; // Berlin wall clock, after it
@@ -42,7 +44,10 @@ const cell = (overrides: Partial<CellInput>): CellInput => ({
 describe("readLegacySettings", () => {
   it("parses θ as a naive UTC wall clock", () => {
     expect(OWNER.zone).toBe("Europe/Berlin");
-    expect(OWNER.theta).toEqual({ iso: "2026-08-15T19:46:42.000Z", naive: "2026-08-15T19:46:42.000000" });
+    expect(OWNER.theta).toEqual({
+      iso: "2026-08-15T19:46:42.000Z",
+      naive: "2026-08-15T19:46:42.000000",
+    });
     expect(naiveUtcOf("2026-08-15T21:46:42+02:00")).toBe("2026-08-15T19:46:42.000000");
   });
 
@@ -52,13 +57,22 @@ describe("readLegacySettings", () => {
   });
 
   it("refuses unknown zones, offset-less θ and θ without a zone", () => {
-    expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "Berlin" })).toThrow(/DATETIME_LEGACY_ZONE/);
+    expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "Berlin" })).toThrow(
+      /DATETIME_LEGACY_ZONE/,
+    );
     // Intl reads '+02:00' as UTC+2, Postgres' AT TIME ZONE as UTC-2: refused.
-    expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "+02:00" })).toThrow(/DATETIME_LEGACY_ZONE.*UTC offset/);
+    expect(() => readLegacySettings({ DATETIME_LEGACY_ZONE: "+02:00" })).toThrow(
+      /DATETIME_LEGACY_ZONE.*UTC offset/,
+    );
     // A wrong-case name is passed on in its canonical spelling.
-    expect(readLegacySettings({ DATETIME_LEGACY_ZONE: "europe/berlin" }).zone).toBe("Europe/Berlin");
+    expect(readLegacySettings({ DATETIME_LEGACY_ZONE: "europe/berlin" }).zone).toBe(
+      "Europe/Berlin",
+    );
     expect(() =>
-      readLegacySettings({ DATETIME_LEGACY_ZONE: "Europe/Berlin", DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42" }),
+      readLegacySettings({
+        DATETIME_LEGACY_ZONE: "Europe/Berlin",
+        DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T21:46:42",
+      }),
     ).toThrow(/DATETIME_LEGACY_UTC_UNTIL/);
     expect(() => readLegacySettings({ DATETIME_LEGACY_UTC_UNTIL: "2026-08-15T19:46:42Z" })).toThrow(
       /needs DATETIME_LEGACY_ZONE/,
@@ -100,18 +114,25 @@ describe("columnKind", () => {
 describe("classifyCell", () => {
   it("write-time stamps go by their own value", () => {
     expect(classifyCell(cell({ naive: PRE }), OWNER)).toEqual({ cls: "write-utc", legacy: false });
-    expect(classifyCell(cell({ naive: POST }), OWNER)).toEqual({ cls: "write-legacy", legacy: true });
+    expect(classifyCell(cell({ naive: POST }), OWNER)).toEqual({
+      cls: "write-legacy",
+      legacy: true,
+    });
     // θ itself is already the legacy side.
     expect(classifyCell(cell({ naive: "2026-08-15T19:46:42.000000" }), OWNER).legacy).toBe(true);
   });
 
   it("expiries go by the row's created_at, not by their own (future) value", () => {
     const longLived = "2026-09-14T09:00:00.000000";
-    expect(classifyCell(cell({ kind: "expiry", naive: longLived, rowCreatedAt: PRE }), OWNER)).toEqual({
+    expect(
+      classifyCell(cell({ kind: "expiry", naive: longLived, rowCreatedAt: PRE }), OWNER),
+    ).toEqual({
       cls: "expiry-utc",
       legacy: false,
     });
-    expect(classifyCell(cell({ kind: "expiry", naive: longLived, rowCreatedAt: POST }), OWNER)).toEqual({
+    expect(
+      classifyCell(cell({ kind: "expiry", naive: longLived, rowCreatedAt: POST }), OWNER),
+    ).toEqual({
       cls: "expiry-legacy",
       legacy: true,
     });
@@ -120,7 +141,12 @@ describe("classifyCell", () => {
   it("class A: a document created after θ is in the legacy zone", () => {
     expect(
       classifyCell(
-        cell({ kind: "user", naive: "2026-11-05T18:00:00.000000", rowCreatedAt: POST, documentCreatedAt: POST }),
+        cell({
+          kind: "user",
+          naive: "2026-11-05T18:00:00.000000",
+          rowCreatedAt: POST,
+          documentCreatedAt: POST,
+        }),
         OWNER,
       ),
     ).toEqual({ cls: "A", legacy: true });
@@ -138,21 +164,39 @@ describe("classifyCell", () => {
   });
 
   it("class B: a row last updated before θ is UTC", () => {
-    expect(classifyCell(cell({ kind: "user", rowUpdatedAt: PRE }), OWNER)).toEqual({ cls: "B", legacy: false });
+    expect(classifyCell(cell({ kind: "user", rowUpdatedAt: PRE }), OWNER)).toEqual({
+      cls: "B",
+      legacy: false,
+    });
   });
 
   it("class C: created before, re-saved after θ defaults to UTC", () => {
-    expect(classifyCell(cell({ kind: "user", naive: "2026-10-10T08:00:00.000000", rowUpdatedAt: POST }), OWNER)).toEqual({
+    expect(
+      classifyCell(
+        cell({ kind: "user", naive: "2026-10-10T08:00:00.000000", rowUpdatedAt: POST }),
+        OWNER,
+      ),
+    ).toEqual({
       cls: "C",
       legacy: false,
     });
   });
 
   it("class C all-day: a local midnight in the legacy reading is the legacy zone", () => {
-    const corrected = cell({ kind: "user", naive: "2026-10-01T00:00:00.000000", rowUpdatedAt: POST, allDay: true });
+    const corrected = cell({
+      kind: "user",
+      naive: "2026-10-01T00:00:00.000000",
+      rowUpdatedAt: POST,
+      allDay: true,
+    });
     expect(classifyCell(corrected, OWNER)).toEqual({ cls: "C-allday", legacy: true });
     // The uncorrected UTC value of a Berlin midnight (22:00) stays UTC.
-    const kept = cell({ kind: "user", naive: "2026-09-30T22:00:00.000000", rowUpdatedAt: POST, allDay: true });
+    const kept = cell({
+      kind: "user",
+      naive: "2026-09-30T22:00:00.000000",
+      rowUpdatedAt: POST,
+      allDay: true,
+    });
     expect(classifyCell(kept, OWNER)).toEqual({ cls: "C", legacy: false });
     // Timed events never take the all-day exception.
     expect(classifyCell({ ...corrected, allDay: false }, OWNER).cls).toBe("C");
@@ -160,7 +204,10 @@ describe("classifyCell", () => {
 
   it("without θ every value is in the legacy zone", () => {
     for (const kind of ["write", "expiry", "user"] as const) {
-      expect(classifyCell(cell({ kind }), WHOLE_DB_LEGACY)).toEqual({ cls: "legacy-all", legacy: true });
+      expect(classifyCell(cell({ kind }), WHOLE_DB_LEGACY)).toEqual({
+        cls: "legacy-all",
+        legacy: true,
+      });
     }
   });
 
@@ -170,10 +217,15 @@ describe("classifyCell", () => {
 });
 
 describe("checkGap", () => {
-  const stamps = (values: string[]) => values.map((naive, index) => ({ naive, where: `t.c#${index}` }));
+  const stamps = (values: string[]) =>
+    values.map((naive, index) => ({ naive, where: `t.c#${index}` }));
   const NOW = new Date("2026-09-26T10:00:00Z");
   // Last UTC write 18:40, first Berlin write 20:50 (real 18:50 UTC).
-  const SWITCH = ["2026-08-15T10:00:00.000000", "2026-08-15T18:40:00.000000", "2026-08-15T20:50:00.000000"];
+  const SWITCH = [
+    "2026-08-15T10:00:00.000000",
+    "2026-08-15T18:40:00.000000",
+    "2026-08-15T20:50:00.000000",
+  ];
 
   it("accepts θ inside the empty stretch the switch left (>= 120 min in August)", () => {
     const gap = checkGap(stamps(SWITCH), OWNER, NOW);
@@ -183,19 +235,29 @@ describe("checkGap", () => {
   });
 
   it("rejects θ in a stretch shorter than the zone offset (a wrong θ)", () => {
-    const gap = checkGap(stamps(["2026-08-15T19:30:00.000000", "2026-08-15T20:00:00.000000"]), OWNER, NOW);
+    const gap = checkGap(
+      stamps(["2026-08-15T19:30:00.000000", "2026-08-15T20:00:00.000000"]),
+      OWNER,
+      NOW,
+    );
     expect(gap).toMatchObject({ ok: false, failures: ["too-short"], gapMinutes: 30 });
-    expect(gapFailureMessage(gap!)).toMatch(/not inside an empty stretch .* 30\.0 minutes apart.*Nothing was changed/);
+    expect(gapFailureMessage(gap!)).toMatch(
+      /not inside an empty stretch .* 30\.0 minutes apart.*Nothing was changed/,
+    );
   });
 
   it("fails when one side of θ holds no write stamp instead of passing untested", () => {
     // Everything before θ: a θ typed a year too late would read every stamp as UTC.
     const onlyBefore = checkGap(stamps(["2026-06-01T00:00:00.000000"]), OWNER, NOW);
     expect(onlyBefore).toMatchObject({ ok: false, failures: ["no-stamp-after"], gapMinutes: null });
-    expect(gapFailureMessage(onlyBefore!)).toMatch(/DATETIME_LEGACY_ZONE=UTC and unset DATETIME_LEGACY_UTC_UNTIL/);
+    expect(gapFailureMessage(onlyBefore!)).toMatch(
+      /DATETIME_LEGACY_ZONE=UTC and unset DATETIME_LEGACY_UTC_UNTIL/,
+    );
     const onlyAfter = checkGap(stamps(["2026-09-01T12:00:00.000000"]), OWNER, NOW);
     expect(onlyAfter).toMatchObject({ ok: false, failures: ["no-stamp-before"] });
-    expect(gapFailureMessage(onlyAfter!)).toMatch(/written in Europe\/Berlin, unset DATETIME_LEGACY_UTC_UNTIL/);
+    expect(gapFailureMessage(onlyAfter!)).toMatch(
+      /written in Europe\/Berlin, unset DATETIME_LEGACY_UTC_UNTIL/,
+    );
     expect(checkGap([], OWNER, NOW)?.failures).toEqual(["no-stamp-before", "no-stamp-after"]);
   });
 

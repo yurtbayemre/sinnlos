@@ -30,8 +30,7 @@ function context(user: StubUser | null, query: Record<string, unknown> = {}) {
   } as any;
 }
 
-const run = (ctx: any) =>
-  notificationVisibility(ctx, undefined, { strapi: {} } as any);
+const run = (ctx: any) => notificationVisibility(ctx, undefined, { strapi: {} } as any);
 
 describe("notification-visibility policy", () => {
   it("rejects an anonymous caller without touching the query", async () => {

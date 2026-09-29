@@ -98,7 +98,12 @@ async function recentActivity() {
 }
 
 /** A recent comment's time, "Sep 30, 14:05", in APP_TIME_ZONE. */
-const COMMENT_TIME: DateTimeFields = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" };
+const COMMENT_TIME: DateTimeFields = {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+};
 
 export default async function AnalyticsPage() {
   if (!isAdmin((await getViewer()).role)) {

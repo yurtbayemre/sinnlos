@@ -90,9 +90,15 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 const isName = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
 /** The link table of poll.departments, or a thrown error (fail closed). */
-export function pollDepartmentLinkTable(strapi: Pick<PollDepartmentDeleteHost, "db">): PollDepartmentLinkTable {
-  const field = (value: unknown, key: string): unknown => (isRecord(value) ? value[key] : undefined);
-  const joinTable = field(field(field(strapi.db.metadata.get(POLL_UID), "attributes"), "departments"), "joinTable");
+export function pollDepartmentLinkTable(
+  strapi: Pick<PollDepartmentDeleteHost, "db">,
+): PollDepartmentLinkTable {
+  const field = (value: unknown, key: string): unknown =>
+    isRecord(value) ? value[key] : undefined;
+  const joinTable = field(
+    field(field(strapi.db.metadata.get(POLL_UID), "attributes"), "departments"),
+    "joinTable",
+  );
   const uid = field(joinTable, "name");
   const pollColumn = field(field(joinTable, "joinColumn"), "name");
   const departmentColumn = field(field(joinTable, "inverseJoinColumn"), "name");
@@ -164,7 +170,8 @@ export async function flagPollsOfDeletedDepartments(
       }),
       "id",
     );
-    if (departmentIds.length > 0) flagged += await flagPollsLinkingDepartments(strapi, link, departmentIds);
+    if (departmentIds.length > 0)
+      flagged += await flagPollsLinkingDepartments(strapi, link, departmentIds);
     if (departmentIds.length < POLL_DEPARTMENT_DELETE_PAGE) break;
     afterDepartmentId = departmentIds[departmentIds.length - 1];
   }

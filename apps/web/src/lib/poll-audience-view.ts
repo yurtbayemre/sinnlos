@@ -40,7 +40,8 @@ export function pollAudienceView(
     .filter((name) => typeof name === "string" && name.length > 0);
   let hint: PollAudienceHint | null = null;
   if (targeted && departments.length === 0) hint = "audienceMissing";
-  else if (!canVote) hint = options.viewerIsGuest === true ? "guestVotingDisabled" : "notInAudience";
+  else if (!canVote)
+    hint = options.viewerIsGuest === true ? "guestVotingDisabled" : "notInAudience";
   return { canVote, targeted, departmentNames, hint };
 }
 
