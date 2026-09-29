@@ -8,14 +8,16 @@
  *   - wikiTags: the tags a page shows as chips, from a JSON value that may
  *     hold anything (the admin panel writes free JSON);
  *   - wikiSpaceIconName: a space's icon as a name of the shared icon map,
- *     BookOpen for anything the map does not know (the page renders
- *     ICONS[name], a static component, not one made during render);
+ *     in any letter case, with or without separators ("wrench",
+ *     "book-open"), the stored default "book" included, BookOpen for
+ *     anything the map does not know (the page renders ICONS[name], a
+ *     static component, not one made during render);
  *   - rehypeWikiToc: the table of contents, built inside the Markdown
  *     pipeline from the headings rehype-slug has given ids, so every link
  *     matches its heading exactly. It adds no text of its own (no new
  *     message key): the list is labelled with the page title.
  */
-import { isIconName, type IconName } from "@/components/icon-map";
+import { ICONS, isIconName, type IconName } from "@/components/icon-map";
 
 // ---------------------------------------------------------------------------
 // Page order
@@ -78,14 +80,43 @@ export function wikiTags(value: unknown): string[] {
 /** The icon of a space without a usable one (the wiki's icon before DA02). */
 export const DEFAULT_WIKI_SPACE_ICON: IconName = "BookOpen";
 
+/** A stored icon value as a lookup key: lower case, without separators. */
+const iconKey = (value: string): string =>
+  value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, "");
+
 /**
- * The icon of a space as an icon-map name: the stored name when the map has
- * it (the names quick links use, e.g. "Wrench", "GraduationCap"), else
- * BookOpen. Own keys only (isIconName, FX27): a "constructor" icon must not
- * render Object.
+ * Stored values that name an icon by another word: the wiki-space schema
+ * default "book" (every space created before DA02 carries it).
+ */
+const WIKI_SPACE_ICON_ALIASES: Readonly<Record<string, IconName>> = { book: "BookOpen" };
+
+/**
+ * Every icon-map name and alias by its lookup key. A Map, not an object,
+ * so "constructor" or "__proto__" can never resolve to an inherited value
+ * (FX27): the keys come from the map's own keys only.
+ */
+const WIKI_SPACE_ICONS: ReadonlyMap<string, IconName> = new Map<string, IconName>([
+  ...Object.keys(ICONS)
+    .filter(isIconName)
+    .map((name): [string, IconName] => [iconKey(name), name]),
+  ...Object.entries(WIKI_SPACE_ICON_ALIASES),
+]);
+
+/**
+ * The icon of a space as an icon-map name. The admin panel takes free
+ * text, so a map name resolves in any letter case and with or without
+ * hyphens, underscores or spaces ("Wrench", "wrench", "BOOKOPEN",
+ * "book-open", "graduation_cap"), and so do the values already stored: the
+ * schema default "book" (BookOpen) and the demo seed's "code" and "heart"
+ * (Code and Heart are in the map for them). Anything else is BookOpen, the
+ * wiki's icon before DA02.
  */
 export function wikiSpaceIconName(icon: string | null | undefined): IconName {
-  return isIconName(icon) ? icon : DEFAULT_WIKI_SPACE_ICON;
+  if (typeof icon !== "string") return DEFAULT_WIKI_SPACE_ICON;
+  return WIKI_SPACE_ICONS.get(iconKey(icon)) ?? DEFAULT_WIKI_SPACE_ICON;
 }
 
 // ---------------------------------------------------------------------------

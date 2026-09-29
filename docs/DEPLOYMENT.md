@@ -1630,8 +1630,11 @@ change.
   switched off, a table of contents of its `##`/`###` headings, and a space
   shows its icon on the wiki index and in its header. The icon field takes
   a name from the same list as quick-link icons (`BookOpen`, `Wrench`,
-  `GraduationCap`, …); any other value, including the default `book`,
-  shows the book icon as before.
+  `GraduationCap`, `Code`, `Heart`, …), in any letter case and with or
+  without hyphens (`wrench`, `graduation-cap`). Existing spaces keep their
+  look or gain one: the default `book` shows the book icon as before, the
+  demo seed's `code` and `heart` now show a code and a heart icon. Any
+  other value shows the book icon.
 - **Duplicate scan (DA04, measurement only).** `infra/diagnostics/census.sql`
   gains section 9: counts of duplicate poll votes, acknowledgements, RSVPs,
   lesson progress rows and reactions (no ids, no names), for the owner's

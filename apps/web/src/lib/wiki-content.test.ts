@@ -5,6 +5,8 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeSlug from "rehype-slug";
 import { describe, expect, it } from "vitest";
 
+import { ICONS } from "@/components/icon-map";
+
 import {
   MAX_WIKI_TAGS,
   collectTocEntries,
@@ -68,13 +70,55 @@ describe("wikiTags", () => {
 });
 
 describe("wikiSpaceIconName", () => {
-  it("takes icon-map names and falls back to BookOpen for anything else", () => {
+  it("takes icon-map names in any case and spelling", () => {
     expect(wikiSpaceIconName("Wrench")).toBe("Wrench");
+    expect(wikiSpaceIconName("wrench")).toBe("Wrench");
     expect(wikiSpaceIconName("GraduationCap")).toBe("GraduationCap");
-    // The schema default and the demo seed's lowercase names are no map names.
-    for (const icon of ["book", "code", "heart", "wrench", "", null, undefined, "constructor"]) {
+    expect(wikiSpaceIconName("graduation-cap")).toBe("GraduationCap");
+    expect(wikiSpaceIconName(" graduation_cap ")).toBe("GraduationCap");
+    expect(wikiSpaceIconName("BOOKOPEN")).toBe("BookOpen");
+    expect(wikiSpaceIconName("book-open")).toBe("BookOpen");
+    expect(wikiSpaceIconName("bar-chart-3")).toBe("BarChart3");
+  });
+
+  it("resolves the stored values: the schema default and the demo seed", () => {
+    // wiki-space schema.json: "default": "book"; seed-demo.ts: book, code, heart.
+    expect(wikiSpaceIconName("book")).toBe("BookOpen");
+    expect(wikiSpaceIconName("code")).toBe("Code");
+    expect(wikiSpaceIconName("heart")).toBe("Heart");
+  });
+
+  it("falls back to BookOpen for anything else, inherited Object keys included (FX27)", () => {
+    for (const icon of [
+      "rocket",
+      "",
+      "   ",
+      "-",
+      null,
+      undefined,
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+      "valueOf",
+    ]) {
       expect(wikiSpaceIconName(icon), String(icon)).toBe("BookOpen");
     }
+  });
+
+  it("only ever returns a name the icon map renders", () => {
+    for (const icon of ["book", "code", "heart", "Wrench", "Calendar", "constructor", "x"]) {
+      expect(Object.hasOwn(ICONS, wikiSpaceIconName(icon)), icon).toBe(true);
+    }
+  });
+
+  it("renders the demo seed's spaces with their own icons, as the wiki pages do", () => {
+    const svg = (icon: string) =>
+      renderToStaticMarkup(createElement(ICONS[wikiSpaceIconName(icon)], { className: "h-4 w-4" }));
+    expect(svg("book")).toContain("lucide-book-open");
+    expect(svg("code")).toContain("lucide-code");
+    expect(svg("heart")).toContain("lucide-heart");
+    expect(svg("unknown")).toContain("lucide-book-open");
   });
 });
 

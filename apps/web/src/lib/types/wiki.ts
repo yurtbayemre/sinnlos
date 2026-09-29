@@ -9,8 +9,9 @@ export interface WikiSpace {
   description?: string | null;
   /**
    * A name from the icon map (components/icon-map.ts, the names quick
-   * links use); anything else, the schema default "book" included, renders
-   * the BookOpen default (DA02, lib/wiki-content.ts).
+   * links use), in any letter case and with or without separators; the
+   * schema default "book" is BookOpen; anything else renders the BookOpen
+   * default (DA02, lib/wiki-content.ts wikiSpaceIconName).
    */
   icon?: string | null;
   visibility?: "public" | "role" | "department" | "team";
