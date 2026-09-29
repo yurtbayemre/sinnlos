@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
+import {
+  isRateLimitedSignIn,
+  LoginBlockedSignIn,
+  StrapiRateLimitedSignIn,
+} from "@/lib/auth-errors";
 import {
   createLoginRateLimiter,
   IDENTIFIER_MAX_FAILURES,
@@ -22,8 +26,9 @@ import {
  *     read fails);
  *   - the counting rule: a 400 counts, 5xx, 429 and network errors do not;
  *     Strapi's 429 throws StrapiRateLimitedSignIn;
- *   - the block transition is logged once, a blocked attempt never reaches
- *     Strapi and logs nothing.
+ *   - the block transition is logged once; a blocked attempt never reaches
+ *     Strapi, logs nothing and throws LoginBlockedSignIn (code
+ *     rate_limited: "too many attempts", not a wrong password).
  */
 const STRAPI = "http://strapi.test";
 const T0 = 1_700_000_000_000;
@@ -149,14 +154,33 @@ describe("authorizeCredentials: the counting rule", () => {
     }
     expect(h.limiter.isBlocked("192.0.2.1", EMAIL, T0)).toBe(true);
     h.fetchMock.mockClear();
-    await expect(h.signIn(EMAIL, "pw", "192.0.2.1")).resolves.toBeNull();
+    await expect(h.signIn(EMAIL, "pw", "192.0.2.1")).rejects.toBeInstanceOf(LoginBlockedSignIn);
     expect(h.fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("answers a blocked attempt as rate_limited, not as a wrong password, and logs nothing", async () => {
+    h.answers.local = { status: 400 };
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
+      await h.signIn(EMAIL, "pw", `10.0.6.${i}`);
+    }
+    h.warn.mockClear();
+    const blocked: unknown = await h.signIn(EMAIL, "right-pw", "192.0.2.2").catch((e) => e);
+    expect(blocked).toBeInstanceOf(LoginBlockedSignIn);
+    // The code the sign-in action maps to rateLimited (and the raw callback
+    // route puts into its error redirect).
+    expect(isRateLimitedSignIn(blocked)).toBe(true);
+    expect((blocked as LoginBlockedSignIn).code).toBe("rate_limited");
+    expect(h.warn).not.toHaveBeenCalled();
   });
 
   it("logs the block transition exactly once, with the masked identifier", async () => {
     h.answers.local = { status: 400 };
-    for (let i = 0; i < IDENTIFIER_MAX_FAILURES + 3; i++) {
+    for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
       await h.signIn(EMAIL, "pw", `10.0.1.${i}`);
+    }
+    // Three refused follow-ups: no further log line.
+    for (let i = IDENTIFIER_MAX_FAILURES; i < IDENTIFIER_MAX_FAILURES + 3; i++) {
+      await expect(h.signIn(EMAIL, "pw", `10.0.1.${i}`)).rejects.toBeInstanceOf(LoginBlockedSignIn);
     }
     expect(h.warn).toHaveBeenCalledTimes(1);
     expect(h.warn).toHaveBeenCalledWith(
@@ -207,7 +231,7 @@ describe("authorizeCredentials: the counting rule", () => {
       await h.signIn(EMAIL, "pw", `10.0.4.${i}`);
     }
     h.fetchMock.mockClear();
-    await h.signIn(EMAIL, "pw", "10.0.5.1");
+    await expect(h.signIn(EMAIL, "pw", "10.0.5.1")).rejects.toBeInstanceOf(LoginBlockedSignIn);
     expect(h.fetchMock).not.toHaveBeenCalled();
     h.tick(IDENTIFIER_WINDOW_MS);
     await h.signIn(EMAIL, "pw", "10.0.5.1");
@@ -231,7 +255,16 @@ describe("authorizeCredentials: the counting rule", () => {
     );
     await Promise.resolve();
     release();
-    await expect(Promise.all(burst)).resolves.toEqual(burst.map(() => null));
+    const settled = await Promise.allSettled(burst);
+    // The first ten held a place and got Strapi's answer (a wrong password:
+    // null); the five beyond the limit were refused as rate_limited.
+    expect(settled.slice(0, IDENTIFIER_MAX_FAILURES)).toEqual(
+      Array.from({ length: IDENTIFIER_MAX_FAILURES }, () => ({ status: "fulfilled", value: null })),
+    );
+    for (const outcome of settled.slice(IDENTIFIER_MAX_FAILURES)) {
+      expect(outcome.status).toBe("rejected");
+      expect((outcome as PromiseRejectedResult).reason).toBeInstanceOf(LoginBlockedSignIn);
+    }
     // Exactly the limit reached Strapi; the transition was logged once.
     expect(h.fetchMock).toHaveBeenCalledTimes(IDENTIFIER_MAX_FAILURES);
     expect(h.warn).toHaveBeenCalledTimes(1);

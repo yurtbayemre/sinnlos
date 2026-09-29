@@ -894,4 +894,32 @@ describe("Strapi's auth throttle (FX11)", () => {
     const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
     expect(location.searchParams.get("code")).toBe("credentials");
   });
+
+  it("an attempt the web's login limiter refuses is rate_limited too, without asking Strapi", async () => {
+    const mod = await load();
+    const { IDENTIFIER_MAX_FAILURES } = await import("@/lib/login-rate-limit");
+    stub.localStatus = 400;
+    const localCalls = () =>
+      fetchMock.mock.calls.filter(
+        ([input]) =>
+          String(input instanceof Request ? input.url : input) === `${STRAPI}/api/auth/local`,
+      ).length;
+    // The block transition is logged once (console.warn); keep it quiet.
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
+        const { res } = await signInLocal(mod, "http://localhost:3000");
+        const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+        expect(location.searchParams.get("code")).toBe("credentials");
+      }
+      const before = localCalls();
+      const { res } = await signInLocal(mod, "http://localhost:3000");
+      const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+      expect(location.searchParams.get("error")).toBe("CredentialsSignin");
+      expect(location.searchParams.get("code")).toBe("rate_limited");
+      expect(localCalls()).toBe(before);
+    } finally {
+      consoleWarn.mockRestore();
+    }
+  });
 });

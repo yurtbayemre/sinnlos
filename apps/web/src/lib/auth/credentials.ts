@@ -18,8 +18,12 @@
  * (FX39, lib/login-rate-limit.ts): "failure" for a counted answer, "success"
  * for a verified password, "neutral" for everything else.
  *
- * Strapi's throttle (429) throws StrapiRateLimitedSignIn so the form says
- * "too many attempts" instead of "invalid email or password" (FX11).
+ * Strapi's throttle (429) throws StrapiRateLimitedSignIn and a blocked
+ * attempt throws LoginBlockedSignIn, so the form says "too many attempts"
+ * instead of "invalid email or password" (FX11; both carry the code
+ * rate_limited, lib/auth-errors.ts). A blocked attempt can reach this point
+ * although the sign-in action's read-only pre-check passed: parallel
+ * attempts in flight hold places too and may take the last ones in between.
  *
  * The email of the session comes from the /api/auth/local payload, never
  * from /api/users/me: the latter runs through the content-api sanitizer
@@ -30,7 +34,7 @@
  * reads them per request.
  */
 import type { User } from "next-auth";
-import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
+import { LoginBlockedSignIn, StrapiRateLimitedSignIn } from "@/lib/auth-errors";
 import {
   maskIdentifier,
   type LoginAttemptOutcome,
@@ -142,6 +146,7 @@ async function checkPassword(
 /**
  * Verifies `input` against Strapi's /api/auth/local. Resolves the Auth.js
  * user (with the Strapi JWT, server-side only) or null; throws
+ * LoginBlockedSignIn when the limiter refuses the attempt and
  * StrapiRateLimitedSignIn on Strapi's 429.
  */
 export async function authorizeCredentials(
@@ -156,9 +161,10 @@ export async function authorizeCredentials(
   // Reserve BEFORE touching Strapi (FX39). No log for a blocked attempt:
   // the transition INTO the block state is logged once below — logging
   // every rejected follow-up would let a script generate ~100 log lines/s
-  // through the /api/auth callback (the edge limit is 100/s).
+  // through the /api/auth callback (the edge limit is 100/s). A blocked
+  // attempt is "too many attempts", not a wrong password.
   const ticket = deps.limiter.tryAcquire(clientIp, identifier, deps.now());
-  if (ticket === "blocked") return null;
+  if (ticket === "blocked") throw new LoginBlockedSignIn();
 
   let verdict: Verdict = { outcome: "neutral" };
   try {

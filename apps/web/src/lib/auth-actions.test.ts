@@ -42,8 +42,14 @@ async function load(env: Record<string, string | undefined> = {}) {
   // The error classes of THIS module graph (resetModules re-evaluates
   // next-auth, and instanceof checks need the same class).
   const { CredentialsSignin } = await import("next-auth");
-  const { StrapiRateLimitedSignIn } = await import("./auth-errors");
-  return { ...actions, loginRateLimiter, CredentialsSignin, StrapiRateLimitedSignIn };
+  const { LoginBlockedSignIn, StrapiRateLimitedSignIn } = await import("./auth-errors");
+  return {
+    ...actions,
+    loginRateLimiter,
+    CredentialsSignin,
+    LoginBlockedSignIn,
+    StrapiRateLimitedSignIn,
+  };
 }
 
 /** The error Next's own redirect() throws, as Auth.js' signIn() does on success. */
@@ -112,6 +118,21 @@ describe("signInWithCredentials", () => {
       error: "rateLimited",
       values: { identifier: "ada@example.test" },
     });
+  });
+
+  it("maps an attempt the limiter refused inside authorize() to rateLimited", async () => {
+    // The read-only pre-check passed, but parallel attempts in flight took
+    // the last places before authorize() reserved one (FX39): authorize()
+    // throws LoginBlockedSignIn, which is not a wrong password.
+    const { signInWithCredentials, LoginBlockedSignIn, loginRateLimiter } = await load();
+    signInMock.mockRejectedValue(new LoginBlockedSignIn());
+    expect(loginRateLimiter.isBlocked("203.0.113.7", "ada@example.test")).toBe(false);
+    await expect(signInWithCredentials({}, signInForm())).resolves.toEqual({
+      error: "rateLimited",
+      values: { identifier: "ada@example.test" },
+    });
+    expect(signInMock).toHaveBeenCalledTimes(1);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("maps wrong credentials to invalidCredentials", async () => {

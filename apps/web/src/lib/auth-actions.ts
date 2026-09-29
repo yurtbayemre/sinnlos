@@ -56,9 +56,10 @@ export async function signInWithCredentials(
 ): Promise<SignInFormState> {
   const identifier = String(formData.get("identifier") ?? "");
   const values = { identifier };
-  // Read-only peek (never counts as an attempt) for an honest message —
-  // enforcement lives in authorize() (lib/auth/credentials.ts, issue #23),
-  // which would otherwise answer like a wrong password.
+  // Read-only peek (never counts as an attempt): a blocked source gets its
+  // answer without a sign-in round trip. Enforcement lives in authorize()
+  // (lib/auth/credentials.ts, issue #23), which answers the same code when
+  // parallel attempts take the last places after this peek.
   if (loginRateLimiter.isBlocked(clientIpFrom(await headers()), identifier)) {
     return { error: "rateLimited", values };
   }
@@ -72,10 +73,13 @@ export async function signInWithCredentials(
     // Auth.js signals success via a NEXT_REDIRECT throw — rethrow it (and
     // every other Next control-flow error).
     unstable_rethrow(err);
-    // Strapi's own throttle answered 429 (FX11): not a wrong password.
+    // Throttled, not a wrong password: Strapi's own throttle answered 429
+    // (FX11), or the limiter refused the attempt in authorize() although
+    // the pre-check above passed (parallel attempts in flight took the last
+    // places in between, FX39).
     if (isRateLimitedSignIn(err)) return { error: "rateLimited", values };
-    // authorize() answered null (CredentialsSignin): wrong credentials, a
-    // blocked attempt or Strapi unreachable — one answer, no oracle.
+    // authorize() answered null (CredentialsSignin): wrong credentials or
+    // Strapi unreachable — one answer, no oracle.
     if (!(err instanceof CredentialsSignin)) console.error("[auth] sign-in failed", err);
     return { error: "invalidCredentials", values };
   }

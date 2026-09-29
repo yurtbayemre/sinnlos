@@ -1592,8 +1592,12 @@ defaults. The cms changes only the digest language.
   was counted, so a burst could exceed the limit (10 failures per account
   in 15 minutes, 10 per IP in a minute). Now at most that many attempts are
   in flight at once; outages and Strapi's own throttle still count
-  nothing. The log line `[login-rate-limit] block engaged ip=… identifier=…`
-  is unchanged. The registration form uses the same limiter.
+  nothing. Only failures stay counted, but an attempt holds its place
+  while it runs: an eleventh simultaneous sign-in from one IP (for example
+  an office NAT at 9:00) or for one account is refused and says "Too many
+  sign-in attempts…", never "Invalid email or password". The log line
+  `[login-rate-limit] block engaged ip=… identifier=…` is unchanged. The
+  registration form uses the same limiter.
 - **Sign-in code split (WD09).** No visible change, except that a correct
   password no longer fails when the cms's `/api/users/me` read right after
   the sign-in fails (the sign-in's own user data is used then).

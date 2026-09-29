@@ -11,8 +11,11 @@
  * (infra/docker-compose.traefik.yml) as a coarse pre-filter only. The
  * register action uses the same limiter.
  *
- * Two dimensions, both counting FAILURES only — an office NAT produces many
- * legitimate logins from one IP and those must never throttle anyone:
+ * Two dimensions; only FAILURES stay counted, so the successful logins of
+ * an office NAT (many from one IP) never add up to a block. An attempt in
+ * flight holds a place until it settles (see below), so at most 10 attempts
+ * per IP and per identifier are in flight at once — an eleventh parallel
+ * one is refused as "too many attempts":
  *  - per client IP: fast brute force from a single host,
  *  - per identifier (case-insensitive) across ALL IPs: distributed guessing
  *    against one account; a successful login resets this bucket.
