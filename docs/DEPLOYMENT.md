@@ -1651,9 +1651,11 @@ grants, policies and schema.
   because the web asked the cms for sections the guest role cannot read;
   each such request also logged a 403. The web now asks nothing there and
   shows "Not available for your account" with a link to the dashboard. The
-  guest's dashboard leaves those sections out, and so does the navigation.
-  The `authenticated` fallback role no longer asks for the birthday and
-  anniversary tiles on `/kudos`, which it cannot read. A user whose role the
+  guest's dashboard leaves those sections out, and so does the navigation,
+  and the guest's ⌘K search no longer asks for announcements, departments
+  and teams (it found none of them anyway). The `authenticated` fallback
+  role no longer asks for the birthday and anniversary tiles on `/kudos`,
+  which it cannot read. A user whose role the
   web could not read (the cms briefly down) still gets the old error
   banner, since the cms decides.
 - **Controls follow the role.** The comment form and the reaction bar show
@@ -1688,16 +1690,14 @@ one code comment in it and none of its behaviour. Only the web changes.
    window): the navigation shows Dashboard, People, Events, Wiki, Polls and
    Documents only; open `/announcements`, `/departments`, `/kudos`,
    `/marketplace` and `/training` by URL: each shows "Not available for
-   your account". Then, on the host, neither log names a 403 for that
-   guest's requests:
+   your account"; press ⌘K and search for a colleague. Then, on the host,
+   neither log names a 403 for that guest's requests:
 
    ```bash
    "${COMPOSE[@]}" logs --since 15m web | grep -E 'fetch failed' || echo "web: none"
    "${COMPOSE[@]}" logs --since 15m cms | grep -E ' 403$' || echo "cms: none"
    ```
 
-   (Only a guest's ⌘K search still sends such reads and the cms logs their
-   403, see the follow-ups; do not search during this check.)
 3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
    other sections; as an admin it lists _Admin_, as a member not. With the
    sheet open, rotate the phone to landscape (or widen the window past

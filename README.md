@@ -1023,7 +1023,8 @@ moderator (`admin_role`, `editor`) gets a _Moderation_ card with _Delete ad_
 people's ads. A role that cannot read a section (guest: announcements,
 departments, teams, kudos, marketplace, training) sends no request for it:
 its pages show _Not available for your account_, the dashboard leaves those
-sections out, and the navigation hides them. The sidebar (desktop) and the
+sections out, the navigation hides them, and the ⌘K search skips them
+(guest: announcements, departments, teams). The sidebar (desktop) and the
 phone tab bar with its _More_ sheet map the same entries
 (`apps/web/src/lib/nav-config.ts`). Note the admin area lives under
 **`/manage`** — `/admin` is reserved for the Strapi admin panel by the
