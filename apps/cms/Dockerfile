@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS base
 # build-base + python3: node-gyp fallback for better-sqlite3 when its prebuilt
 # binary cannot be fetched. No system libvips: sharp 0.35 has no install
 # script and always loads its bundled @img/sharp-libvips-linuxmusl-x64.
@@ -23,7 +23,7 @@ RUN pnpm build
 # NOTE: keep the full node_modules tree in the runtime image — Strapi's
 # admin/runtime resolves packages that a --prod re-install would strip.
 # No pnpm here (corepack is not enabled): the container starts Strapi directly (CMD below).
-FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS runner
 WORKDIR /app
 ENV NODE_ENV=production
 # Datetime contract: the cms runs in UTC. Business dates use APP_TIME_ZONE;
