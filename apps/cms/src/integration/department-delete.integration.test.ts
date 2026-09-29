@@ -7,6 +7,13 @@ import {
   type Row,
   type TestStrapi,
 } from "./harness.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  waitForLockWait,
+  type Settled,
+} from "./pg-lock.test.helper";
 
 /**
  * Deleting a department on the real stack (FX29 residual; owner answer
@@ -20,7 +27,9 @@ import {
  * (utils/department-delete-restrict.ts), in the delete's transaction, and
  * the read policies keep a flagged row without departments for admin_role
  * and editor only, until a moderator re-targets it. A row that also links
- * a surviving department stays visible to that department.
+ * a surviving department stays visible to that department. On Postgres the
+ * hook locks the department rows before it reads their links, so a link
+ * an edit commits while the delete runs is flagged too (the last case).
  */
 
 const TYPES = [
@@ -145,4 +154,68 @@ describe.each(testEngines())("department delete on %s", (engine) => {
       expect(await labels("guest", type), type.path).toEqual(["IT company-wide"]);
     }
   });
+
+  it.runIf(engine === "postgres")(
+    "a link an edit commits while the delete runs is flagged, not cascaded open (Postgres lock)",
+    async () => {
+      const DEPARTMENT = "api::department.department";
+      const DOCUMENT = "api::document.document";
+      const race = await t.strapi.documents(DEPARTMENT).create({
+        data: { name: "Race Temp", slug: "race-temp" },
+      });
+      const doc = await t.strapi.documents(DOCUMENT).create({
+        data: { title: "Race doc", departments: [] },
+        status: "published",
+      });
+      const rows = await t.strapi.db.query(DOCUMENT).findMany({
+        where: { documentId: doc.documentId },
+        select: ["id", "audience"],
+      });
+      expect(rows.map((row) => row.audience)).toEqual(["all", "all"]);
+
+      // An editor's save that links both rows of the document to the
+      // department, still open when the delete starts: under Read Committed
+      // an unlocked link scan does not see it, and the delete's cascade
+      // would then take the link without the flag (company-wide). With the
+      // lock the delete waits for the save and its scan sees the link.
+      const edit = await holdTransaction(t);
+      let deleting: Promise<Settled<unknown>> | undefined;
+      try {
+        for (const row of rows) {
+          await edit.raw(
+            `INSERT INTO ${qualified(t, "documents_departments_lnk")} (document_id, department_id) VALUES (?, ?)`,
+            [row.id, race.id],
+          );
+        }
+        deleting = settle(t.strapi.documents(DEPARTMENT).delete({ documentId: race.documentId }));
+        await waitForLockWait(t);
+        await edit.commit();
+      } catch (err) {
+        await edit.rollback();
+        throw err;
+      }
+      expect(await deleting).toMatchObject({ ok: true });
+
+      const after = await t.strapi.db.query(DOCUMENT).findMany({
+        where: { documentId: doc.documentId },
+        select: ["audience"],
+        populate: { departments: { select: ["id"] } },
+      });
+      expect(after.map((row) => [row.audience, row.departments])).toEqual([
+        ["departments", []],
+        ["departments", []],
+      ]);
+      const titles = async (caller: Caller) => {
+        const res = await t.api<{ data: Record<string, unknown>[] }>(
+          caller,
+          "/api/documents?filters[title][$eq]=Race doc",
+        );
+        expect(res.status, String(caller)).toBe(200);
+        return res.body.data.length;
+      };
+      expect(await titles("member")).toBe(0);
+      expect(await titles("guest")).toBe(0);
+      expect(await titles("editor")).toBe(1);
+    },
+  );
 });

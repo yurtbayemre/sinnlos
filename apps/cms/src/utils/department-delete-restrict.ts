@@ -41,12 +41,27 @@ import { DEPARTMENTS_AUDIENCE } from "./policy-factories";
  *   - flagging a row that also links a surviving department changes
  *     nothing for its readers (its links restrict it already).
  *
- * Residual, as for polls before their write-time guard: a row linked to
- * the department by a transaction that commits after the scan below
- * (Read Committed) loses its link without the flag. There is no write-time
- * guard for documents and quick links: they are authored by admin_role and
- * editor only (FX07 routes), and a concurrent re-link during the delete of
- * the same department is an editorial race, not a caller-driven one.
+ * CONCURRENT LINKS (Postgres). Documents and quick links have no
+ * write-time guard like polls (utils/poll-audience-guard.ts). Under Read
+ * Committed a link that another transaction commits after the link scan
+ * would still be cascaded away by the delete, without the flag, and the
+ * row would turn company-wide. So on Postgres each page of matched
+ * departments is locked `FOR UPDATE` before its link tables are read, in
+ * the delete's transaction (the query builder joins it). Inserting a link
+ * row takes a `FOR KEY SHARE` lock on the department row (the foreign key
+ * check), which conflicts with `FOR UPDATE`:
+ *   - a link written before the lock: the lock waits for its transaction
+ *     if that is still open, and the scan after the lock (a new statement,
+ *     so a new snapshot under Read Committed) sees the committed link;
+ *   - a link written after the lock: its insert waits for the delete and
+ *     then fails the foreign key check (the department is gone), or goes
+ *     through unchanged if the delete rolled back.
+ * A deadlock with a concurrent edit aborts one of the two transactions,
+ * which fails closed either way. SQLite runs one transaction at a time on
+ * its single connection, so it needs (and has) no lock. Without a
+ * surrounding transaction (a script's db-level delete) the lock ends with
+ * its own statement; the admin panel and the content API always delete
+ * through the Document Service, which opens one.
  */
 
 export const DEPARTMENT_DELETE_LOG = "[department-delete]";
@@ -67,10 +82,22 @@ interface LookupQuery {
   updateMany(params: Record<string, unknown>): Promise<{ count?: number } | undefined>;
 }
 
+/** The query builder slice that locks department rows (Postgres). */
+interface LockQuery {
+  select(columns: string[]): LockQuery;
+  where(where: Record<string, unknown>): LockQuery;
+  forUpdate(): LockQuery;
+  execute(): Promise<unknown>;
+}
+
 /** The slice of the Strapi instance the hook uses. */
 export interface DepartmentDeleteHost {
   db: {
     query(uid: string): LookupQuery;
+    /** Joins the ambient transaction on execute() (@strapi/database 5.55.1). */
+    queryBuilder(uid: string): LockQuery;
+    /** 'postgres' or 'sqlite'. */
+    dialect: { client: string };
     /** @strapi/database metadata; read defensively (departmentLinkTable). */
     metadata: { get(uid: string): unknown };
   };
@@ -168,6 +195,21 @@ async function restrictRowsLinking(
 }
 
 /**
+ * Postgres only: locks the department rows `FOR UPDATE` in the ambient
+ * transaction, so no link to them can commit between the link scan and
+ * the delete (see CONCURRENT LINKS in the module comment).
+ */
+async function lockDepartments(strapi: DepartmentDeleteHost, ids: number[]): Promise<void> {
+  if (strapi.db.dialect.client !== "postgres") return;
+  await strapi.db
+    .queryBuilder(DEPARTMENT_UID)
+    .select(["id"])
+    .where({ id: { $in: ids } })
+    .forUpdate()
+    .execute();
+}
+
+/**
  * Flags every document and quick-link row linking a department matched by
  * `where` (the delete's own where; none = every department, as for an
  * unfiltered deleteMany). Returns the rows changed per type uid.
@@ -197,6 +239,7 @@ export async function restrictRowsOfDeletedDepartments(
       "id",
     );
     if (departmentIds.length > 0) {
+      await lockDepartments(strapi, departmentIds);
       for (const type of tables) {
         flagged[type.uid] += await restrictRowsLinking(strapi, type.uid, type.link, departmentIds);
       }

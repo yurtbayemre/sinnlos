@@ -27,7 +27,10 @@ import { flagPollsOfDeletedDepartments } from "../../../../utils/poll-department
  * linked concurrently with the delete. The poll hook catches rows linked
  * outside the Document Service (a previous cms during a rollback, raw SQL).
  * Documents and quick links have no write-time guard; this hook is their
- * only one (the residual is in utils/department-delete-restrict.ts).
+ * only one. It locks the department rows on Postgres before it reads their
+ * links, so a document or quick link linked concurrently with the delete is
+ * either flagged or refused by the foreign key check
+ * (utils/department-delete-restrict.ts, CONCURRENT LINKS).
  */
 
 interface DeleteEvent {

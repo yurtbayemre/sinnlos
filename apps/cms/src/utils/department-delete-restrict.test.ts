@@ -20,7 +20,8 @@ import {
  * The db stub keeps a department table, the two content tables and their
  * link tables (as the query engine registers them) and evaluates the
  * where/orderBy/limit shapes the hook sends, so a wrong filter or a broken
- * paging loop fails the tests.
+ * paging loop fails the tests. `events` records the department locks and
+ * the link reads in order (on Postgres the lock must come first).
  */
 
 type Where = Record<string, unknown>;
@@ -83,8 +84,10 @@ function page<T extends { id: number }>(
 function host(options: {
   departments: number[];
   rows: Partial<Record<string, ContentRow[]>>;
-  failOn?: "departments" | "links" | "update";
+  failOn?: "departments" | "links" | "update" | "lock";
   metadata?: (uid: string) => unknown;
+  /** strapi.db.dialect.client (default sqlite). */
+  dialect?: string;
 }) {
   const tables: Record<string, ContentRow[]> = {};
   for (const uid of [DOCUMENT, QUICK_LINK, POLL]) {
@@ -102,6 +105,7 @@ function host(options: {
     return rows;
   };
   const updates: Array<{ uid: string; ids: number[] }> = [];
+  const events: string[] = [];
   const query = vi.fn((uid: string) => {
     if (uid === "api::department.department") {
       return {
@@ -122,6 +126,10 @@ function host(options: {
           async (params: { where: Where; select: string[]; limit?: number; orderBy?: unknown }) => {
             if (options.failOn === "links") throw new Error("connection reset");
             expect(params.select).toEqual(["id", LINKS[owner].column]);
+            const departmentIds = (params.where.department_id as { $in: number[] }).$in;
+            events.push(
+              `read ${uid} ${departmentIds[0]}..${departmentIds[departmentIds.length - 1]}`,
+            );
             return page(linkRows(owner), params).map((link) => ({
               id: link.id,
               [LINKS[owner].column]: link[LINKS[owner].column],
@@ -144,10 +152,41 @@ function host(options: {
       }),
     };
   });
+  /** The query builder slice the Postgres lock uses; records what it locked. */
+  const queryBuilder = vi.fn((uid: string) => {
+    const state: { select?: string[]; where?: Where; forUpdate: boolean } = { forUpdate: false };
+    const builder = {
+      select(columns: string[]) {
+        state.select = columns;
+        return builder;
+      },
+      where(where: Where) {
+        state.where = where;
+        return builder;
+      },
+      forUpdate() {
+        state.forUpdate = true;
+        return builder;
+      },
+      async execute() {
+        if (options.failOn === "lock") throw new Error("deadlock detected");
+        expect(uid).toBe("api::department.department");
+        expect(state.select).toEqual(["id"]);
+        expect(state.forUpdate).toBe(true);
+        const ids = (state.where?.id as { $in: number[] }).$in;
+        expect(ids.length).toBeLessThanOrEqual(DEPARTMENT_DELETE_PAGE);
+        events.push(`lock ${ids[0]}..${ids[ids.length - 1]}`);
+        return ids.map((id) => ({ id }));
+      },
+    };
+    return builder;
+  });
   const log = { info: vi.fn() };
   const strapi: DepartmentDeleteHost = {
     db: {
       query,
+      queryBuilder,
+      dialect: { client: options.dialect ?? "sqlite" },
       metadata: {
         get: vi.fn((uid: string) =>
           options.metadata ? options.metadata(uid) : LINKS[uid] ? metadataOf(uid) : undefined,
@@ -158,7 +197,7 @@ function host(options: {
   };
   const flagged = (uid: string) =>
     tables[uid].filter((row) => row.audience === "departments").map((row) => row.id);
-  return { strapi, tables, flagged, updates, log, query };
+  return { strapi, tables, flagged, updates, log, query, queryBuilder, events };
 }
 
 /** Rows 1/2 (draft/published) Eng only, 3 Eng+Sales, 4 Sales, 5 none, 6 flagged already. */
@@ -265,22 +304,72 @@ describe("restrictRowsOfDeletedDepartments (FX29 residual)", () => {
   });
 
   it("propagates every failure (the delete fails, its rows stay restricted by their links)", async () => {
-    for (const failOn of ["departments", "links", "update"] as const) {
-      const { strapi } = host({ departments: [1], rows: { [DOCUMENT]: ROWS }, failOn });
+    for (const failOn of ["departments", "links", "update", "lock"] as const) {
+      const { strapi } = host({
+        departments: [1],
+        rows: { [DOCUMENT]: ROWS },
+        failOn,
+        dialect: "postgres",
+      });
       await expect(restrictRowsOfDeletedDepartments(strapi, { id: 1 }), failOn).rejects.toThrow();
     }
   });
 
+  it("on Postgres locks each page of departments before reading its links", async () => {
+    // A link committed after an unlocked scan would be cascaded away
+    // without the flag (Read Committed); the FOR UPDATE lock conflicts with
+    // the FOR KEY SHARE lock of a link insert's foreign key check.
+    const many = Array.from({ length: DEPARTMENT_DELETE_PAGE + 2 }, (_, i) => i + 1);
+    const { strapi, events, flagged } = host({
+      departments: many,
+      rows: { [DOCUMENT]: ROWS, [QUICK_LINK]: ROWS },
+      dialect: "postgres",
+    });
+    await restrictRowsOfDeletedDepartments(strapi, null);
+    const last = DEPARTMENT_DELETE_PAGE;
+    expect(events).toEqual([
+      `lock 1..${last}`,
+      `read documents_departments_lnk 1..${last}`,
+      `read quick_links_departments_lnk 1..${last}`,
+      `lock ${last + 1}..${last + 2}`,
+      `read documents_departments_lnk ${last + 1}..${last + 2}`,
+      `read quick_links_departments_lnk ${last + 1}..${last + 2}`,
+    ]);
+    expect(flagged(DOCUMENT)).toEqual([1, 2, 3, 4, 6]);
+  });
+
+  it("locks only the departments the delete matches, and nothing on SQLite", async () => {
+    const postgres = host({ departments: [1, 2], rows: { [DOCUMENT]: ROWS }, dialect: "postgres" });
+    await restrictRowsOfDeletedDepartments(postgres.strapi, { id: 2 });
+    expect(postgres.events[0]).toBe("lock 2..2");
+    expect(postgres.queryBuilder).toHaveBeenCalledOnce();
+
+    const none = host({ departments: [1, 2], rows: { [DOCUMENT]: ROWS }, dialect: "postgres" });
+    await restrictRowsOfDeletedDepartments(none.strapi, { id: 99 });
+    expect(none.queryBuilder).not.toHaveBeenCalled();
+
+    const sqlite = host({ departments: [1, 2], rows: { [DOCUMENT]: ROWS } });
+    await restrictRowsOfDeletedDepartments(sqlite.strapi, { id: 2 });
+    expect(sqlite.queryBuilder).not.toHaveBeenCalled();
+    expect(sqlite.events).toEqual([
+      "read documents_departments_lnk 2..2",
+      "read quick_links_departments_lnk 2..2",
+    ]);
+    expect(sqlite.flagged(DOCUMENT)).toEqual(postgres.flagged(DOCUMENT));
+  });
+
   it("refuses before any write when a type's link table is unknown", async () => {
-    const { strapi, updates } = host({
+    const { strapi, updates, queryBuilder } = host({
       departments: [1],
       rows: { [DOCUMENT]: ROWS },
       metadata: (uid) => (uid === QUICK_LINK ? undefined : metadataOf(uid)),
+      dialect: "postgres",
     });
     await expect(restrictRowsOfDeletedDepartments(strapi, { id: 1 })).rejects.toThrow(
       /quick-link\.quick-link\.departments is unknown/,
     );
     expect(updates).toEqual([]);
+    expect(queryBuilder).not.toHaveBeenCalled();
   });
 });
 

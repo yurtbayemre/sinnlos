@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import departmentLifecycles from "../api/department/content-types/department/lifecycles";
+import type { DepartmentDeleteHost } from "./department-delete-restrict";
 import { isPollTargeted } from "./poll-audience";
 import { POLL_AUDIENCE_GUARD_CHUNK } from "./poll-audience-guard";
 import {
@@ -331,12 +332,18 @@ describe("department delete lifecycles", () => {
   /**
    * The lifecycles restrict documents and quick links as well (FX29
    * residual, department-delete-restrict.test.ts); here their link tables
-   * exist and are empty.
+   * exist and are empty, on SQLite (no department lock).
    */
-  const withEmptyDocumentLinks = (strapi: PollDepartmentDeleteHost): PollDepartmentDeleteHost => ({
+  const withEmptyDocumentLinks = (
+    strapi: PollDepartmentDeleteHost,
+  ): PollDepartmentDeleteHost & DepartmentDeleteHost => ({
     ...strapi,
     db: {
       ...strapi.db,
+      dialect: { client: "sqlite" },
+      queryBuilder: () => {
+        throw new Error("no department lock on SQLite");
+      },
       metadata: {
         get: (uid: string) =>
           uid === "api::poll.poll"

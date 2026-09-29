@@ -1600,9 +1600,14 @@ change.
   no department left, only admins and editors see it until someone
   re-targets it in the admin panel (link a department, or set Audience back
   to `all` for company-wide). Rows that also link another department stay
-  visible to that department. The delete itself is never refused. The
-  first boot adds the `audience` column to `documents` and `quick_links`;
-  existing rows stay empty (NULL), which reads exactly as before.
+  visible to that department. The delete itself is never refused. On
+  Postgres the delete locks the department rows while it runs, so an edit
+  that links a document or quick link to the same department at that
+  moment either lands first (the delete waits for it and flags the row
+  too) or waits for the delete and then fails, because the department is
+  gone (save again with another department). The first boot adds the
+  `audience` column to `documents` and `quick_links`; existing rows stay
+  empty (NULL), which reads exactly as before.
 - **Comment delete (PL03).** Ownership is now checked by a route policy
   instead of inside the controller. Every answer stays byte for byte the
   same (author and moderators delete, anyone else gets the same 403, an
