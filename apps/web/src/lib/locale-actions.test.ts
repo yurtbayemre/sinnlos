@@ -6,9 +6,9 @@ import { StrapiError } from "@/lib/strapi-error";
 /**
  * switchLocale (AC04): the cookie switches the web's language, and the
  * choice is stored on the profile (PUT /api/me { locale }) so the digests
- * speak it. The profile write is best-effort (a failure keeps the cookie),
- * skipped in DEMO_MODE and without a session; strapi()'s sign-in redirect
- * propagates. next/navigation is the real module.
+ * speak it. The profile write is best-effort (a failure or its 3 s timeout
+ * keeps the cookie), skipped in DEMO_MODE and without a session; strapi()'s
+ * sign-in redirect propagates. next/navigation is the real module.
  */
 const state = vi.hoisted(() => ({
   demo: false,
@@ -62,9 +62,29 @@ describe("switchLocale", () => {
       expect(strapiMock).toHaveBeenCalledWith("/api/me", {
         method: "PUT",
         body: JSON.stringify({ data: { locale } }),
+        signal: expect.any(AbortSignal),
       });
     },
   );
+
+  it("bounds the profile write: the PUT carries a timeout signal", async () => {
+    await switchLocale("de");
+    const [, init] = strapiMock.mock.calls[0] as [string, { signal?: AbortSignal }];
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+    expect(init.signal?.aborted).toBe(false);
+  });
+
+  it("logs a timed-out profile write and resolves with the switched cookie", async () => {
+    // What fetch rejects with when AbortSignal.timeout() fires.
+    strapiMock.mockRejectedValue(
+      new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    );
+    await expect(switchLocale("de")).resolves.toBeUndefined();
+    expect(setUserLocaleMock).toHaveBeenCalledWith("de");
+    expect(console.warn).toHaveBeenCalledWith(
+      "[locale] could not store the language on the profile: The operation was aborted due to timeout",
+    );
+  });
 
   it("keeps the switched cookie when the profile write fails (best-effort)", async () => {
     for (const error of [

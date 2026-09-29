@@ -963,11 +963,12 @@ reads the `locale` cookie and falls back to the `DEFAULT_LOCALE` env var
 `en`, `de`). Users switch languages with the
 locale switcher in the UI, which sets the cookie through a Server Action
 (`apps/web/src/lib/locale-actions.ts`) and also stores the choice on the
-user's profile (`PUT /api/me { locale }`, best-effort), so the e-mail
-digests use it; a user without a stored language gets their digest in
-`DIGEST_DEFAULT_LOCALE` (cms env, default `en`). Message catalogs live in
-`apps/web/messages/en.json` and `apps/web/messages/de.json` — new
-user-visible strings must be added to **both** files.
+user's profile (`PUT /api/me { locale }`, best-effort, at most 3 s), so
+the e-mail digests use it; a user without a stored language gets their
+digest in `DIGEST_DEFAULT_LOCALE` (cms env, default `en`). Message
+catalogs live in `apps/web/messages/en.json` and
+`apps/web/messages/de.json` — new user-visible strings must be added to
+**both** files.
 
 The catalogs are typed: `apps/web/src/global.d.ts` declares next-intl's
 `AppConfig` with the shape of `en.json`, so `pnpm typecheck` rejects a

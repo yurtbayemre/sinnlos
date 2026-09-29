@@ -1603,9 +1603,9 @@ defaults. The cms changes only the digest language.
   the sign-in fails (the sign-in's own user data is used then).
 - **Language (AC04, owner decision 2026-09-29: English by default).**
   - The language switch now also stores the choice on the user's profile
-    (`locale`), best-effort: if that write fails, the switch still works
-    and the web logs `[locale] could not store the language on the
-    profile: …`.
+    (`locale`), best-effort: if that write fails, or the cms does not
+    answer within 3 seconds, the switch still works and the web logs
+    `[locale] could not store the language on the profile: …`.
   - A digest is written in the recipient's profile language. A user whose
     profile has no valid language gets `DIGEST_DEFAULT_LOCALE` (new,
     optional, `en` or `de`, default `en`; an invalid value logs one warning
