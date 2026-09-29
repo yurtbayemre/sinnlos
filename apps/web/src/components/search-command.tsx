@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { Command, defaultFilter } from "cmdk";
+import { DialogDescription, DialogTitle } from "@radix-ui/react-dialog";
 import {
   Search,
   BarChart3,
@@ -439,7 +440,13 @@ export function SearchCommand() {
           header into the containing block for fixed descendants. Items
           carry their unique key as cmdk `value` and are matched on title
           and subtitle (`keywords`); from 2 characters the server's results
-          are shown unfiltered. */}
+          are shown unfiltered.
+          The visually hidden Title and Description name and describe the
+          dialog (UI02/UI07, batch-7 deferral): without them Radix logs
+          "DialogContent requires a DialogTitle" and the Description warning
+          whenever the palette opens. They are cmdk's own Radix Dialog
+          instance (@radix-ui/react-dialog resolves to the same package),
+          rendered inside its Content. */}
       <Command.Dialog
         open={open}
         onOpenChange={setOpen}
@@ -450,6 +457,8 @@ export function SearchCommand() {
         contentClassName="fixed inset-x-3 top-[4.5rem] z-50 mx-auto max-w-lg animate-scale-in"
         className="overflow-hidden rounded-2xl border bg-background shadow-2xl"
       >
+        <DialogTitle className="sr-only">{tSearch("globalSearch")}</DialogTitle>
+        <DialogDescription className="sr-only">{tSearch("placeholder")}</DialogDescription>
         <div className="flex items-center border-b px-3">
           <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
           <Command.Input
