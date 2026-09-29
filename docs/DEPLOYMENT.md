@@ -1677,6 +1677,32 @@ builds passed. Not exercised: a running stack (the German sign-in, the
 language switch writing the user row and a digest dry run were covered by
 unit tests only).
 
+**Fix round (2026-09-29, lane 7A):** on a running stack (the cms and web
+production builds, SQLite with the demo seed, a proxy between web and cms
+that could go down or leave one route unanswered):
+
+- With the cms down, an editor creating a poll saw "The intranet cannot
+  be reached right now…" (before the fix: "Only admins and editors can
+  create polls."), no error page, and no create request reached the cms.
+  A poll-form call the browser could not deliver showed the same text
+  instead of the error page. With the cms up, the poll was created once.
+- 15 parallel wrong sign-ins for one account through the raw Auth.js
+  callback: 10 reached the cms and answered `code=credentials`, the other
+  5 `code=rate_limited` (before the fix: `credentials`). Through the
+  sign-in form, 15 browsers at once: 10 "Invalid email or password.", 5
+  "Too many sign-in attempts…". In this run the sign-in action's own
+  pre-check refused all five; the refusal inside the sign-in itself is
+  covered by the unit tests and the raw-callback run.
+- With `PUT /api/me` left unanswered, the language switch showed German
+  after 3.5 s and logged `[locale] could not store the language on the
+  profile: The operation was aborted due to timeout`. Switching back with
+  the cms answering stored `en`. The seeded users' `locale` stayed empty
+  until they switched (9 of 10 at the end).
+- Unit suite 4466 tests (4524 with Postgres 16), the time-zone matrix
+  under UTC, Europe/Berlin and Pacific/Auckland, the integration suite on
+  SQLite (149 tests) and Postgres 16 (298 tests), and both production
+  builds passed.
+
 #### Deploying batch 10 (2026-09-29)
 
 Batch 10 (branch `batch/10`, on `main` `0b1a2df`, the batch 9 merge) ships
