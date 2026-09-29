@@ -1,7 +1,12 @@
 /**
  * Digest e-mail rendering (issue #18) — pure and unit tested. Plain text
  * first (the HTML is a thin wrapper): intranet notification mail, not a
- * marketing template. Locale follows the user's profile locale (de/en).
+ * marketing template.
+ *
+ * Language: the user's profile `locale` (en/de; the web's language switch
+ * stores it since AC04). A user without one, or with a value that is no
+ * digest language, gets DIGEST_DEFAULT_LOCALE (en or de; unset or invalid =
+ * en, the owner's default of 2026-09-29, like the web's DEFAULT_LOCALE).
  */
 
 export interface DigestContent {
@@ -19,6 +24,44 @@ export interface RenderedDigest {
   subject: string;
   text: string;
   html: string;
+}
+
+/** The languages a digest is written in. */
+export const DIGEST_LOCALES = ["en", "de"] as const;
+export type DigestLocale = (typeof DIGEST_LOCALES)[number];
+
+/** The digest language when neither the profile nor DIGEST_DEFAULT_LOCALE names one. */
+export const DIGEST_FALLBACK_LOCALE: DigestLocale = "en";
+
+function isDigestLocale(value: unknown): value is DigestLocale {
+  return (DIGEST_LOCALES as readonly unknown[]).includes(value);
+}
+
+/** An invalid DIGEST_DEFAULT_LOCALE is reported once per process. */
+let invalidDefaultReported = false;
+
+/**
+ * DIGEST_DEFAULT_LOCALE (trimmed, case-insensitive), or the fallback (en)
+ * when it is unset or no digest language; an invalid value is logged once.
+ */
+export function digestDefaultLocale(
+  env: Record<string, string | undefined> = process.env,
+): DigestLocale {
+  const raw = env.DIGEST_DEFAULT_LOCALE;
+  const value = raw?.trim().toLowerCase();
+  if (isDigestLocale(value)) return value;
+  if (raw && raw.trim() !== "" && !invalidDefaultReported) {
+    invalidDefaultReported = true;
+    console.warn(
+      `[digest] DIGEST_DEFAULT_LOCALE="${raw}" is not one of ${DIGEST_LOCALES.join(", ")} — using "${DIGEST_FALLBACK_LOCALE}".`,
+    );
+  }
+  return DIGEST_FALLBACK_LOCALE;
+}
+
+/** The profile's locale when it is a digest language, else `fallback`. */
+export function digestLocale(profileLocale: unknown, fallback: DigestLocale): DigestLocale {
+  return isDigestLocale(profileLocale) ? profileLocale : fallback;
 }
 
 const STR = {
@@ -73,9 +116,16 @@ export function totalItems(content: DigestContent): number {
 
 export function renderDigest(
   content: DigestContent,
-  opts: { displayName: string; locale?: string | null; baseUrl: string },
+  opts: {
+    displayName: string;
+    /** The user's profile locale; missing or invalid → `defaultLocale`. */
+    locale?: string | null;
+    baseUrl: string;
+    /** Defaults to DIGEST_DEFAULT_LOCALE (digestDefaultLocale()). */
+    defaultLocale?: DigestLocale;
+  },
 ): RenderedDigest {
-  const t = STR[opts.locale === "de" ? "de" : "en"];
+  const t = STR[digestLocale(opts.locale, opts.defaultLocale ?? digestDefaultLocale())];
   const n = totalItems(content);
 
   const sections: { heading: string; lines: string[] }[] = [];

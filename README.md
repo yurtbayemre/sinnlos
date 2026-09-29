@@ -258,7 +258,10 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
   `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
-  `yes` and `on`, and so does `infra/deploy.sh --check`).
+  `yes` and `on`, and so does `infra/deploy.sh --check`). A digest is
+  written in the recipient's profile language; `DIGEST_DEFAULT_LOCALE`
+  (`en` or `de`, default `en`) is the language for a user whose profile
+  has none.
 
 ## 4. Run locally (two terminals)
 
@@ -958,12 +961,39 @@ Strapi would refuse.
 The UI ships in **English and German** via `next-intl`. Locale selection is
 **cookie-based** (no locale segment in URLs): `apps/web/src/i18n/locale.ts`
 reads the `locale` cookie and falls back to the `DEFAULT_LOCALE` env var
-(built-in default `de` when the var is unset or invalid; supported values
+(built-in default `en` when the var is unset or invalid; supported values
 `en`, `de`). Users switch languages with the
 locale switcher in the UI, which sets the cookie through a Server Action
-(`apps/web/src/lib/locale-actions.ts`). Message catalogs live in
-`apps/web/messages/en.json` and `apps/web/messages/de.json` — new
-user-visible strings must be added to **both** files.
+(`apps/web/src/lib/locale-actions.ts`) and also stores the choice on the
+user's profile (`PUT /api/me { locale }`, best-effort, at most 3 s), so
+the e-mail digests use it; a user without a stored language gets their
+digest in `DIGEST_DEFAULT_LOCALE` (cms env, default `en`). Message
+catalogs live in `apps/web/messages/en.json` and
+`apps/web/messages/de.json` — new user-visible strings must be added to
+**both** files.
+
+The catalogs are typed: `apps/web/src/global.d.ts` declares next-intl's
+`AppConfig` with the shape of `en.json`, so `pnpm typecheck` rejects a
+`t("key")` or `useTranslations("namespace")` that `en.json` lacks. ICU
+arguments are not type-checked (a JSON import types every message as a
+plain string), so pass them as the message says;
+`apps/web/src/i18n/messages.test.ts` keeps `de.json` in step (same keys,
+same arguments). A key built at runtime needs a map typed against the
+catalog (`satisfies Record<…, keyof Messages["namespace"]>`), not a cast.
+
+Server Actions never return display text. The mutations behind buttons
+answer an `ActionResult` (`apps/web/src/lib/action-result.ts`):
+`{ ok: true }` or `{ ok: false, code }`, where `code` is the action's own
+code (for example `full` for a booked-out event) or one of `forbidden`,
+`notFound`, `invalid`, `conflict`, `unavailable`, `failed`. Wrap the
+`strapi()` call in `runCmsAction` (it lets the expired-session redirect
+through and maps the CMS answer by status), call the action from a
+component through `startCmsAction`, and translate the code there; the
+shared texts of `forbidden`, `notFound`, `conflict` and `unavailable` live
+in the `actionErrors` namespace. Form actions (`useActionState`) answer
+`{ error?, success?, values? }` with codes too; the sign-in, register,
+profile and password forms translate theirs through
+`apps/web/src/lib/auth/form-messages.ts`.
 
 ## 6. Production deployment
 
@@ -1187,11 +1217,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
   role-less caller, and scans `apps/web/src` for any other filter or sort
   on a contact field (or a `_q`): a web query that the guard would refuse
   for guests fails here, not on a guest's page.
-- The server actions in `apps/web/src/lib` have characterisation tests next
-  to them: the event, classified, acknowledgement, kudos, training and
-  notification actions (S09), and the auth, comment, poll and profile
-  actions. `announcement-live-actions.ts` and `locale-actions.ts` have
-  none yet. The ⌘K search is no Server Action any more: it runs through
+- The server actions in `apps/web/src/lib` have tests next to them: the
+  event, classified, acknowledgement, kudos, training and notification
+  actions (S09), and the auth, comment, poll, profile and locale actions;
+  every mutation that answers an `ActionResult` is tested for success, a
+  specific refusal, the expired-session redirect and a network error.
+  `lib/auth/credentials.ts` (the sign-in's verification with the login
+  limiter) and `lib/auth/callbacks.ts` are tested without Auth.js.
+  `announcement-live-actions.ts` has none yet. The ⌘K search is no Server Action any more: it runs through
   `GET /search` (`apps/web/src/app/search/route.ts`), covered by
   `apps/web/src/lib/search.test.ts`.
   `/api/live/emit` is covered by `apps/web/src/lib/live-emit.test.ts`; its

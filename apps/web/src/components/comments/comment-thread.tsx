@@ -5,6 +5,7 @@ import { useLocale, useTimeZone, useTranslations } from "next-intl";
 import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { addComment, deleteComment } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
 import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
@@ -27,13 +28,15 @@ export function CommentThread({
   const tComments = useTranslations("comments");
   const tCommon = useTranslations("common");
   const tRel = useTranslations("relativeTime");
+  const tErrors = useTranslations("actionErrors");
   // The app locale and APP_TIME_ZONE from the provider (i18n/request.ts),
   // so the server render and the hydrated client show the same label. The
   // root layout always sets the zone; the fallback is APP_TIME_ZONE's default.
   const locale = useLocale();
   const timeZone = useTimeZone() ?? DEFAULT_APP_TIME_ZONE;
   const [body, setBody] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // The failed write and its code (AC01); translated when rendered.
+  const [error, setError] = useState<{ write: "send" | "delete"; code: CommonCode } | null>(null);
   const [isPending, startTransition] = useTransition();
   // Writing requires the documentId anchor. Every Strapi 5 row has one, so
   // this only guards against an unanchored write (issue #11).
@@ -44,29 +47,23 @@ export function CommentThread({
     const text = body.trim();
     if (!text || !canWrite) return;
     setError(null);
-    startTransition(async () => {
-      try {
-        await addComment(target, text);
-      } catch {
-        // Keep the draft in the input so the user can retry.
-        setError(tComments("sendFailed"));
-        return;
-      }
-      setBody("");
-      await onChanged?.();
+    startCmsAction(startTransition, {
+      action: () => addComment(target, text),
+      onSuccess: async () => {
+        setBody("");
+        await onChanged?.();
+      },
+      // The draft stays in the input so the user can retry.
+      onFailure: (code) => setError({ write: "send", code }),
     });
   };
 
   const handleDelete = (id: number) => {
     setError(null);
-    startTransition(async () => {
-      try {
-        await deleteComment(id);
-      } catch {
-        setError(tComments("deleteFailed"));
-        return;
-      }
-      await onChanged?.();
+    startCmsAction(startTransition, {
+      action: () => deleteComment(id),
+      onSuccess: () => onChanged?.(),
+      onFailure: (code) => setError({ write: "delete", code }),
     });
   };
 
@@ -118,7 +115,9 @@ export function CommentThread({
 
       {error && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {isSharedErrorCode(error.code)
+            ? tErrors(error.code)
+            : tComments(error.write === "send" ? "sendFailed" : "deleteFailed")}
         </p>
       )}
 

@@ -1,17 +1,13 @@
 {
   "common": {
-    "appName": "Sinnlos Intranet",
     "selfHosted": "Self-hosted intranet · v0.1",
     "loading": "Loading…",
     "noResults": "No results found.",
     "download": "Download",
     "updated": "Updated",
     "viewAll": "View all",
-    "back": "Back",
     "save": "Save changes",
     "saving": "Saving…",
-    "send": "Send",
-    "sending": "Sending…",
     "cancel": "Cancel",
     "delete": "Delete",
     "or": "or",
@@ -71,10 +67,16 @@
     "namePlaceholder": "Jane Doe",
     "creatingAccount": "Creating account…",
     "demoMode": "Demo mode",
-    "registrationDisabled": "Registration is currently disabled.",
     "sessionExpired": "Your session has expired — please sign in again.",
-    "rateLimited": "Too many sign-in attempts — please wait a minute and try again.",
     "signInFailed": "Sign-in failed. Please try again.",
+    "error_invalidCredentials": "Invalid email or password.",
+    "error_rateLimited": "Too many sign-in attempts — please wait a few minutes and try again.",
+    "error_registrationDisabled": "Registration is currently disabled.",
+    "error_missingFields": "Please fill in all fields.",
+    "error_passwordTooShort": "The password needs at least {min} characters.",
+    "error_emailTaken": "An account with this email address or name already exists.",
+    "error_registrationFailed": "Registration failed — please try again.",
+    "error_accountCreatedSignInManually": "Your account was created — please sign in.",
     "entra_tenant": "This Microsoft account belongs to another organisation. Sign in with your company account.",
     "entra_account_exists": "An intranet account with your e-mail address already exists. Ask an administrator to link it to your Microsoft account.",
     "entra_not_assigned": "Your Microsoft account has no access to the intranet. Ask your IT administrator to assign it.",
@@ -124,7 +126,6 @@
     "teams": "Teams",
     "reportsTo": "Reports to",
     "directReports": "Direct reports",
-    "collapse": "Collapse",
     "expand": "Expand",
     "emptyTitle": "No people yet",
     "emptyHint": "Users will appear here once they sign in.",
@@ -318,6 +319,7 @@
     "emptyTitleGuest": "No polls for you yet",
     "emptyHintGuest": "Polls you can take part in will appear here.",
     "voteFailed": "Your vote couldn't be saved — maybe you already voted.",
+    "pollOptionsChanged": "The answers of this poll were changed in the meantime — please check the updated poll and vote again.",
     "audienceDepartments": "Only for: {departments}",
     "notInAudience": "Only members of these departments can vote.",
     "audienceMissing": "The target department no longer exists – nobody can vote. Re-select departments and republish.",
@@ -350,6 +352,10 @@
     "formError_missingQuestion": "Please enter a question.",
     "formError_tooFewOptions": "Please provide at least two distinct answer options.",
     "formError_forbidden": "Only admins and editors can create polls.",
+    "formError_invalid": "The poll could not be saved — please check your input.",
+    "formError_notFound": "Something this poll refers to no longer exists — reload the page and try again.",
+    "formError_conflict": "Someone changed this in the meantime — reload the page and try again.",
+    "formError_unavailable": "The intranet cannot be reached right now — please try again in a moment.",
     "formError_failed": "The poll could not be created. Please try again."
   },
   "documents": {
@@ -394,6 +400,7 @@
     "passwordMismatch": "Passwords do not match.",
     "passwordChangeFailed": "Could not change password — check your current password.",
     "passwordRateLimited": "Too many password change attempts — please wait a minute and try again.",
+    "passwordChangeUnavailable": "The password could not be changed right now — please try again in a moment.",
     "digestSection": "E-mail digests",
     "digestHint": "Get a morning e-mail summary — daily or weekly (Mondays). Nothing is sent unless you opt in.",
     "digestAnnouncements": "News & announcements",
@@ -485,10 +492,7 @@
     "sendComment": "Send comment",
     "sendFailed": "Couldn't post your comment — please try again.",
     "deleteFailed": "Couldn't delete the comment — please try again.",
-    "reactionFailed": "Couldn't save your reaction — please try again.",
-    "today": "today",
-    "yesterday": "yesterday",
-    "daysAgo": "{days}d ago"
+    "reactionFailed": "Couldn't save your reaction — please try again."
   },
   "relativeTime": {
     "justNow": "just now",
@@ -503,11 +507,7 @@
     "markAllRead": "Mark all read",
     "markReadFailed": "Couldn't mark as read — please try again.",
     "noNotificationsYet": "No notifications yet",
-    "unread": "unread",
-    "justNow": "just now",
-    "minutesAgo": "{min}m ago",
-    "hoursAgo": "{hours}h ago",
-    "daysAgo": "{days}d ago"
+    "unread": "unread"
   },
   "search": {
     "label": "Search (Ctrl+K)",
@@ -531,8 +531,11 @@
     "notFoundHint": "The page you requested does not exist or has moved.",
     "backToDashboard": "Back to dashboard"
   },
-  "locale": {
-    "label": "Language"
+  "actionErrors": {
+    "forbidden": "You are not allowed to do this.",
+    "notFound": "This item no longer exists — reload the page.",
+    "conflict": "Someone changed this in the meantime — reload the page and try again.",
+    "unavailable": "The intranet cannot be reached right now — please try again in a moment."
   },
   "localeSwitcher": {
     "label": "Choose language"

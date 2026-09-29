@@ -1,6 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
+import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
 import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import {
@@ -274,32 +275,50 @@ export async function getCommentSection(target: CommentTarget): Promise<CommentS
 /**
  * Writes send the documentId anchor ONLY — since #25 it is the only key the
  * CMS accepts (a targetId-only payload answers 400 "targetDocumentId
- * required").
+ * required"). Null for a target without a usable anchor: unreachable in
+ * practice (every Strapi 5 row carries a documentId), and the write is
+ * refused ("invalid") instead of writing an unanchored row that would
+ * orphan on publish.
  */
-function requireAnchor(target: CommentTarget): string {
-  const anchor = anchorOf(target.documentId);
-  if (!anchor) {
-    // Unreachable in practice: every Strapi 5 row carries a documentId. Fail
-    // instead of writing an unanchored row that would orphan on publish.
-    throw new Error("comment target has no documentId");
-  }
-  return anchor;
+function writeAnchor(target: CommentTarget): string | null {
+  return anchorOf(target?.documentId);
 }
 
-export async function addComment(target: CommentTarget, body: string) {
-  const targetDocumentId = requireAnchor(target);
-  await strapi("/api/comments", {
-    method: "POST",
-    body: JSON.stringify({
-      data: { body, targetType: target.type, targetDocumentId },
-    }),
-  });
+/**
+ * Posts a comment. Answers an ActionResult (AC01): the cms's 400 for an
+ * unknown, invisible or unpublished target is "invalid" (the same answer
+ * as for a missing one).
+ */
+export async function addComment(target: CommentTarget, body: string): Promise<ActionResult> {
+  const targetDocumentId = writeAnchor(target);
+  if (!targetDocumentId) return actionFailure("invalid");
+  return runCmsAction(
+    () =>
+      strapi("/api/comments", {
+        method: "POST",
+        body: JSON.stringify({
+          data: { body, targetType: target.type, targetDocumentId },
+        }),
+      }),
+    { label: "[comments] add" },
+  );
 }
 
-export async function deleteComment(commentId: number) {
-  await strapi(`/api/comments/${commentId}`, {
-    method: "DELETE",
-  });
+/**
+ * Deletes a comment by its numeric id (the cms translates it). The author
+ * and the moderators may; anyone else gets "forbidden", a comment that is
+ * gone "notFound". The id comes from the client, so anything but a
+ * positive integer is refused before it becomes part of the path.
+ */
+export async function deleteComment(commentId: number): Promise<ActionResult> {
+  if (!Number.isInteger(commentId) || commentId <= 0) return actionFailure("invalid");
+  return runCmsAction(
+    () =>
+      strapi(`/api/comments/${commentId}`, {
+        method: "DELETE",
+      }),
+    { label: "[comments] delete" },
+  );
 }
 
 /**
@@ -307,14 +326,24 @@ export async function deleteComment(commentId: number) {
  * not a toggle, so a repeated request cannot undo the first one. The CMS
  * creates the row, deletes it or does nothing; one that predates the key
  * ignores it and toggles, which is what the button asked for anyway.
+ * Answers an ActionResult (AC01).
  */
-export async function toggleReaction(target: CommentTarget, emoji: EmojiType, reacted: boolean) {
-  const targetDocumentId = requireAnchor(target);
-  await strapi("/api/reactions", {
-    method: "POST",
-    body: JSON.stringify({
-      // Strict boolean whatever a crafted action call passes.
-      data: { emoji, targetType: target.type, targetDocumentId, reacted: reacted === true },
-    }),
-  });
+export async function toggleReaction(
+  target: CommentTarget,
+  emoji: EmojiType,
+  reacted: boolean,
+): Promise<ActionResult> {
+  const targetDocumentId = writeAnchor(target);
+  if (!targetDocumentId) return actionFailure("invalid");
+  return runCmsAction(
+    () =>
+      strapi("/api/reactions", {
+        method: "POST",
+        body: JSON.stringify({
+          // Strict boolean whatever a crafted action call passes.
+          data: { emoji, targetType: target.type, targetDocumentId, reacted: reacted === true },
+        }),
+      }),
+    { label: "[reactions] set" },
+  );
 }

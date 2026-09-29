@@ -1,10 +1,16 @@
 "use client";
 
 import { useState, useRef, useEffect, useTransition } from "react";
-import { unstable_rethrow, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import { Bell, Megaphone, MessageCircle, Calendar, Award } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  isSharedErrorCode,
+  startCmsAction,
+  type ActionResult,
+  type CommonCode,
+} from "@/lib/action-result";
 import { markNotificationsRead, markAllNotificationsRead } from "@/lib/notification-actions";
 import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
 import { relativeTime } from "@/lib/relative-time";
@@ -39,6 +45,7 @@ export function NotificationBell({
 }) {
   const t = useTranslations("notifications");
   const tRel = useTranslations("relativeTime");
+  const tErrors = useTranslations("actionErrors");
   // The app locale and APP_TIME_ZONE from the provider (i18n/request.ts;
   // the root layout always sets the zone, the fallback is its default).
   const locale = useLocale();
@@ -74,28 +81,25 @@ export function NotificationBell({
   // A failed mark-read keeps the page (FX28): the bell lives in the layout,
   // so an uncaught rejection here replaced the whole app with the global
   // error page. The error shows in the open panel until the next attempt.
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<CommonCode | null>(null);
 
   // Opening the panel clears an old error: a click-through closes the panel
   // before its mark-read settles, and the bell stays mounted across pages,
   // so the error would describe an earlier click. The notification that
   // failed stays unread, which is the lasting signal.
   const handleOpen = () => {
-    if (!open) setFailed(false);
+    if (!open) setFailed(null);
     setOpen(!open);
   };
 
-  const runAction = (action: () => Promise<void>) => {
-    setFailed(false);
-    startTransition(async () => {
-      try {
-        await action();
-        await onChanged?.();
-      } catch (e) {
-        // An expired session still redirects to sign-in (NEXT_REDIRECT).
-        unstable_rethrow(e);
-        setFailed(true);
-      }
+  // A refused or failed mark-read answers a code (AC01); an expired
+  // session still redirects to sign-in (the helper rethrows it).
+  const runAction = (action: () => Promise<ActionResult>) => {
+    setFailed(null);
+    startCmsAction(startTransition, {
+      action,
+      onSuccess: () => onChanged?.(),
+      onFailure: setFailed,
     });
   };
 
@@ -146,7 +150,7 @@ export function NotificationBell({
           </div>
           {failed && (
             <p role="alert" className="border-b px-4 py-2 text-xs text-destructive">
-              {t("markReadFailed")}
+              {isSharedErrorCode(failed) ? tErrors(failed) : t("markReadFailed")}
             </p>
           )}
           <div className="max-h-80 overflow-y-auto">
