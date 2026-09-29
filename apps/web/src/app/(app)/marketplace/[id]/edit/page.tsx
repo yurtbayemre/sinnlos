@@ -7,7 +7,7 @@ import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { parseRowId } from "@/lib/entry-id";
-import { canEditAnyAd } from "@/lib/roles";
+import { canEditAnyAd, isReadDenied } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { PageHeader } from "@/components/page-header";
 import { ClassifiedForm } from "@/components/marketplace/classified-form";
@@ -33,6 +33,10 @@ export default async function EditClassifiedPage({ params }: { params: Promise<{
     getSession(),
     getViewer(),
   ]);
+
+  // A role without classified.find (guest) cannot own or edit an ad:
+  // back to the marketplace, which explains why, without a request (SH02).
+  if (isReadDenied(viewer.role, "marketplace")) redirect("/marketplace");
 
   const res = await api.classifieds.one(String(rowId));
   const ad = (res.data?.[0] ?? null) as Classified | null;

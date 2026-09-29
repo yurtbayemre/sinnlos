@@ -11,10 +11,14 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
 import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
+import { getViewer } from "@/lib/viewer";
 
 /**
  * Lesson player (issue #29): markdown body (same pipeline as the wiki —
@@ -29,7 +33,21 @@ export default async function LessonPage({
   params: Promise<{ slug: string; lessonId: string }>;
 }) {
   const { slug, lessonId } = await params;
-  const [t, format] = await Promise.all([getTranslations("training"), getFormatter()]);
+  const [t, format, viewer] = await Promise.all([
+    getTranslations("training"),
+    getFormatter(),
+    getViewer(),
+  ]);
+  // A role without the training reads (guest) gets no request and an
+  // explanation instead of the error banner (SH02).
+  if (isReadDenied(viewer.role, "training")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
 
   const [lessonResult, courseResult, progressResult] = await Promise.all([
     tryFetch(() => fetchLessonByDocumentId(lessonId), "training"),

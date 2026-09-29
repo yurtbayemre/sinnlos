@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { ImageIcon, MapPin, Plus, ShoppingBag, Tag } from "lucide-react";
 import { getLocale, getTranslations } from "next-intl/server";
-import { canPostAds } from "@/lib/roles";
+import { canPostAds, isReadDenied } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { RenewButton } from "@/components/marketplace/renew-button";
 
@@ -67,16 +68,25 @@ export default async function MarketplacePage({
   const timeZone = appTimeZone();
   const today = classifiedToday(timeZone);
 
-  // The ad list needs no role, so it runs alongside getViewer()'s
-  // /api/me read; only the "mine" fetch waits for the role gate.
-  const [t, tRel, locale, session, viewer, listResult] = await Promise.all([
+  const [t, tRel, locale, session, viewer] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
     getViewer(),
-    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
   ]);
+  // A role without classified.find (guest: ads carry contact data) gets no
+  // request and an explanation instead of the CMS's 403 as an error banner
+  // (SH02). The reads wait for the role for that; getViewer() is the
+  // render's one /api/me read, which the layout has already started.
+  if (isReadDenied(viewer.role, "marketplace")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title={t("title")} description={t("description")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
 
   const userId = session?.user?.id;
@@ -84,9 +94,12 @@ export default async function MarketplacePage({
   // fallback and an unreadable role get no create button and no "mine" fetch.
   const canCreate = typeof userId === "number" && canPostAds(viewer.role);
 
-  const mineResult = canCreate
-    ? await tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
-    : { data: null, failed: false };
+  const [listResult, mineResult] = await Promise.all([
+    tryFetch(() => api.classifieds.list(today, category), "classifieds"),
+    canCreate
+      ? tryFetch(() => api.classifieds.mine(userId as number), "my-classifieds")
+      : { data: null, failed: false },
+  ]);
 
   const ads = (listResult.data?.data ?? []) as Classified[];
   const myAds = (mineResult.data?.data ?? []) as Classified[];

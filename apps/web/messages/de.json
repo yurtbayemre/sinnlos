@@ -533,7 +533,9 @@
     "reference": "Referenz: {digest}",
     "notFoundTitle": "Seite nicht gefunden",
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
-    "backToDashboard": "Zurück zum Dashboard"
+    "backToDashboard": "Zurück zum Dashboard",
+    "sectionUnavailableTitle": "Für Ihr Konto nicht verfügbar",
+    "sectionUnavailableHint": "Dieser Bereich gehört nicht zu Ihrer Rolle. Wenn Sie ihn brauchen, wenden Sie sich an die Administration."
   },
   "actionErrors": {
     "forbidden": "Dazu sind Sie nicht berechtigt.",

@@ -4,11 +4,15 @@ import { Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import { avatarThumbUrl } from "@/lib/config";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
+import { getViewer } from "@/lib/viewer";
 import type { Department } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -16,11 +20,11 @@ interface Props {
 
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
+  const t = await getTranslations("departments");
+  // No read for a role that cannot read departments (SH02).
+  if (isReadDenied((await getViewer()).role, "departments")) return { title: t("title") };
   // Same GET as the page's, sent once per render (Next's fetch dedupe).
-  const [t, { data }] = await Promise.all([
-    getTranslations("departments"),
-    tryFetch(() => api.departments.one(slug), "department-meta"),
-  ]);
+  const { data } = await tryFetch(() => api.departments.one(slug), "department-meta");
   const entry = data?.data?.[0] as Department | undefined;
   return { title: entry?.name ?? t("title") };
 }
@@ -30,6 +34,16 @@ export default async function DepartmentPage({ params }: Props) {
   const t = await getTranslations("departments");
   const tTeams = await getTranslations("teams");
   const tCommon = await getTranslations("common");
+  // A role without department.find (guest) gets no request and an
+  // explanation instead of the error page (SH02).
+  if (isReadDenied((await getViewer()).role, "departments")) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the
   // page again, instead of a misleading 404; an unknown slug is a 404.

@@ -533,7 +533,9 @@
     "reference": "Reference: {digest}",
     "notFoundTitle": "Page not found",
     "notFoundHint": "The page you requested does not exist or has moved.",
-    "backToDashboard": "Back to dashboard"
+    "backToDashboard": "Back to dashboard",
+    "sectionUnavailableTitle": "Not available for your account",
+    "sectionUnavailableHint": "Your role does not include this section. If you need it, contact your administrator."
   },
   "actionErrors": {
     "forbidden": "You are not allowed to do this.",

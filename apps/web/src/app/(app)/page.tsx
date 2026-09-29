@@ -5,10 +5,13 @@ import { Award, Building2, Calendar, Contact, Megaphone, Users2, BookOpen } from
 import { getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { zonedDateKey, zonedDayStart, zonedHour } from "@/lib/plain-date";
+import { isReadDenied } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
+import type { Announcement } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -17,8 +20,23 @@ import { TrainingBanner } from "@/components/training/training-banner";
 import { LatestNews } from "@/components/dashboard/latest-news";
 import { QuickLinks } from "@/components/dashboard/quick-links";
 
+/** A skipped read: the role cannot read the section, so nothing is asked (SH02). */
+const SKIPPED = { data: null, failed: false } as const;
+
 export default async function DashboardPage() {
-  const session = await getSession();
+  const [session, viewer] = await Promise.all([getSession(), getViewer()]);
+  // Sections the viewer's role cannot read are neither fetched nor shown
+  // (lib/roles.ts isReadDenied; guest reads no departments, teams,
+  // announcements, kudos or training): no 403 in the logs, no error banner.
+  // An unreadable role (null) still fetches; the CMS decides.
+  const show = {
+    org: !isReadDenied(viewer.role, "departments") && !isReadDenied(viewer.role, "teams"),
+    news: !isReadDenied(viewer.role, "announcements"),
+    acks:
+      !isReadDenied(viewer.role, "announcements") && !isReadDenied(viewer.role, "acknowledgements"),
+    kudos: !isReadDenied(viewer.role, "kudos"),
+    training: !isReadDenied(viewer.role, "training"),
+  };
   // Today in APP_TIME_ZONE (datetime contract, phase 2): events that began
   // earlier today, or are still running, count as upcoming.
   const timeZone = appTimeZone();
@@ -33,10 +51,10 @@ export default async function DashboardPage() {
   // must not hold back the first flush of the dashboard. PeopleStatCard
   // streams it in its own Suspense boundary below.
   const [departments, teams, announcements, events, quickLinks] = await Promise.all([
-    tryFetch(() => api.departments.list(), "dashboard"),
-    tryFetch(() => api.teams.list(), "dashboard"),
+    show.org ? tryFetch(() => api.departments.list(), "dashboard") : SKIPPED,
+    show.org ? tryFetch(() => api.teams.list(), "dashboard") : SKIPPED,
     // Targeting is applied by the CMS policy — no department argument.
-    tryFetch(() => api.announcements.list(), "dashboard"),
+    show.news ? tryFetch(() => api.announcements.list(), "dashboard") : SKIPPED,
     // Upcoming only — the stat card counts events that still matter, not
     // the 50 oldest history entries (api.events is time-window based now).
     tryFetch(() => api.events.upcoming(startOfToday, now.toISOString()), "dashboard"),
@@ -79,14 +97,18 @@ export default async function DashboardPage() {
       {/* AckBanner does its own per-user fetches — inside Suspense it
           streams in after the initial dashboard flush instead of blocking
           the whole page on the acknowledgements round-trips. */}
-      <Suspense fallback={null}>
-        <AckBanner />
-      </Suspense>
+      {show.acks && (
+        <Suspense fallback={null}>
+          <AckBanner />
+        </Suspense>
+      )}
 
       {/* Same streaming rationale as AckBanner — per-user training state. */}
-      <Suspense fallback={null}>
-        <TrainingBanner />
-      </Suspense>
+      {show.training && (
+        <Suspense fallback={null}>
+          <TrainingBanner />
+        </Suspense>
+      )}
 
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
         <Suspense
@@ -94,18 +116,22 @@ export default async function DashboardPage() {
         >
           <PeopleStatCard label={tNav("people")} />
         </Suspense>
-        <StatCard
-          icon={<Building2 className="h-5 w-5" aria-hidden="true" />}
-          label={tNav("departments")}
-          value={deptCount}
-          href="/departments"
-        />
-        <StatCard
-          icon={<Users2 className="h-5 w-5" aria-hidden="true" />}
-          label={tNav("teams")}
-          value={teamCount}
-          href="/teams"
-        />
+        {show.org && (
+          <StatCard
+            icon={<Building2 className="h-5 w-5" aria-hidden="true" />}
+            label={tNav("departments")}
+            value={deptCount}
+            href="/departments"
+          />
+        )}
+        {show.org && (
+          <StatCard
+            icon={<Users2 className="h-5 w-5" aria-hidden="true" />}
+            label={tNav("teams")}
+            value={teamCount}
+            href="/teams"
+          />
+        )}
         <StatCard
           icon={<Calendar className="h-5 w-5" aria-hidden="true" />}
           label={tNav("events")}
@@ -118,23 +144,27 @@ export default async function DashboardPage() {
           value={t("browse")}
           href="/wiki"
         />
-        <StatCard
-          icon={<Megaphone className="h-5 w-5" aria-hidden="true" />}
-          label={tNav("news")}
-          value={newsCount}
-          href="/announcements"
-        />
-        <StatCard
-          icon={<Award className="h-5 w-5" aria-hidden="true" />}
-          label={tNav("kudos")}
-          value={t("give")}
-          href="/kudos"
-        />
+        {show.news && (
+          <StatCard
+            icon={<Megaphone className="h-5 w-5" aria-hidden="true" />}
+            label={tNav("news")}
+            value={newsCount}
+            href="/announcements"
+          />
+        )}
+        {show.kudos && (
+          <StatCard
+            icon={<Award className="h-5 w-5" aria-hidden="true" />}
+            label={tNav("kudos")}
+            value={t("give")}
+            href="/kudos"
+          />
+        )}
       </section>
 
       <QuickLinks items={(quickLinks.data?.data ?? []) as any[]} />
 
-      <LatestNews items={(announcements.data?.data ?? []) as any[]} />
+      {show.news && <LatestNews items={(announcements.data?.data ?? []) as Announcement[]} />}
     </div>
   );
 }

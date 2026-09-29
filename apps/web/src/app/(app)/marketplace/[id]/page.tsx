@@ -12,13 +12,15 @@ import { relativeTime } from "@/lib/relative-time";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { AD_CATEGORY_LABELS } from "@/lib/classified-labels";
 import { classifiedToday, formatAdExpiry, isClassifiedExpired } from "@/lib/classified-shared";
-import { canDeleteAnyAd, canEditAnyAd } from "@/lib/roles";
+import { canDeleteAnyAd, canEditAnyAd, isReadDenied } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { initials } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteClassified } from "@/components/marketplace/delete-classified";
 import { RenewButton } from "@/components/marketplace/renew-button";
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -27,10 +29,10 @@ export async function generateMetadata({ params }: Params) {
   // A malformed id never reaches the CMS (WD07): Postgres answers the
   // filters[id] lookup with an error, i.e. a 500 instead of a 404.
   const rowId = parseRowId(id) ?? notFound();
-  const [t, { data }] = await Promise.all([
-    getTranslations("marketplace"),
-    tryFetch(() => api.classifieds.one(String(rowId)), "classified-meta"),
-  ]);
+  const t = await getTranslations("marketplace");
+  // No read for a role that cannot read ads (SH02).
+  if (isReadDenied((await getViewer()).role, "marketplace")) return { title: t("title") };
+  const { data } = await tryFetch(() => api.classifieds.one(String(rowId)), "classified-meta");
   const ad = data?.data?.[0] as Classified | undefined;
   return { title: ad?.title ?? t("title") };
 }
@@ -43,17 +45,25 @@ export async function generateMetadata({ params }: Params) {
 export default async function ClassifiedDetailPage({ params }: Params) {
   const { id } = await params;
   const rowId = parseRowId(id) ?? notFound();
-  // The ad read needs no role (the controls below are display-only), so it
-  // runs alongside getViewer()'s /api/me read instead of behind it. The same
-  // GET as generateMetadata's is sent once per render (Next's fetch dedupe).
-  const [t, tRel, locale, session, viewer, res] = await Promise.all([
+  const [t, tRel, locale, session, viewer] = await Promise.all([
     getTranslations("marketplace"),
     getTranslations("relativeTime"),
     getLocale(),
     getSession(),
     getViewer(),
-    api.classifieds.one(String(rowId)),
   ]);
+  // A role without classified.find (guest) gets no request and an
+  // explanation instead of the error page (SH02). The same GET as
+  // generateMetadata's is sent once per render (Next's fetch dedupe).
+  if (isReadDenied(viewer.role, "marketplace")) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
+  const res = await api.classifieds.one(String(rowId));
 
   const ad = (res.data?.[0] ?? null) as Classified | null;
   if (!ad) notFound();

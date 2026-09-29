@@ -3,20 +3,24 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchMyProgress } from "@/lib/training";
 import { courseCompletion, sortLessons } from "@/lib/training-shared";
+import { getViewer } from "@/lib/viewer";
 
 type Params = { params: Promise<{ slug: string }> };
 
 export async function generateMetadata({ params }: Params) {
   const { slug } = await params;
+  const t = await getTranslations("training");
+  // No read for a role without the training reads (SH02).
+  if (isReadDenied((await getViewer()).role, "training")) return { title: t("title") };
   // Same GET as the page's, sent once per render (Next's fetch dedupe).
-  const [t, { data }] = await Promise.all([
-    getTranslations("training"),
-    tryFetch(() => fetchCourseBySlug(slug), "course-meta"),
-  ]);
+  const { data } = await tryFetch(() => fetchCourseBySlug(slug), "course-meta");
   return { title: data?.title ?? t("title") };
 }
 
@@ -32,6 +36,16 @@ export async function generateMetadata({ params }: Params) {
 export default async function CoursePage({ params }: Params) {
   const { slug } = await params;
   const t = await getTranslations("training");
+  // A role without the training reads (guest) gets no request and an
+  // explanation instead of the error page (SH02).
+  if (isReadDenied((await getViewer()).role, "training")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
 
   const [course, progressResult] = await Promise.all([
     fetchCourseBySlug(slug),

@@ -5,10 +5,13 @@ import { getTranslations } from "next-intl/server";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourses, fetchMyProgress } from "@/lib/training";
 import { courseCompletion } from "@/lib/training-shared";
+import { getViewer } from "@/lib/viewer";
 
 export async function generateMetadata() {
   const t = await getTranslations("training");
@@ -24,6 +27,16 @@ export async function generateMetadata() {
  */
 export default async function TrainingPage() {
   const t = await getTranslations("training");
+  // A role without the training reads (guest) gets no request and an
+  // explanation instead of the CMS's 403 as an error banner (SH02).
+  if (isReadDenied((await getViewer()).role, "training")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   const [coursesResult, progressResult] = await Promise.all([
     tryFetch(() => fetchCourses(), "training"),
     tryFetch(() => fetchMyProgress(), "training"),

@@ -4,12 +4,15 @@ import { getFormatter, getLocale, getTranslations } from "next-intl/server";
 import { formatDateOnly, formatInstant, LONG_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
+import { isReadDenied } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import type { Acknowledgement, Announcement } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CommentSection,
@@ -29,13 +32,26 @@ export async function generateMetadata() {
 export default async function AnnouncementsPage() {
   const t = await getTranslations("announcements");
   const tCommon = await getTranslations("common");
-  const [locale, format] = await Promise.all([getLocale(), getFormatter()]);
+  const [locale, format, viewer] = await Promise.all([getLocale(), getFormatter(), getViewer()]);
+  // A role without announcement.find (guest) gets no request and an
+  // explanation instead of the CMS's 403 as an error banner (SH02).
+  if (isReadDenied(viewer.role, "announcements")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
+  const readsAcks = !isReadDenied(viewer.role, "acknowledgements");
   // No audience argument: the CMS `announcement-visibility` policy filters
   // both queries down to what this user may see.
   const [{ data, failed }, requiringAckResult, acksResult] = await Promise.all([
     tryFetch(() => api.announcements.list(), "announcements"),
     tryFetch(() => api.announcements.requiringAck(), "announcements"),
-    tryFetch(() => fetchMyAnnouncementAcks(), "acknowledgements"),
+    readsAcks
+      ? tryFetch(() => fetchMyAnnouncementAcks(), "acknowledgements")
+      : { data: null, failed: false },
   ]);
   const items = (data?.data ?? []) as Announcement[];
 
