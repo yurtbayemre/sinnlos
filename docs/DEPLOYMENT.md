@@ -288,17 +288,18 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
    until it prints `Preflight OK`, then deploy. The cms logs
    `[entra] enabled … mode=dry-run`.
    `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
-   a local demo account. Without `AUTH_LOCAL_ENABLED=1` (Entra only) that
-   sign-in fails after an otherwise good deploy whenever the demo
-   credentials file (`PASSWORDS_FILE`) is readable: `live-smoke: FAIL —
-   sign-in … produced no session cookie`, then `live-smoke failed — the
-   SSE pipeline is NOT delivering pings` and exit code 1. Either keep
-   `AUTH_LOCAL_ENABLED=1` (the break-glass account, see
+   local demo accounts. On an Entra-only instance (`ENTRA_ENABLED=1`
+   without `AUTH_LOCAL_ENABLED=1`, as the web container runs) live-smoke
+   runs its datetime check, then prints `live-smoke: SKIPPED the sign-in
+   steps: Entra-only instance …` and passes; `deploy.sh` runs it there
+   even without the demo credentials file. Check the live pings in a
+   browser instead: a comment from a second session refreshes the card in
+   the first. This holds for every deploy of an Entra-only instance, step 5
+   included. (Before batch 10 the sign-in failed and with it the deploy;
+   the workaround was `PASSWORDS_FILE=/nonexistent infra/deploy.sh`, or
+   keeping `AUTH_LOCAL_ENABLED=1` for the break-glass account, see
    [the rollback notes](#rolling-back-after-switching-microsoft-sign-in-on),
-   step 3), or deploy with `PASSWORDS_FILE=/nonexistent infra/deploy.sh`
-   (it logs `live-smoke SKIPPED`) and check the live pings in a browser: a
-   comment from a second session refreshes the card in the first. This
-   holds for every deploy of an Entra-only instance, step 5 included.
+   step 3.)
 2. Let a few users sign in: an app-role user, a user in an
    `ENTRA_GROUP_ROLES` group (if used), a B2B guest without and then with
    `Intranet.Guest`, a user without a manager, a user whose Entra department
@@ -942,20 +943,55 @@ In practice you don't run that by hand — use the wrapper:
 infra/deploy.sh
 ```
 
-`deploy.sh` does, in order: (0) an env preflight that stops before anything is
-touched (`infra/deploy.sh --check` runs only this step, see
-[§3.8](#upgrading-an-existing-instance-to-this-release)), (1) pre-deploy
-Postgres + uploads backup, (2) tags the currently running `infra-web` /
-`infra-cms` images as `:rollback`, (3) rebuilds + restarts the stack with the
-Traefik override, (4) curl smoke-checks `https://sinnlos.yurtbay.dev`
-(override with `SMOKE_URL=`), (5) runs `infra/live-smoke.sh`: first the
-[datetime contract](#310-datetime-contract) check (no
-`timestamp without time zone` column left, the cms boot log reports the
-process zone UTC), then the end-to-end SSE pipeline probe (comment posted via
-the cms → ping frame on a subscribed stream). Step 5 **fails the deploy** when
-either check fails; it is skipped with `LIVE_EVENTS_DISABLED=1` or when the
-demo credentials file is absent (then run `infra/live-smoke.sh` by hand). It
-is `set -euo pipefail` and re-run safe.
+`deploy.sh` does, in order:
+
+0. An env preflight that stops before anything is touched
+   (`infra/deploy.sh --check` runs only this step, see
+   [§3.8](#upgrading-an-existing-instance-to-this-release)), then the deploy
+   checks: one deploy per compose project at a time (`flock`, from
+   util-linux), a clean checkout (a changed tracked file refuses the
+   deploy, untracked files only earn a note) and the GitHub CI result of
+   the commit (a warning by default; `--require-green-ci` refuses a commit
+   without green CI; `GITHUB_TOKEN` is optional, public repositories need
+   none).
+1. A pre-deploy Postgres + uploads + `.env` backup
+   (`infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy`: its
+   artifacts are named `…-predeploy…` and kept apart from the nightly
+   ones, [§7.3](#73-automated-daily-backups-cron)). A first install, with
+   neither the db container nor its volume, has nothing to back up.
+2. The rollback target: the images of the **last-known-good** deploy,
+   `infra-{web,cms}:<sha>` (the first 12 characters of its commit), from
+   the state file `.git/sinnlos-deploy/infra.state` of the checkout.
+   Without a usable state (the first run of this version of `deploy.sh`,
+   or those images are gone) it tags the running images `:rollback`, as
+   before.
+3. Builds web and cms, then restarts the stack with the Traefik override
+   (`up -d --no-build`).
+4. Curl smoke-checks `https://sinnlos.yurtbay.dev` (override with
+   `SMOKE_URL=`), then runs `infra/live-smoke.sh`: first the
+   [datetime contract](#310-datetime-contract) check (no
+   `timestamp without time zone` column left, the cms boot log reports the
+   process zone UTC), then the end-to-end SSE pipeline probe (one comment
+   posted through the cms → the ping frame on a subscribed stream, which
+   must be uncompressed; see [§6.1](#61-health-checks)). A failed live-smoke
+   **fails the deploy**; it is skipped with `LIVE_EVENTS_DISABLED=1` (read
+   from the env compose hands the apps) or when the demo credentials file
+   is absent (then run `infra/live-smoke.sh` by hand), and on an Entra-only
+   instance it runs the datetime check only.
+5. Only after both passed: tags the images web and cms now run as
+   `infra-{web,cms}:<sha>`, records them in the state file as
+   last-known-good, and removes the SHA tags beyond the newest five
+   (`DEPLOY_KEEP_TAGS`).
+
+A failure from step 3 on prints the rollback commands for the target of
+step 2 (an ERR trap catches the unexpected ones, a failed tag included);
+before step 3 the running containers are untouched. `infra/deploy.sh
+--dry-run` runs every check and prints this plan with its rollback target
+and the tags it would remove, and changes nothing. The script is
+`set -Eeuo pipefail` and re-run safe; its parameters (environment, the
+defaults are the owner's host): `SMOKE_URL`, `PASSWORDS_FILE`,
+`SINNLOS_CHECKOUT` (the checkout it lives in), `COMPOSE_PROJECT` (`infra`),
+`DEPLOY_STATE_DIR` and `DEPLOY_KEEP_TAGS`.
 
 The preflight fails (naming keys, never values) when:
 
@@ -966,8 +1002,9 @@ The preflight fails (naming keys, never values) when:
   `TRANSFER_TOKEN_SALT`, `JWT_SECRET`, `ENCRYPTION_KEY`, `REVALIDATE_SECRET`,
   `INTERNAL_UPLOAD_TOKEN` or `AUTH_SECRET` (a placeholder
   `DATABASE_PASSWORD` only warns);
-- `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` are set, `DIGESTS_DISABLED` is not `1`,
-  and `DIGEST_FROM` or `PUBLIC_WEB_URL` is empty;
+- `SMTP_HOST`/`SMTP_USER`/`SMTP_PASS` are set, `DIGESTS_DISABLED` is off
+  (read as the cms reads it: `1`, `true`, `yes` or `on`, any case, switch it
+  on), and `DIGEST_FROM` or `PUBLIC_WEB_URL` is empty;
 - `JWT_SECRET` must be rotated: the running `infra-web-1` lacks the image
   label `org.sinnlos.strapi-jwt=server-only` (i.e. it is a web from before
   2026-09-24 that handed users their Strapi JWT) and the `JWT_SECRET` about to
@@ -995,7 +1032,9 @@ placeholder markers and digest rule to the cms guards (`env-guard.ts`,
 `send-digests.ts`), and the Entra rules to the cms's `parseEntraConfig`
 (`apps/cms/src/entra/config.ts`), the web's `auth-config.ts` and the compose
 mapping, so the preflight cannot silently drift from what the apps do at
-boot.
+boot. `infra/deploy-flow.test.ts` runs the whole script against a throwaway
+checkout with docker, curl and flock stubbed (tags, state, rollback target,
+failures, checks, dry run).
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -1009,6 +1048,16 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the deploy, backup and cron hardening (batch 10, lane 5B)?**
+> A normal `infra/deploy.sh` run, with the new script itself: no schema,
+> grant, env or edge change; the cms image changes only its cron wiring.
+> Its first run has no last-known-good state yet and rolls back to
+> `:rollback` as before; from its success on, a failed deploy rolls back
+> to the SHA tags of the last good one. It refuses a checkout with changed
+> tracked files and needs `flock`. The next morning, check `backup.log`
+> and the new `last-success` file. Follow
+> [Upgrading to the deploy, backup and cron hardening (batch 10, lane 5B)](#upgrading-to-the-deploy-backup-and-cron-hardening-batch-10-lane-5b).
+>
 > **Deploying batch 9 (2026-09-28)?** The policy primitives, the live
 > contract and poll documentIds, and the (switched off) Entra sign-in (the
 > three notes below) ship as one normal deploy of cms and web **together**
@@ -1234,7 +1283,8 @@ systemctl start docker
 > what editors notice.
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
-`infra/.env`, backs up and rollback-tags before rebuilding:
+`infra/.env`, checks the checkout and CI, backs up, and tags the images by
+commit once the smoke checks passed ([§3.6](#36-deploy)):
 
 ```bash
 cd /opt/sinnlos
@@ -1256,6 +1306,115 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the deploy, backup and cron hardening (batch 10, lane 5B)
+
+Lane 5B of batch 10 (branch `ops/deploy-backup-cron`, on `batch/9`
+`5be7dc7`) changes the host scripts and the cms's cron wiring. No schema,
+grant, env, compose or edge change; web and cms images are rebuilt as
+usual.
+
+- **`infra/deploy.sh`** ([§3.6](#36-deploy)): after the env preflight it
+  takes a lock per compose project, refuses a checkout with changed tracked
+  files and checks the GitHub CI result of the commit (a warning;
+  `--require-green-ci` refuses). It builds, starts without a build, runs
+  the smoke check and live-smoke, and only then tags the images
+  `infra-{web,cms}:<sha>` and records them as last-known-good in
+  `.git/sinnlos-deploy/infra.state` (history next to it; the newest five
+  SHA tags are kept). A failed deploy prints the rollback to those tags
+  (with every override the target needs), also for a failed live-smoke or
+  tag. `--dry-run` shows the plan. `DIGESTS_DISABLED` is read like the cms
+  reads it (`true`, `yes` and `on` count, not only `1`), and
+  `LIVE_EVENTS_DISABLED` comes from `infra/.env` through compose, no longer
+  from the shell.
+- **`infra/backup/pg-backup.sh`** ([§7.3](#73-automated-daily-backups-cron)):
+  no plaintext survives a run (umask 077, a cleanup trap, also on errors and
+  signals); retention keeps everything younger than 7 days and at least the
+  newest 7 per series, pre-deploy artifacts (`…-predeploy…`) in series of
+  their own; `backup.log` gains `skip`, `FAIL`, `pruned` and `done` lines;
+  a `last-success` file records the last complete run. Same paths, same
+  cron line.
+- **`infra/backup/restore-drill.sh`** (new): restores the newest encrypted
+  dump into a throwaway Postgres 16, off-box.
+- **`infra/live-smoke.sh`** ([§6.1](#61-health-checks)): finds its target
+  with GETs only, removes the comment notifications it causes, checks the
+  stream is uncompressed, keeps passwords off the command line, and skips
+  its sign-in steps on an Entra-only instance.
+- **cms crons**: one registry (`apps/cms/src/cron/registry.ts`) with a
+  `[cron] <name> took <n>ms` line per run, an in-process overlap guard and
+  the kill switch `CRON_ENABLED` (unset or blank = on; `0`, `false`, `no`
+  or `off` = off). The compose file passes it from batch 10 lane 5A on;
+  without that the crons stay on.
+
+**Before the deploy**
+
+1. The checkout must be clean: `git -C /home/bigemo/git/sinnlos status`
+   (your checkout path) lists no modified tracked file. `deploy.sh` now
+   refuses one: commit, stash or revert it first. Untracked files only earn
+   a note.
+2. `command -v flock` prints a path (util-linux; Debian and Ubuntu ship it).
+3. Optional: `infra/deploy.sh --dry-run`. It runs every check and prints
+   the plan: on the first run `2. rollback target: … -> the images that ran
+   before this deploy (:rollback)`, because there is no state yet.
+
+**Deploy**
+
+4. `infra/deploy.sh` as usual. Expect `WARNING: CI is …` when GitHub has no
+   green run for the checked-out commit yet (the deploy goes on; pass
+   `--require-green-ci` to refuse instead). This first run tags the
+   running images `:rollback` (no state yet), exactly as before, and a
+   failure prints the `:rollback` commands. After the smoke check and
+   live-smoke it prints `Recording infra-{web,cms}:<sha> as last-known-good`.
+
+**After the deploy**
+
+5. `cat .git/sinnlos-deploy/infra.state` shows `TAG=<sha>` and
+   `LIVE_SMOKE=passed`; `docker images infra-web` lists `latest`, the SHA
+   tag and `rollback`. From the next deploy on, a failure rolls back to
+   this SHA tag.
+6. The pre-deploy backup of this run is named
+   `sinnlos-db-<ts>-predeploy.dump.gz.gpg` (uploads and `.env` alike) in the
+   offsite dir, and `backup.log` ends with `done predeploy`.
+7. The next morning, after the 03:00 cron: `tail backup.log` shows `ok`
+   lines, `pruned` lines for artifacts older than 7 days beyond the newest
+   7, and `done nightly`; `cat last-success` names the nightly run. The new
+   script never touches older plaintext left in the backup root by failed
+   runs before this change (`sinnlos-*.dump`, `.tar`, `.env`, `.gz`): review
+   and delete those by hand, but keep the pre-datetime dump until the
+   class-C review is done.
+8. The cms log shows `[cron] uploads-janitor took …ms` after 03:30,
+   `[cron] search-log-janitor took …ms` after 03:35 and
+   `[cron] digest-mailer took …ms` after 07:30.
+9. On the NAS or the owner machine (where the private key is), run the
+   restore drill once ([§7.3](#73-automated-daily-backups-cron)).
+10. Optional, once: remove the notification residue of earlier live-smoke
+    runs (33 rows in the 2026-09-25 census) with
+    `infra/diagnostics/cleanup-live-smoke-notifications.sql`: a dry run
+    first, then armed with the count it printed
+    ([infra/diagnostics/README.md](../infra/diagnostics/README.md)).
+
+**Rollback.** The scripts are part of the checkout: checking out an older
+commit brings the older scripts back, and they ignore the state file. The
+cms image changes only its cron wiring; roll it back with the commands
+`deploy.sh` prints. A later deploy with this `deploy.sh` finds its state
+again.
+
+**Verified** (throwaway compose project `b10-5b-staging` with its own
+volumes, a test GPG key and backup dir, the web on a published port instead
+of Traefik): a first install and five further deploys produced the SHA tags
+and the state, prune kept five tags; a forced smoke failure after a web
+change printed the rollback to the last good SHA tag, and running it as
+printed brought the old web back healthy; a forced live-smoke failure
+printed the rollback and kept the state; a second deploy during the first
+stopped at the lock; a changed tracked file was refused; `--dry-run`
+changed no image, tag, state file or container. The pre-deploy artifacts
+were `0600`, no plaintext was left, and `restore-drill.sh --all` restored
+the newest dump (105 tables) into a throwaway Postgres 16. The old
+live-smoke left two notifications per run and showed the demo password in
+`ps`; the new one left none and showed none, received the notification
+frame with an announcement author as `SMOKE_EMAIL`, skipped its sign-in
+steps for an Entra-only web, and failed with `came back compressed` on a
+gzip-encoded stream.
 
 #### Deploying batch 9 (2026-09-28)
 
@@ -1955,8 +2114,9 @@ these Entra steps:
    Their roles stay as they are (*manual*) until an admin hands them to
    Entra.
 4. Deploy, review the `[entra]` lines in dry-run, then switch to `on`.
-   Without `AUTH_LOCAL_ENABLED=1`, `infra/deploy.sh`'s live-smoke cannot
-   sign in ([Staging dry-run, then on](#staging-dry-run-then-on), step 1).
+   Without `AUTH_LOCAL_ENABLED=1`, `infra/deploy.sh`'s live-smoke skips its
+   sign-in steps (from batch 10 on; before, it failed the deploy:
+   [Staging dry-run, then on](#staging-dry-run-then-on), step 1).
 5. Rollback: prefer switching back in `infra/.env` (`ENTRA_ENABLED=0` or
    `AUTH_LOCAL_ENABLED=1`) over an image rollback. An image rollback needs
    `AUTH_LOCAL_ENABLED=1` in `infra/.env` before the old images start (a
@@ -3421,15 +3581,17 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 4. **A calendar download with a non-ASCII title.** This signs in as the demo
    account `infra/live-smoke.sh` uses (password from the same file, or set
-   `SMOKE_PASSWORD` yourself) and downloads the calendar file of the newest
+   `SMOKE_PASSWORD` yourself; it reaches the container through the
+   environment, not the command line) and downloads the calendar file of the newest
    published event whose title is not plain ASCII, or of the newest event
    when there is none:
 
    ```bash
    SMOKE_EMAIL=casey.jones@sinnlos.local
    SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
-   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
-   const [identifier, password] = process.argv.slice(2);
+   SMOKE_PASSWORD="$SMOKE_PASSWORD" docker exec -i -e SMOKE_PASSWORD infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" <<'NODE'
+   const [identifier] = process.argv.slice(2);
+   const password = process.env.SMOKE_PASSWORD;
    const base = "http://127.0.0.1:1337";
    const login = await fetch(`${base}/api/auth/local`, {
      method: "POST",
@@ -4259,13 +4421,15 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
    the cms for the calendar file of the newest published event whose title
    is plain ASCII, by documentId, by the numeric id of its published row,
    and by three malformed ids (if that password file is not on the host, set
-   `SMOKE_PASSWORD` yourself):
+   `SMOKE_PASSWORD` yourself; it reaches the container through the
+   environment, not the command line):
 
    ```bash
    SMOKE_EMAIL=casey.jones@sinnlos.local
    SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
-   docker exec -i infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" "$SMOKE_PASSWORD" <<'NODE'
-   const [identifier, password] = process.argv.slice(2);
+   SMOKE_PASSWORD="$SMOKE_PASSWORD" docker exec -i -e SMOKE_PASSWORD infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" <<'NODE'
+   const [identifier] = process.argv.slice(2);
+   const password = process.env.SMOKE_PASSWORD;
    const base = "http://127.0.0.1:1337";
    const login = await fetch(`${base}/api/auth/local`, {
      method: "POST",
@@ -6370,7 +6534,11 @@ curl -I <URL>/
 
 # SSE live pipeline (the one subsystem that can be silently dead while
 # every container looks healthy): expect an open stream emitting hb events
-# — or run infra/live-smoke.sh for the full comment→ping proof.
+# — or run infra/live-smoke.sh for the full comment→ping proof (it finds its
+# target with GETs, posts one "[live-smoke]" comment, expects the ping on an
+# uncompressed text/event-stream, and removes the comment and the
+# notification it caused; with an announcement author as SMOKE_EMAIL it
+# also expects the notification frame).
 curl -N -H 'Accept: text/event-stream' <URL>/live/stream --max-time 30
 # Expect (signed-in cookie required): "event: hello" then "event: hb" frames
 
@@ -6529,6 +6697,13 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `infra/deploy.sh` stops with `ERROR: the running database still stores datetimes in the pre-contract format …` | Set `DATETIME_LEGACY_ZONE` (and on some instances `DATETIME_LEGACY_UTC_UNTIL`), see the upgrade section |
 | `infra/deploy.sh` stops with `ERROR: docker compose up failed …` (compose: `dependency failed to start: container infra-cms-1 …`) | The new cms refused to start; `docker logs infra-cms-1` says why. Fix and re-run, or roll back with the commands it prints ([Rolling back this release](#rolling-back-this-release): before the repair only with the legacy-zone override) |
 | `live-smoke: FAIL — timestamp without time zone columns remain` | The guard did not run or failed: check `docker logs infra-cms-1 \| grep datetime` |
+| `live-smoke: FAIL — subscribe: … came back compressed (Content-Encoding: …)` | The edge compresses `text/event-stream`, so pings wait in the encoder's buffer: take the compression off the `/live` route |
+| `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
+| `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh is running for compose project infra` | A deploy of the same project runs (the lock goes with its process); let it finish, then re-run |
+| `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
+| `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed |
+| `infra/deploy.sh` stops with `failed during '<step>'` | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow |
+| `backup.log` has a `FAIL <kind> <step>` line, or `pg-backup: FAILED at …` | The backup stopped at that step (its plaintext is removed); a pre-deploy one also stops the deploy. Fix the cause (usually the db container is down or the key is missing) and re-run |
 
 ---
 
@@ -6569,10 +6744,13 @@ docker compose exec -T db \
 
 ### 7.2 Backup uploads volume
 
+The volume of compose project `infra` is `infra_cms_uploads` (project name,
+underscore, `cms_uploads`); `docker volume ls | grep cms_uploads` shows it.
+
 ```bash
 # Copy uploads out of the named volume
 docker run --rm \
-  -v sinnlos_cms_uploads:/uploads \
+  -v infra_cms_uploads:/uploads \
   -v "$(pwd)/backups":/backup \
   alpine tar czf /backup/uploads-$(date +%Y%m%d-%H%M%S).tar.gz -C /uploads .
 ```
@@ -6581,7 +6759,7 @@ Restore:
 
 ```bash
 docker run --rm \
-  -v sinnlos_cms_uploads:/uploads \
+  -v infra_cms_uploads:/uploads \
   -v "$(pwd)/backups":/backup \
   alpine sh -c "cd /uploads && tar xzf /backup/uploads-20260415-120000.tar.gz"
 ```
@@ -6594,13 +6772,33 @@ snippets above:
 
 - dumps Postgres from `infra-db-1` (`pg_dump -Fc --no-owner`) and **verifies**
   the dump with `pg_restore --list` before keeping it;
-- tars the `infra_cms_uploads` volume;
+- tars the `infra_cms_uploads` volume, and copies `infra/.env` (every
+  secret; the dumps do not hold it);
 - gzips each artifact, then **GPG-encrypts** it to the VPS backup public key
   (asymmetric — a host/NAS compromise can't decrypt; the private key lives
   off-box);
 - writes into the offsite dir under a `sinnlos/` namespace so the existing
   NAS `rrsync` pull replicates it automatically;
-- keeps the **newest 7** of each artifact.
+- leaves **no plaintext** behind: everything it writes is `0600` (umask
+  077), and a cleanup trap removes this run's plaintext dump, tar, `.env`
+  copy, their `.gz` and a partial `.gpg` on every exit, errors and
+  `INT`/`TERM`/`HUP` included (a `kill -9` cannot be trapped). A root run
+  (`deploy.sh`) gives the files it creates the owner of the offsite dir, so
+  the cron user and the NAS pull keep reading them;
+- **retention**, per series (database, uploads, `.env`; each once for the
+  nightly and once for the pre-deploy artifacts): an artifact is removed
+  only when it is **older than 7 days** (by the timestamp in its name)
+  **and** not among the **newest 7** of its series, and only after the new
+  artifact of that series is encrypted. `deploy.sh` runs the script with
+  `SINNLOS_BACKUP_KIND=predeploy`: those artifacts are named
+  `sinnlos-db-<YYYYmmdd-HHMMSS>-predeploy.dump.gz.gpg` (uploads and `.env`
+  alike) and never push a nightly one out. Files of any other name are
+  never removed;
+- logs to `backup.log` in the offsite dir: `ok <series> <artifact> <size>`,
+  `pruned …`, `skip …` (no uploads volume, no `infra/.env`, no quick-access
+  `.env` copy to refresh), `FAIL <kind> <step>` and `done <kind>`; and
+  writes `last-success` there (`<time> <kind> <db artifact>`) after every
+  complete run, for a freshness monitor.
 
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 `SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
@@ -6617,6 +6815,50 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 > commands in §7.1–§7.2 on a cron instead, and push the output off-site with
 > `rsync`/`rclone`.
 
+The paths come from `SINNLOS_BACKUP_DIR`, `SINNLOS_GNUPGHOME`,
+`SINNLOS_BACKUP_KEYID`, `SINNLOS_ENV_FILE`, `SINNLOS_DB_CONTAINER`
+(`infra-db-1`) and `SINNLOS_UPLOADS_VOLUME` (`infra_cms_uploads`); the
+defaults are the owner's host, which the cron line relies on.
+
+**Is it running?** `tail -n 5 <offsite>/backup.log` ends with `done nightly`
+after 03:00, and `cat <offsite>/last-success` names last night. A `FAIL`
+line names the step; the plaintext of that run is already gone.
+
+**Restoring an encrypted artifact** (on a machine with the private key,
+never on the VPS):
+
+```bash
+gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump
+gpg --decrypt sinnlos-uploads-<ts>.tar.gz.gpg | gunzip > sinnlos-uploads-<ts>.tar
+gpg --decrypt sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env   # every secret: keep it 0600
+```
+
+Then restore the dump as in §7.1 (copy it to the host first, or stream it:
+`gpg --decrypt … | gunzip | ssh <host> docker exec -i infra-db-1 pg_restore
+-U sinnlos -d sinnlos --clean --if-exists`), and the uploads as in §7.2.
+Delete the plaintext afterwards.
+
+**Restore drill** (off-box, where the key is): `infra/backup/restore-drill.sh`
+proves the newest database backup restores. It picks the newest
+`sinnlos-db-…dump.gz.gpg` of a directory (the NAS copy of the offsite dir;
+nightly and pre-deploy alike) or takes one file, warns when it is older
+than 36 hours, starts a throwaway `postgres:16-alpine` without network and
+with its data on a tmpfs, streams `gpg --decrypt | gunzip | pg_restore
+--exit-on-error` into it (nothing decrypted touches the disk), prints the
+row count of every table and fails unless `up_users` came back; the
+container goes with its volumes on exit. It needs bash, gpg, gunzip, tar
+and docker:
+
+```bash
+infra/backup/restore-drill.sh /path/to/copy/of/offsite/sinnlos           # your keyring, gpg asks for the passphrase
+infra/backup/restore-drill.sh --key private.asc --passphrase-file pass.txt --all /path/to/copy/of/offsite/sinnlos
+```
+
+`--all` also decrypts the newest uploads and `.env` artifacts and checks
+them (a tar listing and a key count; no value is shown). `--keep` leaves the
+container running for a look (`docker exec -it <name> psql -U drill -d drill`).
+Run it after changes to the backup and every few months.
+
 > **Order matters:** the crontab runs in the **host's** zone, while the
 > uploads and search-log janitors run at 03:30 / 03:35 **`APP_TIME_ZONE`**
 > ([datetime contract](#310-datetime-contract)). The backup must come first,
@@ -6626,8 +6868,9 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 
 ### 7.4 Update procedure (production-safe)
 
-On the live Traefik host the wrapper handles backup, rollback-tagging, build and
-smoke-check in one shot:
+On the live Traefik host the wrapper handles the checks, backup, build,
+smoke checks and the SHA tags of the last-known-good deploy in one shot
+([§3.6](#36-deploy)):
 
 ```bash
 cd /opt/sinnlos && git pull
@@ -6651,24 +6894,40 @@ cd infra && docker compose up -d --build
 docker compose -p infra logs -f --tail=50 cms web
 ```
 
-**Rollback.** `deploy.sh` tags the previously-running images `infra-web:rollback`
-and `infra-cms:rollback` before each build, so a bad deploy can be reverted
-**without** rebuilding — retag and re-up just the affected service (rolling
-back the datetime release needs an extra override file, see
-[Rolling back this release](#rolling-back-this-release); rolling back the
-web to an image from before the web datetime port (batch 8) needs
-`-f infra/docker-compose.web-legacy-tz.yml` on top of the live compose
-files, see below; rolling back poll guest access needs a step **before**
-the retag, see
-[Rolling back poll department targeting](#rolling-back-poll-department-targeting)):
+**Rollback.** Since batch 10, `deploy.sh` keeps the images of every good
+deploy: after the smoke check and live-smoke pass it tags what web and cms
+run as `infra-web:<sha>` / `infra-cms:<sha>` (the first 12 characters of
+the commit) and records them as **last-known-good** in
+`.git/sinnlos-deploy/infra.state` of the checkout (`history` next to it;
+the newest five SHA tags stay, `DEPLOY_KEEP_TAGS`). A failed deploy never
+moves that state. When a deploy fails, the script prints the rollback to
+it, with every override and extra step the target needs; run it as
+printed. By hand:
 
 ```bash
-docker tag infra-web:rollback infra-web:latest
-docker tag infra-cms:rollback infra-cms:latest
+grep '^TAG=' .git/sinnlos-deploy/infra.state      # TAG=<sha>
+docker tag infra-web:<sha> infra-web:latest
+docker tag infra-cms:<sha> infra-cms:latest
 docker compose -p infra \
   -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   up -d --no-build web cms
 ```
+
+`--no-build` is essential: `--build` would rebuild the broken image.
+`docker images infra-web` lists the SHA tags that are still there; any of
+them is a rollback target the same way. **First run of this version:**
+there is no state yet, so that one run tags the running images
+`infra-web:rollback` / `infra-cms:rollback` before the build, as every
+earlier version did, and prints those in its rollback commands (a re-run
+before a successful deploy tags whatever runs then); use `:rollback` in the
+commands above in that case. The special cases below apply whatever the
+target is called (rolling back the datetime release needs an extra override
+file, see [Rolling back this release](#rolling-back-this-release); rolling
+back the web to an image from before the web datetime port (batch 8) needs
+`-f infra/docker-compose.web-legacy-tz.yml` on top of the live compose
+files, see below; rolling back poll guest access needs a step **before**
+the retag, see
+[Rolling back poll department targeting](#rolling-back-poll-department-targeting)).
 
 Since the web datetime port (batch 8) the compose file runs the web in UTC.
 A web image from before it renders dates in its process zone and must run
@@ -6708,7 +6967,9 @@ it directly: see the rollback note of
 Current images (`["node_modules/.bin/strapi","start"]`) start without
 registry access.
 
-If a code revert is needed instead, reset and rebuild:
+If a code revert is needed instead, reset and rebuild (`deploy.sh` refuses a
+checkout with changed tracked files, and tags the rebuilt images by that
+commit):
 
 ```bash
 cd /opt/sinnlos
@@ -6716,8 +6977,9 @@ git reset --hard <previous-commit-sha>
 infra/deploy.sh
 ```
 
-If the database schema changed, restore from the pre-deploy backup (decrypt the
-GPG artifact first with the off-box private key):
+If the database schema changed, restore from the pre-deploy backup
+(`sinnlos-db-<ts>-predeploy.dump.gz.gpg`; decrypt it first with the off-box
+private key, [§7.3](#73-automated-daily-backups-cron)):
 
 ```bash
 docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \

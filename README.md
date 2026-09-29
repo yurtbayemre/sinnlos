@@ -41,9 +41,10 @@ anonymous search analytics, and an **English/German UI**
 ├── infra/
 │   ├── docker-compose.yml          base stack (db, cms, web, caddy)
 │   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy)
-│   ├── deploy.sh                   direct prod deploy (env preflight → backup → tag → build → smoke; --check = preflight only)
+│   ├── deploy.sh                   direct prod deploy (env preflight → lock/clean-tree/CI checks → backup → build → smoke → live-smoke → SHA tags + last-known-good; --check = preflight only, --dry-run = plan)
 │   ├── live-smoke.sh               end-to-end SSE pipeline probe (run by deploy.sh)
-│   ├── backup/pg-backup.sh         nightly encrypted Postgres + uploads backup
+│   ├── backup/pg-backup.sh         nightly encrypted Postgres + uploads + .env backup
+│   ├── backup/restore-drill.sh     off-box restore of the newest encrypted dump into a throwaway Postgres 16
 │   ├── Caddyfile                   used only for local full-stack runs
 │   └── .env.example
 ├── pnpm-workspace.yaml
@@ -237,7 +238,11 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
   `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
-  `yes` and `on`; `infra/deploy.sh --check` still only knows `1`).
+  `yes` and `on`, and so does `infra/deploy.sh --check`).
+  `CRON_ENABLED=0` (or `false`, `no`, `off`) switches off the three cms
+  crons (uploads and search-log janitors, digest mailer); unset or empty
+  keeps them on. Each run logs `[cron] <name> took <n>ms`, and a run that
+  would overlap the previous one of the same task is skipped.
 
 ## 4. Run locally (two terminals)
 
@@ -965,9 +970,15 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 `infra/deploy.sh` wraps this end to end: env preflight (`infra/.env` against
 the env contract, and `DATETIME_LEGACY_ZONE` while the running database
 still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
-only this step) → pre-deploy DB backup → tag the running images `:rollback`
-→ rebuild + restart (a failed `up` prints the rollback commands) → curl
-smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
+only this step) → one deploy at a time (`flock`), a clean checkout and the
+GitHub CI result of the commit (a warning; `--require-green-ci` refuses) →
+pre-deploy DB backup → build + restart → curl smoke-check → datetime and
+live-pipeline smoke → only then the images are tagged
+`infra-{web,cms}:<commit>` and recorded as last-known-good
+(`.git/sinnlos-deploy/infra.state`; the newest five SHA tags stay). A failed
+deploy prints the rollback commands to the last-known-good tags (the first
+run without a state falls back to `:rollback`, the running images it
+tagged); `--dry-run` prints the plan and changes nothing. Rolling back to a cms image
 from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
 on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
 image from before the web datetime port needs
@@ -1006,7 +1017,9 @@ pnpm test:integration  # the real cms booted in process, driven over HTTP per ro
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
+infra/deploy.sh --dry-run  # every deploy check, then the plan (rollback target, tags); changes nothing
 infra/live-smoke.sh    # datetime contract check, then the SSE live pipeline end to end
+infra/backup/restore-drill.sh --all <dir>  # off-box: restore the newest encrypted dump into a throwaway Postgres 16
 # read-only report of the one-time datetime repair (in the cms container)
 node dist/scripts/datetime-migration-report.js [--around <ISO>] [--all] [--baseline <url>]
 ```
