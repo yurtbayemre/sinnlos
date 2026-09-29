@@ -8,14 +8,16 @@
  *    (apps/cms/src/api/profile) so users can't touch their own role.
  *  - changePassword → Strapi's built-in users-permissions endpoint;
  *    only meaningful for local-credentials accounts.
+ *
+ * Both answer machine codes (AC02); the forms translate them through
+ * lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
 import { refresh } from "next/cache";
 import { headers } from "next/headers";
-import { unstable_rethrow } from "next/navigation";
-import { getTranslations } from "next-intl/server";
+import { runCmsAction } from "@/lib/action-result";
+import { PASSWORD_MIN_LENGTH, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
 import { clientIpFrom } from "@/lib/login-rate-limit";
 import { strapi } from "@/lib/strapi";
-import { StrapiError } from "@/lib/strapi-error";
 
 export type ProfileFormValues = {
   displayName: string;
@@ -29,17 +31,39 @@ export type ProfileFormValues = {
   digestKudos: boolean;
   digestFrequency: "daily" | "weekly";
 };
-export type ProfileFormState = { error?: string; success?: string; values?: ProfileFormValues };
 
-/** The free-text fields; the CMS rejects values over TEXT_MAX (FX26). */
+/** The free-text fields; the CMS rejects values over PROFILE_TEXT_MAX (FX26). */
 const TEXT_FIELDS = ["displayName", "jobTitle", "phone", "officeLocation"] as const;
+export type ProfileTextField = (typeof TEXT_FIELDS)[number];
+
 /**
- * Mirrors PROFILE_TEXT_MAX in apps/cms/src/api/profile/controllers/profile.ts
- * (varchar(255), counted in characters as Postgres does).
+ * A profile save's failure: "tooLong" (a text over PROFILE_TEXT_MAX, with
+ * `field`), "invalid" (the CMS refused a value, 400) or "profileSaveFailed"
+ * (anything else: an outage, a refusal).
  */
-const TEXT_MAX = 255;
-/** Same minimum as the form's minLength (change-password-form.tsx). */
-const PASSWORD_MIN = 6;
+export type ProfileErrorCode = "tooLong" | "invalid" | "profileSaveFailed";
+
+export type ProfileFormState = {
+  success?: "profileSaved";
+  error?: ProfileErrorCode;
+  /** With "tooLong": the field over the limit. */
+  field?: ProfileTextField;
+  /** Echoed on every error, see updateProfile. */
+  values?: ProfileFormValues;
+};
+
+/**
+ * A password change's failure: the local checks, then Strapi's refusal of
+ * the current password (400), its throttle (429) and an outage.
+ */
+export type PasswordErrorCode =
+  | "passwordTooShort"
+  | "passwordMismatch"
+  | "passwordWrongOrThrottled"
+  | "passwordRateLimited"
+  | "passwordChangeUnavailable";
+
+export type PasswordFormState = { success?: "passwordChanged"; error?: PasswordErrorCode };
 
 export async function updateProfile(
   _prev: ProfileFormState,
@@ -52,7 +76,7 @@ export async function updateProfile(
   // null. Echoed back on error: React 19 resets the form after every
   // settled action, which silently reverted all typed changes on a
   // transient CMS failure (issue #30; classified-form pattern).
-  const text = (field: (typeof TEXT_FIELDS)[number]) => String(formData.get(field) ?? "").trim();
+  const text = (field: ProfileTextField) => String(formData.get(field) ?? "").trim();
   const values: ProfileFormValues = {
     displayName: text("displayName"),
     jobTitle: text("jobTitle"),
@@ -67,70 +91,64 @@ export async function updateProfile(
     digestFrequency: formData.get("digestFrequency") === "daily" ? "daily" : "weekly",
   };
 
-  // Every message is in the viewer's language (messages/*.json, profile).
-  const t = await getTranslations("profile");
-
   // Same limit as the CMS, answered here with the field's name instead of
   // a generic failure.
-  const tooLong = TEXT_FIELDS.find((field) => Array.from(values[field]).length > TEXT_MAX);
-  if (tooLong) {
-    return { error: t("error_tooLong", { field: t(tooLong), max: TEXT_MAX }), values };
-  }
+  const tooLong = TEXT_FIELDS.find((field) => Array.from(values[field]).length > PROFILE_TEXT_MAX);
+  if (tooLong) return { error: "tooLong", field: tooLong, values };
 
-  try {
-    await strapi("/api/me", {
-      method: "PUT",
-      body: JSON.stringify({ data: { ...values, birthday: birthday || null } }),
-    });
-    // Profile/people data is read uncached (D-DC01) — re-render so the saved
-    // values show up immediately.
-    refresh();
-    return { success: t("profileUpdated") };
-  } catch (e) {
-    // Don't swallow strapi()'s 401 redirect (NEXT_REDIRECT) — an expired
-    // session must navigate to sign-in, not surface as a save error.
-    unstable_rethrow(e);
-    // A 400 is the CMS refusing a value (FX26), not an outage.
-    if (e instanceof StrapiError && e.status === 400) {
-      return { error: t("error_invalid"), values };
-    }
-    return { error: t("error_saveFailed"), values };
-  }
+  // runCmsAction lets strapi()'s 401 redirect (NEXT_REDIRECT) escape: an
+  // expired session must navigate to sign-in, not surface as a save error.
+  const result = await runCmsAction(
+    () =>
+      strapi("/api/me", {
+        method: "PUT",
+        body: JSON.stringify({ data: { ...values, birthday: birthday || null } }),
+      }),
+    {
+      label: "[profile] save",
+      // Profile/people data is read uncached (D-DC01) — re-render so the
+      // saved values show up immediately.
+      after: () => refresh(),
+    },
+  );
+  if (result.ok) return { success: "profileSaved" };
+  // A 400 is the CMS refusing a value (FX26), not an outage.
+  return { error: result.code === "invalid" ? "invalid" : "profileSaveFailed", values };
 }
 
 export async function changePassword(
-  _prev: ProfileFormState,
+  _prev: PasswordFormState,
   formData: FormData,
-): Promise<ProfileFormState> {
+): Promise<PasswordFormState> {
   const currentPassword = String(formData.get("currentPassword") ?? "");
   const password = String(formData.get("password") ?? "");
   const passwordConfirmation = String(formData.get("passwordConfirmation") ?? "");
-  const t = await getTranslations("profile");
-  if (password.length < PASSWORD_MIN) {
-    return { error: t("passwordTooShort", { min: PASSWORD_MIN }) };
-  }
-  if (password !== passwordConfirmation) return { error: t("passwordMismatch") };
-  try {
-    await strapi("/api/auth/change-password", {
-      method: "POST",
-      // Real client IP, like sign-in/register (FX11): the CMS trusts it via
-      // server.proxy.koa. The throttle key here is path + ctx.request.ip +
-      // the caller's user id (koa2-ratelimit appends it), so users never
-      // shared a bucket; the header makes the IP part the client's.
-      headers: { "X-Forwarded-For": clientIpFrom(await headers()) },
-      body: JSON.stringify({ currentPassword, password, passwordConfirmation }),
-    });
-    return { success: t("passwordChanged") };
-  } catch (e) {
-    // A wrong current password is a 400 and stays a friendly error; an
-    // expired session is a 401 that strapi() turns into a redirect
-    // (NEXT_REDIRECT) — that control-flow error must not be swallowed.
-    unstable_rethrow(e);
-    // Strapi's throttle (10 attempts/min): say so instead of blaming the
-    // current password (FX11).
-    if (e instanceof StrapiError && e.status === 429) {
-      return { error: t("passwordRateLimited") };
-    }
-    return { error: t("passwordChangeFailed") };
-  }
+  if (password.length < PASSWORD_MIN_LENGTH) return { error: "passwordTooShort" };
+  if (password !== passwordConfirmation) return { error: "passwordMismatch" };
+  const clientIp = clientIpFrom(await headers());
+  const result = await runCmsAction<"passwordRateLimited">(
+    () =>
+      strapi("/api/auth/change-password", {
+        method: "POST",
+        // Real client IP, like sign-in/register (FX11): the CMS trusts it
+        // via server.proxy.koa. The throttle key here is path +
+        // ctx.request.ip + the caller's user id (koa2-ratelimit appends it),
+        // so users never shared a bucket; the header makes the IP part the
+        // client's.
+        headers: { "X-Forwarded-For": clientIp },
+        body: JSON.stringify({ currentPassword, password, passwordConfirmation }),
+      }),
+    {
+      label: "[profile] change password",
+      // Strapi's throttle (10 attempts/min): say so instead of blaming the
+      // current password (FX11).
+      mapError: (cms) => (cms.status === 429 ? "passwordRateLimited" : undefined),
+    },
+  );
+  if (result.ok) return { success: "passwordChanged" };
+  if (result.code === "passwordRateLimited") return { error: "passwordRateLimited" };
+  if (result.code === "unavailable") return { error: "passwordChangeUnavailable" };
+  // A wrong current password is Strapi's 400 (and so is every other
+  // refusal of the request): the form's "check your current password".
+  return { error: "passwordWrongOrThrottled" };
 }

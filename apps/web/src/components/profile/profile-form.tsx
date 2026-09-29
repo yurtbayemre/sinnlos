@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { updateProfile, type ProfileFormState } from "@/lib/profile-actions";
+import { PROFILE_FORM_MESSAGES, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
@@ -194,9 +195,20 @@ export function ProfileForm({
         </fieldset>
       )}
 
-      {state.error && <p className="text-sm text-destructive">{state.error}</p>}
+      {state.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {state.error === "tooLong"
+            ? tProfile(PROFILE_FORM_MESSAGES.tooLong, {
+                field: state.field ? tProfile(state.field) : "",
+                max: PROFILE_TEXT_MAX,
+              })
+            : tProfile(PROFILE_FORM_MESSAGES[state.error])}
+        </p>
+      )}
       {state.success && (
-        <p className="text-sm text-emerald-600 dark:text-emerald-400">{state.success}</p>
+        <p role="status" className="text-sm text-emerald-600 dark:text-emerald-400">
+          {tProfile(PROFILE_FORM_MESSAGES[state.success])}
+        </p>
       )}
 
       <button

@@ -5,16 +5,20 @@
  * assign them a stable action ID — inline closures inside Server
  * Components that close over dynamically-imported symbols (like the
  * previous topbar sign-out button) don't work reliably.
+ *
+ * The form actions answer machine codes (AC02); the forms translate them
+ * through lib/auth/form-messages.ts. No Strapi message reaches the UI.
  */
 import { headers } from "next/headers";
 import { redirect, unstable_rethrow } from "next/navigation";
 import type { Route } from "next";
-import { getTranslations } from "next-intl/server";
+import { CredentialsSignin } from "next-auth";
 import { signIn, signOut } from "@/auth";
 import { ENTRA, REGISTRATION_ENABLED, entraLogoutUrl } from "@/lib/auth-config";
 import { isRateLimitedSignIn } from "@/lib/auth-errors";
 import { STRAPI_URL } from "@/lib/config";
 import { countsAsFailure } from "@/lib/auth/credentials";
+import { PASSWORD_MIN_LENGTH } from "@/lib/auth/form-messages";
 import {
   clientIpFrom,
   loginRateLimiter,
@@ -22,6 +26,7 @@ import {
   type LoginAttemptOutcome,
 } from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
+import { parseStrapiError } from "@/lib/strapi-error";
 import { safeInternalPath } from "@/lib/utils";
 
 export async function signInWithMicrosoft(formData: FormData) {
@@ -33,13 +38,29 @@ export async function signInWithMicrosoft(formData: FormData) {
   });
 }
 
-export async function signInWithCredentials(_prev: unknown, formData: FormData) {
-  // Read-only peek (never counts as an attempt) for an honest message —
-  // enforcement lives in authorize() (@/auth, issue #23), which would
-  // otherwise answer with the misleading "Invalid email or password.".
+/** What the sign-in form shows (auth.error_<code>). */
+export type SignInErrorCode = "invalidCredentials" | "rateLimited";
+
+export type SignInFormState = {
+  error?: SignInErrorCode;
+  /**
+   * The typed identifier, echoed on error: React 19 resets the form after
+   * every settled action. The password is never echoed.
+   */
+  values?: { identifier: string };
+};
+
+export async function signInWithCredentials(
+  _prev: SignInFormState,
+  formData: FormData,
+): Promise<SignInFormState> {
   const identifier = String(formData.get("identifier") ?? "");
+  const values = { identifier };
+  // Read-only peek (never counts as an attempt) for an honest message —
+  // enforcement lives in authorize() (lib/auth/credentials.ts, issue #23),
+  // which would otherwise answer like a wrong password.
   if (loginRateLimiter.isBlocked(clientIpFrom(await headers()), identifier)) {
-    return { error: "Too many failed attempts — please try again later." };
+    return { error: "rateLimited", values };
   }
   try {
     await signIn("local", {
@@ -52,16 +73,48 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
     // every other Next control-flow error).
     unstable_rethrow(err);
     // Strapi's own throttle answered 429 (FX11): not a wrong password.
-    if (isRateLimitedSignIn(err)) return { error: (await getTranslations("auth"))("rateLimited") };
-    return { error: "Invalid email or password." };
+    if (isRateLimitedSignIn(err)) return { error: "rateLimited", values };
+    // authorize() answered null (CredentialsSignin): wrong credentials, a
+    // blocked attempt or Strapi unreachable — one answer, no oracle.
+    if (!(err instanceof CredentialsSignin)) console.error("[auth] sign-in failed", err);
+    return { error: "invalidCredentials", values };
   }
-  return { error: undefined };
+  return {};
 }
 
+/** What the register form shows (auth.error_<code>). */
+export type RegisterErrorCode =
+  | "registrationDisabled"
+  | "missingFields"
+  | "passwordTooShort"
+  | "rateLimited"
+  | "emailTaken"
+  | "registrationFailed"
+  | "accountCreatedSignInManually";
+
 export type RegisterFormState = {
-  error?: string;
+  error?: RegisterErrorCode;
   values?: { username: string; email: string };
 };
+
+/**
+ * Strapi's register refusals the form names (users-permissions 5.55.1
+ * controllers/auth.js, ApplicationError): every refusal there is a 400
+ * ApplicationError or ValidationError, so the parsed envelope message is
+ * compared exactly; anything else is "registrationFailed". The text itself
+ * never reaches the UI.
+ */
+const REGISTER_REFUSALS: ReadonlyMap<string, RegisterErrorCode> = new Map([
+  ["Email or Username are already taken", "emailTaken"],
+  ["Register action is currently disabled", "registrationDisabled"],
+]);
+
+/** The code of a refused POST /api/auth/local/register. */
+async function registerRefusal(res: Response): Promise<RegisterErrorCode> {
+  if (res.status === 429) return "rateLimited";
+  const { message } = parseStrapiError(await res.text().catch(() => ""));
+  return (message && REGISTER_REFUSALS.get(message)) || "registrationFailed";
+}
 
 export async function registerLocalAccount(
   _prev: RegisterFormState,
@@ -70,10 +123,7 @@ export async function registerLocalAccount(
   // Server-side gate: the register page hides itself when registration is
   // off, but the action must enforce it too — otherwise the endpoint stays
   // callable directly (e.g. with a stale form or crafted request).
-  if (!REGISTRATION_ENABLED) {
-    const t = await getTranslations("auth");
-    return { error: t("registrationDisabled") };
-  }
+  if (!REGISTRATION_ENABLED) return { error: "registrationDisabled" };
   const username = String(formData.get("username") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim();
   const password = String(formData.get("password") ?? "");
@@ -82,17 +132,14 @@ export async function registerLocalAccount(
   // (issue #30; classified-form pattern). The password is deliberately
   // NEVER echoed through the server roundtrip.
   const values = { username, email };
-  if (!username || !email || password.length < 6) {
-    return { values, error: "Fill in all fields; password needs at least 6 characters." };
-  }
+  if (!username || !email || !password) return { values, error: "missingFields" };
+  if (password.length < PASSWORD_MIN_LENGTH) return { values, error: "passwordTooShort" };
   // Same limiter as the login (issue #23): registration is part of the auth
   // surface, so a blocked source may not probe here either. The attempt is
   // reserved before the request and settled after it (FX39).
   const clientIp = clientIpFrom(await headers());
   const ticket = loginRateLimiter.tryAcquire(clientIp, email);
-  if (ticket === "blocked") {
-    return { values, error: "Too many failed attempts — please try again later." };
-  }
+  if (ticket === "blocked") return { values, error: "rateLimited" };
   // Counting rule mirrors authorize(): only real rejections (Strapi answers
   // invalid input and a taken email with 400) count, never 5xx/429 outages
   // or network errors. A created account is "neutral" too: it proves no
@@ -130,18 +177,15 @@ export async function registerLocalAccount(
       );
     }
   }
-  if (!res) return { values, error: "Registration failed — please try again." };
-  if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    return { values, error: body?.error?.message ?? "Registration failed." };
-  }
+  if (!res) return { values, error: "registrationFailed" };
+  if (!res.ok) return { values, error: await registerRefusal(res) };
   // Sign straight in with the new credentials.
   try {
     await signIn("local", { identifier: email, password, redirectTo: "/" });
   } catch (err) {
     // The success redirect (NEXT_REDIRECT) must reach Next.
     unstable_rethrow(err);
-    return { values, error: "Account created — sign in manually." };
+    return { values, error: "accountCreatedSignInManually" };
   }
   return {};
 }
