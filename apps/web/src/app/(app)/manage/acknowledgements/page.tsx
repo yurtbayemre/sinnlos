@@ -13,8 +13,7 @@ import {
 } from "@/lib/ack-report";
 import { isAdmin } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
-import { strapi, type StrapiListResponse } from "@/lib/strapi";
-import { walkAllPages } from "@/lib/paginate";
+import { listAckReportAnnouncements } from "@/lib/api/announcements";
 import { fetchAnnouncementAckIndex } from "@/lib/acknowledgements";
 import { fetchAllTeams } from "@/lib/teams";
 import { fetchAllUsers } from "@/lib/users";
@@ -61,23 +60,11 @@ export default async function AcknowledgementReportPage() {
   // instead of being handed to us by the API. Users come via the paginated
   // directory helper. Like every strapi() read, all are uncached (D-DC01).
   const [announcementsResult, usersResult, teamsResult] = await Promise.all([
-    tryFetch(
-      () =>
-        // audienceRoles populate needs `plugin::users-permissions.role.find`,
-        // which the CMS bootstrap grants to admin_role for exactly this page.
-        // Full page walk, not a single pageSize=100 request: a mandatory
-        // announcement dropped past the first page would silently vanish from
-        // the report and never be chased for confirmation (#14). Secondary
-        // sort on id keeps the walk stable when rows share a createdAt.
-        walkAllPages<ReportAnnouncement>(
-          (page) =>
-            strapi<StrapiListResponse<ReportAnnouncement>>(
-              `/api/announcements?filters[requiresAck][$eq]=true&populate[department][fields][0]=name&populate[team][fields][0]=name&populate[audienceRoles][fields][0]=type&populate[audienceRoles][fields][1]=name&sort[0]=createdAt:desc&sort[1]=id:desc&pagination[page]=${page}&pagination[pageSize]=100`,
-            ),
-          { maxPages: 50, label: "ack-report announcements" },
-        ),
-      "ack-report",
-    ),
+    // Every mandatory announcement with its targeting fields, a full page
+    // walk (lib/api/announcements.ts listAckReportAnnouncements: the
+    // audienceRoles populate needs the role.find grant admin_role holds for
+    // exactly this page).
+    tryFetch(() => listAckReportAnnouncements(), "ack-report"),
     tryFetch(
       () =>
         // role is populated with the users-permissions role.find grant;

@@ -96,14 +96,15 @@ describe("compose", () => {
     },
   );
 
-  it.each(["docker-compose.traefik.yml", "docker-compose.cms-legacy-tz.yml"])(
-    "%s overrides no start command",
-    (file) => {
-      const lines = read(`./${file}`)
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("#"));
-      expect(lines.filter((line) => /^\s+(command|entrypoint|init):/.test(line))).toEqual([]);
-      expect(lines.filter((line) => PACKAGE_MANAGER.test(line))).toEqual([]);
-    },
-  );
+  it.each([
+    "docker-compose.traefik.yml",
+    "docker-compose.cms-legacy-tz.yml",
+    "docker-compose.web-legacy-tz.yml",
+  ])("%s overrides no start command", (file) => {
+    const lines = read(`./${file}`)
+      .split("\n")
+      .filter((line) => !line.trim().startsWith("#"));
+    expect(lines.filter((line) => /^\s+(command|entrypoint|init):/.test(line))).toEqual([]);
+    expect(lines.filter((line) => PACKAGE_MANAGER.test(line))).toEqual([]);
+  });
 });

@@ -9,11 +9,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * read as a green "everyone confirmed" — these tests pin the walk and the
  * `truncated` signal callers need to fail closed (#14).
  *
- * `@/lib/strapi` is mocked wholesale — the real module pulls in next/auth and
- * only its URL contract (start/limit, sort) matters here.
+ * The transport (`@/lib/strapi/client`, WD01) is mocked wholesale — the real
+ * module pulls in next/auth and only its URL contract (start/limit, sort)
+ * matters here.
  */
 const strapiMock = vi.fn();
-vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
+vi.mock("@/lib/strapi/client", () => ({
+  strapi: (...args: unknown[]) => strapiMock(...args),
+}));
 
 const { fetchAllUsers } = await import("./users");
 
@@ -58,7 +61,7 @@ describe("fetchAllUsers", () => {
     strapiMock
       .mockImplementationOnce(async (url: string) => fullPage(url)) // ids 1..100
       .mockResolvedValueOnce([{ id: 101 }]);
-    const { users, truncated } = await fetchAllUsers();
+    const { users, truncated } = await fetchAllUsers<{ id: number }>();
     expect(users).toHaveLength(101);
     expect(users.at(-1)!.id).toBe(101);
     expect(truncated).toBe(false);

@@ -2,6 +2,16 @@
 #   docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d
 # Routing spiegelt das Caddyfile: /api/auth/* -> web, Strapi-Pfade -> cms,
 # Rest -> web. TLS via Host-Traefik (certresolver lehttp).
+# Host: jede Router-Regel nimmt den Hostnamen aus DOMAIN in infra/.env (der
+# nackte Name wie sinnlos.yurtbay.dev, ohne Schema und Port). Ohne DOMAIN
+# rendert compose diese Datei nicht (${DOMAIN:?}), und deploy.sh bricht im
+# Preflight ab, bevor etwas geändert ist; ebenso bei einem DOMAIN, das kein
+# nackter Hostname, ein Platzhalter oder nicht der Host von WEB_PUBLIC_URL
+# und CMS_PUBLIC_URL ist.
+# Ein Sinnlos-Stack je Traefik: Router-, Service- und Middleware-Namen sind
+# fest (sinnlos-*). Eine zweite Instanz (Arbeitgeber, Staging) braucht einen
+# eigenen Host bzw. Traefik; hinter dem Produktions-Traefik löscht sie dessen
+# Router (anderes DOMAIN) oder teilt seine Services (gleiches DOMAIN).
 # Voraussetzung (FX11): der websecure-Entrypoint des Host-Traefik darf
 # client-gesetzte X-Forwarded-* NICHT übernehmen — kein
 # forwardedHeaders.insecure, trustedIPs nur für Proxys, die den Header
@@ -9,6 +19,13 @@
 # (apps/cms/config/server.ts) und zählt seine Login-Throttles
 # (/api/auth/local, /admin/login) pro Client-IP; ein fälschbarer Header
 # hebelt sie aus.
+# Middlewares (FX34): jeder Container definiert die Middlewares, die seine
+# Router nutzen, in den EIGENEN Labels. Der Docker-Provider verwirft alle
+# Labels eines Containers, solange er startet, ungesund oder gestoppt ist;
+# ein Router, dessen Middleware fehlt, wird nicht bedient. Früher hingen die
+# cms-Router an den Middlewares des web-Containers, und /admin und /api
+# fielen mit jedem web-Neustart aus. Gleiche Werte auf beiden Seiten pinnt
+# infra/routing-parity.test.ts.
 services:
   caddy:
     profiles: ["manual"]   # auf diesem Host übernimmt Traefik
@@ -23,15 +40,20 @@ services:
       # Parität zum Caddyfile: Security-Header + Kompression
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
       - "traefik.http.middlewares.sinnlos-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
-      # HSTS: erzwingt HTTPS für sinnlos.yurtbay.dev (1 Jahr, inkl. Subdomains)
+      # HSTS: erzwingt HTTPS für die Domain (1 Jahr, inkl. Subdomains)
       - "traefik.http.middlewares.sinnlos-headers.headers.stsSeconds=31536000"
       - "traefik.http.middlewares.sinnlos-headers.headers.stsIncludeSubdomains=true"
-      - "traefik.http.middlewares.sinnlos-compress.compress=true"
       # Clickjacking-Schutz: X-Frame-Options: DENY (am bestehenden Header-Middleware)
       - "traefik.http.middlewares.sinnlos-headers.headers.frameDeny=true"
       # Restriktive Permissions-Policy: das Intranet braucht keine Sensor-/Media-APIs
       - "traefik.http.middlewares.sinnlos-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
-      # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf Auth-/CMS-Router
+      # Kompression. Traefik 3.7 gzippt auch text/event-stream (trotz
+      # Cache-Control: no-transform; geprüft 2026-09-29 gegen v3.7.13), daher
+      # schließt sie SSE-Antworten aus, und /live/* hat ohnehin einen eigenen
+      # Router ohne Kompression (sinnlos-live).
+      - "traefik.http.middlewares.sinnlos-compress.compress=true"
+      - "traefik.http.middlewares.sinnlos-compress.compress.excludedContentTypes=text/event-stream"
+      # Rate-Limit gegen Brute-Force (pro Client-IP) — nur auf dem Auth-Router
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.average=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.burst=100"
       - "traefik.http.middlewares.sinnlos-ratelimit.ratelimit.period=1s"
@@ -46,21 +68,30 @@ services:
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.average=10"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.burst=20"
       - "traefik.http.middlewares.sinnlos-authlimit.ratelimit.period=1s"
-      - "traefik.http.routers.sinnlos-signin.rule=Host(`sinnlos.yurtbay.dev`) && (Path(`/sign-in`) || Path(`/register`)) && Method(`POST`)"
+      - "traefik.http.routers.sinnlos-signin.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && (Path(`/sign-in`) || Path(`/register`)) && Method(`POST`)"
       - "traefik.http.routers.sinnlos-signin.priority=90"
       - "traefik.http.routers.sinnlos-signin.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-signin.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-signin.service=sinnlos-web"
       - "traefik.http.routers.sinnlos-signin.middlewares=sinnlos-headers,sinnlos-authlimit,sinnlos-compress"
       # Auth.js-Callbacks VOR dem Strapi-/api-Catch-all
-      - "traefik.http.routers.sinnlos-auth.rule=Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api/auth`)"
+      - "traefik.http.routers.sinnlos-auth.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && PathPrefix(`/api/auth`)"
       - "traefik.http.routers.sinnlos-auth.priority=100"
       - "traefik.http.routers.sinnlos-auth.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-auth.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-auth.service=sinnlos-web"
       - "traefik.http.routers.sinnlos-auth.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
+      # Live-SSE (/live/stream, /live/subscribe; FX34): eigener Router OHNE
+      # Kompression und ohne Rate-Limit (wie bisher im Catch-all), vor dem
+      # Catch-all. Nie Puffer- oder Kompressions-Middleware davor.
+      - "traefik.http.routers.sinnlos-live.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && PathPrefix(`/live/`)"
+      - "traefik.http.routers.sinnlos-live.priority=10"
+      - "traefik.http.routers.sinnlos-live.entrypoints=websecure"
+      - "traefik.http.routers.sinnlos-live.tls.certresolver=lehttp"
+      - "traefik.http.routers.sinnlos-live.service=sinnlos-web"
+      - "traefik.http.routers.sinnlos-live.middlewares=sinnlos-headers"
       # Catch-all -> Next.js
-      - "traefik.http.routers.sinnlos-web.rule=Host(`sinnlos.yurtbay.dev`)"
+      - "traefik.http.routers.sinnlos-web.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`)"
       - "traefik.http.routers.sinnlos-web.priority=1"
       - "traefik.http.routers.sinnlos-web.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-web.tls.certresolver=lehttp"
@@ -75,6 +106,24 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.docker.network=frontend"
+      # Eigene Middlewares des cms-Routers (FX34), dieselben Werte wie
+      # sinnlos-headers/-ratelimit/-compress am web, damit /admin und /api
+      # auch dann erreichbar bleiben, wenn der web-Container startet,
+      # ungesund oder gestoppt ist.
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.customresponseheaders.X-Content-Type-Options=nosniff"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.frameDeny=true"
+      - "traefik.http.middlewares.sinnlos-cms-headers.headers.customresponseheaders.Permissions-Policy=camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.average=100"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.burst=100"
+      - "traefik.http.middlewares.sinnlos-cms-ratelimit.ratelimit.period=1s"
+      # Strapi komprimiert selbst nicht (kein strapi::compression in
+      # config/middlewares.ts); ohne sie ginge das Admin-Bundle unkomprimiert
+      # raus.
+      - "traefik.http.middlewares.sinnlos-cms-compress.compress=true"
+      - "traefik.http.middlewares.sinnlos-cms-compress.compress.excludedContentTypes=text/event-stream"
       # `/upload` (no trailing s) is the media-library admin API — distinct
       # from `/uploads`, which serves the stored file bytes. Without it those
       # calls fall through to the web catch-all, which answers the admin's
@@ -88,12 +137,12 @@ services:
       # `/emailXYZ`), so `PathPrefix(`/upload`)` would still swallow
       # `/uploads` — hence the segment-exact `Path(`/upload`) ||
       # PathPrefix(`/upload/`)` pair. Guarded by infra/routing-parity.test.ts.
-      - "traefik.http.routers.sinnlos-cms.rule=Host(`sinnlos.yurtbay.dev`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || Path(`/upload`) || PathPrefix(`/upload/`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
+      - "traefik.http.routers.sinnlos-cms.rule=Host(`${DOMAIN:?set DOMAIN in infra/.env to the public host name}`) && (PathPrefix(`/api`) || PathPrefix(`/admin`) || Path(`/upload`) || PathPrefix(`/upload/`) || PathPrefix(`/email`) || PathPrefix(`/content-manager`) || PathPrefix(`/content-type-builder`) || PathPrefix(`/users-permissions`) || PathPrefix(`/i18n`) || PathPrefix(`/content-api`))"
       - "traefik.http.routers.sinnlos-cms.priority=50"
       - "traefik.http.routers.sinnlos-cms.entrypoints=websecure"
       - "traefik.http.routers.sinnlos-cms.tls.certresolver=lehttp"
       - "traefik.http.routers.sinnlos-cms.service=sinnlos-cms"
-      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-headers,sinnlos-ratelimit,sinnlos-compress"
+      - "traefik.http.routers.sinnlos-cms.middlewares=sinnlos-cms-headers,sinnlos-cms-ratelimit,sinnlos-cms-compress"
       - "traefik.http.services.sinnlos-cms.loadbalancer.server.port=1337"
 
 networks:

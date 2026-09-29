@@ -1,9 +1,11 @@
-# TLS is on by default: with a real DOMAIN Caddy provisions Let's
-# Encrypt certificates automatically and redirects 80 -> 443. Without
-# DOMAIN it falls back to `localhost` with a self-signed internal cert
-# (run `docker compose exec caddy caddy trust` to silence browser
-# warnings, or set DOMAIN=http://localhost to opt back into plain HTTP
-# for local development).
+# TLS is on by default. Compose passes DOMAIN from infra/.env (default
+# localhost). With a real DOMAIN Caddy obtains Let's Encrypt certificates
+# automatically and redirects 80 -> 443. Without one it serves `localhost`
+# with a certificate from Caddy's internal CA, which browsers do not trust:
+# import its root (`docker compose cp
+# caddy:/data/caddy/pki/authorities/local/root.crt .`) into the browser or
+# OS trust store, or set DOMAIN=http://localhost for plain HTTP in local
+# development.
 {$DOMAIN:localhost} {
     encode zstd gzip
 
@@ -25,9 +27,37 @@
     # Everything else → Next.js
     reverse_proxy web:3000
 
+    # Security headers: the same names and values as the Traefik headers
+    # middlewares (docker-compose.traefik.yml), guarded by
+    # infra/routing-parity.test.ts. `defer` applies them when the response
+    # is written, so they replace a header the upstream set itself (Strapi
+    # sends its own X-Frame-Options and Referrer-Policy) instead of adding a
+    # second one, as Traefik does.
     header {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
+        X-Frame-Options "DENY"
+        Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
         -Server
+        defer
+    }
+
+    # HSTS only for a real domain over HTTPS. Not for localhost (internal
+    # CA): a browser would then refuse plain HTTP to every local port for a
+    # year; so on localhost the one Strapi's security middleware adds to cms
+    # responses goes too. A browser ignores HSTS over plain HTTP anyway.
+    @hsts {
+        protocol https
+        not host localhost
+    }
+    header @hsts {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        defer
+    }
+    @localhost {
+        host localhost
+    }
+    header @localhost {
+        -Strict-Transport-Security
     }
 }

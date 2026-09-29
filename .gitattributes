@@ -1,0 +1,5 @@
+# Every text file is stored and checked out with LF line endings, on every
+# platform and whatever core.autocrlf says (.editorconfig and .prettierrc
+# ask for LF too). Shell scripts with CRLF fail in the containers, and CI
+# (Linux) checks formatting on LF. Git detects binary files by itself.
+* text=auto eol=lf

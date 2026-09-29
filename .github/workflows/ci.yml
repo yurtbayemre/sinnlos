@@ -1,9 +1,17 @@
 name: CI
 
+# Pull requests (any branch) and pushes to main. A branch without a pull
+# request runs CI through "Run workflow" (workflow_dispatch).
 on:
   push:
-    branches: ["**"]
+    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+# The jobs only read the repository. The buildx layer cache (type=gha) uses
+# the runner's own cache token, not GITHUB_TOKEN.
+permissions:
+  contents: read
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -14,6 +22,7 @@ jobs:
   build:
     name: typecheck · lint · build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,14 +48,26 @@ jobs:
       - name: Lint
         run: pnpm lint
 
+      # Non-blocking until the one-time format sweep that follows batch 10
+      # (`git add --renormalize . && pnpm format` in its own PR); then drop
+      # continue-on-error.
+      - name: Format check (prettier, non-blocking)
+        run: pnpm format:check
+        continue-on-error: true
+
       - name: Test
         run: pnpm test
 
       - name: Build
         run: pnpm build
 
-      # Advisory only: a failed audit must not block the pipeline.
-      - name: Audit production dependencies (non-blocking)
+      # Blocking: a critical advisory in a production dependency fails the
+      # run (fix it with an update or a scoped pnpm override).
+      - name: Audit production dependencies (critical, blocking)
+        run: pnpm audit --prod --audit-level=critical
+
+      # Advisory only: high findings are reported without blocking.
+      - name: Audit production dependencies (high, non-blocking)
         run: pnpm audit --prod --audit-level=high
         continue-on-error: true
 
@@ -58,6 +79,7 @@ jobs:
   datetime:
     name: datetime · TZ matrix · Postgres 16
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16-alpine
@@ -142,3 +164,103 @@ jobs:
 
       - name: Strapi integration suite (SQLite + Postgres 16)
         run: pnpm test:integration
+
+  # The deployment files themselves: shell scripts and the compose files as
+  # docker compose renders them. No Node needed.
+  infra:
+    name: infra · shellcheck · compose config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Every tracked *.sh plus extensionless files with a shell shebang.
+      # Non-blocking until the sweep after batch 10 (infra/deploy.sh,
+      # infra/live-smoke.sh and infra/backup/pg-backup.sh are being reworked
+      # in the same batch); then drop continue-on-error.
+      - name: shellcheck (non-blocking)
+        continue-on-error: true
+        run: |
+          mapfile -t scripts < <(git ls-files '*.sh')
+          while IFS= read -r file; do scripts+=("${file}"); done \
+            < <(git grep -lE '^#!(/usr/bin/env |/bin/)(ba)?sh' -- ':!*.sh' || true)
+          printf 'shellcheck %s\n' "${scripts[@]}"
+          docker run --rm -v "${PWD}:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 "${scripts[@]}"
+
+      # infra/.env.example leaves the required secrets empty (compose
+      # refuses to render without them), so dummy values fill them in.
+      - name: Compose files render (Caddy mode, Traefik mode, rollback overrides)
+        run: |
+          secrets="${RUNNER_TEMP}/compose-ci.env"
+          cat > "${secrets}" <<'EOF'
+          DATABASE_PASSWORD=ci-dummy
+          APP_KEYS=ci-dummy-1,ci-dummy-2
+          API_TOKEN_SALT=ci-dummy
+          ADMIN_JWT_SECRET=ci-dummy
+          TRANSFER_TOKEN_SALT=ci-dummy
+          JWT_SECRET=ci-dummy
+          ENCRYPTION_KEY=ci-dummy
+          AUTH_SECRET=ci-dummy
+          REVALIDATE_SECRET=ci-dummy
+          INTERNAL_UPLOAD_TOKEN=ci-dummy
+          EOF
+          compose() {
+            docker compose --env-file infra/.env.example --env-file "${secrets}" \
+              -f infra/docker-compose.yml "$@"
+          }
+          echo "Caddy mode (base file only)"
+          compose config -q
+          echo "Caddy mode without DOMAIN serves localhost"
+          test "$(DOMAIN='' compose config --format json | jq -r '.services.caddy.environment.DOMAIN')" = localhost
+          echo "Traefik mode"
+          compose -f infra/docker-compose.traefik.yml config -q
+          echo "Traefik mode: every router rule takes its Host from DOMAIN"
+          compose -f infra/docker-compose.traefik.yml config --format json | jq -e '
+            [.services[] | (.labels // {}) | to_entries[]
+              | select(.key | test("^traefik\\.http\\.routers\\.[^.]+\\.rule$")) | .value]
+            | length > 0 and all(startswith("Host(`intranet.example.com`)"))'
+          echo "Traefik mode: the sinnlos-* aliases stay on the project network"
+          compose -f infra/docker-compose.traefik.yml config --format json | jq -e '
+            .services.db.networks.default.aliases == ["sinnlos-db"]
+            and .services.cms.networks.default.aliases == ["sinnlos-cms"]
+            and .services.web.networks.default.aliases == ["sinnlos-web"]
+            and (.services.cms.networks.frontend.aliases // []) == []
+            and (.services.web.networks.frontend.aliases // []) == []'
+          echo "Traefik mode refuses to render without DOMAIN"
+          if DOMAIN='' compose -f infra/docker-compose.traefik.yml config -q 2> "${RUNNER_TEMP}/domain.err"; then
+            echo "::error::docker-compose.traefik.yml rendered without DOMAIN"
+            exit 1
+          fi
+          grep -q 'required variable DOMAIN is missing a value' "${RUNNER_TEMP}/domain.err"
+          echo "Traefik mode with both rollback overrides"
+          DATETIME_LEGACY_ZONE=Europe/Berlin compose -f infra/docker-compose.traefik.yml \
+            -f infra/docker-compose.cms-legacy-tz.yml \
+            -f infra/docker-compose.web-legacy-tz.yml config -q
+
+  # Both production images build from a clean checkout, exactly as
+  # infra/deploy.sh builds them (context = repo root). Nothing is pushed;
+  # the layer cache lives in the GitHub Actions cache, one scope per image.
+  images:
+    name: images · ${{ matrix.app }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [cms, web]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build apps/${{ matrix.app }}/Dockerfile (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: false
+          cache-from: type=gha,scope=image-${{ matrix.app }}
+          cache-to: type=gha,mode=max,scope=image-${{ matrix.app }}

@@ -1,11 +1,14 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MAX_BATCHED_POLLS,
   POLL_VOTE_UID,
   ballotCountStatement,
+  ballotCountsStatement,
   ballotTables,
   ballotVoterId,
   countPollBallots,
+  countPollBallotsMany,
   countedBallots,
   isOptionIndex,
   tallyBallots,
@@ -276,5 +279,94 @@ describe("countPollBallots", () => {
     expect(calls).toHaveLength(2);
     expect(calls[0]?.bindings).toContain("poll_votes");
     expect(calls[1]?.bindings).toContain("public.poll_votes");
+  });
+});
+
+describe("ballotCountsStatement (WD04: several polls)", () => {
+  it("binds one value per placeholder, one per poll id, groups by poll and option, no DISTINCT", () => {
+    for (const schema of [null, "tenant_a"]) {
+      for (const ids of [[42], [42, 43, 44]]) {
+        const { sql, bindings } = ballotCountsStatement(TABLES, schema, ids, 7);
+        const placeholders = sql.match(/\?\??/g) ?? [];
+        expect(bindings).toHaveLength(placeholders.length);
+        expect(sql).toMatch(new RegExp(`IN \\(${ids.map(() => "\\?").join(", ")}\\)`));
+        expect(sql).toMatch(/GROUP BY pl\.\?\?, v\.\?\?/);
+        expect(sql).toMatch(/count\(v\.id\)/);
+        expect(sql).not.toMatch(/distinct/i);
+        for (const id of ids) expect(bindings).toContain(id);
+        expect(bindings).toContain(schema ? `${schema}.poll_votes` : "poll_votes");
+        // The earlier-row check stays within one poll: pl2.poll = pl.poll.
+        expect(sql).toMatch(/WHERE pl2\.\?\? = pl\.\?\?/);
+      }
+    }
+  });
+
+  it("matches no voter without a caller", () => {
+    expect(ballotCountsStatement(TABLES, null, [42], null).bindings[3]).toBe(-1);
+  });
+
+  it("takes 1 to MAX_BATCHED_POLLS polls", () => {
+    expect(() => ballotCountsStatement(TABLES, null, [], 7)).toThrow(/1\.\.50 polls/);
+    const many = Array.from({ length: MAX_BATCHED_POLLS + 1 }, (_, i) => i + 1);
+    expect(() => ballotCountsStatement(TABLES, null, many, 7)).toThrow(/got 51/);
+    expect(() => ballotCountsStatement(TABLES, null, many.slice(1), 7)).not.toThrow();
+  });
+});
+
+describe("countPollBallotsMany (WD04)", () => {
+  const hostWith = (result: unknown, calls: { bindings: readonly unknown[] }[] = []) => ({
+    db: {
+      connection: {
+        raw: async (_sql: string, bindings: readonly unknown[]) => {
+          calls.push({ bindings });
+          return result;
+        },
+      },
+      metadata: metadataOf(META),
+      getSchemaName: () => undefined,
+    },
+  });
+
+  it("splits the statement's rows per poll into countPollBallots' tallies, both result shapes", async () => {
+    const rows = [
+      { poll_id: 42, option_index: 1, ballots: 2, mine: 1 },
+      { poll_id: "43", option_index: "0", ballots: "3", mine: "0" },
+      { poll_id: 42, option_index: 0, ballots: 1, mine: 0 },
+    ];
+    for (const result of [rows, { rows }]) {
+      const tallies = await countPollBallotsMany(
+        hostWith(result),
+        [
+          { id: 42, optionCount: 2 },
+          { id: 43, optionCount: 3 },
+          { id: 44, optionCount: 2 },
+        ],
+        7,
+      );
+      expect([...tallies]).toEqual([
+        [42, { counts: [1, 2], total: 3, myVoteIndex: 1 }],
+        [43, { counts: [3, 0, 0], total: 3, myVoteIndex: null }],
+        // No counted ballot: zero counts.
+        [44, { counts: [0, 0], total: 0, myVoteIndex: null }],
+      ]);
+    }
+  });
+
+  it("runs no statement for no polls, and one statement for many", async () => {
+    const calls: { bindings: readonly unknown[] }[] = [];
+    await expect(countPollBallotsMany(hostWith([], calls), [], 7)).resolves.toEqual(new Map());
+    expect(calls).toEqual([]);
+    await countPollBallotsMany(
+      hostWith([], calls),
+      [
+        { id: 1, optionCount: 2 },
+        { id: 2, optionCount: 2 },
+        { id: 1, optionCount: 2 },
+      ],
+      7,
+    );
+    expect(calls).toHaveLength(1);
+    // Each poll id once.
+    expect(calls[0]?.bindings.filter((value) => value === 1)).toHaveLength(1);
   });
 });

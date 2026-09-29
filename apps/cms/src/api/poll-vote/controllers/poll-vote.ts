@@ -1,12 +1,13 @@
 import { factories } from "@strapi/strapi";
 
-import { loadPollViewer, loadPublishedPoll, type PollCaller } from "../../../utils/poll-access";
 import {
-  canSeePoll,
-  canVoteOnPoll,
-  isInPollAudience,
-  isPollTargeted,
-} from "../../../utils/poll-audience";
+  loadPollViewer,
+  loadPublishedPoll,
+  pollOptionCount,
+  pollResultsBody,
+  type PollCaller,
+} from "../../../utils/poll-access";
+import { canSeePoll, canVoteOnPoll, isInPollAudience } from "../../../utils/poll-audience";
 import { countPollBallots, isOptionIndex } from "../../../utils/poll-ballots";
 import { isPollClosed } from "../../../utils/poll-close";
 
@@ -150,40 +151,9 @@ export default factories.createCoreController("api::poll-vote.poll-vote", ({ str
     // Counted in the database: ballots per option, one per voter, and the
     // caller's own option (FX20). No voter id leaves the statement; the
     // response carries counts and the caller's own vote only, whatever
-    // `anonymous` says.
-    const options = pollOptions(poll.options);
-    const { counts, total, myVoteIndex } = await countPollBallots(
-      strapi,
-      poll.id,
-      user.id,
-      options.length,
-    );
-
-    return ctx.send({
-      poll: {
-        id: poll.id,
-        question: poll.question,
-        options,
-        closesAt: poll.closesAt,
-        anonymous: poll.anonymous ?? false,
-        // The stored guest-access flags as strict booleans (NULL = false);
-        // guestsCanVote counts only together with visibleToGuests.
-        visibleToGuests: poll.visibleToGuests,
-        guestsCanVote: poll.guestsCanVote,
-      },
-      counts,
-      total,
-      myVoteIndex,
-      canVote: canVoteOnPoll(poll, viewer),
-      audience: {
-        targeted: isPollTargeted(poll),
-        departments: poll.departments
-          .filter((department) => typeof department.documentId === "string")
-          .map((department) => ({
-            documentId: department.documentId as string,
-            name: department.name ?? "",
-          })),
-      },
-    });
+    // `anonymous` says. The body is the one GET /api/poll-results lists
+    // (utils/poll-access.ts pollResultsBody).
+    const tally = await countPollBallots(strapi, poll.id, user.id, pollOptionCount(poll));
+    return ctx.send(pollResultsBody(poll, tally, viewer));
   },
 }));

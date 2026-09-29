@@ -1,7 +1,21 @@
+# Container logs (IN05): Docker's json-file driver with rotation, at most
+# 5 files of 10 MB per container. `docker logs` and `docker compose logs`
+# read across the rotated files; only the oldest lines beyond 50 MB go. The
+# cms logs every request, its healthcheck included, so its [datetime] boot
+# line goes after some weeks of uptime (a deploy that changes nothing of
+# the cms keeps its container); infra/live-smoke.sh then asks node in the
+# running cms container for the process zone.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   db:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_DB: ${DATABASE_NAME:-sinnlos}
       POSTGRES_USER: ${DATABASE_USERNAME:-sinnlos}
@@ -14,6 +28,11 @@ services:
       PGTZ: UTC
     volumes:
       - pgdata:/var/lib/postgresql/data
+    # Unique DNS names on the project network only (IN04); see cms below.
+    networks:
+      default:
+        aliases:
+          - sinnlos-db
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-sinnlos}"]
       interval: 10s
@@ -30,6 +49,7 @@ services:
       context: ..
       dockerfile: apps/cms/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     # docker-init as PID 1: it forwards SIGTERM to Strapi (which shuts down
     # gracefully on its own) and reaps zombies. Without it node is PID 1, and
     # a SIGTERM that arrives before Strapi installs its handler (the first
@@ -38,6 +58,17 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    # Unique DNS names for the internal URLs (IN04): DATABASE_HOST,
+    # STRAPI_URL and WEB_INTERNAL_URL use sinnlos-db, sinnlos-cms and
+    # sinnlos-web, aliases on this project's own network only. The service
+    # names `db`, `cms` and `web` are DNS names on EVERY network a container
+    # joins; in Traefik mode web and cms also sit on the shared `frontend`
+    # network, where another project's `web` or `cms` would answer them too.
+    # Container names (infra-cms-1, …) are unchanged; the scripts use those.
+    networks:
+      default:
+        aliases:
+          - sinnlos-cms
     environment:
       NODE_ENV: production
       # Datetime contract (docs/DEPLOYMENT.md): the cms process runs in UTC
@@ -63,7 +94,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - openssl rand -base64 32}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY must be set - openssl rand -base64 32}
       DATABASE_CLIENT: postgres
-      DATABASE_HOST: db
+      DATABASE_HOST: sinnlos-db
       DATABASE_PORT: 5432
       DATABASE_NAME: ${DATABASE_NAME:-sinnlos}
       DATABASE_USERNAME: ${DATABASE_USERNAME:-sinnlos}
@@ -100,11 +131,20 @@ services:
       # Live-event pings → Next.js: WEB_INTERNAL_URL is only the target of
       # POST /api/live/emit and the secret guards only that ingest (the
       # cache-revalidation webhook is gone, D-DC01; names kept).
-      WEB_INTERNAL_URL: http://web:3000
+      WEB_INTERNAL_URL: http://sinnlos-web:3000
       REVALIDATE_SECRET: ${REVALIDATE_SECRET:?REVALIDATE_SECRET must be set - openssl rand -hex 32, same value for cms and web}
       # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
       # no-ops and the app runs byte-for-byte on the pre-SSE polling.
       LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
+      # Scheduled jobs (uploads and search-log janitors, digest mailer):
+      # unset or true runs them; false (also 0/no/off) switches these
+      # three off in this process (Strapi's own metrics jobs run on). The
+      # cms reads it like its other on/off switches
+      # (apps/cms/src/cron/registry.ts, LF03).
+      CRON_ENABLED: ${CRON_ENABLED:-true}
+      # No usage telemetry to Strapi; also spares a stop the telemetry
+      # lookups that run into the DNS timeout on a host without DNS (B05).
+      STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}
       # E-mail digests (issue #18): authenticated submission against the
       # own mailcow (mail.yurtbay.dev:587 STARTTLS). SMTP_USER/PASS = a
       # mailbox app password (SMTP-only) — without them the digest cron
@@ -142,15 +182,26 @@ services:
     pids_limit: 512
     security_opt:
       - no-new-privileges:true
+    # No Linux capabilities (IN02), like the web: Strapi runs as `node` on
+    # the unprivileged port 1337 and writes only files it owns (uploads
+    # volume, sharp's image formats), so it needs none of Docker's defaults.
+    cap_drop:
+      - ALL
 
   web:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       cms:
         condition: service_healthy
+    # Unique DNS name on the project network only (IN04); see cms above.
+    networks:
+      default:
+        aliases:
+          - sinnlos-web
     environment:
       NODE_ENV: production
       # Datetime contract (docs/DEPLOYMENT.md §3.10): since its datetime port
@@ -167,7 +218,7 @@ services:
       APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}
       HOSTNAME: 0.0.0.0
       PORT: 3000
-      STRAPI_URL: http://cms:1337
+      STRAPI_URL: http://sinnlos-cms:1337
       STRAPI_PUBLIC_URL: ${CMS_PUBLIC_URL}
       # (NEXT_PUBLIC_APP_URL/NAME and STRAPI_ADMIN_* are not passed any more:
       # the web reads none of them, and NEXT_PUBLIC_* would only take effect
@@ -217,9 +268,15 @@ services:
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *default-logging
     depends_on:
       - web
       - cms
+    environment:
+      # The site address of infra/Caddyfile: a real host name gets a Let's
+      # Encrypt certificate (and HSTS), unset means localhost with Caddy's
+      # internal CA, http://localhost plain HTTP.
+      DOMAIN: ${DOMAIN:-localhost}
     ports:
       - "80:80"
       - "443:443"
@@ -227,6 +284,11 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
       - caddy_config:/config
+    mem_limit: 256m
+    cpus: 1.0
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   pgdata:

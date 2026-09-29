@@ -53,7 +53,9 @@ const POLL_REFERENCE = /api::poll\.poll\b|api::poll-vote\.poll-vote\b|\bPOLL_UID
  */
 const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "api/poll/controllers/poll.ts":
-    "core find/findOne behind global::poll-visibility (canSeePoll); create (admin/editor) pins the author",
+    "core find/findOne behind global::poll-visibility (canSeePoll); create (admin/editor) pins the author; batchResults (WD04) keeps only polls canSeePoll admits",
+  "api/poll/routes/custom-poll.ts":
+    "GET /poll-results: the batchResults route of the controller above",
   "api/poll/routes/poll.ts": "find/findOne: global::poll-visibility; writes: admin/editor only",
   "api/poll/services/poll.ts": "core service, reached only through the routes above",
   "api/poll-vote/controllers/poll-vote.ts": "vote/results: canSeePoll 404, canVoteOnPoll 403",
@@ -64,7 +66,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
     "permission matrix and grants (enforcement is in the rules, not the grants)",
   "policies/poll-visibility.ts": "the list/detail filter: canSeePoll per published row",
   "seed-demo.ts": "internal demo seed, no response",
-  "utils/poll-access.ts": "loaders for the policy and the controller",
+  "utils/poll-access.ts":
+    "loaders for the policy and the controllers; the results body, built only after canSeePoll",
   "utils/poll-audience-backfill.ts": "boot backfill of `audience`, writes flags only",
   "utils/poll-audience-guard.ts": "write-time `audience` guard, writes flags only",
   "utils/poll-ballots.ts":

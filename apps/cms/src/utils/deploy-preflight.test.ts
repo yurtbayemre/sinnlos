@@ -48,7 +48,16 @@ import {
  *      hint adds infra/docker-compose.web-legacy-tz.yml for a :rollback web
  *      without the org.sinnlos.datetime label apps/web/Dockerfile sets (or
  *      one it cannot check); that override restores exactly the TZ the
- *      compose file gave the web before the port.
+ *      compose file gave the web before the port,
+ *   9. FX35: the hint names the rollback target of the deploy (the SHA tag
+ *      of the last-known-good state, :rollback without one, nothing on a
+ *      fresh install) and runs every probe on that target's images,
+ *  10. B05: the preflight reads DIGESTS_DISABLED like the cms
+ *      (parseEnvFlag: 1/true/yes/on, trimmed, any case), and live-smoke's
+ *      switches come from the env compose hands the apps
+ *      (LIVE_EVENTS_DISABLED, the Entra-only case), not from the shell.
+ * The state, tag and lock logic of FX35 (and a full stubbed deploy) is
+ * pinned in infra/deploy-flow.test.ts.
  *
  * The SQL itself runs against Postgres 16 in
  * revoke-guest-poll-vote.pg.test.ts.
@@ -233,6 +242,55 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
     },
     30_000,
   );
+
+  it.skipIf(!HAS_AWK)(
+    "reads every DIGESTS_DISABLED spelling as the cms does (B05, parseEnvFlag)",
+    () => {
+      // SMTP set, the sender missing: misconfigured unless the switch is on.
+      const base = {
+        SMTP_HOST: "mail.example.com",
+        SMTP_USER: "u",
+        SMTP_PASS: "p",
+        DIGEST_FROM: "",
+      };
+      let onButNotOne = 0;
+      for (const disabled of [
+        "0",
+        "1",
+        "true",
+        " TRUE ",
+        "Yes",
+        "on",
+        "ON",
+        "off",
+        "no",
+        "false",
+        "",
+        "2",
+        "enabled",
+      ]) {
+        const env = {
+          ...base,
+          PUBLIC_WEB_URL: "https://intranet.example.com",
+          DIGESTS_DISABLED: disabled,
+        };
+        const findings = runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(env));
+        const gate = digestsEnabled(env);
+        if (gate.kind === "skip" && disabled.trim() !== "1") onButNotOne += 1;
+        expect(findings.includes("digest DIGEST_FROM"), JSON.stringify(disabled)).toBe(
+          gate.kind === "misconfigured",
+        );
+      }
+      // Spellings other than 1 that switch the digests off do occur in the table.
+      expect(onButNotOne).toBe(5);
+    },
+    30_000,
+  );
+
+  it("reads DIGESTS_DISABLED through the cms's switch rule, not as the string 1", () => {
+    expect(PREFLIGHT_AWK).toContain('if (!flag(env["DIGESTS_DISABLED"]) && env["SMTP_HOST"] != ""');
+    expect(PREFLIGHT_AWK).not.toContain('env["DIGESTS_DISABLED"] != "1"');
+  });
 
   it("makes the digest finding fatal, not a warning (C4)", () => {
     const block = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${digest_keys}" ]]; then'));
@@ -569,35 +627,52 @@ interface HintProbes {
   hang?: string[];
   /**
    * What `docker image inspect -f '{{ index .Config.Labels
-   * "org.sinnlos.datetime" }}'` prints for infra-web:rollback: default
+   * "org.sinnlos.datetime" }}'` prints for the target web image: default
    * "zone-explicit" (a web from the datetime port on), "<no value>" for an
    * older one (docker 29 prints an empty line there; any other value counts
    * as older), null when that image does not exist.
    */
   webLabel?: string | null;
+  /**
+   * The rollback target (ROLLBACK_REF): "rollback" (default, the images this
+   * run tagged without a state), a 12-digit SHA tag of the last-known-good
+   * state, or "" (nothing to roll back to).
+   */
+  ref?: string;
 }
+
+/** The state file the hint names for a SHA target (harness value). */
+const STATE_FILE_STUB = "/srv/.git/sinnlos-deploy/infra.state";
+/** The bootstrap marker the hint names for a :rollback target (harness value). */
+const BOOTSTRAP_FILE_STUB = "/srv/.git/sinnlos-deploy/infra.bootstrap";
 
 /**
  * print_rollback_hint with docker and `timeout` stubbed and the real probe
  * functions of deploy.sh: `cmd` is what `docker image inspect -f
- * '{{json .Config.Cmd}}'` prints for infra-cms:rollback, null when that
- * image does not exist. The docker stub logs every call to stdout (fd 3,
- * also from inside a command substitution) as "bounded docker …" when it
- * runs under the `timeout` stub and "UNBOUNDED docker …" otherwise, and
- * "permission probe" when a query it is handed reads up_permissions.
+ * '{{json .Config.Cmd}}'` prints for the target cms image
+ * (infra-cms:<ref>), null when that image does not exist. The docker stub
+ * logs every call to stdout (fd 3, also from inside a command
+ * substitution) as "bounded docker …" when it runs under the `timeout` stub
+ * and "UNBOUNDED docker …" otherwise, and "permission probe" when a query
+ * it is handed reads up_permissions.
  */
 function rollbackHintRun(
   cmd: string | null,
   probes: HintProbes = {},
 ): { stdout: string; stderr: string } {
+  const ref = probes.ref ?? "rollback";
   const script = [
     "set -euo pipefail",
     "exec 3>&1",
     "PROJECT=infra",
-    "SCRIPT_DIR=/srv/infra",
+    "INFRA_DIR=/srv/infra",
     "COMPOSE=(docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml)",
     "COMPOSE_LEGACY_TZ=/srv/infra/docker-compose.cms-legacy-tz.yml",
     "COMPOSE_WEB_LEGACY_TZ=/srv/infra/docker-compose.web-legacy-tz.yml",
+    `ROLLBACK_REF=${shellQuote(ref)}`,
+    `ROLLBACK_ORIGIN=${shellQuote(ref === "rollback" ? "the images that ran before this deploy (:rollback)" : ref ? `the last-known-good deploy ${ref} (2026-09-29T10:00:00+02:00)` : "")}`,
+    `STATE_FILE=${STATE_FILE_STUB}`,
+    `BOOTSTRAP_FILE=${BOOTSTRAP_FILE_STUB}`,
     shellLine("PROBE_TIMEOUT=("),
     shellLine("WEB_DATETIME_LABEL="),
     shellLine("WEB_DATETIME_VALUE="),
@@ -618,7 +693,7 @@ function rollbackHintRun(
     "  if ((BOUNDED)); then printf 'bounded docker %s\\n' \"$*\" >&3; else printf 'UNBOUNDED docker %s\\n' \"$*\" >&3; fi",
     '  case "$1 ${2:-}" in',
     '    "image inspect")',
-    '      if [[ "$*" == *" infra-web:rollback" ]]; then',
+    '      if [[ "$*" == *" infra-web:"* ]]; then',
     '        [[ -n "${STUB_WEB_LABEL}" ]] || return 1; printf \'%s\\n\' "${STUB_WEB_LABEL}"; return 0',
     "      fi",
     '      [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
@@ -664,9 +739,9 @@ describe("rollback hint: cms images that start with pnpm", BASH_BUDGET, () => {
     // The :rollback image of the fix's first deploy was built on the same
     // day as the fix, so a date told the operator the wrong thing.
     expect(DEPLOY).not.toMatch(/built before 20\d\d-\d\d-\d\d/);
-    expect(shellFunction("print_rollback_hint")).toContain(
-      `docker image inspect -f '{{json .Config.Cmd}}' "\${PROJECT}-cms:rollback"`,
-    );
+    const hint = shellFunction("print_rollback_hint");
+    expect(hint).toContain('cms_image="${PROJECT}-cms:${ROLLBACK_REF}"');
+    expect(hint).toContain(`docker image inspect -f '{{json .Config.Cmd}}' "\${cms_image}"`);
   });
 
   it.skipIf(!HAS_BASH)("prints the direct start for a :rollback image that runs pnpm start", () => {
@@ -728,12 +803,14 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
   const FULL_SEQUENCE = [
     `${COMPOSE_LINE} stop cms`,
     REVOKE_LINE,
-    "To roll back:",
+    "To roll back to ",
+    "docker tag infra-web:rollback infra-web:latest",
+    "docker tag infra-cms:rollback infra-cms:latest",
     `${COMPOSE_LINE} up -d --no-build web cms`,
     "THEN, once the previous cms is up, run the removal again. It must remove nothing",
     "(guest_links_removed 0, permission_rows_removed 0)",
     REVOKE_LINE,
-    "A re-run of this script tags whatever runs then as :rollback",
+    "a re-run before the first successful deploy keeps this :rollback",
   ];
 
   it("checks the in-image path of the poll schema that the cms Dockerfile ships", () => {
@@ -856,7 +933,7 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
       expectInOrder(hint, [
         `${COMPOSE_LINE} stop cms`,
         REVOKE_LINE,
-        "To roll back:",
+        "To roll back to ",
         `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms`,
         `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
         "THEN, once the previous cms is up",
@@ -934,7 +1011,7 @@ describe(
           "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
           `${COMPOSE_LINE} stop cms`,
           "rollback/revoke-guest-poll-vote.sql",
-          "To roll back:",
+          "To roll back to ",
           "(the database could not be asked whether the datetime repair has run",
           "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
           "(infra-web:rollback could not be checked for the web's datetime port, so the web",
@@ -944,7 +1021,7 @@ describe(
           "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
           "THEN, once the previous cms is up",
           "rollback/revoke-guest-poll-vote.sql",
-          "A re-run of this script tags whatever runs then as :rollback",
+          "a re-run before the first successful deploy keeps this :rollback",
         ]);
       },
     );
@@ -1019,14 +1096,14 @@ describe(
         "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
       );
       expect(shellAssignment("COMPOSE_WEB_LEGACY_TZ")).toBe(
-        "${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml",
+        "${INFRA_DIR}/docker-compose.web-legacy-tz.yml",
       );
     });
 
     it.skipIf(!HAS_BASH)("adds the override for a :rollback web from before the port", () => {
       const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "<no value>" });
       expectInOrder(hint, [
-        "To roll back:",
+        "To roll back to ",
         "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
         // Both kinds of old web: one with the start check (500), one without (UTC times).
         "zone, so in UTC it fails to start or shows UTC times; hence the web override",
@@ -1075,12 +1152,79 @@ describe(
   },
 );
 
+/** The host the tests' instance runs on (not a placeholder). */
+const TEST_HOST = "intranet.acme.test";
+
+/** Where an instance's Traefik routers and public URLs point (5A-T1). */
+interface TraefikHosts {
+  /** What compose renders into every router's Host() (DOMAIN). */
+  domain?: string;
+  /** WEB_PUBLIC_URL, which compose hands the web as AUTH_URL. */
+  webUrl?: string;
+  /** CMS_PUBLIC_URL, which compose hands the cms as PUBLIC_URL. */
+  cmsUrl?: string;
+  /** A different host for the cms router only. */
+  cmsRouterDomain?: string;
+}
+
+/**
+ * `docker compose config --format json` of the Traefik mode as Go writes it:
+ * the five router rules of infra/docker-compose.traefik.yml with the
+ * rendered host (`&&` escaped), the web's AUTH_URL and the cms's
+ * PUBLIC_URL, plus `cmsEnv` in the cms environment.
+ */
+function traefikComposeJson(hosts: TraefikHosts = {}, cmsEnv: Record<string, string> = {}): string {
+  const domain = hosts.domain ?? TEST_HOST;
+  const host = (name: string) => `Host(\`${name}\`)`;
+  const json = JSON.stringify(
+    {
+      services: {
+        cms: {
+          environment: {
+            ...cmsEnv,
+            CORS_ORIGIN: hosts.webUrl ?? `https://${domain}`,
+            PUBLIC_URL: hosts.cmsUrl ?? `https://${domain}`,
+          },
+          labels: {
+            "traefik.enable": "true",
+            "traefik.http.routers.sinnlos-cms.rule": `${host(hosts.cmsRouterDomain ?? domain)} && (PathPrefix(\`/api\`) || PathPrefix(\`/admin\`))`,
+            "traefik.http.routers.sinnlos-cms.priority": "50",
+          },
+        },
+        web: {
+          environment: {
+            AUTH_URL: hosts.webUrl ?? `https://${domain}`,
+            STRAPI_PUBLIC_URL: hosts.cmsUrl ?? `https://${domain}`,
+          },
+          labels: {
+            "traefik.http.routers.sinnlos-auth.rule": `${host(domain)} && PathPrefix(\`/api/auth\`)`,
+            "traefik.http.routers.sinnlos-live.rule": `${host(domain)} && PathPrefix(\`/live/\`)`,
+            "traefik.http.routers.sinnlos-signin.rule": `${host(domain)} && (Path(\`/sign-in\`) || Path(\`/register\`)) && Method(\`POST\`)`,
+            "traefik.http.routers.sinnlos-web.rule": host(domain),
+            "traefik.http.routers.sinnlos-web.service": "sinnlos-web",
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  return json.replace(
+    /[<>&]/g,
+    (c) => `${BACKSLASH}u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /**
  * The preflight of deploy.sh from its scan to "Preflight OK", in bash, with
- * compose answering `env` (the cms service) and the docker probes (JWT
- * rotation, datetime repair) stubbed to "nothing to do".
+ * compose answering `env` (the cms service) in a Traefik mode whose routers
+ * and public URLs point at `hosts` (by default one real host), and the
+ * docker probes (JWT rotation, datetime repair) stubbed to "nothing to do".
  */
-function preflightRun(env: Record<string, string>): {
+function preflightRun(
+  env: Record<string, string>,
+  hosts: TraefikHosts = {},
+): {
   status: number | null;
   stdout: string;
   stderr: string;
@@ -1095,13 +1239,18 @@ function preflightRun(env: Record<string, string>): {
     "datetime_repair_env_missing() { return 1; }",
     "compose_stub() {",
     "cat <<'COMPOSE_JSON'",
-    composeJson(env),
+    traefikComposeJson(hosts, env),
     "COMPOSE_JSON",
     "}",
     "COMPOSE=(compose_stub)",
     `PREFLIGHT_FATAL_KEYS=${shellQuote(shellAssignment("PREFLIGHT_FATAL_KEYS"))}`,
     `PREFLIGHT_WARN_KEYS=${shellQuote(shellAssignment("PREFLIGHT_WARN_KEYS"))}`,
     shellFunction("preflight_scan"),
+    shellFunction("compose_env_value"),
+    shellLine("TRAEFIK_HOST_RE="),
+    shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
+    shellFunction("url_host"),
+    shellFunction("traefik_host_scan"),
     DEPLOY.slice(from, to),
     "",
   ].join("\n");
@@ -1148,3 +1297,303 @@ describe("Entra preflight messages and exit code (D-ENTRA-01)", BASH_BUDGET, () 
     expect(run.stderr).toBe("");
   });
 });
+
+describe("Traefik host preflight: DOMAIN fits the instance (5A-T1)", BASH_BUDGET, () => {
+  const TRAEFIK = read("infra", "docker-compose.traefik.yml");
+  const LIVE_SMOKE = read("infra", "live-smoke.sh");
+
+  /** traefik_host_scan of deploy.sh on `json`: its "host …" and "problem …" lines. */
+  function hostScan(json: string): { host: string; problems: string[] } {
+    const run = runBash(
+      [
+        "set -euo pipefail",
+        shellFunction("compose_env_value"),
+        shellLine("TRAEFIK_HOST_RE="),
+        shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
+        shellFunction("url_host"),
+        shellFunction("traefik_host_scan"),
+        "traefik_host_scan <<'COMPOSE_JSON'",
+        json,
+        "COMPOSE_JSON",
+        "",
+      ].join("\n"),
+    );
+    expect(run.status, run.stderr).toBe(0);
+    const lines = run.stdout.split("\n").filter(Boolean);
+    return {
+      host: lines.find((l) => l.startsWith("host "))?.slice(5) ?? "",
+      problems: lines.filter((l) => l.startsWith("problem ")).map((l) => l.slice(8)),
+    };
+  }
+  const scan = (hosts: TraefikHosts) => hostScan(traefikComposeJson(hosts));
+
+  it("renders DOMAIN into every router rule, and hands the apps the URLs the scan reads", () => {
+    const rules = TRAEFIK.split("\n").filter((l) => /traefik\.http\.routers\.[^.]+\.rule=/.test(l));
+    expect(rules).toHaveLength(5);
+    for (const rule of rules) {
+      expect(rule).toMatch(/rule=Host\(`\$\{DOMAIN:\?[^}]*\}`\)/);
+    }
+    // The scan compares DOMAIN with the web's AUTH_URL and the cms's PUBLIC_URL.
+    expect(COMPOSE).toMatch(/^ {6}AUTH_URL: \$\{WEB_PUBLIC_URL\}$/m);
+    expect(COMPOSE).toMatch(/^ {6}PUBLIC_URL: \$\{CMS_PUBLIC_URL\}$/m);
+  });
+
+  it.skipIf(!HAS_BASH)("passes a bare host that is the host of both public URLs", () => {
+    expect(scan({})).toEqual({ host: TEST_HOST, problems: [] });
+    // Host names compare without case; a port or path in the URLs is no part of the host.
+    expect(
+      scan({
+        domain: "Intranet.ACME.test",
+        webUrl: `https://${TEST_HOST}:443/`,
+        cmsUrl: `HTTPS://${TEST_HOST}/`,
+      }).problems,
+    ).toEqual([]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses a DOMAIN that is not a bare host name", () => {
+    for (const domain of [
+      `https://${TEST_HOST}`,
+      `${TEST_HOST}:443`,
+      `${TEST_HOST}/`,
+      ` ${TEST_HOST}`,
+      "intranet_acme.test",
+      "-intranet.acme.test",
+      "intranet..acme.test",
+    ]) {
+      const result = scan({
+        domain,
+        webUrl: `https://${TEST_HOST}`,
+        cmsUrl: `https://${TEST_HOST}`,
+      });
+      expect(result.problems, domain).toEqual([
+        `DOMAIN=${domain} is not a bare host name (the name alone: no scheme, port, path or blank)`,
+      ]);
+    }
+  });
+
+  it.skipIf(!HAS_BASH)("refuses an empty DOMAIN and routers without a Host() or one host", () => {
+    expect(scan({ domain: "" }).problems).toEqual(["DOMAIN is empty"]);
+    expect(scan({ cmsRouterDomain: "other.acme.test" }).problems).toEqual([
+      `the Traefik routers match different hosts: Host(\`${TEST_HOST}\`) Host(\`other.acme.test\`) `,
+    ]);
+    expect(hostScan(composeJson({ AUTH_URL: `https://${TEST_HOST}` })).problems).toEqual([
+      "no Traefik router rule has a Host() matcher",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses the example host and other placeholders", () => {
+    for (const domain of [
+      "intranet.example.com",
+      "example.org",
+      "sinnlos.example.net",
+      "intranet.example",
+      "host.invalid",
+      "your-domain.tld",
+      "change-me.acme.test",
+    ]) {
+      // Even when the public URLs say the same (as in infra/.env.example).
+      expect(scan({ domain }).problems, domain).toEqual([
+        `DOMAIN=${domain} is a placeholder (infra/.env.example), not this instance's host name`,
+      ]);
+    }
+    expect(scan({ domain: "example-intranet.acme.test" }).problems).toEqual([]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses the values infra/.env.example ships", () => {
+    const example = read("infra", ".env.example");
+    const value = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(example)?.[1] ?? "";
+    expect(
+      scan({
+        domain: value("DOMAIN"),
+        webUrl: value("WEB_PUBLIC_URL"),
+        cmsUrl: value("CMS_PUBLIC_URL"),
+      }).problems,
+    ).toEqual([
+      "DOMAIN=intranet.example.com is a placeholder (infra/.env.example), not this instance's host name",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)(
+    "refuses a DOMAIN that is not the host of WEB_PUBLIC_URL or CMS_PUBLIC_URL",
+    () => {
+      expect(scan({ webUrl: "https://www.acme.test" }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of WEB_PUBLIC_URL (www.acme.test)`,
+      ]);
+      expect(scan({ cmsUrl: "https://cms.acme.test" }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of CMS_PUBLIC_URL (cms.acme.test)`,
+      ]);
+      expect(scan({ webUrl: "", cmsUrl: TEST_HOST }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of WEB_PUBLIC_URL (no http(s) URL)`,
+        `DOMAIN=${TEST_HOST} is not the host of CMS_PUBLIC_URL (no http(s) URL)`,
+      ]);
+    },
+  );
+
+  it.skipIf(!HAS_BASH)("fails the preflight, naming DOMAIN, and passes with a fitting one", () => {
+    const bad = preflightRun({}, { domain: "https://intranet.acme.test" });
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("ERROR: DOMAIN in infra/.env does not fit this instance:");
+    expect(bad.stderr).toContain(
+      "       - DOMAIN=https://intranet.acme.test is not a bare host name (the name alone: no scheme, port, path or blank)",
+    );
+    expect(bad.stderr).toContain("Preflight failed. Nothing was changed.");
+    expect(bad.stdout).not.toContain("Preflight OK");
+    const placeholder = preflightRun({}, { domain: "intranet.example.com" });
+    expect(placeholder.status).toBe(1);
+    expect(placeholder.stderr).toContain("DOMAIN=intranet.example.com is a placeholder");
+    const good = preflightRun({});
+    expect(good.status, good.stderr).toBe(0);
+    expect(good.stdout).toContain("Preflight OK");
+    expect(good.stderr).toBe("");
+  });
+
+  it("takes the smoke URL from the checked host, not from the owner's host name", () => {
+    const lines = DEPLOY.split("\n");
+    const ok = lines.indexOf('log "Preflight OK"');
+    const smoke = lines.indexOf('SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"');
+    expect(ok).toBeGreaterThan(0);
+    // Right after the preflight (so --check prints it), before any smoke-check use.
+    expect(smoke).toBeGreaterThan(ok);
+    expect(lines.slice(ok, smoke).join("\n")).not.toMatch(/\$\{SMOKE_URL\}/);
+    expect(DEPLOY).toContain('SMOKE_URL="${SMOKE_URL:-}"');
+    // No owner host name as a default in either script, comments aside.
+    for (const script of [DEPLOY, LIVE_SMOKE]) {
+      const code = script.split("\n").filter((l) => !l.trim().startsWith("#"));
+      expect(code.join("\n")).not.toContain("sinnlos.yurtbay.dev");
+    }
+    expect(LIVE_SMOKE).toContain(
+      'DOMAIN="${DOMAIN:-$(env_file_value DOMAIN "${SCRIPT_DIR}/.env")}"',
+    );
+    expect(LIVE_SMOKE).toContain('BASE_URL="https://${DOMAIN}"');
+    // live-smoke's bare host rule is deploy.sh's.
+    expect(LIVE_SMOKE).toContain(
+      `host_re=${shellLine("TRAEFIK_HOST_RE=").slice("TRAEFIK_HOST_RE=".length)}`,
+    );
+  });
+});
+
+describe("rollback hint: the target of the last-known-good state (FX35)", BASH_BUDGET, () => {
+  const COMPOSE_LINE =
+    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+  const SHA = "5be7dc7a1b2c";
+  const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+
+  it.skipIf(!HAS_BASH)("retags the SHA images of the state, never :rollback", () => {
+    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: SHA });
+    expectInOrder(stderr, [
+      `To roll back to the last-known-good deploy ${SHA} (2026-09-29T10:00:00+02:00), retag, then start without a build:`,
+      `docker tag infra-web:${SHA} infra-web:latest`,
+      `docker tag infra-cms:${SHA} infra-cms:latest`,
+      `${COMPOSE_LINE} up -d --no-build web cms`,
+      `Rollback target: the last-known-good state (${STATE_FILE_STUB}); a re-run of this`,
+    ]);
+    expect(stderr).not.toContain(":rollback");
+    // Every probe looks at the target's images.
+    expect(stdout).toContain(
+      `bounded docker image inspect -f {{json .Config.Cmd}} infra-cms:${SHA}`,
+    );
+    expect(stdout).toContain(
+      `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:${SHA}`,
+    );
+    expect(stdout).toContain(`--entrypoint grep infra-cms:${SHA} -q visibleToGuests`);
+    expect(stdout).not.toContain(":rollback");
+  });
+
+  it.skipIf(!HAS_BASH)("keeps every special case for a SHA target", () => {
+    const hint = rollbackHint('["pnpm","start"]', "2", {
+      ref: SHA,
+      imageCheck: 1,
+      webLabel: "<no value>",
+    });
+    expectInOrder(hint, [
+      `FIRST, before the retag: infra-cms:${SHA} predates poll guest access.`,
+      `${COMPOSE_LINE} stop cms`,
+      "rollback/revoke-guest-poll-vote.sql",
+      `docker tag infra-web:${SHA} infra-web:latest`,
+      `(infra-web:${SHA} predates the web's datetime port`,
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
+      `infra-cms:${SHA} starts with pnpm (Cmd ["pnpm","start"])`,
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /srv/infra/docker-compose.web-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+      "THEN, once the previous cms is up",
+      "rollback/revoke-guest-poll-vote.sql",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)("says there is nothing to roll back to on a fresh install", () => {
+    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: "" });
+    expect(stderr).toContain("There is no earlier release on this host to roll back to");
+    expect(stderr).not.toContain("docker tag");
+    expect(stdout).not.toContain("docker ");
+  });
+});
+
+describe(
+  "live-smoke switches come from compose, as the apps read them (B05, FX35)",
+  BASH_BUDGET,
+  () => {
+    /** live_smoke_mode of deploy.sh with compose answering `env` and PASSWORDS_FILE readable or not. */
+    function liveSmokeMode(
+      env: Record<string, string>,
+      opts: { passwords?: boolean; smokeEnv?: boolean } = {},
+    ) {
+      const script = [
+        "set -euo pipefail",
+        "compose_stub() {",
+        "cat <<'COMPOSE_JSON'",
+        composeJson(env),
+        "COMPOSE_JSON",
+        "}",
+        "COMPOSE=(compose_stub)",
+        'T="$(mktemp -d)"',
+        "trap 'rm -rf \"$T\"' EXIT",
+        opts.passwords ? 'echo "casey.jones@sinnlos.local pw" > "$T/pw"' : "",
+        'PASSWORDS_FILE="$T/pw"',
+        opts.smokeEnv
+          ? "export SMOKE_PASSWORD=a SMOKE_AUTHOR_PASSWORD=b"
+          : "unset SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD",
+        shellFunction("compose_env_value"),
+        shellFunction("live_smoke_mode"),
+        "live_smoke_mode",
+        "",
+      ].join("\n");
+      const res = runBash(script);
+      expect(res.status, res.stderr).toBe(0);
+      return res.stdout.trim();
+    }
+
+    it("reads LIVE_EVENTS_DISABLED from compose, not from the shell", () => {
+      expect(DEPLOY).not.toMatch(/\$\{LIVE_EVENTS_DISABLED/);
+      expect(shellFunction("live_smoke_mode")).toContain("compose_env_value LIVE_EVENTS_DISABLED");
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "skips it only for LIVE_EVENTS_DISABLED exactly 1 (the apps' rule)",
+      () => {
+        expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "1" }, { passwords: true })).toMatch(
+          /^skip: LIVE_EVENTS_DISABLED=1/,
+        );
+        for (const value of ["0", "", "true"]) {
+          expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: value }, { passwords: true }), value).toBe(
+            "run",
+          );
+        }
+      },
+    );
+
+    it.skipIf(!HAS_BASH)("runs it on an Entra-only instance without the credentials file", () => {
+      expect(
+        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "0" }),
+      ).toMatch(/^run \(Entra-only/);
+      // With local sign-in next to Entra the demo accounts sign in as usual.
+      expect(
+        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "1" }),
+      ).toMatch(/^skip: demo credentials file .* not readable/);
+    });
+
+    it.skipIf(!HAS_BASH)("needs the credentials file, or both passwords in the environment", () => {
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" })).toMatch(/^skip: demo credentials file/);
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" }, { passwords: true })).toBe("run");
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" }, { smokeEnv: true })).toBe("run");
+    });
+  },
+);

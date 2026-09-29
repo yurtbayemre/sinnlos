@@ -1,5 +1,4 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { DEMO_MODE } from "@/lib/config";
 import {
   isPreloadKind,
   loadPreload,
@@ -29,8 +28,9 @@ const NO_STORE = { "cache-control": "no-store" };
 const json = (body: unknown, status = 200) =>
   NextResponse.json(body, { status, headers: NO_STORE });
 
+/** DEMO_MODE is signed in too: getSession() answers DEMO_SESSION there (WD08). */
 async function signedIn(): Promise<boolean> {
-  return DEMO_MODE || (await getSession()) !== null;
+  return (await getSession()) !== null;
 }
 
 export async function GET(req: NextRequest) {
