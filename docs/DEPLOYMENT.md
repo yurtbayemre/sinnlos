@@ -960,10 +960,13 @@ infra/deploy.sh
    [§3.8](#upgrading-an-existing-instance-to-this-release)), then the deploy
    checks: one deploy per compose project at a time (`flock`, from
    util-linux), a clean checkout (a changed tracked file refuses the
-   deploy, and so does an untracked file where the Dockerfiles copy from,
-   `apps/cms`, `apps/web`, `package.json`, `pnpm-lock.yaml`,
-   `pnpm-workspace.yaml` and `tsconfig.base.json`, since the images would
-   contain it; other untracked files only earn a note) and the GitHub CI
+   deploy, and so does an untracked file or directory, an empty one
+   included, where the Dockerfiles copy from, `apps/cms`, `apps/web`,
+   `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml` and
+   `tsconfig.base.json`, since the images would contain it: an empty
+   `apps/web/app/` alone makes Next.js build that instead of `src/app`, and
+   every page answers 500; `git -C <checkout> clean -n -d` lists them without
+   removing anything; other untracked files only earn a note) and the GitHub CI
    result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
    none).
@@ -1370,8 +1373,8 @@ rollback; merged in order (5A, then 5B), batch 10 ships both together.
 
 - **`infra/deploy.sh`** ([§3.6](#36-deploy)): after the env preflight it
   takes a lock per compose project, refuses a checkout with changed tracked
-  files or with untracked files where the images are built from
-  (`apps/cms`, `apps/web`, the root manifests) and checks the GitHub CI result of the commit (a warning;
+  files or with untracked files or directories where the images are built
+  from (`apps/cms`, `apps/web`, the root manifests) and checks the GitHub CI result of the commit (a warning;
   `--require-green-ci` refuses). It builds, starts without a build, runs
   the smoke check and live-smoke, and only then tags the images
   `infra-{web,cms}:<sha>` and records them as last-known-good in
@@ -1422,11 +1425,13 @@ rollback; merged in order (5A, then 5B), batch 10 ships both together.
 **Before the deploy**
 
 1. The checkout must be clean: `git -C /home/bigemo/git/sinnlos status`
-   (your checkout path) lists no modified tracked file and no untracked
-   file under `apps/cms` or `apps/web` (nor an untracked `package.json`,
-   `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `tsconfig.base.json`: the
-   Dockerfiles copy those). `deploy.sh` now refuses either: commit, stash,
-   move or delete them first. Other untracked files only earn a note.
+   (your checkout path) lists no modified tracked file, and
+   `git -C /home/bigemo/git/sinnlos clean -n -d -- apps package.json
+   pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json` (a dry run that
+   removes nothing) lists no untracked file or directory, an empty one
+   included, where the Dockerfiles copy from. `deploy.sh` now refuses
+   either: commit, stash, move or delete them first. Other untracked files
+   only earn a note.
 2. `command -v flock` prints a path (util-linux; Debian and Ubuntu ship it).
    Note which image store the host uses: `docker info -f '{{.DriverStatus}}'`
    showing `io.containerd.snapshotter.v1` means the containerd image store,

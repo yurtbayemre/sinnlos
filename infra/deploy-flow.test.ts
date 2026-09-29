@@ -640,8 +640,17 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       },
       // An untracked file where the images are built from (not only noted).
       /* 15 */ {
-        before:
-          'unset SINNLOS_CHECKOUT; mkdir -p "$REPO/apps/web/app"; echo x > "$REPO/apps/web/app/route.ts"',
+        before: [
+          'unset SINNLOS_CHECKOUT; mkdir -p "$REPO/apps/web/src"; echo x > "$REPO/apps/web/src/page.ts"',
+          '"${G[@]}" add apps/web/src/page.ts; "${G[@]}" commit -q -m web',
+          'echo x > "$REPO/apps/web/src/route.ts"',
+        ].join("; "),
+        args: ["--dry-run"],
+      },
+      // An empty untracked directory: git status never lists it, and an empty
+      // apps/web/app/ would replace the web's src/app in the Next.js build.
+      /* 16 */ {
+        before: 'rm "$REPO/apps/web/src/route.ts"; mkdir "$REPO/apps/web/app"',
         args: ["--dry-run"],
       },
     ]);
@@ -662,14 +671,20 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(called(run, / build$| up -d/)).toEqual([]);
   });
 
-  it("refuses untracked files where the images are built from", () => {
-    const run = r[15];
-    expect(run.status).toBe(1);
-    expect(run.stderr).toContain("has untracked files where the web and cms images are built from");
-    expect(run.stderr).toContain("apps/web/app/route.ts");
-    // Elsewhere an untracked file is only a note (stray.txt, step 2).
-    expect(run.stderr).not.toContain("stray.txt");
-    expect(called(run, / build$| up -d/)).toEqual([]);
+  it("refuses untracked files or directories where the images are built from", () => {
+    for (const [run, path] of [
+      [r[15], "apps/web/src/route.ts"],
+      [r[16], "apps/web/app/"],
+    ] as const) {
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "has untracked files or directories where the web and cms images are",
+      );
+      expect(run.stderr.split("\n")).toContain(`         ${path}`);
+      // Elsewhere an untracked file is only a note (stray.txt, step 2).
+      expect(run.stderr).not.toContain("stray.txt");
+      expect(called(run, / build$| up -d/)).toEqual([]);
+    }
   });
 
   it("changes nothing with --dry-run, notes untracked files and plans the :rollback fallback", () => {

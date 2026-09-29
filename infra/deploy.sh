@@ -1056,15 +1056,20 @@ if [[ -n "${DIRTY}" ]]; then
 fi
 # The Dockerfiles copy apps/cms and apps/web whole, and the root manifests;
 # .dockerignore drops only build output and .env files. An untracked file
-# there would be built into images tagged as this commit.
+# there would be built into images tagged as this commit, and so would an
+# untracked directory, even an empty one, which `git status` never lists:
+# an empty apps/web/app/ makes Next.js build that (empty) app directory
+# instead of src/app (seen in the lane rehearsal: every page answered 500).
+# `git clean -n -d` (a dry run: it lists, never removes) names both, and
+# skips ignored files.
 BUILD_CONTEXT_PATHS=(apps/cms apps/web package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
-UNTRACKED_IN_BUILD="$(GIT_OPTIONAL_LOCKS=0 "${GIT[@]}" status --porcelain --untracked-files=all -- \
-  "${BUILD_CONTEXT_PATHS[@]}" | sed -n 's/^?? //p')"
+UNTRACKED_IN_BUILD="$("${GIT[@]}" clean -n -d -- "${BUILD_CONTEXT_PATHS[@]}" | sed -n 's/^Would remove //p')"
 if [[ -n "${UNTRACKED_IN_BUILD}" ]]; then
-  echo "ERROR: the checkout ${CHECKOUT} has untracked files where the web and cms images are built from;" >&2
-  echo "       the images would not be commit ${NEW_TAG}:" >&2
+  echo "ERROR: the checkout ${CHECKOUT} has untracked files or directories where the web and cms images are" >&2
+  echo "       built from; the images would not be commit ${NEW_TAG}:" >&2
   head -n 20 <<<"${UNTRACKED_IN_BUILD}" | sed 's/^/         /' >&2
-  echo "       Commit, move or delete them (git -C ${CHECKOUT} status), then re-run. Nothing was changed." >&2
+  echo "       Commit, move or delete them (git -C ${CHECKOUT} clean -n -d lists them), then re-run. Nothing" >&2
+  echo "       was changed." >&2
   exit 1
 fi
 UNTRACKED="$(GIT_OPTIONAL_LOCKS=0 "${GIT[@]}" status --porcelain --untracked-files=normal | sed -n 's/^?? //p')"
