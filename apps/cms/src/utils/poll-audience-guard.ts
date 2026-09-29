@@ -204,14 +204,6 @@ export async function flagLinkedRows(
   return toFlag;
 }
 
-/** `flagLinkedRows` of polls. */
-export function flagLinkedPollRows(
-  strapi: Pick<PollAudienceGuardHost, "db">,
-  documentIds: readonly string[],
-): Promise<number[]> {
-  return flagLinkedRows(strapi, POLL_UID, documentIds);
-}
-
 /** The poll documents an action touched: its params and its result. */
 export function affectedDocumentIds(params: unknown, result: unknown): string[] {
   const documentIds = new Set<string>();
