@@ -350,15 +350,25 @@ cms image does not write them back.
       `MS_CLIENT_SECRET` works as well and also hides that button; for the
       old 5.49 flow keep them.)
    2. Restart only the cms of this release on it, **not** with
-      `infra/deploy.sh`: a re-run tags the running images `:rollback` and
-      so replaces the images you want to go back to. From the checkout:
+      `infra/deploy.sh`: a re-run rebuilds and redeploys web and cms (and,
+      before batch 10, tagged the running images `:rollback`, replacing
+      the images you want to go back to). From the checkout:
       `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build cms`
       (on a standalone Caddy box, drop the second `-f`). Its boot turns
       e-mail sign-in back on and logs `[bootstrap] users-permissions
       providers synced (email=on, microsoft=off)`.
-   3. Roll both images back as the deploy's hint says (`docker tag … :rollback`,
-      then `up -d --no-build web cms`). E-mail sign-in works in the cms and
-      the web shows its form.
+   3. Roll both images back to the pair you are going back to, then
+      `up -d --no-build web cms` (with the overrides the target needs,
+      [§7.4](#74-update-procedure-production-safe)). From the first
+      recorded batch-10 deploy on, `deploy.sh` no longer moves `:rollback`:
+      the target its rollback hint names is the last-known-good SHA tag
+      (`grep '^TAG=' .git/sinnlos-deploy/infra.state`, then
+      `docker tag infra-web:<sha> infra-web:latest` and the same for the
+      cms), and an older release is one of the SHA tags
+      `docker images infra-web` still lists. `:rollback` names the images
+      that ran before the first deploy with the batch-10 `deploy.sh`; use
+      it only for those, or before that first deploy was recorded. E-mail
+      sign-in works in the cms and the web shows its form.
 
    Rolled back without that cms restart, the old cms keeps e-mail sign-in
    off: re-enable it in the Strapi admin panel (its admin accounts are not
