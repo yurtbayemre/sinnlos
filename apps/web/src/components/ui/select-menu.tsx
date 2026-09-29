@@ -32,6 +32,13 @@ type SelectMenuProps = {
   /** Shown before the value in the trigger (decorative). */
   icon?: ReactNode;
   disabled?: boolean;
+  /**
+   * Work started from the menu is still running (the locale switch): the
+   * trigger shows it (aria-busy, dimmed) but stays enabled, so Radix can
+   * give focus back to it when the menu closes. A disabled trigger cannot
+   * take focus, and the focus would end on <body>.
+   */
+  busy?: boolean;
   /** The trigger button (React 19: a plain prop, no forwardRef). */
   ref?: Ref<HTMLButtonElement>;
 };
@@ -55,6 +62,10 @@ type SelectMenuProps = {
  * Contract kept for classified-form and people-grid: the props and the
  * hidden input (`name`) that puts the value into the form's FormData — it
  * sits next to the trigger, never in the portal, so it stays in the form.
+ *
+ * Focus return needs an enabled trigger: Radix focuses it when the menu
+ * closes (after an option was picked, too). A caller whose onChange starts
+ * work passes `busy`, not `disabled`, for that time (the locale switcher).
  */
 export function SelectMenu({
   value,
@@ -67,6 +78,7 @@ export function SelectMenu({
   panelClassName,
   icon,
   disabled,
+  busy = false,
   ref,
 }: SelectMenuProps) {
   const id = useId();
@@ -92,8 +104,9 @@ export function SelectMenu({
           ref={ref}
           type="button"
           aria-labelledby={`${labelId} ${valueId}`}
+          aria-busy={busy || undefined}
           className={cn(
-            "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
+            "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 aria-busy:opacity-50",
             buttonClassName,
           )}
         >

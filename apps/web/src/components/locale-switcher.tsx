@@ -21,9 +21,13 @@ const LOCALES: { value: Locale; short: string; label: string }[] = [
  * panel portaled out of the blurred topbar. The closed trigger shows the
  * short code; its accessible name is "<label> <language>".
  *
- * The switch is awaited inside the transition, so the trigger stays
- * disabled until switchLocale has set the cookie and the page came back in
- * the new language (it used to re-enable as soon as the call started). A
+ * The switch is awaited inside the transition, so it counts as pending
+ * until switchLocale has set the cookie and the page came back in the new
+ * language (it used to end as soon as the call started). Meanwhile the
+ * trigger is `busy` (aria-busy, dimmed) and another pick is ignored, but
+ * the trigger stays ENABLED: the pending state commits before the menu
+ * closes, and Radix's focus return does nothing on a disabled button, so
+ * a keyboard user's focus ended on <body> after choosing a language. A
  * failed call (the web server unreachable) keeps the current language
  * instead of replacing the page with the error boundary; Next's control
  * flow (the sign-in redirect of an expired session) is rethrown.
@@ -34,6 +38,8 @@ export function LocaleSwitcher() {
   const [isPending, startTransition] = useTransition();
 
   const select = (value: string) => {
+    // One switch at a time: the trigger stays enabled while one runs.
+    if (isPending) return;
     const next = LOCALES.find((l) => l.value === value);
     if (!next || next.value === current) return;
     startTransition(async () => {
@@ -53,7 +59,7 @@ export function LocaleSwitcher() {
       options={LOCALES}
       ariaLabel={t("label")}
       align="right"
-      disabled={isPending}
+      busy={isPending}
       icon={<Languages aria-hidden="true" className="h-4 w-4 shrink-0" />}
       buttonClassName="h-9 gap-1 px-2.5 text-xs font-medium text-muted-foreground"
       panelClassName="w-36"

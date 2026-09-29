@@ -71,4 +71,12 @@ describe("SelectMenu", () => {
     const trigger = /<button[^>]*>/.exec(render({ disabled: true }))?.[0] ?? "";
     expect(trigger).toMatch(/\sdisabled=""/);
   });
+
+  it("marks a busy trigger with aria-busy and keeps it enabled (focus can return to it)", () => {
+    const busy = /<button[^>]*>/.exec(render({ busy: true }))?.[0] ?? "";
+    expect(busy).toContain('aria-busy="true"');
+    expect(busy).not.toMatch(/\sdisabled=""/);
+    const idle = /<button[^>]*>/.exec(render())?.[0] ?? "";
+    expect(idle).not.toMatch(/\saria-busy=/);
+  });
 });
