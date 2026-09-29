@@ -40,6 +40,10 @@ describe.skipIf(!built && !required)("dist", () => {
     expect((cjs.parseEntryRef as typeof source.parseEntryRef)("12")).toEqual({ id: 12 });
   });
 
+  // 30 s like the repo's other cold loads: the dynamic import goes through
+  // vitest's module runner, which transformed dist/esm in 5 s once under the
+  // full suite on a loaded machine (test:tz, Pacific/Auckland); alone it
+  // takes milliseconds.
   it("dist/esm is an ES module and exports exactly the source's names", async () => {
     expect(JSON.parse(readFileSync(join(ROOT, "dist", "esm", "package.json"), "utf8"))).toEqual({
       type: "module",
@@ -49,7 +53,7 @@ describe.skipIf(!built && !required)("dist", () => {
     expect(
       (esm.zonedDateKey as typeof source.zonedDateKey)("2026-09-30T22:30:00Z", "Europe/Berlin"),
     ).toBe("2026-10-01");
-  });
+  }, 30_000);
 
   it("ships the declarations package.json points at", () => {
     const manifest = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as {
