@@ -23,7 +23,9 @@
 #   2. The rollback target: the images of the last-known-good deploy,
 #      <project>-{web,cms}:<sha> from the state file (below). Without a usable
 #      state (the first run of this version of the script, or those images
-#      are gone) the running images are tagged :rollback, as before. The
+#      are gone) the running images are tagged :rollback, as before, and
+#      recorded in a marker file; a running image that cannot be tagged, or
+#      a marker that cannot be written, stops the run before the build. The
 #      running images are also tagged :pre-deploy, on every run, so they
 #      stay resolvable through the build (keep_running_images).
 #   3. Build web and cms (without BuildKit's default attestations, so an
@@ -635,8 +637,10 @@ bootstrap_rollback_intact() {
     [[ "$(docker image inspect -f '{{.Id}}' "${PROJECT}-cms:rollback" 2>/dev/null)" == "${BOOT_CMS_IMAGE}" ]]
 }
 
-# Writes BOOTSTRAP_FILE for the :rollback tags this run set; a failure only
-# warns (a later run then tags what runs, as before).
+# Writes BOOTSTRAP_FILE for the :rollback tags this run set. False when it
+# cannot (its temp file removed): without the marker, a re-run after a
+# deploy that failed after `up` would tag the failed images :rollback, so
+# the caller stops before the build.
 write_bootstrap() {
   local web_id cms_id tmp="${BOOTSTRAP_FILE}.tmp.$$"
   if web_id="$(docker image inspect -f '{{.Id}}' "${PROJECT}-web:rollback" 2>/dev/null)" &&
@@ -651,7 +655,7 @@ write_bootstrap() {
     echo "  kept in ${BOOTSTRAP_FILE} until the first deploy is recorded"
   else
     rm -f "${tmp}" 2>/dev/null || true
-    echo "  WARNING: could not write ${BOOTSTRAP_FILE}; a re-run before a recorded deploy tags what runs then." >&2
+    return 1
   fi
 }
 
@@ -700,22 +704,39 @@ resolve_rollback_target() {
   if [[ -e "${BOOTSTRAP_FILE}" ]]; then
     echo "  NOTE: the :rollback tags no longer name the images in ${BOOTSTRAP_FILE}; tagging what runs now."
   fi
+  # Every running image must resolve before either :rollback moves: a
+  # running image that cannot (containerd image store, no tag names it)
+  # would leave its service's :rollback on an older image, or none, next to
+  # the other service's current one. Refused before anything is tagged.
+  local entry
+  local -a running=() unresolved=()
   for svc in web cms; do
     container="${PROJECT}-${svc}-1"
     if img="$(docker inspect --format '{{.Image}}' "${container}" 2>/dev/null)" && [[ -n "${img}" ]]; then
-      if ((DRY_RUN)); then
-        echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:rollback"
-      elif ! docker tag "${img}" "${PROJECT}-${svc}:rollback"; then
-        echo "  ${container} runs ${img}, which cannot be resolved here any more (no tag references it):"
-        echo "  nothing to roll back to for ${svc}"
-        continue
+      if docker image inspect "${img}" >/dev/null 2>&1; then
+        running+=("${svc} ${img}")
       else
-        echo "  ${container} (${img}) -> ${PROJECT}-${svc}:rollback"
+        unresolved+=("${svc} ${img}")
       fi
-      tagged=$((tagged + 1))
     else
       echo "  ${container} not running — nothing to roll back to for ${svc}"
     fi
+  done
+  if ((${#unresolved[@]})); then
+    refuse_rollback_target "${unresolved[@]}"
+  fi
+  for entry in ${running[@]+"${running[@]}"}; do
+    svc="${entry%% *}"
+    img="${entry#* }"
+    container="${PROJECT}-${svc}-1"
+    if ((DRY_RUN)); then
+      echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:rollback"
+    elif docker tag "${img}" "${PROJECT}-${svc}:rollback"; then
+      echo "  ${container} (${img}) -> ${PROJECT}-${svc}:rollback"
+    else
+      refuse_rollback_target "${entry}"
+    fi
+    tagged=$((tagged + 1))
   done
   if ((tagged == 2)); then
     ROLLBACK_REF="rollback"
@@ -725,9 +746,36 @@ resolve_rollback_target() {
     ROLLBACK_REF="rollback"
     ROLLBACK_ORIGIN=":rollback (only one of web and cms ran before this deploy)"
   fi
-  if [[ "${ROLLBACK_REF}" == "rollback" ]] && ! ((DRY_RUN)); then
-    write_bootstrap
+  if [[ "${ROLLBACK_REF}" == "rollback" ]] && ! ((DRY_RUN)) && ! write_bootstrap; then
+    echo "ERROR: could not write ${BOOTSTRAP_FILE}; nothing was built. Without it, a re-run after a" >&2
+    echo "       deploy that failed after \`up\` would tag the failed images :rollback. The running" >&2
+    echo "       containers are untouched. Fix the cause (free space, the permissions of ${STATE_DIR})" >&2
+    echo "       and re-run." >&2
+    exit 1
   fi
+}
+
+# Step 2 without a usable state: a running web or cms image that cannot be
+# resolved or tagged leaves no whole :rollback target, so the run stops
+# before the build (a dry run says it would). $@ = "<svc> <image id>".
+refuse_rollback_target() {
+  local entry prefix="ERROR:"
+  if ((DRY_RUN)); then prefix="WOULD STOP:"; fi
+  local svc
+  for entry in "$@"; do
+    svc="${entry%% *}"
+    echo "${prefix} ${PROJECT}-${svc}-1 runs ${entry#* }, which no tag names any more: on the containerd" >&2
+    echo "       image store it cannot be tagged ${PROJECT}-${svc}:rollback. Without a last-known-good state" >&2
+    echo "       :rollback is the rollback target, so a failed deploy would have no rollback for ${svc} (only an" >&2
+    echo "       older ${PROJECT}-${svc}:rollback, or none, next to the other service's current image: never mix" >&2
+    echo "       releases)." >&2
+  done
+  echo "       Nothing was built; the running containers are untouched. Run that service from an image" >&2
+  echo "       that has a tag, its current :latest (check that it is the release to roll back to), then re-run:" >&2
+  for entry in "$@"; do
+    echo "                      ${COMPOSE[*]} up -d --no-build --force-recreate ${entry%% *}" >&2
+  done
+  exit 1
 }
 
 # Step 2, on every run: the images web and cms run now also get the tag

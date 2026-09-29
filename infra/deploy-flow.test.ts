@@ -25,7 +25,11 @@
  *   7. on the containerd image store (an image no tag references cannot be
  *      resolved), the running images keep a :pre-deploy tag through the
  *      build, so a re-run after a failed deploy records what runs, and a
- *      running image that cannot be resolved stops `record` before any tag.
+ *      running image that cannot be resolved stops `record` before any tag;
+ *   8. without a state, a running image that cannot be tagged :rollback
+ *      (next to an older :rollback of that service) or a bootstrap marker
+ *      that cannot be written stops the run before the build, and a dry run
+ *      says it would stop (B10-T2).
  * Each sequence runs in one bash process. Git Bash forks slowly (a stubbed
  * deploy costs about 6 s there, both sequences about 100 s), so on Windows
  * the two sequences run only with SINNLOS_SLOW_SHELL_TESTS=1; CI (Linux)
@@ -108,7 +112,8 @@ const COMPOSE_JSON = composeJson(STUB_HOST);
  * <cms-id>` (containers that run already), `ci <json-body>` (the GitHub
  * check-runs answer), KEEP (DEPLOY_KEEP_TAGS), and the STUB_* switches
  * (STUB_SMOKE_CODE, STUB_LIVE_RC, STUB_BUILD_FAIL, STUB_UP_FAIL,
- * STUB_TAG_FAIL, STUB_LOCK_HELD; STUB_CONTAINERD: an image id resolves only
+ * STUB_TAG_FAIL, STUB_LOCK_HELD, STUB_STATE_WRITE_FAIL,
+ * STUB_BOOTSTRAP_WRITE_FAIL; STUB_CONTAINERD: an image id resolves only
  * while a tag references it, as on the containerd image store, else once it
  * was built or ran; STUB_UP_KEEP: `up` keeps the containers that exist, as
  * compose does for unchanged content). Every build is a new image id.
@@ -151,7 +156,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL=",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -224,8 +229,14 @@ function deploys(steps: readonly Step[]): StepReport[] {
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
     "sleep() { :; }",
-    // STUB_STATE_WRITE_FAIL: the state file cannot be written (its mv fails).
-    'mv() { if [[ -n "$STUB_STATE_WRITE_FAIL" && "${*: -1}" == *.state ]]; then echo "mv: permission denied" >&2; return 1; fi; command mv "$@"; }',
+    // STUB_STATE_WRITE_FAIL / STUB_BOOTSTRAP_WRITE_FAIL: the state file or the
+    // bootstrap marker cannot be written (its mv fails).
+    "mv() {",
+    '  if [[ -n "$STUB_STATE_WRITE_FAIL" && "${*: -1}" == *.state ]] || [[ -n "$STUB_BOOTSTRAP_WRITE_FAIL" && "${*: -1}" == *.bootstrap ]]; then',
+    '    echo "mv: No space left on device" >&2; return 1',
+    "  fi",
+    '  command mv "$@"',
+    "}",
     "export -f docker curl flock timeout sleep resolvable mv",
   ];
   steps.forEach((step, n) => {
@@ -608,6 +619,92 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(done.stdout).toContain(":rollback kept from ");
       expect(done.state.WEB_IMAGE).toBe("sha256:web3");
       expect(done.bootstrap).toEqual([]);
+    });
+  },
+);
+
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh before its first recorded deploy: a :rollback it cannot take whole stops it (B10-T2)",
+  () => {
+    let r: StepReport[] = [];
+    const rollbackTags = (report: StepReport) =>
+      called(report, /^docker tag \S+ infra-(web|cms):rollback$/);
+    const builtOrStarted = (report: StepReport) => called(report, / build$| up -d/);
+    beforeAll(() => {
+      // The :rollback tags an older deploy.sh left (the release before the running one).
+      const olderRollback =
+        'echo sha256:web8 > "$T/img/infra-web__rollback"; echo sha256:cms8 > "$T/img/infra-cms__rollback"';
+      r = deploys([
+        // containerd store: no tag names the running web image any more; the cms image has one.
+        /* 0 */ {
+          before: `STUB_CONTAINERD=1; running sha256:ghostweb sha256:cms9; echo sha256:cms9 > "$T/img/infra-cms__latest"; ${olderRollback}`,
+        },
+        /* 1 */ { args: ["--dry-run"] },
+        // The web recreated from a tagged image; the bootstrap marker cannot be written …
+        /* 2 */ {
+          before:
+            'echo sha256:web9 > "$T/img/infra-web__latest"; running sha256:web9 sha256:cms9; STUB_BOOTSTRAP_WRITE_FAIL=1',
+        },
+        // … and the re-run once it can.
+        /* 3 */ { before: "STUB_BOOTSTRAP_WRITE_FAIL=" },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("refuses before the build when a running image cannot be tagged :rollback", () => {
+      const run = r[0];
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "ERROR: infra-web-1 runs sha256:ghostweb, which no tag names any more: on the containerd",
+      );
+      expect(run.stderr).toContain("a failed deploy would have no rollback for web");
+      expect(run.stderr).toContain("up -d --no-build --force-recreate web\n");
+      expect(run.stderr).toContain("Nothing was built; the running containers are untouched.");
+      expect(builtOrStarted(run)).toEqual([]);
+      // Neither :rollback moved (never the cms's current image next to the older web one) …
+      expect(rollbackTags(run)).toEqual([]);
+      expect(run.images).toEqual(
+        expect.arrayContaining([
+          "infra-web:rollback=sha256:web8",
+          "infra-cms:rollback=sha256:cms8",
+        ]),
+      );
+      // … and no marker keeps a pair for later runs.
+      expect(run.bootstrap).toEqual([]);
+      expect(run.state).toEqual({});
+    });
+
+    it("says in a dry run that the deploy would stop there", () => {
+      const dry = r[1];
+      expect(dry.status).toBe(1);
+      expect(dry.stderr).toContain("WOULD STOP: infra-web-1 runs sha256:ghostweb");
+      expect(dry.stdout).not.toContain(
+        "would tag infra-web-1 (sha256:ghostweb) as infra-web:rollback",
+      );
+      expect(called(dry, /^docker tag |compose .* (build|up)/)).toEqual([]);
+      expect(dry.bootstrap).toEqual([]);
+    });
+
+    it("stops before the build when the bootstrap marker cannot be written, and the re-run goes on", () => {
+      const [unwritten, rerun] = [r[2], r[3]];
+      expect(unwritten.status).toBe(1);
+      expect(unwritten.stderr).toContain("mv: No space left on device");
+      expect(unwritten.stderr).toMatch(
+        /ERROR: could not write \S+\/infra\.bootstrap; nothing was built/,
+      );
+      expect(builtOrStarted(unwritten)).toEqual([]);
+      expect(unwritten.bootstrap).toEqual([]);
+      expect(unwritten.state).toEqual({});
+      expect(rerun.status, rerun.stderr).toBe(0);
+      expect(rerun.stdout).toContain("until the first deploy is recorded");
+      expect(rerun.images).toEqual(
+        expect.arrayContaining([
+          "infra-web:rollback=sha256:web9",
+          "infra-cms:rollback=sha256:cms9",
+        ]),
+      );
+      expect(rerun.state.WEB_IMAGE).toMatch(/^sha256:web\d+$/);
+      expect(rerun.state.WEB_IMAGE).not.toBe("sha256:web9");
+      expect(rerun.bootstrap).toEqual([]);
     });
   },
 );

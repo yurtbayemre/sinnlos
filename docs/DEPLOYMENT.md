@@ -1111,7 +1111,11 @@ infra/deploy.sh
    Without a usable state (the first run of this version of `deploy.sh`,
    or those images are gone) it tags the running images `:rollback`, as
    before, and a re-run before the first recorded deploy keeps that
-   `:rollback` (`.git/sinnlos-deploy/infra.bootstrap`). On every run it also tags the running images
+   `:rollback` (`.git/sinnlos-deploy/infra.bootstrap`). A running image it
+   cannot tag (containerd image store, no tag names it any more) or a
+   marker it cannot write stops the run before the build, so `:rollback`
+   never pairs an older image of one service with the current one of the
+   other. On every run it also tags the running images
    `infra-{web,cms}:pre-deploy` (moved each run, never pruned, never a
    rollback target): on Docker's containerd image store an image that no
    tag names can no longer be resolved by its id, and without that tag a
@@ -1736,7 +1740,11 @@ needs setting)
      the containerd store. **For this one run the rollback target is
      `:rollback`, the batch 9 images.** A re-run after a failure keeps that
      `:rollback` (`:rollback kept from <time>`) instead of tagging the
-     failed images;
+     failed images. If a running image cannot be tagged `:rollback` (on the
+     containerd store: no tag names it any more; the `--dry-run` of step 4
+     then prints `WOULD STOP:`) or `infra.bootstrap` cannot be written, the
+     run stops here with `ERROR:` and the fix, before anything is built,
+     the stack untouched; re-run once it is done;
    - builds both images (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`) and runs
      `up -d --no-build`: db (log rotation, alias), cms (new image, no
      capabilities, `STRAPI_TELEMETRY_DISABLED`, `CRON_ENABLED`, its own
