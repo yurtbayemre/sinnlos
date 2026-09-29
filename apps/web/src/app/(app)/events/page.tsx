@@ -209,7 +209,8 @@ function EventCard({
 }: {
   event: Event;
   muted?: boolean;
-  t: (key: string, values?: Record<string, string>) => string;
+  /** The page's `events` translator (typed keys and arguments, AC03). */
+  t: Awaited<ReturnType<typeof getTranslations<"events">>>;
   /** next-intl's formatter: formats in APP_TIME_ZONE. */
   format: DateTimeFormatter;
   /** APP_TIME_ZONE, for the calendar-day comparisons. */

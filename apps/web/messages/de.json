@@ -1,17 +1,13 @@
 {
   "common": {
-    "appName": "Sinnlos Intranet",
     "selfHosted": "Self-hosted Intranet · v0.1",
     "loading": "Wird geladen…",
     "noResults": "Keine Ergebnisse gefunden.",
     "download": "Herunterladen",
     "updated": "Aktualisiert",
     "viewAll": "Alle anzeigen",
-    "back": "Zurück",
     "save": "Speichern",
     "saving": "Speichert…",
-    "send": "Senden",
-    "sending": "Sendet…",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "or": "oder",
@@ -130,7 +126,6 @@
     "teams": "Teams",
     "reportsTo": "Berichtet an",
     "directReports": "Direkte Mitarbeiter",
-    "collapse": "Einklappen",
     "expand": "Ausklappen",
     "emptyTitle": "Noch keine Personen",
     "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden.",
@@ -497,10 +492,7 @@
     "sendComment": "Kommentar senden",
     "sendFailed": "Kommentar konnte nicht gesendet werden – bitte erneut versuchen.",
     "deleteFailed": "Kommentar konnte nicht gelöscht werden – bitte erneut versuchen.",
-    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen.",
-    "today": "heute",
-    "yesterday": "gestern",
-    "daysAgo": "vor {days} T."
+    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen."
   },
   "relativeTime": {
     "justNow": "gerade eben",
@@ -515,11 +507,7 @@
     "markAllRead": "Alle als gelesen markieren",
     "markReadFailed": "Konnte nicht als gelesen markiert werden – bitte erneut versuchen.",
     "noNotificationsYet": "Noch keine Benachrichtigungen",
-    "unread": "ungelesen",
-    "justNow": "gerade eben",
-    "minutesAgo": "vor {min} Min.",
-    "hoursAgo": "vor {hours} Std.",
-    "daysAgo": "vor {days} T."
+    "unread": "ungelesen"
   },
   "search": {
     "label": "Suche (Strg+K)",
@@ -548,9 +536,6 @@
     "notFound": "Dieser Eintrag existiert nicht mehr – bitte laden Sie die Seite neu.",
     "conflict": "Jemand hat das inzwischen geändert – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
     "unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal."
-  },
-  "locale": {
-    "label": "Sprache"
   },
   "localeSwitcher": {
     "label": "Sprache wählen"

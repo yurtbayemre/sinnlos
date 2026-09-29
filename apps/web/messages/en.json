@@ -1,17 +1,13 @@
 {
   "common": {
-    "appName": "Sinnlos Intranet",
     "selfHosted": "Self-hosted intranet · v0.1",
     "loading": "Loading…",
     "noResults": "No results found.",
     "download": "Download",
     "updated": "Updated",
     "viewAll": "View all",
-    "back": "Back",
     "save": "Save changes",
     "saving": "Saving…",
-    "send": "Send",
-    "sending": "Sending…",
     "cancel": "Cancel",
     "delete": "Delete",
     "or": "or",
@@ -130,7 +126,6 @@
     "teams": "Teams",
     "reportsTo": "Reports to",
     "directReports": "Direct reports",
-    "collapse": "Collapse",
     "expand": "Expand",
     "emptyTitle": "No people yet",
     "emptyHint": "Users will appear here once they sign in.",
@@ -497,10 +492,7 @@
     "sendComment": "Send comment",
     "sendFailed": "Couldn't post your comment — please try again.",
     "deleteFailed": "Couldn't delete the comment — please try again.",
-    "reactionFailed": "Couldn't save your reaction — please try again.",
-    "today": "today",
-    "yesterday": "yesterday",
-    "daysAgo": "{days}d ago"
+    "reactionFailed": "Couldn't save your reaction — please try again."
   },
   "relativeTime": {
     "justNow": "just now",
@@ -515,11 +507,7 @@
     "markAllRead": "Mark all read",
     "markReadFailed": "Couldn't mark as read — please try again.",
     "noNotificationsYet": "No notifications yet",
-    "unread": "unread",
-    "justNow": "just now",
-    "minutesAgo": "{min}m ago",
-    "hoursAgo": "{hours}h ago",
-    "daysAgo": "{days}d ago"
+    "unread": "unread"
   },
   "search": {
     "label": "Search (Ctrl+K)",
@@ -548,9 +536,6 @@
     "notFound": "This item no longer exists — reload the page.",
     "conflict": "Someone changed this in the meantime — reload the page and try again.",
     "unavailable": "The intranet cannot be reached right now — please try again in a moment."
-  },
-  "locale": {
-    "label": "Language"
   },
   "localeSwitcher": {
     "label": "Choose language"

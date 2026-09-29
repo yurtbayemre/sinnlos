@@ -24,9 +24,14 @@ type QuickLink = {
 const CATEGORY_ORDER = ["hr", "it", "tools", "extern"] as const;
 type Category = (typeof CATEGORY_ORDER)[number];
 
+/** A category with its own heading (quickLinks.categories.<category>). */
+function isCategory(value: string): value is Category {
+  return (CATEGORY_ORDER as readonly string[]).includes(value);
+}
+
 function categoryOf(link: QuickLink): Category {
   const c = link.category ?? "";
-  return (CATEGORY_ORDER as readonly string[]).includes(c) ? (c as Category) : "tools";
+  return isCategory(c) ? c : "tools";
 }
 
 export async function QuickLinks({ items }: { items: QuickLink[] }) {

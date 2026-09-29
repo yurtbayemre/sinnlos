@@ -196,7 +196,7 @@ function StatCard({
 }
 
 /** The greeting of the wall-clock hour `h` (0-23) in APP_TIME_ZONE, not the process zone. */
-function greeting(t: (key: string) => string, h: number) {
+function greeting(t: Awaited<ReturnType<typeof getTranslations<"dashboard">>>, h: number) {
   if (h < 12) return t("goodMorning");
   if (h < 18) return t("goodAfternoon");
   return t("goodEvening");

@@ -9,9 +9,9 @@ import {
   updateClassified,
   type ClassifiedFormState,
 } from "@/lib/classified-actions";
+import { AD_CATEGORY_LABELS } from "@/lib/classified-labels";
 import {
   AD_CATEGORIES,
-  AD_CATEGORY_KEYS,
   AD_DEFAULT_DURATION_DAYS,
   AD_DURATION_DAYS,
   AD_IMAGE_TYPES,
@@ -78,7 +78,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
   const errorValues = { count: MAX_AD_IMAGES, size: MAX_AD_IMAGE_MB };
   const serverError = state.error
     ? // Error codes come from the action; map to translated messages.
-      t(`error_${state.error}` as Parameters<typeof t>[0], errorValues)
+      t(`error_${state.error}`, errorValues)
     : null;
 
   const onFilesChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -133,7 +133,7 @@ export function ClassifiedForm({ initial }: { initial?: ClassifiedFormInitial })
           buttonClassName="w-full"
           options={AD_CATEGORIES.map((c) => ({
             value: c,
-            label: t(AD_CATEGORY_KEYS[c] as Parameters<typeof t>[0]),
+            label: t(AD_CATEGORY_LABELS[c]),
           }))}
         />
       </div>
