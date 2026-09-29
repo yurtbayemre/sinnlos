@@ -1877,7 +1877,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    ```bash
    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|department-audience)\]|Strapi started'
-   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -v ' refused: '
    ```
 
    `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
@@ -1888,7 +1888,14 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    department)` with N and M the `linked` counts of step 6 (a type with
    none is left out, and there is no line when neither has one; later
    boots print none), `Strapi started successfully`; the second command
-   prints nothing.
+   prints nothing. It leaves out the web's warnings `<action> refused:
+   <status> <…Error> → <code>` (for example `[comments] add refused: 400
+   BadRequestError → notFound`): since this batch the web logs every
+   refused user action that way, a vote on a closed poll or a comment on
+   an announcement that is gone, and those are no fault. Look at every
+   line it does print: an action's `… failed → <code>` (the cms did not
+   answer, or answered 5xx or 428), a `[locale]` line, or `[auth] sign-in
+   failed`.
 
    **If the cms does not start** and logs `[department-audience] could
    not backfill the audience of documents and quick links (<reason>);
