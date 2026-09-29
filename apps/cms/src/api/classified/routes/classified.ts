@@ -2,9 +2,10 @@ import { factories } from "@strapi/strapi";
 import type { RoleType } from "../../../bootstrap/roles";
 
 /**
- * Reads are open to every role including guest (an internal flea market is
- * company-public; expired ads are merely filtered client-side, they are not
- * confidential). Create is limited via the bootstrap permission matrix to
+ * Reads are granted to the five staff roles and the `authenticated`
+ * fallback, not guest (ads populate author contact data; see the guest
+ * block in bootstrap/permission-matrix.ts). Expired ads are merely filtered
+ * client-side. Create is limited via the bootstrap permission matrix to
  * member/team_lead/department_head/editor/admin — the controller then pins
  * the author to the caller. update/delete additionally require ownership
  * via the policy below: editing bypasses ownership only for admins, while

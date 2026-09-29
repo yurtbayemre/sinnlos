@@ -1682,7 +1682,8 @@ grants, policies and schema.
 **A normal deploy with `infra/deploy.sh`.** No env, schema, permission,
 compose, edge or Traefik change, nothing in the database. The cms image is
 rebuilt as in every deploy and its container recreated; this lane changes
-one code comment in it and none of its behaviour. Only the web changes.
+code comments in it (the classified routes and the permission matrix) and
+none of its behaviour. Only the web changes.
 
 1. **Deploy:** `infra/deploy.sh`.
 2. **After: as a guest** (any guest account; on a phone or a narrow
