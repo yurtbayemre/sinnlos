@@ -279,6 +279,16 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 6 */ { before: "STUB_UP_FAIL=; KEEP=2" },
         /* 7 */ { before: "commit" },
         /* 8 */ { before: "commit; STUB_LIVE_NOFRAME=1" },
+        // No demo credentials: live-smoke is skipped, and nothing is recorded …
+        /* 9 */ {
+          before: "commit; STUB_LIVE_NOFRAME=",
+          env: { PASSWORDS_FILE: "/nonexistent/pw" },
+        },
+        // … unless asked to.
+        /* 10 */ {
+          env: { PASSWORDS_FILE: "/nonexistent/pw" },
+          args: ["--record-without-live-smoke"],
+        },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -380,6 +390,26 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(run.state.LIVE_SMOKE).toBe("passed (notification frame not checked)");
       expect(tagOf(run)).not.toBe(tagOf(r[7]));
       expect(r[7].state.LIVE_SMOKE).toBe("passed");
+    });
+
+    it("records nothing when live-smoke lacked the demo credentials, unless told to", () => {
+      const [before, skipped, forced] = [r[8], r[9], r[10]];
+      expect(skipped.status, skipped.stderr).toBe(0);
+      expect(skipped.stdout).toContain("live-smoke SKIPPED: demo credentials file /nonexistent/pw");
+      expect(skipped.stderr).toContain(
+        "WARNING: live-smoke did not run; this deploy is NOT recorded as last-known-good",
+      );
+      expect(skipped.stdout).toContain("Deploy complete, NOT recorded as last-known-good.");
+      expect(skipped.state).toEqual(before.state);
+      expect(skipped.history).toEqual(before.history);
+      expect(
+        called(skipped, /^docker tag \S+ infra-(web|cms):[0-9a-f]{12}$|^docker image rm/),
+      ).toEqual([]);
+      expect(forced.status, forced.stderr).toBe(0);
+      expect(forced.state.SHA).not.toBe(before.state.SHA);
+      expect(forced.state.LIVE_SMOKE).toMatch(
+        /^skip: demo credentials file \/nonexistent\/pw not readable/,
+      );
     });
 
     it("moves the state on the next good deploy, and prunes SHA tags beyond DEPLOY_KEEP_TAGS", () => {
@@ -516,6 +546,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       /* 11 */ { env: { ...STAGING, DEPLOY_SEPARATE_EDGE: "0" } },
       // … and with its own of each, it deploys.
       /* 12 */ { env: { ...STAGING, DEPLOY_SEPARATE_EDGE: "1" } },
+      /* 13 */ { env: { PASSWORDS_FILE: "/nonexistent/pw" }, args: ["--dry-run"] },
     ]);
   }, SEQUENCE_BUDGET);
 
@@ -572,6 +603,13 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       ]),
     );
     expect(run.state.WEB_IMAGE).toBe("sha256:web1");
+  });
+
+  it("plans no record when live-smoke would lack the demo credentials", () => {
+    const run = r[13];
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain("5. NOT recorded: live-smoke would not run");
+    expect(run.stdout).not.toContain("5. tag ");
   });
 
   it("plans a dry run from the state, and changes nothing", () => {

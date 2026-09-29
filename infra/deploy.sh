@@ -29,7 +29,11 @@
 #   4. Curl smoke check of the live site, then infra/live-smoke.sh.
 #   5. Only after both passed: tag the images <project>-{web,cms}:<sha> (the
 #      first 12 characters of the commit), record them as last-known-good in
-#      the state file, and prune older SHA tags (DEPLOY_KEEP_TAGS, 5).
+#      the state file, and prune older SHA tags (DEPLOY_KEEP_TAGS, 5). A
+#      live-smoke that was skipped for want of the demo credentials file
+#      records nothing (--record-without-live-smoke records anyway); one
+#      skipped for LIVE_EVENTS_DISABLED=1, or the datetime check alone on an
+#      Entra-only instance, counts as passed.
 # Any failure from step 3 on prints the rollback commands for the target of
 # step 2 (an ERR trap catches the unexpected ones, tagging included); before
 # step 3 the running containers are untouched.
@@ -41,6 +45,9 @@
 #   infra/deploy.sh --check             # env preflight only (validate infra/.env), deploys nothing
 #   infra/deploy.sh --dry-run           # every check, then the plan; changes nothing
 #   infra/deploy.sh --require-green-ci  # refuse a commit without green GitHub CI
+#   infra/deploy.sh --record-without-live-smoke
+#                                       # record it as last-known-good although
+#                                       # live-smoke lacked the demo credentials
 #
 # Parameters (environment; the defaults are the owner's production host):
 #   SMOKE_URL         https://sinnlos.yurtbay.dev (smoke check and live-smoke)
@@ -59,8 +66,9 @@ set -Eeuo pipefail
 CHECK_ONLY=0
 DRY_RUN=0
 REQUIRE_GREEN_CI=0
+RECORD_WITHOUT_LIVE_SMOKE=0
 usage() {
-  echo "usage: infra/deploy.sh [--check | --dry-run] [--require-green-ci]" >&2
+  echo "usage: infra/deploy.sh [--check | --dry-run] [--require-green-ci] [--record-without-live-smoke]" >&2
   exit 2
 }
 for arg in "$@"; do
@@ -68,6 +76,7 @@ for arg in "$@"; do
     --check) CHECK_ONLY=1 ;;
     --dry-run) DRY_RUN=1 ;;
     --require-green-ci) REQUIRE_GREEN_CI=1 ;;
+    --record-without-live-smoke) RECORD_WITHOUT_LIVE_SMOKE=1 ;;
     *) usage ;;
   esac
 done
@@ -870,6 +879,15 @@ live_smoke_mode() {
   fi
 }
 
+# True (0) when LIVE_SMOKE_MODE says live-smoke does not run for want of the
+# demo credentials (a typo in PASSWORDS_FILE, the wrong user) and
+# --record-without-live-smoke was not given: step 5 then records nothing,
+# as the SSE pipeline went unverified. LIVE_EVENTS_DISABLED=1 (SSE off on
+# purpose) and an Entra-only instance (the datetime check alone) record.
+unrecorded_live_smoke_skip() {
+  [[ "${LIVE_SMOKE_MODE}" == "skip: demo credentials"* ]] && ! ((RECORD_WITHOUT_LIVE_SMOKE))
+}
+
 # --- Deploy checks (FX35): lock, checkout, CI ---------------------------------
 PHASE="checks"
 log "Deploy checks: lock, checkout, CI"
@@ -977,7 +995,13 @@ if ((DRY_RUN)); then
   resolve_rollback_target
   echo "     -> ${ROLLBACK_ORIGIN:-none: nothing ran here before (first install)}"
   echo "  3. BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, then ${COMPOSE[*]} up -d --no-build"
-  echo "  4. smoke check ${SMOKE_URL}; live-smoke: $(live_smoke_mode)"
+  LIVE_SMOKE_MODE="$(live_smoke_mode)"
+  echo "  4. smoke check ${SMOKE_URL}; live-smoke: ${LIVE_SMOKE_MODE}"
+  if unrecorded_live_smoke_skip; then
+    echo "  5. NOT recorded: live-smoke would not run for want of the demo credentials (--record-without-live-smoke records anyway)"
+    log "Dry run complete: nothing was changed."
+    exit 0
+  fi
   echo "  5. tag ${PROJECT}-{web,cms}:${NEW_TAG} (commit ${HEAD_SHA}), record ${STATE_FILE}"
   PRUNE="$(tags_to_prune "${NEW_TAG}" | tr '\n' ' ')"
   echo "     and prune SHA tags beyond the newest ${KEEP_TAGS}: ${PRUNE:-none}"
@@ -1111,6 +1135,14 @@ else
 fi
 
 # --- 5. Last-known-good -----------------------------------------------------
+if unrecorded_live_smoke_skip; then
+  echo "WARNING: live-smoke did not run; this deploy is NOT recorded as last-known-good (the rollback target" >&2
+  echo "         stays ${ROLLBACK_ORIGIN:-as it was}). Run infra/live-smoke.sh with the demo credentials, then" >&2
+  echo "         re-run with a readable PASSWORDS_FILE, or with --record-without-live-smoke." >&2
+  PHASE="done"
+  log "Deploy complete, NOT recorded as last-known-good."
+  exit 0
+fi
 PHASE="record"
 log "Recording ${PROJECT}-{web,cms}:${NEW_TAG} as last-known-good"
 record_last_known_good

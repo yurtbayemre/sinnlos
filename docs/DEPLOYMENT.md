@@ -989,12 +989,20 @@ infra/deploy.sh
    `LIVE_SMOKE=passed (notification frame not checked)`. A failed live-smoke
    **fails the deploy**; it is skipped with `LIVE_EVENTS_DISABLED=1` (read
    from the env compose hands the apps) or when the demo credentials file
-   is absent (then run `infra/live-smoke.sh` by hand), and on an Entra-only
-   instance it runs the datetime check only.
+   is not readable, and on an Entra-only instance it runs the datetime
+   check only.
 5. Only after both passed: tags the images web and cms now run as
    `infra-{web,cms}:<sha>`, records them in the state file as
    last-known-good, and removes the SHA tags beyond the newest five
-   (`DEPLOY_KEEP_TAGS`).
+   (`DEPLOY_KEEP_TAGS`). A skip for `LIVE_EVENTS_DISABLED=1` and the
+   datetime check alone on an Entra-only instance count as passed. A
+   live-smoke skipped for want of the credentials file (a typo in
+   `PASSWORDS_FILE`, the wrong user) records **nothing**: the deploy ends
+   with `WARNING: live-smoke did not run; this deploy is NOT recorded as
+   last-known-good`, and the rollback target stays the previous one. Run
+   `infra/live-smoke.sh` by hand, then re-run with a readable
+   `PASSWORDS_FILE`, or with `--record-without-live-smoke` to record it
+   anyway.
 
 A failure from step 3 on prints the rollback commands for the target of
 step 2 (an ERR trap catches the unexpected ones, a failed tag included);
@@ -1409,6 +1417,11 @@ usual.
    running images `:rollback` (no state yet), exactly as before, and a
    failure prints the `:rollback` commands. After the smoke check and
    live-smoke it prints `Recording infra-{web,cms}:<sha> as last-known-good`.
+   If it ends with `WARNING: live-smoke did not run; this deploy is NOT
+   recorded as last-known-good`, the credentials file of step 3 was not
+   readable: nothing was recorded, so fix `PASSWORDS_FILE` and re-run, or
+   run `infra/live-smoke.sh` by hand and re-run with
+   `--record-without-live-smoke`.
 
 **After the deploy**
 
