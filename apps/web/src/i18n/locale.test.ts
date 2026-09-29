@@ -5,8 +5,9 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * The web's language (AC04, owner decision 2026-09-29): the `locale`
  * cookie wins; without one, DEFAULT_LOCALE; unset or invalid, English —
- * the same default as compose, the .env examples, the user schema and the
- * cms's DIGEST_DEFAULT_LOCALE. next/headers' cookie jar is stubbed.
+ * the same default as compose, the .env examples and the cms's
+ * DIGEST_DEFAULT_LOCALE (the user schema's value states the intent only,
+ * see below). next/headers' cookie jar is stubbed.
  */
 const jar = vi.hoisted(() => ({ locale: undefined as string | undefined }));
 vi.mock("next/headers", () => ({
@@ -63,7 +64,11 @@ describe("every shipped default language is English (AC04)", () => {
   const repo = (path: string) =>
     readFileSync(join(__dirname, "../../../..", path), "utf8").replace(/\r\n/g, "\n");
 
-  it("the user schema's locale defaults to en", () => {
+  // Intent only: Strapi's i18n plugin replaces the `locale` attribute of
+  // every content type at register (@strapi/i18n extendContentTypes, no
+  // default), so this value never reaches a row. New users start with
+  // locale NULL, and the digest falls back to DIGEST_DEFAULT_LOCALE.
+  it("the user schema's locale default reads en (documents the intent)", () => {
     const schema = JSON.parse(
       repo("apps/cms/src/extensions/users-permissions/content-types/user/schema.json"),
     ) as { attributes: { locale: { default?: string } } };

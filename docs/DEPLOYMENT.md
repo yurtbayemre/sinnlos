@@ -1613,11 +1613,16 @@ defaults. The cms changes only the digest language.
   - The web's built-in default is English when `DEFAULT_LOCALE` is unset or
     invalid (it was German). Compose has passed `DEFAULT_LOCALE` with the
     default `en` for a while, so a compose deployment sees no change.
-  - The user schema's `locale` default stays `en`; it applies to new users
-    only. Existing users keep their stored value. Most of them hold `en`,
-    the value the schema gave them when they were created, even if they
-    read the German UI; their digests stay English until they switch the
-    language once (any switch stores it).
+  - Users without a stored language get their digests in
+    `DIGEST_DEFAULT_LOCALE`. That is every user who never used the language
+    switch, new registrations and Microsoft-provisioned users included.
+    The user schema's `locale` default (`en`) has no effect: Strapi's i18n
+    plugin replaces the `locale` attribute of every content type at
+    startup, so new user rows start without a language (the database
+    column is empty). Setting `DIGEST_DEFAULT_LOCALE=de` therefore switches
+    the digests of all these users to German, not only those of new users.
+    A user who switches the language once (any switch stores it) gets
+    their own language from then on.
 
 **A normal deploy with `infra/deploy.sh`.** No schema, permission, edge or
 Traefik change; the cms and the web can be deployed in either order.
@@ -1625,7 +1630,14 @@ Traefik change; the cms and the web can be deployed in either order.
 1. **Optional env:** an instance whose users should get German digests by
    default sets `DIGEST_DEFAULT_LOCALE=de` (and `DEFAULT_LOCALE=de` for the
    UI) in `infra/.env`. The owner instance keeps the English default:
-   nothing to set.
+   nothing to set. The setting applies to every user without a stored
+   language; to see how many that are (read-only, the helper of step 4):
+
+   ```bash
+   echo "SELECT coalesce(locale, '(none)') AS locale, count(*) FROM up_users GROUP BY 1;" \
+     | docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+   ```
+
 2. **Deploy:** `infra/deploy.sh`.
 3. **After: sign-in.** In the German UI, sign in with a wrong password:
    "E-Mail-Adresse oder Passwort ist falsch." Then sign in correctly.
@@ -1654,7 +1666,7 @@ parallel burst of 15 wrong sign-ins against one account, of which exactly
 10 reached the cms and one logged the block; every auth and profile code
 with its text in both catalogs; the digest language fallback; and a pin
 that compose, both `.env.example` files and the user schema all default to
-`en`. The time-zone matrix passed under Pacific/Auckland; under UTC and
+`en` (the schema's value has no effect, see the language notes above). The time-zone matrix passed under Pacific/Auckland; under UTC and
 Europe/Berlin one `infra/live-smoke.test.ts` case hit its 30 s limit on a
 loaded host and passed when that file ran alone in both zones. The
 integration suite passed on SQLite (149 tests). On Postgres 16, 296 of 298
