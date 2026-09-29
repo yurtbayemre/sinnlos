@@ -782,8 +782,17 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         before: 'rm "$REPO/apps/web/src/route.ts"; mkdir "$REPO/apps/web/app"',
         args: ["--dry-run"],
       },
-      // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
+      // An untracked file in packages/ (SH01: both images build
+      // packages/domain from the checkout).
       /* 17 */ {
+        before: [
+          'rmdir "$REPO/apps/web/app"; mkdir -p "$REPO/packages/domain/src"',
+          'echo x > "$REPO/packages/domain/src/stray.ts"',
+        ].join("; "),
+        args: ["--dry-run"],
+      },
+      // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
+      /* 18 */ {
         before: 'cp "$T/compose-example.json" "$T/compose.json"',
         args: ["--check"],
       },
@@ -798,7 +807,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
   });
 
   it("refuses the example DOMAIN in --check, before anything is touched (5A-T1)", () => {
-    const run = r[17];
+    const run = r[18];
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("ERROR: DOMAIN in infra/.env does not fit this instance:");
     expect(run.stderr).toContain(
@@ -822,6 +831,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     for (const [run, path] of [
       [r[15], "apps/web/src/route.ts"],
       [r[16], "apps/web/app/"],
+      [r[17], "packages/"],
     ] as const) {
       expect(run.status).toBe(1);
       expect(run.stderr).toContain(

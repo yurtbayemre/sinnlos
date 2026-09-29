@@ -26,7 +26,7 @@ export type Instant = Temporal.Instant;
 export type InstantInput = Date | string | Temporal.Instant;
 export type Disambiguation = "compatible" | "earlier" | "later" | "reject";
 
-// One implementation for cms and web (plain-date.ts is mirrored).
+// One implementation for cms and web (plain-date.ts, from @sinnlos/domain).
 export { DEFAULT_APP_TIME_ZONE, resolveAppTimeZone };
 
 const WALL_TIME_RE = /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$/;

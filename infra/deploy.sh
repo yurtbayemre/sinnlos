@@ -444,8 +444,10 @@ image_web_zone_explicit() {
 # Whether a cms image knows poll guest access (its poll schema has
 # visibleToGuests): exit 0 yes, 1 no, anything else unknown (no such image
 # here, another layout, docker failed or timed out, no `timeout`). Never
-# pulls, no network.
-POLL_SCHEMA_IN_IMAGE="/app/apps/cms/src/api/poll/content-types/poll/schema.json"
+# pulls, no network. The compiled schema, the one Strapi loads: every cms
+# image has it there, also those from batch 12 on, which ship dist without
+# the sources (IN02).
+POLL_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/api/poll/content-types/poll/schema.json"
 image_has_poll_guest_access() {
   "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
     -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
@@ -1195,15 +1197,16 @@ if [[ -n "${DIRTY}" ]]; then
   echo "       Commit, stash or revert them (git -C ${CHECKOUT} status), then re-run. Nothing was changed." >&2
   exit 1
 fi
-# The Dockerfiles copy apps/cms and apps/web whole, and the root manifests;
-# .dockerignore drops only build output and .env files. An untracked file
-# there would be built into images tagged as this commit, and so would an
-# untracked directory, even an empty one, which `git status` never lists:
-# an empty apps/web/app/ makes Next.js build that (empty) app directory
-# instead of src/app (seen in the lane rehearsal: every page answered 500).
+# The Dockerfiles copy apps/cms, apps/web and packages/domain whole, and the
+# root manifests; .dockerignore drops only build output, local state and
+# caches, and .env files. An untracked file there would be built into images
+# tagged as this commit, and so would an untracked directory, even an empty
+# one, which `git status` never lists: an empty apps/web/app/ makes Next.js
+# build that (empty) app directory instead of src/app (seen in the lane
+# rehearsal: every page answered 500).
 # `git clean -n -d` (a dry run: it lists, never removes) names both, and
 # skips ignored files.
-BUILD_CONTEXT_PATHS=(apps/cms apps/web package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
+BUILD_CONTEXT_PATHS=(apps/cms apps/web packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
 UNTRACKED_IN_BUILD="$("${GIT[@]}" clean -n -d -- "${BUILD_CONTEXT_PATHS[@]}" | sed -n 's/^Would remove //p')"
 if [[ -n "${UNTRACKED_IN_BUILD}" ]]; then
   echo "ERROR: the checkout ${CHECKOUT} has untracked files or directories where the web and cms images are" >&2

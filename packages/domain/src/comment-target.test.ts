@@ -1,5 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { anchorOf, matchesTarget, targetFilterQuery, type CommentTarget } from "./comment-target";
+
+import {
+  COMMENT_TARGET_TYPES,
+  anchorFromTargetRow,
+  isCommentTargetType,
+  matchesTarget,
+  targetAnchor,
+  targetFilterQuery,
+  targetMatchWhere,
+  type CommentTarget,
+} from "./comment-target.js";
 
 /**
  * Addressing a comment section / reaction bar by the target's documentId
@@ -13,6 +23,8 @@ import { anchorOf, matchesTarget, targetFilterQuery, type CommentTarget } from "
  *   2. the same rule applied to the fetched rows (`matchesTarget`) — the
  *      permanent defense-in-depth that keeps reaction counts honest — and
  *   3. that an unanchored row never matches (#25 regression pin).
+ * The cms's database side (findCommentTarget, resolveWriteTarget) is tested
+ * in apps/cms/src/utils/comment-target.test.ts.
  */
 
 const DOC = "a1b2c3d4e5f6g7h8i9j0kl";
@@ -24,13 +36,56 @@ const target = (over: Partial<CommentTarget> = {}): CommentTarget => ({
   ...over,
 });
 
-describe("anchorOf", () => {
+describe("isCommentTargetType", () => {
+  it("accepts exactly the two draft-and-publish target types", () => {
+    expect(COMMENT_TARGET_TYPES).toEqual(["announcement", "wiki-page"]);
+    for (const type of COMMENT_TARGET_TYPES) expect(isCommentTargetType(type)).toBe(true);
+  });
+
+  it("refuses other values, inherited object keys included (FX27)", () => {
+    for (const value of [
+      "poll",
+      "Announcement",
+      " announcement",
+      "",
+      "constructor",
+      "__proto__",
+      "toString",
+      "hasOwnProperty",
+      null,
+      undefined,
+      1,
+      ["announcement"],
+    ]) {
+      expect(isCommentTargetType(value), String(value)).toBe(false);
+    }
+  });
+});
+
+describe("targetAnchor", () => {
   it("accepts a non-empty documentId and trims it", () => {
-    expect(anchorOf(` ${DOC} `)).toBe(DOC);
+    expect(targetAnchor(` ${DOC} `)).toBe(DOC);
   });
 
   it("treats blank and non-string documentIds as 'no anchor'", () => {
-    for (const value of ["", "  ", null, undefined, 7]) expect(anchorOf(value)).toBeNull();
+    for (const value of ["", "  ", null, undefined, 7]) expect(targetAnchor(value)).toBeNull();
+  });
+});
+
+describe("anchorFromTargetRow and targetMatchWhere", () => {
+  it("takes the anchor of a looked-up row, and null for a missing one", () => {
+    expect(anchorFromTargetRow({ documentId: DOC })).toBe(DOC);
+    expect(anchorFromTargetRow({ documentId: " " })).toBeNull();
+    expect(anchorFromTargetRow({})).toBeNull();
+    expect(anchorFromTargetRow(null)).toBeNull();
+    expect(anchorFromTargetRow(undefined)).toBeNull();
+  });
+
+  it("matches rows by the anchor pair and nothing else", () => {
+    expect(targetMatchWhere("wiki-page", DOC)).toEqual({
+      targetType: "wiki-page",
+      targetDocumentId: DOC,
+    });
   });
 });
 

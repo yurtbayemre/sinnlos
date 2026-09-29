@@ -16,17 +16,25 @@
  *    `x.pdf` would be stored and served as application/pdf.
  */
 
+import {
+  CLASSIFIED_MAX_IMAGES,
+  CLASSIFIED_MAX_IMAGE_BYTES,
+  type ClassifiedImageType,
+} from "@sinnlos/domain";
 import { strings } from "@strapi/utils";
 
-export const MAX_FILES_PER_REQUEST = 4;
-export const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5 MB
+// The marketplace image limits of @sinnlos/domain (SH01), shared with the
+// web ad form: one ad's worth of files per request, 5 MB each.
+export const MAX_FILES_PER_REQUEST = CLASSIFIED_MAX_IMAGES;
+export const MAX_FILE_BYTES = CLASSIFIED_MAX_IMAGE_BYTES;
 /** Bytes the sniffer needs (the WebP signature ends at offset 12). */
 export const SNIFF_BYTES = 12;
 
 /** The only multipart text field the content-API upload accepts. */
 export const ALLOWED_UPLOAD_BODY_KEYS: ReadonlySet<string> = new Set(["fileInfo"]);
 
-export type AllowedImageMime = "image/jpeg" | "image/png" | "image/webp";
+/** JPEG, PNG or WebP: CLASSIFIED_IMAGE_TYPES of @sinnlos/domain. */
+export type AllowedImageMime = ClassifiedImageType;
 
 /** Canonical extension per allowed type — what the stored file is named. */
 export const CANONICAL_EXTENSION: Readonly<Record<AllowedImageMime, string>> = {

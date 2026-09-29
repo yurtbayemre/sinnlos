@@ -1,0 +1,10 @@
+// ES module build for the web bundler (package.json exports, "import").
+// Relative imports carry their .js extension, so the output is valid ESM
+// for Node as well; scripts/build.mjs marks dist/esm as "type": "module".
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/esm",
+    "noEmit": false
+  }
+}
