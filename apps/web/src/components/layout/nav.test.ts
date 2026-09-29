@@ -1,7 +1,10 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createElement, isValidElement, type ReactElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import defaultTheme from "tailwindcss/defaultTheme";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import de from "../../../messages/de.json";
 import en from "../../../messages/en.json";
 import { navItemsFor, type NavItem } from "@/lib/nav-config";
@@ -10,10 +13,12 @@ import { navItemsFor, type NavItem } from "@/lib/nav-config";
  * FX30: the sidebar and the phone nav map the same entries (lib/nav-config.ts
  * navItemsFor, SH02). The phone nav shows the primary tabs plus a More
  * trigger for the rest (a Radix dialog: closed in server markup), and the
- * More sheet lists the others with the current one marked. Every link shows
- * a pending dot while its navigation runs (UI05, useLinkStatus). The
- * pathname, the link status, the viewer and the server translations are
- * mocked; the client markup uses the real catalogs.
+ * More sheet lists the others with the current one marked. The sheet stays
+ * open only on the route it was opened on and below Tailwind `md`, where it
+ * is visible (the viewport store is driven by a fake MediaQueryList). Every
+ * link shows a pending dot while its navigation runs (UI05, useLinkStatus).
+ * The pathname, the link status, the viewer and the server translations
+ * are mocked; the client markup uses the real catalogs.
  */
 const state = vi.hoisted(() => ({
   pathname: "/",
@@ -35,7 +40,14 @@ vi.mock("next-intl/server", () => ({
     (en[namespace] as Record<string, string>)[key],
 }));
 
-const { MobileNav, MoreSheetLinks } = await import("./mobile-nav");
+const {
+  DESKTOP_QUERY,
+  MobileNav,
+  MoreSheetLinks,
+  isDesktopViewport,
+  sheetStaysOpen,
+  subscribeDesktop,
+} = await import("./mobile-nav");
 const { Sidebar } = await import("./sidebar");
 const { NavLink } = await import("./nav-link");
 const { ViewerMobileNav } = await import("./viewer-mobile-nav");
@@ -110,6 +122,82 @@ describe("MobileNav", () => {
     const html = render(createElement(MobileNav, { items: navItemsFor("member") }), "de");
     expect(html).toContain(`aria-label="${de.common.bottomNav}"`);
     expect(html).toContain(`>${de.nav.more}<`);
+  });
+});
+
+describe("More sheet: open only on its route and below md", () => {
+  /** A MediaQueryList stand-in: `matches` and the change listeners. */
+  function stubMatchMedia(matches: boolean) {
+    const listeners = new Set<EventListener>();
+    const list = {
+      matches,
+      addEventListener: vi.fn((type: string, listener: EventListener) => {
+        if (type === "change") listeners.add(listener);
+      }),
+      removeEventListener: vi.fn((type: string, listener: EventListener) => {
+        if (type === "change") listeners.delete(listener);
+      }),
+    };
+    const matchMedia = vi.fn((_query: string) => list);
+    vi.stubGlobal("window", { matchMedia });
+    return {
+      matchMedia,
+      listeners,
+      /** The viewport crosses the query: `matches` flips, the listeners run. */
+      resize(next: boolean) {
+        list.matches = next;
+        for (const listener of listeners) listener(new Event("change"));
+      },
+    };
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("stays open on the route it was opened on, below md only", () => {
+    expect(sheetStaysOpen("/kudos", "/kudos", false)).toBe(true);
+    // A navigation from it closes it (the chosen entry's route rendered).
+    expect(sheetStaysOpen("/kudos", "/polls", false)).toBe(false);
+    // From md up the sheet is hidden: an open Radix dialog would keep the
+    // page scroll-locked, inert and aria-hidden behind it.
+    expect(sheetStaysOpen("/kudos", "/kudos", true)).toBe(false);
+    expect(sheetStaysOpen(null, "/kudos", false)).toBe(false);
+  });
+
+  it("reads the viewport through one change listener on the md query", () => {
+    const media = stubMatchMedia(false);
+    const onChange = vi.fn();
+    const unsubscribe = subscribeDesktop(onChange);
+    expect(media.matchMedia).toHaveBeenCalledWith(DESKTOP_QUERY);
+    expect(media.listeners.size).toBe(1);
+    expect(isDesktopViewport()).toBe(false);
+
+    // A phone rotated to landscape, a window widened past 768 px.
+    media.resize(true);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(isDesktopViewport()).toBe(true);
+
+    unsubscribe();
+    expect(media.listeners.size).toBe(0);
+    media.resize(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(isDesktopViewport()).toBe(false);
+  });
+
+  it("uses Tailwind's md, which tailwind.config.ts does not override", () => {
+    expect(DESKTOP_QUERY).toBe(`(min-width: ${defaultTheme.screens.md})`);
+    const config = readFileSync(join(__dirname, "..", "..", "..", "tailwind.config.ts"), "utf8");
+    // The only `screens` there is the container's.
+    expect(config.match(/\bscreens\s*:/g)).toHaveLength(1);
+    expect(config).toMatch(/container:\s*{[^}]*screens:\s*{\s*"2xl"/);
+  });
+
+  it("renders closed in server markup (the server snapshot, no window)", () => {
+    expect(typeof window).toBe("undefined");
+    const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
+    expect(html).toMatch(/<button[^>]*aria-expanded="false"/);
+    expect(html).not.toContain('role="dialog"');
   });
 });
 

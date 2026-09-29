@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as Dialog from "@radix-ui/react-dialog";
@@ -16,6 +16,31 @@ const TAB_CLASS = cn(
   "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
 );
 
+/** Tailwind `md` (not overridden in tailwind.config.ts): the bar and its sheet hide, the sidebar shows. */
+export const DESKTOP_QUERY = "(min-width: 768px)";
+
+/** useSyncExternalStore subscription: calls onChange when the viewport crosses DESKTOP_QUERY. */
+export function subscribeDesktop(onChange: () => void): () => void {
+  const query = window.matchMedia(DESKTOP_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** The client snapshot: whether the viewport is at DESKTOP_QUERY now. */
+export function isDesktopViewport(): boolean {
+  return window.matchMedia(DESKTOP_QUERY).matches;
+}
+
+/**
+ * Whether the sheet opened on `openedOn` stays open: only on that route and
+ * below `md`. From `md` up the sheet and its backdrop are hidden, and an
+ * open Radix dialog would keep the page scroll-locked, inert to the pointer
+ * and aria-hidden (a phone rotated or a window widened with the sheet open).
+ */
+export function sheetStaysOpen(openedOn: string | null, pathname: string, desktop: boolean) {
+  return openedOn === pathname && !desktop;
+}
+
 /**
  * Bottom tab bar shown on small screens, where the sidebar is hidden (FX30).
  * It maps the same entries as the sidebar (lib/nav-config.ts), which the
@@ -25,16 +50,21 @@ const TAB_CLASS = cn(
  * reachable on a phone. The sheet is a Radix dialog: focus moves into it
  * and back to the More tab, Escape and the backdrop close it. Choosing an
  * entry keeps it open with the entry's pending dot (UI05) until the new
- * route renders, then it closes with the route change.
+ * route renders, then it closes with the route change. It also closes when
+ * the viewport reaches `md`, where it is hidden (sheetStaysOpen).
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
+  // The server snapshot is false: server markup and hydration render the
+  // phone layout's state, the client then reads the real viewport.
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktopViewport, () => false);
   // The pathname the sheet was opened on: it is open only while that is
-  // still the current route, so a navigation from it closes it.
+  // still the current route (a navigation from it closes it) and the
+  // viewport is below md.
   const [openedOn, setOpenedOn] = useState<string | null>(null);
-  if (openedOn !== null && openedOn !== pathname) setOpenedOn(null);
+  if (openedOn !== null && !sheetStaysOpen(openedOn, pathname, desktop)) setOpenedOn(null);
   const open = openedOn !== null;
 
   const primary = items.filter((item) => item.mobilePrimary);

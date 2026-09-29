@@ -1699,7 +1699,10 @@ one code comment in it and none of its behaviour. Only the web changes.
    (Only a guest's ⌘K search still sends such reads and the cms logs their
    403, see the follow-ups; do not search during this check.)
 3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
-   other sections; as an admin it lists _Admin_, as a member not.
+   other sections; as an admin it lists _Admin_, as a member not. With the
+   sheet open, rotate the phone to landscape (or widen the window past
+   768 px): the sheet closes, and the page scrolls and answers the first
+   tap.
 4. **After: as an editor:** on an ad posted by someone else, _Moderation_ →
    _Delete ad_ is offered and no _Edit_ link. (Take a test ad down, not a
    real one.)
