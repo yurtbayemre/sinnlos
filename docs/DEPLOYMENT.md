@@ -1279,20 +1279,20 @@ systemctl start docker
 >
 > **Deploying the CMS data lifecycle leftovers (batch 12, lane 7C)?** A
 > normal deploy of cms and web **together** (`infra/deploy.sh`) once
-> batch 11 runs: no env, compose, grant or edge change. The first boot adds
-> an `audience` column to `documents` and `quick_links` and sets it to
-> `departments` on the rows that link a department (the others stay NULL;
-> visibility unchanged). Two new nightly crons delete read
-> notifications 90 days after reading (03:40) and marketplace ads 90 days
-> after their last day, with their images (03:45): take an **extra manual
-> backup** after the deploy and before that first night, and look at the
-> read-only counts first. Comment delete answers byte for byte as before;
-> expired announcements leave lists, threads and digests; an unpublished
-> announcement's thread answers like a missing one; deleting a department
-> keeps its documents and quick links admin/editor-only, and removing their
-> departments keeps them so until Audience is set to `all`. Afterwards run
-> the census once and send section 9 (the duplicate scan) to the owner.
-> Follow
+> batch 10 runs (batch 11 deployed nothing): no env, compose, grant or edge
+> change. The first boot adds an `audience` column to `documents` and
+> `quick_links` and sets it to `departments` on the rows that link a
+> department (the others stay NULL; visibility unchanged). Two new nightly
+> crons delete read notifications 90 days after reading (03:40) and
+> marketplace ads 90 days after their last day, with their images
+> (03:45): take an **extra manual backup** after the deploy and before
+> that first night, and look at the read-only counts first. Comment
+> delete answers byte for byte as before; expired announcements leave
+> lists, threads and digests; an unpublished announcement's thread answers
+> like a missing one; deleting a department keeps its documents and quick
+> links admin/editor-only, and removing their departments keeps them so
+> until Audience is set to `all`. Afterwards run the census once and send
+> section 9 (the duplicate scan) to the owner. Follow
 > [Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c).
 >
 > **Deploying the action results, auth codes and English defaults (batch 12,
@@ -2243,8 +2243,8 @@ live-smoke and the web checks through the edge.
 Lane 7C of batch 12 (branch `fix/cms-data-lifecycle-leftovers`, on `main`
 `7d9e52b`) finishes the cms leftovers the owner decided on 2026-09-29 (b).
 It changes the cms and the web's wiki pages; deploy both **together** with
-`infra/deploy.sh` once batch 11 runs. No env, compose, grant, route or edge
-change.
+`infra/deploy.sh` once batch 10 runs (batch 11 deployed nothing). No env,
+compose, grant, route or edge change.
 
 **What changes**
 
@@ -2585,7 +2585,7 @@ cms and the web do at runtime stays the same:
   TypeScript sources are no longer in the image; Strapi loads the compiled
   files, the schemas included, from `dist` as before. While the lockfile is
   unchanged and the build cache holds the install stage, a later code-only
-  deploy writes a ~15 MB layer instead of a new ~850 MB copy, and the
+  deploy writes a ~15 MB layer instead of a new copy of about 820 MB, and the
   SHA-tagged images share the dependency layer on disk. Both Dockerfiles
   pull `node:24-alpine` by digest in one `FROM` line.
 - **The rollback probe for poll guest access** (the rollback hint of
@@ -2609,7 +2609,7 @@ cms and the web do at runtime stays the same:
 schema, permission, edge or Traefik change, and nothing in the database
 changes. The first build after this release is slower: pnpm 10 runs the
 install stage of both images from scratch (a new pnpm store, nothing cached)
-and the cms dependency layer is written once, about 850 MB next to the
+and the cms dependency layer is written once, about 820 MB next to the
 images that stay for rollback; check `df -h` has a few GB free. The helpers
 of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
 
