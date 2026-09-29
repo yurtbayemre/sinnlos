@@ -38,8 +38,11 @@ duplicates occur in production. Section 9 answers that with counts only
 - `duplicate_keys`: keys with more than one row;
 - `surplus_rows`: rows beyond the first per key (what a cleanup would remove);
 - `max_rows`: the largest group;
-- `without_user` (and for votes `votes_without_poll`, for reactions
-  `without_target_document_id`): rows that cannot collide, counted apart;
+- `without_user` (and for votes `votes_without_poll`, for the other
+  records `without_target_document_id`): rows that cannot collide, counted
+  apart. A missing target anchor (NULL, possible for rows from before issue
+  #11) is left out of the key count: `GROUP BY` would treat those NULLs as
+  one target, a unique index would not;
 - a last table with the month of the newest row of each duplicate group,
   which shows whether the races still happen since the batch-6 cleanups.
 
