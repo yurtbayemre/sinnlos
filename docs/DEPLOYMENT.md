@@ -1653,9 +1653,9 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   reads the typed category labels.
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
-and starts both; the rollback below takes both back. No env change is needed (the new
-`DIGEST_DEFAULT_LOCALE` defaults to `en` in compose), no permission, route,
-edge or Traefik change. The database container is not recreated; cms and
+and starts both; the rollback below takes both back. No env change is
+needed (the new `DIGEST_DEFAULT_LOCALE` defaults to `en` in compose), no
+permission, route, edge or Traefik change. The database container is not recreated; cms and
 web are, so the site is down while the cms boots. The first boot adds the
 `audience` column to `documents` and `quick_links` (two `ALTER TABLE`s;
 existing rows stay NULL and read exactly as before). **The first build is
