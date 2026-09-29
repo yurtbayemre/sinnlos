@@ -10,13 +10,20 @@ RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/cms/package.json ./apps/cms/
+# The cms depends on the workspace package @sinnlos/domain (SH01).
+COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/cms... --frozen-lockfile
 
 FROM base AS builder
 COPY apps/cms ./apps/cms
+COPY packages/domain ./packages/domain
 COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/cms/node_modules ./apps/cms/node_modules
+COPY --from=deps /app/packages/domain/node_modules ./packages/domain/node_modules
+# dist/cjs of @sinnlos/domain: the cms compile reads its .d.ts, the runtime
+# requires it through apps/cms/node_modules/@sinnlos/domain (a symlink).
+RUN pnpm --filter @sinnlos/domain build
 WORKDIR /app/apps/cms
 RUN pnpm build
 

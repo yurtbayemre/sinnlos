@@ -7,13 +7,20 @@ RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/web/package.json ./apps/web/
+# The web depends on the workspace package @sinnlos/domain (SH01).
+COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/web... --frozen-lockfile
 
 FROM base AS builder
 COPY apps/web ./apps/web
+COPY packages/domain ./packages/domain
 COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/packages/domain/node_modules ./packages/domain/node_modules
+# dist/esm of @sinnlos/domain: next build bundles it into the standalone
+# output, so the runtime stage needs nothing of the package.
+RUN pnpm --filter @sinnlos/domain build
 WORKDIR /app/apps/web
 RUN pnpm build && mkdir -p public
 

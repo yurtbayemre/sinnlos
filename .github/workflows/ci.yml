@@ -42,6 +42,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # packages/domain (SH01) ships dist/cjs + dist/esm; the apps' typecheck
+      # and build and the package's dist test (packages/domain/src/
+      # dist.test.ts, required under CI) read it.
+      - name: Build @sinnlos/domain
+        run: pnpm build:domain
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -112,6 +118,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build @sinnlos/domain
+        run: pnpm build:domain
+
       # UTC, Europe/Berlin, Pacific/Auckland (scripts/test-tz.mjs).
       - name: Test under three process time zones, with Postgres 16
         run: pnpm test:tz
@@ -159,6 +168,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Build @sinnlos/domain
+        run: pnpm build:domain
 
       - name: Strapi integration suite (SQLite + Postgres 16)
         run: pnpm test:integration

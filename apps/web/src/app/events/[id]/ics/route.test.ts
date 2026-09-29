@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * The web's ICS proxy (EVT-ICS-ID). Pinned:
- *   1. `[id]` is checked with the cms's own rules (lib/entry-id.ts, mirrored)
+ *   1. `[id]` is checked with the cms's own rules (lib/entry-id.ts, shared)
  *      BEFORE the session is read or the cms is called: a documentId or a
  *      numeric row id passes, anything else is a 404,
  *   2. the id is forwarded URL-encoded, with the caller's Strapi JWT and

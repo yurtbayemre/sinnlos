@@ -4,8 +4,8 @@
 # requests instead of one per package.
 version: 2
 updates:
-  # The pnpm workspace: the root package.json, apps/cms, apps/web and
-  # pnpm-lock.yaml.
+  # The pnpm workspace: the root package.json, apps/cms, apps/web,
+  # packages/domain and pnpm-lock.yaml.
   - package-ecosystem: npm
     directory: /
     schedule:

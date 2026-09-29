@@ -26,6 +26,9 @@ importers:
 
   apps/cms:
     dependencies:
+      '@sinnlos/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@strapi/plugin-cloud':
         specifier: 5.55.1
         version: 5.55.1(b5u7xytmiispg7ssyrbp3vxkfa)
@@ -114,6 +117,9 @@ importers:
       '@radix-ui/react-tooltip':
         specifier: 1.1.4
         version: 1.1.4(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      '@sinnlos/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@tailwindcss/typography':
         specifier: 0.5.15
         version: 0.5.15(tailwindcss@3.4.14)
@@ -193,6 +199,21 @@ importers:
       postcss:
         specifier: 8.5.28
         version: 8.5.28
+      typescript:
+        specifier: 5.6.3
+        version: 5.6.3
+      typescript-eslint:
+        specifier: ^8.18.0
+        version: 8.62.0(eslint@9.13.0(jiti@1.21.7))(typescript@5.6.3)
+
+  packages/domain:
+    devDependencies:
+      '@types/node':
+        specifier: 24.13.3
+        version: 24.13.3
+      eslint:
+        specifier: ^9.13.0
+        version: 9.13.0(jiti@1.21.7)
       typescript:
         specifier: 5.6.3
         version: 5.6.3
@@ -11751,8 +11772,8 @@ snapshots:
       koa: 2.16.4
       koa-body: 6.0.1
       typedoc: 0.28.19(typescript@5.6.3)
-      typedoc-github-wiki-theme: 2.1.0(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.6.3)))
-      typedoc-plugin-markdown: 4.11.0(typedoc@0.28.19(typescript@5.6.3))
+      typedoc-github-wiki-theme: 2.1.0(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.9.3)))
+      typedoc-plugin-markdown: 4.11.0(typedoc@0.28.19(typescript@5.9.3))
       zod: 4.4.3
     transitivePeerDependencies:
       - better-sqlite3
@@ -12286,7 +12307,7 @@ snapshots:
       '@typescript-eslint/visitor-keys': 8.62.0
       debug: 4.4.3
       minimatch: 10.2.5
-      semver: 7.7.4
+      semver: 7.8.5
       tinyglobby: 0.2.16
       ts-api-utils: 2.5.0(typescript@5.6.3)
       typescript: 5.6.3
@@ -17431,11 +17452,11 @@ snapshots:
     dependencies:
       is-typedarray: 1.0.0
 
-  typedoc-github-wiki-theme@2.1.0(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.6.3))):
+  typedoc-github-wiki-theme@2.1.0(typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.9.3))):
     dependencies:
-      typedoc-plugin-markdown: 4.11.0(typedoc@0.28.19(typescript@5.6.3))
+      typedoc-plugin-markdown: 4.11.0(typedoc@0.28.19(typescript@5.9.3))
 
-  typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.6.3)):
+  typedoc-plugin-markdown@4.11.0(typedoc@0.28.19(typescript@5.9.3)):
     dependencies:
       typedoc: 0.28.19(typescript@5.6.3)
 

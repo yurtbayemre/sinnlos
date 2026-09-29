@@ -12,6 +12,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@sinnlos/domain": "workspace:*",
     "@strapi/plugin-cloud": "5.55.1",
     "@strapi/plugin-users-permissions": "5.55.1",
     "@strapi/provider-email-nodemailer": "5.55.1",

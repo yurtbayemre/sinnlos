@@ -1,33 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  courseCompletion,
-  evaluateQuiz,
-  parseQuiz,
-  sortLessons,
-  youtubeVideoId,
-} from "./training-shared";
+import { courseCompletion, evaluateQuiz, parseQuiz, sortLessons } from "./training-shared";
 
-describe("youtubeVideoId (mirror of the CMS copy)", () => {
-  it("accepts the canonical forms and rejects foreign hosts", () => {
-    expect(youtubeVideoId("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
-    expect(youtubeVideoId("https://youtu.be/dQw4w9WgXcQ")).toBe("dQw4w9WgXcQ");
-    expect(youtubeVideoId("https://vimeo.com/123")).toBeNull();
-    expect(youtubeVideoId("javascript:alert(1)")).toBeNull();
-  });
-});
-
-describe("parseQuiz", () => {
-  it("drops malformed entries instead of crashing the player", () => {
-    const quiz = parseQuiz([
-      { question: "ok?", options: ["a", "b"], correctIndex: 1 },
-      { question: "", options: ["a", "b"], correctIndex: 0 },
-      { question: "bad idx", options: ["a", "b"], correctIndex: 5 },
-      "garbage",
-    ]);
-    expect(quiz).toHaveLength(1);
-  });
-});
+// The YouTube parser and parseQuiz are @sinnlos/domain's
+// (packages/domain/src/training.test.ts).
 
 describe("evaluateQuiz (quiz-gate batch check)", () => {
   const quiz = parseQuiz([
