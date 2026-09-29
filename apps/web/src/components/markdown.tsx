@@ -6,6 +6,7 @@ import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import rehypeSlug from "rehype-slug";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import type { HastNode } from "@/lib/wiki-content";
 
 /**
  * The one Markdown renderer of the web (UI03): wiki pages, lessons and
@@ -28,6 +29,10 @@ import { cn } from "@/lib/utils";
  *     with rel="noopener noreferrer";
  *   - images: loading="lazy", decoding="async" and referrerPolicy
  *     "no-referrer" (an external image host learns no intranet URL).
+ *
+ * Several bodies on one page (announcement cards) pass `idPrefix`: GFM
+ * footnotes otherwise get the same ids in every body (user-content-fn-1),
+ * and a card's footnote links would jump to the first card's notes.
  *
  * A server component (no hooks), usable from client components as well.
  */
@@ -128,6 +133,39 @@ const HEADING_ANCHORS: MarkdownRehypePlugins = [
   [rehypeAutolinkHeadings, { behavior: "wrap" }],
 ];
 
+/** The id mdast-util-to-hast always gives the footnote section's heading. */
+const FOOTNOTE_LABEL_ID = "footnote-label";
+
+/**
+ * A rehype plugin: `prefix` in front of the footnote section's heading id,
+ * which mdast-util-to-hast never prefixes (clobberPrefix covers only the
+ * fn-/fnref- ids), and in the footnote references' aria-describedby that
+ * names it. Runs before rehype-slug, so a heading that slugs to the same
+ * text keeps its own id. Raw HTML is never parsed, so no other element can
+ * carry these ids.
+ */
+function rehypeFootnoteLabelPrefix(options: { prefix: string }) {
+  const id = `${options.prefix}${FOOTNOTE_LABEL_ID}`;
+  const visit = (node: HastNode): void => {
+    const properties = node.properties;
+    if (properties) {
+      if (properties.id === FOOTNOTE_LABEL_ID) properties.id = id;
+      const describedBy = properties.ariaDescribedBy;
+      if (Array.isArray(describedBy)) {
+        properties.ariaDescribedBy = describedBy.map((value) =>
+          value === FOOTNOTE_LABEL_ID ? id : value,
+        );
+      }
+    }
+    for (const child of node.children ?? []) visit(child);
+  };
+  return (tree: HastNode): void => visit(tree);
+}
+
+const footnoteLabelPrefix = (prefix: string): MarkdownRehypePlugins => [
+  [rehypeFootnoteLabelPrefix, { prefix }],
+];
+
 /** The typography of long-form bodies (wiki page, lesson). */
 export const PROSE_CLASS = "prose prose-slate max-w-none dark:prose-invert";
 
@@ -135,6 +173,7 @@ export function Markdown({
   children,
   className = PROSE_CLASS,
   headingAnchors = false,
+  idPrefix,
   rehypePlugins = [],
 }: {
   /** The Markdown source; empty or missing renders an empty wrapper. */
@@ -147,6 +186,13 @@ export function Markdown({
    * cards) would repeat the ids.
    */
   headingAnchors?: boolean;
+  /**
+   * Prefix of the footnote ids and their links, the footnote section's
+   * heading included (without it: "user-content-fn-1" and a bare
+   * "footnote-label"). One per body on a page with several bodies, e.g.
+   * "announcement-12-".
+   */
+  idPrefix?: string;
   /** Further rehype plugins, run after the heading anchors (the wiki TOC). */
   rehypePlugins?: MarkdownRehypePlugins;
 }) {
@@ -154,7 +200,12 @@ export function Markdown({
     <div className={cn(className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[...(headingAnchors ? HEADING_ANCHORS : []), ...rehypePlugins]}
+        remarkRehypeOptions={idPrefix ? { clobberPrefix: idPrefix } : undefined}
+        rehypePlugins={[
+          ...(idPrefix ? footnoteLabelPrefix(idPrefix) : []),
+          ...(headingAnchors ? HEADING_ANCHORS : []),
+          ...rehypePlugins,
+        ]}
         components={COMPONENTS}
       >
         {children ?? ""}

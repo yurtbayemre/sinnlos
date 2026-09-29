@@ -232,8 +232,12 @@ function AnnouncementCard({
       </CardHeader>
       <CardContent>
         {/* The body is a Strapi richtext field, i.e. Markdown (UI03): the
-            shared renderer, without heading ids (several cards per page). */}
-        <Markdown className="prose prose-sm prose-slate max-w-none text-muted-foreground dark:prose-invert">
+            shared renderer, without heading ids and with footnote ids of
+            its own (several cards per page). */}
+        <Markdown
+          className="prose prose-sm prose-slate max-w-none text-muted-foreground dark:prose-invert"
+          idPrefix={`announcement-${item.id}-`}
+        >
           {item.body}
         </Markdown>
         {ack && <div className="mt-4">{ack}</div>}

@@ -218,6 +218,59 @@ describe("Markdown: rendering", () => {
   });
 });
 
+describe("Markdown: footnote ids (several bodies on one page)", () => {
+  const BODY = "Text[^1]\n\n[^1]: note";
+
+  /** Every id, every fragment link and every aria-describedby of `html`. */
+  const refs = (html: string) => {
+    const all = tags(html);
+    return {
+      ids: all.map((t) => t.attrs.id).filter((id): id is string => id !== undefined),
+      hrefs: all.map((t) => t.attrs.href).filter((h): h is string => h?.startsWith("#") ?? false),
+      describedBy: all
+        .map((t) => t.attrs["aria-describedby"])
+        .filter((d): d is string => d !== undefined),
+    };
+  };
+
+  it("keeps react-markdown's default prefix without idPrefix", () => {
+    const { ids, hrefs } = refs(render(BODY));
+    expect(ids).toEqual(
+      expect.arrayContaining(["user-content-fnref-1", "footnote-label", "user-content-fn-1"]),
+    );
+    expect(hrefs).toEqual(["#user-content-fn-1", "#user-content-fnref-1"]);
+  });
+
+  it("gives each body its own footnote ids, links and label with idPrefix", () => {
+    const first = refs(render(BODY, { idPrefix: "announcement-1-" }));
+    const second = refs(render(BODY, { idPrefix: "announcement-2-" }));
+    expect(first.ids.sort()).toEqual([
+      "announcement-1-fn-1",
+      "announcement-1-fnref-1",
+      "announcement-1-footnote-label",
+    ]);
+    expect(first.hrefs).toEqual(["#announcement-1-fn-1", "#announcement-1-fnref-1"]);
+    expect(first.describedBy).toEqual(["announcement-1-footnote-label"]);
+    // Every link and description points at an id of its own body.
+    for (const target of [...first.hrefs.map((h) => h.slice(1)), ...first.describedBy]) {
+      expect(first.ids).toContain(target);
+    }
+    // No id repeats across the two bodies.
+    expect(first.ids.filter((id) => second.ids.includes(id))).toEqual([]);
+  });
+
+  it("leaves a heading that slugs to the label's text its own id", () => {
+    const html = render(`## Footnote label\n\n${BODY}`, {
+      idPrefix: "a-",
+      headingAnchors: true,
+    });
+    const { ids } = refs(html);
+    expect(ids).toContain("footnote-label");
+    expect(ids).toContain("a-footnote-label");
+    expect(elementsNamed(html, "h2")[0].attrs.id).toBe("footnote-label");
+  });
+});
+
 describe("markdownLinkKind", () => {
   it.each([
     ["", "none"],
