@@ -42,7 +42,9 @@
     "home": "Home",
     "news": "News",
     "marketplace": "Marketplace",
-    "training": "Training"
+    "training": "Training",
+    "more": "More",
+    "moreSections": "More sections"
   },
   "auth": {
     "signIn": "Sign in",

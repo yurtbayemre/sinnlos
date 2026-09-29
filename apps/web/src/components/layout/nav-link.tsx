@@ -4,6 +4,7 @@ import Link from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { isNavActive } from "@/lib/nav-config";
 // The (server) sidebar can't pass component references across the RSC
 // boundary — icons are addressed by name and resolved here on the client
 // via the shared icon map.
@@ -18,7 +19,7 @@ export type NavIconName = IconName;
 export function NavLink({ href, label, icon }: { href: Route; label: string; icon: NavIconName }) {
   const Icon = ICONS[icon];
   const pathname = usePathname();
-  const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const active = isNavActive(pathname, href);
 
   return (
     <Link

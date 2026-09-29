@@ -1,6 +1,6 @@
 import { getTranslations } from "next-intl/server";
 import { PageFade } from "../page-fade";
-import { MobileNav } from "./mobile-nav";
+import { ViewerMobileNav } from "./viewer-mobile-nav";
 import { Sidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 
@@ -34,7 +34,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </main>
       </div>
-      <MobileNav />
+      <ViewerMobileNav />
     </div>
   );
 }

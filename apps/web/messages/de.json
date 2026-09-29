@@ -42,7 +42,9 @@
     "home": "Start",
     "news": "News",
     "marketplace": "Kleinanzeigen",
-    "training": "Schulungen"
+    "training": "Schulungen",
+    "more": "Mehr",
+    "moreSections": "Weitere Bereiche"
   },
   "auth": {
     "signIn": "Anmelden",
