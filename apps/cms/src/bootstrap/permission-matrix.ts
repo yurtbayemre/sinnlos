@@ -338,6 +338,11 @@ export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*
   // (docs/DEPLOYMENT.md, "Upgrading to poll department targeting", Rollback).
   "api::poll-vote.poll-vote.vote": "*",
   "api::poll-vote.poll-vote.results": "*",
+  // The batched results of GET /api/poll-results (WD04): the roles that
+  // read polls today (poll find and the single results: every role), and
+  // the same per-poll gate, canSeePoll, in the controller: a guest gets
+  // only the polls opened to guests, everyone only their audience's.
+  "api::poll.poll.batchResults": "*",
   // Aggregated search analytics (issue #19) — /manage/analytics is
   // admin-only, so is the summary endpoint.
   "api::search-log.search-log.summary": [ADMIN],

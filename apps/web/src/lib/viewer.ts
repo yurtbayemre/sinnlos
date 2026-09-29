@@ -20,9 +20,9 @@
 import "server-only";
 import { cache } from "react";
 import { unstable_rethrow } from "next/navigation";
+import { me } from "@/lib/api/people";
 import { DEMO_MODE } from "@/lib/config";
 import { getSession } from "@/lib/session";
-import { strapi } from "@/lib/strapi";
 
 export type ViewerDepartment = { id: number; documentId: string; name: string; slug: string };
 
@@ -44,8 +44,9 @@ export const ANONYMOUS_VIEWER: Viewer = Object.freeze({
 });
 
 /**
- * DEMO_MODE has no Strapi and no session. The demo viewer is the fixture's
- * Ada Lovelace (lib/demo.ts /api/me) as a plain member — no admin UI, no
+ * DEMO_MODE has no Strapi and no sign-in. The demo viewer is the fixture's
+ * Ada Lovelace (lib/demo.ts /api/me), the user of DEMO_SESSION
+ * (lib/session.ts, same id and name), as a plain member — no admin UI, no
  * poll creation — which keeps the demo showing what it showed before.
  */
 export const DEMO_VIEWER: Viewer = Object.freeze({
@@ -99,7 +100,7 @@ export const getViewer = cache(async (): Promise<Viewer> => {
   if (DEMO_MODE) return DEMO_VIEWER;
   if (!(await getSession())) return ANONYMOUS_VIEWER;
   try {
-    const res = await strapi<{ data?: unknown }>("/api/me");
+    const res = await me();
     return toViewer(res?.data);
   } catch (e) {
     unstable_rethrow(e);

@@ -3,8 +3,7 @@ import { unstable_rethrow } from "next/navigation";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { canCreatePolls } from "@/lib/roles";
-import { api, pollRef } from "@/lib/strapi";
-import { StrapiError } from "@/lib/strapi-error";
+import { api, findPollResults, pollRef } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import { isPollClosed } from "@/lib/poll-close";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -31,47 +30,42 @@ export default async function PollsPage() {
   const canCreate = canCreatePolls(viewer.role);
   const polls = (data?.data ?? []) as Poll[];
 
-  // Per poll (FX47): an expired session's redirect (NEXT_REDIRECT) must
-  // reach Next.js; a 404 is a race (the poll was deleted, unpublished or
-  // retargeted after the list read, decision 02) and just drops the card;
-  // any other failure also shows the error banner. Each poll is addressed
-  // by its documentId (DA01), which a republish between the list read and
-  // this request does not change; the cms decides visibility, canVote, the
-  // audience and the guest flags per poll and caller.
+  // All cards' results in ONE request (WD04: GET /api/poll-results; it used
+  // to be one request per poll). Each poll is addressed by its documentId
+  // (DA01), which a republish between the list read and this request does
+  // not change; the cms decides visibility, canVote, the audience and the
+  // guest flags per poll and caller, and leaves out a poll the caller may
+  // no longer see (deleted, unpublished or retargeted after the list read,
+  // decision 02): that card is just dropped. FX47: an expired session's
+  // redirect (NEXT_REDIRECT) must reach Next.js; any other failure shows
+  // the error banner (and no card, the counts being unknown).
   let resultsFailed = false;
-  const resultsArr = await Promise.all(
-    polls.map((p) =>
-      api.polls.results(pollRef(p)).catch((e: unknown): PollResults | null => {
-        unstable_rethrow(e);
-        if (!(e instanceof StrapiError && e.status === 404)) {
-          console.error("[polls] results fetch failed", e);
-          resultsFailed = true;
-        }
-        return null;
-      }),
-    ),
-  );
+  let results: PollResults[] = [];
+  if (polls.length > 0) {
+    try {
+      results = await api.polls.resultsMany(polls.map(pollRef));
+    } catch (e) {
+      unstable_rethrow(e);
+      console.error("[polls] results fetch failed", e);
+      resultsFailed = true;
+    }
+  }
 
   // Closed iff now >= closesAt: the rule the cms vote handler and the card use.
   const now = new Date();
   const active = polls.filter((p) => !isPollClosed(p.closesAt, now));
   const closed = polls.filter((p) => isPollClosed(p.closesAt, now));
 
-  const resultsMap = new Map<number, PollResults>();
-  polls.forEach((p, i) => {
-    const results = resultsArr[i];
-    if (results) resultsMap.set(p.id, results);
-  });
-  // A poll without results (404 race or failed read) renders no card.
-  // Keyed by the poll's address (its documentId), which a republish keeps:
-  // a card whose vote was refused because the options changed keeps its
-  // voteFailed message through the refresh that shows the new options,
-  // instead of remounting under the new published row id.
+  // A poll without results (left out by the cms, or a failed read) renders
+  // no card. Keyed by the poll's address (its documentId), which a
+  // republish keeps: a card whose vote was refused because the options
+  // changed keeps its voteFailed message through the refresh that shows
+  // the new options, instead of remounting under the new published row id.
   const card = (p: Poll) => {
-    const results = resultsMap.get(p.id);
     const ref = pollRef(p);
-    return results ? (
-      <PollCard key={ref} results={results} pollRef={ref} viewerRole={viewer.role} />
+    const pollResults = findPollResults(results, ref);
+    return pollResults ? (
+      <PollCard key={ref} results={pollResults} pollRef={ref} viewerRole={viewer.role} />
     ) : null;
   };
 

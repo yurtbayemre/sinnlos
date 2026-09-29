@@ -18,7 +18,10 @@
  *    cleanup is never read without its voter; the two-step read it replaced
  *    counted such a row as a separate ballot of a deleted account;
  *  - parallel votes of one voter interleaved with results reads never show
- *    more than one ballot for that voter.
+ *    more than one ballot for that voter;
+ *  - the batched statement of GET /api/poll-results (WD04,
+ *    countPollBallotsMany) equals the single statement per poll, for every
+ *    caller, in one statement.
  */
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,6 +39,7 @@ import {
   POLL_VOTE_UID,
   ballotTables,
   countPollBallots,
+  countPollBallotsMany,
   tallyBallots,
   type BallotCountHost,
   type BallotRow,
@@ -367,6 +371,42 @@ function suite(name: string, open: () => Promise<Opened>) {
       await Promise.all([...Array.from({ length: 8 }, (_, i) => vote(i % 2)), read(), read()]);
       expect(Math.max(...totals)).toBeLessThanOrEqual(1);
       await expect(countPollBallots(host, poll, voter, 2)).resolves.toMatchObject({ total: 1 });
+    }, 60_000);
+
+    it("WD04: the batched statement equals the single one per poll, for every caller, in ONE statement", async () => {
+      const random = prng(0xba7c4);
+      const polls: { id: number; optionCount: number }[] = [];
+      for (let p = 0; p < 5; p += 1) {
+        const id = await createPoll(`batch-${p}`);
+        const optionCount = 2 + Math.floor(random() * 3);
+        polls.push({ id, optionCount });
+        // Poll 0 stays without votes; the others get duplicates, deleted
+        // accounts and the same voter across polls.
+        const ballots = p === 0 ? 0 : 4 + Math.floor(random() * 16);
+        for (let b = 0; b < ballots; b += 1) {
+          const voter = random() < 0.125 ? null : (users[Math.floor(random() * 6)] as number);
+          await addVote(id, voter, Math.floor(random() * 5));
+        }
+      }
+      for (const caller of [...users.slice(0, 7), null]) {
+        const statements: string[] = [];
+        const listener = (query: KnexQueryEvent) => statements.push(query.sql);
+        engine.connection.on("query", listener);
+        let batched: Map<number, unknown>;
+        try {
+          batched = await countPollBallotsMany(host, polls, caller);
+        } finally {
+          engine.connection.off("query", listener);
+        }
+        expect(statements).toHaveLength(1);
+        expect(statements[0]).not.toMatch(/distinct/i);
+        for (const poll of polls) {
+          await expect(
+            countPollBallots(host, poll.id, caller, poll.optionCount),
+            `poll ${poll.id}, caller ${String(caller)}`,
+          ).resolves.toEqual(batched.get(poll.id));
+        }
+      }
     }, 60_000);
   });
 }

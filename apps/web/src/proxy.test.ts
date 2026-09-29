@@ -1,10 +1,30 @@
-import { describe, expect, it } from "vitest";
-import { isPublicPath } from "./proxy";
+import { NextRequest } from "next/server";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+/**
+ * `@/auth` is mocked for the proxy() cases at the end (auth() counts its
+ * calls), and `@/lib/config` so that DEMO_MODE can be switched per case;
+ * isPublicPath is pure.
+ */
+const state = vi.hoisted(() => ({ demo: false, authImported: false }));
+const authMock = vi.fn<() => Promise<unknown>>();
+vi.mock("@/auth", () => {
+  state.authImported = true;
+  return { auth: () => authMock() };
+});
+vi.mock("@/lib/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/config")>()),
+  get DEMO_MODE() {
+    return state.demo;
+  },
+}));
+
+const { default: proxy, isPublicPath } = await import("./proxy");
 
 /**
  * The proxy.ts public allowlist (S06). Two failure modes are silent in
  * production, so both directions are pinned:
- *   - an internal webhook dropped from the list gets a 307 to /sign-in and
+ *   - an internal webhook dropped from the list gets a redirect to /sign-in and
  *     the CMS→web pipeline dies without an error (/api/live/emit — the only
  *     one left since D-DC01 removed /api/revalidate);
  *   - a per-session path added to it (/uploads bytes, /live/* SSE) becomes
@@ -135,5 +155,173 @@ describe("isPublicPath — raw prefix entries (current state)", () => {
     expect(isPublicPath("/api/authx")).toBe(true);
     expect(isPublicPath("/_nextx")).toBe(true);
     expect(isPublicPath("/favicon-32x32.png")).toBe(true);
+  });
+});
+
+/** A request as the proxy sees it; `cookie`, the action header and a body are optional. */
+function request(
+  path: string,
+  {
+    method = "GET",
+    cookie,
+    action,
+    body,
+  }: { method?: string; cookie?: string; action?: boolean; body?: BodyInit } = {},
+): NextRequest {
+  const headers = new Headers();
+  if (cookie) headers.set("cookie", cookie);
+  if (action) headers.set("next-action", "7f3a9c");
+  return new NextRequest(`https://intranet.example.test${path}`, { method, headers, body });
+}
+
+/**
+ * The body a progressively enhanced form posts without JavaScript: React's
+ * hidden `$ACTION_ID_<id>` field next to the form's own fields, multipart,
+ * and no Next-Action header.
+ */
+function noJsFormBody(): FormData {
+  const form = new FormData();
+  form.append("$ACTION_ID_7f3a9c", "");
+  form.append("message", "Thanks for the help");
+  return form;
+}
+
+/** NextResponse.next() marks "continue" with this header. */
+const passes = (res: Response) => res.headers.get("x-middleware-next") === "1";
+
+const PUBLIC_REQUESTS = [
+  "/sign-in",
+  "/register",
+  "/api/auth/session",
+  "/api/live/emit",
+  "/robots.txt",
+];
+
+describe("proxy() — no session decode where none is needed (WD08)", () => {
+  beforeEach(() => {
+    state.demo = false;
+    authMock.mockReset();
+    authMock.mockResolvedValue(null);
+  });
+
+  it("lets DEMO_MODE through before importing @/auth", async () => {
+    state.demo = true;
+    for (const path of ["/", "/wiki/x", "/uploads/a.png"]) {
+      expect(passes(await proxy(request(path))), path).toBe(true);
+    }
+    expect(authMock).not.toHaveBeenCalled();
+    expect(state.authImported).toBe(false);
+  });
+
+  it("never calls auth() on a public path (nor imports @/auth for it)", async () => {
+    for (const path of PUBLIC_REQUESTS) {
+      expect(passes(await proxy(request(path))), path).toBe(true);
+      expect(passes(await proxy(request(path, { method: "POST", action: true }))), path).toBe(true);
+    }
+    expect(authMock).not.toHaveBeenCalled();
+    expect(state.authImported).toBe(false);
+  });
+
+  it("decodes the session once per guarded request", async () => {
+    authMock.mockResolvedValue({ user: { id: 7 } });
+    expect(passes(await proxy(request("/wiki/handbook")))).toBe(true);
+    expect(authMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("proxy() — a request without a session", () => {
+  const STALE_COOKIE = "authjs.session-token=eyJhbGciOiJkaXIifQ.stale";
+
+  beforeEach(() => {
+    state.demo = false;
+    authMock.mockReset();
+    authMock.mockResolvedValue(null);
+  });
+
+  it("sends a page load to /sign-in with the path to return to", async () => {
+    const res = await proxy(request("/wiki/handbook"));
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(
+      "https://intranet.example.test/sign-in?from=%2Fwiki%2Fhandbook",
+    );
+  });
+
+  it("adds expired=1 when the request still carries a session cookie (the session ended)", async () => {
+    for (const cookie of [
+      STALE_COOKIE,
+      "__Secure-authjs.session-token=x",
+      "theme=dark; authjs.session-token.0=a; authjs.session-token.1=b",
+    ]) {
+      const res = await proxy(request("/polls", { cookie }));
+      expect(res.headers.get("location"), cookie).toBe(
+        "https://intranet.example.test/sign-in?expired=1&from=%2Fpolls",
+      );
+    }
+    // Other cookies are no session.
+    const other = await proxy(request("/polls", { cookie: "authjs.csrf-token=x; theme=dark" }));
+    expect(other.headers.get("location")).toBe(
+      "https://intranet.example.test/sign-in?from=%2Fpolls",
+    );
+  });
+
+  it("answers an expired Server Action with the action redirect to /sign-in?expired=1 (batch-6 deferral)", async () => {
+    const res = await proxy(
+      request("/polls/new", { method: "POST", action: true, cookie: STALE_COOKIE }),
+    );
+    // Not a 307: Next's action client would follow it as a POST to /sign-in
+    // and fail. The shape Next itself answers a redirect() in an action with.
+    expect(res.status).toBe(200);
+    expect(res.headers.get("location")).toBeNull();
+    expect(res.headers.get("x-action-redirect")).toBe(
+      "/sign-in?expired=1&from=%2Fpolls%2Fnew;push",
+    );
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(passes(res)).toBe(false);
+    expect(await res.text()).toBe("");
+  });
+
+  it("answers an action without any session cookie with the plain sign-in path", async () => {
+    const res = await proxy(request("/kudos", { method: "POST", action: true }));
+    expect(res.headers.get("x-action-redirect")).toBe("/sign-in?from=%2Fkudos;push");
+  });
+
+  it("sends a form post without the action header to the sign-in page with a 303", async () => {
+    // A 307 would make the browser POST the form's $ACTION_ID_ fields to
+    // /sign-in, which has no worker for that action (500). A 303 is
+    // followed with a GET.
+    for (const body of [noJsFormBody(), new URLSearchParams({ message: "hi" }), undefined]) {
+      const res = await proxy(request("/kudos", { method: "POST", cookie: STALE_COOKIE, body }));
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(
+        "https://intranet.example.test/sign-in?expired=1&from=%2Fkudos",
+      );
+      expect(res.headers.get("x-action-redirect")).toBeNull();
+    }
+    const signedOut = await proxy(request("/kudos", { method: "POST", body: noJsFormBody() }));
+    expect(signedOut.status).toBe(303);
+    expect(signedOut.headers.get("location")).toBe(
+      "https://intranet.example.test/sign-in?from=%2Fkudos",
+    );
+  });
+
+  it("keeps the 307 for GET and HEAD and answers other methods with a 303", async () => {
+    for (const method of ["GET", "HEAD"]) {
+      const res = await proxy(request("/polls", { method, cookie: STALE_COOKIE }));
+      expect(res.status, method).toBe(307);
+    }
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
+      const res = await proxy(request("/polls", { method, cookie: STALE_COOKIE }));
+      expect(res.status, method).toBe(303);
+      expect(res.headers.get("location"), method).toBe(
+        "https://intranet.example.test/sign-in?expired=1&from=%2Fpolls",
+      );
+    }
+  });
+
+  it("lets a Server Action with a session through", async () => {
+    authMock.mockResolvedValue({ user: { id: 7 } });
+    const res = await proxy(request("/polls/new", { method: "POST", action: true }));
+    expect(passes(res)).toBe(true);
+    expect(res.headers.get("x-action-redirect")).toBeNull();
   });
 });

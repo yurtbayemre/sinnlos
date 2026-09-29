@@ -3,12 +3,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * lib/acknowledgements.ts: the open-confirmation rule shared by the
  * dashboard banner and /announcements (WD02) and the report's chunked ack
- * fetch (FX32). `@/lib/strapi` is mocked (the real module pulls in
- * next-auth); the page walk (lib/paginate.ts) is the real one.
+ * fetch (FX32). The transport (`@/lib/strapi/client`, WD01) is mocked (the
+ * real module pulls in next-auth); the requests (lib/api/announcements.ts)
+ * and the page walk (lib/paginate.ts) are the real ones.
  */
 
 const strapiMock = vi.fn();
-vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
+vi.mock("@/lib/strapi/client", () => ({
+  strapi: (...args: unknown[]) => strapiMock(...args),
+}));
 
 const {
   REPORT_ACK_CHUNK,

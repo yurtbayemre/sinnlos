@@ -414,7 +414,8 @@ so publishing it still drops them. The runbook lists both kinds up front:
   Audience to `all`; Audience `all` with departments still selected is
   saved as `departments`.
 - Where it is enforced: the `poll-visibility` read policy (list and
-  detail) and the custom `vote`/`results` actions, all through
+  detail), the custom `vote`/`results` actions and the batched
+  `GET /api/poll-results`, all through
   `apps/cms/src/utils/poll-audience.ts`. Departments are compared by
   documentId. `results` also tells the web whether the caller may vote
   (`canVote`) and which departments a poll targets.
@@ -745,6 +746,15 @@ Strapi admin applies on the user's next page load, without a new sign-in:
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+When the session has ended (its Strapi JWT expired, or the cms rejects
+it), every path ends on the sign-in page with the "session expired"
+notice: `web/src/proxy.ts` sends a page load to `/sign-in?expired=1&from=…`
+and answers a Server Action (a button or form on an open page) with the
+redirect Next's action client follows, instead of a 307 it cannot use;
+a form posted without JavaScript gets a 303, so the browser loads the
+sign-in page with a GET instead of posting the form to it again;
+a Strapi 401 inside a render or an action redirects the same way.
+
 **Microsoft Entra ID → Strapi role** (only with `ENTRA_ENABLED=1`;
 [`apps/cms/src/entra/roles.ts`](./apps/cms/src/entra/roles.ts)). The app
 roles come from the signed ID token; the highest privilege wins:
@@ -795,8 +805,10 @@ above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
 No role holds any `poll-vote` CRUD grant: votes are cast and counted only
 through the custom `vote`/`results` actions below, which every role holds
-(guest included); whether a caller may see or vote on a given poll is
-decided per poll by the department targeting and the guest access above.
+(guest included), and the batched `GET /api/poll-results?ids=` (poll
+`batchResults`, every role, the `/polls` page's one results request);
+whether a caller may see or vote on a given poll is decided per poll by
+the department targeting and the guest access above.
 
 Fine print encoded in the matrix (and enforced by the policies/controllers):
 acknowledgements are **immutable read receipts** — only `admin_role` may
@@ -855,9 +867,11 @@ officeLocation, microsoftOid) are removed output-side by the contact-field
 sanitizer (#10), and filtering or sorting by them is refused query-side
 (`global::sensitive-query-guard`, FX22; see the global guards above). Custom (non-CRUD) route
 actions (ICS export, celebrations — staff roles only, not `guest` or
-`authenticated` —, poll `vote` and `results` — every role, `guest`
-included, narrowed per poll by the department targeting and the guest
-access —, the RSVP `summary` behind `/events` — exactly the roles that
+`authenticated` —, poll `vote`, `results` and the batched poll
+`batchResults` (`GET /api/poll-results?ids=`, up to 50 polls) — every
+role, `guest` included, narrowed per poll by the department targeting and
+the guest access: a poll the caller may not see is simply left out of the
+batched answer —, the RSVP `summary` behind `/events` — exactly the roles that
 hold event-rsvp `find` (the staff roles and `authenticated`), never
 `guest`; `routes.matrix.test.ts` pins that —,
 mark-read/mark-all-read, `/api/me`, `changePassword`,

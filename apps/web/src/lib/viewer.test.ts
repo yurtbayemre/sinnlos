@@ -6,7 +6,7 @@ import { canCreatePolls, canPostAds, canRsvp, isAdmin } from "./roles";
  * GET /api/me, never from the session, and every failure fails CLOSED — the
  * role is then null and all role gates deny. A 401 keeps the existing
  * /sign-in?expired=1 redirect (strapi() throws NEXT_REDIRECT, which must
- * escape). `@/lib/strapi`, `@/lib/session`, `@/lib/config` and
+ * escape). `@/lib/strapi/client` (the transport, WD01), `@/lib/session`, `@/lib/config` and
  * `next/navigation` are mocked; React's cache() is a pass-through outside a
  * server render, so every call re-resolves.
  */
@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({ demo: false }));
 const strapiMock = vi.fn<(path: string) => Promise<unknown>>();
 const getSessionMock = vi.fn<() => Promise<unknown>>();
 
-vi.mock("@/lib/strapi", () => ({ strapi: (path: string) => strapiMock(path) }));
+vi.mock("@/lib/strapi/client", () => ({ strapi: (path: string) => strapiMock(path) }));
 vi.mock("@/lib/session", () => ({ getSession: () => getSessionMock() }));
 vi.mock("@/lib/config", () => ({
   get DEMO_MODE() {

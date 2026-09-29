@@ -283,6 +283,12 @@ export interface BallotCountHost {
   };
 }
 
+/** knex raw's rows: an array on SQLite, `{ rows }` on Postgres. */
+function rawRows(result: unknown): unknown[] {
+  const rows = Array.isArray(result) ? result : field(result, "rows");
+  return Array.isArray(rows) ? rows : [];
+}
+
 /**
  * The results of poll row `pollId` in ONE statement: ballots per option,
  * one per voter (the first), the total, and `callerId`'s counted option.
@@ -297,7 +303,112 @@ export async function countPollBallots(
   const schema = strapi.db.getSchemaName?.() ?? null;
   const { sql, bindings } = ballotCountStatement(tables, schema || null, pollId, callerId);
   const result = await strapi.db.connection.raw(sql, bindings);
-  // knex raw: an array of rows on SQLite, { rows } on Postgres.
-  const rows = Array.isArray(result) ? result : field(result, "rows");
-  return tallyFromCounts(Array.isArray(rows) ? (rows as BallotCountRow[]) : [], optionCount);
+  return tallyFromCounts(rawRows(result) as BallotCountRow[], optionCount);
+}
+
+// ---------------------------------------------------------------------------
+// Several polls in one statement (WD04: GET /api/poll-results)
+// ---------------------------------------------------------------------------
+
+/** Most polls one batched count takes (the endpoint's cap). */
+export const MAX_BATCHED_POLLS = 50;
+
+/**
+ * The statement of ballotCountStatement for several poll rows at once: the
+ * same rows count (the first ballot of each voter per poll, NOT EXISTS over
+ * an earlier row of the same voter FOR THE SAME POLL), grouped by poll and
+ * option, with the poll row id as `poll_id`. One snapshot for all of them.
+ */
+export function ballotCountsStatement(
+  tables: BallotTables,
+  schema: string | null,
+  pollIds: readonly number[],
+  callerId: number | null,
+): { sql: string; bindings: unknown[] } {
+  if (pollIds.length === 0 || pollIds.length > MAX_BATCHED_POLLS) {
+    throw new Error(
+      `[poll-results] 1..${MAX_BATCHED_POLLS} polls per statement, got ${pollIds.length}`,
+    );
+  }
+  const qualified = (table: string) => (schema ? `${schema}.${table}` : table);
+  const { votes, optionColumn, pollLink, voterLink } = tables;
+  const sql = [
+    "SELECT pl.?? AS poll_id, v.?? AS option_index, count(v.id) AS ballots,",
+    "  sum(CASE WHEN vl.?? = ? THEN 1 ELSE 0 END) AS mine",
+    "FROM ?? v",
+    "JOIN ?? pl ON pl.?? = v.id",
+    "LEFT JOIN ?? vl ON vl.?? = v.id",
+    `WHERE pl.?? IN (${pollIds.map(() => "?").join(", ")})`,
+    "  AND NOT EXISTS (",
+    "    SELECT 1 FROM ?? pl2",
+    "    JOIN ?? v2 ON v2.id = pl2.??",
+    "    JOIN ?? vl2 ON vl2.?? = pl2.??",
+    "    WHERE pl2.?? = pl.?? AND vl2.?? = vl.?? AND pl2.?? < v.id",
+    "  )",
+    "GROUP BY pl.??, v.??",
+  ].join("\n");
+  const bindings: unknown[] = [
+    pollLink.pollColumn,
+    optionColumn,
+    voterLink.userColumn,
+    // No caller: a value no voter id has, so `mine` stays 0.
+    callerId ?? -1,
+    qualified(votes),
+    qualified(pollLink.table),
+    pollLink.voteColumn,
+    qualified(voterLink.table),
+    voterLink.voteColumn,
+    pollLink.pollColumn,
+    ...pollIds,
+    qualified(pollLink.table),
+    qualified(votes),
+    pollLink.voteColumn,
+    qualified(voterLink.table),
+    voterLink.voteColumn,
+    pollLink.voteColumn,
+    pollLink.pollColumn,
+    pollLink.pollColumn,
+    voterLink.userColumn,
+    voterLink.userColumn,
+    pollLink.voteColumn,
+    pollLink.pollColumn,
+    optionColumn,
+  ];
+  return { sql, bindings };
+}
+
+/** One poll of a batched count: its published row id and its number of options. */
+export interface BallotPoll {
+  id: number;
+  optionCount: number;
+}
+
+/**
+ * The results of several poll rows in ONE statement (ballotCountsStatement):
+ * per poll row id the same tally countPollBallots gives for it alone. A
+ * poll without a counted ballot gets zero counts. Throws past
+ * MAX_BATCHED_POLLS; no statement for no polls.
+ */
+export async function countPollBallotsMany(
+  strapi: BallotCountHost,
+  polls: readonly BallotPoll[],
+  callerId: number | null,
+): Promise<Map<number, BallotTally>> {
+  const tallies = new Map<number, BallotTally>();
+  if (polls.length === 0) return tallies;
+  const ids = [...new Set(polls.map((poll) => poll.id))];
+  const tables = ballotTables(strapi.db.metadata);
+  const schema = strapi.db.getSchemaName?.() ?? null;
+  const { sql, bindings } = ballotCountsStatement(tables, schema || null, ids, callerId);
+  const byPoll = new Map<number, BallotCountRow[]>();
+  for (const row of rawRows(await strapi.db.connection.raw(sql, bindings))) {
+    const pollId = Number(field(row, "poll_id"));
+    const rows = byPoll.get(pollId) ?? [];
+    rows.push(row as BallotCountRow);
+    byPoll.set(pollId, rows);
+  }
+  for (const poll of polls) {
+    tallies.set(poll.id, tallyFromCounts(byPoll.get(poll.id) ?? [], poll.optionCount));
+  }
+  return tallies;
 }

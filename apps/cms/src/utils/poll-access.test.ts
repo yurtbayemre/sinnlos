@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { failLikePostgres } from "./entry-id.test.helper";
+import { MALFORMED_ENTRY_IDS, failLikePostgres } from "./entry-id.test.helper";
 import {
   loadPollViewer,
   loadPublishedPoll,
+  loadPublishedPolls,
   loadUserDepartmentDocumentId,
+  parsePollRefs,
+  pollOptionCount,
+  pollResultsBody,
   POLL_UID,
   USER_UID,
   type PollAccessHost,
+  type PollListHost,
+  type PublishedPoll,
 } from "./poll-access";
 
 /**
@@ -229,5 +235,174 @@ describe("loadPublishedPoll", () => {
       visibleToGuests: false,
       guestsCanVote: false,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The batched results (WD04): GET /api/poll-results
+// ---------------------------------------------------------------------------
+
+const DOC_A = "k3m9x0000000000000000001";
+const DOC_B = "k3m9x0000000000000000002";
+
+describe("parsePollRefs", () => {
+  it("reads documentIds and row ids, comma-separated or repeated, in order, each once", () => {
+    expect(parsePollRefs(`${DOC_A},12,${DOC_B}`)).toEqual({
+      refs: [{ documentId: DOC_A }, { id: 12 }, { documentId: DOC_B }],
+    });
+    expect(parsePollRefs([DOC_A, `12,${DOC_A}`, "12"])).toEqual({
+      refs: [{ documentId: DOC_A }, { id: 12 }],
+    });
+  });
+
+  it("refuses a missing, empty, malformed or over-long list", () => {
+    expect(parsePollRefs(undefined)).toEqual({ error: "ids required" });
+    expect(parsePollRefs([])).toEqual({ error: "ids required" });
+    for (const raw of [
+      "",
+      ",",
+      `${DOC_A},`,
+      12,
+      { $in: [1] },
+      [DOC_A, 7],
+      ...MALFORMED_ENTRY_IDS,
+    ]) {
+      expect(parsePollRefs(raw), JSON.stringify(raw)).toEqual({ error: "Invalid ids" });
+    }
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => String(i + 1)).join(",");
+    expect(parsePollRefs(ids(50))).toMatchObject({ refs: expect.any(Array) });
+    expect(parsePollRefs(ids(51))).toEqual({ error: "At most 50 ids" });
+    // Duplicates do not count towards the cap.
+    expect(parsePollRefs(`${ids(50)},1,2`)).toMatchObject({ refs: expect.any(Array) });
+  });
+});
+
+describe("loadPublishedPolls", () => {
+  const rowOf = (id: number, documentId: string) => ({
+    id,
+    documentId,
+    question: `Poll ${id}`,
+    options: ["a", "b"],
+    closesAt: null,
+    anonymous: false,
+    audience: "all",
+    departments: [],
+    visibleToGuests: false,
+    guestsCanVote: false,
+  });
+
+  function listHost(rows: unknown[]) {
+    const queries: Record<string, unknown>[] = [];
+    const strapi: PollListHost = {
+      db: {
+        query: (uid: string) => ({
+          findMany: async (params: Record<string, unknown>) => {
+            expect(uid).toBe(POLL_UID);
+            queries.push(params);
+            return rows;
+          },
+        }),
+      },
+    };
+    return { strapi, queries };
+  }
+
+  it("reads the published rows of every address in ONE query", async () => {
+    const { strapi, queries } = listHost([rowOf(12, DOC_B), rowOf(31, DOC_A)]);
+    const polls = await loadPublishedPolls(strapi, [{ documentId: DOC_A }, { id: 12 }]);
+    expect(polls.map((poll) => poll.id)).toEqual([31, 12]);
+    expect(queries).toEqual([
+      {
+        where: {
+          publishedAt: { $notNull: true },
+          $or: [{ id: { $in: [12] } }, { documentId: { $in: [DOC_A] } }],
+        },
+        select: expect.arrayContaining(["id", "documentId", "options", "visibleToGuests"]),
+        populate: { departments: { select: ["documentId", "name"] } },
+      },
+    ]);
+  });
+
+  it("lists a poll once when its id and its documentId are both asked, and drops unknown ones", async () => {
+    const { strapi } = listHost([rowOf(12, DOC_A), { id: "x" }, null]);
+    const polls = await loadPublishedPolls(strapi, [
+      { id: 12 },
+      { documentId: DOC_A },
+      { documentId: DOC_B },
+      { id: 99 },
+    ]);
+    expect(polls.map((poll) => poll.id)).toEqual([12]);
+  });
+
+  it("asks only for the kinds of address it got, and nothing for none", async () => {
+    const onlyIds = listHost([]);
+    await loadPublishedPolls(onlyIds.strapi, [{ id: 1 }, { id: 2 }]);
+    expect(onlyIds.queries[0]?.where).toEqual({
+      publishedAt: { $notNull: true },
+      $or: [{ id: { $in: [1, 2] } }],
+    });
+    const none = listHost([]);
+    await expect(loadPublishedPolls(none.strapi, [])).resolves.toEqual([]);
+    expect(none.queries).toEqual([]);
+  });
+});
+
+describe("pollResultsBody", () => {
+  const poll: PublishedPoll = {
+    id: 12,
+    documentId: DOC_A,
+    question: "Pizza?",
+    options: ["yes", "no", "maybe"],
+    closesAt: null,
+    anonymous: null,
+    audience: "departments",
+    departments: [
+      { documentId: "d-eng", name: "Engineering" },
+      { documentId: null, name: "Gone" },
+      { documentId: "d-ops", name: null },
+    ],
+    visibleToGuests: true,
+    guestsCanVote: false,
+  };
+  const tally = { counts: [1, 2, 0], total: 3, myVoteIndex: 1 };
+
+  it("carries the question, options, counts, the caller's vote, canVote, audience and guest flags", () => {
+    const member = { roleType: "member", departmentDocumentId: "d-eng" };
+    expect(pollResultsBody(poll, tally, member)).toEqual({
+      poll: {
+        id: 12,
+        documentId: DOC_A,
+        question: "Pizza?",
+        options: ["yes", "no", "maybe"],
+        closesAt: null,
+        anonymous: false,
+        visibleToGuests: true,
+        guestsCanVote: false,
+      },
+      counts: [1, 2, 0],
+      total: 3,
+      myVoteIndex: 1,
+      canVote: true,
+      audience: {
+        targeted: true,
+        departments: [
+          { documentId: "d-eng", name: "Engineering" },
+          { documentId: "d-ops", name: "" },
+        ],
+      },
+    });
+  });
+
+  it("decides canVote per caller: outside the audience and a guest without guest voting cannot", () => {
+    const canVote = (roleType: string, departmentDocumentId: string | null) =>
+      pollResultsBody(poll, tally, { roleType, departmentDocumentId }).canVote;
+    expect(canVote("editor", null)).toBe(false);
+    expect(canVote("guest", "d-eng")).toBe(false);
+  });
+
+  it("counts the options of a list only", () => {
+    expect(pollOptionCount(poll)).toBe(3);
+    expect(pollOptionCount({ ...poll, options: "yes,no" })).toBe(0);
+    expect(pollResultsBody({ ...poll, options: null }, tally, null).poll.options).toEqual([]);
   });
 });

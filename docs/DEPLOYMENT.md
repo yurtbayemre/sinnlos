@@ -629,6 +629,15 @@ DEMO_MODE=1 pnpm --filter @sinnlos/web dev
 
 Bypasses auth and Strapi entirely. Uses the in-memory fixture dataset in
 `apps/web/src/lib/demo.ts`. Useful for UI tweaking without network setup.
+It is a best-effort preview, not a second backend: you are signed in as the
+fixture user Ada Lovelace (a member of Engineering, with a populated
+notification bell); list reads apply their filters, sort and paging to the
+fixtures; writes are not stored (a path without a fixture logs
+`[demo] no fixture for …` and answers an empty list). A production server
+(`NODE_ENV=production`) with `DEMO_MODE=1` comes up but answers every page
+and API route with a 500 (`apps/web/src/auth.ts` throws on its first load,
+and the log names `DEMO_MODE`), so the web healthcheck fails; only the
+internal `/api/live/emit` and static files still answer.
 
 ---
 
@@ -1227,6 +1236,17 @@ systemctl start docker
 > and the new `last-success` file. Follow
 > [Upgrading to the deploy, backup and cron hardening (batch 10, lane 5B)](#upgrading-to-the-deploy-backup-and-cron-hardening-batch-10-lane-5b).
 >
+> **Deploying the web session, data client and batched poll results
+> (batch 10, lane 5C)?** A normal deploy of cms and web **together**
+> (`infra/deploy.sh`) once batch 9 runs: no env, schema, edge or Traefik
+> change. The first boot grants one new permission (the batched
+> `GET /api/poll-results`, every role) by itself; afterwards the permission
+> diff shows only the two known informational rows. A session that ended
+> while a page was open now lands on `/sign-in?expired=1` from any button,
+> too. Never roll back the cms alone (the new `/polls` would show the error
+> banner and no cards). Follow
+> [Upgrading to the web session, data client and batched poll results (batch 10, lane 5C)](#upgrading-to-the-web-session-data-client-and-batched-poll-results-batch-10-lane-5c).
+>
 > **Deploying batch 9 (2026-09-28)?** The policy primitives, the live
 > contract and poll documentIds, and the (switched off) Entra sign-in (the
 > three notes below) ship as one normal deploy of cms and web **together**
@@ -1812,6 +1832,136 @@ directory, and the uploads stream restored the volume, while `tar xzf`
 fails on the decrypted `.tar`. A SIGKILLed backup left a dump that the
 next run reported. Four live-smoke runs within 6 s passed (two cms
 sign-ins each), where the lane head's hit HTTP 429 on the fourth.
+
+#### Upgrading to the web session, data client and batched poll results (batch 10, lane 5C)
+
+This release (branch `refactor/web-session-and-api-client`, on `batch/9`
+`5be7dc7`) changes how the web reads the session and talks to the cms, and
+adds one cms endpoint:
+
+- **Session and sign-in redirects (WD08).** Every render decodes the
+  Auth.js session once for all of its readers (the page, the role lookup,
+  the cms token, the notification bell), and `proxy.ts` no longer decodes it
+  for public paths (`/sign-in`, `/register`, `/api/auth/*`, `/api/live/emit`,
+  static files). When a session has ended (its Strapi JWT expired) while a
+  page was open, forms such as the profile and new-poll forms failed with
+  "An unexpected response was received from the server" and lost the typed
+  input; other buttons (a poll vote, sign-out) ended at `/sign-in` without
+  the notice. Any button or form now lands on `/sign-in?expired=1` with the
+  "session expired" notice, like a page load (which now shows that notice
+  too, whenever the browser still sent a session cookie). This holds for a
+  form posted without JavaScript as well:
+  it gets a 303 and the browser loads the sign-in page (before, the 307
+  made it post the form to `/sign-in` again, which answered 500).
+- **Data client (WD01).** The web's Strapi client is split into a
+  transport, a query encoder and one typed read per request. Every request
+  it sends is byte-identical to before (pinned in a test), so the cms sees
+  no difference.
+- **Batched poll results (WD04).** `/polls` reads all cards' results with
+  one `GET /api/poll-results?ids=…` (at most 50 polls) instead of one
+  `GET /api/polls/:id/results` per poll. Each entry is exactly what the
+  single read answers for that poll and caller; a poll the caller may not
+  see is simply left out. The counts follow the same one-ballot-per-voter
+  rule, in one statement for all polls. The single read stays and now also
+  names the poll's `documentId`.
+- **New permission:** `api::poll.poll.batchResults`, granted to every role
+  (all six intranet roles and `authenticated`), like the poll reads today.
+  Which polls a caller gets stays decided per poll (department targeting,
+  guest access).
+- **DEMO_MODE** (`DEMO_MODE=1`, development only) answers much more like
+  Strapi; nothing changes for a production instance, which must never set
+  it: with `DEMO_MODE=1` a production web answers every page and API route
+  with a 500 (the log names `DEMO_MODE`), so its healthcheck fails.
+
+**A normal deploy of cms and web together with `infra/deploy.sh`.** No env,
+schema, edge or Traefik change. The helpers of the batch 8 section (on a
+standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+```
+
+1. **Before (optional):** open `/polls` and note the counts of two or three
+   cards.
+2. **Deploy:** `infra/deploy.sh`.
+3. **After: the grant.** The first cms boot logs the new permission once:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\] (granted|revoked|permission drift)'
+   ```
+
+   expects `[bootstrap] granted 7 permission(s) across intranet roles` and
+   `permission drift: none …` (a later restart grants nothing). Then
+   `docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < infra/diagnostics/prod-perm-diff.sql`
+   shows only the two known informational `authenticated` rows
+   (`auth.getSessions`/`auth.revokeSession`), no `MISSING_IN_DB` for
+   `api::poll.poll.batchResults`.
+4. **After: `/polls`.** As a member, `/polls` shows every card with the
+   counts of step 1, and a vote still works. As a guest (if you have one),
+   only the polls opened to guests appear.
+5. **After: logs.**
+   `"${COMPOSE[@]}" logs --since 30m cms | grep -E '\[poll-results\]'`
+   prints nothing; `"${COMPOSE[@]}" logs --since 30m web | grep -F '[demo]'`
+   prints nothing (the demo fixtures are never used in production).
+
+**Rollback:** re-up both previous images with the commands `infra/deploy.sh`
+prints. Roll back the cms and the web together: the new web asks the cms
+for `/api/poll-results`, which a batch 9 cms does not have (the new `/polls`
+shows the error banner and no cards). The previous web alone in front of
+the new cms works (it reads the single results, which the new cms still
+serves). Nothing in the database changes; the batch 9 cms drops permission
+rows of actions it does not know at its boot (possibly one per boot), and
+any row left is inert; a roll-forward uses or re-grants it.
+
+**Rehearsal (2026-09-29, lane 5C):** unit suite 4154 tests with Postgres 16,
+the time-zone matrix, and the integration suite on SQLite and Postgres 16
+(298 tests): the booted cms granted the new action to all seven roles and
+answered `public` 403; for every role, the batched read listed exactly the
+polls the single read answered, with identical bodies, and nothing for
+drafts, a never-published poll, a missing id or a poll outside the caller's
+audience; counts stayed one ballot per voter, also across a republish; a
+malformed or over-long id list was a 400. Against the built web (no cms
+behind it): public paths answered without a session check; a page load with
+a session cookie whose Strapi JWT had expired went to
+`/sign-in?expired=1&from=…`; a Server Action with it got the action
+redirect (200, `x-action-redirect`); in headless Chrome, a page rendered
+with a fresh session, then the session expired and the sign-out button was
+clicked: the browser landed on `/sign-in?expired=1&from=%2F` with the
+notice. `DEMO_MODE=1` under `next dev`: 22 pages answered 200, no demo
+fall-through, events split correctly, the bell populated.
+
+A second rehearsal ran the images of this branch and of the base on a
+throwaway compose stack (Postgres 16, Caddy, headless Chrome): the first cms
+boot granted 7 permissions and a restart 0, with `permission drift: none`;
+`prod-perm-diff.sql` returned no rows (a fresh database has the two plugin
+defaults production lacks); for 8 users, two of them guests, the batched
+read matched the single reads; a crawl of 192 page pairs, base against
+branch, showed no status or text difference, and `/polls` sent 1 batched
+results request instead of 3 to 9 single ones; after a real Strapi JWT
+expiry, a poll vote, a page load, sign-out, the profile form and the
+new-poll form all ended at `/sign-in?expired=1`; a cms-only rollback and
+the roll-forward worked; with `DEMO_MODE=1`, 29 pages answered 200.
+
+The fix round (2026-09-29) re-ran the sign-in redirects against the built
+web: a form posted without JavaScript and without a valid session
+(multipart with the `$ACTION_ID_…` field, urlencoded, or without any
+session cookie) got a 303 to `/sign-in?expired=1&from=…` (`/sign-in?from=…`
+without a cookie), which the browser then loaded (200); the same profile
+form body posted to `/sign-in`, as the old 307 made the browser do,
+answered 500 ("Failed to find Server Action"). A page GET or HEAD kept the
+307, a Server Action the `x-action-redirect`. In headless Chrome with
+JavaScript disabled, sign-out on `/` and the password form on `/profile`,
+submitted after the session had expired, went POST, 303,
+`/sign-in?expired=1&from=…` with the notice; with JavaScript, the same two
+went through the action redirect. With `NODE_ENV=production` and
+`DEMO_MODE=1` the built web printed Ready, then answered 500 on `/`,
+`/wiki`, `/polls`, `/profile`, `/search`, `/sign-in`, `/api/auth/session`
+and `/uploads/…` (the log named
+`DEMO_MODE`), while `/api/live/emit` still answered (503 without its
+secret). Not exercised: `infra/deploy.sh` itself (its steps were run by
+hand), the Traefik 3.7 edge (only a static check of its `/api` rule) and
+Microsoft sign-in.
 
 #### Deploying batch 9 (2026-09-28)
 
