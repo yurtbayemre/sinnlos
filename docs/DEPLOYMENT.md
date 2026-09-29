@@ -1358,7 +1358,7 @@ serves). Nothing in the database changes; the batch 9 cms drops permission
 rows of actions it does not know at its boot (possibly one per boot), and
 any row left is inert; a roll-forward uses or re-grants it.
 
-**Rehearsal (2026-09-29, lane 5C):** unit suite 4153 tests with Postgres 16,
+**Rehearsal (2026-09-29, lane 5C):** unit suite 4154 tests with Postgres 16,
 the time-zone matrix, and the integration suite on SQLite and Postgres 16
 (298 tests): the booted cms granted the new action to all seven roles and
 answered `public` 403; for every role, the batched read listed exactly the
@@ -1373,9 +1373,39 @@ redirect (200, `x-action-redirect`); in headless Chrome, a page rendered
 with a fresh session, then the session expired and the sign-out button was
 clicked: the browser landed on `/sign-in?expired=1&from=%2F` with the
 notice. `DEMO_MODE=1` under `next dev`: 22 pages answered 200, no demo
-fall-through, events split correctly, the bell populated. Not exercised: a
-full `infra/deploy.sh` run with both images on Postgres, the Traefik/Caddy
-edge, and Microsoft sign-in.
+fall-through, events split correctly, the bell populated.
+
+A second rehearsal ran the images of this branch and of the base on a
+throwaway compose stack (Postgres 16, Caddy, headless Chrome): the first cms
+boot granted 7 permissions and a restart 0, with `permission drift: none`;
+`prod-perm-diff.sql` returned no rows (a fresh database has the two plugin
+defaults production lacks); for 8 users, two of them guests, the batched
+read matched the single reads; a crawl of 192 page pairs, base against
+branch, showed no status or text difference, and `/polls` sent 1 batched
+results request instead of 3 to 9 single ones; after a real Strapi JWT
+expiry, a poll vote, a page load, sign-out, the profile form and the
+new-poll form all ended at `/sign-in?expired=1`; a cms-only rollback and
+the roll-forward worked; with `DEMO_MODE=1`, 29 pages answered 200.
+
+The fix round (2026-09-29) re-ran the sign-in redirects against the built
+web: a form posted without JavaScript and without a valid session
+(multipart with the `$ACTION_ID_…` field, urlencoded, or without any
+session cookie) got a 303 to `/sign-in?expired=1&from=…` (`/sign-in?from=…`
+without a cookie), which the browser then loaded (200); the same profile
+form body posted to `/sign-in`, as the old 307 made the browser do,
+answered 500 ("Failed to find Server Action"). A page GET or HEAD kept the
+307, a Server Action the `x-action-redirect`. In headless Chrome with
+JavaScript disabled, sign-out on `/` and the password form on `/profile`,
+submitted after the session had expired, went POST, 303,
+`/sign-in?expired=1&from=…` with the notice; with JavaScript, the same two
+went through the action redirect. With `NODE_ENV=production` and
+`DEMO_MODE=1` the built web printed Ready, then answered 500 on `/`,
+`/wiki`, `/polls`, `/profile`, `/search`, `/sign-in`, `/api/auth/session`
+and `/uploads/…` (the log named
+`DEMO_MODE`), while `/api/live/emit` still answered (503 without its
+secret). Not exercised: `infra/deploy.sh` itself (its steps were run by
+hand), the Traefik 3.7 edge (only a static check of its `/api` rule) and
+Microsoft sign-in.
 
 #### Deploying batch 9 (2026-09-28)
 
