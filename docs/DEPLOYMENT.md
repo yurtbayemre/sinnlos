@@ -1832,6 +1832,14 @@ needs setting)
     actions)` (batch 9: 119), and the step-5 output without the seven
     `batchResults` rows (on production: only the two informational
     `MISSING_IN_DB` rows for `authenticated`). Keep it for the next batch.
+    The 7 holds for the first deploy only: after a rollback to batch 9
+    (below) every boot of the batch 9 cms removes one of the seven rows
+    (Strapi's permission sync deletes one row per unknown action and
+    boot), so `prod-perm-diff.sql` shows 1 to 7 `MISSING_IN_DB`
+    `batchResults` rows while batch 9 runs, and the roll-forward logs
+    `granted <that number> permission(s)`. Any number is fine when the
+    drift line says `none` and `prod-perm-diff.sql` then shows only the two
+    informational `authenticated` rows.
 
 12. **Poll results.** As a member, `/polls` shows every card with the
     counts of step 7, and a vote still works. The logs stay clean:
@@ -1942,8 +1950,10 @@ batch 9 cms ignores `CRON_ENABLED` (its crons run as before). To return to
 the batch 9 edge as well, follow the rollback of the
 [lane 5A runbook](#upgrading-to-the-ci-and-edge-changes-batch-10-lane-5a).
 Nothing in the database needs undoing: the `batchResults` permission rows
-are inert for the batch 9 cms (which may drop them at its boot), and a
-roll-forward grants them again. **Never roll back one image alone:** a
+are inert for the batch 9 cms, which removes one of them at each boot (1
+to 7 `MISSING_IN_DB` rows in `prod-perm-diff.sql` while it runs), and a
+roll-forward grants the removed ones again (`[bootstrap] granted <that
+number> permission(s)`, not 7; see step 11). **Never roll back one image alone:** a
 batch 10 web in front of the batch 9 cms shows no poll cards. Once this
 deploy is recorded, the batch 9 images keep `:rollback` (the new script
 never moves it while a state exists) and `:pre-deploy` until the next
@@ -2401,7 +2411,9 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
    ```
 
    expects `[bootstrap] granted 7 permission(s) across intranet roles` and
-   `permission drift: none …` (a later restart grants nothing). Then
+   `permission drift: none …` (a later restart grants nothing; a
+   roll-forward after a rollback to batch 9 grants fewer, one per boot of
+   the batch 9 cms, see Rollback). Then
    `docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' < infra/diagnostics/prod-perm-diff.sql`
    shows only the two known informational `authenticated` rows
    (`auth.getSessions`/`auth.revokeSession`), no `MISSING_IN_DB` for
@@ -2420,8 +2432,10 @@ for `/api/poll-results`, which a batch 9 cms does not have (the new `/polls`
 shows the error banner and no cards). The previous web alone in front of
 the new cms works (it reads the single results, which the new cms still
 serves). Nothing in the database changes; the batch 9 cms drops permission
-rows of actions it does not know at its boot (possibly one per boot), and
-any row left is inert; a roll-forward uses or re-grants it.
+rows of actions it does not know, one row per unknown action and boot (so
+after N boots N of the seven `batchResults` rows are gone), and any row
+left is inert; a roll-forward uses the rest and re-grants the dropped ones
+(`[bootstrap] granted N permission(s)`).
 
 **Rehearsal (2026-09-29, lane 5C):** unit suite 4154 tests with Postgres 16,
 the time-zone matrix, and the integration suite on SQLite and Postgres 16
