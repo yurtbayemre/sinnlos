@@ -1,4 +1,5 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionResult } from "@/lib/action-result";
 import type { Notification } from "@/lib/types";
@@ -17,6 +18,13 @@ import type { Notification } from "@/lib/types";
  * element tree is searched for the handlers, and each "render" replays the
  * hooks in call order. Only the hooks the bell uses are replaced; the
  * notification actions, the router and the translations are mocked.
+ *
+ * Since UI02 the panel is a Radix DropdownMenu, whose elements the harness
+ * does not render: the bell opens and closes through the Root's
+ * onOpenChange (Radix calls it on a trigger click, Escape or an outside
+ * click), "open" is the Root's `open` prop, and the menu items are
+ * activated through their onSelect (Radix calls it on click, Enter or
+ * Space).
  */
 const harness = vi.hoisted(() => {
   let slots: unknown[] = [];
@@ -56,6 +64,7 @@ vi.mock("react", async (importOriginal) => ({
   useTransition: harness.useTransition,
   useRef: () => ({ current: null }),
   useEffect: () => {},
+  useId: () => "bell-note",
 }));
 
 const markReadMock = vi.fn<(ids: number[]) => Promise<ActionResult>>();
@@ -107,24 +116,34 @@ function render(notifications: Notification[] = [unread], unreadTotal = 1) {
   const all = [...elements(tree)];
   const find = (predicate: (props: Props, el: ReactElement<Props>) => boolean) =>
     all.find((el) => predicate(el.props, el));
-  const click = (el: ReactElement<Props> | undefined) => {
+  /** Radix's item selection: onSelect with a cancelable event. */
+  const select = (el: ReactElement<Props> | undefined) => {
     expect(el).toBeDefined();
-    (el!.props.onClick as () => void)();
+    const event = new Event("menu.itemSelect", { cancelable: true });
+    (el!.props.onSelect as (event: Event) => void)(event);
+    return event;
   };
+  const root = find((_, el) => el.type === DropdownMenu.Root);
   const bell = find((p) => String(p["aria-label"] ?? "").startsWith("title"));
   const badge = bell
     ? [...elements(bell.props.children)].find((el) => el.type === "span")
     : undefined;
-  const panelOpen = all.some((el) => el.props.children === "markAllRead");
+  const panelOpen = root?.props.open === true;
+  const markAll = find((p) => p.children === "markAllRead");
   return {
     panelOpen,
+    offersMarkAll: panelOpen && markAll !== undefined,
     badge: badge ? String(badge.props.children) : null,
     label: bell ? String(bell.props["aria-label"]) : null,
     showsError: all.some((el) => el.props.role === "alert"),
     alertText: all.find((el) => el.props.role === "alert")?.props.children ?? null,
-    clickBell: () => click(bell),
-    clickNotification: () => click(find((_, el) => el.key === String(unread.id))),
-    clickMarkAll: () => click(find((p) => p.children === "markAllRead")),
+    /** A click on the bell: Radix toggles the menu through onOpenChange. */
+    clickBell: () => {
+      expect(root).toBeDefined();
+      (root!.props.onOpenChange as (open: boolean) => void)(!panelOpen);
+    },
+    clickNotification: () => select(find((_, el) => el.key === String(unread.id))),
+    clickMarkAll: () => select(markAll),
   };
 }
 
@@ -154,12 +173,14 @@ describe("NotificationBell badge: the unread total (WD10)", () => {
     expect(bell.badge).toBeNull();
     expect(bell.label).toBe("title");
     bell.clickBell();
-    expect(render([read(2)], 0).panelOpen).toBe(false);
+    const opened = render([read(2)], 0);
+    expect(opened.panelOpen).toBe(true);
+    expect(opened.offersMarkAll).toBe(false);
   });
 
   it("offers Mark all read when only older, unloaded notifications are unread", () => {
     render([read(2)], 3).clickBell();
-    expect(render([read(2)], 3).panelOpen).toBe(true);
+    expect(render([read(2)], 3).offersMarkAll).toBe(true);
   });
 });
 
@@ -174,7 +195,8 @@ describe("NotificationBell mark-read error", () => {
   it("does not show a failed click-through's error when the panel opens again", async () => {
     markReadMock.mockResolvedValue({ ok: false, code: "unavailable" });
     render().clickBell();
-    render().clickNotification();
+    // Not prevented: Radix closes the menu after the selection.
+    expect(render().clickNotification().defaultPrevented).toBe(false);
     expect(pushMock).toHaveBeenCalledWith("/announcements");
     await harness.settle();
     expect(markReadMock).toHaveBeenCalledWith([1]);
@@ -189,7 +211,8 @@ describe("NotificationBell mark-read error", () => {
   it("keeps the inline error of a failed Mark all read while the panel stays open", async () => {
     markAllMock.mockResolvedValue({ ok: false, code: "failed" });
     render().clickBell();
-    render().clickMarkAll();
+    // Prevented: Radix keeps the menu open after this selection.
+    expect(render().clickMarkAll().defaultPrevented).toBe(true);
     await harness.settle();
     const after = render();
     expect(after.panelOpen).toBe(true);
