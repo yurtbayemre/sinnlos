@@ -65,8 +65,8 @@ describe("api.wiki.page (FX24)", () => {
   });
 });
 
-describe("api.wiki.space (FX24, WD05)", () => {
-  it("loads the listed page fields only: no bodies, no author", async () => {
+describe("api.wiki.space (FX24, WD05, DA02)", () => {
+  it("loads the listed page fields only: no bodies, no author, the order to sort by", async () => {
     await api.wiki.space("handbook");
     const populate = sentParams()
       .filter((p) => p.startsWith("populate"))
@@ -75,6 +75,7 @@ describe("api.wiki.space (FX24, WD05)", () => {
       "populate[pages][fields][0]=title",
       "populate[pages][fields][1]=slug",
       "populate[pages][fields][2]=summary",
+      "populate[pages][fields][3]=order",
     ]);
   });
 });
