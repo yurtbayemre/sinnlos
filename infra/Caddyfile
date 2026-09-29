@@ -1,9 +1,11 @@
 # TLS is on by default. Compose passes DOMAIN from infra/.env (default
 # localhost). With a real DOMAIN Caddy obtains Let's Encrypt certificates
 # automatically and redirects 80 -> 443. Without one it serves `localhost`
-# with a certificate from Caddy's internal CA (run
-# `docker compose exec caddy caddy trust` to silence browser warnings, or set
-# DOMAIN=http://localhost to opt back into plain HTTP for local development).
+# with a certificate from Caddy's internal CA, which browsers do not trust:
+# import its root (`docker compose cp
+# caddy:/data/caddy/pki/authorities/local/root.crt .`) into the browser or
+# OS trust store, or set DOMAIN=http://localhost for plain HTTP in local
+# development.
 {$DOMAIN:localhost} {
     encode zstd gzip
 
