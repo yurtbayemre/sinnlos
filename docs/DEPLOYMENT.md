@@ -2123,8 +2123,8 @@ and CI. The app code does not change.
   `apps/cms/.env.example` now lists every setting `apps/cms/config` reads.
 - **CI.** New jobs `infra · shellcheck · compose config` and
   `images · cms`/`images · web` (buildx, no push), a blocking critical
-  `pnpm audit`, `pnpm format:check` and shellcheck (both reporting only
-  until the format sweep after batch 10), a read-only token, timeouts, and
+  `pnpm audit`, `pnpm format:check` and shellcheck (both blocking since
+  the format sweep after batch 10), a read-only token, timeouts, and
   push builds on `main` only (pull requests as before, a branch without
   one through "Run workflow"). Dependabot opens weekly grouped update pull
   requests for npm, the Dockerfile base image and the GitHub Actions.

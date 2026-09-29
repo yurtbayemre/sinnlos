@@ -1084,8 +1084,9 @@ blocking `pnpm audit --prod --audit-level=critical` and an advisory one at
 `infra` (shellcheck over every shell script; `docker compose config` of
 Caddy mode, Traefik mode, which must refuse to render without `DOMAIN`, and
 the rollback overrides) and `images · cms`/`images · web` (both Dockerfiles
-built with buildx, not pushed). `format:check` and shellcheck only report
-until the one-time format sweep after batch 10. Dependabot
+built with buildx, not pushed). `format:check` and shellcheck block since
+the one-time format sweep after batch 10 (the two long hand-formatted docs,
+`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). Dependabot
 (`.github/dependabot.yml`) opens weekly grouped update pull requests for the
 npm workspace, the Dockerfiles' base image and the GitHub Actions.
 `.gitattributes` stores and checks out every text file with LF.

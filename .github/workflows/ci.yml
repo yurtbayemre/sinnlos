@@ -48,12 +48,10 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      # Non-blocking until the one-time format sweep that follows batch 10
-      # (`git add --renormalize . && pnpm format` in its own PR); then drop
-      # continue-on-error.
-      - name: Format check (prettier, non-blocking)
+      # Blocking since the format sweep after batch 10. The two long
+      # hand-formatted docs are in .prettierignore.
+      - name: Format check (prettier)
         run: pnpm format:check
-        continue-on-error: true
 
       - name: Test
         run: pnpm test
@@ -176,11 +174,8 @@ jobs:
         uses: actions/checkout@v4
 
       # Every tracked *.sh plus extensionless files with a shell shebang.
-      # Non-blocking until the sweep after batch 10 (infra/deploy.sh,
-      # infra/live-smoke.sh and infra/backup/pg-backup.sh are being reworked
-      # in the same batch); then drop continue-on-error.
-      - name: shellcheck (non-blocking)
-        continue-on-error: true
+      # Blocking since the sweep after batch 10.
+      - name: shellcheck
         run: |
           mapfile -t scripts < <(git ls-files '*.sh')
           while IFS= read -r file; do scripts+=("${file}"); done \
