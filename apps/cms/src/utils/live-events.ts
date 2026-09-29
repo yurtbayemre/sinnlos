@@ -31,9 +31,24 @@
  * refetches on the ping sees the committed rows. Outside a transaction it
  * pings right away. emitLiveEvent itself queues immediately: the
  * controllers call it after their writes returned.
+ *
+ * Keepalive (LF05): while live events are on, a `keepalive` event goes to
+ * the same endpoint every LIVE_KEEPALIVE_MS (20 s), started with the
+ * subscriber. The web marks its streams' heartbeats `emitFresh: false`
+ * once it has heard nothing from the cms for EMIT_FRESH_MS (45 s), and the
+ * browsers then count as degraded and poll at the short intervals: a
+ * stopped cms, a wrong secret or a misrouted emit no longer look like a
+ * healthy stream that just never pings. A failing keepalive is logged once
+ * when it starts failing and once when it gets through again, not every
+ * 20 s.
  */
 import { afterCommit, type CommitAwareDb } from "./after-commit";
-import { MAX_EVENTS_PER_EMIT, channelFor, type LiveEvent } from "./live-contract";
+import {
+  LIVE_KEEPALIVE_MS,
+  MAX_EVENTS_PER_EMIT,
+  channelFor,
+  type LiveEvent,
+} from "./live-contract";
 
 export type { LiveEvent } from "./live-contract";
 
@@ -50,6 +65,8 @@ function dedupeKey(event: LiveEvent): string {
       return `n:${event.recipientId}`;
     case "announcements":
       return "a";
+    case "keepalive":
+      return "k";
   }
 }
 
@@ -61,8 +78,16 @@ function liveEventsEnabled(): boolean {
   );
 }
 
-/** POSTs one chunk of at most MAX_EVENTS_PER_EMIT events; never throws. */
-async function post(webUrl: string, secret: string, events: LiveEvent[]): Promise<void> {
+/**
+ * One POST's outcome: `failure` is null when the web took it, else the
+ * web's status (`status=401`) or the error (`failed: <message>`). A string
+ * rather than a union on `ok`: the cms compiles without strictNullChecks,
+ * which narrows no boolean discriminant.
+ */
+type SendResult = { failure: string | null };
+
+/** POSTs `events` to the web's emit endpoint; never throws. */
+async function send(webUrl: string, secret: string, events: LiveEvent[]): Promise<SendResult> {
   try {
     const res = await fetch(`${webUrl}/api/live/emit`, {
       method: "POST",
@@ -78,14 +103,70 @@ async function post(webUrl: string, secret: string, events: LiveEvent[]): Promis
       // following one would masquerade a misroute as success.
       redirect: "manual",
     });
-    if (!res.ok) {
-      console.warn(
-        `[live-emit] status=${res.status} for ${events.length} event(s) — live pings are NOT reaching the web bus`,
-      );
-    }
+    return { failure: res.ok ? null : `status=${res.status}` };
   } catch (err) {
-    console.warn(`[live-emit] failed (${events.length} event(s)): ${(err as Error).message}`);
+    return { failure: `failed: ${(err as Error).message}` };
   }
+}
+
+/** POSTs one chunk of at most MAX_EVENTS_PER_EMIT events; never throws. */
+async function post(webUrl: string, secret: string, events: LiveEvent[]): Promise<void> {
+  const { failure } = await send(webUrl, secret, events);
+  if (failure === null) return;
+  if (failure.startsWith("status=")) {
+    console.warn(
+      `[live-emit] ${failure} for ${events.length} event(s) — live pings are NOT reaching the web bus`,
+    );
+  } else {
+    console.warn(
+      `[live-emit] failed (${events.length} event(s)): ${failure.slice("failed: ".length)}`,
+    );
+  }
+}
+
+let keepaliveTimer: NodeJS.Timeout | null = null;
+let keepaliveFailing = false;
+
+/**
+ * One keepalive POST (LF05). Logs only the changes: the first failure, and
+ * the first success after failures.
+ */
+async function sendKeepalive(): Promise<void> {
+  const webUrl = process.env.WEB_INTERNAL_URL;
+  const secret = process.env.REVALIDATE_SECRET;
+  if (!webUrl || !secret || !liveEventsEnabled()) return;
+  const { failure } = await send(webUrl, secret, [{ kind: "keepalive" }]);
+  if (failure === null) {
+    if (keepaliveFailing) console.info("[live-emit] keepalive reaches the web again");
+    keepaliveFailing = false;
+    return;
+  }
+  if (keepaliveFailing) return;
+  keepaliveFailing = true;
+  console.warn(
+    `[live-emit] keepalive ${failure} — the web's live streams show degraded until it gets through (logged again only when it does)`,
+  );
+}
+
+/**
+ * Starts the keepalive: one `keepalive` event every LIVE_KEEPALIVE_MS while
+ * live events are on (WEB_INTERNAL_URL and REVALIDATE_SECRET set,
+ * LIVE_EVENTS_DISABLED not 1). Idempotent; the timer never keeps the
+ * process alive.
+ */
+export function startLiveKeepalive(): void {
+  if (keepaliveTimer || !liveEventsEnabled()) return;
+  keepaliveTimer = setInterval(() => {
+    void sendKeepalive();
+  }, LIVE_KEEPALIVE_MS);
+  keepaliveTimer.unref?.();
+}
+
+/** Stops the keepalive (tests, and a cms that shuts its subscriber down). */
+export function stopLiveKeepalive(): void {
+  if (keepaliveTimer) clearInterval(keepaliveTimer);
+  keepaliveTimer = null;
+  keepaliveFailing = false;
 }
 
 async function flush(): Promise<void> {
@@ -266,4 +347,6 @@ export function registerLiveEventSubscriber(strapi: LiveSubscriberStrapi): void 
     afterDelete: handle,
   });
   strapi.log?.info?.("[live-emit] DB lifecycle subscriber registered");
+  // The web's proof that this leg is alive (LF05); a no-op with live events off.
+  startLiveKeepalive();
 }

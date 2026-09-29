@@ -119,6 +119,15 @@ describe("live-smoke.sh: what it touches", () => {
     expect(SCRIPT.match(/cms_probe comment/g)).toHaveLength(1);
   });
 
+  it("requires the stream to say emitFresh (the cms keepalive reaches the web) before the comment (LF05)", () => {
+    expect(SCRIPT).toContain('FRESH_SECONDS="${FRESH_SECONDS:-35}"');
+    const check = SCRIPT.indexOf(`if grep -q '"emitFresh":true' "\${STREAM_LOG}"; then`);
+    expect(check).toBeGreaterThan(SCRIPT.indexOf('echo "live-smoke: stream open'));
+    // Before the comment: its own emit would make the leg fresh too.
+    expect(check).toBeLessThan(SCRIPT.indexOf("cms_probe comment ||"));
+    expect(SCRIPT).toContain('fail "the cms leg is not fresh: no');
+  });
+
   it("subscribes with the full channel set at revision 1 and checks that the set was applied (LF05)", () => {
     expect(SCRIPT).toContain(
       '--data "{\\"connId\\":\\"${CONN_ID}\\",\\"rev\\":1,\\"channels\\":[\\"announcement:${TARGET_DOC_ID}\\"]}"',

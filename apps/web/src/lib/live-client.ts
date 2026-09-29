@@ -22,6 +22,11 @@
  *  - Heartbeat watchdog: the server sends an `hb` event every 25s; ~65s
  *    without one means the connection is half-open → force reopen. (A
  *    `: comment` heartbeat would be invisible to the EventSource API.)
+ *  - Two-leg health (LF05): the hello and every heartbeat say whether the
+ *    cms reached the web lately (`emitFresh`, its 20 s keepalive). Without
+ *    it the stream is up but no ping can come, so the client reports
+ *    unhealthy (degraded) and its owners poll at the short intervals; the
+ *    web pushes a heartbeat the moment the cms leg is back.
  *  - Pings are coalesced per channel (content 400ms; notifications +
  *    announcements get extra 0–3s/0–10s jitter — those fan out to every
  *    user at once) and refetches are single-flight with a dirty flag:
@@ -54,6 +59,8 @@ import {
   frameChannel,
   isContentChannel,
   parseByeFrame,
+  parseHeartbeatFrame,
+  parseHelloFrame,
   parseLiveFrame,
   type ByeReason,
   type ContentChannel,
@@ -89,6 +96,15 @@ export interface LiveClientDeps {
   };
   /** POSTs a JSON body (the subscribe route); true when the server took it (2xx). */
   post(url: string, body: unknown): Promise<boolean>;
+}
+
+/** An event's data parsed as JSON, or undefined when it is none. */
+function readJson(data: unknown): unknown {
+  try {
+    return JSON.parse(String(data));
+  } catch {
+    return undefined;
+  }
 }
 
 /** EventSource.CLOSED: the connection is gone and the browser will not retry. */
@@ -209,12 +225,11 @@ export class LiveClient {
       this.attempt = 0;
       this.instantCloses = 0;
       this.lastBeat = this.deps.now();
-      try {
-        this.connId = (JSON.parse(String(event.data)) as { connId: string }).connId;
-      } catch {
-        this.connId = null;
-      }
-      this.onHealth(true);
+      const hello = parseHelloFrame(readJson(event.data));
+      this.connId = hello?.connId ?? null;
+      // Degraded while the cms leg is not fresh (LF05): the stream is up
+      // but no ping can come, so the owners poll at the short intervals.
+      this.onHealth(hello?.emitFresh ?? true);
       // A new connection starts with no channels: send the set if there is one.
       if (this.connId) this.sent = { connId: this.connId, key: "" };
       this.scheduleSync();
@@ -225,9 +240,9 @@ export class LiveClient {
       this.everOpened = true;
     });
 
-    source.addEventListener("hb", () => {
+    source.addEventListener("hb", (event) => {
       this.lastBeat = this.deps.now();
-      this.onHealth(true);
+      this.onHealth(parseHeartbeatFrame(readJson(event.data)).emitFresh);
     });
 
     source.addEventListener("bye", (event) => {

@@ -4,7 +4,9 @@ import {
   ANNOUNCEMENTS_CHANNEL,
   BYE_REASONS,
   CHANNEL_RE,
+  EMIT_FRESH_MS,
   GLOBAL_CHANNELS,
+  LIVE_KEEPALIVE_MS,
   LIVE_TARGET_TYPES,
   MAX_EVENTS_PER_EMIT,
   MAX_SUBSCRIBE_LIST,
@@ -13,6 +15,8 @@ import {
   frameChannel,
   isContentChannel,
   parseByeFrame,
+  parseHeartbeatFrame,
+  parseHelloFrame,
   parseLiveFrame,
   parseSubscribeRequest,
   type LiveFrame,
@@ -115,6 +119,37 @@ describe("frames", () => {
 });
 
 describe("stream events (LF05)", () => {
+  it("reads the hello's connection id and cms-leg freshness; without the flag it is fresh", () => {
+    expect(parseHelloFrame({ connId: "c1", emitFresh: false })).toEqual({
+      connId: "c1",
+      emitFresh: false,
+    });
+    expect(parseHelloFrame({ connId: "c1", emitFresh: true })).toEqual({
+      connId: "c1",
+      emitFresh: true,
+    });
+    // The hello of a web from before LF05.
+    expect(parseHelloFrame({ connId: "c1" })).toEqual({ connId: "c1", emitFresh: true });
+    for (const value of [null, "c1", {}, { connId: "" }, { connId: 7 }]) {
+      expect(parseHelloFrame(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  it("calls a heartbeat stale only when it says emitFresh false", () => {
+    expect(parseHeartbeatFrame({ emitFresh: false })).toEqual({ emitFresh: false });
+    expect(parseHeartbeatFrame({ emitFresh: true })).toEqual({ emitFresh: true });
+    // The heartbeat of a web from before LF05 (data 1), and anything else.
+    for (const value of [1, null, "x", {}, { emitFresh: "false" }]) {
+      expect(parseHeartbeatFrame(value), JSON.stringify(value)).toEqual({ emitFresh: true });
+    }
+  });
+
+  it("keeps the cms leg fresh for two keepalives and some slack", () => {
+    expect(LIVE_KEEPALIVE_MS).toBe(20_000);
+    expect(EMIT_FRESH_MS).toBe(45_000);
+    expect(EMIT_FRESH_MS).toBeGreaterThan(2 * LIVE_KEEPALIVE_MS);
+  });
+
   it("parses a bye with one of the four reasons and nothing else", () => {
     expect(BYE_REASONS).toEqual(["evicted", "shutdown", "rotate", "expired"]);
     for (const reason of BYE_REASONS) {

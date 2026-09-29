@@ -60,11 +60,28 @@ export type GlobalChannel = (typeof GLOBAL_CHANNELS)[number];
 
 export type LiveChannel = ContentChannel | GlobalChannel;
 
-/** What the cms POSTs to the web's /api/live/emit, in `{ events: LiveEvent[] }`. */
+/**
+ * What the cms POSTs to the web's /api/live/emit, in `{ events: LiveEvent[] }`.
+ * `keepalive` (LF05) changes nothing and pings nobody: the cms sends it every
+ * LIVE_KEEPALIVE_MS, so the web knows its emit leg is alive even when nobody
+ * writes (see EMIT_FRESH_MS).
+ */
 export type LiveEvent =
   | { kind: "content"; targetType: string; targetDocumentId: string }
   | { kind: "notification"; recipientId: number }
-  | { kind: "announcements" };
+  | { kind: "announcements" }
+  | { kind: "keepalive" };
+
+/** How often the cms proves that its emits reach the web (LF05). */
+export const LIVE_KEEPALIVE_MS = 20_000;
+
+/**
+ * The web calls the cms leg fresh while its last emit (a keepalive or any
+ * event) is at most this old: two keepalives and some slack, so one slow or
+ * lost keepalive does not flap the clients. A web that has heard nothing
+ * since it started is not fresh.
+ */
+export const EMIT_FRESH_MS = 2 * LIVE_KEEPALIVE_MS + 5_000;
 
 /** What the SSE stream sends as the data of a `ping` event. */
 export type LiveFrame =
@@ -152,6 +169,43 @@ export function frameChannel(frame: LiveFrame): LiveChannel {
     case "announcements":
       return ANNOUNCEMENTS_CHANNEL;
   }
+}
+
+/**
+ * The data of the stream's first event, `hello`: the connection id the
+ * subscribe POSTs name, and whether the cms leg is fresh (EMIT_FRESH_MS).
+ */
+export type HelloFrame = { connId: string; emitFresh: boolean };
+
+/**
+ * The data of the heartbeat, `hb`, sent every 25 s and at once when the cms
+ * leg recovers: whether the cms leg is fresh. A stream whose cms leg is not
+ * fresh is up but gets no pings, so the client counts as degraded (its
+ * owners poll at the short intervals).
+ */
+export type HeartbeatFrame = { emitFresh: boolean };
+
+/**
+ * A `hello` event's data, or null without a connection id. A hello without
+ * `emitFresh` (a web from before LF05) counts as fresh.
+ */
+export function parseHelloFrame(value: unknown): HelloFrame | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { connId, emitFresh } = value as { connId?: unknown; emitFresh?: unknown };
+  if (typeof connId !== "string" || connId === "") return null;
+  return { connId, emitFresh: emitFresh !== false };
+}
+
+/**
+ * An `hb` event's data. Only an explicit `emitFresh: false` is stale: the
+ * heartbeat of a web from before LF05 (the data `1`) counts as fresh.
+ */
+export function parseHeartbeatFrame(value: unknown): HeartbeatFrame {
+  const emitFresh =
+    typeof value === "object" && value !== null
+      ? (value as { emitFresh?: unknown }).emitFresh
+      : undefined;
+  return { emitFresh: emitFresh !== false };
 }
 
 /**

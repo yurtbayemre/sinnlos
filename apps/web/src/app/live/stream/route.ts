@@ -24,11 +24,16 @@
  * EventSource on it, so the browser's native 3 s retry no longer reopens a
  * stream the server ended on purpose. A stream that died (a failed write,
  * backpressure, the client's abort) gets no bye: nobody would read it.
+ *
+ * The hello and every heartbeat carry `emitFresh` (LF05): whether the cms
+ * reached the bus within the last 45 s (its keepalive runs every 20 s). A
+ * stream without a fresh cms leg is up but gets no pings; the client then
+ * counts as degraded, and its owners poll at the short intervals.
  */
 import { getSession } from "@/lib/session";
 
 import { getLiveBus, liveEventsDisabled, type LiveFrame } from "@/lib/live-bus";
-import type { ByeReason } from "@/lib/live-contract";
+import type { ByeReason, HeartbeatFrame, HelloFrame } from "@/lib/live-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -91,24 +96,30 @@ export async function GET(req: Request) {
         }
       };
 
+      // The heartbeat carries the cms leg's freshness (LF05, HeartbeatFrame).
+      const beat = (emitFresh: boolean) =>
+        write(`event: hb\ndata: ${JSON.stringify({ emitFresh } satisfies HeartbeatFrame)}\n\n`);
+
       bus.register({
         id: connId,
         userId,
         channels: new Set(),
         openedAt: Date.now(),
         enqueue: (frame: LiveFrame) => write(`event: ping\ndata: ${JSON.stringify(frame)}\n\n`),
+        beat,
         close: cleanup,
       });
 
       // retry: native EventSource reconnect hint for mid-stream network
       // drops (HTTP errors close it permanently — the provider owns that).
-      write(`retry: 3000\nevent: hello\ndata: ${JSON.stringify({ connId })}\n\n`);
+      const hello: HelloFrame = { connId, emitFresh: bus.emitFresh() };
+      write(`retry: 3000\nevent: hello\ndata: ${JSON.stringify(hello)}\n\n`);
 
       heartbeat = setInterval(() => {
         // A real event, not an SSE comment line: comment frames are
         // invisible to the EventSource API, and the client watchdog
         // (~60s without a beat → force reopen) needs to see these.
-        if (!write("event: hb\ndata: 1\n\n")) {
+        if (!beat(bus.emitFresh())) {
           cleanup();
           return;
         }

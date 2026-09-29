@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
-import { MAX_EVENTS_PER_EMIT } from "./live-contract";
+import { LIVE_KEEPALIVE_MS, MAX_EVENTS_PER_EMIT } from "./live-contract";
 import {
   __flushLiveEventsForTest,
   emitLiveEvent,
   registerLiveEventSubscriber,
+  startLiveKeepalive,
+  stopLiveKeepalive,
   type LiveEvent,
 } from "./live-events";
 
@@ -22,6 +24,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   await __flushLiveEventsForTest();
+  stopLiveKeepalive();
   vi.unstubAllGlobals();
 });
 
@@ -408,5 +411,96 @@ describe("live subscriber: pings go out after the commit (LF02)", () => {
     await h.fire("afterCreate", ANNOUNCEMENT, { result: { id: 2, publishedAt: PUBLISHED } });
     expect(h.strapi.db.inTransaction()).toBe(false);
     expect(await h.emitted()).toEqual([{ kind: "announcements" }]);
+  });
+});
+
+describe("keepalive (LF05)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  const keepalives = () =>
+    fetchMock.mock.calls.map(([url, init]) => ({
+      url,
+      secret: (init as { headers: Record<string, string> }).headers["x-revalidate-secret"],
+      events: (JSON.parse((init as { body: string }).body) as { events: LiveEvent[] }).events,
+    }));
+
+  it("POSTs one keepalive event to the emit endpoint every 20 s", async () => {
+    expect(LIVE_KEEPALIVE_MS).toBe(20_000);
+    startLiveKeepalive();
+    await vi.advanceTimersByTimeAsync(LIVE_KEEPALIVE_MS - 1);
+    expect(fetchMock).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(keepalives()).toEqual([
+      {
+        url: "http://web:3000/api/live/emit",
+        secret: "test-secret",
+        events: [{ kind: "keepalive" }],
+      },
+    ]);
+    await vi.advanceTimersByTimeAsync(2 * LIVE_KEEPALIVE_MS);
+    expect(keepalives()).toHaveLength(3);
+  });
+
+  it("starts with the subscriber, and only once", async () => {
+    const strapi = createStrapiStub();
+    for (let i = 0; i < 2; i += 1) {
+      registerLiveEventSubscriber({
+        log: strapi.log,
+        db: {
+          query: (uid: string) => strapi.db.query(uid),
+          lifecycles: { subscribe: () => undefined },
+        },
+      });
+    }
+    await vi.advanceTimersByTimeAsync(LIVE_KEEPALIVE_MS);
+    expect(keepalives()).toHaveLength(1);
+  });
+
+  it.each([
+    ["without WEB_INTERNAL_URL", () => delete process.env.WEB_INTERNAL_URL],
+    ["without REVALIDATE_SECRET", () => delete process.env.REVALIDATE_SECRET],
+    ["with LIVE_EVENTS_DISABLED=1", () => (process.env.LIVE_EVENTS_DISABLED = "1")],
+  ])("stays off %s", async (_label, configure) => {
+    configure();
+    startLiveKeepalive();
+    await vi.advanceTimersByTimeAsync(3 * LIVE_KEEPALIVE_MS);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("logs a failing keepalive once, and once more when it gets through again", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    startLiveKeepalive();
+    await vi.advanceTimersByTimeAsync(3 * LIVE_KEEPALIVE_MS);
+    fetchMock.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    await vi.advanceTimersByTimeAsync(LIVE_KEEPALIVE_MS);
+    expect(warn.mock.calls).toEqual([
+      [
+        "[live-emit] keepalive status=401 — the web's live streams show degraded until it gets through (logged again only when it does)",
+      ],
+    ]);
+    fetchMock.mockResolvedValue({ ok: true, status: 204 });
+    await vi.advanceTimersByTimeAsync(2 * LIVE_KEEPALIVE_MS);
+    expect(info.mock.calls).toEqual([["[live-emit] keepalive reaches the web again"]]);
+    fetchMock.mockRejectedValue(new Error("connect ECONNREFUSED"));
+    await vi.advanceTimersByTimeAsync(LIVE_KEEPALIVE_MS);
+    expect(warn.mock.calls[warn.mock.calls.length - 1]).toEqual([
+      "[live-emit] keepalive failed: connect ECONNREFUSED — the web's live streams show degraded until it gets through (logged again only when it does)",
+    ]);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("never keeps the process alive", () => {
+    const unref = vi.fn();
+    vi.spyOn(globalThis, "setInterval").mockReturnValue({ unref } as unknown as NodeJS.Timeout);
+    startLiveKeepalive();
+    expect(unref).toHaveBeenCalledTimes(1);
   });
 });

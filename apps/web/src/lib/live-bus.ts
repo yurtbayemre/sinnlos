@@ -17,9 +17,18 @@
  *
  * Sizing (200-employee profile, plan §7): 500 connections total,
  * 5 per user with oldest-first eviction, 200 channels per connection.
+ *
+ * Two-leg health (LF05): the stream is one leg, the cms emit is the other.
+ * Every POST from the cms, its 20 s keepalive included, refreshes
+ * `lastEmitAt`; emitFresh() says whether that was at most EMIT_FRESH_MS
+ * (45 s) ago, and the stream route puts it on every hello and heartbeat.
+ * A web that has heard nothing since it started is not fresh. When a
+ * stale leg recovers, every stream gets a heartbeat at once instead of at
+ * its next 25 s tick.
  */
 
 import {
+  EMIT_FRESH_MS,
   MAX_EVENTS_PER_EMIT,
   channelFor,
   type ByeReason,
@@ -40,6 +49,8 @@ type Connection = {
   openedAt: number;
   /** Returns false when the underlying stream rejected the frame. */
   enqueue: (frame: LiveFrame) => boolean;
+  /** Sends a heartbeat with the cms leg's freshness now (LF05); false when the stream is gone. */
+  beat?: (emitFresh: boolean) => boolean;
   /**
    * Ends the stream. With a reason, a terminal `bye` event goes out first
    * (LF05), so the client neither retries natively nor evicts the next tab.
@@ -61,6 +72,13 @@ class LiveBus {
   private connections = new Map<string, Connection>();
   private counters = { emitsReceived: 0, pingsSent: 0, evictions: 0 };
   private statsTimer: NodeJS.Timeout | null = null;
+  /** When the cms last POSTed anything (events or a keepalive); 0 = never. */
+  private lastEmitAt = 0;
+
+  /** Whether the cms leg is alive: an emit within the last EMIT_FRESH_MS. */
+  emitFresh(now: number = Date.now()): boolean {
+    return this.lastEmitAt > 0 && now - this.lastEmitAt <= EMIT_FRESH_MS;
+  }
 
   register(conn: Connection): void {
     // Per-user cap: evict the OLDEST connection instead of rejecting the
@@ -153,8 +171,20 @@ class LiveBus {
   }
 
   publish(events: LiveEvent[]): void {
+    const now = Date.now();
+    const recovered = !this.emitFresh(now);
+    this.lastEmitAt = now;
+    if (recovered) {
+      // The streams said `emitFresh: false` (or nothing yet): tell them now.
+      for (const conn of [...this.connections.values()]) {
+        if (conn.beat && !conn.beat(true)) this.drop(conn.id);
+      }
+    }
+    // A keepalive-only POST is no emit in the stats line (three a minute).
+    if (events.every((event) => event.kind === "keepalive")) return;
     this.counters.emitsReceived += 1;
     for (const event of events) {
+      if (event.kind === "keepalive") continue;
       for (const conn of this.connections.values()) {
         let frame: LiveFrame | null = null;
         if (event.kind === "content") {
@@ -281,6 +311,8 @@ export function parseLiveEvents(body: unknown): LiveEvent[] | null {
       parsed.push({ kind: "notification", recipientId: ev.recipientId });
     } else if (ev.kind === "announcements") {
       parsed.push({ kind: "announcements" });
+    } else if (ev.kind === "keepalive") {
+      parsed.push({ kind: "keepalive" });
     } else {
       return null;
     }

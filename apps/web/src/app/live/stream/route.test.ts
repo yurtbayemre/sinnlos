@@ -13,7 +13,9 @@ import { getLiveBus } from "@/lib/live-bus";
  *      `bye {reason}` (LF05): `evicted` when the bus's per-user cap takes
  *      the place, `shutdown` on the bus's closeAll (SIGTERM), `rotate` at
  *      the lifetime rotation, `expired` when the session ends first; the
- *      client's abort ends it without one.
+ *      client's abort ends it without one;
+ *   4. the hello and the 25 s heartbeat carry the cms leg's freshness
+ *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
  *
  * `@/lib/session` is mocked (the real module pulls in next-auth).
  */
@@ -90,7 +92,7 @@ describe("GET /live/stream", () => {
     expect(stream.res.headers.get("cache-control")).toBe("no-store, no-transform");
     expect(stream.res.headers.get("x-accel-buffering")).toBe("no");
     expect(await stream.read()).toMatch(
-      /^retry: 3000\nevent: hello\ndata: \{"connId":"[^"]+"\}\n\n$/,
+      /^retry: 3000\nevent: hello\ndata: \{"connId":"[^"]+","emitFresh":false\}\n\n$/,
     );
     expect(getLiveBus().connectionCount()).toBe(1);
   });
@@ -148,10 +150,37 @@ describe("GET /live/stream", () => {
     expect(getLiveBus().connectionCount()).toBe(0);
   });
 
-  it("beats every 25 s", async () => {
+  it("beats every 25 s with the cms leg's freshness", async () => {
     const stream = await open();
     await stream.read();
     await vi.advanceTimersByTimeAsync(25_000);
-    expect(await stream.read()).toBe("event: hb\ndata: 1\n\n");
+    // Nothing from the cms since the web started: not fresh.
+    expect(await stream.read()).toBe('event: hb\ndata: {"emitFresh":false}\n\n');
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    await stream.read();
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(await stream.read()).toBe('event: hb\ndata: {"emitFresh":true}\n\n');
+    // No keepalive for more than 45 s: stale again at the next beat.
+    await vi.advanceTimersByTimeAsync(25_000);
+    expect(await stream.read()).toBe('event: hb\ndata: {"emitFresh":false}\n\n');
+  });
+
+  it("says in the hello whether the cms leg is fresh", async () => {
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    const stream = await open();
+    expect(await stream.read()).toMatch(
+      /event: hello\ndata: \{"connId":"[^"]+","emitFresh":true\}/,
+    );
+  });
+
+  it("beats at once when the cms leg comes back, not at the next tick", async () => {
+    const stream = await open();
+    await stream.read();
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(await stream.read()).toBe('event: hb\ndata: {"emitFresh":true}\n\n');
+    // Still fresh: the next keepalive adds nothing to the stream.
+    await vi.advanceTimersByTimeAsync(20_000);
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(await stream.read()).toBe("");
   });
 });

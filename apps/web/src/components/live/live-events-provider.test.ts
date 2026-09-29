@@ -112,6 +112,17 @@ describe("connection", () => {
     expect(registry.healthy).toBe(true);
   });
 
+  it("reports degraded while the stream says the cms leg is not fresh (LF05)", async () => {
+    await mount();
+    const source = FakeEventSource.latest();
+    await browser.act(() => source.emit("hello", { connId: "conn-1", emitFresh: false }));
+    expect(registry.healthy).toBe(false);
+    await browser.act(() => source.emit("hb", { emitFresh: true }));
+    expect(registry.healthy).toBe(true);
+    await browser.act(() => source.emit("hb", { emitFresh: false }));
+    expect(registry.healthy).toBe(false);
+  });
+
   it("opens nothing when disabled (LIVE_EVENTS_DISABLED, DEMO_MODE)", async () => {
     await mount(null, false);
     await advance(10 * 60_000);

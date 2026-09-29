@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getLiveBus, parseLiveEvents, type LiveFrame } from "./live-bus";
-import { MAX_EVENTS_PER_EMIT, channelFor, type ByeReason } from "./live-contract";
+import { EMIT_FRESH_MS, MAX_EVENTS_PER_EMIT, channelFor, type ByeReason } from "./live-contract";
 
 type TestConn = {
   id: string;
@@ -152,6 +152,66 @@ describe("subscription ownership", () => {
   });
 });
 
+describe("the cms leg's freshness (LF05)", () => {
+  it("is not fresh before the cms sent anything, fresh for 45 s after any POST, then stale", () => {
+    vi.useFakeTimers();
+    try {
+      expect(getLiveBus().emitFresh()).toBe(false);
+      getLiveBus().publish([{ kind: "keepalive" }]);
+      expect(getLiveBus().emitFresh()).toBe(true);
+      vi.advanceTimersByTime(EMIT_FRESH_MS);
+      expect(getLiveBus().emitFresh()).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(getLiveBus().emitFresh()).toBe(false);
+      // Real events count as much as a keepalive.
+      getLiveBus().publish([{ kind: "announcements" }]);
+      expect(getLiveBus().emitFresh()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delivers no frame for a keepalive", () => {
+    const conn = connect({ userId: 1, channels: ["announcement:a"] });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(conn.frames).toEqual([]);
+  });
+
+  it("beats every stream at once when a stale leg recovers, and only then", () => {
+    const beats: boolean[] = [];
+    getLiveBus().register({
+      id: "c1",
+      userId: 1,
+      channels: new Set(),
+      openedAt: Date.now(),
+      enqueue: () => true,
+      beat: (fresh) => {
+        beats.push(fresh);
+        return true;
+      },
+      close: () => undefined,
+    });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    getLiveBus().publish([{ kind: "announcements" }]);
+    expect(beats).toEqual([true]);
+  });
+
+  it("drops a stream whose recovery beat fails", () => {
+    getLiveBus().register({
+      id: "dead",
+      userId: 1,
+      channels: new Set(),
+      openedAt: Date.now(),
+      enqueue: () => true,
+      beat: () => false,
+      close: () => undefined,
+    });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+});
+
 describe("full-set sync with a revision (LF05)", () => {
   const ping = (documentId: string) =>
     getLiveBus().publish([
@@ -280,16 +340,22 @@ describe("shutdown", () => {
 });
 
 describe("parseLiveEvents", () => {
-  it("accepts the three event shapes", () => {
+  it("accepts the four event shapes, the cms keepalive included (LF05)", () => {
     expect(
       parseLiveEvents({
         events: [
           { kind: "content", targetType: "announcement", targetDocumentId: "abc" },
           { kind: "notification", recipientId: 5 },
           { kind: "announcements" },
+          { kind: "keepalive", extra: 1 },
         ],
       }),
-    ).toHaveLength(3);
+    ).toEqual([
+      { kind: "content", targetType: "announcement", targetDocumentId: "abc" },
+      { kind: "notification", recipientId: 5 },
+      { kind: "announcements" },
+      { kind: "keepalive" },
+    ]);
   });
 
   it("accepts up to MAX_EVENTS_PER_EMIT events and refuses one more (the cms chunks, LF01)", () => {

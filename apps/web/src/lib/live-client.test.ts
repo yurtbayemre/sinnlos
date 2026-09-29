@@ -229,6 +229,49 @@ describe("terminal bye frames (LF05)", () => {
   });
 });
 
+describe("two-leg health (LF05)", () => {
+  it("is degraded while the hello or the heartbeats say the cms leg is not fresh", async () => {
+    const h = harness();
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "c1", emitFresh: false });
+    expect(h.health).toEqual([false]);
+    source.emit("hb", { emitFresh: true });
+    expect(h.health.at(-1)).toBe(true);
+    source.emit("hb", { emitFresh: false });
+    expect(h.health.at(-1)).toBe(false);
+    // Still subscribed and connected: the stream itself is fine.
+    await advance(h, 0);
+    expect(h.posts).toEqual([]);
+    expect(source.closed).toBe(false);
+    h.client.stop();
+  });
+
+  it("a stale heartbeat still feeds the watchdog", async () => {
+    const h = harness();
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "c1", emitFresh: false });
+    for (let i = 0; i < 6; i += 1) {
+      await advance(h, 25_000);
+      source.emit("hb", { emitFresh: false });
+    }
+    expect(source.closed).toBe(false);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    h.client.stop();
+  });
+
+  it("a web from before LF05 (hello without the flag, hb data 1) counts as fresh", () => {
+    const h = harness();
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "c1" });
+    source.emit("hb", "1");
+    expect(h.health).toEqual([true, true]);
+    h.client.stop();
+  });
+});
+
 describe("start and stop (the provider's effect)", () => {
   it("stop() closes the stream, removes the visibility listener and every timer", async () => {
     const h = harness();
