@@ -57,7 +57,9 @@
 #                     another project also needs SMOKE_URL, SINNLOS_BACKUP_DIR
 #                     and, next to project infra's containers,
 #                     DEPLOY_SEPARATE_EDGE=1 (a Traefik of its own)
-#   DEPLOY_STATE_DIR  <git dir of the checkout>/sinnlos-deploy (state, history, lock)
+#   DEPLOY_STATE_DIR  <common git dir of the clone>/sinnlos-deploy (state, history,
+#                     lock; shared by its worktrees; a second clone deploying the
+#                     same project must point it at the same directory)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
 #   GITHUB_TOKEN      optional, for the CI check (public repos need none)
 #
@@ -516,9 +518,9 @@ print_rollback_hint() {
 # --- Last-known-good state (FX35) --------------------------------------------
 # Written only after the smoke check and live-smoke passed: the commit, its
 # SHA tag and the image ids web and cms ran with. A plain key=value file,
-# read back by key (never sourced). Kept in the checkout's git dir by
+# read back by key (never sourced). Kept in the clone's common git dir by
 # default: outside the working tree, never committed, the same for every
-# user that runs this script on the host.
+# user that runs this script on the host and for every worktree.
 STATE_KEYS="SHA TAG DEPLOYED_AT WEB_IMAGE CMS_IMAGE LIVE_SMOKE"
 
 # Reads STATE_FILE into STATE_<KEY>; false without a usable state (no file,
@@ -583,7 +585,7 @@ write_bootstrap() {
 # git dir, so the checkout's owner can deploy (and write it) next time.
 own_like_git_dir() {
   if ((EUID == 0)); then
-    chown --reference="${GIT_DIR}" "$@" 2>/dev/null || true
+    chown --reference="${REPO_GIT_DIR}" "$@" 2>/dev/null || true
   fi
 }
 
@@ -996,8 +998,16 @@ if ! HEAD_SHA="$("${GIT[@]}" rev-parse --verify -q HEAD)"; then
   exit 1
 fi
 NEW_TAG="${HEAD_SHA:0:12}"
-GIT_DIR="$("${GIT[@]}" rev-parse --absolute-git-dir)"
-STATE_DIR="${DEPLOY_STATE_DIR:-${GIT_DIR}/sinnlos-deploy}"
+# The common git dir of the clone (its .git, also from a linked worktree),
+# so every worktree of it shares state, history and lock. A second clone
+# that deploys the same project must set DEPLOY_STATE_DIR to the same
+# directory. (Not named GIT_DIR: git itself reads that variable.)
+REPO_GIT_DIR="$("${GIT[@]}" rev-parse --git-common-dir)"
+if [[ "${REPO_GIT_DIR}" != /* && "${REPO_GIT_DIR}" != [A-Za-z]:* ]]; then
+  REPO_GIT_DIR="${CHECKOUT}/${REPO_GIT_DIR}"
+fi
+REPO_GIT_DIR="$(cd "${REPO_GIT_DIR}" && pwd)"
+STATE_DIR="${DEPLOY_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-deploy}"
 STATE_FILE="${STATE_DIR}/${PROJECT}.state"
 HISTORY_FILE="${STATE_DIR}/${PROJECT}.history"
 BOOTSTRAP_FILE="${STATE_DIR}/${PROJECT}.bootstrap"

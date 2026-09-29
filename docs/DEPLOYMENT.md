@@ -1015,7 +1015,11 @@ and the tags it would remove, and changes nothing. The script is
 `set -Eeuo pipefail` and re-run safe; its parameters (environment, the
 defaults are the owner's host): `SMOKE_URL`, `PASSWORDS_FILE`,
 `SINNLOS_CHECKOUT` (the checkout it lives in), `COMPOSE_PROJECT` (`infra`),
-`DEPLOY_STATE_DIR` and `DEPLOY_KEEP_TAGS`. A second compose project (a
+`DEPLOY_STATE_DIR` (state, history, bootstrap marker and lock; by default
+`sinnlos-deploy` in the clone's `.git`, which its linked worktrees share: a
+second clone that deploys the same project must point `DEPLOY_STATE_DIR`
+at that same directory, or the two deploys neither share the lock nor the
+rollback target) and `DEPLOY_KEEP_TAGS`. A second compose project (a
 staging copy) needs its own backup dir, smoke URL and edge: `deploy.sh`
 refuses a project other than `infra` without `SMOKE_URL` and
 `SINNLOS_BACKUP_DIR` (passed on to the pre-deploy backup, whose

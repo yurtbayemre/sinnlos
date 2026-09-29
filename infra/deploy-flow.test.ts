@@ -633,6 +633,11 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       // … and with its own of each, it deploys.
       /* 12 */ { env: { ...STAGING, DEPLOY_SEPARATE_EDGE: "1" } },
       /* 13 */ { env: { PASSWORDS_FILE: "/nonexistent/pw" }, args: ["--dry-run"] },
+      // A linked worktree of the same clone deploys with the clone's state and lock.
+      /* 14 */ {
+        before: '"${G[@]}" worktree add -q --detach "$T/wt" HEAD; export SINNLOS_CHECKOUT="$T/wt"',
+        args: ["--dry-run"],
+      },
     ]);
   }, SEQUENCE_BUDGET);
 
@@ -692,6 +697,14 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(run.state.WEB_IMAGE).toBe("sha256:web1");
     // Recorded: the :rollback bootstrap marker is gone.
     expect(run.bootstrap).toEqual([]);
+  });
+
+  it("shares the state and the lock with the linked worktrees of the clone", () => {
+    const run = r[14];
+    expect(run.status, run.stderr).toBe(0);
+    expect(run.stdout).toContain(`-> the last-known-good deploy ${tagOf(r[7])}`);
+    expect(run.stdout).toMatch(/record \S*\/checkout\/\.git\/sinnlos-deploy\/infra\.state$/m);
+    expect(run.stdout).not.toContain("/worktrees/");
   });
 
   it("plans no record when live-smoke would lack the demo credentials", () => {
