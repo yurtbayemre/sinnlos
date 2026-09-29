@@ -1,7 +1,13 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
-import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
+import {
+  actionFailure,
+  runCmsAction,
+  type ActionResult,
+  type CmsErrorInfo,
+  type CommonCode,
+} from "@/lib/action-result";
 import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import {
@@ -285,14 +291,32 @@ function writeAnchor(target: CommentTarget): string | null {
 }
 
 /**
- * Posts a comment. Answers an ActionResult (AC01): the cms's 400 for an
- * unknown, invisible or unpublished target is "invalid" (the same answer
- * as for a missing one).
+ * The cms's refusal of a comment or reaction write whose target it cannot
+ * resolve for the caller: unknown, not visible to them, or an announcement
+ * that is unpublished (batch 12, lane 7C: its thread answers exactly like
+ * a missing target) or expired. comment-target's WRITE_TARGET_ERRORS gives
+ * "no key sent" and "the key names nothing" the same text on purpose (no
+ * existence oracle); the web always sends a key (writeAnchor refuses
+ * first), so from here the answer means the target is gone for this user:
+ * "notFound" ("This item no longer exists — reload the page."), not a
+ * retry prompt. A bare ctx.badRequest carries no machine code, so the
+ * parsed envelope message is compared exactly;
+ * comment-actions-writes.test.ts pins the text against the cms.
+ */
+const TARGET_GONE = "targetDocumentId required";
+
+const targetGone = (cms: CmsErrorInfo): CommonCode | undefined =>
+  cms.status === 400 && cms.message === TARGET_GONE ? "notFound" : undefined;
+
+/**
+ * Posts a comment. Answers an ActionResult (AC01): a target that is gone
+ * for the caller (unknown, invisible, unpublished) is "notFound", any other
+ * 400 "invalid".
  */
 export async function addComment(target: CommentTarget, body: string): Promise<ActionResult> {
   const targetDocumentId = writeAnchor(target);
   if (!targetDocumentId) return actionFailure("invalid");
-  return runCmsAction(
+  return runCmsAction<never>(
     () =>
       strapi("/api/comments", {
         method: "POST",
@@ -300,7 +324,7 @@ export async function addComment(target: CommentTarget, body: string): Promise<A
           data: { body, targetType: target.type, targetDocumentId },
         }),
       }),
-    { label: "[comments] add" },
+    { label: "[comments] add", mapError: targetGone },
   );
 }
 
@@ -326,7 +350,8 @@ export async function deleteComment(commentId: number): Promise<ActionResult> {
  * not a toggle, so a repeated request cannot undo the first one. The CMS
  * creates the row, deletes it or does nothing; one that predates the key
  * ignores it and toggles, which is what the button asked for anyway.
- * Answers an ActionResult (AC01).
+ * Answers an ActionResult (AC01): a target that is gone for the caller is
+ * "notFound", as for a comment.
  */
 export async function toggleReaction(
   target: CommentTarget,
@@ -335,7 +360,7 @@ export async function toggleReaction(
 ): Promise<ActionResult> {
   const targetDocumentId = writeAnchor(target);
   if (!targetDocumentId) return actionFailure("invalid");
-  return runCmsAction(
+  return runCmsAction<never>(
     () =>
       strapi("/api/reactions", {
         method: "POST",
@@ -344,6 +369,6 @@ export async function toggleReaction(
           data: { emoji, targetType: target.type, targetDocumentId, reacted: reacted === true },
         }),
       }),
-    { label: "[reactions] set" },
+    { label: "[reactions] set", mapError: targetGone },
   );
 }

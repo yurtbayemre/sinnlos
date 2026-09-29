@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -5,8 +7,9 @@ import { StrapiError } from "@/lib/strapi-error";
 
 /**
  * The comment and reaction writes answer ActionResults (AC01): success, the
- * cms's specific refusals (400 for an unknown, invisible or unpublished
- * target; 403 for a stranger's delete; 404 for a comment that is gone), the
+ * cms's specific refusals (its 400 for an unknown, invisible or unpublished
+ * target is notFound, any other 400 invalid; 403 for a stranger's delete;
+ * 404 for a comment that is gone), the
  * expired session's redirect propagating, and a network error as
  * "unavailable". No refresh(): the sections refetch themselves. strapi() and
  * the session are mocked; next/navigation is the real module.
@@ -136,5 +139,46 @@ describe("deleteComment", () => {
       });
     }
     expect(strapiMock).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Batch 12 coupling of lanes 7A and 7C: a comment or reaction write on a
+ * target that is gone for the caller (unknown, not visible to them, an
+ * unpublished or expired announcement) gets the cms's unresolved-target
+ * refusal, byte-identical in every case (no existence oracle). The web
+ * shows it as notFound ("reload the page"), not as a retry prompt.
+ */
+const TARGET_GONE = "targetDocumentId required";
+
+describe("a write on a target that is gone for the caller", () => {
+  const goneWrites = [
+    ["addComment", () => addComment(target, "Hello")],
+    ["toggleReaction", () => toggleReaction(target, "heart", true)],
+  ] as const;
+
+  it.each(goneWrites)("%s answers the unresolved-target refusal as notFound", async (_, run) => {
+    strapiMock.mockRejectedValue(cmsError(400, TARGET_GONE));
+    await expect(run()).resolves.toEqual({ ok: false, code: "notFound" });
+  });
+
+  it.each(goneWrites)("%s compares the text exactly and by status", async (_, run) => {
+    strapiMock.mockRejectedValue(cmsError(400, `${TARGET_GONE}.`));
+    await expect(run()).resolves.toEqual({ ok: false, code: "invalid" });
+    strapiMock.mockRejectedValue(cmsError(403, TARGET_GONE));
+    await expect(run()).resolves.toEqual({ ok: false, code: "forbidden" });
+  });
+
+  it("pins the text both cms write controllers send for an unresolved target", () => {
+    const cms = (path: string) => readFileSync(join(__dirname, "../../../cms/src", path), "utf8");
+    expect(cms("utils/comment-target.ts")).toContain(`"unresolved-target": "${TARGET_GONE}"`);
+    for (const controller of [
+      "api/comment/controllers/comment.ts",
+      "api/reaction/controllers/reaction.ts",
+    ]) {
+      expect(cms(controller), controller).toContain(
+        'ctx.badRequest(WRITE_TARGET_ERRORS["unresolved-target"])',
+      );
+    }
   });
 });
