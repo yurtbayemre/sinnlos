@@ -1387,7 +1387,10 @@ usual.
   frame by default: the stream user is the first of `alex.morgan` (who
   authors seeded announcements) and `casey.jones` with a line in the
   credentials file, and an unchecked frame is a warning that `deploy.sh`
-  repeats and records.
+  repeats and records. The comment author signs in to the cms once per run
+  (the comment and the cleanup reuse that token, passed through the
+  environment), so back-to-back runs stay under the cms sign-in limit of
+  10 per minute; a `HTTP 429` from that sign-in says to wait 60 s.
 - **cms crons**: one registry (`apps/cms/src/cron/registry.ts`) with a
   `[cron] <name> took <n>ms` line per run, an in-process overlap guard and
   the kill switch `CRON_ENABLED` (unset or blank = on; `0`, `false`, `no`

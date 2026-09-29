@@ -3,7 +3,9 @@
  * real stack (lane rehearsal, docs/DEPLOYMENT.md §6.1); pinned here:
  *   1. no password ever lands on a command line: curl reads SMOKE_PASSWORD
  *      from stdin, the cms container gets SMOKE_AUTHOR_PASSWORD through
- *      `docker exec -e`, and the node program reads the environment;
+ *      `docker exec -e`, and the node program reads the environment; the
+ *      author signs in once per run, and the comment and the cleanup get
+ *      that JWT through `docker exec -e` as well;
  *   2. the target announcement is found with GETs only;
  *   3. the stream is fetched with --compressed and must come back as
  *      text/event-stream without a Content-Encoding;
@@ -60,9 +62,40 @@ describe("live-smoke.sh: passwords stay off the command line", () => {
 
   it("gives the cms container the author's password through its environment", () => {
     expect(SCRIPT).toMatch(
-      /docker exec -i -e MODE -e TARGET -e STREAM_USER_ID -e SMOKE_AUTHOR_EMAIL -e SMOKE_AUTHOR_PASSWORD \\\n\s+"\$\{CMS_CONTAINER\}" node --input-type=module -/,
+      /docker exec -i -e MODE -e TARGET -e STREAM_USER_ID -e SMOKE_JWT -e SMOKE_AUTHOR_EMAIL -e SMOKE_AUTHOR_PASSWORD \\\n\s+"\$\{CMS_CONTAINER\}" node --input-type=module -/,
     );
     expect(PROBE).toContain("SMOKE_AUTHOR_PASSWORD: password");
+  });
+
+  it("signs the author in once per run and hands the JWT on through the environment only", () => {
+    // One sign-in in the probe, skipped when SMOKE_JWT carries an earlier one.
+    expect(PROBE.match(/\/api\/auth\/local/g)).toHaveLength(1);
+    expect(PROBE).toContain("let jwt = SMOKE_JWT;\nif (!jwt) {");
+    // A throttled sign-in says how long to wait.
+    expect(PROBE).toContain("wait 60 s before a re-run");
+    // discover prints it; the shell takes it out before anything prints DISCOVERED.
+    expect(PROBE).toContain("console.log(`JWT=${jwt}`);");
+    const discovered = SCRIPT.indexOf('DISCOVERED="$(cms_probe discover)"');
+    const stripped = SCRIPT.indexOf(
+      `DISCOVERED="$(printf '%s\\n' "\${DISCOVERED}" | grep -v '^JWT=' || true)"`,
+    );
+    expect(discovered).toBeGreaterThan(-1);
+    expect(stripped).toBeGreaterThan(discovered);
+    // Nothing between the two prints DISCOVERED (with the JWT still in it).
+    expect(SCRIPT.slice(discovered, stripped)).not.toMatch(
+      /\becho\b|fail "[^"\n]*\$\{DISCOVERED\}/,
+    );
+    // Every other use of the variable: the environment of `docker exec`, or comments.
+    for (const line of SCRIPT.split("\n").filter((l) => l.includes("SMOKE_JWT"))) {
+      const allowed =
+        /^\s*#/.test(line) ||
+        line.includes('SMOKE_JWT="${SMOKE_JWT:-}"') ||
+        line.includes("-e SMOKE_JWT") ||
+        line.startsWith(`SMOKE_JWT="$(printf '%s\\n' "\${DISCOVERED}" | sed -n 's/^JWT=//p')"`) ||
+        line.includes("SMOKE_JWT, STREAM_USER_ID, TARGET } = process.env;") ||
+        line.includes("let jwt = SMOKE_JWT;");
+      expect(allowed, line).toBe(true);
+    }
   });
 });
 

@@ -43,7 +43,9 @@
 #
 # Passwords never appear on a command line (the host's process list): curl
 # reads SMOKE_PASSWORD from stdin, and the cms container gets
-# SMOKE_AUTHOR_PASSWORD through `docker exec -e`.
+# SMOKE_AUTHOR_PASSWORD through `docker exec -e`. The author signs in once
+# per run (step 2); the comment and the cleanup reuse that Strapi JWT,
+# which likewise travels only through `docker exec -e`.
 #
 # Usage:
 #   SMOKE_EMAIL=alex.morgan@sinnlos.local SMOKE_PASSWORD=… \
@@ -65,8 +67,10 @@
 # DB_CONTAINER (infra-{cms,web,db}-1), DB_SCHEMA (public), ASSERT_SECONDS (5).
 #
 # Notes:
-#   - Watch the Strapi login rate limit (10 fails/60s per IP) when
-#     iterating on this script.
+#   - Watch the Strapi sign-in rate limit (10 per 60 s for one e-mail and
+#     IP, successful ones included) when iterating on this script: every
+#     run signs in once as the author inside the cms, plus a cleanup-only
+#     sign-in when it fails before step 2.
 #   - Without a visible announcement the script fails loudly (seeded prod
 #     has some).
 #
@@ -161,22 +165,28 @@ fi
 echo "live-smoke: stream user ${SMOKE_EMAIL}, comment author ${SMOKE_AUTHOR_EMAIL}"
 
 # The author's side, inside the cms container: sign in as SMOKE_AUTHOR_EMAIL
-# (password from the environment), then MODE discover (GETs only: prints
-# TARGET=<documentId> and KIND=own|newest), comment (one "[live-smoke]"
-# comment on TARGET) or cleanup (deletes every "[live-smoke]" comment).
+# (password from the environment) unless SMOKE_JWT holds the Strapi JWT of
+# an earlier call, then MODE discover (GETs only: prints TARGET=<documentId>,
+# KIND=own|newest and JWT=<the author's JWT>, which the shell keeps for the
+# later calls, never echoed), comment (one "[live-smoke]" comment on
+# TARGET) or cleanup (deletes every "[live-smoke]" comment).
 CMS_PROBE="$(cat <<'NODE'
-const { MODE, SMOKE_AUTHOR_EMAIL: identifier, SMOKE_AUTHOR_PASSWORD: password, STREAM_USER_ID, TARGET } = process.env;
+const { MODE, SMOKE_AUTHOR_EMAIL: identifier, SMOKE_AUTHOR_PASSWORD: password, SMOKE_JWT, STREAM_USER_ID, TARGET } = process.env;
 const base = "http://127.0.0.1:1337";
-const login = await fetch(`${base}/api/auth/local`, {
-  method: "POST",
-  headers: { "content-type": "application/json" },
-  body: JSON.stringify({ identifier, password }),
-});
-if (!login.ok) {
-  console.error(`sign-in as ${identifier} inside the cms failed: HTTP ${login.status}`);
-  process.exit(1);
+let jwt = SMOKE_JWT;
+if (!jwt) {
+  const login = await fetch(`${base}/api/auth/local`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ identifier, password }),
+  });
+  if (!login.ok) {
+    const limited = login.status === 429 ? " (the cms sign-in rate limit: wait 60 s before a re-run)" : "";
+    console.error(`sign-in as ${identifier} inside the cms failed: HTTP ${login.status}${limited}`);
+    process.exit(1);
+  }
+  ({ jwt } = await login.json());
 }
-const { jwt } = await login.json();
 const auth = { authorization: `Bearer ${jwt}` };
 if (MODE === "discover") {
   const newest = async (filter) => {
@@ -195,6 +205,7 @@ if (MODE === "discover") {
   }
   console.log(`TARGET=${target}`);
   console.log(`KIND=${own ? "own" : "newest"}`);
+  console.log(`JWT=${jwt}`);
 } else if (MODE === "comment") {
   const res = await fetch(`${base}/api/comments`, {
     method: "POST",
@@ -220,14 +231,15 @@ if (MODE === "discover") {
 NODE
 )"
 
-# Runs CMS_PROBE in the cms container. $1 = MODE; TARGET and STREAM_USER_ID
-# come from this script's variables. The password travels in the
-# environment of `docker exec`, never on its command line.
+# Runs CMS_PROBE in the cms container. $1 = MODE; TARGET, STREAM_USER_ID
+# and SMOKE_JWT (empty until discover ran) come from this script's
+# variables. The password and the JWT travel in the environment of
+# `docker exec`, never on its command line.
 cms_probe() {
   printf '%s\n' "${CMS_PROBE}" |
-    MODE="$1" TARGET="${TARGET_DOC_ID:-}" STREAM_USER_ID="${STREAM_USER_ID:-}" \
+    MODE="$1" TARGET="${TARGET_DOC_ID:-}" STREAM_USER_ID="${STREAM_USER_ID:-}" SMOKE_JWT="${SMOKE_JWT:-}" \
       SMOKE_AUTHOR_EMAIL="${SMOKE_AUTHOR_EMAIL}" SMOKE_AUTHOR_PASSWORD="${SMOKE_AUTHOR_PASSWORD}" \
-      docker exec -i -e MODE -e TARGET -e STREAM_USER_ID -e SMOKE_AUTHOR_EMAIL -e SMOKE_AUTHOR_PASSWORD \
+      docker exec -i -e MODE -e TARGET -e STREAM_USER_ID -e SMOKE_JWT -e SMOKE_AUTHOR_EMAIL -e SMOKE_AUTHOR_PASSWORD \
       "${CMS_CONTAINER}" node --input-type=module -
 }
 
@@ -333,6 +345,10 @@ echo "live-smoke: stream open (text/event-stream, uncompressed)"
 
 # --- 3. Target (GETs only), subscription, one comment -----------------------
 DISCOVERED="$(cms_probe discover)" || fail "could not pick an announcement (see the line above)"
+# The author's JWT, for the comment and the cleanup (one sign-in per run);
+# it leaves DISCOVERED before anything prints it.
+SMOKE_JWT="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^JWT=//p')"
+DISCOVERED="$(printf '%s\n' "${DISCOVERED}" | grep -v '^JWT=' || true)"
 TARGET_DOC_ID="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^TARGET=//p')"
 TARGET_KIND="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^KIND=//p')"
 [[ -n "${TARGET_DOC_ID}" ]] || fail "could not pick an announcement: ${DISCOVERED}"
