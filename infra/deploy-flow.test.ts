@@ -677,9 +677,12 @@ describe.skipIf(!RUN_SEQUENCES)(
       const dry = r[1];
       expect(dry.status).toBe(1);
       expect(dry.stderr).toContain("WOULD STOP: infra-web-1 runs sha256:ghostweb");
-      expect(dry.stdout).not.toContain(
-        "would tag infra-web-1 (sha256:ghostweb) as infra-web:rollback",
+      // Neither tag is promised for an image that cannot be resolved (the real run warns too).
+      expect(dry.stdout).not.toContain("would tag infra-web-1 (sha256:ghostweb)");
+      expect(dry.stderr).toContain(
+        "WARNING: would not be able to tag sha256:ghostweb (infra-web-1) as infra-web:pre-deploy",
       );
+      expect(dry.stdout).toContain("would tag infra-cms-1 (sha256:cms9) as infra-cms:pre-deploy");
       expect(called(dry, /^docker tag |compose .* (build|up)/)).toEqual([]);
       expect(dry.bootstrap).toEqual([]);
     });

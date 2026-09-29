@@ -793,7 +793,11 @@ keep_running_images() {
     container="${PROJECT}-${svc}-1"
     img="$(docker inspect --format '{{.Image}}' "${container}" 2>/dev/null)" && [[ -n "${img}" ]] || continue
     if ((DRY_RUN)); then
-      echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:pre-deploy (keeps it resolvable through the build)"
+      if docker image inspect "${img}" >/dev/null 2>&1; then
+        echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:pre-deploy (keeps it resolvable through the build)"
+      else
+        echo "WARNING: would not be able to tag ${img} (${container}) as ${PROJECT}-${svc}:pre-deploy; it cannot be resolved here any more." >&2
+      fi
     elif docker tag "${img}" "${PROJECT}-${svc}:pre-deploy"; then
       echo "  ${container} (${img}) -> ${PROJECT}-${svc}:pre-deploy (keeps it resolvable through the build)"
     else
