@@ -51,7 +51,10 @@ export function sheetStaysOpen(openedOn: string | null, pathname: string, deskto
  * and back to the More tab, Escape and the backdrop close it. Choosing an
  * entry keeps it open with the entry's pending dot (UI05) until the new
  * route renders, then it closes with the route change. It also closes when
- * the viewport reaches `md`, where it is hidden (sheetStaysOpen).
+ * the viewport reaches `md`, where it is hidden (sheetStaysOpen). When the
+ * current page is in the sheet, the More tab carries aria-current="true"
+ * and names that entry for screen readers ("More: Training"), as the tabs
+ * carry aria-current="page".
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
@@ -69,7 +72,10 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
 
   const primary = items.filter((item) => item.mobilePrimary);
   const more = items.filter((item) => !item.mobilePrimary);
-  const moreActive = more.some((item) => isNavActive(pathname, item.href));
+  // The sheet entry of the current page, if any: the More tab is then the
+  // bar's current item.
+  const activeMore = more.find((item) => isNavActive(pathname, item.href));
+  const moreActive = activeMore !== undefined;
 
   return (
     <nav
@@ -107,6 +113,9 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
             <Dialog.Trigger
               className={cn(TAB_CLASS, moreActive ? "text-primary" : "text-muted-foreground")}
               data-active={moreActive ? "true" : undefined}
+              // "true", not "page": the button is not the page, one of its
+              // entries is (named below for screen readers).
+              aria-current={moreActive ? "true" : undefined}
             >
               <Ellipsis
                 aria-hidden="true"
@@ -115,7 +124,10 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
                   moreActive && "scale-110",
                 )}
               />
-              <span className="max-w-full truncate px-0.5">{t("more")}</span>
+              <span className="max-w-full truncate px-0.5">
+                {t("more")}
+                {activeMore && <span className="sr-only">: {t(activeMore.labelKey)}</span>}
+              </span>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-sm md:hidden" />

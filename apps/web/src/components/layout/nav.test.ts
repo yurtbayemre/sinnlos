@@ -78,6 +78,8 @@ const current = (html: string) =>
     .map((m) => m[0])
     .filter((tag) => tag.includes('aria-current="page"'))
     .map((tag) => /href="([^"]*)"/.exec(tag)?.[1]);
+/** The More trigger's opening tag (the bar's only button). */
+const trigger = (html: string) => /<button [^>]*>/.exec(html)?.[0] ?? "";
 
 beforeEach(() => {
   state.pathname = "/";
@@ -100,10 +102,22 @@ describe("MobileNav", () => {
     let html = render(createElement(MobileNav, { items: navItemsFor("member") }));
     expect(current(html)).toEqual(["/events"]);
     expect(html).not.toContain('data-active="true"');
+    expect(trigger(html)).not.toContain("aria-current");
+    expect(html).not.toContain('class="sr-only"');
     state.pathname = "/marketplace/7";
     html = render(createElement(MobileNav, { items: navItemsFor("member") }));
     expect(current(html)).toEqual([]);
     expect(html).toContain('data-active="true"');
+    // A programmatic cue, not only the colour: the button is current, and
+    // its name says which entry ("More: Marketplace").
+    expect(trigger(html)).toContain('aria-current="true"');
+    expect(html).toContain(`>${en.nav.more}<span class="sr-only">: ${en.nav.marketplace}</span><`);
+  });
+
+  it("names the current sheet entry on the More tab in the UI language", () => {
+    state.pathname = "/training/security-basics";
+    const html = render(createElement(MobileNav, { items: navItemsFor("member") }), "de");
+    expect(html).toContain(`>${de.nav.more}<span class="sr-only">: ${de.nav.training}</span><`);
   });
 
   it("leaves the News tab out for a guest", () => {
