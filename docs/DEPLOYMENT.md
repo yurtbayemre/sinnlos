@@ -7879,7 +7879,13 @@ snippets above:
   dir) every later run reports as `WARN stale plaintext <name>` in
   `backup.log` and on stderr, until the owner deletes it. A root run
   (`deploy.sh`) gives the files it creates the owner of the offsite dir, so
-  the cron user and the NAS pull keep reading them;
+  the cron user and the NAS pull keep reading them, and the offsite dirs
+  it creates (`offsite/`, `offsite/sinnlos/`, on a new host or a new
+  `SINNLOS_BACKUP_DIR` when a deploy's backup runs before the first
+  nightly one) the owner of the backup root. So on a new host the backup
+  root must exist, with its keyring (`.gnupg`, `.backup-keyid`), owned by
+  the cron user; without it every run stops with `the backup root … does
+  not exist`;
 - **retention**, per series (database, uploads, `.env`; each once for the
   nightly and once for the pre-deploy artifacts): an artifact is removed
   only when it is **older than 7 days** (by the timestamp in its name)

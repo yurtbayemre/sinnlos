@@ -17,7 +17,8 @@
 # every later run ("WARN stale plaintext" in backup.log and on stderr).
 # The encrypted artifacts are 0600 and, when root runs this (deploy.sh),
 # owned like the offsite dir, so the owner's cron and the NAS pull keep
-# reading them.
+# reading them; an offsite dir that a root run creates is owned like the
+# backup root (which must exist, with the keyring).
 #
 # Retention, per series (db / uploads / env, each once for the nightly and
 # once for the pre-deploy artifacts): an artifact goes only when it is older
@@ -66,7 +67,24 @@ esac
 # last-success for the nightly runs, last-success-predeploy for the others.
 LAST_SUCCESS="$OFFSITE/last-success$TAG"
 
-mkdir -p "$OFFSITE"; chmod 700 "$OFFSITE"
+# The offsite dirs, created level by level (0700). One that root creates
+# (deploy.sh's pre-deploy run on a new host or backup dir, before the first
+# nightly run) gets the owner of the backup root, who holds the keyring and
+# runs the cron: a root-owned offsite dir would lock that cron out, and
+# own_like_offsite would hand root's ownership on to every artifact.
+# Existing dirs keep their owner. The backup root itself must exist.
+if [[ ! -d "$BK" ]]; then
+  echo "pg-backup: the backup root $BK does not exist (it holds the GPG keyring and .backup-keyid)" >&2
+  exit 1
+fi
+for d in "$BK/offsite" "$OFFSITE"; do
+  if [[ ! -d "$d" ]]; then
+    mkdir "$d"
+    chmod 700 "$d"
+    if ((EUID == 0)); then chown --reference="$BK" "$d" 2>/dev/null || true; fi
+  fi
+done
+chmod 700 "$OFFSITE"
 # Timestamps come from bash's printf (strftime in the process zone, like
 # date(1)), which forks nothing.
 printf -v TS '%(%Y%m%d-%H%M%S)T' -1

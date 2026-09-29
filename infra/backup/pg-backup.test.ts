@@ -16,7 +16,11 @@
  *      last-success;
  *   5. plaintext of the script's own names older than an hour in the
  *      backup root (a SIGKILLed run's) is reported as "WARN stale
- *      plaintext" and never removed.
+ *      plaintext" and never removed;
+ *   6. a missing offsite dir is created level by level, and a root run
+ *      (deploy.sh) gives the levels it creates the backup root's owner,
+ *      never root's (B10-T4; root is faked: EUID in the script reads
+ *      STUB_EUID, and chown is a stub that records its calls).
  *
  * Every file operation happens inside bash (a temp dir it creates), so no
  * Windows path crosses into the MSYS or WSL side (as in
@@ -72,8 +76,8 @@ describe("pg-backup.sh: what the host cron relies on", () => {
     const first = (prefix: string) => lines.findIndex((l) => l.startsWith(prefix));
     expect(first("set -Eeuo pipefail")).toBeGreaterThan(-1);
     expect(first("umask 077")).toBe(first("set -Eeuo pipefail") + 1);
-    // umask before the first file the run writes.
-    expect(first("umask 077")).toBeLessThan(first('mkdir -p "$OFFSITE"'));
+    // umask before the first file or directory the run writes.
+    expect(first("umask 077")).toBeLessThan(first('    mkdir "$d"'));
     for (const trap of [
       "trap on_exit EXIT",
       "trap 'exit 129' HUP",
@@ -234,6 +238,8 @@ interface RunOptions {
   gpgFails?: boolean;
   /** Send TERM to the run while gpg works on the first artifact. */
   killDuringGpg?: boolean;
+  /** Run as if root ran it (deploy.sh): EUID reads 0, chown is recorded, not run. */
+  root?: boolean;
 }
 
 interface RunReport {
@@ -249,6 +255,10 @@ interface RunReport {
   lastPredeploy: string;
   quickAccess: string;
   stderr: string;
+  /** The stubbed chown calls of a `root` run, with the backup root shown as BK. */
+  chowns: string[];
+  /** Mode of each offsite dir level that exists ("offsite", "offsite/sinnlos"). */
+  dirs: Record<string, string>;
 }
 
 /**
@@ -302,7 +312,9 @@ function backupRun(options: RunOptions = {}): RunReport {
     '  if [[ -n "$STUB_GPG_SLEEP" ]]; then : > "$STUB_MARK"; sleep "$STUB_GPG_SLEEP"; fi',
     '  { echo "ENCRYPTED"; cat "$in"; } > "$out"',
     "}",
-    "export -f docker gpg",
+    'chown() { printf "chown %s\n" "${*//$BK/BK}" >> "$T/chown.log"; }',
+    "export -f docker gpg chown",
+    "export T BK",
     "printf -v NOW '%(%s)T' -1",
     "mk() {",
     "  local ts; printf -v ts '%(%Y%m%d-%H%M%S)T' \"$((NOW - $2 * 86400))\"",
@@ -310,9 +322,13 @@ function backupRun(options: RunOptions = {}): RunReport {
     "}",
     options.setup ?? "",
     "cat > \"$T/pg-backup.sh\" <<'PG_BACKUP_SH_EOF'",
-    SCRIPT.trimEnd(),
+    (options.root
+      ? SCRIPT.replace(/\(\(EUID == 0\)\)/g, "((${STUB_EUID:-$EUID} == 0))")
+      : SCRIPT
+    ).trimEnd(),
     "PG_BACKUP_SH_EOF",
     exports,
+    options.root ? "export STUB_EUID=0" : "",
     "rc=0",
     options.killDuringGpg
       ? [
@@ -325,12 +341,14 @@ function backupRun(options: RunOptions = {}): RunReport {
       : 'bash "$T/pg-backup.sh" 2> "$T/stderr" || rc=$?',
     'echo "STATUS $rc"',
     'for f in "$BK"/* "$BK"/.[!.]*; do [[ -e "$f" ]] && echo "ROOT ${f##*/}"; done',
-    '(cd "$OFFSITE" && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
+    '(cd "$OFFSITE" 2> /dev/null && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
     'if [[ -f "$OFFSITE/backup.log" ]]; then sed "s/^/LOG /" "$OFFSITE/backup.log"; fi',
     'if [[ -f "$OFFSITE/last-success" ]]; then echo "LAST $(cat "$OFFSITE/last-success")"; fi',
     'if [[ -f "$OFFSITE/last-success-predeploy" ]]; then echo "LASTPRE $(cat "$OFFSITE/last-success-predeploy")"; fi',
     'if [[ -f "$BK/quick/.env" ]]; then echo "QUICK $(cat "$BK/quick/.env")"; fi',
     'sed "s/^/STDERR /" "$T/stderr"',
+    'if [[ -f "$T/chown.log" ]]; then sed "s/^/CHOWN /" "$T/chown.log"; fi',
+    'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
     "",
   ].join("\n");
   const res = runBash(script);
@@ -349,6 +367,8 @@ function backupRun(options: RunOptions = {}): RunReport {
     lastPredeploy: pick("LASTPRE")[0] ?? "",
     quickAccess: pick("QUICK")[0] ?? "",
     stderr: pick("STDERR").join("\n"),
+    chowns: pick("CHOWN"),
+    dirs: Object.fromEntries(pick("DIR").map((l) => l.split(" "))),
   };
 }
 
@@ -427,6 +447,44 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
       noEnv.log.some((l) => /^skip sinnlos-env \S+\/checkout\/infra\/\.env not found$/.test(l)),
     ).toBe(true);
     expect(noEnv.log.at(-1)).toBe("done nightly");
+  });
+
+  it("gives the offsite dirs a root run creates the backup root's owner, not root's (B10-T4)", () => {
+    // deploy.sh's pre-deploy run on a new host: no offsite dir yet.
+    const fresh = backupRun({ root: true, setup: 'rm -rf "$BK/offsite"' });
+    expect(fresh.status, fresh.stderr).toBe(0);
+    const reBk = (c: string) => c.startsWith("chown --reference=BK ");
+    expect(fresh.chowns.filter(reBk)).toEqual([
+      "chown --reference=BK BK/offsite",
+      "chown --reference=BK BK/offsite/sinnlos",
+    ]);
+    // What it writes into the offsite dir takes that dir's owner, as before.
+    const rest = fresh.chowns.filter((c) => !reBk(c));
+    expect(rest.length).toBeGreaterThan(0);
+    for (const call of rest)
+      expect(call).toMatch(/^chown --reference=BK\/offsite\/sinnlos BK\/offsite\/sinnlos\//);
+    if (POSIX_MODES) expect(fresh.dirs).toEqual({ offsite: "700", "offsite/sinnlos": "700" });
+    expect(Object.keys(fresh.dirs)).toEqual(["offsite", "offsite/sinnlos"]);
+
+    // Dirs that exist keep their owner.
+    const existing = backupRun({ root: true });
+    expect(existing.status, existing.stderr).toBe(0);
+    expect(existing.chowns.filter(reBk)).toEqual([]);
+
+    // The owner's own run creates them without any chown.
+    const owner = backupRun({ setup: 'rm -rf "$BK/offsite"' });
+    expect(owner.status, owner.stderr).toBe(0);
+    expect(owner.chowns).toEqual([]);
+    expect(Object.keys(owner.dirs)).toEqual(["offsite", "offsite/sinnlos"]);
+  });
+
+  it("refuses a backup root that does not exist, creating nothing", () => {
+    const run = backupRun({ root: true, setup: 'rm -rf "$BK"' });
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("the backup root ");
+    expect(run.stderr).toContain(" does not exist (it holds the GPG keyring and .backup-keyid)");
+    expect(run.root).toEqual([]);
+    expect(run.chowns).toEqual([]);
   });
 
   it("prunes each series by the time-and-count rule after encrypting", () => {
