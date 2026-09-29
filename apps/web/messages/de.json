@@ -531,6 +531,12 @@
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
     "backToDashboard": "Zurück zum Dashboard"
   },
+  "actionErrors": {
+    "forbidden": "Dazu sind Sie nicht berechtigt.",
+    "notFound": "Dieser Eintrag existiert nicht mehr – bitte laden Sie die Seite neu.",
+    "conflict": "Jemand hat das inzwischen geändert – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal."
+  },
   "locale": {
     "label": "Sprache"
   },

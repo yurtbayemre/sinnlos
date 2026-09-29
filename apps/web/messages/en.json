@@ -531,6 +531,12 @@
     "notFoundHint": "The page you requested does not exist or has moved.",
     "backToDashboard": "Back to dashboard"
   },
+  "actionErrors": {
+    "forbidden": "You are not allowed to do this.",
+    "notFound": "This item no longer exists — reload the page.",
+    "conflict": "Someone changed this in the meantime — reload the page and try again.",
+    "unavailable": "The intranet cannot be reached right now — please try again in a moment."
+  },
   "locale": {
     "label": "Language"
   },
