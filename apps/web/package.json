@@ -2,7 +2,7 @@
   "name": "@sinnlos/web",
   "private": true,
   "version": "0.1.0",
-  "description": "Next.js 15 frontend for the Sinnlos intranet",
+  "description": "Next.js 16 frontend for the Sinnlos intranet",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -40,7 +40,6 @@
     "tailwindcss-animate": "1.0.7"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.2.9",
     "@types/node": "24.13.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
