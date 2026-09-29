@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeInternalPath } from "./utils";
+import { safeInternalPath, stripMarkdown } from "./utils";
 
 /**
  * `safeInternalPath` is the open-redirect guard for every ?from= value (the
@@ -152,5 +152,90 @@ describe("safeInternalPath — valid deep links pass through unchanged", () => {
     for (const value of valid) {
       expect(browserTarget(safeInternalPath(value)).origin).toBe(SITE);
     }
+  });
+});
+
+/**
+ * stripMarkdown (UI03): a Markdown body as one line of plain text for the
+ * dashboard's LatestNews excerpts, which showed the raw source. The words
+ * stay, the syntax and every URL go.
+ */
+describe("stripMarkdown", () => {
+  it("answers an empty string for nothing", () => {
+    for (const value of [undefined, null, "", "   \n\n "]) expect(stripMarkdown(value)).toBe("");
+  });
+
+  it("keeps plain text, collapsing whitespace and line breaks", () => {
+    expect(stripMarkdown("Join us at 15:00 CET.\nAgenda:  numbers,\n\nroadmap")).toBe(
+      "Join us at 15:00 CET. Agenda: numbers, roadmap",
+    );
+  });
+
+  it("removes headings, emphasis, strikethrough and inline code markers", () => {
+    expect(
+      stripMarkdown(
+        "# Welcome\n\nThis is **self-hosted**, _fast_ and *simple*; ~~old~~ `in:handbook`",
+      ),
+    ).toBe("Welcome This is self-hosted, fast and simple; old in:handbook");
+    expect(stripMarkdown("## Rules ##\n### Deep")).toBe("Rules Deep");
+    expect(stripMarkdown("__bold__ and ***both***")).toBe("bold and both");
+  });
+
+  it("keeps link and image text, never their targets", () => {
+    expect(
+      stripMarkdown(
+        'Read [the wiki](/wiki/eng "Engineering") and ![a chart](https://cdn.example/c.png), ' +
+          "[ref link][r], <https://example.com/x> or <it@example.com>\n\n[r]: https://example.com",
+      ),
+    ).toBe("Read the wiki and a chart, ref link, https://example.com/x or it@example.com");
+    expect(stripMarkdown("[click](javascript:alert(1))")).toBe("click");
+  });
+
+  it("removes list, task, quote, rule and table syntax", () => {
+    expect(stripMarkdown("- one\n* two\n+ three\n1. four\n2) five")).toBe(
+      "one two three four five",
+    );
+    expect(stripMarkdown("- [x] done\n- [ ] open")).toBe("done open");
+    expect(stripMarkdown("> quoted\n> > nested\n\n---\n\n***\nafter")).toBe("quoted nested after");
+    expect(stripMarkdown("| a | b |\n| :- | -: |\n| 1 | 2 |")).toBe("a b 1 2");
+    expect(stripMarkdown("Title\n=====\nSub\n---")).toBe("Title Sub");
+  });
+
+  it("drops code fences but keeps the code", () => {
+    expect(stripMarkdown('Run:\n```ts\nconsole.log("hi");\n```\ndone')).toBe(
+      'Run: console.log("hi"); done',
+    );
+  });
+
+  it("drops raw HTML tags and comments, not a lone angle bracket", () => {
+    expect(stripMarkdown('<p onclick="x()">Hi</p><br/><!-- note -->there')).toBe("Hithere");
+    expect(stripMarkdown("<script>alert(1)</script>")).toBe("alert(1)");
+    expect(stripMarkdown("a < b and c > d")).toBe("a < b and c > d");
+  });
+
+  it("keeps escaped characters and what only looks like syntax", () => {
+    expect(stripMarkdown("\\*not emphasis\\* and \\# no heading")).toBe(
+      "*not emphasis* and # no heading",
+    );
+    expect(stripMarkdown("snake_case_name, 2 * 3 * 4, #hashtag, C#")).toBe(
+      "snake_case_name, 2 * 3 * 4, #hashtag, C#",
+    );
+    expect(stripMarkdown("`**literal**` and `a\\*b`")).toBe("**literal** and a*b");
+  });
+
+  it("never leaves its internal markers behind", () => {
+    const out = stripMarkdown("x `\\*` \\_ [a](b)");
+    expect(out).not.toMatch(/[]/);
+    expect(out).toBe("x * _ a");
+  });
+
+  it("turns the demo announcements into readable excerpts", () => {
+    expect(
+      stripMarkdown(
+        "Hit ⌘K anywhere in the app to fuzzy search wiki pages, people and teams. Special filters: `in:handbook`, `by:@grace`, `tag:runbook`.",
+      ),
+    ).toBe(
+      "Hit ⌘K anywhere in the app to fuzzy search wiki pages, people and teams. Special filters: in:handbook, by:@grace, tag:runbook.",
+    );
   });
 });
