@@ -127,8 +127,8 @@ describe("CommentSectionsProvider on the live provider", () => {
     await mount([section("a", "a1"), section("b", "b1"), section("a", "a2")]);
     await hello();
     await ping("a");
-    // 400 ms ping coalescing in the live provider, 50 ms batching in the page provider.
-    await advance(449);
+    // 150 ms ping coalescing in the live provider, 50 ms batching in the page provider.
+    await advance(199);
     expect(loads()).toEqual([]);
     await advance(1);
     expect(loads()).toEqual([["a"]]);

@@ -27,11 +27,13 @@
  *    it the stream is up but no ping can come, so the client reports
  *    unhealthy (degraded) and its owners poll at the short intervals; the
  *    web pushes a heartbeat the moment the cms leg is back.
- *  - Pings are coalesced per channel (content 400ms; notifications +
- *    announcements get extra 0–3s/0–10s jitter — those fan out to every
- *    user at once) and refetches are single-flight with a dirty flag:
- *    the CMS lifecycle fires inside the write transaction, so an instant
- *    refetch could still read the pre-commit state.
+ *  - Pings are coalesced per channel (content 150ms; notifications +
+ *    announcements get extra 0–1s/0–4s jitter — those fan out to every
+ *    user at once, so the jitter spreads the refetch herd) and refetches
+ *    are single-flight with a dirty flag. The longer windows before LF05
+ *    (400ms, 0–3s, 0–10s) also covered pings sent from inside the write
+ *    transaction; since LF02 the cms pings after the commit, so a refetch
+ *    right away reads the committed rows.
  *  - Hidden tabs hold NO connection at all and queue no catch-up;
  *    visibility regain reopens and runs one catch-up refetch per channel
  *    through a small queue (concurrency 2, notifications first) — deduped
@@ -124,9 +126,9 @@ export const REOPEN_SPREAD_MS = 15_000;
 export const INSTANT_CLOSE_MS = 2_000;
 export const TERMINAL_INSTANT_CLOSES = 5;
 export const STOPPED_RETRY_MS = 5 * 60_000;
-export const COALESCE_CONTENT_MS = 400;
-export const COALESCE_NOTIFICATIONS_JITTER_MS = 3_000;
-export const COALESCE_ANNOUNCEMENTS_JITTER_MS = 10_000;
+export const COALESCE_CONTENT_MS = 150;
+export const COALESCE_NOTIFICATIONS_JITTER_MS = 1_000;
+export const COALESCE_ANNOUNCEMENTS_JITTER_MS = 4_000;
 export const CATCHUP_CONCURRENCY = 2;
 
 type Timer = ReturnType<typeof setTimeout>;

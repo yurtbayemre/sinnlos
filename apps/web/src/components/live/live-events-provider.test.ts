@@ -350,7 +350,7 @@ describe("hidden tab", () => {
 });
 
 describe("pings", () => {
-  it("coalesces a content channel's pings for 400 ms into one refetch", async () => {
+  it("coalesces a content channel's pings for 150 ms into one refetch (LF05, was 400 ms)", async () => {
     const calls: string[] = [];
     await mount(
       createElement(Channel, { channel: "announcement:a", onPing: () => calls.push("a") }),
@@ -361,13 +361,13 @@ describe("pings", () => {
     await browser.act(() => source.emit("ping", ping));
     await advance(100);
     await browser.act(() => source.emit("ping", ping));
-    await advance(299);
+    await advance(49);
     expect(calls).toEqual([]);
     await advance(1);
     expect(calls).toEqual(["a"]);
   });
 
-  it("adds up to 3 s of jitter for notifications and 10 s for announcements", async () => {
+  it("adds up to 1 s of jitter for notifications and 4 s for announcements (LF05, was 3 s and 10 s)", async () => {
     vi.mocked(Math.random).mockReturnValue(0.5);
     const calls: string[] = [];
     await mount([
@@ -380,11 +380,12 @@ describe("pings", () => {
       source.emit("ping", { type: "notification" });
       source.emit("ping", { type: "announcements" });
     });
-    await advance(1_899);
+    // 150 + 0.5·1000 and 150 + 0.5·4000
+    await advance(649);
     expect(calls).toEqual([]);
     await advance(1);
     expect(calls).toEqual(["n"]);
-    await advance(5_400 - 1_900 - 1);
+    await advance(2_150 - 650 - 1);
     expect(calls).toEqual(["n"]);
     await advance(1);
     expect(calls).toEqual(["n", "a"]);
