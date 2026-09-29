@@ -175,6 +175,14 @@
     "lastDigestAt": {
       "type": "datetime",
       "private": true
+    },
+    "tokenVersion": {
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "configurable": false,
+      "private": true,
+      "searchable": false
     }
   }
 }

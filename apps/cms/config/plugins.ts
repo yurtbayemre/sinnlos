@@ -10,6 +10,12 @@
  * grant.microsoft off on every boot. Self-registration (LOCAL_REGISTRATION=1)
  * accepts displayName as its only extra field: microsoftOid, jobTitle and
  * avatar are not the registrant's to set (FX14).
+ *
+ * `jwtManagement: "legacy-support"` is the plugin's default, pinned here:
+ * the token version that lets a password change revoke older JWTs (FX40,
+ * src/extensions/users-permissions/strapi-server.ts) works on these legacy
+ * JWTs, and the web keeps one Strapi JWT per session (D-SESSION-01, no
+ * refresh flow). "refresh" would change both; it is a decision of its own.
  */
 type Env = ((key: string, def?: unknown) => any) & {
   int: (key: string, def?: number) => number;
@@ -35,6 +41,7 @@ export default ({ env }: { env: Env }) => ({
       jwt: {
         expiresIn: "7d",
       },
+      jwtManagement: "legacy-support",
       jwtSecret: env("JWT_SECRET"),
       register: {
         allowedFields: ["displayName"],
