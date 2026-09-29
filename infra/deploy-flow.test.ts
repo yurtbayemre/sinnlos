@@ -104,7 +104,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     ': > "$REPO/infra/docker-compose.yml"',
     ': > "$REPO/infra/docker-compose.traefik.yml"',
     ': > "$REPO/infra/rollback/revoke-guest-poll-vote.sql"',
-    `printf '#!/usr/bin/env bash\\necho "backup kind=$SINNLOS_BACKUP_KIND db=$SINNLOS_DB_CONTAINER"\\n' > "$REPO/infra/backup/pg-backup.sh"`,
+    `printf '#!/usr/bin/env bash\\necho "backup kind=$SINNLOS_BACKUP_KIND db=$SINNLOS_DB_CONTAINER dir=\${SINNLOS_BACKUP_DIR:-default} quick=\${SINNLOS_LOCAL_ENV_BACKUP:-default}"\\n' > "$REPO/infra/backup/pg-backup.sh"`,
     `printf '#!/usr/bin/env bash\\necho "live-smoke base=$BASE_URL cms=$CMS_CONTAINER"\\nexit "\${STUB_LIVE_RC:-0}"\\n' > "$REPO/infra/live-smoke.sh"`,
     'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh"',
     "cat > \"$T/compose.json\" <<'COMPOSE_JSON'",
@@ -125,7 +125,8 @@ function deploys(steps: readonly Step[]): StepReport[] {
     "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP=",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
-    '  if [[ -n "$STUB_CONTAINERD" ]]; then cat "$T"/img/* 2> /dev/null | grep -qxF "$1"; else grep -qxF "$1" "$T/ids" 2> /dev/null; fi',
+    // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
+    '  if [[ -n "$STUB_CONTAINERD" ]]; then grep -qxF "$1" "$T"/img/* 2> /dev/null; else grep -qxF "$1" "$T/ids" 2> /dev/null; fi',
     "}",
     // docker keeps images in $T/img/<name>__<tag> and containers in $T/ctr.
     "docker() {",
@@ -173,6 +174,12 @@ function deploys(steps: readonly Step[]): StepReport[] {
     '      echo "$id" > "$T/img/${3//:/__}" ;;',
     "    exec) cat > /dev/null; echo 0 ;;",
     '    volume) [[ -z "$STUB_NO_VOLUMES" ]] ;;',
+    // ps -aq --filter label=com.docker.compose.project=<p>: containers <p>-<svc>-1.
+    "    ps)",
+    '      for ref in "$T"/ctr/*; do',
+    '        ref="${ref##*/}"',
+    '        if [[ -e "$T/ctr/$ref" && "$*" == *"com.docker.compose.project=${ref%-*-1}" ]]; then echo "$ref"; fi',
+    "      done ;;",
     "    run) return 0 ;;",
     "  esac",
     "}",
@@ -461,6 +468,11 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     '"in_progress",\n      "conclusion": null',
   );
   const quoted = (json: string) => `'${json.replace(/'/g, `'\\''`)}'`;
+  const STAGING = {
+    COMPOSE_PROJECT: "b10-5b-staging",
+    SMOKE_URL: "http://localhost:8511/",
+    SINNLOS_BACKUP_DIR: "/srv/b10-5b-backups",
+  };
   beforeAll(() => {
     r = deploys([
       /* 0 */ { before: 'echo change >> "$REPO/infra/docker-compose.yml"', args: ["--check"] },
@@ -481,10 +493,11 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       },
       /* 8 */ { before: `commit; ci ${quoted(failed)}`, args: ["--require-green-ci"] },
       /* 9 */ { before: `ci ${quoted(pending)}`, args: ["--require-green-ci"] },
-      /* 10 */ {
-        before: `ci ${quoted(failed)}`,
-        env: { COMPOSE_PROJECT: "b10-5b-staging", SMOKE_URL: "http://localhost:8511/" },
-      },
+      // Another project: production's smoke URL, backup dir and edge are refused …
+      /* 10 */ { before: `ci ${quoted(failed)}`, env: { COMPOSE_PROJECT: "b10-5b-staging" } },
+      /* 11 */ { env: { ...STAGING, DEPLOY_SEPARATE_EDGE: "0" } },
+      // … and with its own of each, it deploys.
+      /* 12 */ { env: { ...STAGING, DEPLOY_SEPARATE_EDGE: "1" } },
     ]);
   }, SEQUENCE_BUDGET);
 
@@ -568,14 +581,35 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(r[8].stderr).toContain("CI is failed: CI did not pass");
     expect(r[9].status).toBe(1);
     expect(r[9].stderr).toContain("CI is pending: CI is still running");
-    expect(r[10].status, r[10].stderr).toBe(0);
-    expect(r[10].stderr).toContain("WARNING: CI is failed");
+    expect(r[12].status, r[12].stderr).toBe(0);
+    expect(r[12].stderr).toContain("WARNING: CI is failed");
+  });
+
+  it("refuses another compose project with production's smoke URL, backup dir or edge", () => {
+    const [bare, sharedEdge] = [r[10], r[11]];
+    for (const run of [bare, sharedEdge]) {
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain("ERROR: compose project b10-5b-staging is not isolated from production:");
+      expect(run.stderr).toContain("containers of compose project infra exist on this Docker host");
+      expect(run.stdout).not.toContain("backup kind=");
+      expect(called(run, / build$| up -d/)).toEqual([]);
+    }
+    expect(bare.stderr).toContain(
+      "- SMOKE_URL is not set: the smoke checks would test https://sinnlos.yurtbay.dev.",
+    );
+    expect(bare.stderr).toContain("- SINNLOS_BACKUP_DIR is not set");
+    expect(sharedEdge.stderr).not.toContain("SMOKE_URL is not set");
+    expect(sharedEdge.stderr).not.toContain("SINNLOS_BACKUP_DIR is not set");
+    expect(called(sharedEdge, /^docker ps -aq --filter label=com.docker.compose.project=infra$/)).toHaveLength(1);
   });
 
   it("takes the compose project and the smoke URL as parameters", () => {
-    const run = r[10];
+    const run = r[12];
     expect(run.status, run.stderr).toBe(0);
-    expect(run.stdout).toContain("backup kind=predeploy db=b10-5b-staging-db-1");
+    // Its own backup dir, and a quick-access .env copy of its own (absent: never refreshed).
+    expect(run.stdout).toMatch(
+      /backup kind=predeploy db=b10-5b-staging-db-1 dir=\/srv\/b10-5b-backups quick=\S+\/\.git\/sinnlos-deploy\/b10-5b-staging\.quick-access\.env/,
+    );
     expect(run.stdout).toContain("live-smoke base=http://localhost:8511 cms=b10-5b-staging-cms-1");
     expect(run.calls.some((c) => c.startsWith("docker compose -p b10-5b-staging "))).toBe(true);
     expect(
@@ -583,6 +617,8 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     ).toBe(true);
     // Its own state file; the infra state is untouched.
     expect(run.state).toEqual(r[9].state);
+    // Project infra keeps production's backup dir and quick-access copy (the defaults).
+    expect(r[7].stdout).toContain("backup kind=predeploy db=infra-db-1 dir=default quick=default");
     expect(run.state.TAG).toBe(tagOf(r[7]));
   });
 });

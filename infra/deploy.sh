@@ -46,7 +46,10 @@
 #   SMOKE_URL         https://sinnlos.yurtbay.dev (smoke check and live-smoke)
 #   PASSWORDS_FILE    /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt
 #   SINNLOS_CHECKOUT  the checkout this script lives in (compose files, git)
-#   COMPOSE_PROJECT   infra (containers <project>-web-1 …, images <project>-web …)
+#   COMPOSE_PROJECT   infra (containers <project>-web-1 …, images <project>-web …);
+#                     another project also needs SMOKE_URL, SINNLOS_BACKUP_DIR
+#                     and, next to project infra's containers,
+#                     DEPLOY_SEPARATE_EDGE=1 (a Traefik of its own)
 #   DEPLOY_STATE_DIR  <git dir of the checkout>/sinnlos-deploy (state, history, lock)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
 #   GITHUB_TOKEN      optional, for the CI check (public repos need none)
@@ -88,7 +91,11 @@ LIVE_SMOKE_SCRIPT="${INFRA_DIR}/live-smoke.sh"
 # Compose project name — 'infra' on the owner's host, so container/image
 # names are stable (infra-web-1, infra-cms-1, infra-db-1 / images infra-web,
 # infra-cms). Another name (a staging project) gets its own containers,
-# volumes, images, state and lock.
+# volumes, images, state and lock, but the backup dir, the smoke URL and
+# the edge stay production's unless given: such a project needs SMOKE_URL
+# and SINNLOS_BACKUP_DIR, and on a Docker host with containers of project
+# infra an edge of its own (DEPLOY_SEPARATE_EDGE=1), or the deploy checks
+# refuse it (step 0).
 PROJECT="${COMPOSE_PROJECT:-infra}"
 if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
   echo "ERROR: COMPOSE_PROJECT must be a compose project name (lower case, digits, - and _): ${PROJECT}" >&2
@@ -96,6 +103,8 @@ if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
 fi
 COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}" -f "${COMPOSE_TRAEFIK}")
 
+# Whether the caller named the smoke URL (another project must).
+SMOKE_URL_GIVEN="${SMOKE_URL:+1}"
 SMOKE_URL="${SMOKE_URL:-https://sinnlos.yurtbay.dev}"
 PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
 KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"
@@ -864,6 +873,28 @@ live_smoke_mode() {
 # --- Deploy checks (FX35): lock, checkout, CI ---------------------------------
 PHASE="checks"
 log "Deploy checks: lock, checkout, CI"
+# A second compose project (a staging copy) must not reach production: the
+# smoke URL and pg-backup.sh's backup dir default to production's (its
+# offsite dir, its retention, its quick-access .env copy), and the Traefik
+# overlay's router and service names are fixed (sinnlos-*), so two stacks
+# behind one Traefik share or drop each other's routes.
+if [[ "${PROJECT}" != "infra" ]]; then
+  isolation=()
+  [[ -n "${SMOKE_URL_GIVEN}" ]] ||
+    isolation+=("SMOKE_URL is not set: the smoke checks would test ${SMOKE_URL}.")
+  [[ -n "${SINNLOS_BACKUP_DIR:-}" ]] ||
+    isolation+=("SINNLOS_BACKUP_DIR is not set: the pre-deploy backup would go to production's backup dir.")
+  if [[ "${DEPLOY_SEPARATE_EDGE:-}" != "1" &&
+    -n "$(docker ps -aq --filter label=com.docker.compose.project=infra 2>/dev/null || true)" ]]; then
+    isolation+=("containers of compose project infra exist on this Docker host, and the Traefik routers of the overlay have fixed names: set DEPLOY_SEPARATE_EDGE=1 only when this project has a Traefik of its own.")
+  fi
+  if ((${#isolation[@]})); then
+    echo "ERROR: compose project ${PROJECT} is not isolated from production:" >&2
+    printf '       - %s\n' "${isolation[@]}" >&2
+    echo "       Nothing was changed (docs/DEPLOYMENT.md §3.6, the parameters)." >&2
+    exit 1
+  fi
+fi
 # Root may deploy a checkout another user owns: allow it for these calls
 # only (a command-line setting; no git config is changed).
 GIT=(git -c "safe.directory=${CHECKOUT}" -C "${CHECKOUT}")
@@ -963,6 +994,15 @@ BACKUP_ENV=(
   "SINNLOS_DB_CONTAINER=${SINNLOS_DB_CONTAINER:-${PROJECT}-db-1}"
   "SINNLOS_UPLOADS_VOLUME=${SINNLOS_UPLOADS_VOLUME:-${PROJECT}_cms_uploads}"
 )
+if [[ "${PROJECT}" != "infra" ]]; then
+  # Its own backup dir (step 0 insists on it) and its own quick-access .env
+  # copy, which pg-backup.sh only refreshes, never creates: absent by
+  # default, so production's copy is never overwritten.
+  BACKUP_ENV+=(
+    "SINNLOS_BACKUP_DIR=${SINNLOS_BACKUP_DIR}"
+    "SINNLOS_LOCAL_ENV_BACKUP=${SINNLOS_LOCAL_ENV_BACKUP:-${STATE_DIR}/${PROJECT}.quick-access.env}"
+  )
+fi
 # A first install has no database to back up. Only then: a db container
 # that exists but does not run, or a database volume without a container,
 # still fails the backup (and the deploy), as it should.

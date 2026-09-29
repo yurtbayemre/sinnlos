@@ -997,7 +997,15 @@ and the tags it would remove, and changes nothing. The script is
 `set -Eeuo pipefail` and re-run safe; its parameters (environment, the
 defaults are the owner's host): `SMOKE_URL`, `PASSWORDS_FILE`,
 `SINNLOS_CHECKOUT` (the checkout it lives in), `COMPOSE_PROJECT` (`infra`),
-`DEPLOY_STATE_DIR` and `DEPLOY_KEEP_TAGS`.
+`DEPLOY_STATE_DIR` and `DEPLOY_KEEP_TAGS`. A second compose project (a
+staging copy) needs its own backup dir, smoke URL and edge: `deploy.sh`
+refuses a project other than `infra` without `SMOKE_URL` and
+`SINNLOS_BACKUP_DIR` (passed on to the pre-deploy backup, whose
+quick-access `.env` copy then defaults to a file of that project that does
+not exist, so production's is never refreshed), and, on a Docker host that
+runs containers of project `infra`, without `DEPLOY_SEPARATE_EDGE=1`: the
+Traefik overlay's router names are fixed, so set it only when that project
+has a Traefik of its own.
 
 The preflight fails (naming keys, never values) when:
 
