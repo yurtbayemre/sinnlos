@@ -1251,6 +1251,17 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the capabilities, navigation and loading states (batch 13,
+> lane 8A)?** A normal deploy with `infra/deploy.sh`; only the web
+> changes (no env, schema, grant, compose or edge change). Guests no longer
+> get 403 banners or error pages on sections their role cannot read (the
+> pages say "Not available for your account" and ask the cms nothing), the
+> phone navigation gains a _More_ sheet with every other section, editors
+> can take down other people's marketplace ads, the comment and reaction
+> controls follow the role, and navigation shows a pending dot and a
+> skeleton per page. Follow
+> [Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a).
+>
 > **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
 > the action results with English defaults, and the domain package with
 > the new image layers and pnpm 10 (the three notes below) ship as one
@@ -1620,6 +1631,112 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)
+
+This release (branch `feat/web-capabilities-and-nav`, on `batch/12`
+`02f288e`) changes only what the web shows and asks for; the cms keeps its
+grants, policies and schema.
+
+- **One set of role rules in the web (SH02).** Every role set and check the
+  web uses lives in `apps/web/src/lib/roles.ts`, in the capability shape of
+  decision 06 (§L2, including `authorScope`), and
+  `apps/web/src/lib/roles-matrix-parity.test.ts` fails CI when the cms
+  permission matrix changes without it. The acknowledgement and training
+  reports and the profile's digest options use these sets; what they show
+  is unchanged.
+- **No more 403 banners for guests.** A guest opening Announcements,
+  Departments, Teams, Kudos, Marketplace or Training (lists, detail pages
+  and lessons) saw "Some content couldn't be loaded" or the error page,
+  because the web asked the cms for sections the guest role cannot read;
+  each such request also logged a 403. The web now asks nothing there and
+  shows "Not available for your account" with a link to the dashboard. The
+  guest's dashboard leaves those sections out, and so does the navigation.
+  The `authenticated` fallback role no longer asks for the birthday and
+  anniversary tiles on `/kudos`, which it cannot read. A user whose role the
+  web could not read (the cms briefly down) still gets the old error
+  banner, since the cms decides.
+- **Controls follow the role.** The comment form and the reaction bar show
+  only for roles that may comment and react (never guest), and the delete
+  button on one's own comments only for roles that may delete them (not
+  the `authenticated` fallback). On someone else's marketplace ad, an
+  editor (and an admin) now sees a _Moderation_ card with _Delete ad_: the
+  cms always allowed editors to take ads down, the web had no button.
+  Editors still cannot edit other people's ads; the edit page sends them
+  back to the ad.
+- **Every section reachable on a phone (FX30).** The bottom bar keeps its
+  five tabs (Home, People, Events, Wiki, News; a guest has no News tab) and
+  adds _More_: a sheet with Training, Departments, Teams, Kudos,
+  Marketplace, Polls, Documents and, for admins only, _Admin_. Before,
+  those sections could not be reached on a phone at all. The sidebar and
+  the phone nav use one list (`apps/web/src/lib/nav-config.ts`), and the
+  current-section highlight no longer confuses sections that share a
+  prefix.
+- **Loading feedback (UI05).** A clicked navigation link shows a small
+  pulsing dot until the new page can render, and every page has its own
+  loading skeleton with the progress bar (the training pages had none and
+  overflowed on phones; `/manage`, `/manage/training` and `/polls/new`
+  showed the dashboard's).
+
+**A normal deploy with `infra/deploy.sh`.** No env, schema, permission,
+compose, edge or Traefik change, nothing in the database. The cms image is
+rebuilt as in every deploy and its container recreated; this lane changes
+one code comment in it and none of its behaviour. Only the web changes.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **After: as a guest** (any guest account; on a phone or a narrow
+   window): the navigation shows Dashboard, People, Events, Wiki, Polls and
+   Documents only; open `/announcements`, `/departments`, `/kudos`,
+   `/marketplace` and `/training` by URL: each shows "Not available for
+   your account". Then, on the host, neither log names a 403 for that
+   guest's requests:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 15m web | grep -E 'fetch failed' || echo "web: none"
+   "${COMPOSE[@]}" logs --since 15m cms | grep -E ' 403$' || echo "cms: none"
+   ```
+
+   (Only a guest's ⌘K search still sends such reads and the cms logs their
+   403, see the follow-ups; do not search during this check.)
+3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
+   other sections; as an admin it lists _Admin_, as a member not.
+4. **After: as an editor:** on an ad posted by someone else, _Moderation_ →
+   _Delete ad_ is offered and no _Edit_ link. (Take a test ad down, not a
+   real one.)
+
+**Rollback:** re-up the previous images with the commands `infra/deploy.sh`
+prints; no database step.
+
+**Rehearsal (2026-09-29, lane 8A):** unit suite 4840 tests (4898 with Postgres
+16.15), including the parity test against the permission matrix (it fails
+as intended when a grant changes: a guest with comment create turns
+`canComment` red), every section page and the dashboard per role without a
+request, the phone nav and its sheet, and a loading file on the shared
+skeletons for every page. The time-zone matrix passed under UTC,
+Europe/Berlin and Pacific/Auckland; the integration suite on SQLite (163
+tests) and Postgres 16 (330 tests); the domain, cms and web builds.
+
+On a throwaway stack (the cms and web production builds, SQLite with the
+demo seed, one account each for `admin_role`, `editor`, `department_head`,
+`member`, `authenticated` and `guest`), 21 pages per role over HTTP:
+
+- the cms log showed no 401, 403 or 500 in any of the six runs and the web
+  log no `fetch failed` (a direct guest request for announcements, made as
+  a control, logged its 403 as expected);
+- the guest got "Not available for your account" on all section pages and
+  their detail pages, and a navigation without those sections; every other
+  role saw every section, and `/manage` only as `admin_role`;
+- an editor saw _Moderation_ / _Delete ad_ on the member's ad and no _Edit_
+  link, an admin both, the owner the _Edit_ link.
+
+In headless Chrome at 360 px, Enter on _More_ opened the sheet (the admin's
+with _Admin_, the guest's with Polls and Documents only), Tab stayed inside,
+Escape closed it and put focus back on _More_, choosing an entry navigated
+and closed it, and Back did not reopen it; no React or Radix warning was
+logged. With the network throttled, a link clicked before its prefetch
+arrived showed its pending dot for 2.4 s, then the page skeleton with the
+progress bar. Not exercised: `infra/deploy.sh`, Traefik, a real phone and
+a screen reader pass.
 
 #### Deploying batch 12 (2026-09-29)
 
