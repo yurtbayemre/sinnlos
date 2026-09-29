@@ -6670,12 +6670,28 @@ You need that user's Strapi JWT. The web no longer hands it out
 stack:
 
 ```bash
-docker exec infra-web-1 wget -qO- \
-  --header 'Content-Type: application/json' \
-  --post-data '{"identifier":"<test-user-email>","password":"<password>"}' \
-  http://cms:1337/api/auth/local
+read -rp 'Test user e-mail: ' TEST_EMAIL
+read -rsp 'Password: ' TEST_PASSWORD; echo
+export TEST_EMAIL TEST_PASSWORD
+docker exec -e TEST_EMAIL -e TEST_PASSWORD infra-web-1 node -e '
+  fetch("http://sinnlos-cms:1337/api/auth/local", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      identifier: process.env.TEST_EMAIL,
+      password: process.env.TEST_PASSWORD,
+    }),
+  }).then((r) => r.text()).then(console.log)'
+unset TEST_PASSWORD
 # → {"jwt":"<your-strapi-jwt>","user":{…}}
 ```
+
+`sinnlos-cms` is the cms's alias on the project network (since batch 10; on
+an older stack use `cms`). In Traefik mode the plain name `cms` also
+resolves on the shared `frontend` network, where another project's container
+could answer and receive the password. The password reaches the container
+through the environment of `docker exec`, not its command line, so it does
+not show up in the host's process list.
 
 Then:
 
