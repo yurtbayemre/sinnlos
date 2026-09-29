@@ -1124,8 +1124,10 @@ infra/deploy.sh
    (override with `SMOKE_URL=`, which live-smoke gets as `BASE_URL`, see
    [§3.6 B](#b-shared-traefik-live-production-layout)), then runs `infra/live-smoke.sh`: first the
    [datetime contract](#310-datetime-contract) check (no
-   `timestamp without time zone` column left, the cms boot log reports the
-   process zone UTC), then the end-to-end SSE pipeline probe (one comment
+   `timestamp without time zone` column left, the cms process runs in UTC:
+   by its `[datetime]` boot line, or, once log rotation has dropped that
+   line, by `node` in the running cms container), then the end-to-end SSE
+   pipeline probe (one comment
    posted through the cms → the ping frame on a subscribed stream, which
    must be uncompressed, and, when the comment lands on the stream user's
    own announcement, the notification frame; see [§6.1](#61-health-checks)).
@@ -2020,7 +2022,14 @@ and CI. The app code does not change.
   memory, CPU and pid limits ([§3.6](#36-deploy) A, [§2.1](#21-clone-and-prepare-env)).
 - **Log rotation (IN05).** db, cms, web and caddy log through `json-file`
   with at most 5 files of 10 MB each. Log lines older than the newest
-  50 MB of a container are gone.
+  50 MB of a container are gone. The cms logs every request, its
+  healthcheck's every 15 s included, so after some weeks of uptime its
+  `[datetime] process time zone` boot line is gone too. live-smoke then
+  asks `node` in the running cms container for the zone (`datetime
+  contract OK (process time zone UTC), from the running cms container`):
+  that covers a deploy that does not recreate the cms (one that changes
+  nothing the cms image is built from keeps its container) and a manual
+  run.
 - **Network aliases (IN04).** `DATABASE_HOST`, `STRAPI_URL` and
   `WEB_INTERNAL_URL` use `sinnlos-db`, `sinnlos-cms` and `sinnlos-web`,
   aliases on the project network only; the plain names `db`, `cms` and
@@ -6845,7 +6854,9 @@ extra steps):
   with rotation (`x-logging` in `docker-compose.yml`): at most 5 files of
   10 MB per container. `docker logs` reads across them; lines beyond the
   newest 50 MB are gone, so a `[digest]` or `[bootstrap]` line from weeks
-  ago may no longer be there. Check with
+  ago may no longer be there, nor the cms's `[datetime]` boot line (the
+  cms logs every request, the healthcheck's included; live-smoke then asks
+  `node` in the running cms container for the zone). Check with
   `docker inspect -f '{{json .HostConfig.LogConfig}}' infra-cms-1`.
 - **Security response headers** are set at the edge, not in the app: in
   mode B by the **Traefik** headers middlewares (override file; one per

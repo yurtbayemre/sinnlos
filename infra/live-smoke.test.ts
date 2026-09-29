@@ -20,7 +20,10 @@
  *      path prints the WARNING line deploy.sh looks for;
  *   7. without BASE_URL the public origin is https://<DOMAIN>, DOMAIN from
  *      the environment or else from the .env next to the script, never the
- *      owner's host name (5A-T1).
+ *      owner's host name (5A-T1);
+ *   8. the cms process zone comes from its boot line, and once that line has
+ *      rotated out of `docker logs`, from node in the running cms container;
+ *      either must be UTC (B10-T1).
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -145,7 +148,11 @@ describe("live-smoke.sh: what it touches", () => {
  * `webEnv`; curl fails at once (no request gets through). `setup` runs
  * before the script, after the defaults (no credentials file, no
  * passwords, no BASE_URL, DOMAIN=intranet.acme.test; the script lives in
- * $W, so $W/.env is the .env next to it).
+ * $W, so $W/.env is the .env next to it). `docker logs` prints
+ * STUB_BOOT_LINE (by default the cms boot line in UTC; set it empty for a
+ * log without one); `docker exec <cms> node -e …` prints STUB_NODE_ZONE
+ * (UTC) and exits with STUB_NODE_RC (0), and says "exec-node-called" on
+ * stderr.
  */
 function run(
   webEnv: string[],
@@ -154,8 +161,13 @@ function run(
   const script = [
     "docker() {",
     '  case "$1" in',
-    "    exec) cat > /dev/null ;;", // no naive columns
-    "    logs) echo '[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin' ;;",
+    "    exec)",
+    // The zone probe in the cms container (not cms_probe's `node --input-type=module -`).
+    '      if [[ "$*" == *" node -e "* ]]; then',
+    '        echo exec-node-called >&2; printf "%s" "${STUB_NODE_ZONE:-UTC}"; return "${STUB_NODE_RC:-0}"',
+    "      fi",
+    "      cat > /dev/null ;;", // no naive columns
+    '    logs) printf "%s\n" "${STUB_BOOT_LINE-[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin}" ;;',
     `    inspect) printf '%s\n' PATH=/usr/bin ${webEnv.map((e) => `'${e}'`).join(" ")} ;;`,
     "    *) return 1 ;;",
     "  esac",
@@ -198,6 +210,61 @@ describe.skipIf(!HAS_BASH)("live-smoke.sh: an Entra-only instance", { timeout: 3
     }
   });
 });
+
+describe.skipIf(!HAS_BASH)(
+  "live-smoke.sh: the cms zone once its boot line has rotated out (B10-T1)",
+  { timeout: 30_000 },
+  () => {
+    // Entra-only, so a passing datetime check ends the run with exit 0.
+    const ENTRA_ONLY = ["ENTRA_ENABLED=1"];
+    const NO_BOOT_LINE = "export STUB_BOOT_LINE=";
+
+    it("reads the boot line while it is there, without asking the container", () => {
+      const res = run(ENTRA_ONLY);
+      expect(res.status, res.stderr).toBe(0);
+      expect(res.stdout).toContain(
+        "live-smoke: datetime contract OK (process time zone UTC, APP_TIME_ZONE Europe/Berlin), from the cms boot line",
+      );
+      expect(res.stderr).not.toContain("exec-node-called");
+      const berlin = run(
+        ENTRA_ONLY,
+        "export STUB_BOOT_LINE='[datetime] process time zone Europe/Berlin, APP_TIME_ZONE Europe/Berlin'",
+      );
+      expect(berlin.status).toBe(1);
+      expect(berlin.stderr).toContain(
+        "live-smoke: FAIL — the cms does not report the process zone UTC: [datetime] process time zone Europe/Berlin",
+      );
+      expect(berlin.stderr).not.toContain("exec-node-called");
+    });
+
+    it("asks node in the running cms container without a boot line, and passes on UTC", () => {
+      for (const zone of ["UTC", "Etc/UTC"]) {
+        const res = run(ENTRA_ONLY, `${NO_BOOT_LINE}\nexport STUB_NODE_ZONE=${zone}`);
+        expect(res.status, res.stderr).toBe(0);
+        expect(res.stderr).toContain("exec-node-called");
+        expect(res.stdout).toContain(
+          `live-smoke: datetime contract OK (process time zone ${zone}), from the running cms container: its boot line has rotated out of docker logs infra-cms-1`,
+        );
+        expect(res.stdout).toContain("live-smoke: SKIPPED the sign-in steps");
+      }
+    });
+
+    it("fails when the running cms container is in another zone, or node does not answer", () => {
+      const berlin = run(ENTRA_ONLY, `${NO_BOOT_LINE}\nexport STUB_NODE_ZONE=Europe/Berlin`);
+      expect(berlin.status).toBe(1);
+      expect(berlin.stderr).toContain(
+        "live-smoke: FAIL — the cms process runs in Europe/Berlin, not UTC (asked node in infra-cms-1",
+      );
+      expect(berlin.stdout).not.toContain("datetime contract OK");
+      expect(berlin.stdout).not.toContain("SKIPPED");
+      const down = run(ENTRA_ONLY, `${NO_BOOT_LINE}\nexport STUB_NODE_RC=1`);
+      expect(down.status).toBe(1);
+      expect(down.stderr).toContain(
+        "live-smoke: FAIL — no [datetime] boot line in docker logs infra-cms-1, and node in that container did not answer",
+      );
+    });
+  },
+);
 
 describe.skipIf(!HAS_BASH)(
   "live-smoke.sh: the stream user checks the notification frame by default",

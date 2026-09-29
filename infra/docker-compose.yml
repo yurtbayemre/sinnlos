@@ -1,7 +1,10 @@
 # Container logs (IN05): Docker's json-file driver with rotation, at most
 # 5 files of 10 MB per container. `docker logs` and `docker compose logs`
-# read across the rotated files; only the oldest lines beyond 50 MB go (the
-# cms boot line infra/live-smoke.sh checks right after a deploy stays).
+# read across the rotated files; only the oldest lines beyond 50 MB go. The
+# cms logs every request, its healthcheck included, so its [datetime] boot
+# line goes after some weeks of uptime (a deploy that changes nothing of
+# the cms keeps its container); infra/live-smoke.sh then asks node in the
+# running cms container for the process zone.
 x-logging: &default-logging
   driver: json-file
   options:

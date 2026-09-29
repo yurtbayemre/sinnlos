@@ -34,7 +34,10 @@
 #
 # Before that, a datetime-contract check (docs/DEPLOYMENT.md): no column of
 # the app schema may still be `timestamp without time zone`, and the cms
-# boot log must report the process zone UTC.
+# process must run in UTC: by its boot line in `docker logs`, or, once that
+# line has rotated out of the container's log (json-file, 10 MB x 5; a cms
+# that the deploy did not recreate, or a manual run weeks after its start),
+# by the zone node reports inside the running cms container.
 #
 # An Entra-only instance (the web runs with ENTRA_ENABLED=1 and without
 # AUTH_LOCAL_ENABLED=1) has no local sign-in for the demo accounts: after the
@@ -117,11 +120,31 @@ SQL
 if [[ -n "${NAIVE_COLUMNS}" ]]; then
   fail "timestamp without time zone columns remain (datetime contract): ${NAIVE_COLUMNS}"
 fi
+# The process zone: the boot line first. Docker keeps only the newest 50 MB
+# of a container's log (x-logging in docker-compose.yml), and the cms logs
+# every request, its healthcheck included (about 0.8 MB a day), so a cms
+# that runs for weeks has lost that line; a deploy that changes no cms input
+# keeps its container (same image id). Then node in the running container
+# answers: the same image and environment (TZ) as the server process, and
+# the same Intl call as the boot line (apps/cms/src/utils/time.ts).
 CMS_ZONE_LINE="$(docker logs "${CMS_CONTAINER}" 2>&1 | grep -F '[datetime] process time zone' | tail -n 1 || true)"
-if [[ "${CMS_ZONE_LINE}" != *"process time zone UTC,"* && "${CMS_ZONE_LINE}" != *"process time zone Etc/UTC,"* ]]; then
-  fail "the cms does not report the process zone UTC: ${CMS_ZONE_LINE:-no [datetime] boot line in docker logs ${CMS_CONTAINER}}"
+if [[ -n "${CMS_ZONE_LINE}" ]]; then
+  if [[ "${CMS_ZONE_LINE}" != *"process time zone UTC,"* && "${CMS_ZONE_LINE}" != *"process time zone Etc/UTC,"* ]]; then
+    fail "the cms does not report the process zone UTC: ${CMS_ZONE_LINE}"
+  fi
+  echo "live-smoke: datetime contract OK (${CMS_ZONE_LINE##*\[datetime\] }), from the cms boot line"
+else
+  zone_rc=0
+  CMS_ZONE="$(docker exec "${CMS_CONTAINER}" node -e 'process.stdout.write(Intl.DateTimeFormat().resolvedOptions().timeZone)' < /dev/null)" ||
+    zone_rc=$?
+  if ((zone_rc)); then
+    fail "no [datetime] boot line in docker logs ${CMS_CONTAINER}, and node in that container did not answer (docker exec, exit ${zone_rc}): is the cms running?"
+  fi
+  if [[ "${CMS_ZONE}" != "UTC" && "${CMS_ZONE}" != "Etc/UTC" ]]; then
+    fail "the cms process runs in ${CMS_ZONE:-an unknown zone}, not UTC (asked node in ${CMS_CONTAINER}: its [datetime] boot line is no longer in docker logs)"
+  fi
+  echo "live-smoke: datetime contract OK (process time zone ${CMS_ZONE}), from the running cms container: its boot line has rotated out of docker logs ${CMS_CONTAINER}"
 fi
-echo "live-smoke: datetime contract OK (${CMS_ZONE_LINE##*\[datetime\] })"
 
 # --- Entra-only instance: no local sign-in for the demo accounts ------------
 # The web offers local sign-in unless ENTRA_ENABLED is exactly 1 and
