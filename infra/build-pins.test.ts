@@ -12,7 +12,10 @@
  *   3. .dockerignore keeps local state and caches out of the build context;
  *   4. every GitHub Action in the workflows runs at a full commit SHA with
  *      its release tag in a trailing comment (the form Dependabot updates),
- *      never at a movable tag or branch.
+ *      never at a movable tag or branch;
+ *   5. one pnpm version everywhere (packageManager, CI, both images), and
+ *      pnpm 10's build-script allowlist names the dependencies that need
+ *      their install scripts.
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -128,6 +131,37 @@ describe("GitHub Actions", () => {
       shaByAction.set(action, (shaByAction.get(action) ?? new Set()).add(sha));
     }
     for (const [action, shas] of shaByAction) expect(shas.size, action).toBe(1);
+  });
+});
+
+describe("pnpm", () => {
+  const manifest = JSON.parse(read("../package.json")) as {
+    packageManager: string;
+    engines: { pnpm: string };
+    pnpm: { onlyBuiltDependencies: string[]; ignoredBuiltDependencies: string[] };
+  };
+  const [, version] = /^pnpm@(\d+\.\d+\.\d+)$/.exec(manifest.packageManager) ?? [];
+
+  it("is one exact pnpm 10 release in packageManager, engines, CI and both images", () => {
+    expect(version).toMatch(/^10\./);
+    expect(manifest.engines.pnpm).toBe(">=10");
+    const prepared = [
+      read("../.github/workflows/ci.yml"),
+      DOCKERFILES.cms,
+      DOCKERFILES.web,
+    ].flatMap((text) =>
+      [...text.matchAll(/corepack prepare pnpm@(\S+) --activate/g)].map((m) => m[1]),
+    );
+    // Three CI jobs with Node plus the two images.
+    expect(prepared).toHaveLength(5);
+    expect(new Set(prepared)).toEqual(new Set([version]));
+  });
+
+  it("runs install scripts only for the dependencies that need them", () => {
+    expect(manifest.pnpm.onlyBuiltDependencies).toEqual(["better-sqlite3", "esbuild", "sharp"]);
+    for (const name of manifest.pnpm.ignoredBuiltDependencies) {
+      expect(manifest.pnpm.onlyBuiltDependencies).not.toContain(name);
+    }
   });
 });
 

@@ -11,7 +11,10 @@ FROM node-base AS base
 # script and always loads its bundled @img/sharp-libvips-linuxmusl-x64.
 RUN apk add --no-cache libc6-compat build-base python3
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+# pnpm = package.json packageManager. Dependency build scripts run only for
+# the root package.json's pnpm.onlyBuiltDependencies (better-sqlite3's
+# native binding, esbuild, sharp); pnpm 10 skips all others.
+RUN corepack enable && corepack prepare pnpm@10.34.6 --activate
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./

@@ -8,7 +8,9 @@ FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04
 FROM node-base AS base
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+# pnpm = package.json packageManager (dependency build scripts: see the root
+# package.json's pnpm.onlyBuiltDependencies).
+RUN corepack enable && corepack prepare pnpm@10.34.6 --activate
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
