@@ -154,7 +154,7 @@ describe("More sheet: open only on its route and below md", () => {
         if (type === "change") listeners.delete(listener);
       }),
     };
-    const matchMedia = vi.fn((_query: string) => list);
+    const matchMedia = vi.fn<(query: string) => typeof list>(() => list);
     vi.stubGlobal("window", { matchMedia });
     return {
       matchMedia,
