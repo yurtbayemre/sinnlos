@@ -240,9 +240,10 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   `http://localhost`: plain HTTP); the Traefik overlay requires it for every
   router's host rule.
 - **cms runtime:** `STRAPI_TELEMETRY_DISABLED=true` (compose default) sends
-  no usage telemetry to Strapi. `CRON_ENABLED` (default `true`; read with
-  Strapi's `env.bool`, so only the exact value `true` is on) runs the cms's
-  scheduled jobs; `false` switches all of them off in that process.
+  no usage telemetry to Strapi. `CRON_ENABLED` (unset or `true`, the
+  default) runs the cms's scheduled jobs; `false` (also `0`/`no`/`off`)
+  switches all of them off in that process. The cms reads it like its other
+  on/off switches.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
   enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
