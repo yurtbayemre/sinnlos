@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useId, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import type { Route } from "next";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
@@ -12,7 +12,11 @@ import {
   type ActionResult,
   type CommonCode,
 } from "@/lib/action-result";
-import { markNotificationsRead, markAllNotificationsRead } from "@/lib/notification-actions";
+import {
+  markNotificationsRead,
+  markAllNotificationsRead,
+  type NotificationFeed,
+} from "@/lib/notification-actions";
 import { DEFAULT_APP_TIME_ZONE } from "@/lib/plain-date";
 import { relativeTime } from "@/lib/relative-time";
 import type { Notification } from "@/lib/types";
@@ -31,6 +35,17 @@ export function unreadBadge(count: number): string {
 }
 
 /**
+ * The feed the bell shows after a refetch (batch-12 deferral): an
+ * unavailable answer (the cms unreachable, or the call itself failed) keeps
+ * the last feed and flags it, so the bell no longer empties itself — badge
+ * and list included — during an outage; any other answer replaces it.
+ */
+export function nextFeed(previous: NotificationFeed, next: NotificationFeed): NotificationFeed {
+  if (!next.unavailable) return next;
+  return previous.unavailable ? previous : { ...previous, unavailable: true };
+}
+
+/**
  * The topbar bell. The panel is a Radix DropdownMenu (UI02, the primitive
  * of SelectMenu): portaled out of the blurred topbar, arrow keys and
  * typeahead over the notifications, Escape and outside click close it, and
@@ -40,6 +55,7 @@ export function unreadBadge(count: number): string {
 export function NotificationBell({
   notifications,
   unreadTotal,
+  unavailable = false,
   onChanged,
 }: {
   /** The newest notifications (the panel lists these). */
@@ -49,6 +65,11 @@ export function NotificationBell({
    * badge used to count only the unread among the 20 loaded ones.
    */
   unreadTotal: number;
+  /**
+   * The last refetch could not reach the cms: the list and the badge are
+   * the last known ones, and the panel says so (actionErrors.unavailable).
+   */
+  unavailable?: boolean;
   onChanged?: () => void | Promise<void>;
 }) {
   const t = useTranslations("notifications");
@@ -61,6 +82,7 @@ export function NotificationBell({
   const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
   const router = useRouter();
+  const unavailableNoteId = useId();
 
   // Never below what the panel itself shows as unread (a notification
   // that arrived between the list and the count request).
@@ -109,11 +131,19 @@ export function NotificationBell({
 
   return (
     <DropdownMenu.Root open={open} onOpenChange={handleOpenChange}>
+      {unavailable && (
+        // The trigger's description: a screen reader hears it on the bell,
+        // before the panel opens.
+        <span id={unavailableNoteId} hidden>
+          {tErrors("unavailable")}
+        </span>
+      )}
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
           className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-muted/40 text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring"
           aria-label={`${t("title")}${unreadCount > 0 ? ` (${unreadCount} ${t("unread")})` : ""}`}
+          aria-describedby={unavailable ? unavailableNoteId : undefined}
         >
           <Bell aria-hidden="true" className="h-4 w-4" />
           {unreadCount > 0 && (
@@ -145,6 +175,11 @@ export function NotificationBell({
               </DropdownMenu.Item>
             )}
           </div>
+          {unavailable && (
+            <p className="border-b bg-muted/40 px-4 py-2 text-xs text-muted-foreground">
+              {tErrors("unavailable")}
+            </p>
+          )}
           {failed && (
             <p role="alert" className="border-b px-4 py-2 text-xs text-destructive">
               {isSharedErrorCode(failed) ? tErrors(failed) : t("markReadFailed")}

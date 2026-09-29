@@ -86,7 +86,7 @@ vi.mock("next-intl", () => ({
   useTimeZone: () => "Europe/Berlin",
 }));
 
-const { NotificationBell } = await import("./notification-bell");
+const { NotificationBell, nextFeed } = await import("./notification-bell");
 
 const unread: Notification = {
   id: 1,
@@ -110,9 +110,14 @@ function* elements(node: ReactNode): Generator<ReactElement<Props>> {
 }
 
 /** One render of the bell: the handlers and what the panel shows. */
-function render(notifications: Notification[] = [unread], unreadTotal = 1) {
+function render(notifications: Notification[] = [unread], unreadTotal = 1, unavailable = false) {
   harness.begin();
-  const tree = NotificationBell({ notifications, unreadTotal, onChanged: async () => {} });
+  const tree = NotificationBell({
+    notifications,
+    unreadTotal,
+    unavailable,
+    onChanged: async () => {},
+  });
   const all = [...elements(tree)];
   const find = (predicate: (props: Props, el: ReactElement<Props>) => boolean) =>
     all.find((el) => predicate(el.props, el));
@@ -135,6 +140,17 @@ function render(notifications: Notification[] = [unread], unreadTotal = 1) {
     offersMarkAll: panelOpen && markAll !== undefined,
     badge: badge ? String(badge.props.children) : null,
     label: bell ? String(bell.props["aria-label"]) : null,
+    /** The text of the element the bell's aria-describedby points at. */
+    description: (() => {
+      const id = bell?.props["aria-describedby"];
+      if (typeof id !== "string") return null;
+      return find((p) => p.id === id)?.props.children ?? null;
+    })(),
+    /** Texts of the panel's plain paragraphs (the notes, not the alert). */
+    notes: all
+      .filter((el) => el.type === "p" && el.props.role === undefined)
+      .map((el) => el.props.children),
+    listed: all.filter((el) => el.type === DropdownMenu.Item && el.key !== null).length,
     showsError: all.some((el) => el.props.role === "alert"),
     alertText: all.find((el) => el.props.role === "alert")?.props.children ?? null,
     /** A click on the bell: Radix toggles the menu through onOpenChange. */
@@ -236,5 +252,47 @@ describe("NotificationBell mark-read error", () => {
     render().clickMarkAll();
     await harness.settle();
     expect(render().alertText).toBe("unavailable");
+  });
+});
+
+describe("NotificationBell during a cms outage (batch-12 deferral)", () => {
+  const feed = { items: [unread, read(2)], unreadTotal: 4 };
+  const down = { items: [], unreadTotal: 0, unavailable: true as const };
+
+  it("keeps the last feed when a refetch comes back unavailable, and flags it", () => {
+    expect(nextFeed(feed, down)).toEqual({ ...feed, unavailable: true });
+  });
+
+  it("keeps the same flagged feed while the outage lasts (no re-render)", () => {
+    const flagged = nextFeed(feed, down);
+    expect(nextFeed(flagged, down)).toBe(flagged);
+  });
+
+  it("replaces the feed and clears the flag with the next good answer", () => {
+    const back = { items: [read(5)], unreadTotal: 0 };
+    expect(nextFeed(nextFeed(feed, down), back)).toBe(back);
+    expect(nextFeed(feed, back)).toBe(back);
+  });
+
+  it("keeps the empty feed, flagged, when the outage came before any feed", () => {
+    expect(nextFeed({ items: [], unreadTotal: 0 }, down)).toEqual(down);
+  });
+
+  it("shows the kept list and badge with the shared outage note", () => {
+    render([unread, read(2)], 4, true).clickBell();
+    const bell = render([unread, read(2)], 4, true);
+    expect(bell.badge).toBe("4");
+    expect(bell.listed).toBe(2);
+    expect(bell.notes).toEqual(["unavailable"]);
+    // A screen reader hears it on the bell, before the panel opens.
+    expect(bell.description).toBe("unavailable");
+    expect(bell.showsError).toBe(false);
+  });
+
+  it("shows no note and no description while the cms answers", () => {
+    render().clickBell();
+    const bell = render();
+    expect(bell.notes).toEqual([]);
+    expect(bell.description).toBeNull();
   });
 });
