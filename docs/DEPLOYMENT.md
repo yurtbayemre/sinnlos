@@ -1251,6 +1251,27 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
+> the action results with English defaults, and the domain package with
+> the new image layers and pnpm 10 (the three notes below) ship as one
+> deploy of cms and web with `infra/deploy.sh`, once batch 10 runs (batch
+> 11 was design work; nothing to deploy). No env, grant, route or edge
+> change; the first cms boot adds an `audience` column to `documents` and
+> `quick_links`, and the first build with pnpm 10 and the new layers is
+> slower. Two new nightly crons delete read notifications and long-expired
+> ads from the first night on, so look at their read-only counts first and
+> take an extra manual backup before that night. Read-only checks before
+> it: a clean checkout (now including `packages/`), the language lines of
+> `infra/.env`, `deploy.sh --check` and `--dry-run`, the permission diff
+> (unchanged), the census with its new duplicate scan, the janitors' counts,
+> the users without a stored language, the expired and the unpublished
+> announcements. After it: the boot lines, the new column, the cron
+> registry, the English default, a member probe (comment delete, expired
+> and unpublished announcements) and the wiki fields, and the next morning
+> the janitors' lines. A rollback goes to the batch 10 SHA tags; the new
+> column stays, rows the janitors deleted come back only from a backup.
+> Follow [Deploying batch 12 (2026-09-29)](#deploying-batch-12-2026-09-29).
+>
 > **Deploying the CMS data lifecycle leftovers (batch 12, lane 7C)?** A
 > normal deploy of cms and web **together** (`infra/deploy.sh`) once
 > batch 11 runs: no env, compose, grant or edge change. The first boot adds
@@ -1278,6 +1299,16 @@ systemctl start docker
 > registration and profile messages are translated, and a burst of parallel
 > wrong logins can no longer exceed the login limit. Follow
 > [Upgrading to the action results, auth codes and English defaults (batch 12, lane 7A)](#upgrading-to-the-action-results-auth-codes-and-english-defaults-batch-12-lane-7a).
+>
+> **Deploying the domain package, image layers and pnpm 10 (batch 12, lane
+> 7B)?** A normal deploy of cms and web with `infra/deploy.sh`: no env,
+> schema, permission, edge or Traefik change, nothing in the database. The
+> first build installs everything with pnpm 10 and writes the cms
+> dependency layer once (about 820 MB), so it is slower and needs a few GB
+> free; later code-only deploys add about 15 MB. `deploy.sh` also refuses
+> untracked files under `packages/`. The admin panel loses its "Deploy to
+> Strapi Cloud" entry. Follow
+> [Upgrading to the domain package, image layers and pnpm 10 (batch 12, lane 7B)](#upgrading-to-the-domain-package-image-layers-and-pnpm-10-batch-12-lane-7b).
 >
 > **Deploying batch 10 (2026-09-29)?** The CI and edge changes, the deploy,
 > backup and cron hardening and the web session with batched poll results
@@ -1581,6 +1612,529 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 12 (2026-09-29)
+
+Batch 12 (branch `batch/12`, on `main` `7d9e52b`, batch 10 with the format
+sweep) ships three lanes in one deploy, once batch 10 runs (the owner
+instance deploys batch 8, then batch 9, then batch 10, then this; batch 11
+was the v2 authoring design and deployed nothing). The runbooks below
+explain each change in detail; **this section is the one sequence to
+follow** on the owner instance (srv-prod-01, Traefik mode, checkout
+`/home/bigemo/git/sinnlos`, compose project `infra`):
+
+- [the CMS data lifecycle leftovers](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c)
+  (lane 7C): comment delete checked by a route policy (every answer byte
+  for byte as before); two nightly retention crons (read notifications 90
+  days after reading at 03:40, ads 90 days after their last day with their
+  images at 03:45, `APP_TIME_ZONE`, after the 03:00 backup); a department
+  delete keeps its documents and quick links restricted to admins and
+  editors (a new `audience` column on both); expired announcements leave
+  lists, threads and digests; an unpublished announcement's thread answers
+  like a missing one; the wiki shows page order, tags, a table of contents
+  and space icons; the census gains a duplicate scan (section 9);
+- [the action results, auth codes and English defaults](#upgrading-to-the-action-results-auth-codes-and-english-defaults-batch-12-lane-7a)
+  (lane 7A): buttons answer with an inline message instead of an error
+  page, translated sign-in, registration and profile messages, a login
+  limit that parallel attempts cannot pass, the language switch stored on
+  the profile, English as the default everywhere and the new optional cms
+  env `DIGEST_DEFAULT_LOCALE` (default `en`);
+- [the domain package, image layers and pnpm 10](#upgrading-to-the-domain-package-image-layers-and-pnpm-10-batch-12-lane-7b)
+  (lane 7B): the rules both apps copied now come from `packages/domain`,
+  the cms image keeps its dependencies and its app in separate layers,
+  both images build with pnpm 10 and TypeScript 5.9, `deploy.sh` checks
+  `packages/` for untracked files, the CI actions are pinned to commit
+  SHAs (nothing of that runs on the host);
+- from the integration: the wiki's tag list and table of contents carry
+  names for screen readers ("Tags"/"Schlagwörter", "Contents"/"Inhalt");
+  a comment or reaction on an announcement that was unpublished, expired
+  or deleted while the page was open says "This item no longer exists —
+  reload the page." instead of asking to try again; the ad detail page
+  reads the typed category labels.
+
+It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
+and starts both; the rollback below takes both back. No env change is needed (the new
+`DIGEST_DEFAULT_LOCALE` defaults to `en` in compose), no permission, route,
+edge or Traefik change. The database container is not recreated; cms and
+web are, so the site is down while the cms boots. The first boot adds the
+`audience` column to `documents` and `quick_links` (two `ALTER TABLE`s;
+existing rows stay NULL and read exactly as before). **The first build is
+slower:** pnpm 10 installs both images from scratch (a new pnpm store,
+nothing cached) and the cms dependency layer (about 820 MB) is written once
+next to the images kept for rollback; later code-only deploys add about
+15 MB.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Fast-forward to the new `main`, with a clean checkout and room for the
+   new layers:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git pull --ff-only
+   git log -1 --oneline      # the batch 12 merge
+   git clean -n -d -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   df -h /var/lib/docker
+   ```
+
+   The `git clean -n` dry run removes nothing and must print nothing:
+   `packages/` is new in the images' build context, and `deploy.sh`
+   refuses untracked files and directories there as in `apps/`. `df -h`
+   shows a few GB free for the first build.
+
+2. **The language lines, the zone and the backup order:**
+
+   ```bash
+   grep -E '^(DEFAULT_LOCALE|DIGEST_DEFAULT_LOCALE|APP_TIME_ZONE)=' infra/.env
+   timedatectl show -p Timezone --value
+   crontab -l 2>/dev/null | grep -F pg-backup.sh; sudo crontab -l 2>/dev/null | grep -F pg-backup.sh
+   ```
+
+   `DEFAULT_LOCALE` and `DIGEST_DEFAULT_LOCALE` are missing or `en` (the
+   owner chose English; compose then passes `en`, and nothing needs
+   setting). `APP_TIME_ZONE=Europe/Berlin` is the zone the new janitors and
+   step 6 use. The backup line runs at `0 3 * * *` in the host zone, and
+   the host is in `Europe/Berlin`: the 03:00 backup comes before the new
+   03:40 and 03:45 janitors ([§7.3](#73-automated-daily-backups-cron)).
+   Note which user's crontab holds the line (step 11).
+
+3. **The preflight and the plan:**
+
+   ```bash
+   infra/deploy.sh --check
+   infra/deploy.sh --dry-run
+   cat .git/sinnlos-deploy/infra.state
+   ```
+
+   `--check` prints `Preflight OK` and
+   `Traefik host: sinnlos.yurtbay.dev; smoke URL: https://sinnlos.yurtbay.dev`.
+   The state names the batch 10 deploy (`TAG=7d9e52ba7e6a` when batch 10
+   was deployed from `7d9e52b`, `LIVE_SMOKE=passed`; if it names another
+   tag, use that one wherever this section says `7d9e52ba7e6a`). `--dry-run` prints `lock: free`, the clean
+   checkout at the batch 12 commit, the CI result of that commit (a
+   `WARNING: CI is …` only informs), `last-known-good:
+   infra-{web,cms}:7d9e52ba7e6a (commit 7d9e52b…, deployed …)` and
+   `-> the last-known-good deploy 7d9e52ba7e6a (…)` as the rollback
+   target, `4. smoke check https://sinnlos.yurtbay.dev; live-smoke: run`,
+   and `5. tag infra-{web,cms}:<sha12> (commit …), record
+   /home/bigemo/git/sinnlos/.git/sinnlos-deploy/infra.state` with
+   `and prune SHA tags beyond the newest 5: none`. A listed untracked file
+   under `packages/` would stop the real deploy: remove it first.
+
+4. **Permissions: no change.**
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   The file is the same as batch 10's (regenerated after the last merge,
+   byte-identical): the comment delete policy (PL03) guards the same
+   route with the same grants, and no lane adds or removes an action. So
+   the output equals the one you kept after the batch 10 deploy (on
+   production only the two informational `MISSING_IN_DB` rows for
+   `authenticated`), before and after this deploy. Any other row was there
+   before this batch.
+
+5. **The census, with the new duplicate scan:**
+
+   ```bash
+   infra/diagnostics/census.sh > /tmp/b12-census.txt 2>&1
+   sed -n '/== 9\./,$p' /tmp/b12-census.txt
+   ```
+
+   Read-only. Section 9 counts duplicate poll votes, acknowledgements,
+   RSVPs, lesson progress rows and reactions (counts only, no ids or
+   names); keep it for the DA04 decision on unique constraints
+   ([infra/diagnostics/README.md](../infra/diagnostics/README.md)).
+
+6. **What the first night deletes, the stored languages, and which
+   announcements members stop seeing** (one read-only transaction):
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   \echo '== what the first night deletes: notification-janitor (03:40), classified-janitor (03:45)'
+   SELECT count(*) AS notifications_to_prune
+     FROM notifications
+    WHERE read_at < now() - interval '90 days'
+      AND created_at < now() - interval '90 days'
+      AND source_type IS NULL AND source_document_id IS NULL;
+   SELECT count(*) AS old_read_anchors_kept
+     FROM notifications
+    WHERE read_at < now() - interval '90 days'
+      AND (source_type IS NOT NULL OR source_document_id IS NOT NULL);
+   SELECT count(*) AS ads_to_purge,
+          (SELECT count(DISTINCT m.file_id)
+             FROM files_related_mph m JOIN classifieds i ON i.id = m.related_id
+            WHERE m.related_type = 'api::classified.classified'
+              AND i.expires_at < (now() AT TIME ZONE 'Europe/Berlin')::date - 90) AS their_images_at_most
+     FROM classifieds
+    WHERE expires_at < (now() AT TIME ZONE 'Europe/Berlin')::date - 90;
+   \echo '== users per stored language (none = DIGEST_DEFAULT_LOCALE)'
+   SELECT coalesce(locale, '(none)') AS locale, count(*) AS users,
+          count(*) FILTER (WHERE digest_announcements OR digest_mentions OR digest_kudos) AS digest_opt_ins
+     FROM up_users GROUP BY 1 ORDER BY 1;
+   \echo '== published announcements already expired (members stop seeing them)'
+   SELECT document_id, title, expires_at
+     FROM announcements
+    WHERE published_at IS NOT NULL AND expires_at <= now()
+    ORDER BY expires_at;
+   \echo '== unpublished announcements with a thread (it answers like a missing one)'
+   SELECT a.document_id, max(a.title) AS title,
+          (SELECT count(*) FROM comments c
+            WHERE c.target_type = 'announcement' AND c.target_document_id = a.document_id) AS comments,
+          (SELECT count(*) FROM reactions r
+            WHERE r.target_type = 'announcement' AND r.target_document_id = a.document_id) AS reactions
+     FROM announcements a
+    GROUP BY a.document_id
+   HAVING bool_and(a.published_at IS NULL)
+    ORDER BY 1;
+   ROLLBACK;
+   SQL
+   ```
+
+   (With another `APP_TIME_ZONE`, replace `Europe/Berlin`.) Note the
+   numbers for step 17:
+   - `notifications_to_prune`: read notifications that were read, and
+     created, more than 90 days ago and are no fan-out anchor. The
+     janitor deletes at most 100 000 a night; a larger backlog continues
+     the next nights. `old_read_anchors_kept` are old but stay (they keep
+     a re-published announcement from notifying again). Unread
+     notifications never expire.
+   - `ads_to_purge`: ads whose last day lies more than 90 days back (at
+     most 1000 a night), and at most `their_images_at_most` images with
+     them (images uploaded in the admin panel are kept).
+   - Users with `(none)`: every user who never used the language switch
+     (the user schema's `en` default has no effect). They get
+     `DIGEST_DEFAULT_LOCALE`, `en`, as before this batch, where a missing
+     language also meant English: no digest changes its language.
+   - The expired announcements disappear for members after the deploy
+     (admins and editors still see them). The unpublished announcements'
+     threads read as empty for members and take no new comments or
+     reactions, from moderators neither, until the announcement is
+     published again (the thread is kept and comes back).
+
+7. **The language of a fresh browser** (no cookie), for comparison in step
+   14:
+
+   ```bash
+   curl -s https://sinnlos.yurtbay.dev/sign-in | grep -o '<html lang="[a-z]*"'
+   ```
+
+**Deploy**
+
+8. Run `infra/deploy.sh`. It takes the lock, checks the clean checkout
+   (with `packages/`) and the CI result, takes the pre-deploy backup
+   (`done predeploy` in `backup.log`), keeps the batch 10 SHA tags
+   (`7d9e52ba7e6a`) as the rollback target, builds both images (the long
+   first pnpm 10 build), runs `up -d --no-build` (cms and web recreated,
+   the database kept), smoke-checks, runs live-smoke, and only then tags
+   `infra-{web,cms}:<sha12>` of the batch 12 commit and records the state.
+   A failure prints the rollback to `7d9e52ba7e6a` (below).
+
+**After the deploy** (read-only)
+
+9. **Boot lines:**
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime)\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed'
+   ```
+
+   `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
+   `[bootstrap] permission drift: none (report-only check of 120 managed
+   actions)` (as in batch 10), no `granted` or `revoked` line, `Strapi
+   started successfully`; the second command prints nothing.
+
+10. **The new column** (empty until a department is deleted or an editor
+    sets it):
+
+    ```bash
+    psql_db -X <<'SQL'
+    SELECT table_name, column_name FROM information_schema.columns
+     WHERE column_name = 'audience' AND table_name IN ('documents', 'quick_links') ORDER BY 1;
+    SELECT 'documents' AS rows_of, count(*) AS total, count(audience) AS with_audience FROM documents
+    UNION ALL
+    SELECT 'quick_links', count(*), count(audience) FROM quick_links;
+    SQL
+    ```
+
+    Two column rows, and `with_audience` `0` for both.
+
+11. **An extra manual backup before the first night of the retention
+    crons:** the same day, after the deploy and before 03:00, as the user
+    whose crontab holds the backup line (step 2), with that line's
+    environment if it sets any:
+
+    ```bash
+    SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
+    tail -n 3 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
+    ```
+
+    The log ends with `done predeploy`. The pre-deploy kind is kept apart
+    from the nightly rotation; keep this backup until step 17 is checked.
+    It holds everything the first night may delete (the 03:00 nightly one
+    does too; this one does not depend on it). If the deploy ran after
+    03:45, the first night is the next one: take the backup before it.
+
+12. **The cron registry,** read from the running cms (its own compiled
+    registry and zone rule):
+
+    ```bash
+    docker exec -w /app/apps/cms infra-cms-1 node -e 'const r = require("./dist/src/cron/registry.js"), { resolveAppTimeZone } = require("./dist/src/utils/time.js"); console.log("cron enabled:", r.cronEnabled(process.env.CRON_ENABLED)); for (const t of r.cronRegistry(resolveAppTimeZone(process.env.APP_TIME_ZONE))) console.log(t.name, t.rule, t.tz);'
+    ```
+
+    ```text
+    cron enabled: true
+    uploads-janitor 30 3 * * * Europe/Berlin
+    search-log-janitor 35 3 * * * Europe/Berlin
+    notification-janitor 40 3 * * * Europe/Berlin
+    classified-janitor 45 3 * * * Europe/Berlin
+    digest-mailer 30 7 * * * Europe/Berlin
+    ```
+
+13. **The layers and the rollback probe** (lane 7B):
+
+    ```bash
+    docker history infra-cms:latest | head -n 8
+    docker run --rm --pull never --network none --entrypoint grep infra-cms:latest \
+      -c visibleToGuests /app/apps/cms/dist/src/api/poll/content-types/poll/schema.json
+    ```
+
+    `COPY … /out /app` of about 15 MB above the two `node_modules` copies
+    (about 820 MB and 120 kB); the probe prints `2`. `/admin` loads, and
+    an image uploaded in the media library gets its formats.
+
+14. **English by default, and the digest default:**
+
+    ```bash
+    curl -s https://sinnlos.yurtbay.dev/sign-in | grep -o '<html lang="[a-z]*"'
+    docker exec infra-cms-1 printenv DIGEST_DEFAULT_LOCALE
+    ```
+
+    `<html lang="en"` (as in step 7 when `infra/.env` sets no
+    `DEFAULT_LOCALE`) and `en`. In the browser, switching the language in
+    the top bar stores it on your profile (the lane 7A runbook, step 4).
+
+15. **A member probe: comment delete, expired and unpublished
+    announcements.** Inside the cms container, as `casey.jones` (a member;
+    the password travels from the credentials file through the
+    environment, never on a command line). Put one `document_id` of each
+    list of step 6 into `EXPIRED` and `UNPUBLISHED` (leave one empty when
+    its list was empty):
+
+    ```bash
+    PROBE_EMAIL=casey.jones@sinnlos.local
+    PROBE_PASSWORD="$(grep "^${PROBE_EMAIL}[[:space:]]" /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt | awk '{print $2}')"
+    EXPIRED=''       # a document_id of step 6's expired list, between the quotes
+    UNPUBLISHED=''   # a document_id of step 6's unpublished list
+    export PROBE_EMAIL PROBE_PASSWORD EXPIRED UNPUBLISHED
+    docker exec -i -e PROBE_EMAIL -e PROBE_PASSWORD -e EXPIRED -e UNPUBLISHED infra-cms-1 node --input-type=module - <<'NODE'
+    const base = "http://127.0.0.1:1337";
+    const { PROBE_EMAIL: identifier, PROBE_PASSWORD: password, UNPUBLISHED, EXPIRED } = process.env;
+    const login = await fetch(`${base}/api/auth/local`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ identifier, password }),
+    });
+    if (!login.ok) {
+      console.log(`sign-in as ${identifier} failed: HTTP ${login.status}`);
+      process.exit(1);
+    }
+    const auth = { authorization: `Bearer ${(await login.json()).jwt}` };
+    const gone = await fetch(`${base}/api/comments/2147483647`, { method: "DELETE", headers: auth });
+    console.log(`comment delete, unknown id: ${gone.status} ${await gone.text()}`);
+    const rows = async (path) => {
+      const res = await fetch(`${base}${path}`, { headers: auth });
+      return `${res.status}, ${res.ok ? (await res.json()).data.length : "-"} row(s)`;
+    };
+    if (UNPUBLISHED)
+      console.log(`thread of the unpublished announcement: ${await rows(`/api/comments?filters[targetType][$eq]=announcement&filters[targetDocumentId][$eq]=${UNPUBLISHED}`)}`);
+    if (EXPIRED)
+      console.log(`the expired announcement: ${await rows(`/api/announcements?filters[documentId][$eq]=${EXPIRED}`)}`);
+    NODE
+    unset PROBE_PASSWORD
+    ```
+
+    ```text
+    comment delete, unknown id: 404 {"data":null,"error":{"status":404,"name":"NotFoundError","message":"Not Found","details":{}}}
+    thread of the unpublished announcement: 200, 0 row(s)
+    the expired announcement: 200, 0 row(s)
+    ```
+
+    The DELETE names a comment id that cannot exist, so nothing is
+    deleted; its 404 body is the one the controller always sent. Before
+    the deploy the same probe shows the unpublished thread's comments and
+    the expired announcement (`1 row(s)`). The refusals that write (a
+    stranger's delete: the same `403` `ForbiddenError` body as before; a
+    comment or reaction on the unpublished announcement: `400`
+    `targetDocumentId required`, for editors too) were rehearsed and are
+    pinned by the integration suite; to see them on production, use the
+    optional checks of the [lane 7C runbook](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c)
+    with a test announcement. The live-smoke of step 8 already posted
+    and deleted its probe comment through the new policy.
+
+16. **The wiki fields and the pages** (in the browser as a member): a space
+    lists its pages by their Order field; a page with tags shows them as
+    chips, and one with two or more `##`/`###` headings a table of contents
+    above the text (unless Toc enabled is off); `/wiki` shows each space's
+    icon (the stored `book` stays the book icon). To find a page with tags:
+
+    ```bash
+    psql_db -X -tA -c "SELECT s.slug || '/' || p.slug FROM wiki_pages p JOIN wiki_pages_space_lnk l ON l.wiki_page_id = p.id JOIN wiki_spaces s ON s.id = l.wiki_space_id WHERE p.published_at IS NOT NULL AND jsonb_typeof(p.tags) = 'array' AND p.tags <> '[]'::jsonb LIMIT 3;"
+    ```
+
+    `/announcements` no longer lists the expired titles of step 6 for the
+    member (an editor still sees them); the bell may still hold an older
+    "New announcement: …" notification for one.
+
+17. **The next morning:**
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 12h cms | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]|removed [0-9]+ image\(s\) of deleted classified'
+    tail -n 20 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
+    ```
+
+    `[cron] notification-janitor took …ms` after 03:40 and `[cron]
+    classified-janitor took …ms` after 03:45, and, when something went,
+    `[notification-janitor] pruned N read notification(s) …` and
+    `[classified-janitor] purged N ad(s) expired before YYYY-MM-DD …`
+    with the counts of step 6 (the notifications capped at 100 000), plus
+    one `[uploads-janitor] removed N image(s) of deleted classified` per
+    purged ad with images (logged by the ad's delete, not by the 03:30
+    task). The backup log shows the 03:00 `done nightly` before them. A
+    `[cron] … failed` line: keep the backup of step 11 and look at the
+    error before the next night. Then delete the step 11 backup whenever
+    you like (or leave it to the rotation).
+
+**What users notice** (worth a short release note): expired announcements
+disappear for everyone below admin/editor, from lists, threads and
+digests; while an announcement is unpublished its comments and reactions
+are hidden and closed; read notifications older than 90 days and ads
+expired more than 90 days ago are removed; the wiki shows page order,
+tags, a table of contents and space icons; buttons show a short message
+instead of an error page when the intranet cannot be reached, and a
+comment on something that vanished says so; sign-in, registration and
+profile messages are translated; more than ten sign-ins at the same moment
+from one office network can be refused with "Too many sign-in attempts"
+(a retry a moment later works); the language switch remembers the choice
+for the e-mail digests; deleting a department keeps its documents and
+quick links for admins and editors until someone re-targets them. The
+admin panel no longer shows "Deploy to Strapi Cloud".
+
+**Rollback: both images, to the batch 10 SHA tags, no database step.**
+Follow the hint `infra/deploy.sh` prints when the deploy fails. After a
+recorded batch 12 deploy, by hand (the batch 10 tags stay: the prune keeps
+the newest five):
+
+```bash
+grep -F 7d9e52ba7e6a .git/sinnlos-deploy/infra.history
+docker tag infra-web:7d9e52ba7e6a infra-web:latest
+docker tag infra-cms:7d9e52ba7e6a infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+None of the hint's special cases applies from batch 12 to batch 10 (the
+batch 10 cms knows poll guest access and starts without pnpm, the database
+has no naive datetime columns, the batch 10 web renders in
+`APP_TIME_ZONE`), and the hint's guest-access probe reads the compiled
+poll schema, which the batch 10 cms image carries. What stays in the
+database, and how the batch 10 images take it (rehearsed):
+
+- **The `audience` columns stay** (the schema sync never drops columns,
+  `forceMigration: false`); the batch 10 cms boots on them and ignores
+  them. A document or quick link a department delete flagged after this
+  deploy, and left without any department, reads as **company-wide**
+  there, for guests too. List them first and re-target them (link a
+  department in the admin panel) before rolling back, or accept it:
+
+  ```bash
+  psql_db -X <<'SQL'
+  BEGIN TRANSACTION READ ONLY;
+  SELECT 'document' AS type, d.document_id, max(d.title) AS title, bool_or(d.published_at IS NOT NULL) AS published
+    FROM documents d
+   WHERE d.audience = 'departments'
+     AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
+   GROUP BY d.document_id
+  UNION ALL
+  SELECT 'quick link', q.document_id, max(q.label), bool_or(q.published_at IS NOT NULL)
+    FROM quick_links q
+   WHERE q.audience = 'departments'
+     AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+   GROUP BY q.document_id
+   ORDER BY 1, 2;
+  ROLLBACK;
+  SQL
+  ```
+
+- **Rows the janitors deleted do not come back** with the images:
+  notifications and ads (with their image files) exist only in the
+  backups (step 11, the nightly ones). Restoring a dump rolls back
+  everything else written since, so bring single rows back by hand from a
+  dump restored elsewhere (the restore drill,
+  [§7.3](#73-automated-daily-backups-cron)), if at all.
+- **Stored profile languages stay;** the batch 10 cms writes digests in
+  them the same way (a missing one is English there too), the batch 10
+  web does not write them.
+- Expired announcements and unpublished threads read as in batch 10
+  again (the draft fallback returns), with nothing to undo.
+
+A roll-forward is a normal `infra/deploy.sh` (it notes that the containers
+do not run the last-known-good images); the flags written before the
+rollback take effect again.
+
+**Rehearsal (2026-09-29, the integrated `batch/12`):** both images built
+from the tree through compose (`docker compose -p b12i-staging … build`,
+from BuildKit's cache, so the slow first build was not measured) and ran as
+the throwaway project `b12i-staging` (its own volumes, Postgres 16, demo
+data, loopback ports, no Traefik). The project first ran the `7d9e52b`
+images (batch 10 with the format sweep) and got the conditions of step 6:
+two prunable read notifications next to an old read anchor, an old unread
+one and a recently read one, an ad 100 days past its last day and one 10
+days past, an expired announcement, an unpublished announcement with two
+comments and a reaction, and tags on a wiki page. Step 6's SQL counted
+2, 1 and 1 (0 images), 10 users without a language, the expired and the
+unpublished announcement; `prod-perm-diff.sql` returned no rows, and the
+census, section 9 included, ran without an error. The member probe of step
+15 showed the unpublished thread's 2 comments and the expired
+announcement. Then the batch 12 images: the cms booted in about 2 s with
+`permission drift: none (report-only check of 120 managed actions)` and no
+grant line, the two `audience` columns appeared with no value, the
+registry printed the five tasks of step 12, `DIGEST_DEFAULT_LOCALE` was
+`en`, `/sign-in` answered `<html lang="en"`, and the probe printed exactly
+the three lines of step 15. Writes (not for production): a member's
+delete of another user's comment answered the former `403` body; comments
+and reactions on the unpublished announcement answered `400 targetDocumentId
+required` for member and editor alike, byte-equal to a documentId that
+never existed; an editor still read the expired announcement. Through the
+web as `casey.jones`: the wiki page showed its tags in a list named "Tags"
+and a table of contents named "Contents", the index showed the book, code
+and heart icons, and `/announcements` held the expired title only in the
+bell's old notification. An `admin_role` user deleted the Finance
+department, which a document targeted alone: the cms logged `[department-delete]
+set the audience of 2 document row(s) to 'departments': they stay restricted
+(admins and editors only) until re-targeted`, the member did not see the
+document, an editor did. Rollback to the `7d9e52b` images (`up -d
+--no-build web cms`): the batch 10 cms booted without an error, the
+columns and the two values stayed, the rollback listing above named the
+document, the member saw it again (company-wide), and the unpublished
+thread and the expired announcement read as before the deploy. The roll
+forward restored all three. The cms image holds `COPY … /out /app` of 15.2
+MB above 823 MB and 119 kB of `node_modules`, resolves `@sinnlos/domain`
+to `packages/domain/dist/cjs`, carries no `src`, and stopped in 0.7 s;
+the probe of step 13 printed `2` on both images. Not exercised here:
+`infra/deploy.sh` end to end, Traefik, the janitors firing at 03:40 and
+03:45 (their rules and both engines are covered by
+`retention.integration.test.ts`), a large notification backlog, the pnpm
+10 cold build time, and the production host.
 
 #### Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)
 
@@ -1897,7 +2451,6 @@ that could go down or leave one route unanswered):
   under UTC, Europe/Berlin and Pacific/Auckland, the integration suite on
   SQLite (149 tests) and Postgres 16 (298 tests), and both production
   builds passed.
-
 
 #### Upgrading to the domain package, image layers and pnpm 10 (batch 12, lane 7B)
 
