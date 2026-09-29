@@ -18,22 +18,22 @@
     "@strapi/strapi": "5.55.1",
     "@strapi/utils": "5.55.1",
     "better-sqlite3": "12.9.0",
-    "jose": "6.2.2",
-    "pg": "8.13.1",
+    "jose": "6.2.12",
+    "pg": "8.23.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-router-dom": "6.30.6",
-    "styled-components": "6.1.13",
+    "styled-components": "6.5.3",
     "temporal-polyfill": "1.0.5"
   },
   "devDependencies": {
     "@strapi/typescript-utils": "5.55.1",
-    "@types/node": "24.13.3",
+    "@types/node": "24.19.0",
     "@types/react": "18.3.12",
     "@types/react-dom": "18.3.1",
     "eslint": "^9.13.0",
     "typescript": "5.6.3",
-    "typescript-eslint": "^8.18.0"
+    "typescript-eslint": "^8.70.1"
   },
   "engines": {
     "node": "^22.13.0 || ^24.0.0",
