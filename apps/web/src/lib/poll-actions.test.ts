@@ -8,7 +8,8 @@ import { StrapiError } from "@/lib/strapi-error";
  * createPoll (decision 02): the payload carries the explicit `audience`
  * flag ("departments" when departments are chosen, "all" otherwise), only
  * positive integer department ids reach the CMS, a role that may not
- * create polls is turned away before any write, and the action no longer
+ * create polls is turned away before any write (a viewer the CMS could not
+ * resolve answers "unavailable" instead), and the action no longer
  * refreshes or tags a cache (D-DC01; the form navigates to /polls itself).
  * Guest access (owner decision 2026-09-27): `visibleToGuests` and
  * `guestsCanVote` are always sent as strict booleans, hidden by default,
@@ -173,6 +174,13 @@ describe("createPoll", () => {
       });
       expect(strapiMock).not.toHaveBeenCalled();
     }
+  });
+
+  it("answers unavailable, not forbidden, when the viewer could not be read (CMS outage)", async () => {
+    // getViewer()'s ANONYMOUS_VIEWER: /api/me failed, so the role is unknown.
+    viewerMock.mockResolvedValue({ id: null, displayName: null, role: null, department: null });
+    await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code: "unavailable" });
+    expect(strapiMock).not.toHaveBeenCalled();
   });
 
   it.each([

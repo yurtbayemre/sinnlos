@@ -44,7 +44,15 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
   // Poll creation is CMS-gated by global::is-admin-or-editor — mirror that
   // here so non-privileged users get a clean error instead of a 403. The
   // role is read fresh from the CMS (no render memo in a Server Action).
-  if (!canCreatePolls((await getViewer()).role)) return actionFailure("forbidden");
+  // A viewer without an id: /api/me could not be read (getViewer() answers
+  // ANONYMOUS_VIEWER during a CMS outage) or there is no session (only a
+  // crafted call, the form sits behind the sign-in). Nothing is sent either
+  // way; the outage is the case an author meets, so it answers
+  // "unavailable", not a missing permission. DEMO_VIEWER has an id, so the
+  // demo still answers "forbidden" without a request.
+  const viewer = await getViewer();
+  if (viewer.id === null) return actionFailure("unavailable");
+  if (!canCreatePolls(viewer.role)) return actionFailure("forbidden");
 
   const question = input.question.trim();
   if (!question) return actionFailure("missingQuestion");
