@@ -350,6 +350,32 @@ describe("departmentScopedIds (PL02)", () => {
     await expect(load(null)).resolves.toEqual([100]);
     await expect(load(999)).resolves.toEqual([100]);
   });
+
+  it("keeps a row flagged 'departments' targeted without links: flag OR links (FX29 residual)", async () => {
+    const strapi = stub();
+    const rows = strapi.tables[DOCUMENT];
+    rows.push(
+      { id: 104, title: "dept deleted", audience: "departments", departments: [] },
+      { id: 105, title: "re-targeted", audience: "departments", departments: [{ id: 10 }] },
+      { id: 106, title: "explicitly all", audience: "all", departments: [] },
+    );
+    const loadFrom = (userId: number | null) =>
+      departmentScopedIds({
+        strapi,
+        user: userId === null ? null : { id: userId },
+        config: undefined,
+        uid: DOCUMENT,
+      });
+    await expect(loadFrom(1)).resolves.toEqual([100, 101, 103, 105, 106]);
+    await expect(loadFrom(2)).resolves.toEqual([100, 106]);
+    await expect(loadFrom(null)).resolves.toEqual([100, 106]);
+    // One read of the rows, with the flag column and the department ids.
+    const reads = strapi.calls.filter((call) => call.uid === DOCUMENT);
+    expect(reads[0]?.params).toMatchObject({
+      select: ["id", "audience"],
+      populate: { departments: { select: ["id"] } },
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -269,6 +269,9 @@ export function visibleIdsPolicy<Config = unknown>(
   };
 }
 
+/** The `audience` value that keeps a department-scoped row restricted (FX29 residual). */
+export const DEPARTMENTS_AUDIENCE = "departments";
+
 /**
  * Loader for types scoped by a `departments` (manyToMany) relation
  * (document, quick-link): a row without departments is company-wide, every
@@ -276,6 +279,17 @@ export function visibleIdsPolicy<Config = unknown>(
  * members of one of them. The caller's department is read from the
  * database (ctx.state.user does not carry it reliably). department is
  * single-row since decision 05, so row ids compare directly (I-ORG).
+ *
+ * "Flag OR links", the poll pattern (FX29 residual, owner answer
+ * 2026-09-29 (b)): a row is targeted when it links a department OR its
+ * `audience` flag says 'departments'. Deleting a department cascades its
+ * link rows away, so a row targeted only by that department would turn
+ * company-wide; the department delete hook sets the flag first
+ * (utils/department-delete-restrict.ts). A flagged row without departments
+ * is visible to no one here, i.e. to admin_role and editor only (the
+ * policy's bypass), until a moderator re-targets it (links departments, or
+ * sets the audience back to 'all'). NULL (rows from before the flag) and
+ * 'all' leave the decision to the links, as before.
  */
 export async function departmentScopedIds({
   strapi,
@@ -295,19 +309,20 @@ export async function departmentScopedIds({
   }
 
   const rows = await strapi.db.query(uid).findMany({
-    select: ["id"],
+    select: ["id", "audience"],
     populate: { departments: { select: ["id"] } },
   });
   const visible: number[] = [];
   for (const row of Array.isArray(rows) ? rows : []) {
     if (!isRecord(row) || typeof row.id !== "number") continue;
     const departments: unknown[] = Array.isArray(row.departments) ? row.departments : [];
-    const companyWide = departments.length === 0;
+    const companyWide = departments.length === 0 && row.audience !== DEPARTMENTS_AUDIENCE;
     const ownDepartment =
       departmentId != null &&
       departments.some((department) => isRecord(department) && department.id === departmentId);
     // Company-wide: everyone, anonymous included. Scoped: only the members
     // of a linked department (never anonymous, who has no department).
+    // Flagged without departments: nobody but the bypass roles.
     if (companyWide || ownDepartment) visible.push(row.id);
   }
   return visible;

@@ -26,6 +26,11 @@
       "relation": "manyToMany",
       "target": "api::department.department"
     },
+    "audience": {
+      "type": "enumeration",
+      "enum": ["all", "departments"],
+      "default": "all"
+    },
     "uploadedBy": {
       "type": "relation",
       "relation": "manyToOne",

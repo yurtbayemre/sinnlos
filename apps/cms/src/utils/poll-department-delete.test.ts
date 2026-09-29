@@ -328,10 +328,38 @@ describe("department delete lifecycles", () => {
     globals.strapi = previous;
   });
 
+  /**
+   * The lifecycles restrict documents and quick links as well (FX29
+   * residual, department-delete-restrict.test.ts); here their link tables
+   * exist and are empty.
+   */
+  const withEmptyDocumentLinks = (strapi: PollDepartmentDeleteHost): PollDepartmentDeleteHost => ({
+    ...strapi,
+    db: {
+      ...strapi.db,
+      metadata: {
+        get: (uid: string) =>
+          uid === "api::poll.poll"
+            ? strapi.db.metadata.get(uid)
+            : {
+                attributes: {
+                  departments: {
+                    joinTable: {
+                      name: `${uid}_lnk`,
+                      joinColumn: { name: "row_id" },
+                      inverseJoinColumn: { name: "department_id" },
+                    },
+                  },
+                },
+              },
+      },
+    },
+  });
+
   it("flag the polls before a delete and before a deleteMany, with the event's where", async () => {
     for (const hook of ["beforeDelete", "beforeDeleteMany"] as const) {
       const { strapi, polls } = host({ departments: [1, 2], polls: POLLS });
-      globals.strapi = strapi;
+      globals.strapi = withEmptyDocumentLinks(strapi);
       await departmentLifecycles[hook]({ params: { where: { id: { $in: [2] } } } });
       expect(
         polls.filter((row) => row.audience === "departments").map((row) => row.id),
