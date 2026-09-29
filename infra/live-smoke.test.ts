@@ -11,7 +11,11 @@
  *      notifications of the smoke author;
  *   5. an Entra-only web (ENTRA_ENABLED=1 without AUTH_LOCAL_ENABLED=1)
  *      ends after the datetime check with a SKIPPED note and exit 0 (run in
- *      bash with docker stubbed).
+ *      bash with docker stubbed);
+ *   6. the stream user defaults to an announcement author from the
+ *      credentials file (alex.morgan, else casey.jones), so the
+ *      notification frame path is checked by default, and an unchecked
+ *      path prints the WARNING line deploy.sh looks for.
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -96,34 +100,43 @@ describe("live-smoke.sh: what it touches", () => {
   });
 });
 
-describe.skipIf(!HAS_BASH)("live-smoke.sh: an Entra-only instance", { timeout: 30_000 }, () => {
-  /** Runs the script with docker stubbed: the web container's env holds `webEnv`. */
-  function run(webEnv: string[]): { status: number | null; stdout: string; stderr: string } {
-    const script = [
-      "docker() {",
-      '  case "$1" in',
-      "    exec) cat > /dev/null ;;", // no naive columns
-      "    logs) echo '[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin' ;;",
-      `    inspect) printf '%s\\n' PATH=/usr/bin ${webEnv.map((e) => `'${e}'`).join(" ")} ;;`,
-      "    *) return 1 ;;",
-      "  esac",
-      "}",
-      "curl() { echo curl-called >&2; return 7; }",
-      "export -f docker curl",
-      "export PASSWORDS_FILE=/nonexistent/passwords.txt",
-      "unset SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD",
-      "cat > \"${TMPDIR:-/tmp}/live-smoke-$$.sh\" <<'LIVE_SMOKE_EOF'",
-      SCRIPT.trimEnd(),
-      "LIVE_SMOKE_EOF",
-      'bash "${TMPDIR:-/tmp}/live-smoke-$$.sh"; rc=$?',
-      'rm -f "${TMPDIR:-/tmp}/live-smoke-$$.sh"',
-      "exit $rc",
-      "",
-    ].join("\n");
-    const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
-    return { status: res.status, stdout: res.stdout, stderr: res.stderr };
-  }
+/**
+ * Runs the script with docker stubbed: the web container's env holds
+ * `webEnv`; curl fails at once (no request gets through). `setup` runs
+ * before the script, after the defaults (no credentials file, no passwords).
+ */
+function run(
+  webEnv: string[],
+  setup = "",
+): { status: number | null; stdout: string; stderr: string } {
+  const script = [
+    "docker() {",
+    '  case "$1" in',
+    "    exec) cat > /dev/null ;;", // no naive columns
+    "    logs) echo '[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin' ;;",
+    `    inspect) printf '%s\n' PATH=/usr/bin ${webEnv.map((e) => `'${e}'`).join(" ")} ;;`,
+    "    *) return 1 ;;",
+    "  esac",
+    "}",
+    "curl() { echo curl-called >&2; return 7; }",
+    "export -f docker curl",
+    "export PASSWORDS_FILE=/nonexistent/passwords.txt",
+    "unset SMOKE_EMAIL SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD",
+    'W="$(mktemp -d)"',
+    setup,
+    "cat > \"$W/live-smoke.sh\" <<'LIVE_SMOKE_EOF'",
+    SCRIPT.trimEnd(),
+    "LIVE_SMOKE_EOF",
+    'bash "$W/live-smoke.sh"; rc=$?',
+    'rm -rf "$W"',
+    "exit $rc",
+    "",
+  ].join("\n");
+  const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr };
+}
 
+describe.skipIf(!HAS_BASH)("live-smoke.sh: an Entra-only instance", { timeout: 30_000 }, () => {
   it("checks the datetime contract, then skips the sign-in steps with exit 0", () => {
     const res = run(["ENTRA_ENABLED=1", "AUTH_LOCAL_ENABLED=0"]);
     expect(res.status, res.stderr).toBe(0);
@@ -142,3 +155,61 @@ describe.skipIf(!HAS_BASH)("live-smoke.sh: an Entra-only instance", { timeout: 3
     }
   });
 });
+
+describe.skipIf(!HAS_BASH)(
+  "live-smoke.sh: the stream user checks the notification frame by default",
+  { timeout: 30_000 },
+  () => {
+    /** The stream user the script picks, given credential-file lines and extra setup. */
+    function streamUser(lines: string[], setup = ""): string {
+      const res = run(
+        [],
+        [
+          `printf '%s\n' ${lines.map((l) => `'${l}'`).join(" ")} > "$W/pw"`,
+          'export PASSWORDS_FILE="$W/pw"',
+          setup,
+        ].join("\n"),
+      );
+      // It gets as far as the first request (curl is stubbed to fail).
+      expect(res.stderr).toContain("curl-called");
+      return /^live-smoke: stream user (\S+), comment author (\S+)$/m.exec(res.stdout)?.[1] ?? "";
+    }
+    const AUTHOR = "sam.chen@sinnlos.local\tpw-sam";
+
+    it("prefers alex.morgan, who authors seeded announcements", () => {
+      expect(
+        streamUser([
+          "# demo accounts",
+          "casey.jones@sinnlos.local\tpw-casey",
+          "alex.morgan@sinnlos.local\tpw-alex",
+          AUTHOR,
+        ]),
+      ).toBe("alex.morgan@sinnlos.local");
+    });
+
+    it("keeps casey.jones for a credentials file without alex.morgan", () => {
+      expect(streamUser(["casey.jones@sinnlos.local\tpw-casey", AUTHOR])).toBe(
+        "casey.jones@sinnlos.local",
+      );
+    });
+
+    it("takes SMOKE_EMAIL as given, and casey.jones for a bare SMOKE_PASSWORD", () => {
+      const lines = [
+        "alex.morgan@sinnlos.local\tpw-alex",
+        "riley.kim@sinnlos.local\tpw-riley",
+        AUTHOR,
+      ];
+      expect(streamUser(lines, "export SMOKE_EMAIL=riley.kim@sinnlos.local")).toBe(
+        "riley.kim@sinnlos.local",
+      );
+      expect(streamUser(lines, "export SMOKE_PASSWORD=pw-casey")).toBe("casey.jones@sinnlos.local");
+    });
+
+    it("warns, in the words deploy.sh looks for, when the frame path went unchecked", () => {
+      const deploy = readFileSync(new URL("./deploy.sh", import.meta.url), "utf8");
+      const phrase = "the notification frame path was not checked";
+      expect(SCRIPT).toContain(`echo "live-smoke: WARNING — ${phrase}: `);
+      expect(deploy).toContain(`grep -q '${phrase}' "\${LIVE_SMOKE_OUT}"`);
+    });
+  },
+);

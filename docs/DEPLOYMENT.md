@@ -979,7 +979,14 @@ infra/deploy.sh
    `timestamp without time zone` column left, the cms boot log reports the
    process zone UTC), then the end-to-end SSE pipeline probe (one comment
    posted through the cms → the ping frame on a subscribed stream, which
-   must be uncompressed; see [§6.1](#61-health-checks)). A failed live-smoke
+   must be uncompressed, and, when the comment lands on the stream user's
+   own announcement, the notification frame; see [§6.1](#61-health-checks)).
+   The stream user is `SMOKE_EMAIL`, by default the first of
+   `alex.morgan@sinnlos.local` (an announcement author in the demo data)
+   and `casey.jones@sinnlos.local` with a line in the credentials file; when
+   it owns no visible announcement, the notification frame goes unchecked,
+   live-smoke and `deploy.sh` print a warning, and the state records
+   `LIVE_SMOKE=passed (notification frame not checked)`. A failed live-smoke
    **fails the deploy**; it is skipped with `LIVE_EVENTS_DISABLED=1` (read
    from the env compose hands the apps) or when the demo credentials file
    is absent (then run `infra/live-smoke.sh` by hand), and on an Entra-only
@@ -1356,7 +1363,11 @@ usual.
 - **`infra/live-smoke.sh`** ([§6.1](#61-health-checks)): finds its target
   with GETs only, removes the comment notifications it causes, checks the
   stream is uncompressed, keeps passwords off the command line, and skips
-  its sign-in steps on an Entra-only instance.
+  its sign-in steps on an Entra-only instance. It checks the notification
+  frame by default: the stream user is the first of `alex.morgan` (who
+  authors seeded announcements) and `casey.jones` with a line in the
+  credentials file, and an unchecked frame is a warning that `deploy.sh`
+  repeats and records.
 - **cms crons**: one registry (`apps/cms/src/cron/registry.ts`) with a
   `[cron] <name> took <n>ms` line per run, an in-process overlap guard and
   the kill switch `CRON_ENABLED` (unset or blank = on; `0`, `false`, `no`
@@ -1376,13 +1387,23 @@ usual.
    (plain `overlay2` keeps it until it is pruned). `deploy.sh` handles both
    (the `:pre-deploy` tags, [§3.6](#36-deploy)); on the containerd store
    roll back by tag, never by a bare image id.
-3. Optional: `infra/deploy.sh --dry-run`. It runs every check and prints
+3. The credentials file (`PASSWORDS_FILE`, by default
+   `/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt`) holds a
+   line for an announcement author: live-smoke now signs in as the first of
+   `alex.morgan@sinnlos.local` and `casey.jones@sinnlos.local` that has one,
+   and only a stream user with a visible announcement of their own gets the
+   notification frame checked. `grep -c '^alex.morgan@' <file>` prints 1;
+   otherwise add that account's line, or set `SMOKE_EMAIL` (and
+   `SMOKE_PASSWORD`) to another author. Without one the deploy still passes,
+   with a warning and `LIVE_SMOKE=passed (notification frame not checked)`
+   in the state.
+4. Optional: `infra/deploy.sh --dry-run`. It runs every check and prints
    the plan: on the first run `2. rollback target: … -> the images that ran
    before this deploy (:rollback)`, because there is no state yet.
 
 **Deploy**
 
-4. `infra/deploy.sh` as usual. Expect `WARNING: CI is …` when GitHub has no
+5. `infra/deploy.sh` as usual. Expect `WARNING: CI is …` when GitHub has no
    green run for the checked-out commit yet (the deploy goes on; pass
    `--require-green-ci` to refuse instead). This first run tags the
    running images `:rollback` (no state yet), exactly as before, and a
@@ -1391,26 +1412,26 @@ usual.
 
 **After the deploy**
 
-5. `cat .git/sinnlos-deploy/infra.state` shows `TAG=<sha>` and
+6. `cat .git/sinnlos-deploy/infra.state` shows `TAG=<sha>` and
    `LIVE_SMOKE=passed`; `docker images infra-web` lists `latest`, the SHA
    tag, `rollback` and `pre-deploy` (the images that ran before this
    deploy). From the next deploy on, a failure rolls back to this SHA tag.
-6. The pre-deploy backup of this run is named
+7. The pre-deploy backup of this run is named
    `sinnlos-db-<ts>-predeploy.dump.gz.gpg` (uploads and `.env` alike) in the
    offsite dir, and `backup.log` ends with `done predeploy`.
-7. The next morning, after the 03:00 cron: `tail backup.log` shows `ok`
+8. The next morning, after the 03:00 cron: `tail backup.log` shows `ok`
    lines, `pruned` lines for artifacts older than 7 days beyond the newest
    7, and `done nightly`; `cat last-success` names the nightly run. The new
    script never touches older plaintext left in the backup root by failed
    runs before this change (`sinnlos-*.dump`, `.tar`, `.env`, `.gz`): review
    and delete those by hand, but keep the pre-datetime dump until the
    class-C review is done.
-8. The cms log shows `[cron] uploads-janitor took …ms` after 03:30,
+9. The cms log shows `[cron] uploads-janitor took …ms` after 03:30,
    `[cron] search-log-janitor took …ms` after 03:35 and
    `[cron] digest-mailer took …ms` after 07:30.
-9. On the NAS or the owner machine (where the private key is), run the
+10. On the NAS or the owner machine (where the private key is), run the
    restore drill once ([§7.3](#73-automated-daily-backups-cron)).
-10. Optional, once: remove the notification residue of earlier live-smoke
+11. Optional, once: remove the notification residue of earlier live-smoke
     runs (33 rows in the 2026-09-25 census) with
     `infra/diagnostics/cleanup-live-smoke-notifications.sql`: a dry run
     first, then armed with the count it printed

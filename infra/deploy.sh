@@ -1081,8 +1081,12 @@ PHASE="live-smoke"
 LIVE_SMOKE_MODE="$(live_smoke_mode)"
 if [[ "${LIVE_SMOKE_MODE}" == run* ]]; then
   log "Running live-pipeline smoke (infra/live-smoke.sh)"
+  # Its output also goes to a file, for the one line that says the
+  # notification frame path went unchecked (no secrets in it).
+  LIVE_SMOKE_OUT="$(mktemp)"
   if ! BASE_URL="${SMOKE_URL%/}" PASSWORDS_FILE="${PASSWORDS_FILE}" CMS_CONTAINER="${PROJECT}-cms-1" \
-    WEB_CONTAINER="${PROJECT}-web-1" DB_CONTAINER="${PROJECT}-db-1" "${LIVE_SMOKE_SCRIPT}"; then
+    WEB_CONTAINER="${PROJECT}-web-1" DB_CONTAINER="${PROJECT}-db-1" "${LIVE_SMOKE_SCRIPT}" | tee "${LIVE_SMOKE_OUT}"; then
+    rm -f "${LIVE_SMOKE_OUT}"
     echo "ERROR: live-smoke failed — the SSE pipeline is NOT delivering pings, or a check above failed." >&2
     echo "       App still works on polling fallback; investigate before calling this deploy done:" >&2
     echo "       docker logs ${PROJECT}-cms-1 2>&1 | grep live-emit ; docker logs ${PROJECT}-web-1 2>&1 | grep '\\[live\\]'" >&2
@@ -1092,9 +1096,15 @@ if [[ "${LIVE_SMOKE_MODE}" == run* ]]; then
   fi
   if [[ "${LIVE_SMOKE_MODE}" == "run (Entra-only"* ]]; then
     LIVE_SMOKE_RESULT="passed: the datetime check only (Entra-only instance)"
+  elif grep -q 'the notification frame path was not checked' "${LIVE_SMOKE_OUT}"; then
+    LIVE_SMOKE_RESULT="passed (notification frame not checked)"
+    echo "WARNING: live-smoke did not check the notification frame path: the stream user has no announcement" >&2
+    echo "         of their own. Give ${PASSWORDS_FILE} a line for an announcement author, or set SMOKE_EMAIL" >&2
+    echo "         (docs/DEPLOYMENT.md, \"Upgrading to the deploy, backup and cron hardening\")." >&2
   else
     LIVE_SMOKE_RESULT="passed"
   fi
+  rm -f "${LIVE_SMOKE_OUT}"
 else
   log "live-smoke SKIPPED: ${LIVE_SMOKE_MODE#skip: }"
   LIVE_SMOKE_RESULT="${LIVE_SMOKE_MODE}"

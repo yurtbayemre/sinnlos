@@ -10,7 +10,9 @@
 #
 # Chain under test:
 #   1. Sign in to the web app as a demo user (SMOKE_EMAIL, Auth.js
-#      credentials flow) and hold an open `curl -N --compressed` on
+#      credentials flow; by default the first of alex.morgan@sinnlos.local
+#      and casey.jones@sinnlos.local with a line in PASSWORDS_FILE, see
+#      below) and hold an open `curl -N --compressed` on
 #      /live/stream: the stream must be text/event-stream WITHOUT a
 #      Content-Encoding (a compressing edge buffers the pings).
 #   2. Pick the target announcement with GETs only, as a SECOND demo user
@@ -23,7 +25,8 @@
 #   4. Assert the content ping for that channel within ASSERT_SECONDS; when
 #      the announcement is SMOKE_EMAIL's own, the comment notifies
 #      SMOKE_EMAIL, and the notification ping must arrive on the stream too
-#      (the notification frame path).
+#      (the notification frame path). Otherwise that path goes unchecked
+#      and a WARNING line says so (deploy.sh repeats it and records it).
 # On exit, also after a failure: the "[live-smoke]" comments are deleted
 # (through the cms, as their author), and so are the comment notifications
 # this run caused (in the database: type comment, actor SMOKE_AUTHOR_EMAIL,
@@ -43,7 +46,7 @@
 # SMOKE_AUTHOR_PASSWORD through `docker exec -e`.
 #
 # Usage:
-#   SMOKE_EMAIL=casey.jones@sinnlos.local SMOKE_PASSWORD=… \
+#   SMOKE_EMAIL=alex.morgan@sinnlos.local SMOKE_PASSWORD=… \
 #   SMOKE_AUTHOR_EMAIL=sam.chen@sinnlos.local SMOKE_AUTHOR_PASSWORD=… \
 #   infra/live-smoke.sh
 #
@@ -51,6 +54,12 @@
 # /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt, lines of
 # "email@host password"; anchor greps with ^email@ — the header comment
 # line matches un-anchored greps!).
+#
+# SMOKE_EMAIL defaults to the first of SMOKE_EMAIL_CANDIDATES that has a
+# line in PASSWORDS_FILE: alex.morgan authors seeded announcements, so the
+# notification frame path is checked; casey.jones (the earlier default)
+# authors none. With SMOKE_PASSWORD given but no SMOKE_EMAIL, the password
+# is taken to be casey.jones's, as before.
 #
 # Other settings: BASE_URL (the public origin), CMS_CONTAINER, WEB_CONTAINER,
 # DB_CONTAINER (infra-{cms,web,db}-1), DB_SCHEMA (public), ASSERT_SECONDS (5).
@@ -72,7 +81,8 @@ DB_SCHEMA="${DB_SCHEMA:-public}"
 ASSERT_SECONDS="${ASSERT_SECONDS:-5}"
 PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
 
-SMOKE_EMAIL="${SMOKE_EMAIL:-casey.jones@sinnlos.local}"
+SMOKE_EMAIL="${SMOKE_EMAIL:-}"
+SMOKE_EMAIL_CANDIDATES="alex.morgan@sinnlos.local casey.jones@sinnlos.local"
 SMOKE_AUTHOR_EMAIL="${SMOKE_AUTHOR_EMAIL:-sam.chen@sinnlos.local}"
 
 fail() {
@@ -128,6 +138,17 @@ lookup_password() {
   { grep "^${email}[[:space:]]" "${PASSWORDS_FILE}" 2>/dev/null | awk '{print $2}' | head -1; } || true
 }
 
+if [[ -z "${SMOKE_EMAIL}" ]]; then
+  SMOKE_EMAIL="casey.jones@sinnlos.local"
+  if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
+    for candidate in ${SMOKE_EMAIL_CANDIDATES}; do
+      if [[ -n "$(lookup_password "${candidate}")" ]]; then
+        SMOKE_EMAIL="${candidate}"
+        break
+      fi
+    done
+  fi
+fi
 if [[ -z "${SMOKE_PASSWORD:-}" ]]; then
   SMOKE_PASSWORD="$(lookup_password "${SMOKE_EMAIL}")"
 fi
@@ -137,6 +158,7 @@ fi
 if [[ -z "${SMOKE_PASSWORD}" || -z "${SMOKE_AUTHOR_PASSWORD}" ]]; then
   fail "missing passwords (set SMOKE_PASSWORD/SMOKE_AUTHOR_PASSWORD or provide ${PASSWORDS_FILE})"
 fi
+echo "live-smoke: stream user ${SMOKE_EMAIL}, comment author ${SMOKE_AUTHOR_EMAIL}"
 
 # The author's side, inside the cms container: sign in as SMOKE_AUTHOR_EMAIL
 # (password from the environment), then MODE discover (GETs only: prints
@@ -362,6 +384,10 @@ if [[ "${TARGET_KIND}" == "own" ]]; then
   fi
   echo "live-smoke: OK — notification frame received (the comment notified ${SMOKE_EMAIL}, the announcement's author)"
 else
-  echo "live-smoke: notification frame path not checked: ${SMOKE_EMAIL} has no visible announcement of their own"
+  # deploy.sh looks for this line (and records the deploy as passed with the
+  # frame not checked).
+  echo "live-smoke: WARNING — the notification frame path was not checked: ${SMOKE_EMAIL} has no visible"
+  echo "live-smoke: announcement of their own. Give ${PASSWORDS_FILE} a line for an announcement author"
+  echo "live-smoke: (alex.morgan@sinnlos.local in the demo data), or set SMOKE_EMAIL (and its password) to one."
 fi
 exit 0

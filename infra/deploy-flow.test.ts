@@ -105,7 +105,9 @@ function deploys(steps: readonly Step[]): StepReport[] {
     ': > "$REPO/infra/docker-compose.traefik.yml"',
     ': > "$REPO/infra/rollback/revoke-guest-poll-vote.sql"',
     `printf '#!/usr/bin/env bash\\necho "backup kind=$SINNLOS_BACKUP_KIND db=$SINNLOS_DB_CONTAINER dir=\${SINNLOS_BACKUP_DIR:-default} quick=\${SINNLOS_LOCAL_ENV_BACKUP:-default}"\\n' > "$REPO/infra/backup/pg-backup.sh"`,
-    `printf '#!/usr/bin/env bash\\necho "live-smoke base=$BASE_URL cms=$CMS_CONTAINER"\\nexit "\${STUB_LIVE_RC:-0}"\\n' > "$REPO/infra/live-smoke.sh"`,
+    `printf '#!/usr/bin/env bash\\necho "live-smoke base=$BASE_URL cms=$CMS_CONTAINER"\\n' > "$REPO/infra/live-smoke.sh"`,
+    // With STUB_LIVE_NOFRAME: the line live-smoke prints when the stream user owns no announcement.
+    `printf 'if [[ -n "\${STUB_LIVE_NOFRAME:-}" ]]; then echo "live-smoke: WARNING - the notification frame path was not checked: stub"; fi\\nexit "\${STUB_LIVE_RC:-0}"\\n' >> "$REPO/infra/live-smoke.sh"`,
     'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh"',
     "cat > \"$T/compose.json\" <<'COMPOSE_JSON'",
     COMPOSE_JSON,
@@ -122,7 +124,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP=",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -148,7 +150,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     '          printf "sha256:web%s\\nsha256:cms%s\\n" "$id" "$id" >> "$T/ids" ;;',
     "        up)",
     '          [[ -z "$STUB_UP_FAIL" ]] || return 1',
-    '          for a in web cms; do',
+    "          for a in web cms; do",
     '            if [[ -z "$STUB_UP_KEEP" || ! -f "$T/ctr/$p-$a-1" ]]; then cp "$T/img/$p-${a}__latest" "$T/ctr/$p-$a-1"; fi',
     "          done ;;",
     "      esac ;;",
@@ -276,6 +278,7 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 5 */ { before: "STUB_BUILD_FAIL=; STUB_UP_FAIL=1" },
         /* 6 */ { before: "STUB_UP_FAIL=; KEEP=2" },
         /* 7 */ { before: "commit" },
+        /* 8 */ { before: "commit; STUB_LIVE_NOFRAME=1" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -366,6 +369,19 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.state).toEqual(r[0].state);
     });
 
+    it("records a live-smoke that could not check the notification frame, with a warning", () => {
+      const run = r[8];
+      expect(run.status, run.stderr).toBe(0);
+      // live-smoke's own output still reaches the terminal (tee).
+      expect(run.stdout).toContain(
+        "live-smoke: WARNING - the notification frame path was not checked",
+      );
+      expect(run.stderr).toContain("WARNING: live-smoke did not check the notification frame path");
+      expect(run.state.LIVE_SMOKE).toBe("passed (notification frame not checked)");
+      expect(tagOf(run)).not.toBe(tagOf(r[7]));
+      expect(r[7].state.LIVE_SMOKE).toBe("passed");
+    });
+
     it("moves the state on the next good deploy, and prunes SHA tags beyond DEPLOY_KEEP_TAGS", () => {
       const [first, , , , , , second, third] = r;
       expect(second.status, second.stderr).toBe(0);
@@ -438,7 +454,9 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(bad.stderr).toContain(
         "WARNING: could not tag sha256:ghostweb (infra-web-1) as infra-web:pre-deploy",
       );
-      expect(bad.stderr).toContain("the image sha256:ghostweb that infra-web-1 or infra-cms-1 runs");
+      expect(bad.stderr).toContain(
+        "the image sha256:ghostweb that infra-web-1 or infra-cms-1 runs",
+      );
       expect(bad.stderr).toContain("up -d --no-build --force-recreate web cms");
       expect(bad.stderr).toContain("infra/deploy.sh failed during 'record'");
       expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
@@ -589,7 +607,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     const [bare, sharedEdge] = [r[10], r[11]];
     for (const run of [bare, sharedEdge]) {
       expect(run.status).toBe(1);
-      expect(run.stderr).toContain("ERROR: compose project b10-5b-staging is not isolated from production:");
+      expect(run.stderr).toContain(
+        "ERROR: compose project b10-5b-staging is not isolated from production:",
+      );
       expect(run.stderr).toContain("containers of compose project infra exist on this Docker host");
       expect(run.stdout).not.toContain("backup kind=");
       expect(called(run, / build$| up -d/)).toEqual([]);
@@ -600,7 +620,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(bare.stderr).toContain("- SINNLOS_BACKUP_DIR is not set");
     expect(sharedEdge.stderr).not.toContain("SMOKE_URL is not set");
     expect(sharedEdge.stderr).not.toContain("SINNLOS_BACKUP_DIR is not set");
-    expect(called(sharedEdge, /^docker ps -aq --filter label=com.docker.compose.project=infra$/)).toHaveLength(1);
+    expect(
+      called(sharedEdge, /^docker ps -aq --filter label=com.docker.compose.project=infra$/),
+    ).toHaveLength(1);
   });
 
   it("takes the compose project and the smoke URL as parameters", () => {
