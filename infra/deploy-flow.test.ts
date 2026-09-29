@@ -19,7 +19,9 @@
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
  *   6. the pre-deploy backup runs as SINNLOS_BACKUP_KIND=predeploy, and the
- *      compose project, smoke URL and checkout are parameters;
+ *      compose project, smoke URL and checkout are parameters; the smoke
+ *      URL defaults to https://<DOMAIN>, the host of the rendered router
+ *      rules, and --check refuses the example DOMAIN (5A-T1);
  *   7. on the containerd image store (an image no tag references cannot be
  *      resolved), the running images keep a :pre-deploy tag through the
  *      build, so a re-run after a failed deploy records what runs, and a
@@ -69,17 +71,35 @@ interface StepReport {
   stateDir: boolean;
 }
 
-const COMPOSE_JSON = JSON.stringify(
-  {
-    services: {
-      cms: {
-        environment: { LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "0", AUTH_LOCAL_ENABLED: "0" },
+/** The host the stub instance's Traefik routers and public URLs name (DOMAIN). */
+const STUB_HOST = "intranet.acme.test";
+
+/** `docker compose config --format json` of the stub instance, with `host` as DOMAIN. */
+const composeJson = (host: string) =>
+  JSON.stringify(
+    {
+      services: {
+        cms: {
+          environment: {
+            LIVE_EVENTS_DISABLED: "0",
+            ENTRA_ENABLED: "0",
+            AUTH_LOCAL_ENABLED: "0",
+            PUBLIC_URL: `https://${host}`,
+          },
+          labels: {
+            "traefik.http.routers.sinnlos-cms.rule": `Host(\`${host}\`) && PathPrefix(\`/api\`)`,
+          },
+        },
+        web: {
+          environment: { AUTH_URL: `https://${host}` },
+          labels: { "traefik.http.routers.sinnlos-web.rule": `Host(\`${host}\`)` },
+        },
       },
     },
-  },
-  null,
-  2,
-);
+    null,
+    2,
+  );
+const COMPOSE_JSON = composeJson(STUB_HOST);
 
 /**
  * Runs the steps in one bash process, in a fresh checkout ($REPO, one
@@ -114,6 +134,10 @@ function deploys(steps: readonly Step[]): StepReport[] {
     'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh"',
     "cat > \"$T/compose.json\" <<'COMPOSE_JSON'",
     COMPOSE_JSON,
+    "COMPOSE_JSON",
+    // The same instance with the example DOMAIN of infra/.env.example.
+    "cat > \"$T/compose-example.json\" <<'COMPOSE_JSON'",
+    composeJson("intranet.example.com"),
     "COMPOSE_JSON",
     // A throwaway repo: identity and line endings on the command line only.
     'G=(git -C "$REPO" -c user.name=deploy-test -c user.email=deploy-test@example.invalid -c commit.gpgsign=false -c core.autocrlf=false -c core.safecrlf=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
@@ -314,7 +338,12 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(first.stdout).not.toContain("backup kind=");
       // … every later deploy does, as a pre-deploy backup.
       expect(r[6].stdout).toContain("backup kind=predeploy db=infra-db-1");
-      expect(first.stdout).toContain("live-smoke base=https://sinnlos.yurtbay.dev cms=infra-cms-1");
+      // The smoke URL follows DOMAIN (the host of every router).
+      expect(first.stdout).toContain(`Traefik host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
+      expect(first.stdout).toContain(`live-smoke base=https://${STUB_HOST} cms=infra-cms-1`);
+      expect(called(first, /^curl /).filter((c) => !c.includes("api.github.com"))).toEqual([
+        `curl -sS -o /dev/null -w %{http_code} --max-time 15 https://${STUB_HOST}`,
+      ]);
       expect(first.stdout).toContain("none: nothing ran here before (first install)");
       expect(first.state).toMatchObject({
         WEB_IMAGE: "sha256:web1",
@@ -653,13 +682,31 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         before: 'rm "$REPO/apps/web/src/route.ts"; mkdir "$REPO/apps/web/app"',
         args: ["--dry-run"],
       },
+      // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
+      /* 17 */ {
+        before: 'cp "$T/compose-example.json" "$T/compose.json"',
+        args: ["--check"],
+      },
     ]);
   }, SEQUENCE_BUDGET);
 
   it("keeps --check the env preflight only (no git check, no lock)", () => {
     expect(r[0].status, r[0].stderr).toBe(0);
     expect(r[0].stdout).toContain("--check: nothing deployed.");
+    expect(r[0].stdout).toContain(`Traefik host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
     expect(r[0].stateDir).toBe(false);
+  });
+
+  it("refuses the example DOMAIN in --check, before anything is touched (5A-T1)", () => {
+    const run = r[17];
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("ERROR: DOMAIN in infra/.env does not fit this instance:");
+    expect(run.stderr).toContain(
+      "- DOMAIN=intranet.example.com is a placeholder (infra/.env.example), not this instance's host name",
+    );
+    expect(run.stderr).toContain("Preflight failed. Nothing was changed.");
+    expect(run.stdout).not.toContain("--check: nothing deployed.");
+    expect(called(run, /^curl |^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
   });
 
   it("refuses a checkout with a changed tracked file before anything is touched", () => {
@@ -786,7 +833,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       expect(called(run, / build$| up -d/)).toEqual([]);
     }
     expect(bare.stderr).toContain(
-      "- SMOKE_URL is not set: the smoke checks would test https://sinnlos.yurtbay.dev.",
+      `- SMOKE_URL is not set: the smoke checks would test https://${STUB_HOST}.`,
     );
     expect(bare.stderr).toContain("- SINNLOS_BACKUP_DIR is not set");
     expect(sharedEdge.stderr).not.toContain("SMOKE_URL is not set");
@@ -821,7 +868,8 @@ describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
     const lines = DEPLOY.split("\n");
     for (const line of [
       'PROJECT="${COMPOSE_PROJECT:-infra}"',
-      'SMOKE_URL="${SMOKE_URL:-https://sinnlos.yurtbay.dev}"',
+      'SMOKE_URL="${SMOKE_URL:-}"',
+      'SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"',
       'PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"',
       'CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"',
       'KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"',

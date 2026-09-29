@@ -287,9 +287,9 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
    `ENTRA_SYNC_MODE=dry-run` (the default), on its own host or behind its
    own Traefik, never behind the production one
    ([§3.6 B](#b-shared-traefik-live-production-layout)); run `infra/deploy.sh --check`
-   until it prints `Preflight OK`, then deploy with `SMOKE_URL` and
-   `BASE_URL` set to the staging address (both default to the owner's
-   site, [§3.6 B](#b-shared-traefik-live-production-layout)). The cms logs
+   until it prints `Preflight OK`, then deploy (the smoke checks follow
+   its `DOMAIN`; a compose project other than `infra` also needs
+   `SMOKE_URL`, [§3.6 B](#b-shared-traefik-live-production-layout)). The cms logs
    `[entra] enabled … mode=dry-run`.
    `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
    local demo accounts. On an Entra-only instance (`ENTRA_ENABLED=1`
@@ -979,29 +979,39 @@ without scheme or port, equal to the host of `WEB_PUBLIC_URL`. Without it
 (`required variable DOMAIN is missing a value`), and `infra/deploy.sh` stops in
 its preflight before anything is touched.
 
-**Nothing checks the value itself.** Compose and `infra/deploy.sh --check`
-only reject a missing or empty `DOMAIN`. A value with a scheme
-(`https://…`), with a port, with a typo, or the example
-`intranet.example.com` renders and passes the preflight, and then no router
-matches: the whole site answers Traefik's `404 page not found`. The deploy's
-smoke check fails and prints the image rollback, which does not help, because
-the router rules come from `infra/.env`, not from the images. Correct
-`DOMAIN` and recreate web and cms with the corrected labels:
+**`infra/deploy.sh` checks the value.** Compose only rejects a missing or
+empty `DOMAIN`. A value with a scheme (`https://…`), with a port, with a
+typo, or the example `intranet.example.com` renders fine, and then no
+router matches: the whole site answers Traefik's `404 page not found`, and
+the image rollback of a failed smoke check does not help, because the
+router rules come from `infra/.env`, not from the images. So the preflight
+of `infra/deploy.sh` (and `--check`) reads the host the routers will match
+from the rendered labels and refuses the deploy, before anything is
+touched, unless all five routers match one host that is a bare host name
+(no scheme, port, path or blank), not a placeholder (`example.com`,
+`.org` and `.net` and their subdomains, the `.example` and `.invalid`
+names, `change-me`, `your-domain`), and the host of both `WEB_PUBLIC_URL`
+and `CMS_PUBLIC_URL`, since the overlay serves web and cms on that one
+host (`ERROR: DOMAIN in infra/.env does not fit this instance:` and the
+reasons). A wrong `DOMAIN` that went live some other way (a hand-run
+`docker compose up`, a typo that is also in both URLs) shows the same
+symptom: correct `DOMAIN` and recreate web and cms with the corrected
+labels:
 `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build web cms`.
-Before a deploy that sets or changes `DOMAIN`, check what compose renders
-(it prints five times the same host, yours):
+To see what compose renders (it prints five times the same host, yours):
 
 ```bash
 docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   config --format json | grep -o 'Host(`[^`]*`)' | sort | uniq -c
 ```
 
-The smoke checks do not follow `DOMAIN` either: `deploy.sh` curls `SMOKE_URL`
-and `infra/live-smoke.sh` signs in against `BASE_URL`, and both default to
-the owner's `https://sinnlos.yurtbay.dev`. On any other instance, set both to
-its own address, for example
-`SMOKE_URL=https://intranet.example.com BASE_URL=https://intranet.example.com infra/deploy.sh`,
-or the deploy tests the owner's site and can pass while its own is down.
+The smoke checks follow `DOMAIN`: `deploy.sh` curls `SMOKE_URL`, by default
+`https://$DOMAIN` (the host its preflight checked; `--check` prints both),
+and hands the same URL to `infra/live-smoke.sh` as `BASE_URL`. Run by hand,
+live-smoke takes `BASE_URL`, or else `https://$DOMAIN`, with `DOMAIN` from
+the environment or from the `infra/.env` next to it. Until batch 10 both
+defaulted to the owner's `https://sinnlos.yurtbay.dev`, so on another
+instance an older checkout's deploy tested the owner's site.
 
 **One Sinnlos stack per Traefik.** The router, service and middleware names
 are fixed (`sinnlos-*`), and a Traefik docker provider keeps one set of names
@@ -1100,9 +1110,8 @@ infra/deploy.sh
    BuildKit's default provenance attestation an unchanged rebuild keeps its
    image id), then restarts the stack with the Traefik override
    (`up -d --no-build`).
-4. Curl smoke-checks `https://sinnlos.yurtbay.dev` (override with
-   `SMOKE_URL=`; any other instance sets it, and `BASE_URL` for
-   live-smoke, to its own address, see
+4. Curl smoke-checks `https://$DOMAIN`, the host the preflight checked
+   (override with `SMOKE_URL=`, which live-smoke gets as `BASE_URL`, see
    [§3.6 B](#b-shared-traefik-live-production-layout)), then runs `infra/live-smoke.sh`: first the
    [datetime contract](#310-datetime-contract) check (no
    `timestamp without time zone` column left, the cms boot log reports the
@@ -1141,7 +1150,7 @@ before step 3 the running containers are untouched. `infra/deploy.sh
 --dry-run` runs every check and prints this plan with its rollback target
 and the tags it would remove, and changes nothing. The script is
 `set -Eeuo pipefail` and re-run safe; its parameters (environment, the
-defaults are the owner's host): `SMOKE_URL`, `PASSWORDS_FILE`,
+defaults are the owner's host): `SMOKE_URL` (`https://$DOMAIN`), `PASSWORDS_FILE`,
 `SINNLOS_CHECKOUT` (the checkout it lives in), `COMPOSE_PROJECT` (`infra`),
 `DEPLOY_STATE_DIR` (state, history, bootstrap marker and lock; by default
 `sinnlos-deploy` in the clone's `.git`, which its linked worktrees share: a
@@ -1189,7 +1198,12 @@ The preflight fails (naming keys, never values) when:
   format (`timestamp without time zone` outside Strapi's bookkeeping tables)
   and `DATETIME_LEGACY_ZONE` is empty: the new cms would refuse to start
   ([Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
-  No running database (a fresh install) skips this check.
+  No running database (a fresh install) skips this check;
+- `DOMAIN` does not fit the instance (since batch 10): the five Traefik
+  routers do not all match one host, or that host is not a bare host name,
+  is a placeholder, or is not the host of `WEB_PUBLIC_URL` and
+  `CMS_PUBLIC_URL` ([§3.6 B](#b-shared-traefik-live-production-layout)).
+  This check names the hosts, which are no secrets.
 
 `apps/cms/src/utils/deploy-preflight.test.ts` pins the preflight's key lists,
 placeholder markers and digest rule to the cms guards (`env-guard.ts`,
@@ -1512,7 +1526,10 @@ and CI. The app code does not change.
   [§3.6 B](#b-shared-traefik-live-production-layout).
   `DOMAIN` is required: without it `docker compose` refuses to render the
   overlay (`required variable DOMAIN is missing a value`), and
-  `infra/deploy.sh` stops in its preflight before touching anything.
+  `infra/deploy.sh` stops in its preflight before touching anything. From
+  the batch 10 integration on, that preflight also refuses a `DOMAIN` that
+  is not a bare host name, is a placeholder, or is not the host of
+  `WEB_PUBLIC_URL` and `CMS_PUBLIC_URL`.
 - **The cms routes no longer depend on the web container (FX34).** The cms
   labels define their own `sinnlos-cms-headers`, `sinnlos-cms-ratelimit`
   and `sinnlos-cms-compress` with the web's values. Traefik drops all
@@ -1569,11 +1586,11 @@ the owner instance uses its own path):
 
    It must print the bare host name of `WEB_PUBLIC_URL`, without scheme or
    port (owner instance: `DOMAIN=sinnlos.yurtbay.dev`). If the line is
-   missing, add it: the only `infra/.env` change of this lane. Do not skip
-   the rest of this step: `deploy.sh --check` only rejects a missing or
-   empty `DOMAIN`, and any other wrong value (a scheme, a port, the example
-   host) passes it and leaves all five routers without a match
-   ([§3.6 B](#b-shared-traefik-live-production-layout)). Then:
+   missing, add it: the only `infra/.env` change of this lane. Then (with
+   the batch 10 `deploy.sh`, `--check` also refuses a scheme, a port, the
+   example host or a host other than that of `WEB_PUBLIC_URL`; the lane
+   branch alone only rejected a missing or empty `DOMAIN`,
+   [§3.6 B](#b-shared-traefik-live-production-layout)):
 
    ```bash
    infra/deploy.sh --check
@@ -1581,9 +1598,11 @@ the owner instance uses its own path):
      config --format json | grep -o 'Host(`[^`]*`)' | sort | uniq -c
    ```
 
-   `deploy.sh --check` prints `Preflight OK`; the second command prints
-   ``5 Host(`sinnlos.yurtbay.dev`)`` (your host) and nothing else, without
-   printing any other value of `infra/.env`.
+   `deploy.sh --check` prints `Preflight OK` and
+   `Traefik host: sinnlos.yurtbay.dev; smoke URL: https://sinnlos.yurtbay.dev`
+   (your host); the second command prints
+   ``5 Host(`sinnlos.yurtbay.dev`)`` and nothing else, without printing any
+   other value of `infra/.env`.
 2. **Deploy:** `infra/deploy.sh`. All containers are recreated, Postgres
    included (its logging and network alias change): expect the site to be
    down for a Postgres restart plus a cms boot, somewhat longer than a
@@ -7262,7 +7281,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | cms log says `[draft-twins] <type> <documentId>: could not create the draft (…)` | The boot repair could not give that published entry its draft twin (the reason is in the parentheses; `the pending draft of … links another …` is a saved, unpublished move of a lesson or wiki page: publish or discard that draft, then restart the cms); the cms runs normally and retries on every boot. Fix the named entry before you edit or publish the entries linked to it (its course, lessons, space, pages, parent or child pages): until it has a draft, publishing one of them drops its link to the named entry. See [Upgrading to the draft-twin repair (FX38)](#upgrading-to-the-draft-twin-repair-fx38), step 8 |
 | cms restarts in a loop, log says `[org-dp] departments still holds N draft row(s)` (or `teams`) | The database still has department/team drafts from an earlier release (not migrated, a pre-migration dump restored, or a roll-forward after an image rollback). The data is untouched; run [One-time: org draft/publish off](#one-time-org-draftpublish-off) step 0 (preflight), then steps 3 to 7 |
 | `docker compose up` fails with `… must be set` | A required key in `infra/.env` is empty (see [§3.6](#36-deploy)) |
-| Traefik mode: right after a deploy every path answers `404 page not found`, and `infra/deploy.sh`'s smoke check fails with HTTP 404 | `DOMAIN` in `infra/.env` is not the bare public host name (a scheme, a port, a typo, the example host), so no router matches. Correct it and run `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build web cms`; an image rollback does not help ([§3.6 B](#b-shared-traefik-live-production-layout)) |
+| Traefik mode: every path answers `404 page not found` (after a hand-run `docker compose up`, or a deploy with a `deploy.sh` from before batch 10; the current preflight refuses such a `DOMAIN`) | `DOMAIN` in `infra/.env` is not the bare public host name (a scheme, a port, a typo, the example host), so no router matches. Correct it and run `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build web cms`; an image rollback does not help ([§3.6 B](#b-shared-traefik-live-production-layout)) |
 | Traefik mode: the site answers 404, or shows another instance's data, after a second Sinnlos stack started behind the same Traefik | One Sinnlos stack per Traefik: the `sinnlos-*` routers of both stacks conflict (Traefik log: `Router defined multiple times with different configurations`) or their services merge. Stop the second stack and give it its own host or Traefik ([§3.6 B](#b-shared-traefik-live-production-layout)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
 | Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |

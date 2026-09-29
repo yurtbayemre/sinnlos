@@ -63,8 +63,11 @@
 # authors none. With SMOKE_PASSWORD given but no SMOKE_EMAIL, the password
 # is taken to be casey.jones's, as before.
 #
-# Other settings: BASE_URL (the public origin), CMS_CONTAINER, WEB_CONTAINER,
-# DB_CONTAINER (infra-{cms,web,db}-1), DB_SCHEMA (public), ASSERT_SECONDS (5).
+# Other settings: BASE_URL (the public origin; without it https://<DOMAIN>,
+# DOMAIN from the environment or else from infra/.env next to this script,
+# the host every Traefik router matches; deploy.sh passes its SMOKE_URL),
+# CMS_CONTAINER, WEB_CONTAINER, DB_CONTAINER (infra-{cms,web,db}-1),
+# DB_SCHEMA (public), ASSERT_SECONDS (5).
 #
 # Notes:
 #   - Watch the Strapi sign-in rate limit (10 per 60 s for one e-mail and
@@ -76,8 +79,8 @@
 #
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-https://sinnlos.yurtbay.dev}"
-BASE_URL="${BASE_URL%/}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BASE_URL="${BASE_URL:-}"
 CMS_CONTAINER="${CMS_CONTAINER:-infra-cms-1}"
 WEB_CONTAINER="${WEB_CONTAINER:-infra-web-1}"
 DB_CONTAINER="${DB_CONTAINER:-infra-db-1}"
@@ -162,6 +165,41 @@ fi
 if [[ -z "${SMOKE_PASSWORD}" || -z "${SMOKE_AUTHOR_PASSWORD}" ]]; then
   fail "missing passwords (set SMOKE_PASSWORD/SMOKE_AUTHOR_PASSWORD or provide ${PASSWORDS_FILE})"
 fi
+
+# The value of KEY in a compose-style .env file: its last KEY= line, with
+# surrounding quotes or an unquoted value's " # comment" removed. Nothing
+# when the file is not readable or has no such line.
+env_file_value() {
+  local line value
+  [[ -r "$2" ]] || return 0
+  line="$(grep -E "^[[:space:]]*(export[[:space:]]+)?$1=" "$2" | tail -n 1 || true)"
+  [[ -n "${line}" ]] || return 0
+  value="${line#*=}"
+  value="${value#"${value%%[![:space:]]*}"}"
+  case "${value}" in
+    \"*) value="${value#\"}"; value="${value%%\"*}" ;;
+    \'*) value="${value#\'}"; value="${value%%\'*}" ;;
+    *) value="${value%% #*}"; value="${value%"${value##*[![:space:]]}"}" ;;
+  esac
+  printf '%s\n' "${value}"
+}
+
+# The public origin (5A-T1): BASE_URL, or https://<DOMAIN>, the host every
+# Traefik router matches (never another instance's site).
+if [[ -z "${BASE_URL}" ]]; then
+  DOMAIN="${DOMAIN:-$(env_file_value DOMAIN "${SCRIPT_DIR}/.env")}"
+  if [[ -z "${DOMAIN}" ]]; then
+    fail "BASE_URL is not set, and neither the environment nor ${SCRIPT_DIR}/.env sets DOMAIN: set BASE_URL=https://<public host>"
+  fi
+  # The bare host name rule of deploy.sh (TRAEFIK_HOST_RE).
+  host_re='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
+  if ! [[ "${DOMAIN,,}" =~ ${host_re} ]]; then
+    fail "BASE_URL is not set, and DOMAIN=${DOMAIN} is not a bare host name (no scheme, port or path): fix DOMAIN, or set BASE_URL"
+  fi
+  BASE_URL="https://${DOMAIN}"
+fi
+BASE_URL="${BASE_URL%/}"
+echo "live-smoke: public origin ${BASE_URL}"
 echo "live-smoke: stream user ${SMOKE_EMAIL}, comment author ${SMOKE_AUTHOR_EMAIL}"
 
 # The author's side, inside the cms container: sign in as SMOKE_AUTHOR_EMAIL

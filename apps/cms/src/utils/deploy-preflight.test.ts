@@ -1152,12 +1152,79 @@ describe(
   },
 );
 
+/** The host the tests' instance runs on (not a placeholder). */
+const TEST_HOST = "intranet.acme.test";
+
+/** Where an instance's Traefik routers and public URLs point (5A-T1). */
+interface TraefikHosts {
+  /** What compose renders into every router's Host() (DOMAIN). */
+  domain?: string;
+  /** WEB_PUBLIC_URL, which compose hands the web as AUTH_URL. */
+  webUrl?: string;
+  /** CMS_PUBLIC_URL, which compose hands the cms as PUBLIC_URL. */
+  cmsUrl?: string;
+  /** A different host for the cms router only. */
+  cmsRouterDomain?: string;
+}
+
+/**
+ * `docker compose config --format json` of the Traefik mode as Go writes it:
+ * the five router rules of infra/docker-compose.traefik.yml with the
+ * rendered host (`&&` escaped), the web's AUTH_URL and the cms's
+ * PUBLIC_URL, plus `cmsEnv` in the cms environment.
+ */
+function traefikComposeJson(hosts: TraefikHosts = {}, cmsEnv: Record<string, string> = {}): string {
+  const domain = hosts.domain ?? TEST_HOST;
+  const host = (name: string) => `Host(\`${name}\`)`;
+  const json = JSON.stringify(
+    {
+      services: {
+        cms: {
+          environment: {
+            ...cmsEnv,
+            CORS_ORIGIN: hosts.webUrl ?? `https://${domain}`,
+            PUBLIC_URL: hosts.cmsUrl ?? `https://${domain}`,
+          },
+          labels: {
+            "traefik.enable": "true",
+            "traefik.http.routers.sinnlos-cms.rule": `${host(hosts.cmsRouterDomain ?? domain)} && (PathPrefix(\`/api\`) || PathPrefix(\`/admin\`))`,
+            "traefik.http.routers.sinnlos-cms.priority": "50",
+          },
+        },
+        web: {
+          environment: {
+            AUTH_URL: hosts.webUrl ?? `https://${domain}`,
+            STRAPI_PUBLIC_URL: hosts.cmsUrl ?? `https://${domain}`,
+          },
+          labels: {
+            "traefik.http.routers.sinnlos-auth.rule": `${host(domain)} && PathPrefix(\`/api/auth\`)`,
+            "traefik.http.routers.sinnlos-live.rule": `${host(domain)} && PathPrefix(\`/live/\`)`,
+            "traefik.http.routers.sinnlos-signin.rule": `${host(domain)} && (Path(\`/sign-in\`) || Path(\`/register\`)) && Method(\`POST\`)`,
+            "traefik.http.routers.sinnlos-web.rule": host(domain),
+            "traefik.http.routers.sinnlos-web.service": "sinnlos-web",
+          },
+        },
+      },
+    },
+    null,
+    2,
+  );
+  return json.replace(
+    /[<>&]/g,
+    (c) => `${BACKSLASH}u${c.charCodeAt(0).toString(16).padStart(4, "0")}`,
+  );
+}
+
 /**
  * The preflight of deploy.sh from its scan to "Preflight OK", in bash, with
- * compose answering `env` (the cms service) and the docker probes (JWT
- * rotation, datetime repair) stubbed to "nothing to do".
+ * compose answering `env` (the cms service) in a Traefik mode whose routers
+ * and public URLs point at `hosts` (by default one real host), and the
+ * docker probes (JWT rotation, datetime repair) stubbed to "nothing to do".
  */
-function preflightRun(env: Record<string, string>): {
+function preflightRun(
+  env: Record<string, string>,
+  hosts: TraefikHosts = {},
+): {
   status: number | null;
   stdout: string;
   stderr: string;
@@ -1172,13 +1239,18 @@ function preflightRun(env: Record<string, string>): {
     "datetime_repair_env_missing() { return 1; }",
     "compose_stub() {",
     "cat <<'COMPOSE_JSON'",
-    composeJson(env),
+    traefikComposeJson(hosts, env),
     "COMPOSE_JSON",
     "}",
     "COMPOSE=(compose_stub)",
     `PREFLIGHT_FATAL_KEYS=${shellQuote(shellAssignment("PREFLIGHT_FATAL_KEYS"))}`,
     `PREFLIGHT_WARN_KEYS=${shellQuote(shellAssignment("PREFLIGHT_WARN_KEYS"))}`,
     shellFunction("preflight_scan"),
+    shellFunction("compose_env_value"),
+    shellLine("TRAEFIK_HOST_RE="),
+    shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
+    shellFunction("url_host"),
+    shellFunction("traefik_host_scan"),
     DEPLOY.slice(from, to),
     "",
   ].join("\n");
@@ -1223,6 +1295,180 @@ describe("Entra preflight messages and exit code (D-ENTRA-01)", BASH_BUDGET, () 
     const run = preflightRun(entraOff("", ""));
     expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toBe("");
+  });
+});
+
+describe("Traefik host preflight: DOMAIN fits the instance (5A-T1)", BASH_BUDGET, () => {
+  const TRAEFIK = read("infra", "docker-compose.traefik.yml");
+  const LIVE_SMOKE = read("infra", "live-smoke.sh");
+
+  /** traefik_host_scan of deploy.sh on `json`: its "host …" and "problem …" lines. */
+  function hostScan(json: string): { host: string; problems: string[] } {
+    const run = runBash(
+      [
+        "set -euo pipefail",
+        shellFunction("compose_env_value"),
+        shellLine("TRAEFIK_HOST_RE="),
+        shellLine("TRAEFIK_HOST_PLACEHOLDER_RE="),
+        shellFunction("url_host"),
+        shellFunction("traefik_host_scan"),
+        "traefik_host_scan <<'COMPOSE_JSON'",
+        json,
+        "COMPOSE_JSON",
+        "",
+      ].join("\n"),
+    );
+    expect(run.status, run.stderr).toBe(0);
+    const lines = run.stdout.split("\n").filter(Boolean);
+    return {
+      host: lines.find((l) => l.startsWith("host "))?.slice(5) ?? "",
+      problems: lines.filter((l) => l.startsWith("problem ")).map((l) => l.slice(8)),
+    };
+  }
+  const scan = (hosts: TraefikHosts) => hostScan(traefikComposeJson(hosts));
+
+  it("renders DOMAIN into every router rule, and hands the apps the URLs the scan reads", () => {
+    const rules = TRAEFIK.split("\n").filter((l) => /traefik\.http\.routers\.[^.]+\.rule=/.test(l));
+    expect(rules).toHaveLength(5);
+    for (const rule of rules) {
+      expect(rule).toMatch(/rule=Host\(`\$\{DOMAIN:\?[^}]*\}`\)/);
+    }
+    // The scan compares DOMAIN with the web's AUTH_URL and the cms's PUBLIC_URL.
+    expect(COMPOSE).toMatch(/^ {6}AUTH_URL: \$\{WEB_PUBLIC_URL\}$/m);
+    expect(COMPOSE).toMatch(/^ {6}PUBLIC_URL: \$\{CMS_PUBLIC_URL\}$/m);
+  });
+
+  it.skipIf(!HAS_BASH)("passes a bare host that is the host of both public URLs", () => {
+    expect(scan({})).toEqual({ host: TEST_HOST, problems: [] });
+    // Host names compare without case; a port or path in the URLs is no part of the host.
+    expect(
+      scan({
+        domain: "Intranet.ACME.test",
+        webUrl: `https://${TEST_HOST}:443/`,
+        cmsUrl: `HTTPS://${TEST_HOST}/`,
+      }).problems,
+    ).toEqual([]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses a DOMAIN that is not a bare host name", () => {
+    for (const domain of [
+      `https://${TEST_HOST}`,
+      `${TEST_HOST}:443`,
+      `${TEST_HOST}/`,
+      ` ${TEST_HOST}`,
+      "intranet_acme.test",
+      "-intranet.acme.test",
+      "intranet..acme.test",
+    ]) {
+      const result = scan({
+        domain,
+        webUrl: `https://${TEST_HOST}`,
+        cmsUrl: `https://${TEST_HOST}`,
+      });
+      expect(result.problems, domain).toEqual([
+        `DOMAIN=${domain} is not a bare host name (the name alone: no scheme, port, path or blank)`,
+      ]);
+    }
+  });
+
+  it.skipIf(!HAS_BASH)("refuses an empty DOMAIN and routers without a Host() or one host", () => {
+    expect(scan({ domain: "" }).problems).toEqual(["DOMAIN is empty"]);
+    expect(scan({ cmsRouterDomain: "other.acme.test" }).problems).toEqual([
+      `the Traefik routers match different hosts: Host(\`${TEST_HOST}\`) Host(\`other.acme.test\`) `,
+    ]);
+    expect(hostScan(composeJson({ AUTH_URL: `https://${TEST_HOST}` })).problems).toEqual([
+      "no Traefik router rule has a Host() matcher",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses the example host and other placeholders", () => {
+    for (const domain of [
+      "intranet.example.com",
+      "example.org",
+      "sinnlos.example.net",
+      "intranet.example",
+      "host.invalid",
+      "your-domain.tld",
+      "change-me.acme.test",
+    ]) {
+      // Even when the public URLs say the same (as in infra/.env.example).
+      expect(scan({ domain }).problems, domain).toEqual([
+        `DOMAIN=${domain} is a placeholder (infra/.env.example), not this instance's host name`,
+      ]);
+    }
+    expect(scan({ domain: "example-intranet.acme.test" }).problems).toEqual([]);
+  });
+
+  it.skipIf(!HAS_BASH)("refuses the values infra/.env.example ships", () => {
+    const example = read("infra", ".env.example");
+    const value = (key: string) => new RegExp(`^${key}=(.*)$`, "m").exec(example)?.[1] ?? "";
+    expect(
+      scan({
+        domain: value("DOMAIN"),
+        webUrl: value("WEB_PUBLIC_URL"),
+        cmsUrl: value("CMS_PUBLIC_URL"),
+      }).problems,
+    ).toEqual([
+      "DOMAIN=intranet.example.com is a placeholder (infra/.env.example), not this instance's host name",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)(
+    "refuses a DOMAIN that is not the host of WEB_PUBLIC_URL or CMS_PUBLIC_URL",
+    () => {
+      expect(scan({ webUrl: "https://www.acme.test" }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of WEB_PUBLIC_URL (www.acme.test)`,
+      ]);
+      expect(scan({ cmsUrl: "https://cms.acme.test" }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of CMS_PUBLIC_URL (cms.acme.test)`,
+      ]);
+      expect(scan({ webUrl: "", cmsUrl: TEST_HOST }).problems).toEqual([
+        `DOMAIN=${TEST_HOST} is not the host of WEB_PUBLIC_URL (no http(s) URL)`,
+        `DOMAIN=${TEST_HOST} is not the host of CMS_PUBLIC_URL (no http(s) URL)`,
+      ]);
+    },
+  );
+
+  it.skipIf(!HAS_BASH)("fails the preflight, naming DOMAIN, and passes with a fitting one", () => {
+    const bad = preflightRun({}, { domain: "https://intranet.acme.test" });
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("ERROR: DOMAIN in infra/.env does not fit this instance:");
+    expect(bad.stderr).toContain(
+      "       - DOMAIN=https://intranet.acme.test is not a bare host name (the name alone: no scheme, port, path or blank)",
+    );
+    expect(bad.stderr).toContain("Preflight failed. Nothing was changed.");
+    expect(bad.stdout).not.toContain("Preflight OK");
+    const placeholder = preflightRun({}, { domain: "intranet.example.com" });
+    expect(placeholder.status).toBe(1);
+    expect(placeholder.stderr).toContain("DOMAIN=intranet.example.com is a placeholder");
+    const good = preflightRun({});
+    expect(good.status, good.stderr).toBe(0);
+    expect(good.stdout).toContain("Preflight OK");
+    expect(good.stderr).toBe("");
+  });
+
+  it("takes the smoke URL from the checked host, not from the owner's host name", () => {
+    const lines = DEPLOY.split("\n");
+    const ok = lines.indexOf('log "Preflight OK"');
+    const smoke = lines.indexOf('SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"');
+    expect(ok).toBeGreaterThan(0);
+    // Right after the preflight (so --check prints it), before any smoke-check use.
+    expect(smoke).toBeGreaterThan(ok);
+    expect(lines.slice(ok, smoke).join("\n")).not.toMatch(/\$\{SMOKE_URL\}/);
+    expect(DEPLOY).toContain('SMOKE_URL="${SMOKE_URL:-}"');
+    // No owner host name as a default in either script, comments aside.
+    for (const script of [DEPLOY, LIVE_SMOKE]) {
+      const code = script.split("\n").filter((l) => !l.trim().startsWith("#"));
+      expect(code.join("\n")).not.toContain("sinnlos.yurtbay.dev");
+    }
+    expect(LIVE_SMOKE).toContain(
+      'DOMAIN="${DOMAIN:-$(env_file_value DOMAIN "${SCRIPT_DIR}/.env")}"',
+    );
+    expect(LIVE_SMOKE).toContain('BASE_URL="https://${DOMAIN}"');
+    // live-smoke's bare host rule is deploy.sh's.
+    expect(LIVE_SMOKE).toContain(
+      `host_re=${shellLine("TRAEFIK_HOST_RE=").slice("TRAEFIK_HOST_RE=".length)}`,
+    );
   });
 });
 

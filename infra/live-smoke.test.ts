@@ -17,7 +17,10 @@
  *   6. the stream user defaults to an announcement author from the
  *      credentials file (alex.morgan, else casey.jones), so the
  *      notification frame path is checked by default, and an unchecked
- *      path prints the WARNING line deploy.sh looks for.
+ *      path prints the WARNING line deploy.sh looks for;
+ *   7. without BASE_URL the public origin is https://<DOMAIN>, DOMAIN from
+ *      the environment or else from the .env next to the script, never the
+ *      owner's host name (5A-T1).
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -140,7 +143,9 @@ describe("live-smoke.sh: what it touches", () => {
 /**
  * Runs the script with docker stubbed: the web container's env holds
  * `webEnv`; curl fails at once (no request gets through). `setup` runs
- * before the script, after the defaults (no credentials file, no passwords).
+ * before the script, after the defaults (no credentials file, no
+ * passwords, no BASE_URL, DOMAIN=intranet.acme.test; the script lives in
+ * $W, so $W/.env is the .env next to it).
  */
 function run(
   webEnv: string[],
@@ -158,7 +163,8 @@ function run(
     "curl() { echo curl-called >&2; return 7; }",
     "export -f docker curl",
     "export PASSWORDS_FILE=/nonexistent/passwords.txt",
-    "unset SMOKE_EMAIL SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD",
+    "unset SMOKE_EMAIL SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD BASE_URL",
+    "export DOMAIN=intranet.acme.test",
     'W="$(mktemp -d)"',
     setup,
     "cat > \"$W/live-smoke.sh\" <<'LIVE_SMOKE_EOF'",
@@ -247,6 +253,74 @@ describe.skipIf(!HAS_BASH)(
       const phrase = "the notification frame path was not checked";
       expect(SCRIPT).toContain(`echo "live-smoke: WARNING — ${phrase}: `);
       expect(deploy).toContain(`grep -q '${phrase}' "\${LIVE_SMOKE_OUT}"`);
+    });
+  },
+);
+
+describe.skipIf(!HAS_BASH)(
+  "live-smoke.sh: the public origin follows DOMAIN (5A-T1)",
+  { timeout: 30_000 },
+  () => {
+    const CREDENTIALS = [
+      "printf '%s\\t%s\\n' alex.morgan@sinnlos.local pw-alex sam.chen@sinnlos.local pw-sam > \"$W/pw\"",
+      'export PASSWORDS_FILE="$W/pw"',
+    ].join("\n");
+    /** The run with credentials and `setup`: its exit code, origin line and failure. */
+    function origin(setup: string) {
+      const res = run([], `${CREDENTIALS}\n${setup}`);
+      return {
+        status: res.status,
+        origin: /^live-smoke: public origin (\S+)$/m.exec(res.stdout)?.[1] ?? "",
+        stderr: res.stderr,
+      };
+    }
+
+    it("takes BASE_URL as given", () => {
+      expect(origin("export BASE_URL=https://staging.acme.test/").origin).toBe(
+        "https://staging.acme.test",
+      );
+    });
+
+    it("builds it from DOMAIN in the environment", () => {
+      const res = origin("");
+      expect(res.origin).toBe("https://intranet.acme.test");
+      // It then gets as far as the first request (curl is stubbed to fail).
+      expect(res.stderr).toContain("curl-called");
+    });
+
+    it("reads DOMAIN from the .env next to the script: the last line, quotes and comment removed", () => {
+      const env = (lines: string[]) =>
+        ["unset DOMAIN", "cat > \"$W/.env\" <<'ENV_EOF'", ...lines, "ENV_EOF"].join("\n");
+      expect(
+        origin(
+          env([
+            "# DOMAIN=commented.acme.test",
+            "DOMAIN=old.acme.test",
+            'DOMAIN="intranet.acme.test"',
+          ]),
+        ).origin,
+      ).toBe("https://intranet.acme.test");
+      expect(origin(env(["DOMAIN=intranet.acme.test   # the public host"])).origin).toBe(
+        "https://intranet.acme.test",
+      );
+      expect(origin(env(["export DOMAIN='intranet.acme.test'"])).origin).toBe(
+        "https://intranet.acme.test",
+      );
+    });
+
+    it("fails before any request without BASE_URL and DOMAIN, or with a DOMAIN that is no bare host", () => {
+      const none = origin("unset DOMAIN");
+      expect(none.status).toBe(1);
+      expect(none.stderr).toContain(
+        "live-smoke: FAIL — BASE_URL is not set, and neither the environment nor",
+      );
+      expect(none.stderr).not.toContain("curl-called");
+      const scheme = origin("export DOMAIN=https://intranet.acme.test");
+      expect(scheme.status).toBe(1);
+      expect(scheme.stderr).toContain(
+        "DOMAIN=https://intranet.acme.test is not a bare host name (no scheme, port or path)",
+      );
+      expect(scheme.stderr).not.toContain("curl-called");
     });
   },
 );

@@ -1001,10 +1001,10 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 
 Every Traefik router matches the host in `DOMAIN` (`infra/.env`, the bare
 host name), so the overlay file is the same for every instance; compose
-refuses to render it without `DOMAIN`. Nothing checks the value beyond that:
-a scheme, a port or the example host renders, passes `deploy.sh --check`
-and leaves every router without a match (the site answers 404), so check
-the rendered hosts before a deploy that sets or changes it
+refuses to render it without `DOMAIN`, and `infra/deploy.sh` (also
+`--check`) refuses a value the routers cannot match before anything is
+touched: not a bare host name (a scheme, a port), a placeholder such as the
+example host, or not the host of `WEB_PUBLIC_URL` and `CMS_PUBLIC_URL`
 ([docs/DEPLOYMENT.md §3.6 B](./docs/DEPLOYMENT.md#b-shared-traefik-live-production-layout)).
 It is one Sinnlos stack per Traefik, though: the router, service and
 middleware names are fixed (`sinnlos-*`), so a second instance (employer,
@@ -1023,9 +1023,8 @@ still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
 only this step) → one deploy at a time (`flock`), a clean checkout and the
 GitHub CI result of the commit (a warning; `--require-green-ci` refuses) →
 pre-deploy DB backup → build + restart → curl smoke-check → datetime and
-live-pipeline smoke (against `SMOKE_URL` and
-`BASE_URL`, which default to the owner's site: another instance sets both
-to its own address) → only then the images are tagged
+live-pipeline smoke (against `SMOKE_URL`, by default `https://$DOMAIN`,
+which live-smoke gets as `BASE_URL`) → only then the images are tagged
 `infra-{web,cms}:<commit>` and recorded as last-known-good
 (`.git/sinnlos-deploy/infra.state`; the newest five SHA tags stay). A failed
 deploy prints the rollback commands to the last-known-good tags (the first

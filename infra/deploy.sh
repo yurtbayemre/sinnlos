@@ -9,7 +9,9 @@
 #      Strapi JWTs (D-SESSION-01), a valid Entra configuration when
 #      ENTRA_ENABLED=1 (D-ENTRA-01: cms and web would refuse to start),
 #      DATETIME_LEGACY_ZONE set while the running database still holds
-#      pre-contract datetime columns (the new cms would refuse to start).
+#      pre-contract datetime columns (the new cms would refuse to start),
+#      and a DOMAIN every Traefik router can match: a bare host name, no
+#      placeholder, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL.
 #      Then the deploy checks (FX35): one deploy per compose project at a
 #      time (flock), a clean checkout (no changed tracked file, and no
 #      untracked file where the images are built from), and the
@@ -51,7 +53,8 @@
 #                                       # live-smoke lacked the demo credentials
 #
 # Parameters (environment; the defaults are the owner's production host):
-#   SMOKE_URL         https://sinnlos.yurtbay.dev (smoke check and live-smoke)
+#   SMOKE_URL         https://<DOMAIN>, the host every Traefik router matches
+#                     (smoke check and live-smoke)
 #   PASSWORDS_FILE    /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt
 #   SINNLOS_CHECKOUT  the checkout this script lives in (compose files, git)
 #   COMPOSE_PROJECT   infra (containers <project>-web-1 …, images <project>-web …);
@@ -115,9 +118,11 @@ if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
 fi
 COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}" -f "${COMPOSE_TRAEFIK}")
 
-# Whether the caller named the smoke URL (another project must).
+# Whether the caller named the smoke URL (another project must). Without
+# it, the smoke URL is https://<DOMAIN>, set once the preflight has checked
+# the host the Traefik routers match (traefik_host_scan).
 SMOKE_URL_GIVEN="${SMOKE_URL:+1}"
-SMOKE_URL="${SMOKE_URL:-https://sinnlos.yurtbay.dev}"
+SMOKE_URL="${SMOKE_URL:-}"
 PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
 KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"
 if ! [[ "${KEEP_TAGS}" =~ ^[1-9][0-9]*$ ]]; then
@@ -292,6 +297,74 @@ compose_env_value() {
       print val
       exit
     }'
+}
+
+# Traefik host (5A-T1): every router of the Traefik overlay matches
+# Host(`${DOMAIN}`) from infra/.env, and compose refuses only an unset or
+# empty DOMAIN. A scheme, a port, a typo or the example host of
+# infra/.env.example renders fine, and then no router matches: the whole
+# site answers Traefik's 404, and an image rollback does not help (the
+# labels are wrong, not the images). So the preflight reads the host the
+# routers will match from the rendered labels and requires one host for
+# every router, a bare host name (no scheme, port, path or blank), no
+# placeholder, and the host of WEB_PUBLIC_URL (the web's AUTH_URL) and of
+# CMS_PUBLIC_URL (the cms's PUBLIC_URL): the overlay serves both apps on
+# that one host. Host names are no secrets, so the messages show them.
+TRAEFIK_HOST_RE='^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*$'
+# Documentation names (RFC 2606: example.com/.net/.org and the .example and
+# .invalid TLDs; infra/.env.example ships intranet.example.com) and
+# template markers.
+TRAEFIK_HOST_PLACEHOLDER_RE='(^|\.)(example\.(com|net|org)|example|invalid)$|change-?me|placeholder|your-?domain'
+
+# The host of an http(s) URL, in lower case; nothing for anything else.
+url_host() {
+  local host
+  [[ "$1" =~ ^[Hh][Tt][Tt][Pp][Ss]?://([^/?#]*) ]] || return 0
+  host="${BASH_REMATCH[1]##*@}"
+  host="${host%%:*}"
+  printf '%s\n' "${host,,}"
+}
+
+# Reads `compose config --format json` on stdin (the rendered Traefik
+# labels and the apps' env; secrets stay inside this function). Prints
+# "host <name>" for the one host every router matches, and "problem <text>"
+# for each finding (none: DOMAIN fits).
+traefik_host_scan() {
+  local json rules hosts host web cms
+  json="$(cat)"
+  rules="$(grep -E '^[[:space:]]*"traefik\.http\.routers\.[^"]+\.rule": ' <<<"${json}" || true)"
+  # The backticks are Traefik's rule syntax, matched literally.
+  # shellcheck disable=SC2016
+  hosts="$(grep -o 'Host(`[^`]*`)' <<<"${rules}" | sort -u || true)"
+  if [[ -z "${hosts}" ]]; then
+    echo "problem no Traefik router rule has a Host() matcher"
+    return 0
+  fi
+  if [[ "${hosts}" == *$'\n'* ]]; then
+    echo "problem the Traefik routers match different hosts: $(tr '\n' ' ' <<<"${hosts}")"
+    return 0
+  fi
+  host="$(sed -e 's/^Host(`//' -e 's/`)$//' <<<"${hosts}")"
+  echo "host ${host}"
+  if [[ -z "${host}" ]]; then
+    echo "problem DOMAIN is empty"
+    return 0
+  fi
+  if ((${#host} > 253)) || ! [[ "${host,,}" =~ ${TRAEFIK_HOST_RE} ]]; then
+    echo "problem DOMAIN=${host} is not a bare host name (the name alone: no scheme, port, path or blank)"
+    return 0
+  fi
+  if [[ "${host,,}" =~ ${TRAEFIK_HOST_PLACEHOLDER_RE} ]]; then
+    echo "problem DOMAIN=${host} is a placeholder (infra/.env.example), not this instance's host name"
+  fi
+  web="$(url_host "$(compose_env_value AUTH_URL <<<"${json}")")"
+  cms="$(url_host "$(compose_env_value PUBLIC_URL <<<"${json}")")"
+  if [[ "${web}" != "${host,,}" ]]; then
+    echo "problem DOMAIN=${host} is not the host of WEB_PUBLIC_URL (${web:-no http(s) URL})"
+  fi
+  if [[ "${cms}" != "${host,,}" ]]; then
+    echo "problem DOMAIN=${host} is not the host of CMS_PUBLIC_URL (${cms:-no http(s) URL})"
+  fi
 }
 
 # True (0) when the running web predates D-SESSION-01 and the JWT_SECRET about
@@ -902,6 +975,19 @@ if [[ -n "${entra_invalid_keys}" ]]; then
   echo "       (docs/DEPLOYMENT.md, \"Microsoft Entra ID sign-in\"). Or unset ENTRA_ENABLED." >&2
   preflight_failed=1
 fi
+# 5A-T1: the host the Traefik routers match, from the rendered labels.
+traefik_scan="$("${COMPOSE[@]}" config --format json 2>/dev/null | traefik_host_scan)"
+TRAEFIK_HOST="$(sed -n 's/^host //p' <<<"${traefik_scan}")"
+traefik_problems="$(sed -n 's/^problem //p' <<<"${traefik_scan}")"
+if [[ -n "${traefik_problems}" ]]; then
+  echo "ERROR: DOMAIN in infra/.env does not fit this instance:" >&2
+  while IFS= read -r problem; do echo "       - ${problem}" >&2; done <<<"${traefik_problems}"
+  echo "       Every Traefik router matches Host(\`\$DOMAIN\`), and web and cms are served on that one host:" >&2
+  echo "       with this value the site would answer 404 or break sign-in, and an image rollback would not" >&2
+  echo "       help. Set DOMAIN to the bare public host name, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL" >&2
+  echo "       (docs/DEPLOYMENT.md §3.6 B), and re-run." >&2
+  preflight_failed=1
+fi
 if jwt_rotation_missing; then
   echo "ERROR: JWT_SECRET must be rotated for this deploy (D-SESSION-01)." >&2
   echo "       The running web (${PROJECT}-web-1, no ${JWT_OFF_SESSION_LABEL}=${JWT_OFF_SESSION_VALUE} label)" >&2
@@ -926,6 +1012,9 @@ if ((preflight_failed)); then
   exit 1
 fi
 log "Preflight OK"
+# The smoke checks follow the host the routers match (checked above).
+SMOKE_URL="${SMOKE_URL:-https://${TRAEFIK_HOST}}"
+echo "  Traefik host: ${TRAEFIK_HOST}; smoke URL: ${SMOKE_URL}"
 if ((CHECK_ONLY)); then
   echo "  --check: nothing deployed."
   exit 0

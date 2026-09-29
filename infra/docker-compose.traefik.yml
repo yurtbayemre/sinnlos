@@ -5,7 +5,9 @@
 # Host: jede Router-Regel nimmt den Hostnamen aus DOMAIN in infra/.env (der
 # nackte Name wie sinnlos.yurtbay.dev, ohne Schema und Port). Ohne DOMAIN
 # rendert compose diese Datei nicht (${DOMAIN:?}), und deploy.sh bricht im
-# Preflight ab, bevor etwas geändert ist.
+# Preflight ab, bevor etwas geändert ist; ebenso bei einem DOMAIN, das kein
+# nackter Hostname, ein Platzhalter oder nicht der Host von WEB_PUBLIC_URL
+# und CMS_PUBLIC_URL ist.
 # Ein Sinnlos-Stack je Traefik: Router-, Service- und Middleware-Namen sind
 # fest (sinnlos-*). Eine zweite Instanz (Arbeitgeber, Staging) braucht einen
 # eigenen Host bzw. Traefik; hinter dem Produktions-Traefik löscht sie dessen
