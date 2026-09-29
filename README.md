@@ -180,7 +180,11 @@ self-registration when `LOCAL_REGISTRATION=1` is set in **both**
 `member` role; users manage their own display name, job title and phone
 on **/profile**; password resets are done by an admin in the Strapi
 panel (no SMTP required; the anonymous forgot/reset-password endpoints are
-revoked).
+revoked). Changing one's own password on **/profile** signs the user out
+of every other browser and device (their next request lands on the
+sign-in page) while the tab that changed it stays signed in: the cms keeps
+a token version per user and refuses older JWTs. A password an admin sets
+in the Strapi panel does not do that yet.
 
 Quick start:
 
@@ -1349,9 +1353,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two
-      seconds without a reload (SSE) — or run `infra/live-smoke.sh`; on
-      `/announcements` the network panel shows one `POST /live/subscribe`
-      for all cards, and a comment on one card refreshes that card only
+      seconds without a reload (SSE) — or run `infra/live-smoke.sh` (it
+      also requires the stream to report `"emitFresh":true`, i.e. the cms
+      keepalive reaches the web); on `/announcements` the network panel
+      shows one `POST /live/subscribe` with the page's full channel set for
+      all cards, and a comment on one card refreshes that card only
+- [ ] Changing the password on `/profile` in browser A keeps A signed in;
+      the same account in browser B lands on `/sign-in?expired=1` with its
+      next click
 - [ ] `/training` lists published courses; on a `quizGate` course the
       completion button stays locked until every quiz answer is correct;
       `/manage/training` shows the completion report (admin)
