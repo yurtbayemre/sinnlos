@@ -638,6 +638,12 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         before: '"${G[@]}" worktree add -q --detach "$T/wt" HEAD; export SINNLOS_CHECKOUT="$T/wt"',
         args: ["--dry-run"],
       },
+      // An untracked file where the images are built from (not only noted).
+      /* 15 */ {
+        before:
+          'unset SINNLOS_CHECKOUT; mkdir -p "$REPO/apps/web/app"; echo x > "$REPO/apps/web/app/route.ts"',
+        args: ["--dry-run"],
+      },
     ]);
   }, SEQUENCE_BUDGET);
 
@@ -653,6 +659,16 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(run.stderr).toContain("has changed tracked files");
     expect(run.stderr).toContain("infra/docker-compose.yml");
     expect(run.stdout).not.toContain("backup kind=");
+    expect(called(run, / build$| up -d/)).toEqual([]);
+  });
+
+  it("refuses untracked files where the images are built from", () => {
+    const run = r[15];
+    expect(run.status).toBe(1);
+    expect(run.stderr).toContain("has untracked files where the web and cms images are built from");
+    expect(run.stderr).toContain("apps/web/app/route.ts");
+    // Elsewhere an untracked file is only a note (stray.txt, step 2).
+    expect(run.stderr).not.toContain("stray.txt");
     expect(called(run, / build$| up -d/)).toEqual([]);
   });
 

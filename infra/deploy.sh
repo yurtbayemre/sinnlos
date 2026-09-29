@@ -11,7 +11,8 @@
 #      DATETIME_LEGACY_ZONE set while the running database still holds
 #      pre-contract datetime columns (the new cms would refuse to start).
 #      Then the deploy checks (FX35): one deploy per compose project at a
-#      time (flock), a clean checkout (no changed tracked file), and the
+#      time (flock), a clean checkout (no changed tracked file, and no
+#      untracked file where the images are built from), and the
 #      GitHub CI result of the commit (a warning, or a refusal with
 #      --require-green-ci). Fails before anything is touched.
 #   1. Pre-deploy backup (infra/backup/pg-backup.sh; its artifacts are named
@@ -1053,12 +1054,25 @@ if [[ -n "${DIRTY}" ]]; then
   echo "       Commit, stash or revert them (git -C ${CHECKOUT} status), then re-run. Nothing was changed." >&2
   exit 1
 fi
+# The Dockerfiles copy apps/cms and apps/web whole, and the root manifests;
+# .dockerignore drops only build output and .env files. An untracked file
+# there would be built into images tagged as this commit.
+BUILD_CONTEXT_PATHS=(apps/cms apps/web package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
+UNTRACKED_IN_BUILD="$(GIT_OPTIONAL_LOCKS=0 "${GIT[@]}" status --porcelain --untracked-files=all -- \
+  "${BUILD_CONTEXT_PATHS[@]}" | sed -n 's/^?? //p')"
+if [[ -n "${UNTRACKED_IN_BUILD}" ]]; then
+  echo "ERROR: the checkout ${CHECKOUT} has untracked files where the web and cms images are built from;" >&2
+  echo "       the images would not be commit ${NEW_TAG}:" >&2
+  head -n 20 <<<"${UNTRACKED_IN_BUILD}" | sed 's/^/         /' >&2
+  echo "       Commit, move or delete them (git -C ${CHECKOUT} status), then re-run. Nothing was changed." >&2
+  exit 1
+fi
 UNTRACKED="$(GIT_OPTIONAL_LOCKS=0 "${GIT[@]}" status --porcelain --untracked-files=normal | sed -n 's/^?? //p')"
 if [[ -n "${UNTRACKED}" ]]; then
-  echo "  NOTE: untracked files in the checkout (part of the build context unless .dockerignore excludes them):"
+  echo "  NOTE: untracked files in the checkout, outside what the web and cms images are built from:"
   head -n 10 <<<"${UNTRACKED}" | sed 's/^/        /'
 fi
-echo "  checkout: ${CHECKOUT} at ${NEW_TAG} ($("${GIT[@]}" log -1 --format=%s HEAD)), no changed tracked file"
+echo "  checkout: ${CHECKOUT} at ${NEW_TAG} ($("${GIT[@]}" log -1 --format=%s HEAD)), clean"
 
 CI="$(ci_status)"
 if [[ "${CI}" == green:* ]]; then

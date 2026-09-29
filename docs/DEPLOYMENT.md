@@ -950,8 +950,11 @@ infra/deploy.sh
    [§3.8](#upgrading-an-existing-instance-to-this-release)), then the deploy
    checks: one deploy per compose project at a time (`flock`, from
    util-linux), a clean checkout (a changed tracked file refuses the
-   deploy, untracked files only earn a note) and the GitHub CI result of
-   the commit (a warning by default; `--require-green-ci` refuses a commit
+   deploy, and so does an untracked file where the Dockerfiles copy from,
+   `apps/cms`, `apps/web`, `package.json`, `pnpm-lock.yaml`,
+   `pnpm-workspace.yaml` and `tsconfig.base.json`, since the images would
+   contain it; other untracked files only earn a note) and the GitHub CI
+   result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
    none).
 1. A pre-deploy Postgres + uploads + `.env` backup
@@ -1090,7 +1093,7 @@ systemctl start docker
 > Its first run has no last-known-good state yet and rolls back to
 > `:rollback` as before; from its success on, a failed deploy rolls back
 > to the SHA tags of the last good one. It refuses a checkout with changed
-> tracked files and needs `flock`. The next morning, check `backup.log`
+> tracked files or untracked files under `apps/` and needs `flock`. The next morning, check `backup.log`
 > and the new `last-success` file. Follow
 > [Upgrading to the deploy, backup and cron hardening (batch 10, lane 5B)](#upgrading-to-the-deploy-backup-and-cron-hardening-batch-10-lane-5b).
 >
@@ -1352,7 +1355,8 @@ usual.
 
 - **`infra/deploy.sh`** ([§3.6](#36-deploy)): after the env preflight it
   takes a lock per compose project, refuses a checkout with changed tracked
-  files and checks the GitHub CI result of the commit (a warning;
+  files or with untracked files where the images are built from
+  (`apps/cms`, `apps/web`, the root manifests) and checks the GitHub CI result of the commit (a warning;
   `--require-green-ci` refuses). It builds, starts without a build, runs
   the smoke check and live-smoke, and only then tags the images
   `infra-{web,cms}:<sha>` and records them as last-known-good in
@@ -1392,9 +1396,11 @@ usual.
 **Before the deploy**
 
 1. The checkout must be clean: `git -C /home/bigemo/git/sinnlos status`
-   (your checkout path) lists no modified tracked file. `deploy.sh` now
-   refuses one: commit, stash or revert it first. Untracked files only earn
-   a note.
+   (your checkout path) lists no modified tracked file and no untracked
+   file under `apps/cms` or `apps/web` (nor an untracked `package.json`,
+   `pnpm-lock.yaml`, `pnpm-workspace.yaml` or `tsconfig.base.json`: the
+   Dockerfiles copy those). `deploy.sh` now refuses either: commit, stash,
+   move or delete them first. Other untracked files only earn a note.
 2. `command -v flock` prints a path (util-linux; Debian and Ubuntu ship it).
    Note which image store the host uses: `docker info -f '{{.DriverStatus}}'`
    showing `io.containerd.snapshotter.v1` means the containerd image store,
