@@ -45,7 +45,16 @@ describe("role vocabulary (B02)", () => {
 
   it("isRoleType accepts the six types only", () => {
     for (const role of ROLE_PRIVILEGE_ORDER) expect(isRoleType(role)).toBe(true);
-    for (const value of ["authenticated", "public", "admin", "Admin_role", "", null, undefined, 1]) {
+    for (const value of [
+      "authenticated",
+      "public",
+      "admin",
+      "Admin_role",
+      "",
+      null,
+      undefined,
+      1,
+    ]) {
       expect(isRoleType(value), String(value)).toBe(false);
     }
   });

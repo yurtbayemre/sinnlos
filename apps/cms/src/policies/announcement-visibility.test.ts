@@ -47,8 +47,7 @@ function stubStrapi(users: StubUser[]) {
   return {
     db: {
       query: (uid: string) => ({
-        findOne: async ({ where }: any) =>
-          users.find((u) => u.id === where.id) ?? null,
+        findOne: async ({ where }: any) => users.find((u) => u.id === where.id) ?? null,
         findMany: async () =>
           uid === "api::team.team"
             ? TEAMS

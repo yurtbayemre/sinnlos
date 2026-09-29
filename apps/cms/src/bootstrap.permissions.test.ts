@@ -40,7 +40,9 @@ import { PRIVILEGED_ROLE_TYPES } from "./utils/sanitize-user-contact";
 const SNAPSHOT = "./__snapshots__/bootstrap.permissions.txt";
 
 /** Our six roles plus the two users-permissions built-ins, ids 1..8. */
-function roleRows(types: readonly string[] = [...ROLES.map((r) => r.type), "authenticated", "public"]): Row[] {
+function roleRows(
+  types: readonly string[] = [...ROLES.map((r) => r.type), "authenticated", "public"],
+): Row[] {
   return types.map((type, index) => ({ id: index + 1, type, name: type }));
 }
 
@@ -125,9 +127,10 @@ describe("syncRolePermissions on a fresh database (S02)", () => {
     const pairs = new Set(pairsOf(strapi));
     for (const role of Object.keys(PERMISSION_MATRIX)) {
       for (const action of ["find", "findOne", "me"]) {
-        expect(pairs.has(`${role}|plugin::users-permissions.user.${action}`), `${role} ${action}`).toBe(
-          true,
-        );
+        expect(
+          pairs.has(`${role}|plugin::users-permissions.user.${action}`),
+          `${role} ${action}`,
+        ).toBe(true);
       }
     }
   });
@@ -398,14 +401,22 @@ describe("granted actions are checked against the loaded controllers (B04)", () 
     });
     // Own keys only, like lodash `_.keys` in syncPermissions (the core
     // controller factory copies the base actions onto the instance).
-    expect([...known].sort()).toEqual(["api::event.event.ics", "plugin::upload.content-api.upload"]);
+    expect([...known].sort()).toEqual([
+      "api::event.event.ics",
+      "plugin::upload.content-api.upload",
+    ]);
   });
 
   it("unknownActions returns each missing action once, sorted", () => {
     const known = new Set(["api::a.a.find"]);
     expect(
       unknownActions(
-        [{ action: "api::b.b.x" }, { action: "api::a.a.find" }, { action: "api::a.a.typo" }, { action: "api::b.b.x" }],
+        [
+          { action: "api::b.b.x" },
+          { action: "api::a.a.find" },
+          { action: "api::a.a.typo" },
+          { action: "api::b.b.x" },
+        ],
         known,
       ),
     ).toEqual(["api::a.a.typo", "api::b.b.x"]);
@@ -438,7 +449,9 @@ describe("granted actions are checked against the loaded controllers (B04)", () 
         .map((grant) => grant.action)
         .filter((action) => !revokedOnly.has(action)),
     );
-    await expect(syncRolePermissions(permissionStub([], roleRows(), registry))).resolves.toBeUndefined();
+    await expect(
+      syncRolePermissions(permissionStub([], roleRows(), registry)),
+    ).resolves.toBeUndefined();
   });
 
   it("refuses to run without the controller registries", () => {
@@ -529,7 +542,9 @@ describe("set-based reconciliation in one transaction (B03)", () => {
     expect(db.writes()).toEqual([]);
     expect(db.transactions.count).toBe(0);
     expect(strapi.log.info.mock.calls.map(([message]) => String(message))).toEqual([
-      expect.stringMatching(/^\[bootstrap\] permission drift: none \(report-only check of \d+ managed actions\)$/),
+      expect.stringMatching(
+        /^\[bootstrap\] permission drift: none \(report-only check of \d+ managed actions\)$/,
+      ),
     ]);
   });
 
@@ -559,33 +574,40 @@ describe("set-based reconciliation in one transaction (B03)", () => {
     await syncRolePermissions(strapi);
     const deletes = db.writes().filter((entry) => entry.method === "deleteMany");
     const sizes = deletes.map(
-      (entry) => ((entry.params as { where: { id: { $in: number[] } } }).where.id.$in).length,
+      (entry) => (entry.params as { where: { id: { $in: number[] } } }).where.id.$in.length,
     );
     expect(sizes).toEqual([REVOKE_CHUNK_SIZE, REVOKE_CHUNK_SIZE, 7]);
-    expect(strapi.log.info).toHaveBeenCalledWith(`[bootstrap] revoked ${count} obsolete permission(s)`);
+    expect(strapi.log.info).toHaveBeenCalledWith(
+      `[bootstrap] revoked ${count} obsolete permission(s)`,
+    );
     expect(pairsOf(strapi)).not.toContain(pair);
   });
 
   it.each([
     ["a create", { failOnCreate: 3 }, "insert failed"],
     ["the revocation after every create", { failOnDelete: true }, "delete failed"],
-  ] as const)("an error in %s rolls the whole sync back and fails the boot", async (_, options, error) => {
-    const revoked = "guest|api::kudos.kudos.find";
-    const strapi = permissionStub(rowsFor([revoked]));
-    const before = pairsOf(strapi);
-    const db = fakeDb(strapi, options);
-    await expect(syncRolePermissions(strapi)).rejects.toThrow(error);
-    expect(db.transactions.count).toBe(1);
-    expect(db.writes().length).toBeGreaterThan(1);
-    expect(db.writes().every((entry) => entry.inTransaction)).toBe(true);
-    expect(pairsOf(strapi)).toEqual(before);
-    expect(strapi.log.info).not.toHaveBeenCalledWith(expect.stringMatching(/granted|revoked/));
-  });
+  ] as const)(
+    "an error in %s rolls the whole sync back and fails the boot",
+    async (_, options, error) => {
+      const revoked = "guest|api::kudos.kudos.find";
+      const strapi = permissionStub(rowsFor([revoked]));
+      const before = pairsOf(strapi);
+      const db = fakeDb(strapi, options);
+      await expect(syncRolePermissions(strapi)).rejects.toThrow(error);
+      expect(db.transactions.count).toBe(1);
+      expect(db.writes().length).toBeGreaterThan(1);
+      expect(db.writes().every((entry) => entry.inTransaction)).toBe(true);
+      expect(pairsOf(strapi)).toEqual(before);
+      expect(strapi.log.info).not.toHaveBeenCalledWith(expect.stringMatching(/granted|revoked/));
+    },
+  );
 
   it("never uses createMany (it would drop the role link)", async () => {
     const strapi = permissionStub(rowsFor(["guest|api::kudos.kudos.find"]));
     await syncRolePermissions(strapi);
-    const methods = new Set(strapi.calls.filter((c) => c.uid === PERMISSION_UID).map((c) => c.method));
+    const methods = new Set(
+      strapi.calls.filter((c) => c.uid === PERMISSION_UID).map((c) => c.method),
+    );
     expect([...methods].sort()).toEqual(["create", "deleteMany", "findMany"]);
   });
 

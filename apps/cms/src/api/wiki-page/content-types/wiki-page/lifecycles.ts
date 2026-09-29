@@ -11,10 +11,7 @@ import { wikiEditContext } from "../../../../utils/wiki-edit-context";
  * anything non-numeric means "unknown" (never feed it into a where clause).
  */
 function relationId(raw: any): number | undefined {
-  const entry =
-    raw && typeof raw === "object"
-      ? (raw.set?.[0] ?? raw.connect?.[0] ?? raw)
-      : raw;
+  const entry = raw && typeof raw === "object" ? (raw.set?.[0] ?? raw.connect?.[0] ?? raw) : raw;
   const id = Number(entry && typeof entry === "object" ? entry.id : entry);
   return Number.isFinite(id) ? id : undefined;
 }
@@ -39,8 +36,7 @@ export default {
     // fallbacks for writes that bypass the controller (admin panel, seeds).
     const editContext = wikiEditContext.getStore();
     const editorId =
-      editContext?.editorId ??
-      relationId((data as any).lastEditor ?? existing.lastEditor?.id);
+      editContext?.editorId ?? relationId((data as any).lastEditor ?? existing.lastEditor?.id);
 
     await strapi.db.query("api::wiki-revision.wiki-revision").create({
       data: {

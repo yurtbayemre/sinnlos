@@ -21,7 +21,16 @@
 /** The libpq `options` value every cms Postgres connection uses. */
 export const DB_SESSION_OPTIONS = "-c TimeZone=UTC";
 
-const UTC_SETTING_VALUES = new Set(["utc", "etc/utc", "gmt", "etc/gmt", "zulu", "etc/zulu", "uct", "etc/uct"]);
+const UTC_SETTING_VALUES = new Set([
+  "utc",
+  "etc/utc",
+  "gmt",
+  "etc/gmt",
+  "zulu",
+  "etc/zulu",
+  "uct",
+  "etc/uct",
+]);
 
 /** The query-string `options` of a Postgres URL, or null when it has none. */
 export function databaseUrlOptions(url: string): string | null {

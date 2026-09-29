@@ -60,7 +60,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "api/poll/services/poll.ts": "core service, reached only through the routes above",
   "api/poll-vote/controllers/poll-vote.ts": "vote/results: canSeePoll 404, canVoteOnPoll 403",
   "api/poll-vote/routes/custom-poll-vote.ts": "the vote/results routes of the controller above",
-  "api/poll-vote/routes/poll-vote.ts": "core router with `only: []`: no generic /api/poll-votes route",
+  "api/poll-vote/routes/poll-vote.ts":
+    "core router with `only: []`: no generic /api/poll-votes route",
   "api/poll-vote/services/poll-vote.ts": "core service without a route",
   "bootstrap/permission-matrix.ts":
     "permission matrix and grants (enforcement is in the rules, not the grants)",
@@ -83,7 +84,11 @@ function sourceFiles(dir: string): string[] {
     const path = join(dir, name);
     if (statSync(path).isDirectory()) {
       out.push(...sourceFiles(path));
-    } else if (name.endsWith(".ts") && !name.endsWith(".test.ts") && !name.endsWith(".test.helper.ts")) {
+    } else if (
+      name.endsWith(".ts") &&
+      !name.endsWith(".test.ts") &&
+      !name.endsWith(".test.helper.ts")
+    ) {
       out.push(relative(SRC, path).split("\\").join("/"));
     }
   }
@@ -116,7 +121,9 @@ function schemas(): Map<string, ContentTypeSchema> {
   }
   out.set(
     "plugin::users-permissions.user",
-    readSchema(join(SRC, "extensions", "users-permissions", "content-types", "user", "schema.json")),
+    readSchema(
+      join(SRC, "extensions", "users-permissions", "content-types", "user", "schema.json"),
+    ),
   );
   return out;
 }
@@ -146,7 +153,10 @@ describe("poll consumers (inventory)", () => {
       "utils/live-contract",
       "utils/notification-source",
     ]) {
-      expect(consumers.filter((file) => file.startsWith(prefix)), prefix).toEqual([]);
+      expect(
+        consumers.filter((file) => file.startsWith(prefix)),
+        prefix,
+      ).toEqual([]);
     }
   });
 });
@@ -186,9 +196,16 @@ describe("notifications", () => {
 
 describe("comments, reactions and read receipts", () => {
   it("cannot anchor on a poll", () => {
-    for (const uid of ["api::comment.comment", "api::reaction.reaction", "api::acknowledgement.acknowledgement"]) {
+    for (const uid of [
+      "api::comment.comment",
+      "api::reaction.reaction",
+      "api::acknowledgement.acknowledgement",
+    ]) {
       const values = schemaOf(uid).attributes.targetType.enum ?? [];
-      expect(values.filter((value) => value.includes("poll")), uid).toEqual([]);
+      expect(
+        values.filter((value) => value.includes("poll")),
+        uid,
+      ).toEqual([]);
     }
     expect(targetUid("poll")).toBeNull();
   });
@@ -247,7 +264,13 @@ describe("live (SSE) pings", () => {
       visibleToGuests: false,
     };
     for (const uid of [POLL_UID, POLL_VOTE_UID]) {
-      for (const action of ["afterCreate", "afterUpdate", "afterDelete", "afterCreateMany", "afterUpdateMany"]) {
+      for (const action of [
+        "afterCreate",
+        "afterUpdate",
+        "afterDelete",
+        "afterCreateMany",
+        "afterUpdateMany",
+      ]) {
         await dispatch(subscriber, { model: { uid }, action, result: row, params: { data: row } });
       }
     }
@@ -284,7 +307,9 @@ describe("relations into polls", () => {
   it("are cut by the relation guard for every source (no trusted source into polls)", () => {
     expect(RESTRICTED_RELATION_TARGETS[POLL_UID]).toEqual([]);
     const attr = schemaOf(POLL_VOTE_UID).attributes.poll;
-    expect(isRestrictedRelation({ uid: POLL_VOTE_UID }, attr, RESTRICTED_RELATION_TARGETS)).toBe(true);
+    expect(isRestrictedRelation({ uid: POLL_VOTE_UID }, attr, RESTRICTED_RELATION_TARGETS)).toBe(
+      true,
+    );
   });
 
   it("do not start at the user model: /api/users cannot populate a poll or a vote", () => {

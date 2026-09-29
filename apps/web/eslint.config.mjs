@@ -41,8 +41,7 @@ const NO_SERVER_CACHE_SYNTAX = [
     // entry (build-time prerender, a segment fetchCache default).
     selector:
       "Property:matches([key.name='cache'], [key.value='cache'])[value.type='Literal']:not([value.value=/^no-(store|cache)$/])",
-    message:
-      "Fetch cache mode must be no-store or no-cache (D-DC01): Strapi reads are no-store.",
+    message: "Fetch cache mode must be no-store or no-cache (D-DC01): Strapi reads are no-store.",
   },
   {
     // Segment config `export const fetchCache = ...` (pages, layouts,
@@ -97,7 +96,8 @@ const LOCAL_DATE_SYNTAX = [
 // No Temporal polyfill in the web (decision 04, phase 2): client code ships
 // to the browser, and plain-date.ts covers every calendar need with Intl
 // alone. The cms keeps it behind its src/utils/time.ts.
-const NO_TEMPORAL_MESSAGE = "No temporal-polyfill in the web: use src/lib/plain-date.ts (Intl only).";
+const NO_TEMPORAL_MESSAGE =
+  "No temporal-polyfill in the web: use src/lib/plain-date.ts (Intl only).";
 
 export default tseslint.config(
   {
@@ -139,7 +139,10 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
-          paths: [NO_SERVER_CACHE_IMPORT, { name: "temporal-polyfill", message: NO_TEMPORAL_MESSAGE }],
+          paths: [
+            NO_SERVER_CACHE_IMPORT,
+            { name: "temporal-polyfill", message: NO_TEMPORAL_MESSAGE },
+          ],
           patterns: [{ group: ["temporal-polyfill/*"], message: NO_TEMPORAL_MESSAGE }],
         },
       ],

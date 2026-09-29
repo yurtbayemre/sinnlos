@@ -52,7 +52,8 @@ function host(
   options: { failOn?: "findMany" | "updateMany"; flagged?: FlaggedRow[] } = {},
 ) {
   const findMany = vi.fn(async (params: Record<string, unknown>) => {
-    if (options.failOn === "findMany") throw new Error("relation polls_departments_lnk does not exist");
+    if (options.failOn === "findMany")
+      throw new Error("relation polls_departments_lnk does not exist");
     const where = params.where as { audience?: unknown; documentId?: { $in?: string[] } };
     if (typeof where.audience === "string") {
       const documentIds = where.documentId?.$in ?? [];
@@ -109,7 +110,9 @@ describe("backfillPollAudience", () => {
     await backfillPollAudience(strapi);
 
     const reads = pageReads(findMany.mock.calls);
-    expect(reads.map((params) => [(params.where as { id: { $gt: number } }).id.$gt, params.limit])).toEqual([
+    expect(
+      reads.map((params) => [(params.where as { id: { $gt: number } }).id.$gt, params.limit]),
+    ).toEqual([
       [0, POLL_AUDIENCE_BACKFILL_CHUNK],
       [POLL_AUDIENCE_BACKFILL_CHUNK, POLL_AUDIENCE_BACKFILL_CHUNK],
       [2 * POLL_AUDIENCE_BACKFILL_CHUNK, POLL_AUDIENCE_BACKFILL_CHUNK],
@@ -126,7 +129,10 @@ describe("backfillPollAudience", () => {
   });
 
   it("stops with a [poll-audience] error instead of looping when a full page does not advance", async () => {
-    const rows = Array.from({ length: POLL_AUDIENCE_BACKFILL_CHUNK }, (_, i) => ({ id: i + 1, departments: [] }));
+    const rows = Array.from({ length: POLL_AUDIENCE_BACKFILL_CHUNK }, (_, i) => ({
+      id: i + 1,
+      departments: [],
+    }));
     const { strapi, findMany, updateMany } = host(rows);
     // A read that ignores the cursor returns the same full page forever.
     findMany.mockImplementation(async () => rows);
@@ -160,12 +166,21 @@ describe("backfillPollAudience", () => {
     );
     await backfillPollAudience(strapi);
     expect(findMany).toHaveBeenCalledWith({
-      where: { documentId: { $in: ["p-republished", "p-discarded", "p-new", "p-open"] }, audience: "departments" },
+      where: {
+        documentId: { $in: ["p-republished", "p-discarded", "p-new", "p-open"] },
+        audience: "departments",
+      },
       select: ["documentId"],
     });
     expect(updateMany.mock.calls.map(([params]) => params)).toEqual([
-      { where: { id: { $in: [21, 22] }, audience: { $null: true } }, data: { audience: "departments" } },
-      { where: { id: { $in: [23, 24, 25] }, audience: { $null: true } }, data: { audience: "all" } },
+      {
+        where: { id: { $in: [21, 22] }, audience: { $null: true } },
+        data: { audience: "departments" },
+      },
+      {
+        where: { id: { $in: [23, 24, 25] }, audience: { $null: true } },
+        data: { audience: "all" },
+      },
     ]);
     expect(log.info).toHaveBeenCalledWith(
       "[poll-audience] set the audience of 5 existing poll row(s): 0 to 'departments' (they link a department), " +
@@ -187,7 +202,10 @@ describe("backfillPollAudience", () => {
       select: ["documentId"],
     });
     expect(updateMany.mock.calls.map(([params]) => params)).toEqual([
-      { where: { id: { $in: [30] }, audience: { $null: true } }, data: { audience: "departments" } },
+      {
+        where: { id: { $in: [30] }, audience: { $null: true } },
+        data: { audience: "departments" },
+      },
       { where: { id: { $in: [31] }, audience: { $null: true } }, data: { audience: "all" } },
     ]);
   });
@@ -204,8 +222,14 @@ describe("backfillPollAudience", () => {
     ]);
     await backfillPollAudience(strapi);
     expect(updateMany.mock.calls.map(([params]) => params)).toEqual([
-      { where: { id: { $in: [10, 11] }, audience: { $null: true } }, data: { audience: "departments" } },
-      { where: { id: { $in: [20, 21, 22] }, audience: { $null: true } }, data: { audience: "all" } },
+      {
+        where: { id: { $in: [10, 11] }, audience: { $null: true } },
+        data: { audience: "departments" },
+      },
+      {
+        where: { id: { $in: [20, 21, 22] }, audience: { $null: true } },
+        data: { audience: "all" },
+      },
     ]);
     expect(log.info).toHaveBeenCalledWith(
       "[poll-audience] set the audience of 5 existing poll row(s): 2 to 'departments' (they link a department), 3 to 'all'",
@@ -229,7 +253,10 @@ describe("backfillPollAudience", () => {
   });
 
   it("updates in bounded chunks", async () => {
-    const rows = Array.from({ length: POLL_AUDIENCE_BACKFILL_CHUNK + 1 }, (_, i) => ({ id: i + 1, departments: [] }));
+    const rows = Array.from({ length: POLL_AUDIENCE_BACKFILL_CHUNK + 1 }, (_, i) => ({
+      id: i + 1,
+      departments: [],
+    }));
     const { strapi, updateMany } = host(rows);
     await backfillPollAudience(strapi);
     expect(updateMany).toHaveBeenCalledTimes(2);
@@ -288,35 +315,50 @@ describe("backfillPollAudience: atomic and fail closed", () => {
     { id: 8, documentId: "p-d", published: true, audience: null, departments: [3] },
   ];
 
-  const copy = (rows: TableRow[]) => rows.map((row) => ({ ...row, departments: [...row.departments] }));
+  const copy = (rows: TableRow[]) =>
+    rows.map((row) => ({ ...row, departments: [...row.departments] }));
 
-  function tableHost(initial: TableRow[], fail: { updateCall?: number; findManyCall?: number } = {}) {
+  function tableHost(
+    initial: TableRow[],
+    fail: { updateCall?: number; findManyCall?: number } = {},
+  ) {
     let table = copy(initial);
     let updates = 0;
     let finds = 0;
     const query = {
-      findMany: vi.fn(async ({ where, limit }: { where: Record<string, unknown>; limit?: number }) => {
-        finds += 1;
-        if (finds === fail.findManyCall) throw new Error("canceling statement due to lock timeout");
-        if (where.audience === "departments") {
-          const documentIds = (where.documentId as { $in: string[] }).$in;
-          return table
-            .filter((row) => row.audience === "departments" && documentIds.includes(row.documentId))
-            .map((row) => ({ documentId: row.documentId }));
-        }
-        return nullRowPage(
-          table.filter((row) => row.audience === null),
-          { where, limit },
-        ).map((row) => ({ id: row.id, documentId: row.documentId, departments: row.departments.map((id) => ({ id })) }));
-      }),
-      updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: { audience: string } }) => {
-        updates += 1;
-        if (updates === fail.updateCall) throw new Error("deadlock detected");
-        const ids = (where.id as { $in: number[] }).$in;
-        const hits = table.filter((row) => ids.includes(row.id) && row.audience === null);
-        for (const row of hits) row.audience = data.audience;
-        return { count: hits.length };
-      }),
+      findMany: vi.fn(
+        async ({ where, limit }: { where: Record<string, unknown>; limit?: number }) => {
+          finds += 1;
+          if (finds === fail.findManyCall)
+            throw new Error("canceling statement due to lock timeout");
+          if (where.audience === "departments") {
+            const documentIds = (where.documentId as { $in: string[] }).$in;
+            return table
+              .filter(
+                (row) => row.audience === "departments" && documentIds.includes(row.documentId),
+              )
+              .map((row) => ({ documentId: row.documentId }));
+          }
+          return nullRowPage(
+            table.filter((row) => row.audience === null),
+            { where, limit },
+          ).map((row) => ({
+            id: row.id,
+            documentId: row.documentId,
+            departments: row.departments.map((id) => ({ id })),
+          }));
+        },
+      ),
+      updateMany: vi.fn(
+        async ({ where, data }: { where: Record<string, unknown>; data: { audience: string } }) => {
+          updates += 1;
+          if (updates === fail.updateCall) throw new Error("deadlock detected");
+          const ids = (where.id as { $in: number[] }).$in;
+          const hits = table.filter((row) => ids.includes(row.id) && row.audience === null);
+          for (const row of hits) row.audience = data.audience;
+          return { count: hits.length };
+        },
+      ),
     };
     const transaction = async <T>(callback: () => Promise<T>): Promise<T> => {
       const snapshot = copy(table);
@@ -354,7 +396,13 @@ describe("backfillPollAudience: atomic and fail closed", () => {
   it("an injected failure changes nothing and throws, at every step", async () => {
     // findMany calls: 1 the NULL rows, 2 the sibling lookup; updateMany
     // calls: 1 'departments' by links, 2 by sibling, 3 'all'.
-    for (const fail of [{ findManyCall: 1 }, { findManyCall: 2 }, { updateCall: 1 }, { updateCall: 2 }, { updateCall: 3 }]) {
+    for (const fail of [
+      { findManyCall: 1 },
+      { findManyCall: 2 },
+      { updateCall: 1 },
+      { updateCall: 2 },
+      { updateCall: 3 },
+    ]) {
       const label = JSON.stringify(fail);
       const { strapi, table, log } = tableHost(INITIAL, fail);
       await expect(backfillPollAudience(strapi), label).rejects.toThrow(
@@ -402,6 +450,10 @@ describe("backfillPollAudience: atomic and fail closed", () => {
     await backfillPollAudience(strapi);
     const audienceOf = new Map(table().map((row) => [row.id, row.audience]));
     expect(CLEAN_RUN.map(([id]) => [id, audienceOf.get(shifted(Number(id)))])).toEqual(CLEAN_RUN);
-    expect(table().filter((row) => row.documentId.startsWith("f")).every((row) => row.audience === "all")).toBe(true);
+    expect(
+      table()
+        .filter((row) => row.documentId.startsWith("f"))
+        .every((row) => row.audience === "all"),
+    ).toBe(true);
   });
 });

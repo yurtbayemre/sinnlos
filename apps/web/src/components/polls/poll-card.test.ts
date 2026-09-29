@@ -35,7 +35,13 @@ const render = (element: ReactElement) =>
   );
 
 const results = (overrides: Partial<PollResults>): PollResults => ({
-  poll: { id: 4, question: "Which on-call tool?", options: ["Pager", "Chat"], closesAt: null, anonymous: false },
+  poll: {
+    id: 4,
+    question: "Which on-call tool?",
+    options: ["Pager", "Chat"],
+    closesAt: null,
+    anonymous: false,
+  },
   counts: [3, 1],
   total: 4,
   myVoteIndex: null,
@@ -112,7 +118,9 @@ describe("PollCard: guest access (owner decision 2026-09-27)", () => {
     });
 
   it("shows a guest the results, disabled buttons and guestVotingDisabled on a poll without guest voting", () => {
-    const html = render(createElement(PollCard, { results: visible(false, false), viewerRole: "guest" }));
+    const html = render(
+      createElement(PollCard, { results: visible(false, false), viewerRole: "guest" }),
+    );
     for (const button of optionButtons(html)) expect(isDisabled(button)).toBe(true);
     expect(html).toContain("75%");
     expect(html).toContain(GUEST_VOTING_DISABLED);
@@ -120,7 +128,9 @@ describe("PollCard: guest access (owner decision 2026-09-27)", () => {
   });
 
   it("lets a guest vote where the CMS says so, without a hint", () => {
-    const html = render(createElement(PollCard, { results: visible(true, true), viewerRole: "guest" }));
+    const html = render(
+      createElement(PollCard, { results: visible(true, true), viewerRole: "guest" }),
+    );
     for (const button of optionButtons(html)) expect(isDisabled(button)).toBe(false);
     expect(html).not.toContain(GUEST_VOTING_DISABLED);
   });
@@ -139,7 +149,9 @@ describe("PollCard: guest access (owner decision 2026-09-27)", () => {
       expect(both, viewerRole).toContain(en.polls.guestAccessVisible);
       expect(both, viewerRole).toContain(en.polls.guestAccessVote);
 
-      const readOnly = render(createElement(PollCard, { results: visible(false, true), viewerRole }));
+      const readOnly = render(
+        createElement(PollCard, { results: visible(false, true), viewerRole }),
+      );
       expect(readOnly, viewerRole).toContain(en.polls.guestAccessVisible);
       expect(readOnly, viewerRole).not.toContain(en.polls.guestAccessVote);
 
@@ -186,7 +198,8 @@ describe("PollForm", () => {
   });
 
   /** The <input> tag with the given id. */
-  const inputById = (html: string, id: string) => html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] ?? "";
+  const inputById = (html: string, id: string) =>
+    html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0] ?? "";
   const isChecked = (tag: string) => /\schecked=""/.test(tag);
 
   it("offers both guest switches unchecked, the vote switch disabled until the poll is visible to guests", () => {

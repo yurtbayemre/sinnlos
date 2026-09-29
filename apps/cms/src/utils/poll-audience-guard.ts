@@ -138,7 +138,10 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * flag is NULL or anything else, in chunks. Returns the number of rows
  * changed. Shared with the department delete hook.
  */
-export async function setDepartmentsFlag(query: FlagWriteQuery, ids: readonly number[]): Promise<number> {
+export async function setDepartmentsFlag(
+  query: FlagWriteQuery,
+  ids: readonly number[],
+): Promise<number> {
   let changed = 0;
   for (let start = 0; start < ids.length; start += POLL_AUDIENCE_GUARD_CHUNK) {
     const chunk = ids.slice(start, start + POLL_AUDIENCE_GUARD_CHUNK);

@@ -117,9 +117,7 @@ function stubStrapi(overrides: StubOverrides = {}) {
             }
             case "api::wiki-revision.wiki-revision": {
               const ids: number[] = params?.where?.page?.space?.id?.$in ?? [];
-              return revisions
-                .filter((r) => ids.includes(r.spaceId))
-                .map((r) => ({ id: r.id }));
+              return revisions.filter((r) => ids.includes(r.spaceId)).map((r) => ({ id: r.id }));
             }
             default:
               return [];
@@ -137,16 +135,8 @@ function context(user: StubUser | null, query: Record<string, unknown> = {}) {
   } as any;
 }
 
-const run = (
-  ctx: any,
-  level?: "space" | "page" | "revision",
-  overrides: StubOverrides = {},
-) =>
-  wikiVisibility(
-    ctx,
-    level ? { level } : undefined,
-    { strapi: stubStrapi(overrides) } as any,
-  );
+const run = (ctx: any, level?: "space" | "page" | "revision", overrides: StubOverrides = {}) =>
+  wikiVisibility(ctx, level ? { level } : undefined, { strapi: stubStrapi(overrides) } as any);
 
 describe("wiki-visibility policy", () => {
   describe("space level", () => {

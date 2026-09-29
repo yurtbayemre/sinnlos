@@ -120,7 +120,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
                 </span>
               )}
               <span>
-                {t("postedOn", { relative: relativeTime(ad.createdAt, tRel, { locale, timeZone }) })}
+                {t("postedOn", {
+                  relative: relativeTime(ad.createdAt, tRel, { locale, timeZone }),
+                })}
               </span>
             </div>
             <h1 className="mt-2 text-3xl font-semibold tracking-tight">{ad.title}</h1>

@@ -79,10 +79,18 @@ describe("planCelebrations", () => {
       date: "2027-02-28",
       daysUntil: 8,
     });
-    expect(planCelebrations(leap, today("2027-02-28"), 30)[0]).toMatchObject({ date: "2027-02-28", daysUntil: 0 });
-    expect(planCelebrations(leap, today("2028-02-20"), 30)[0]).toMatchObject({ date: "2028-02-29", daysUntil: 9 });
+    expect(planCelebrations(leap, today("2027-02-28"), 30)[0]).toMatchObject({
+      date: "2027-02-28",
+      daysUntil: 0,
+    });
+    expect(planCelebrations(leap, today("2028-02-20"), 30)[0]).toMatchObject({
+      date: "2028-02-29",
+      daysUntil: 9,
+    });
     // Past Feb 28 in a non-leap year: the next one is Feb 29 of the leap year.
-    expect(planCelebrations(leap, today("2027-03-01"), 366)[0]).toMatchObject({ date: "2028-02-29" });
+    expect(planCelebrations(leap, today("2027-03-01"), 366)[0]).toMatchObject({
+      date: "2028-02-29",
+    });
   });
 
   it("skips anniversaries with fewer than one completed year", () => {
@@ -95,7 +103,9 @@ describe("planCelebrations", () => {
       today("2026-09-24"),
       30,
     );
-    expect(cards).toEqual([expect.objectContaining({ user: expect.objectContaining({ id: 3 }), years: 1, daysUntil: 0 })]);
+    expect(cards).toEqual([
+      expect.objectContaining({ user: expect.objectContaining({ id: 3 }), years: 1, daysUntil: 0 }),
+    ]);
   });
 
   it("includes both window edges and nothing beyond", () => {
@@ -149,7 +159,11 @@ describe("planCelebrations", () => {
       today("2026-09-24"),
       30,
     );
-    expect(cards.map((c) => `${c.user.id}:${c.type}`)).toEqual(["2:work-anniversary", "3:birthday", "1:birthday"]);
+    expect(cards.map((c) => `${c.user.id}:${c.type}`)).toEqual([
+      "2:work-anniversary",
+      "3:birthday",
+      "1:birthday",
+    ]);
   });
 });
 

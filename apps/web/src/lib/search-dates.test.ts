@@ -44,7 +44,9 @@ describe("event preload window", () => {
     vi.stubEnv("APP_TIME_ZONE", zone);
     await loadPreload("event", new Date(now));
     expect(strapiMock).toHaveBeenCalledTimes(1);
-    expect(decodeURIComponent(strapiMock.mock.calls[0]![0])).toContain(`filters[start][$gte]=${from}&`);
+    expect(decodeURIComponent(strapiMock.mock.calls[0]![0])).toContain(
+      `filters[start][$gte]=${from}&`,
+    );
   });
 });
 
@@ -60,8 +62,12 @@ describe("snippet dates", () => {
     // "Closes on 25 Oct" = 25 Oct 23:59:59 in APP_TIME_ZONE, 22:59:59Z after the change back.
     const closesAt = pollClosesAtForDay("2026-10-25", "Europe/Berlin");
     expect(closesAt).toBe("2026-10-25T22:59:59.000Z");
-    expect(searchFormatFor("de", "Europe/Berlin", labels).pollCloses(closesAt!)).toBe("closes 25.10.2026");
-    expect(searchFormatFor("en", "Europe/Berlin", labels).pollCloses(closesAt!)).toBe("closes 10/25/2026");
+    expect(searchFormatFor("de", "Europe/Berlin", labels).pollCloses(closesAt!)).toBe(
+      "closes 25.10.2026",
+    );
+    expect(searchFormatFor("en", "Europe/Berlin", labels).pollCloses(closesAt!)).toBe(
+      "closes 10/25/2026",
+    );
   });
 
   it("has no date for a value that is no instant", () => {

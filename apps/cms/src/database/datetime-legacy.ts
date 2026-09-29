@@ -166,9 +166,17 @@ export function readLegacySettings(env: Record<string, string | undefined>): Leg
 }
 
 /** How a column's values are classified. */
-export function columnKind(table: string, column: string, tableColumns: ReadonlySet<string>): ColumnKind {
+export function columnKind(
+  table: string,
+  column: string,
+  tableColumns: ReadonlySet<string>,
+): ColumnKind {
   if (USER_ENTERED_COLUMNS[table]?.includes(column)) return "user";
-  if (EXPIRY_COLUMNS.has(column) && SESSION_OR_TOKEN_TABLE.test(table) && tableColumns.has("created_at")) {
+  if (
+    EXPIRY_COLUMNS.has(column) &&
+    SESSION_OR_TOKEN_TABLE.test(table) &&
+    tableColumns.has("created_at")
+  ) {
     return "expiry";
   }
   return "write";
@@ -199,16 +207,21 @@ export function classifyCell(cell: CellInput, settings: LegacySettings): CellDec
   if (!settings.theta) return { cls: "legacy-all", legacy: true };
   const theta = settings.theta.naive;
   if (cell.kind === "write") {
-    return cell.naive < theta ? { cls: "write-utc", legacy: false } : { cls: "write-legacy", legacy: true };
+    return cell.naive < theta
+      ? { cls: "write-utc", legacy: false }
+      : { cls: "write-legacy", legacy: true };
   }
   if (cell.kind === "expiry") {
     const reference = cell.rowCreatedAt ?? cell.naive;
-    return reference < theta ? { cls: "expiry-utc", legacy: false } : { cls: "expiry-legacy", legacy: true };
+    return reference < theta
+      ? { cls: "expiry-utc", legacy: false }
+      : { cls: "expiry-legacy", legacy: true };
   }
   const created = cell.documentCreatedAt ?? cell.rowCreatedAt;
   if (created !== null && created >= theta) return { cls: "A", legacy: true };
   if (cell.rowUpdatedAt !== null && cell.rowUpdatedAt < theta) return { cls: "B", legacy: false };
-  if (cell.allDay && cell.naive.slice(11) === "00:00:00.000000") return { cls: "C-allday", legacy: true };
+  if (cell.allDay && cell.naive.slice(11) === "00:00:00.000000")
+    return { cls: "C-allday", legacy: true };
   return { cls: "C", legacy: false };
 }
 
@@ -232,7 +245,12 @@ export interface WriteStamp {
  *    so nothing proves where the switch was;
  *  - too-short: the empty stretch around θ is shorter than the offset.
  */
-export type GapFailure = "theta-future" | "zone-not-ahead" | "no-stamp-before" | "no-stamp-after" | "too-short";
+export type GapFailure =
+  | "theta-future"
+  | "zone-not-ahead"
+  | "no-stamp-before"
+  | "no-stamp-after"
+  | "too-short";
 
 export interface GapCheck {
   /** θ as a naive UTC wall clock (NAIVE format) and as ISO-Z. */
@@ -266,7 +284,11 @@ export interface GapCheck {
  * stretch at all) and write stamps on both sides of θ. Otherwise it fails
  * instead of passing untested (see GapFailure).
  */
-export function checkGap(stamps: readonly WriteStamp[], settings: LegacySettings, now: Date): GapCheck | null {
+export function checkGap(
+  stamps: readonly WriteStamp[],
+  settings: LegacySettings,
+  now: Date,
+): GapCheck | null {
   if (!settings.theta || !settings.zone) return null;
   const theta = settings.theta.naive;
   let before: WriteStamp | null = null;
@@ -280,13 +302,15 @@ export function checkGap(stamps: readonly WriteStamp[], settings: LegacySettings
     }
   }
   const requiredMinutes = offsetMinutesAt(settings.theta.iso, settings.zone);
-  const gapMinutes = before && after ? (naiveMs(after.naive) - naiveMs(before.naive)) / 60000 : null;
+  const gapMinutes =
+    before && after ? (naiveMs(after.naive) - naiveMs(before.naive)) / 60000 : null;
   const failures: GapFailure[] = [];
   if (Date.parse(settings.theta.iso) > now.getTime()) failures.push("theta-future");
   if (requiredMinutes <= 0) failures.push("zone-not-ahead");
   if (!before) failures.push("no-stamp-before");
   if (!after) failures.push("no-stamp-after");
-  if (gapMinutes !== null && requiredMinutes > 0 && gapMinutes < requiredMinutes) failures.push("too-short");
+  if (gapMinutes !== null && requiredMinutes > 0 && gapMinutes < requiredMinutes)
+    failures.push("too-short");
   return {
     theta,
     thetaIso: settings.theta.iso,
@@ -373,7 +397,9 @@ export interface LegacyPlan {
 
 /** Naive columns the repair owns: the schema's, minus bookkeeping and audit. */
 export function repairColumns(columns: readonly NaiveColumn[]): NaiveColumn[] {
-  return columns.filter(({ table }) => !BOOKKEEPING_TABLES.includes(table) && table !== AUDIT_TABLE);
+  return columns.filter(
+    ({ table }) => !BOOKKEEPING_TABLES.includes(table) && table !== AUDIT_TABLE,
+  );
 }
 
 interface SnapshotRow {
@@ -417,7 +443,9 @@ export async function buildLegacyPlan(
       continue;
     }
     const has = (column: string) => types.has(column);
-    const keyColumn: TablePlan["keyColumn"] = /^(integer|bigint|smallint)$/.test(types.get("id") ?? "")
+    const keyColumn: TablePlan["keyColumn"] = /^(integer|bigint|smallint)$/.test(
+      types.get("id") ?? "",
+    )
       ? "id"
       : "ctid";
     const naiveOf = (column: string) => `to_char(${quoteIdent(column)}, ${NAIVE_FORMAT})`;
@@ -425,7 +453,9 @@ export async function buildLegacyPlan(
     const select = [
       `${keyColumn === "id" ? quoteIdent("id") : "ctid"}::text AS row_key`,
       keyColumn === "id" ? `${quoteIdent("id")} AS row_id` : "NULL::bigint AS row_id",
-      has("document_id") ? `${quoteIdent("document_id")}::text AS document_id` : "NULL::text AS document_id",
+      has("document_id")
+        ? `${quoteIdent("document_id")}::text AS document_id`
+        : "NULL::text AS document_id",
       has("created_at") ? `${naiveOf("created_at")} AS created_at_n` : "NULL::text AS created_at_n",
       has("updated_at") ? `${naiveOf("updated_at")} AS updated_at_n` : "NULL::text AS updated_at_n",
       has("all_day") ? `${quoteIdent("all_day")} AS all_day` : "NULL::boolean AS all_day",
@@ -444,7 +474,8 @@ export async function buildLegacyPlan(
     for (const row of rows) {
       if (!row.document_id || !row.created_at_n) continue;
       const known = documentCreated.get(row.document_id);
-      if (!known || row.created_at_n < known) documentCreated.set(row.document_id, row.created_at_n);
+      if (!known || row.created_at_n < known)
+        documentCreated.set(row.document_id, row.created_at_n);
     }
 
     const columnNames = new Set(types.keys());
@@ -464,7 +495,9 @@ export async function buildLegacyPlan(
             naive,
             rowCreatedAt: row.created_at_n,
             rowUpdatedAt: row.updated_at_n,
-            documentCreatedAt: row.document_id ? (documentCreated.get(row.document_id) ?? null) : null,
+            documentCreatedAt: row.document_id
+              ? (documentCreated.get(row.document_id) ?? null)
+              : null,
             allDay: row.all_day === true,
           },
           settings,
@@ -487,7 +520,8 @@ export async function buildLegacyPlan(
           legacy: decision.legacy,
           ambiguous,
         });
-        if (kind === "write") writeStamps.push({ naive, where: `${table}.${column}#${row.row_key}` });
+        if (kind === "write")
+          writeStamps.push({ naive, where: `${table}.${column}#${row.row_key}` });
       });
     }
     tables.push({ table, columns, kinds, keyColumn, cells });
@@ -541,7 +575,11 @@ async function ensureAuditTable(sql: SqlClient, schema: string): Promise<void> {
  * expressions read the old row), then the ALTER to timestamptz(6) of every
  * repaired column. Must run in one transaction with the plan's locks.
  */
-export async function applyLegacyPlan(sql: SqlClient, plan: LegacyPlan, runId: string): Promise<ApplySummary> {
+export async function applyLegacyPlan(
+  sql: SqlClient,
+  plan: LegacyPlan,
+  runId: string,
+): Promise<ApplySummary> {
   const { schema, settings } = plan;
   let convertedColumns = 0;
   let shiftedCells = 0;
@@ -581,7 +619,11 @@ export async function applyLegacyPlan(sql: SqlClient, plan: LegacyPlan, runId: s
       const keyExpr = keyColumn === "id" ? quoteIdent("id") : "ctid";
       const keyType = keyColumn === "id" ? "bigint" : "tid";
       const keysOf = (subset: readonly CellPlan[]) =>
-        pgArrayLiteral(keyColumn === "id" ? subset.map((cell) => Number(cell.key)) : subset.map((cell) => cell.key));
+        pgArrayLiteral(
+          keyColumn === "id"
+            ? subset.map((cell) => Number(cell.key))
+            : subset.map((cell) => cell.key),
+        );
       const assignments: string[] = [];
       const bindings: unknown[] = [];
       for (const column of columns) {
@@ -680,7 +722,9 @@ export async function runLegacyDatetimeMigration(
   }
   const [session] = await sql.query<{ tz: string }>("SELECT current_setting('TimeZone') AS tz");
   if (!isUtcZone(session?.tz)) {
-    throw new Error(`[datetime] The database session runs in ${session?.tz}, not UTC. Nothing was changed.`);
+    throw new Error(
+      `[datetime] The database session runs in ${session?.tz}, not UTC. Nothing was changed.`,
+    );
   }
   // Bounded waits: a lock held elsewhere fails the boot (and the next boot
   // retries) instead of hanging it.
@@ -714,7 +758,9 @@ export async function runLegacyDatetimeMigration(
     for (const [table, tableColumns] of byTable) {
       await sql.query(alterToTimestamptzSql(schema, table, tableColumns));
     }
-    log.info(`[datetime] legacy repair: ${columns.length} empty naive column(s) converted to timestamptz`);
+    log.info(
+      `[datetime] legacy repair: ${columns.length} empty naive column(s) converted to timestamptz`,
+    );
     return { runId, convertedColumns: columns.length, shiftedCells: 0, auditedCells: 0 };
   }
 
@@ -724,7 +770,9 @@ export async function runLegacyDatetimeMigration(
   const plan = await buildLegacyPlan(sql, schema, settings, { lock: true, now });
   if (plan.gap && !plan.gap.ok) throw new Error(gapFailureMessage(plan.gap));
 
-  const ambiguous = plan.tables.flatMap((tablePlan) => tablePlan.cells.filter((cell) => cell.ambiguous));
+  const ambiguous = plan.tables.flatMap((tablePlan) =>
+    tablePlan.cells.filter((cell) => cell.ambiguous),
+  );
   if (ambiguous.length > 0) {
     // User-entered times first: those are the ones to check by hand.
     const entered = ambiguous.filter((cell) => cell.kind === "user");

@@ -131,12 +131,24 @@ function naiveShort(naive: string): string {
   return naive.slice(0, 19).replace("T", " ");
 }
 
-function reading(naive: string, zone: string, appZone: string, disambiguation: "later" | "earlier" = "later"): string {
+function reading(
+  naive: string,
+  zone: string,
+  appZone: string,
+  disambiguation: "later" | "earlier" = "later",
+): string {
   const instant = plainDateTimeToInstant(naive, zone, disambiguation);
   return formatInstant(
     "sv-SE",
     instant,
-    { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" },
+    {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    },
     appZone,
   );
 }
@@ -171,7 +183,8 @@ function isOpen(cell: CellPlan, settings: LegacySettings, now: Date): boolean {
 
 async function printAround(print: Print, plan: LegacyPlan, around: string): Promise<void> {
   const centreMs = instantMsOrNull(around);
-  if (centreMs === null) throw new Error(`--around needs an ISO instant with an offset, got "${around}"`);
+  if (centreMs === null)
+    throw new Error(`--around needs an ISO instant with an offset, got "${around}"`);
   const stamps = plan.writeStamps
     .filter((stamp) => {
       const ms = naiveMs(stamp.naive);
@@ -200,7 +213,11 @@ async function printAround(print: Print, plan: LegacyPlan, around: string): Prom
     print(`  ${naiveShort(stamp.naive)}  ${stamp.where}`);
   });
   if (stamps.length === 0) print("  (no write stamps in this window)");
-  print(suggestion ? `First gap >= 1h55m ending after it: ${suggestion}` : "No gap >= 1h55m ends after it.");
+  print(
+    suggestion
+      ? `First gap >= 1h55m ending after it: ${suggestion}`
+      : "No gap >= 1h55m ends after it.",
+  );
 }
 
 /** What the baseline dump says about a cell. */
@@ -262,7 +279,12 @@ async function baselineValue(
  * published_at (no draft & publish) or a row without an id. A lookup that
  * fails throws (reported by the caller).
  */
-async function isDraftRow(sql: SqlClient, mainSchema: SchemaCache, schema: string, cell: CellPlan): Promise<boolean | null> {
+async function isDraftRow(
+  sql: SqlClient,
+  mainSchema: SchemaCache,
+  schema: string,
+  cell: CellPlan,
+): Promise<boolean | null> {
   const columns = await mainSchema(cell.table);
   if (!columns.has("published_at") || !columns.has("id") || cell.rowId === null) return null;
   const [row] = await inSavepoint(sql, () =>
@@ -336,7 +358,9 @@ async function currentValues(
     return "      now: no document id or row id to look the row up by";
   }
   const id = columns.has("id") ? `${quoteIdent("id")}::text` : "NULL::text";
-  const draft = columns.has("published_at") ? `${quoteIdent("published_at")} IS NULL` : "NULL::boolean";
+  const draft = columns.has("published_at")
+    ? `${quoteIdent("published_at")} IS NULL`
+    : "NULL::boolean";
   const found = await inSavepoint(sql, () =>
     sql.query<{ id: string | null; draft: boolean | null; v: string | null }>(
       `SELECT ${id} AS id, ${draft} AS draft,
@@ -348,10 +372,13 @@ async function currentValues(
     ),
   );
   if (found.length === 0) return "      now: gone (deleted since the repair)";
-  const state = (value: boolean | null) => (value === true ? "draft" : value === false ? "published" : "row");
+  const state = (value: boolean | null) =>
+    value === true ? "draft" : value === false ? "published" : "row";
   return (
     `      now in ${options.appTimeZone}: ` +
-    found.map((current) => `${state(current.draft)} #${current.id ?? "?"} ${current.v ?? "empty"}`).join(", ")
+    found
+      .map((current) => `${state(current.draft)} #${current.id ?? "?"} ${current.v ?? "empty"}`)
+      .join(", ")
   );
 }
 
@@ -361,12 +388,17 @@ async function currentValues(
  * the document's current values, for the review in the admin panel
  * (DEPLOYMENT.md, after the deploy). Returns the number of failed lookups.
  */
-async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, print: Print): Promise<number> {
+async function printRecordedAmbiguous(
+  sql: SqlClient,
+  options: ReportOptions,
+  print: Print,
+): Promise<number> {
   const { settings, now } = options;
   const audit = qualifiedTable(options.schema, AUDIT_TABLE);
   const auditColumns = await tableColumnTypes(sql, options.schema, AUDIT_TABLE);
   // An audit table from a rehearsal of an earlier build has no document_id/label.
-  const optional = (column: string) => (auditColumns.has(column) ? quoteIdent(column) : `NULL::text AS ${quoteIdent(column)}`);
+  const optional = (column: string) =>
+    auditColumns.has(column) ? quoteIdent(column) : `NULL::text AS ${quoteIdent(column)}`;
   const rows = await sql.query<AuditRow>(
     `SELECT run_id, table_name, row_id::text AS row_id, ${optional("document_id")}, ${optional("label")},
             column_name, old_naive, zone, class
@@ -403,9 +435,13 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
         `${row.label ? ` "${row.label}"` : ""} ${row.column_name} = ${naiveShort(naive)} ` +
         `[${row.class}, run ${row.run_id}, repaired as ${row.zone}]`,
     );
-    print(`      read as UTC:             ${reading(naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`);
+    print(
+      `      read as UTC:             ${reading(naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`,
+    );
     if (zone) {
-      print(`      read as ${zone.padEnd(16)} ${reading(naive, zone, options.appTimeZone)} ${options.appTimeZone}`);
+      print(
+        `      read as ${zone.padEnd(16)} ${reading(naive, zone, options.appTimeZone)} ${options.appTimeZone}`,
+      );
     }
     await printNow(row);
   }
@@ -447,7 +483,11 @@ async function printRecordedAmbiguous(sql: SqlClient, options: ReportOptions, pr
 }
 
 /** Prints the report. Only runs SELECTs (and savepoints) on `sql`, inside its READ ONLY transaction. */
-export async function runReport(sql: SqlClient, options: ReportOptions, print: Print): Promise<ReportResult> {
+export async function runReport(
+  sql: SqlClient,
+  options: ReportOptions,
+  print: Print,
+): Promise<ReportResult> {
   const { schema, settings, now } = options;
   let lookupErrors = 0;
   const allNaive = await listNaiveColumns(sql, schema);
@@ -461,7 +501,9 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
       `${settings.theta ? `${settings.theta.iso} (stored ${naiveShort(settings.theta.naive)})` : "(unset: whole database legacy)"}` +
       ` | APP_TIME_ZONE ${options.appTimeZone}`,
   );
-  print(`  repair recorded in strapi_migrations: ${recorded ? "yes" : "no"}${auditExists ? `, ${AUDIT_TABLE} present` : ""}`);
+  print(
+    `  repair recorded in strapi_migrations: ${recorded ? "yes" : "no"}${auditExists ? `, ${AUDIT_TABLE} present` : ""}`,
+  );
   print(
     `  naive timestamp columns: ${allNaive.length} (to repair: ${repair.length}; bookkeeping, left to the guard: ` +
       `${allNaive.filter(({ table }) => BOOKKEEPING_TABLES.includes(table)).length})`,
@@ -476,12 +518,16 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   }
   if (plan.tables.length === 0) {
     print();
-    print("The naive columns hold no data: the migration converts them without a rewrite (no env needed).");
+    print(
+      "The naive columns hold no data: the migration converts them without a rewrite (no env needed).",
+    );
     return { plan, lookupErrors };
   }
   if (!settings.zone) {
     print();
-    print("DATETIME_LEGACY_ZONE is unset: the migration would REFUSE to start (data present). Set it first.");
+    print(
+      "DATETIME_LEGACY_ZONE is unset: the migration would REFUSE to start (data present). Set it first.",
+    );
   }
 
   print();
@@ -507,7 +553,9 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   }
   for (const [column, classes] of byColumn) print(`  ${column.padEnd(44)} ${classes.join(" ")}`);
 
-  const ambiguous = plan.tables.flatMap((table) => table.cells).filter((cell) => cell.cls === "C" || cell.cls === "C-allday");
+  const ambiguous = plan.tables
+    .flatMap((table) => table.cells)
+    .filter((cell) => cell.cls === "C" || cell.cls === "C-allday");
   const listed = options.all ? ambiguous : ambiguous.filter((cell) => isOpen(cell, settings, now));
   print();
   print(
@@ -515,16 +563,22 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
       `${options.all ? "all listed" : `${listed.length} still open or upcoming listed (--all for every one)`}:`,
   );
   const mainSchema = schemaCache(sql, schema);
-  const baselineSchema = options.baseline ? schemaCache(options.baseline.sql, options.baseline.schema) : null;
+  const baselineSchema = options.baseline
+    ? schemaCache(options.baseline.sql, options.baseline.schema)
+    : null;
   for (const cell of listed) {
     const chosen = cell.legacy ? `read as ${settings.zone}` : "read as UTC";
     print(
       `  ${cell.table}#${cell.key}${cell.documentId ? ` doc ${cell.documentId}` : ""}` +
         `${cell.label ? ` "${cell.label}"` : ""} ${cell.column} = ${naiveShort(cell.naive)} [${cell.cls}, migration: ${chosen}]`,
     );
-    print(`      read as UTC:             ${reading(cell.naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`);
+    print(
+      `      read as UTC:             ${reading(cell.naive, "UTC", options.appTimeZone)} ${options.appTimeZone}`,
+    );
     if (settings.zone) {
-      print(`      read as ${settings.zone.padEnd(16)} ${reading(cell.naive, settings.zone, options.appTimeZone)} ${options.appTimeZone}`);
+      print(
+        `      read as ${settings.zone.padEnd(16)} ${reading(cell.naive, settings.zone, options.appTimeZone)} ${options.appTimeZone}`,
+      );
     }
     if (options.baseline && baselineSchema) {
       let lookup: BaselineLookup;
@@ -540,7 +594,9 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
   }
   if (lookupErrors > 0) {
     print();
-    print(`${lookupErrors} baseline lookup(s) FAILED (see LOOKUP FAILED above): those values are not compared.`);
+    print(
+      `${lookupErrors} baseline lookup(s) FAILED (see LOOKUP FAILED above): those values are not compared.`,
+    );
   }
 
   const folds = plan.tables.flatMap((table) => table.cells).filter((cell) => cell.ambiguous);
@@ -559,7 +615,8 @@ export async function runReport(sql: SqlClient, options: ReportOptions, print: P
       );
       print(`      ${foldReadings(cell.naive, settings.zone, options.appTimeZone)}`);
     }
-    for (const cell of stamps.slice(0, 50)) print(`  ${cell.table}.${cell.column}#${cell.key} = ${naiveShort(cell.naive)}`);
+    for (const cell of stamps.slice(0, 50))
+      print(`  ${cell.table}.${cell.column}#${cell.key} = ${naiveShort(cell.naive)}`);
     if (stamps.length > 50) print(`  … and ${stamps.length - 50} more write stamps`);
   }
 
@@ -603,7 +660,10 @@ export interface ReadOnlySession {
 }
 
 /** Connects and opens the READ ONLY transaction every report query runs in. */
-export async function openReadOnlySession(Client: PgClientCtor, config: Record<string, unknown>): Promise<ReadOnlySession> {
+export async function openReadOnlySession(
+  Client: PgClientCtor,
+  config: Record<string, unknown>,
+): Promise<ReadOnlySession> {
   const client = new Client(config);
   await client.connect();
   try {
@@ -622,10 +682,15 @@ export async function openReadOnlySession(Client: PgClientCtor, config: Record<s
 }
 
 /** Read-only pg connection settings for the cms database or a given URL. */
-export function connectionConfig(env: Record<string, string | undefined>, url?: string): Record<string, unknown> {
+export function connectionConfig(
+  env: Record<string, string | undefined>,
+  url?: string,
+): Record<string, unknown> {
   const readOnly = { options: "-c TimeZone=UTC -c default_transaction_read_only=on" };
   const ssl =
-    env.DATABASE_SSL === "true" ? { ssl: { rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" } } : {};
+    env.DATABASE_SSL === "true"
+      ? { ssl: { rejectUnauthorized: env.DATABASE_SSL_REJECT_UNAUTHORIZED !== "false" } }
+      : {};
   if (url) return { connectionString: url, ...readOnly };
   if (env.DATABASE_URL) return { connectionString: env.DATABASE_URL, ...ssl, ...readOnly };
   return {
@@ -650,7 +715,8 @@ async function main(): Promise<void> {
     return;
   }
   const env = process.env;
-  const str = (name: string): string | undefined => (typeof args[name] === "string" ? (args[name] as string) : undefined);
+  const str = (name: string): string | undefined =>
+    typeof args[name] === "string" ? (args[name] as string) : undefined;
   const settings = readLegacySettings({
     DATETIME_LEGACY_ZONE: str("legacy-zone") ?? env.DATETIME_LEGACY_ZONE,
     DATETIME_LEGACY_UTC_UNTIL: str("utc-until") ?? env.DATETIME_LEGACY_UTC_UNTIL,
@@ -670,7 +736,10 @@ async function main(): Promise<void> {
     const sql = await open(connectionConfig(env, str("url")));
     const baselineUrl = str("baseline");
     const baseline = baselineUrl
-      ? { sql: await open(connectionConfig(env, baselineUrl)), schema: str("baseline-schema") ?? "public" }
+      ? {
+          sql: await open(connectionConfig(env, baselineUrl)),
+          schema: str("baseline-schema") ?? "public",
+        }
       : undefined;
     const { lookupErrors } = await runReport(
       sql,
@@ -686,7 +755,9 @@ async function main(): Promise<void> {
       (line = "") => process.stdout.write(`${line}\n`),
     );
     if (lookupErrors > 0) {
-      process.stderr.write(`datetime-migration-report: ${lookupErrors} lookup(s) failed, see LOOKUP FAILED above\n`);
+      process.stderr.write(
+        `datetime-migration-report: ${lookupErrors} lookup(s) failed, see LOOKUP FAILED above\n`,
+      );
       process.exitCode = 1;
     }
   } finally {

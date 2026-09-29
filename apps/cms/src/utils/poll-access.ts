@@ -97,7 +97,10 @@ export async function loadUserDepartmentDocumentId(
  * `ctx.state.user` (users-permissions populates it), the department from
  * the database: a department change applies on the next request.
  */
-export async function loadPollViewer(strapi: PollAccessHost, user: PollCaller): Promise<PollViewer> {
+export async function loadPollViewer(
+  strapi: PollAccessHost,
+  user: PollCaller,
+): Promise<PollViewer> {
   return {
     roleType: user.role?.type ?? null,
     departmentDocumentId: await loadUserDepartmentDocumentId(strapi, user.id),
@@ -274,7 +277,8 @@ function toPublishedPoll(row: unknown): PublishedPoll | null {
     documentId: typeof row.documentId === "string" ? row.documentId : "",
     question: typeof row.question === "string" ? row.question : "",
     options: row.options,
-    closesAt: typeof row.closesAt === "string" || row.closesAt instanceof Date ? row.closesAt : null,
+    closesAt:
+      typeof row.closesAt === "string" || row.closesAt instanceof Date ? row.closesAt : null,
     anonymous: row.anonymous == null ? null : Boolean(row.anonymous),
     audience: typeof row.audience === "string" ? row.audience : null,
     departments: Array.isArray(row.departments)

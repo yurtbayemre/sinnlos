@@ -39,7 +39,15 @@ const REVOKE_SQL = readFileSync(
   "utf8",
 );
 const VOTE = "api::poll-vote.poll-vote.vote";
-const ROLES = ["admin_role", "editor", "department_head", "team_lead", "member", "guest", "authenticated"];
+const ROLES = [
+  "admin_role",
+  "editor",
+  "department_head",
+  "team_lead",
+  "member",
+  "guest",
+  "authenticated",
+];
 
 describe.skipIf(!PG_URL)("revoke-guest-poll-vote.sql on Postgres 16", () => {
   let client: PgClient;
@@ -75,7 +83,9 @@ describe.skipIf(!PG_URL)("revoke-guest-poll-vote.sql on Postgres 16", () => {
          ORDER BY 1`)
     ).map((row) => String(row.grant));
   const documentIds = async () =>
-    (await all(`SELECT document_id FROM up_permissions ORDER BY 1`)).map((row) => String(row.document_id));
+    (await all(`SELECT document_id FROM up_permissions ORDER BY 1`)).map((row) =>
+      String(row.document_id),
+    );
 
   /** Grants `action` to `role` with a row of its own, as users-permissions does. */
   const grant = (role: string, action: string, documentId: string) =>

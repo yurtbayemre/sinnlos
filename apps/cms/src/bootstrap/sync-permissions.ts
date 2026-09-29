@@ -209,8 +209,7 @@ export function planPermissionSync(input: {
     create,
     revokeIds: revokeIds.sort((a, b) => a - b),
     drift: [...drift.values()].sort(
-      (a, b) =>
-        a.roleType.localeCompare(b.roleType) || a.action.localeCompare(b.action),
+      (a, b) => a.roleType.localeCompare(b.roleType) || a.action.localeCompare(b.action),
     ),
     managedActions: managed.size,
   };

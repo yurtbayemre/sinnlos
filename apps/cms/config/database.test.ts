@@ -57,7 +57,10 @@ describe("config/database", () => {
 });
 
 /** pg's own parameter resolution, as the cms loads it (pg 8.13.1). */
-type ConnectionParametersCtor = new (config: Record<string, unknown>) => { options?: string; host?: string };
+type ConnectionParametersCtor = new (config: Record<string, unknown>) => {
+  options?: string;
+  host?: string;
+};
 function loadPgConnectionParameters(): ConnectionParametersCtor {
   const requireFromCms = createRequire(join(__dirname, "..", "package.json"));
   return requireFromCms("pg/lib/connection-parameters") as ConnectionParametersCtor;
@@ -82,22 +85,30 @@ describe("config/database: UTC session pin (datetime contract)", () => {
     const url = "postgres://u:p@db/sinnlos?options=-c%20search_path%3Dapp";
     // pg would indeed drop the pin: the URL's options win.
     const ConnectionParameters = loadPgConnectionParameters();
-    expect(new ConnectionParameters({ options: "-c TimeZone=UTC", connectionString: url }).options).toBe(
-      "-c search_path=app",
-    );
+    expect(
+      new ConnectionParameters({ options: "-c TimeZone=UTC", connectionString: url }).options,
+    ).toBe("-c search_path=app");
     expect(() => databaseConfig({ env: makeEnv({ DATABASE_URL: url }) })).toThrow(/options/);
     expect(() =>
-      databaseConfig({ env: makeEnv({ DATABASE_URL: "postgres://u:p@db/x?options=-c%20TimeZone%3DEurope%2FBerlin" }) }),
+      databaseConfig({
+        env: makeEnv({
+          DATABASE_URL: "postgres://u:p@db/x?options=-c%20TimeZone%3DEurope%2FBerlin",
+        }),
+      }),
     ).toThrow(/TimeZone=UTC/);
   });
 
   it("accepts URL options that pin TimeZone=UTC themselves", () => {
-    const url = "postgres://u:p@db/sinnlos?options=-c%20TimeZone%3DUTC%20-c%20statement_timeout%3D0";
+    const url =
+      "postgres://u:p@db/sinnlos?options=-c%20TimeZone%3DUTC%20-c%20statement_timeout%3D0";
     expect(() => databaseConfig({ env: makeEnv({ DATABASE_URL: url }) })).not.toThrow();
   });
 
   it("ignores DATABASE_URL entirely on SQLite", () => {
-    const env = makeEnv({ DATABASE_CLIENT: "sqlite", DATABASE_URL: "postgres://u:p@db/x?options=-c%20x%3Dy" });
+    const env = makeEnv({
+      DATABASE_CLIENT: "sqlite",
+      DATABASE_URL: "postgres://u:p@db/x?options=-c%20x%3Dy",
+    });
     expect(databaseConfig({ env }).connection.client).toBe("sqlite");
   });
 });

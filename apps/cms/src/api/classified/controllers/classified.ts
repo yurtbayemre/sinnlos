@@ -74,8 +74,7 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   const isModerator = hasRole(user, MODERATORS);
   if (!isModerator) {
     const ownsAll =
-      user != null &&
-      files.every((f: any) => (f.provider_metadata as any)?.uploadedBy === user.id);
+      user != null && files.every((f: any) => (f.provider_metadata as any)?.uploadedBy === user.id);
     if (!ownsAll) return null;
   }
   return ids;

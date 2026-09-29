@@ -28,7 +28,7 @@
 # infra/routing-parity.test.ts.
 services:
   caddy:
-    profiles: ["manual"]   # auf diesem Host übernimmt Traefik
+    profiles: ["manual"] # auf diesem Host übernimmt Traefik
 
   web:
     networks:

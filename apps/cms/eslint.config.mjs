@@ -21,7 +21,10 @@ export default tseslint.config(
     // idiomatic. Keep these visible as warnings, not CI-breaking errors.
     rules: {
       "@typescript-eslint/no-explicit-any": "warn",
-      "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
   {
@@ -49,8 +52,10 @@ export default tseslint.config(
             "new Date(y, m, d, ...) builds a local-time instant. Use time.ts (parsePlainDate, wallTimeToInstant) or an ISO-Z string.",
         },
         {
-          selector: "CallExpression[callee.property.name=/^(toLocaleDateString|toLocaleTimeString)$/]",
-          message: "Format with time.ts formatInstant (explicit zone) or plain-date.ts formatPlainDate.",
+          selector:
+            "CallExpression[callee.property.name=/^(toLocaleDateString|toLocaleTimeString)$/]",
+          message:
+            "Format with time.ts formatInstant (explicit zone) or plain-date.ts formatPlainDate.",
         },
         {
           selector:
@@ -70,8 +75,18 @@ export default tseslint.config(
       "no-restricted-imports": [
         "error",
         {
-          paths: [{ name: "temporal-polyfill", message: "Import calendar helpers from src/utils/time.ts instead." }],
-          patterns: [{ group: ["temporal-polyfill/*"], message: "Import calendar helpers from src/utils/time.ts instead." }],
+          paths: [
+            {
+              name: "temporal-polyfill",
+              message: "Import calendar helpers from src/utils/time.ts instead.",
+            },
+          ],
+          patterns: [
+            {
+              group: ["temporal-polyfill/*"],
+              message: "Import calendar helpers from src/utils/time.ts instead.",
+            },
+          ],
         },
       ],
     },

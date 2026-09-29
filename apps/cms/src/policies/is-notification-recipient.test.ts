@@ -39,9 +39,7 @@ function stubStrapi(rows: StubRow[]) {
           if (uid !== "api::notification.notification") return null;
           // Trap c: honour whichever column the policy chose to look up on.
           const match = (r: StubRow) =>
-            where.documentId !== undefined
-              ? r.documentId === where.documentId
-              : r.id === where.id;
+            where.documentId !== undefined ? r.documentId === where.documentId : r.id === where.id;
           return rows.find(match) ?? null;
         },
       }),

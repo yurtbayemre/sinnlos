@@ -89,7 +89,9 @@ export function toInstant(value: InstantInput): Temporal.Instant {
   try {
     return Temporal.Instant.from(value.trim());
   } catch {
-    throw new RangeError(`Not an instant (ISO-8601 with Z or a numeric offset required): "${value}"`);
+    throw new RangeError(
+      `Not an instant (ISO-8601 with Z or a numeric offset required): "${value}"`,
+    );
   }
 }
 
@@ -127,7 +129,10 @@ export function todayIn(
 }
 
 /** The calendar date an instant falls on in the zone. */
-export function zonedDateOf(instant: InstantInput, timeZone: string = appTimeZone()): Temporal.PlainDate {
+export function zonedDateOf(
+  instant: InstantInput,
+  timeZone: string = appTimeZone(),
+): Temporal.PlainDate {
   return toInstant(instant).toZonedDateTimeISO(timeZone).toPlainDate();
 }
 
@@ -169,7 +174,10 @@ export function comparePlainDates(a: Temporal.PlainDate, b: Temporal.PlainDate):
  * day that starts inside a DST gap starts at the first valid instant. Day
  * windows are half-open: [startOfDayInstant(D), startOfDayInstant(D + 1)).
  */
-export function startOfDayInstant(date: Temporal.PlainDate, timeZone: string = appTimeZone()): Date {
+export function startOfDayInstant(
+  date: Temporal.PlainDate,
+  timeZone: string = appTimeZone(),
+): Date {
   return new Date(date.toZonedDateTime({ timeZone }).epochMilliseconds);
 }
 
@@ -236,7 +244,10 @@ export function plainDateTimeToInstant(
  * repeated hour when DST ends) or not at all (the hour skipped when DST
  * starts). Only a unique wall time maps to exactly one instant.
  */
-export function wallTimeOccurrence(dateTime: string, timeZone: string): "unique" | "repeated" | "skipped" {
+export function wallTimeOccurrence(
+  dateTime: string,
+  timeZone: string,
+): "unique" | "repeated" | "skipped" {
   const plain = Temporal.PlainDateTime.from(dateTime);
   const earlier = plain.toZonedDateTime(timeZone, { disambiguation: "earlier" });
   const later = plain.toZonedDateTime(timeZone, { disambiguation: "later" });
@@ -245,7 +256,11 @@ export function wallTimeOccurrence(dateTime: string, timeZone: string): "unique"
 }
 
 /** The same wall time `days` calendar days later in the zone (DST-safe). */
-export function addCalendarDays(instant: InstantInput, days: number, timeZone: string = appTimeZone()): Date {
+export function addCalendarDays(
+  instant: InstantInput,
+  days: number,
+  timeZone: string = appTimeZone(),
+): Date {
   return new Date(toInstant(instant).toZonedDateTimeISO(timeZone).add({ days }).epochMilliseconds);
 }
 

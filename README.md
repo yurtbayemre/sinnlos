@@ -85,8 +85,8 @@ before roles are applied, is in
 
 In the Microsoft Entra admin center:
 
-1. **App registrations → New registration**, *Accounts in this organizational
-   directory only* (single tenant). Note the **Directory (tenant) ID** and the
+1. **App registrations → New registration**, _Accounts in this organizational
+   directory only_ (single tenant). Note the **Directory (tenant) ID** and the
    **Application (client) ID** (both GUIDs; `common`, `organizations` and
    `consumers` are refused).
 2. **Authentication → Web redirect URI**:
@@ -97,15 +97,15 @@ In the Microsoft Entra admin center:
    (and the production equivalent). "Sign out" ends the intranet session and
    the Microsoft session and returns there; Microsoft only redirects to a
    registered redirect URI, so without it users end on Microsoft's "signed
-   out" page. Leave the *Front-channel logout URL* empty: single sign-out is
+   out" page. Leave the _Front-channel logout URL_ empty: single sign-out is
    not implemented.
 4. **API permissions (delegated)**: `openid`, `profile`, `email`, `User.Read`;
    `User.Read.All` only with `ENTRA_SYNC_MANAGER=1`. Grant admin consent.
    (`GroupMember.Read.All` is not needed.)
-5. **App roles** (allowed member types *Users/Groups*): `Intranet.Admin`,
+5. **App roles** (allowed member types _Users/Groups_): `Intranet.Admin`,
    `Intranet.Editor`, `Intranet.DepartmentHead`, `Intranet.TeamLead`,
    `Intranet.Member`, `Intranet.Guest`. In **Enterprise applications**, set
-   *Assignment required* = Yes and assign the roles to users or security
+   _Assignment required_ = Yes and assign the roles to users or security
    groups (see [Role flow](#role-flow-sign-in--strapi--frontend)).
 6. **Certificates & secrets** → new client secret.
 
@@ -148,7 +148,7 @@ Quick start:
    themselves if you enabled registration.
 5. Sign in at http://localhost:3000/sign-in with email + password.
 
-To offer local sign-in *alongside* Microsoft, set `AUTH_LOCAL_ENABLED=1`
+To offer local sign-in _alongside_ Microsoft, set `AUTH_LOCAL_ENABLED=1`
 for both apps next to `ENTRA_ENABLED=1` (the cms mirrors it into its own
 e-mail provider switch, so without it the cms refuses password sign-ins
 too).
@@ -340,32 +340,32 @@ See [Role flow](#role-flow-sign-in--strapi--frontend) for the roles.
 Strapi ships 22 collection types plus two routes-only APIs
 (`apps/cms/src/api/`):
 
-| Type | Purpose |
-| --- | --- |
-| **department** | Top-level org unit with head, members, teams, pages. Master data **without draft & publish**: one row per department with a stable id; saving in the admin is live immediately (no Publish/Unpublish), hiding a unit means deleting it |
-| **team** | Belongs to a department, has a lead and members. Like department: **no draft & publish**, one row per team, a save is live |
-| **announcement** | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`) |
-| **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement |
-| **comment** | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28) |
-| **reaction** | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement. `create` toggles; with the optional boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store it; each create keeps the oldest copy and deletes the others right after its insert. Removing deletes every copy (also copies from an older release). Delete takes the documentId or the numeric id |
-| **kudos** | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id |
-| **notification** | Per-user notification rows (recipient, actor, link), written by the lifecycles through `apps/cms/src/utils/notify.ts` (one row per recipient, titles at most 255 characters, shortened with `…`). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (`announcement.find` / `event.find`, read from the permissions table at runtime) and who are not blocked, after the publish is saved, with the title and audience of the entry as saved at that moment; one failing row costs that recipient only, and the next publish delivers it. Admins and editors get strictly the targeted audience. Comment and kudos notifications are also written after the comment or kudos is saved, so a failing notification never discards it. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
-| **event** | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events |
-| **event-rsvp** | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms) |
-| **poll** | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them |
-| **poll-vote** | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes; `:id` is the poll's documentId (what the web sends; it survives a republish) or its published row id. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), in one SQL statement with a GROUP BY, and a vote removes the voter's later rows right after it is stored (parallel votes) |
-| **document** | File library entry; `departments` m2m — no relation = company-wide |
-| **classified** | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron |
-| **quick-link** | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel |
-| **course** | Training course (draft & publish): ordered lessons, `mandatory` flag, `completionMode` (`confirm` \| `quizGate` — quiz must be passed before completion unlocks). Maintained in the Strapi admin panel; the content api is read-only |
-| **lesson** | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check (quiz text typed in the admin panel is parsed and stored as the array; a cleared quiz is stored as null). First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers) |
-| **lesson-progress** | Completion receipt per user + lesson, anchored on the lesson's `documentId` (survives re-publish); own-rows read policy, admin report at `/manage/training`. Course completion is derived at read time — a lesson added later re-opens the course |
-| **search-log** | Anonymous search telemetry (term + result count, deliberately NO user relation): write-only content api, aggregated admin-only `/search-logs/summary`, 90-day retention cron. Feeds the Meilisearch go/no-go decision |
-| **wiki-space** | Namespace for wiki pages with scoped visibility |
-| **wiki-page** | Markdown body, tags, parent/children, author, revisions |
-| **wiki-revision** | Auto-captured snapshot of a page before each update |
-| *profile* | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only. For a user bound to Microsoft Entra those four fields belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields` (the form shows them read-only) |
-| *entra-auth* | Routes-only API (no schema): `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (`auth: false`; authenticated by `ENTRA_EXCHANGE_SECRET` and the cms's own ID-token check). 404 while `ENTRA_ENABLED` is not `1` |
+| Type                | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **department**      | Top-level org unit with head, members, teams, pages. Master data **without draft & publish**: one row per department with a stable id; saving in the admin is live immediately (no Publish/Unpublish), hiding a unit means deleting it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **team**            | Belongs to a department, has a lead and members. Like department: **no draft & publish**, one row per team, a save is live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **announcement**    | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **comment**         | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **reaction**        | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement. `create` toggles; with the optional boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store it; each create keeps the oldest copy and deletes the others right after its insert. Removing deletes every copy (also copies from an older release). Delete takes the documentId or the numeric id                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **kudos**           | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **notification**    | Per-user notification rows (recipient, actor, link), written by the lifecycles through `apps/cms/src/utils/notify.ts` (one row per recipient, titles at most 255 characters, shortened with `…`). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (`announcement.find` / `event.find`, read from the permissions table at runtime) and who are not blocked, after the publish is saved, with the title and audience of the entry as saved at that moment; one failing row costs that recipient only, and the next publish delivers it. Admins and editors get strictly the targeted audience. Comment and kudos notifications are also written after the comment or kudos is saved, so a failing notification never discards it. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
+| **event**           | Calendar events, ICS export via custom route (`/api/events/:documentId/ics`; the numeric id of the published row still works, anything else is a 404; the calendar `UID` is built from the documentId, so it survives a re-publish; the file name follows RFC 6266, so any title works, and the file carries `SEQUENCE`/`LAST-MODIFIED` from the last change; the description is exported as plain text, its first 10 000 characters); optional RSVP (`rsvpEnabled` + `capacity`). `departments` decide who is notified, not who can read: every role with `event.find` (guest included) sees all published events                                                                                                                                                                                                                                                                                                      |
+| **event-rsvp**      | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms)                                                                                                                                                                                                                                                                                                                                             |
+| **poll**            | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them                                                                                                                                                              |
+| **poll-vote**       | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes; `:id` is the poll's documentId (what the web sends; it survives a republish) or its published row id. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), in one SQL statement with a GROUP BY, and a vote removes the voter's later rows right after it is stored (parallel votes)                                                                                                                                                                                                                                                                                                                                                                                                  |
+| **document**        | File library entry; `departments` m2m — no relation = company-wide                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| **classified**      | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **quick-link**      | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **course**          | Training course (draft & publish): ordered lessons, `mandatory` flag, `completionMode` (`confirm` \| `quizGate` — quiz must be passed before completion unlocks). Maintained in the Strapi admin panel; the content api is read-only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **lesson**          | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check (quiz text typed in the admin panel is parsed and stored as the array; a cleared quiz is stored as null). First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **lesson-progress** | Completion receipt per user + lesson, anchored on the lesson's `documentId` (survives re-publish); own-rows read policy, admin report at `/manage/training`. Course completion is derived at read time — a lesson added later re-opens the course                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **search-log**      | Anonymous search telemetry (term + result count, deliberately NO user relation): write-only content api, aggregated admin-only `/search-logs/summary`, 90-day retention cron. Feeds the Meilisearch go/no-go decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **wiki-space**      | Namespace for wiki pages with scoped visibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| **wiki-page**       | Markdown body, tags, parent/children, author, revisions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **wiki-revision**   | Auto-captured snapshot of a page before each update                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| _profile_           | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only. For a user bound to Microsoft Entra those four fields belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields` (the form shows them read-only)                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| _entra-auth_        | Routes-only API (no schema): `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (`auth: false`; authenticated by `ENTRA_EXCHANGE_SECRET` and the cms's own ID-token check). 404 while `ENTRA_ENABLED` is not `1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 **Draft & publish.** announcement, course, document, event, lesson, poll,
 quick-link, wiki-space, wiki-page and wiki-revision keep Strapi's draft &
@@ -388,11 +388,11 @@ so publishing it still drops them. The runbook lists both kinds up front:
 
 **Poll department targeting** (enforced by the cms, not only in the UI):
 
-| Caller | Poll without departments | Poll whose departments include the caller's | Poll of other departments |
-| --- | --- | --- | --- |
-| member, team lead, department head, `authenticated` | see, vote, results | see, vote, results | not found (list, detail, vote, results) |
-| guest | as the poll's guest access says (below); by default not found | the same | not found |
-| admin, editor | see, vote, results | see, vote, results | see and results; voting refused |
+| Caller                                              | Poll without departments                                      | Poll whose departments include the caller's | Poll of other departments               |
+| --------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------- | --------------------------------------- |
+| member, team lead, department head, `authenticated` | see, vote, results                                            | see, vote, results                          | not found (list, detail, vote, results) |
+| guest                                               | as the poll's guest access says (below); by default not found | the same                                    | not found                               |
+| admin, editor                                       | see, vote, results                                            | see, vote, results                          | see and results; voting refused         |
 
 - "The caller's department" is the `department` of their user record
   (Strapi admin → Content Manager → User). Role never adds membership; a
@@ -429,11 +429,11 @@ the same rules module): polls are **hidden from guests** (role type exactly
 `guest`) unless an admin or editor opens them, per poll, with two fields
 (admin panel and the `/polls/new` form):
 
-| Visible to guests | Guests can vote | A guest in the poll's audience |
-| --- | --- | --- |
-| off (default) | any | not found: not listed, not in search, 404 on results and vote |
-| on | off | sees the poll and its results; a vote answers 403 "Guests cannot vote on this poll" and the card says "Guests can't vote on this poll." |
-| on | on | sees, votes, results |
+| Visible to guests | Guests can vote | A guest in the poll's audience                                                                                                          |
+| ----------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| off (default)     | any             | not found: not listed, not in search, 404 on results and vote                                                                           |
+| on                | off             | sees the poll and its results; a vote answers 403 "Guests cannot vote on this poll" and the card says "Guests can't vote on this poll." |
+| on                | on              | sees, votes, results                                                                                                                    |
 
 - The department rule still applies: a guest never gets a poll of another
   department. "Guests can vote" without "Visible to guests" does nothing.
@@ -462,7 +462,7 @@ the same rules module): polls are **hidden from guests** (role type exactly
 
 The users-permissions **User** is extended with `department`, `teams`,
 `manager` (self-relation, drives the org chart; paired with its inverse
-`directReports`, which the person page shows as *Direct reports*), the
+`directReports`, which the person page shows as _Direct reports_), the
 schema-`private` Entra columns `microsoftOid` and `entraTenantId` (the
 identity of a Microsoft user; an admin sets both, lower-case, to bind an
 existing account once its owner is confirmed), `roleSource` (`entra` |
@@ -530,8 +530,8 @@ Write-side guards:
 - `is-notification-recipient` — notification delete only by its recipient (or admin)
 
 **Field-level write allowlist (FX07).** The three write policies above
-decide *whether* a caller may write a row and in which role class (head,
-lead, author, …); `apps/cms/src/utils/write-allowlist.ts` decides *what* a
+decide _whether_ a caller may write a row and in which role class (head,
+lead, author, …); `apps/cms/src/utils/write-allowlist.ts` decides _what_ a
 caller without the `admin_role`/`editor` bypass may send. It is the single
 place those payload rules live and the extension point for frontend
 authoring (v2, see [architecture.md §5.34](./docs/architecture.md)):
@@ -758,16 +758,16 @@ a Strapi 401 inside a render or an action redirects the same way.
 [`apps/cms/src/entra/roles.ts`](./apps/cms/src/entra/roles.ts)). The app
 roles come from the signed ID token; the highest privilege wins:
 
-| Entra app role (or `ENTRA_GROUP_ROLES` group) | Strapi `role.type` |
-| --- | --- |
-| `Intranet.Admin` | `admin_role` |
-| `Intranet.Editor` | `editor` |
-| `Intranet.DepartmentHead` | `department_head` |
-| `Intranet.TeamLead` | `team_lead` |
-| `Intranet.Member` | `member` |
-| `Intranet.Guest` | `guest` |
-| *(tenant member, no match)* | `ENTRA_DEFAULT_ROLE`: `member` (default), `guest` or refused (`deny`) |
-| *(B2B guest, no match)* | refused |
+| Entra app role (or `ENTRA_GROUP_ROLES` group) | Strapi `role.type`                                                    |
+| --------------------------------------------- | --------------------------------------------------------------------- |
+| `Intranet.Admin`                              | `admin_role`                                                          |
+| `Intranet.Editor`                             | `editor`                                                              |
+| `Intranet.DepartmentHead`                     | `department_head`                                                     |
+| `Intranet.TeamLead`                           | `team_lead`                                                           |
+| `Intranet.Member`                             | `member`                                                              |
+| `Intranet.Guest`                              | `guest`                                                               |
+| _(tenant member, no match)_                   | `ENTRA_DEFAULT_ROLE`: `member` (default), `guest` or refused (`deny`) |
+| _(B2B guest, no match)_                       | refused                                                               |
 
 `ENTRA_GROUP_ROLES` (optional, `<roleType>:<groupObjectId>,…`, at most 20
 groups) adds group **object ids** checked through Graph
@@ -792,15 +792,15 @@ dashboard still works for such accounts.
 `PERMISSION_MATRIX` in `apps/cms/src/bootstrap/permission-matrix.ts`, further gated by the policies
 above; `R` = find + findOne, `C` = create, `U` = update, `D` = delete):
 
-| Role | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos | Notifications | Courses · Lessons / Progress | Search-log |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `admin_role` | CRUD | CRUD | CRUD / CRUD | CRUD | CRUD | CRUD | CRUD | R+C+D | R+C+D | R+D | R / R+C | C |
-| `editor` | CRUD | R+C · R+C+U | R / R | CRUD | CRUD | CRUD | CRUD | R+C+D | R+C+D | R+D | R / R+C | C |
-| `department_head` | R | R+C · R+C+U | R+U / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D | R / R+C | C |
-| `team_lead` | R | R+C · R+C+U | R / R+U | R | CRUD | R | R · R+C+U · R | R+C+D | R+C | R+D | R / R+C | C |
-| `member` | R | R+C · R+C+U | R / R | R | CRUD | R | R · R+U · R | R+C+D | R+C | R+D | R / R+C | C |
-| `guest` | — | — · — | — / — | R | — | R | R · R · — | R | — | R | — / — | C |
-| `authenticated` *(fallback)* | R | R+C · R+C+U | R / R | R | R | R | R | R+C | R+C | R | R / R+C | C |
+| Role                         | Announcements | Acks · RSVPs | Depts / Teams | Docs · Events · Polls | Classifieds | Quick-links | Wiki spaces · pages · revisions | Comments · Reactions | Kudos | Notifications | Courses · Lessons / Progress | Search-log |
+| ---------------------------- | ------------- | ------------ | ------------- | --------------------- | ----------- | ----------- | ------------------------------- | -------------------- | ----- | ------------- | ---------------------------- | ---------- |
+| `admin_role`                 | CRUD          | CRUD         | CRUD / CRUD   | CRUD                  | CRUD        | CRUD        | CRUD                            | R+C+D                | R+C+D | R+D           | R / R+C                      | C          |
+| `editor`                     | CRUD          | R+C · R+C+U  | R / R         | CRUD                  | CRUD        | CRUD        | CRUD                            | R+C+D                | R+C+D | R+D           | R / R+C                      | C          |
+| `department_head`            | R             | R+C · R+C+U  | R+U / R+U     | R                     | CRUD        | R           | R · R+C+U · R                   | R+C+D                | R+C   | R+D           | R / R+C                      | C          |
+| `team_lead`                  | R             | R+C · R+C+U  | R / R+U       | R                     | CRUD        | R           | R · R+C+U · R                   | R+C+D                | R+C   | R+D           | R / R+C                      | C          |
+| `member`                     | R             | R+C · R+C+U  | R / R         | R                     | CRUD        | R           | R · R+U · R                     | R+C+D                | R+C   | R+D           | R / R+C                      | C          |
+| `guest`                      | —             | — · —        | — / —         | R                     | —           | R           | R · R · —                       | R                    | —     | R             | — / —                        | C          |
+| `authenticated` _(fallback)_ | R             | R+C · R+C+U  | R / R         | R                     | R           | R           | R                               | R+C                  | R+C   | R             | R / R+C                      | C          |
 
 No role holds any `poll-vote` CRUD grant: votes are cast and counted only
 through the custom `vote`/`results` actions below, which every role holds
@@ -847,7 +847,7 @@ audience like everyone else; a rollback to a cms from before guest access
 removes the vote grant first). Grants that older
 bootstrap versions handed to `guest` are actively removed again via the
 `REVOKED_PERMISSIONS` mechanism in the same file (the boot sync only ever
-*adds* rows, so revocations must be listed explicitly to take effect on
+_adds_ rows, so revocations must be listed explicitly to take effect on
 existing databases; any other grant the code does not want is only reported
 by the boot's `[bootstrap] permission drift` line).
 
@@ -857,7 +857,7 @@ survive); this also powers the people directory. No role is excluded:
 an earlier audit attempt to revoke the grant from `guest` turned every guest
 read that populates a user relation (and the notification visibility
 filter) into a 400, because Strapi's core controllers run
-`validateQuery` → `throwRestrictedRelations` *before* the sanitize pass.
+`validateQuery` → `throwRestrictedRelations` _before_ the sanitize pass.
 (On Strapi 5.55.1 such a populate is dropped silently instead of failing,
 which would still strip every author and uploader name from guest pages;
 filters through a user relation still answer 400.)
@@ -890,7 +890,7 @@ separate admin routes and is unaffected:
   (it would let any uploader overwrite arbitrary existing media).
 - **Body allowlist** — the only accepted multipart text field is
   `fileInfo`. Anything else (`ref`/`refId`/`field`, which core would turn
-  into a link on *any* entry — someone else's ad, an avatar, a document —
+  into a link on _any_ entry — someone else's ad, an avatar, a document —
   or `path`) is rejected with 400.
 - **Max 4 files per request, 5 MB per file** (with an `fs.stat` fallback when
   the reported size is missing — never waved through).
@@ -898,7 +898,7 @@ separate admin routes and is unaffected:
   the client-declared mimetype: JPEG/PNG/WebP only. **No SVG** (stored-XSS
   vector) and no GIF (decompression-bomb surface) on purpose.
 - **Canonical filename** — the stored name becomes `<stem>.<extension of
-  the sniffed type>` (core stores and serves by extension, so a JPEG named
+the sniffed type>` (core stores and serves by extension, so a JPEG named
   `x.pdf` was served as `application/pdf`). A stem core cannot turn into a
   slug (CJK, emoji or punctuation only) becomes `image`.
 - **Uploader attribution** — every stored file is stamped with the caller's
@@ -924,13 +924,13 @@ gates the UI with the fail-closed allowlist helpers in
 `apps/web/src/lib/roles.ts` — `null`, unknown or differently-cased roles
 never pass, and exclusion checks such as `role !== "guest"` are not allowed:
 
-| Helper | Roles | Used for |
-| --- | --- | --- |
-| `isAdmin` | `admin_role` | sidebar *Admin* link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
-| `canCreatePolls` | `admin_role`, `editor` | *New poll* button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards |
-| `canRsvp` | the five staff roles + `authenticated` | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant) |
-| `canPostAds` | the five staff roles | *New ad* button, `/marketplace/new` |
-| `isGuest` | `guest` | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint |
+| Helper           | Roles                                  | Used for                                                                                                                                                                                  |
+| ---------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isAdmin`        | `admin_role`                           | sidebar _Admin_ link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
+| `canCreatePolls` | `admin_role`, `editor`                 | _New poll_ button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards                                                                  |
+| `canRsvp`        | the five staff roles + `authenticated` | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant)                                                                                           |
+| `canPostAds`     | the five staff roles                   | _New ad_ button, `/marketplace/new`                                                                                                                                                       |
+| `isGuest`        | `guest`                                | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint                                                                              |
 
 Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
@@ -1084,8 +1084,9 @@ blocking `pnpm audit --prod --audit-level=critical` and an advisory one at
 `infra` (shellcheck over every shell script; `docker compose config` of
 Caddy mode, Traefik mode, which must refuse to render without `DOMAIN`, and
 the rollback overrides) and `images · cms`/`images · web` (both Dockerfiles
-built with buildx, not pushed). `format:check` and shellcheck only report
-until the one-time format sweep after batch 10. Dependabot
+built with buildx, not pushed). `format:check` and shellcheck block since
+the one-time format sweep after batch 10 (the two long hand-formatted docs,
+`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). Dependabot
 (`.github/dependabot.yml`) opens weekly grouped update pull requests for the
 npm workspace, the Dockerfiles' base image and the GitHub Actions.
 `.gitattributes` stores and checks out every text file with LF.
@@ -1198,12 +1199,12 @@ Safety nets for refactors (roadmap S03–S06, S09):
 
 - [ ] `pnpm install` completes cleanly
 - [ ] Strapi admin loads at `:1337/admin`, first admin created
-- [ ] The six intranet roles visible under *Settings → Users & Permissions →
-      Roles* (next to the built-in *Authenticated* and *Public*)
+- [ ] The six intranet roles visible under _Settings → Users & Permissions →
+      Roles_ (next to the built-in _Authenticated_ and _Public_)
 - [ ] Create a department, a team, a wiki space + page via the admin
 - [ ] With `SEED_DEMO_DATA=1`, the seeded announcements, events, wiki pages
       and the rest show in the Content Manager's default list as
-      *Published*, and editing and publishing one keeps its relations
+      _Published_, and editing and publishing one keeps its relations
       (author, department, space, …)
 - [ ] Next.js dashboard at `:3000` shows stat cards and empty states
 - [ ] Local sign-in (e-mail + password) completes and returns to the
@@ -1225,14 +1226,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] While signed in, `/api/auth/session` returns only `user`
       (name/email/image/id), `provider` and `expires` — no Strapi JWT, role
       or department
-- [ ] An admin sees the *Admin* link and `/manage`; an editor sees
-      *New poll*; a guest sees no RSVP controls and no *New ad* button
+- [ ] An admin sees the _Admin_ link and `/manage`; an editor sees
+      _New poll_; a guest sees no RSVP controls and no _New ad_ button
 - [ ] Poll targeting: a poll restricted to one department is listed for
-      its members only; an editor outside it sees *Only for: …*, the
+      its members only; an editor outside it sees _Only for: …_, the
       results and disabled buttons
 - [ ] Poll guest access: a guest sees no poll until an admin or editor
-      turns on *Visible to guests* (then results, disabled buttons and
-      *Guests can't vote on this poll.*); with *Guests can vote* on as well
+      turns on _Visible to guests_ (then results, disabled buttons and
+      _Guests can't vote on this poll._); with _Guests can vote_ on as well
       the guest can vote
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
@@ -1248,20 +1249,20 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] ⌘K as a guest finds a colleague by name but not by e-mail; while a new
       term loads, the previous term's results are not shown (nor the old
       results of the same term typed again)
-- [ ] `/people/<id>` of a manager shows *Direct reports*
+- [ ] `/people/<id>` of a manager shows _Direct reports_
 - [ ] A user blocked in the Strapi admin loses `/uploads` files within a
       minute (401) and is sent to sign-in on the next page load
 - [ ] Digest opt-ins save on `/profile`; without SMTP env the 07:30 cron
       logs `[digest] skipped` (dark mode); a guest sees no digest options
 - [ ] Publishing an announcement logs `[notifications] created <n>
-      notification(s) for announcement …` and rings the bell of its
+notification(s) for announcement …` and rings the bell of its
       audience only (no guest, no blocked user)
 - [ ] On Postgres the cms log shows `[datetime] process time zone UTC,
-      APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
+APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
       (`infra/live-smoke.sh` checks both); an all-day event's `.ics` download
       is an all-day entry
 - [ ] The web log shows `[datetime] web process time zone UTC, APP_TIME_ZONE …`;
-      on `/events` an event that is running today is under *Upcoming* and a
+      on `/events` an event that is running today is under _Upcoming_ and a
       multi-day event shows its end day; relative times say "yesterday"
       for something from late last night
 - [ ] The `.ics` link on `/events` names the event's documentId, the file's
@@ -1275,18 +1276,18 @@ Safety nets for refactors (roadmap S03–S06, S09):
       announcement (not "–") while the directory is complete, also with
       more than 2000 confirmations in total
 - [ ] The kudos picker lists neither you nor blocked accounts; `/people`
-      renders 48 cards and a *+ N people* button when more match; the bell
+      renders 48 cards and a _+ N people_ button when more match; the bell
       badge counts every unread notification (99+ above 99), not only the
       20 in the panel
 - [ ] A lesson with a YouTube video plays (no player "Error 153"); on a
       real domain, since localhost can hide the Referer effect
 - [ ] `/people/abc`, `/marketplace/abc` and `/marketplace/2147483648`
-      show the *Page not found* card (like every `notFound()` page here
+      show the _Page not found_ card (like every `notFound()` page here
       with HTTP status 200 and `noindex`: `loading.tsx` streams the shell
       first) and send no request to the cms; with the cms stopped, `/profile` shows the error banner
       and no editable profile form; stopping the cms after a page loaded, a
-      reaction click or *Mark all read* shows an inline error while the
+      reaction click or _Mark all read_ shows an inline error while the
       page stays
-- [ ] The first Tab on an app page shows *Skip to content*; the theme
+- [ ] The first Tab on an app page shows _Skip to content_; the theme
       toggle switches on the first click also for a user whose system theme
       is dark

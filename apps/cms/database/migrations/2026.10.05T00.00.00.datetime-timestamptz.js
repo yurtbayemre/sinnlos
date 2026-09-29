@@ -24,7 +24,10 @@ const path = require("node:path");
 function loadRepair() {
   const strapiInstance = global.strapi;
   const distSrc =
-    (strapiInstance && strapiInstance.dirs && strapiInstance.dirs.dist && strapiInstance.dirs.dist.src) ||
+    (strapiInstance &&
+      strapiInstance.dirs &&
+      strapiInstance.dirs.dist &&
+      strapiInstance.dirs.dist.src) ||
     path.join(__dirname, "..", "..", "dist", "src");
   return require(path.join(distSrc, "database", "datetime-legacy.js"));
 }

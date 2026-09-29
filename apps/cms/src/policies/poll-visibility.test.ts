@@ -37,8 +37,18 @@ const PUBLISHED = "2026-09-01T00:00:00.000Z";
 /** 1 company-wide, 2 Engineering, 3 Design, 4 Eng+Design, 5 orphaned, 6 legacy 'all' + Eng, 7 a draft. */
 const POLLS: PollRow[] = [
   { id: 1, audience: "all", departments: [], publishedAt: PUBLISHED },
-  { id: 2, audience: "departments", departments: [{ id: 2, documentId: "d-eng" }], publishedAt: PUBLISHED },
-  { id: 3, audience: "departments", departments: [{ id: 3, documentId: "d-design" }], publishedAt: PUBLISHED },
+  {
+    id: 2,
+    audience: "departments",
+    departments: [{ id: 2, documentId: "d-eng" }],
+    publishedAt: PUBLISHED,
+  },
+  {
+    id: 3,
+    audience: "departments",
+    departments: [{ id: 3, documentId: "d-design" }],
+    publishedAt: PUBLISHED,
+  },
   {
     id: 4,
     audience: "departments",
@@ -212,14 +222,67 @@ describe("poll-visibility policy: guest access (owner decision 2026-09-27)", () 
    * 18 Engineering hidden, 19 a visible draft.
    */
   const GUEST_POLLS: PollRow[] = [
-    { id: 11, audience: "all", departments: [], publishedAt: PUBLISHED, visibleToGuests: true, guestsCanVote: false },
-    { id: 12, audience: "all", departments: [], publishedAt: PUBLISHED, visibleToGuests: true, guestsCanVote: true },
-    { id: 13, audience: "all", departments: [], publishedAt: PUBLISHED, visibleToGuests: false, guestsCanVote: false },
-    { id: 14, audience: null, departments: [], publishedAt: PUBLISHED, visibleToGuests: null, guestsCanVote: null },
-    { id: 15, audience: "all", departments: [], publishedAt: PUBLISHED, visibleToGuests: false, guestsCanVote: true },
-    { id: 16, audience: "departments", departments: [ENG], publishedAt: PUBLISHED, visibleToGuests: true },
-    { id: 17, audience: "departments", departments: [DESIGN], publishedAt: PUBLISHED, visibleToGuests: true },
-    { id: 18, audience: "departments", departments: [ENG], publishedAt: PUBLISHED, visibleToGuests: false },
+    {
+      id: 11,
+      audience: "all",
+      departments: [],
+      publishedAt: PUBLISHED,
+      visibleToGuests: true,
+      guestsCanVote: false,
+    },
+    {
+      id: 12,
+      audience: "all",
+      departments: [],
+      publishedAt: PUBLISHED,
+      visibleToGuests: true,
+      guestsCanVote: true,
+    },
+    {
+      id: 13,
+      audience: "all",
+      departments: [],
+      publishedAt: PUBLISHED,
+      visibleToGuests: false,
+      guestsCanVote: false,
+    },
+    {
+      id: 14,
+      audience: null,
+      departments: [],
+      publishedAt: PUBLISHED,
+      visibleToGuests: null,
+      guestsCanVote: null,
+    },
+    {
+      id: 15,
+      audience: "all",
+      departments: [],
+      publishedAt: PUBLISHED,
+      visibleToGuests: false,
+      guestsCanVote: true,
+    },
+    {
+      id: 16,
+      audience: "departments",
+      departments: [ENG],
+      publishedAt: PUBLISHED,
+      visibleToGuests: true,
+    },
+    {
+      id: 17,
+      audience: "departments",
+      departments: [DESIGN],
+      publishedAt: PUBLISHED,
+      visibleToGuests: true,
+    },
+    {
+      id: 18,
+      audience: "departments",
+      departments: [ENG],
+      publishedAt: PUBLISHED,
+      visibleToGuests: false,
+    },
     { id: 19, audience: "all", departments: [], publishedAt: null, visibleToGuests: true },
   ];
 
@@ -229,7 +292,9 @@ describe("poll-visibility policy: guest access (owner decision 2026-09-27)", () 
   };
 
   it("lists for a guest only the polls visible to guests in its audience", async () => {
-    expect(await idsFor(as("guest", { id: 1, documentId: "d-eng" }))).toEqual({ id: { $in: [11, 12, 16] } });
+    expect(await idsFor(as("guest", { id: 1, documentId: "d-eng" }))).toEqual({
+      id: { $in: [11, 12, 16] },
+    });
     expect(await idsFor(as("guest", DESIGN))).toEqual({ id: { $in: [11, 12, 17] } });
     expect(await idsFor(as("guest", null))).toEqual({ id: { $in: [11, 12] } });
   });
@@ -249,7 +314,9 @@ describe("poll-visibility policy: guest access (owner decision 2026-09-27)", () 
       { filters: { question: { $containsi: "hidden" } }, status: "draft" },
       GUEST_POLLS,
     );
-    expect(query.filters).toEqual({ $and: [{ question: { $containsi: "hidden" } }, { id: { $in: [11, 12] } }] });
+    expect(query.filters).toEqual({
+      $and: [{ question: { $containsi: "hidden" } }, { id: { $in: [11, 12] } }],
+    });
     expect(query.status).toBe("published");
   });
 

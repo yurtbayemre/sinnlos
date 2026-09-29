@@ -11,19 +11,15 @@ import lifecycle from "./index";
 const { calls, step, syncStep, failing } = vi.hoisted(() => {
   const calls: string[] = [];
   const failing = new Set<string>();
-  const step =
-    (name: string) =>
-    async (): Promise<void> => {
-      calls.push(name);
-      if (failing.has(name)) throw new Error(`${name} failed`);
-    };
+  const step = (name: string) => async (): Promise<void> => {
+    calls.push(name);
+    if (failing.has(name)) throw new Error(`${name} failed`);
+  };
   /** A step the lifecycle calls without awaiting (a synchronous function). */
-  const syncStep =
-    (name: string) =>
-    (): void => {
-      calls.push(name);
-      if (failing.has(name)) throw new Error(`${name} failed`);
-    };
+  const syncStep = (name: string) => (): void => {
+    calls.push(name);
+    if (failing.has(name)) throw new Error(`${name} failed`);
+  };
   return { calls, step, syncStep, failing };
 });
 
@@ -126,7 +122,9 @@ describe("src/index.ts lifecycle order (B01)", () => {
 
   it("a failing identity index (Entra on) stops bootstrap() before the provider sync", async () => {
     failing.add("ensureEntraIdentityIndex");
-    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("ensureEntraIdentityIndex failed");
+    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow(
+      "ensureEntraIdentityIndex failed",
+    );
     expect(calls).not.toContain("syncAuthProviders");
   });
 

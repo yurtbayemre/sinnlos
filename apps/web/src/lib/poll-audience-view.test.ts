@@ -19,9 +19,20 @@ describe("pollAudienceView", () => {
     expect(
       pollAudienceView({
         canVote: true,
-        audience: { targeted: true, departments: [{ documentId: "d1", name: "Engineering" }, { documentId: "d2", name: "Design" }] },
+        audience: {
+          targeted: true,
+          departments: [
+            { documentId: "d1", name: "Engineering" },
+            { documentId: "d2", name: "Design" },
+          ],
+        },
       }),
-    ).toEqual({ canVote: true, targeted: true, departmentNames: ["Engineering", "Design"], hint: null });
+    ).toEqual({
+      canVote: true,
+      targeted: true,
+      departmentNames: ["Engineering", "Design"],
+      hint: null,
+    });
   });
 
   it("locks voting with the notInAudience hint when the CMS says canVote false", () => {
@@ -36,7 +47,12 @@ describe("pollAudienceView", () => {
   it("says audienceMissing for a targeted poll without departments", () => {
     expect(
       pollAudienceView({ canVote: false, audience: { targeted: true, departments: [] } }),
-    ).toMatchObject({ canVote: false, targeted: true, departmentNames: [], hint: "audienceMissing" });
+    ).toMatchObject({
+      canVote: false,
+      targeted: true,
+      departmentNames: [],
+      hint: "audienceMissing",
+    });
   });
 
   it("leaves a company-wide poll without badge or hint", () => {
@@ -50,17 +66,21 @@ describe("pollAudienceView", () => {
       { targeted: false, departments: [] },
       { targeted: true, departments: [{ documentId: "d1", name: "Engineering" }] },
     ]) {
-      expect(pollAudienceView({ canVote: false, audience }, { viewerIsGuest: true })).toMatchObject({
-        canVote: false,
-        hint: "guestVotingDisabled",
-      });
+      expect(pollAudienceView({ canVote: false, audience }, { viewerIsGuest: true })).toMatchObject(
+        {
+          canVote: false,
+          hint: "guestVotingDisabled",
+        },
+      );
     }
   });
 
   it("gives a guest who may vote no hint, and a non-guest the audience hint as before", () => {
     const audience = { targeted: false, departments: [] };
     expect(pollAudienceView({ canVote: true, audience }, { viewerIsGuest: true }).hint).toBeNull();
-    expect(pollAudienceView({ canVote: false, audience }, { viewerIsGuest: false }).hint).toBe("notInAudience");
+    expect(pollAudienceView({ canVote: false, audience }, { viewerIsGuest: false }).hint).toBe(
+      "notInAudience",
+    );
     expect(pollAudienceView({ canVote: false, audience }).hint).toBe("notInAudience");
   });
 });
@@ -73,7 +93,9 @@ describe("pollGuestNotes", () => {
       "guestAccessVisible",
       "guestAccessVote",
     ]);
-    expect(pollGuestNotes({ ...poll, visibleToGuests: true, guestsCanVote: false })).toEqual(["guestAccessVisible"]);
+    expect(pollGuestNotes({ ...poll, visibleToGuests: true, guestsCanVote: false })).toEqual([
+      "guestAccessVisible",
+    ]);
   });
 
   it("has no note for a poll hidden from guests, an inert vote flag or an older CMS", () => {

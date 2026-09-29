@@ -61,7 +61,7 @@ Three architectural decisions already made carry most of the weight:
 1. **Per-user Strapi JWT on every request** — `apps/web/src/lib/strapi.ts`
    injects the caller's Strapi JWT into all fetches (read server-side from
    the encrypted session cookie; it is never exposed to the browser).
-   Authenticated *writes* (comments, votes, kudos) need zero new auth
+   Authenticated _writes_ (comments, votes, kudos) need zero new auth
    plumbing: a Server Action calling `strapi()` with `method: "POST"` just
    works, and Strapi knows who the author is.
 2. **The viewer's role + department are known per request** —
@@ -97,6 +97,7 @@ schema in `apps/cms/src/api/<name>/`, permissions added to the
 users with `displayName`, `jobTitle`, `department`, `teams`, `avatar`.
 
 **CMS**
+
 - Extend `user/schema.json`: `phone`, `officeLocation`, `manager`
   (self-relation `manyToOne` → user), `hireDate` (date), `birthday` (date,
   `private` until consent decided).
@@ -110,6 +111,7 @@ users with `displayName`, `jobTitle`, `department`, `teams`, `avatar`.
   to all roles (field-level privacy via `private: true` on sensitive fields).
 
 **Web**
+
 - `/people` — searchable, department-filterable card grid (client-side filter
   over one paginated fetch is fine below ~2k employees).
 - `/people/[id]` — profile page: contact info, department, teams, manager
@@ -131,6 +133,7 @@ visible-tab polling (`LiveCommentSection`).
 two-way communication. Prerequisite for recognition (1.3 reuses the pattern).
 
 **CMS**
+
 - New `comment` content type: `body` (text), `author` (relation → user),
   `target` (string, e.g. `announcement:42` — Strapi v5 has no polymorphic
   relations; a typed string key keeps it one content type for all targets),
@@ -144,6 +147,7 @@ two-way communication. Prerequisite for recognition (1.3 reuses the pattern).
 - `PERMISSION_MATRIX`: all roles get `find`/`create` on both; `delete` own.
 
 **Web**
+
 - `CommentThread` + `ReactionBar` client components; Server Actions
   `addComment`, `toggleReaction` in `apps/web/src/lib/actions.ts` using the
   existing `strapi()` client, then `revalidateTag("announcements")`.
@@ -159,6 +163,7 @@ opt-in birthdays: `user.birthday`/`birthdayVisible`, maintained via
 `/api/me`, surfaced year-less).
 
 **CMS**
+
 - New `kudos` content type: `from` (user), `to` (user), `message`,
   `value` (enum of company values — configurable later).
 - Celebrations are derived data: birthdays/anniversaries computed from
@@ -166,6 +171,7 @@ opt-in birthdays: `user.birthday`/`birthdayVisible`, maintained via
   `GET /api/celebrations?window=7` that returns upcoming ones.
 
 **Web**
+
 - "Give kudos" modal (user picker reuses directory search from 1.1).
 - Dashboard widgets: kudos feed + "Celebrations this week".
 
@@ -186,18 +192,20 @@ reverse-proxy split). Since 2026-08 also with a month grid
 decliner privacy).
 
 **CMS**
+
 - New `event` content type: `title`, `description` (richtext), `start`,
   `end`, `allDay`, `location`, `url`, `departments` (m2m, empty = company-wide).
 - Draft & publish enabled (same as announcements).
 
 **Web**
+
 - `/events` — month grid (custom component; a month grid is ~100 lines and
   avoids a calendar-library dependency) + agenda list for mobile.
 - Per-event **ICS download** (`/api/events/[id]/ics` route handler) so it
   lands in Outlook — this covers 90% of the "calendar sync" ask without
   touching Graph write scopes.
 - Dashboard widget: next 3 events.
-- *(Later, optional)* push events into Outlook calendars via Graph
+- _(Later, optional)_ push events into Outlook calendars via Graph
   application permissions — separate decision, needs admin consent.
 
 **Effort:** ~3 days. **Depends on:** nothing (targeting filter shared with 2.3).
@@ -214,12 +222,14 @@ profile page, a 07:30 cron with audience-filtered content, idempotent via
 `DIGESTS_DISABLED=1`; without SMTP env the cron is a logged no-op.
 
 **Phase A — derived, no fan-out (ship first):**
+
 - Bell icon in the topbar with unread count = announcements/events/kudos-to-me
   newer than `user.lastSeenNotificationsAt` (new datetime field on user).
   One aggregated route handler computes this; opening the panel updates the
   timestamp. No queue, no per-user rows, scales fine.
 
 **Phase B — real notification rows (when mentions arrive):**
+
 - `notification` content type (`recipient`, `type`, `title`, `link`,
   `readAt`) created by lifecycle hooks (`afterCreate` on announcement →
   notify targeted users; on comment reply → notify parent author; on kudos →
@@ -240,10 +250,12 @@ notifies about (1.2, 1.3, 2.1).
 filter accordingly.
 
 **CMS**
+
 - Add `departments` (m2m) + `audience` (enum: `all` | `departments`) to
   `announcement` (and reuse on `event`).
 
 **Web**
+
 - Announcements/dashboard queries gain
   `filters[$or][0][audience][$eq]=all&filters[$or][1][departments][id][$eq]=<sessionDeptId>`.
   These fetches become per-user → switch them to `noCache: true` (same
@@ -266,7 +278,7 @@ refetch through the caller's own session. Polling demoted to backstop
 Two details below turned out WRONG during implementation and are corrected
 in the shipped design — kept here so nobody "fixes" the code back to the
 sketch: the endpoints live at `/live/stream` + `/api/live/emit` (NOT
-`/api/events*` — external /api/* is swallowed by the cms Traefik rule,
+`/api/events*` — external /api/\* is swallowed by the cms Traefik rule,
 which is exactly what makes the emit ingest internal-only), and channels
 key on `targetDocumentId` (NOT the numeric `targetId`, which died with
 issue #25). Also answered from the spike list: Traefik's 60s `readTimeout` default
@@ -371,6 +383,7 @@ restricted after its departments are deleted; guests vote on company-wide
 polls): see the README's content model section.
 
 **CMS**
+
 - `poll`: `question`, `options` (JSON array of strings), `closesAt`,
   `anonymous` (bool), `departments` targeting (from 2.3).
 - `poll-vote`: `poll` (relation), `voter` (relation), `optionIndex` (int).
@@ -380,6 +393,7 @@ polls): see the README's content model section.
   voter identity when `anonymous`).
 
 **Web**
+
 - `PollCard` widget in dashboard + announcements feed: options as buttons,
   results as CSS bar chart after voting. Server Action → custom vote route.
 
@@ -391,12 +405,14 @@ polls): see the README's content model section.
 `document-visibility` read policy, `/documents` page.
 
 **CMS**
+
 - `document` content type: `title`, `description`, `file` (media),
   `category` (enum or relation), `departments` (m2m, empty = public).
 - Files live in Strapi's existing upload plugin; this type adds the
   browsable, permission-aware catalogue on top.
 
 **Web**
+
 - `/documents` — filter by category/department, search by title, download
   button, "recently updated" sort. `EmptyState` + skeletons per existing
   patterns.
@@ -462,15 +478,15 @@ lives at `/manage/analytics` and combines them with Strapi content stats.
 
 ## Suggested order & rough timeline
 
-| Sprint (≈1 wk) | Deliverables |
-|---|---|
-| 1 | 1.1 Directory + org chart |
-| 2 | 1.2 Comments & reactions, 1.3 Recognition |
-| 3 | 2.1 Events calendar, 2.3 Targeting |
-| 4 | 2.2 Notifications (A then B) |
-| 5 | 3.1 Polls, 3.2 Documents |
-| 6 | 4.1 Search V1, 4.2 Analytics |
-| later | ~~2.4 Live updates (SSE)~~ ✅ 2026-09, 4.1 V2 (Meilisearch — data-driven decision ~Oct 2026), 4.3 AI assistant |
+| Sprint (≈1 wk) | Deliverables                                                                                                   |
+| -------------- | -------------------------------------------------------------------------------------------------------------- |
+| 1              | 1.1 Directory + org chart                                                                                      |
+| 2              | 1.2 Comments & reactions, 1.3 Recognition                                                                      |
+| 3              | 2.1 Events calendar, 2.3 Targeting                                                                             |
+| 4              | 2.2 Notifications (A then B)                                                                                   |
+| 5              | 3.1 Polls, 3.2 Documents                                                                                       |
+| 6              | 4.1 Search V1, 4.2 Analytics                                                                                   |
+| later          | ~~2.4 Live updates (SSE)~~ ✅ 2026-09, 4.1 V2 (Meilisearch — data-driven decision ~Oct 2026), 4.3 AI assistant |
 
 ## Cross-cutting checklist (applies to every feature)
 

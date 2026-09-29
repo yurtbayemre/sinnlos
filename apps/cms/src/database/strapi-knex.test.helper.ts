@@ -25,7 +25,9 @@ const requireFromCms = createRequire(join(__dirname, "..", "..", "package.json")
 /** knex as @strapi/database resolves it (same version and dialects). */
 export function loadStrapiKnex(): KnexFactory {
   const requireFromStrapi = createRequire(requireFromCms.resolve("@strapi/strapi/package.json"));
-  const requireFromDatabase = createRequire(requireFromStrapi.resolve("@strapi/database/package.json"));
+  const requireFromDatabase = createRequire(
+    requireFromStrapi.resolve("@strapi/database/package.json"),
+  );
   return requireFromDatabase("knex") as KnexFactory;
 }
 

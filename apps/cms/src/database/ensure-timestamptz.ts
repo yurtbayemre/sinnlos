@@ -143,7 +143,10 @@ async function sessionTimeZone(sql: SqlClient): Promise<string> {
  * register(): zone log, session check, TZ rules for fresh and repair boots.
  * Throws (refusing the boot) before Strapi writes anything.
  */
-export async function prepareDatetimeContract(strapi: GuardHost, options: GuardOptions = {}): Promise<void> {
+export async function prepareDatetimeContract(
+  strapi: GuardHost,
+  options: GuardOptions = {},
+): Promise<void> {
   const env = options.env ?? process.env;
   const zone = options.processZone ?? processTimeZone();
   // Also validates APP_TIME_ZONE a second time for this process.
@@ -197,7 +200,10 @@ export async function prepareDatetimeContract(strapi: GuardHost, options: GuardO
  * stays as a backstop (core beforeSync handlers run in parallel with this
  * one).
  */
-export async function refuseNonUtcSchemaSync(strapi: GuardHost, options: GuardOptions = {}): Promise<void> {
+export async function refuseNonUtcSchemaSync(
+  strapi: GuardHost,
+  options: GuardOptions = {},
+): Promise<void> {
   if (!isPostgres(strapi)) return;
   const zone = options.processZone ?? processTimeZone();
   if (isUtcZone(zone)) return;
@@ -256,7 +262,10 @@ async function convertTable(
  * table. Throws only for conditions a retry cannot fix (non-UTC process,
  * unrepaired legacy data); a failed table is logged and left for the retry.
  */
-export async function convertNaiveColumns(strapi: GuardHost, options: GuardOptions = {}): Promise<NaiveColumn[]> {
+export async function convertNaiveColumns(
+  strapi: GuardHost,
+  options: GuardOptions = {},
+): Promise<NaiveColumn[]> {
   if (!isPostgres(strapi)) return [];
   const schema = schemaOf(strapi);
   const sql = knexSqlClient(strapi.db.connection);
@@ -333,7 +342,10 @@ export async function convertNaiveColumns(strapi: GuardHost, options: GuardOptio
  * bootstrap(): the last word before the server starts. Retries whatever the
  * afterSync pass could not convert and throws if any naive column remains.
  */
-export async function assertTimestamptzContract(strapi: GuardHost, options: GuardOptions = {}): Promise<void> {
+export async function assertTimestamptzContract(
+  strapi: GuardHost,
+  options: GuardOptions = {},
+): Promise<void> {
   if (!isPostgres(strapi)) return;
   const schema = schemaOf(strapi);
   const sql = knexSqlClient(strapi.db.connection);

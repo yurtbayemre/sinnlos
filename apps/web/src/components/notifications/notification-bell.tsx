@@ -185,7 +185,11 @@ export function NotificationBell({
                         {n.title}
                       </div>
                       <div className="mt-0.5 text-xs text-muted-foreground">
-                        {relativeTime(n.createdAt, tRel, { granularity: "minute", locale, timeZone })}
+                        {relativeTime(n.createdAt, tRel, {
+                          granularity: "minute",
+                          locale,
+                          timeZone,
+                        })}
                       </div>
                     </div>
                     {!n.readAt && <div className="mt-2 h-2 w-2 shrink-0 rounded-full bg-primary" />}

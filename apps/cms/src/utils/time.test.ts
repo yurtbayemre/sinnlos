@@ -165,7 +165,9 @@ describe("wallTimeToInstant", () => {
 
   it("builds the poll deadline D 23:59:59 in the business zone", () => {
     const day = parsePlainDate("2026-09-30");
-    expect(wallTimeToInstant(day, "23:59:59", BERLIN).toISOString()).toBe("2026-09-30T21:59:59.000Z");
+    expect(wallTimeToInstant(day, "23:59:59", BERLIN).toISOString()).toBe(
+      "2026-09-30T21:59:59.000Z",
+    );
     expect(wallTimeToInstant(day, "23:59:59", NEW_YORK).toISOString()).toBe(
       "2026-10-01T03:59:59.000Z",
     );
@@ -184,8 +186,12 @@ describe("plainDateTimeToInstant / wallTimeOccurrence", () => {
     expect(plainDateTimeToInstant("2026-08-16T10:00:00.000000", BERLIN).toISOString()).toBe(
       "2026-08-16T08:00:00.000Z",
     );
-    expect(plainDateTimeToInstant("2026-10-25T02:30:00", BERLIN).toISOString()).toBe("2026-10-25T01:30:00.000Z");
-    expect(plainDateTimeToInstant("2027-03-28T02:30:00", BERLIN).toISOString()).toBe("2027-03-28T01:30:00.000Z");
+    expect(plainDateTimeToInstant("2026-10-25T02:30:00", BERLIN).toISOString()).toBe(
+      "2026-10-25T01:30:00.000Z",
+    );
+    expect(plainDateTimeToInstant("2027-03-28T02:30:00", BERLIN).toISOString()).toBe(
+      "2027-03-28T01:30:00.000Z",
+    );
     expect(plainDateTimeToInstant("2026-10-25T02:30:00", BERLIN, "earlier").toISOString()).toBe(
       "2026-10-25T00:30:00.000Z",
     );
@@ -223,10 +229,17 @@ describe("nextAnnual", () => {
   const leapBirthday = parsePlainDate("2004-02-29");
 
   it("puts Feb 29 on Feb 28 in a non-leap year and on Feb 29 in a leap year", () => {
-    expect(nextAnnual(leapBirthday, parsePlainDate("2027-01-10")).next.toString()).toBe("2027-02-28");
+    expect(nextAnnual(leapBirthday, parsePlainDate("2027-01-10")).next.toString()).toBe(
+      "2027-02-28",
+    );
     expect(nextAnnual(leapBirthday, parsePlainDate("2027-02-28"))).toMatchObject({ daysUntil: 0 });
-    expect(nextAnnual(leapBirthday, parsePlainDate("2027-03-01")).next.toString()).toBe("2028-02-29");
-    expect(nextAnnual(leapBirthday, parsePlainDate("2028-02-28"))).toMatchObject({ daysUntil: 1, years: 24 });
+    expect(nextAnnual(leapBirthday, parsePlainDate("2027-03-01")).next.toString()).toBe(
+      "2028-02-29",
+    );
+    expect(nextAnnual(leapBirthday, parsePlainDate("2028-02-28"))).toMatchObject({
+      daysUntil: 1,
+      years: 24,
+    });
   });
 
   it("wraps from Dec 31 to the next year", () => {
@@ -245,7 +258,9 @@ describe("nextAnnual", () => {
   it("reports years < 1 for a same-day or future start (callers skip those)", () => {
     expect(nextAnnual(parsePlainDate("2026-09-24"), parsePlainDate("2026-09-24")).years).toBe(0);
     expect(nextAnnual(parsePlainDate("2026-12-01"), parsePlainDate("2026-09-24")).years).toBe(0);
-    expect(nextAnnual(parsePlainDate("2027-03-01"), parsePlainDate("2026-09-24")).years).toBeLessThan(1);
+    expect(
+      nextAnnual(parsePlainDate("2027-03-01"), parsePlainDate("2026-09-24")).years,
+    ).toBeLessThan(1);
   });
 });
 
@@ -282,9 +297,11 @@ describe("startOfIsoWeek / monthGrid", () => {
 
 describe("formatPlainDate", () => {
   it("renders the calendar day itself, never a shifted one", () => {
-    expect(formatPlainDate("en-US", "2026-09-30", { month: "short", day: "numeric" })).toBe("Sep 30");
-    expect(formatPlainDate("de-DE", "2026-09-30", { day: "2-digit", month: "2-digit", year: "numeric" })).toBe(
-      "30.09.2026",
+    expect(formatPlainDate("en-US", "2026-09-30", { month: "short", day: "numeric" })).toBe(
+      "Sep 30",
     );
+    expect(
+      formatPlainDate("de-DE", "2026-09-30", { day: "2-digit", month: "2-digit", year: "numeric" }),
+    ).toBe("30.09.2026");
   });
 });

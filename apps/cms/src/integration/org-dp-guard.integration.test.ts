@@ -61,47 +61,55 @@ describe.each(testEngines())("restarts and the org-dp boot guard on %s", (engine
     await database?.drop();
   });
 
-  it("a second boot adds no role and no permission, and the accounts still sign in", async () => {
-    expect(firstBoot.roles).toBe(8); // six intranet roles + authenticated + public
-    expect(firstBoot.permissions).toBeGreaterThan(400);
+  it(
+    "a second boot adds no role and no permission, and the accounts still sign in",
+    async () => {
+      expect(firstBoot.roles).toBe(8); // six intranet roles + authenticated + public
+      expect(firstBoot.permissions).toBeGreaterThan(400);
 
-    const t = await createTestStrapi({ database, fixtures: false });
-    try {
-      const member = fixtures.users.member;
-      const jwt = await t.login(member.username, member.password);
-      const me = await t.api<{ username?: string }>({ jwt }, "/api/users/me");
-      expect(me.status).toBe(200);
-      expect(me.body.username).toBe(member.username);
-    } finally {
-      await t.stop();
-    }
-    expect(await counts()).toEqual(firstBoot);
-  }, RESTART_BUDGET);
+      const t = await createTestStrapi({ database, fixtures: false });
+      try {
+        const member = fixtures.users.member;
+        const jwt = await t.login(member.username, member.password);
+        const me = await t.api<{ username?: string }>({ jwt }, "/api/users/me");
+        expect(me.status).toBe(200);
+        expect(me.body.username).toBe(member.username);
+      } finally {
+        await t.stop();
+      }
+      expect(await counts()).toEqual(firstBoot);
+    },
+    RESTART_BUDGET,
+  );
 
-  it("refuses to boot while a department draft row exists, and boots once it is gone", async () => {
-    // A draft row as a pre-decision-05 database (or a restored old backup)
-    // has it, written while the cms is down.
-    await database.sql(
-      "INSERT INTO departments (document_id, name, slug, published_at) VALUES (?, ?, ?, NULL)",
-      ["itdraftdepartment000000a", "IT Draft", "it-draft"],
-    );
-    expect(await draftDepartments()).toBe(1);
+  it(
+    "refuses to boot while a department draft row exists, and boots once it is gone",
+    async () => {
+      // A draft row as a pre-decision-05 database (or a restored old backup)
+      // has it, written while the cms is down.
+      await database.sql(
+        "INSERT INTO departments (document_id, name, slug, published_at) VALUES (?, ?, ?, NULL)",
+        ["itdraftdepartment000000a", "IT Draft", "it-draft"],
+      );
+      expect(await draftDepartments()).toBe(1);
 
-    await expect(createTestStrapi({ database, fixtures: false })).rejects.toThrow(
-      /\[org-dp\] departments still holds 1 draft row\(s\)/,
-    );
-    // Refused before Strapi's beforeSync hook could delete the draft.
-    expect(await draftDepartments()).toBe(1);
+      await expect(createTestStrapi({ database, fixtures: false })).rejects.toThrow(
+        /\[org-dp\] departments still holds 1 draft row\(s\)/,
+      );
+      // Refused before Strapi's beforeSync hook could delete the draft.
+      expect(await draftDepartments()).toBe(1);
 
-    await database.sql("DELETE FROM departments WHERE published_at IS NULL");
-    const t = await createTestStrapi({ database, fixtures: false });
-    try {
-      const departments = await t.strapi.db
-        .query("api::department.department")
-        .findMany({ select: ["name"] });
-      expect(departments.map((row) => row.name).sort()).toEqual(["IT Engineering", "IT Sales"]);
-    } finally {
-      await t.stop();
-    }
-  }, RESTART_BUDGET);
+      await database.sql("DELETE FROM departments WHERE published_at IS NULL");
+      const t = await createTestStrapi({ database, fixtures: false });
+      try {
+        const departments = await t.strapi.db
+          .query("api::department.department")
+          .findMany({ select: ["name"] });
+        expect(departments.map((row) => row.name).sort()).toEqual(["IT Engineering", "IT Sales"]);
+      } finally {
+        await t.stop();
+      }
+    },
+    RESTART_BUDGET,
+  );
 });

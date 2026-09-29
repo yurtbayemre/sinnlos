@@ -52,7 +52,11 @@ export function youtubeVideoId(rawUrl: unknown): string | null {
     candidate = url.pathname.slice(1).split("/")[0] ?? null;
   } else if (url.pathname === "/watch") {
     candidate = url.searchParams.get("v");
-  } else if (url.pathname.startsWith("/embed/") || url.pathname.startsWith("/shorts/") || url.pathname.startsWith("/live/")) {
+  } else if (
+    url.pathname.startsWith("/embed/") ||
+    url.pathname.startsWith("/shorts/") ||
+    url.pathname.startsWith("/live/")
+  ) {
     candidate = url.pathname.split("/")[2] ?? null;
   }
   return candidate && VIDEO_ID_RE.test(candidate) ? candidate : null;
@@ -77,15 +81,25 @@ const MAX_TEXT = 500;
 export function validateQuiz(raw: unknown): { quiz: QuizQuestion[] } | { error: string } {
   if (raw == null) return { quiz: [] };
   if (!Array.isArray(raw)) {
-    return { error: 'quiz muss ein JSON-Array sein: [{"question":"…","options":["…","…"],"correctIndex":0}]' };
+    return {
+      error:
+        'quiz muss ein JSON-Array sein: [{"question":"…","options":["…","…"],"correctIndex":0}]',
+    };
   }
   if (raw.length > MAX_QUESTIONS) return { error: `quiz: maximal ${MAX_QUESTIONS} Fragen` };
   const quiz: QuizQuestion[] = [];
   for (let i = 0; i < raw.length; i++) {
     const q = raw[i] as Record<string, unknown>;
-    if (!q || typeof q !== "object" || Array.isArray(q)) return { error: `quiz[${i}]: Objekt erwartet` };
-    if (typeof q.question !== "string" || q.question.trim() === "" || q.question.length > MAX_TEXT) {
-      return { error: `quiz[${i}].question: nicht-leerer Text (max. ${MAX_TEXT} Zeichen) erforderlich` };
+    if (!q || typeof q !== "object" || Array.isArray(q))
+      return { error: `quiz[${i}]: Objekt erwartet` };
+    if (
+      typeof q.question !== "string" ||
+      q.question.trim() === "" ||
+      q.question.length > MAX_TEXT
+    ) {
+      return {
+        error: `quiz[${i}].question: nicht-leerer Text (max. ${MAX_TEXT} Zeichen) erforderlich`,
+      };
     }
     const options = q.options;
     if (
@@ -100,7 +114,11 @@ export function validateQuiz(raw: unknown): { quiz: QuizQuestion[] } | { error: 
     if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0 || idx >= options.length) {
       return { error: `quiz[${i}].correctIndex: ganze Zahl zwischen 0 und ${options.length - 1}` };
     }
-    quiz.push({ question: q.question.trim(), options: options.map((o) => (o as string).trim()), correctIndex: idx });
+    quiz.push({
+      question: q.question.trim(),
+      options: options.map((o) => (o as string).trim()),
+      correctIndex: idx,
+    });
   }
   return { quiz };
 }

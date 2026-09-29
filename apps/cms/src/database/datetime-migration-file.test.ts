@@ -32,7 +32,9 @@ describe("datetime user migration file", () => {
 
   it("is the only migration Strapi will discover, under the name the guard expects", () => {
     expect(existsSync(MIGRATION_FILE)).toBe(true);
-    expect(readdirSync(MIGRATIONS_DIR).filter((name) => /\.(js|sql)$/.test(name))).toEqual([LEGACY_MIGRATION_NAME]);
+    expect(readdirSync(MIGRATIONS_DIR).filter((name) => /\.(js|sql)$/.test(name))).toEqual([
+      LEGACY_MIGRATION_NAME,
+    ]);
   });
 
   it("hands Strapi's (trx, db) to the compiled repair in dist, with the env and Strapi's logger", async () => {
@@ -52,7 +54,11 @@ describe("datetime user migration file", () => {
     await migration.up(trx, db);
 
     expect(scope.__repairCalls).toHaveLength(1);
-    const [calledTrx, calledDb, options] = scope.__repairCalls[0] as [unknown, unknown, { env: unknown; log: unknown }];
+    const [calledTrx, calledDb, options] = scope.__repairCalls[0] as [
+      unknown,
+      unknown,
+      { env: unknown; log: unknown },
+    ];
     expect(calledTrx).toBe(trx);
     expect(calledDb).toBe(db);
     expect(options.env).toBe(process.env);
