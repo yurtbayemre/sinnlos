@@ -27,15 +27,6 @@ export const AD_CATEGORIES: ClassifiedCategory[] = [
   "service-wanted",
 ];
 
-/** i18n keys (marketplace namespace) per category. */
-export const AD_CATEGORY_KEYS: Record<ClassifiedCategory, string> = {
-  sale: "categorySale",
-  giveaway: "categoryGiveaway",
-  wanted: "categoryWanted",
-  "service-offer": "categoryServiceOffer",
-  "service-wanted": "categoryServiceWanted",
-};
-
 export const MAX_AD_IMAGES = CLASSIFIED_MAX_IMAGES;
 export const MAX_AD_IMAGE_MB = CLASSIFIED_MAX_IMAGE_MB;
 export const MAX_AD_IMAGE_BYTES = CLASSIFIED_MAX_IMAGE_BYTES;
