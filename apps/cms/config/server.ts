@@ -2,9 +2,7 @@
 // compiled dist/ mirrors config/ + src/ side by side (config/database.ts
 // imports src/database/session-zone the same way). The module runs no code
 // at load time — config files are loaded before the `strapi` global exists.
-import { sendDigests } from "../src/digest/send-digests";
-import { pruneSearchLogs } from "../src/cron/prune-search-logs";
-import { sweepOrphanedUploads } from "../src/cron/sweep-orphaned-uploads";
+import { buildCronTasks, cronEnabled, cronRegistry } from "../src/cron/registry";
 import { resolveAppTimeZone } from "../src/utils/time";
 
 type Env = ((key: string, def?: unknown) => any) & {
@@ -55,33 +53,20 @@ export default ({ env }: { env: Env }) => ({
   //    spoofable X-Forwarded-For would leave it unthrottled.
   proxy: { koa: true },
   // Strapi-native cron (croner via @strapi/core since 5.54, node-schedule
-  // before; no extra dep). `rule` is a 5-field cron pattern, `tz` its zone:
-  // @strapi/core 5.55.1 dist/services/cron.js:65-69 hands `tz` to croner as
-  // `timezone`. Every task runs at its wall-clock time in APP_TIME_ZONE; the
-  // process zone (UTC in the container) plays no part.
+  // before; no extra dep). The tasks live in src/cron/registry.ts (LF03):
+  // name, 5-field rule and zone per task, each wrapped with duration logging
+  // and an in-process overlap guard. `tz` is APP_TIME_ZONE for every task:
+  // @strapi/core 5.55.1 dist/services/cron.js hands it to croner as
+  // `timezone`, so a task runs at its wall-clock time in APP_TIME_ZONE and
+  // the process zone (UTC in the container) plays no part. The janitors run
+  // after the 03:00 host backup (keep the host in APP_TIME_ZONE,
+  // docs/DEPLOYMENT.md §7.3). CRON_ENABLED=0 (or false/no/off) switches
+  // the app's tasks off: with `enabled` false @strapi/core
+  // (dist/providers/cron.js) adds none of `tasks`, but still starts its cron
+  // service, so the jobs Strapi's plugins add (metrics) keep running
+  // (src/cron/registry.ts).
   cron: {
-    enabled: true,
-    tasks: {
-      // Nightly at 03:30 APP_TIME_ZONE — AFTER the 03:00 pg-backup (host
-      // crontab, in the host zone: keep the host in APP_TIME_ZONE, see
-      // docs/DEPLOYMENT.md), so every swept file is still in the backup.
-      "uploads-janitor": {
-        task: ({ strapi }: { strapi: any }) => sweepOrphanedUploads(strapi),
-        options: { rule: "30 3 * * *", tz: cronTimeZone(env) },
-      },
-      // 90-day retention for the anonymous search telemetry (issue #19),
-      // after the 03:00 pg-backup like the uploads janitor.
-      "search-log-janitor": {
-        task: ({ strapi }: { strapi: any }) => pruneSearchLogs(strapi),
-        options: { rule: "35 3 * * *", tz: cronTimeZone(env) },
-      },
-      // Morning e-mail digests (issue #18): daily users every day, weekly
-      // users on Mondays — the per-user decision lives in digest-plan.ts;
-      // without SMTP_* env the run is a logged no-op.
-      "digest-mailer": {
-        task: ({ strapi }: { strapi: any }) => sendDigests(strapi),
-        options: { rule: "30 7 * * *", tz: cronTimeZone(env) },
-      },
-    },
+    enabled: cronEnabled(env("CRON_ENABLED")),
+    tasks: buildCronTasks(cronRegistry(cronTimeZone(env))),
   },
 });

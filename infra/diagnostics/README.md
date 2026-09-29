@@ -2,7 +2,8 @@
 
 Read-only checks to run on the production host. None of them change data.
 The SQL runs inside `BEGIN TRANSACTION READ ONLY` … `ROLLBACK`, and no secret
-values are printed.
+values are printed. The one exception, a one-time cleanup that changes data
+only when armed, is described at the end.
 
 | File                       | What it shows                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -36,3 +37,27 @@ pnpm vitest run apps/cms/src/prod-perm-diff.test.ts -u
 ```
 
 CI fails while the committed file is out of date.
+
+## One-time cleanup: `cleanup-live-smoke-notifications.sql` (changes data)
+
+Before batch 10, every run of `infra/live-smoke.sh` left one or two comment
+notifications behind (actor: the smoke author `sam.chen@sinnlos.local`,
+recipient: the author of the newest announcement); the census counted 33 of
+them. This owner-run script removes them once. Run it without arguments
+first: that is a dry run that prints the count (`residue_rows`) and the titles
+and removes nothing. Then arm it with exactly that count, which it checks
+before deleting, in one transaction:
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < infra/diagnostics/cleanup-live-smoke-notifications.sql
+
+docker exec -i -e PGOPTIONS='-c sinnlos.cleanup_expected_rows=33' infra-db-1 \
+  sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+  < infra/diagnostics/cleanup-live-smoke-notifications.sql
+```
+
+A real comment by the smoke author's account would match as well; check the
+dry run's titles first. Deleted notifications come back only from a backup.
+`apps/cms/src/utils/cleanup-live-smoke-notifications.pg.test.ts` runs the file
+against Postgres 16.
