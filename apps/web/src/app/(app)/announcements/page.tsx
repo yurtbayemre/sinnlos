@@ -9,6 +9,7 @@ import type { Acknowledgement, Announcement } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { Markdown } from "@/components/markdown";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -230,9 +231,11 @@ function AnnouncementCard({
         </div>
       </CardHeader>
       <CardContent>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+        {/* The body is a Strapi richtext field, i.e. Markdown (UI03): the
+            shared renderer, without heading ids (several cards per page). */}
+        <Markdown className="prose prose-sm prose-slate max-w-none text-muted-foreground dark:prose-invert">
           {item.body}
-        </p>
+        </Markdown>
         {ack && <div className="mt-4">{ack}</div>}
         {children && <div className="mt-4 border-t pt-4">{children}</div>}
       </CardContent>
