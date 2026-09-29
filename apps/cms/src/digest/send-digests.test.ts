@@ -248,6 +248,30 @@ describe("sendDigests orchestrator", () => {
     );
   });
 
+  it("leaves out announcements expired by the run's now, for every recipient (DA02)", async () => {
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn(), [USER.carol]: optIn() },
+      announcements: [
+        news("Ended at dawn", minutesAfter(MONDAY_RUN, 5), {
+          expiresAt: minutesAfter(NOW.toISOString(), -60),
+        }),
+        news("Ends right now", minutesAfter(MONDAY_RUN, 6), { expiresAt: NOW.toISOString() }),
+        news("Ends tonight", minutesAfter(MONDAY_RUN, 7), {
+          expiresAt: minutesAfter(NOW.toISOString(), 12 * 60),
+        }),
+        news("Never ends", minutesAfter(MONDAY_RUN, 8), { expiresAt: null }),
+      ],
+    });
+    await sendDigests(strapi, NOW);
+    for (const user of ["alice", "carol"]) {
+      const text = mailTo(mails(), user)?.text ?? "";
+      expect(text, user).toContain("• Ends tonight");
+      expect(text, user).toContain("• Never ends");
+      expect(text, user).not.toContain("Ended at dawn");
+      expect(text, user).not.toContain("Ends right now");
+    }
+  });
+
   it("reads users, scopes, grants, announcements and anchors once per run", async () => {
     const users = Object.fromEntries(
       [USER.alice, USER.bob, USER.carol, USER.dave, USER.anna].map((id) => [id, optIn()]),

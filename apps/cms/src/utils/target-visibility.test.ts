@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
@@ -379,5 +379,85 @@ describe("pinnedTargetAnchor (PL04 filter shapes)", () => {
     ["a pin nested two $and levels deep", { $and: [{ $and: [pinned] }] }],
   ])("takes the full path for %s", (_label, filters) => {
     expect(pinnedTargetAnchor(filters)).toBeNull();
+  });
+});
+
+/**
+ * DA02: an expired announcement is invisible like one outside the audience,
+ * so its thread goes with it, in the list and in the single check alike;
+ * the published row's expiry decides (the row the read policy serves).
+ */
+describe("expired announcements (DA02)", () => {
+  const NOW = new Date("2026-09-29T10:00:00.000Z");
+  const PAST = "2026-09-29T09:00:00.000Z";
+  const FUTURE = "2026-09-30T00:00:00.000Z";
+  const PUBLISHED = "2026-09-01T00:00:00.000Z";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function stub(): StrapiStub {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const row = (id: number, documentId: string, published: boolean, expiresAt: string | null) => ({
+      id,
+      documentId,
+      title: documentId,
+      audience: "all",
+      publishedAt: published ? PUBLISHED : null,
+      expiresAt,
+    });
+    return createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [{ id: 1, username: "eng", department: null, teams: [] }],
+        "api::announcement.announcement": [
+          row(1, "ann-live", true, FUTURE),
+          row(2, "ann-live", false, FUTURE),
+          row(3, "ann-ended", true, PAST),
+          row(4, "ann-ended", false, PAST),
+          // The published row has ended; a draft extends it (not yet published).
+          row(5, "ann-extended-in-draft", true, PAST),
+          row(6, "ann-extended-in-draft", false, FUTURE),
+          row(7, "ann-no-end", true, null),
+          row(8, "ann-no-end", false, null),
+        ],
+      },
+    });
+  }
+
+  const member = { id: 1, role: { type: "member" } };
+
+  it("leaves expired announcements out of the visible anchors", async () => {
+    const anchors = await visibleTargetAnchors(stub(), member);
+    expect(anchors.announcement.sort()).toEqual(["ann-live", "ann-no-end"]);
+    expect((await visibleTargetAnchors(stub(), null)).announcement.sort()).toEqual([
+      "ann-live",
+      "ann-no-end",
+    ]);
+  });
+
+  it("refuses the single check for an expired announcement, like the list", async () => {
+    for (const documentId of ["ann-ended", "ann-extended-in-draft"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", documentId, member),
+        documentId,
+      ).resolves.toBe(false);
+    }
+    for (const documentId of ["ann-live", "ann-no-end"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", documentId, member),
+        documentId,
+      ).resolves.toBe(true);
+    }
+  });
+
+  it("keeps the admin_role / editor bypass for expired announcements", async () => {
+    for (const type of ["admin_role", "editor"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", "ann-ended", { id: 1, role: { type } }),
+        type,
+      ).resolves.toBe(true);
+    }
   });
 });

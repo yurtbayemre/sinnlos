@@ -25,10 +25,18 @@
  *
  * Fail-closed rules: unknown targetType → invisible; wiki page without a
  * space → invisible; missing rows → invisible.
+ *
+ * Expiry (DA02, owner answer 2026-09-29 (b)): an announcement whose
+ * `expiresAt` instant has passed is invisible like one outside the
+ * caller's audience (utils/announcement-expiry.ts), so its thread leaves
+ * with it: the list and single reads, comment and reaction creates. The
+ * admin_role / editor bypass keeps it, as the announcement read policy
+ * does.
  */
 
 import { MODERATORS, hasRole, type RoleHolder } from "../bootstrap/roles";
 import { isAnnouncementVisible } from "./announcement-audience";
+import { isAnnouncementExpired } from "./announcement-expiry";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 import type { PolicyStrapi } from "./policy-factories";
 import { fitsBindLimit } from "./policy-query";
@@ -51,6 +59,7 @@ const WIKI_PAGE_UID = "api::wiki-page.wiki-page";
 type AnnouncementRow = {
   documentId?: string | null;
   publishedAt?: string | null;
+  expiresAt?: string | null;
   department?: { id: number } | null;
   team?: { id: number } | null;
   audienceRoles?: { id: number }[] | null;
@@ -156,14 +165,15 @@ export async function visibleTargetAnchors(
 
   const [announcementRows, spaceIds] = await Promise.all([
     strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      select: ["id", "documentId", "publishedAt", "audience"],
+      select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
       populate: ANNOUNCEMENT_POPULATE,
     }),
     visibleWikiSpaceIds(strapi, raw),
   ]);
 
+  const now = new Date();
   const announcement = [...preferPublished(listOf<AnnouncementRow>(announcementRows)).entries()]
-    .filter(([, row]) => isAnnouncementVisible(row, audience))
+    .filter(([, row]) => !isAnnouncementExpired(row, now) && isAnnouncementVisible(row, audience))
     .map(([anchor]) => anchor);
 
   return { announcement, "wiki-page": await visibleWikiPageAnchors(strapi, spaceIds) };
@@ -189,12 +199,12 @@ export async function isTargetVisible(
     const rows = listOf<AnnouncementRow>(
       await strapi.db.query(ANNOUNCEMENT_UID).findMany({
         where: { documentId: targetDocumentId },
-        select: ["id", "documentId", "publishedAt", "audience"],
+        select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
         populate: ANNOUNCEMENT_POPULATE,
       }),
     );
     const row = preferPublished(rows).get(targetDocumentId);
-    if (!row) return false;
+    if (!row || isAnnouncementExpired(row, new Date())) return false;
     return isAnnouncementVisible(row, toAudienceScope(raw));
   }
 
