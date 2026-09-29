@@ -14,6 +14,9 @@
  * Strapi/DB trouble or Strapi's own throttle, not a wrong password, and a
  * network error or timeout is no verdict at all: counting those would keep
  * legitimate users locked out for up to 15 minutes after an outage.
+ * The attempt is reserved before the Strapi call and settled after it
+ * (FX39, lib/login-rate-limit.ts): "failure" for a counted answer, "success"
+ * for a verified password, "neutral" for everything else.
  *
  * Strapi's throttle (429) throws StrapiRateLimitedSignIn so the form says
  * "too many attempts" instead of "invalid email or password" (FX11).
@@ -28,7 +31,11 @@
  */
 import type { User } from "next-auth";
 import { StrapiRateLimitedSignIn } from "@/lib/auth-errors";
-import { maskIdentifier, type LoginRateLimiter } from "@/lib/login-rate-limit";
+import {
+  maskIdentifier,
+  type LoginAttemptOutcome,
+  type LoginRateLimiter,
+} from "@/lib/login-rate-limit";
 
 /** Timeout of each Strapi request of a sign-in. */
 export const LOCAL_SIGN_IN_TIMEOUT_MS = 5_000;
@@ -83,27 +90,18 @@ export function countsAsFailure(status: number): boolean {
   return status < 500 && status !== 429;
 }
 
-/**
- * Verifies `input` against Strapi's /api/auth/local. Resolves the Auth.js
- * user (with the Strapi JWT, server-side only) or null; throws
- * StrapiRateLimitedSignIn on Strapi's 429.
- */
-export async function authorizeCredentials(
-  input: CredentialsInput,
+/** What Strapi's /api/auth/local said, as the limiter settles it. */
+type Verdict =
+  | { outcome: "success"; jwt: string; user: StrapiUserFields }
+  | { outcome: Exclude<LoginAttemptOutcome, "success">; rateLimited?: boolean };
+
+/** One POST /api/auth/local; never throws. */
+async function checkPassword(
+  identifier: string,
+  password: string,
+  clientIp: string,
   deps: CredentialsDeps,
-): Promise<User | null> {
-  const identifier = typeof input.identifier === "string" ? input.identifier : "";
-  const password = typeof input.password === "string" ? input.password : "";
-  if (!identifier || !password) return null;
-  const { clientIp } = input;
-  const timeoutMs = deps.timeoutMs ?? LOCAL_SIGN_IN_TIMEOUT_MS;
-
-  // Rate-limit BEFORE touching Strapi. No log for a blocked attempt: the
-  // transition INTO the block state is logged once below — logging every
-  // rejected follow-up would let a script generate ~100 log lines/s through
-  // the /api/auth callback (the edge limit is 100/s).
-  if (deps.limiter.isBlocked(clientIp, identifier, deps.now())) return null;
-
+): Promise<Verdict> {
   let res: Response;
   try {
     res = await deps.fetch(`${deps.strapiUrl}/api/auth/local`, {
@@ -119,40 +117,70 @@ export async function authorizeCredentials(
       },
       body: JSON.stringify({ identifier, password }),
       cache: "no-store",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? LOCAL_SIGN_IN_TIMEOUT_MS),
     });
   } catch {
     // Network error or timeout: no verdict, nothing counted.
-    return null;
+    return { outcome: "neutral" };
   }
-
   if (!res.ok) {
-    if (countsAsFailure(res.status)) {
-      const justBlocked = deps.limiter.recordFailure(clientIp, identifier, deps.now());
-      if (justBlocked) {
-        // Logged once per lock window, at the transition. The full IP is
-        // intentional: this is a security log of an attack pattern
-        // (legitimate interest) and the IP is what an admin needs to
-        // correlate with edge logs or block upstream.
-        deps.warn(
-          `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(identifier)}`,
-        );
-      }
-    }
-    if (res.status === 429) throw new StrapiRateLimitedSignIn();
-    return null;
+    return countsAsFailure(res.status)
+      ? { outcome: "failure" }
+      : { outcome: "neutral", rateLimited: res.status === 429 };
   }
-
   let payload: unknown;
   try {
     payload = await res.json();
   } catch {
-    return null;
+    return { outcome: "neutral" };
   }
   const jwt = isRecord(payload) ? text(payload.jwt) : undefined;
-  const signedIn = isRecord(payload) ? userFields(payload.user) : null;
-  if (!jwt || !signedIn) return null;
-  deps.limiter.recordSuccess(identifier);
+  const user = isRecord(payload) ? userFields(payload.user) : null;
+  return jwt && user ? { outcome: "success", jwt, user } : { outcome: "neutral" };
+}
+
+/**
+ * Verifies `input` against Strapi's /api/auth/local. Resolves the Auth.js
+ * user (with the Strapi JWT, server-side only) or null; throws
+ * StrapiRateLimitedSignIn on Strapi's 429.
+ */
+export async function authorizeCredentials(
+  input: CredentialsInput,
+  deps: CredentialsDeps,
+): Promise<User | null> {
+  const identifier = typeof input.identifier === "string" ? input.identifier : "";
+  const password = typeof input.password === "string" ? input.password : "";
+  if (!identifier || !password) return null;
+  const { clientIp } = input;
+
+  // Reserve BEFORE touching Strapi (FX39). No log for a blocked attempt:
+  // the transition INTO the block state is logged once below — logging
+  // every rejected follow-up would let a script generate ~100 log lines/s
+  // through the /api/auth callback (the edge limit is 100/s).
+  const ticket = deps.limiter.tryAcquire(clientIp, identifier, deps.now());
+  if (ticket === "blocked") return null;
+
+  let verdict: Verdict = { outcome: "neutral" };
+  try {
+    verdict = await checkPassword(identifier, password, clientIp, deps);
+  } finally {
+    // Settled exactly once, whatever happened in between.
+    const justBlocked = deps.limiter.settle(ticket, verdict.outcome, deps.now());
+    if (justBlocked) {
+      // Logged once per lock window, at the transition. The full IP is
+      // intentional: this is a security log of an attack pattern
+      // (legitimate interest) and the IP is what an admin needs to
+      // correlate with edge logs or block upstream.
+      deps.warn(
+        `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(identifier)}`,
+      );
+    }
+  }
+  if (verdict.outcome !== "success") {
+    if (verdict.rateLimited) throw new StrapiRateLimitedSignIn();
+    return null;
+  }
+  const { jwt, user: signedIn } = verdict;
 
   // Display name and id of the fresh user; the payload's user stands in
   // when this read fails.
@@ -161,7 +189,7 @@ export async function authorizeCredentials(
     const meRes = await deps.fetch(`${deps.strapiUrl}/api/users/me`, {
       headers: { Authorization: `Bearer ${jwt}` },
       cache: "no-store",
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: AbortSignal.timeout(deps.timeoutMs ?? LOCAL_SIGN_IN_TIMEOUT_MS),
     });
     if (meRes.ok) me = userFields(await meRes.json());
   } catch {

@@ -14,7 +14,13 @@ import { signIn, signOut } from "@/auth";
 import { ENTRA, REGISTRATION_ENABLED, entraLogoutUrl } from "@/lib/auth-config";
 import { isRateLimitedSignIn } from "@/lib/auth-errors";
 import { STRAPI_URL } from "@/lib/config";
-import { clientIpFrom, loginRateLimiter, maskIdentifier } from "@/lib/login-rate-limit";
+import { countsAsFailure } from "@/lib/auth/credentials";
+import {
+  clientIpFrom,
+  loginRateLimiter,
+  maskIdentifier,
+  type LoginAttemptOutcome,
+} from "@/lib/login-rate-limit";
 import { getSession } from "@/lib/session";
 import { safeInternalPath } from "@/lib/utils";
 
@@ -80,12 +86,20 @@ export async function registerLocalAccount(
     return { values, error: "Fill in all fields; password needs at least 6 characters." };
   }
   // Same limiter as the login (issue #23): registration is part of the auth
-  // surface, so a blocked source may not probe here either.
+  // surface, so a blocked source may not probe here either. The attempt is
+  // reserved before the request and settled after it (FX39).
   const clientIp = clientIpFrom(await headers());
-  if (loginRateLimiter.isBlocked(clientIp, email)) {
+  const ticket = loginRateLimiter.tryAcquire(clientIp, email);
+  if (ticket === "blocked") {
     return { values, error: "Too many failed attempts — please try again later." };
   }
-  let res: Response;
+  // Counting rule mirrors authorize(): only real rejections (Strapi answers
+  // invalid input and a taken email with 400) count, never 5xx/429 outages
+  // or network errors. A created account is "neutral" too: it proves no
+  // password of an existing account, so it resets nothing (the sign-in
+  // below settles its own attempt).
+  let outcome: LoginAttemptOutcome = "neutral";
+  let res: Response | null = null;
   try {
     res = await fetch(`${STRAPI_URL}/api/auth/local/register`, {
       method: "POST",
@@ -98,28 +112,26 @@ export async function registerLocalAccount(
       },
       body: JSON.stringify({ username, email, password, displayName: username }),
       cache: "no-store",
-      // Timeout parity with the login/exchange fetches in @/auth.
+      // Timeout parity with the login/exchange fetches (lib/auth).
       signal: AbortSignal.timeout(5000),
     });
+    if (!res.ok && countsAsFailure(res.status)) outcome = "failure";
   } catch {
     // The timeout (or a network failure) would otherwise throw uncaught out
     // of the Server Action — an opaque digest error page instead of the
     // {error} form state.
-    return { values, error: "Registration failed — please try again." };
-  }
-  if (!res.ok) {
-    // Counting rule mirrors authorize(): only real rejections (Strapi
-    // answers invalid input with 400) count, never 5xx/429 outages. The
-    // transition log matches the one in authorize() so a block engaged via
-    // this path is visible too.
-    if (res.status < 500 && res.status !== 429) {
-      const justBlocked = loginRateLimiter.recordFailure(clientIp, email);
-      if (justBlocked) {
-        console.warn(
-          `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(email)}`,
-        );
-      }
+    res = null;
+  } finally {
+    // The transition log matches the one in authorize() so a block engaged
+    // via this path is visible too.
+    if (loginRateLimiter.settle(ticket, outcome)) {
+      console.warn(
+        `[login-rate-limit] block engaged ip=${clientIp} identifier=${maskIdentifier(email)}`,
+      );
     }
+  }
+  if (!res) return { values, error: "Registration failed — please try again." };
+  if (!res.ok) {
     const body = await res.json().catch(() => null);
     return { values, error: body?.error?.message ?? "Registration failed." };
   }

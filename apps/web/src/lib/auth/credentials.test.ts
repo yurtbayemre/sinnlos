@@ -214,6 +214,41 @@ describe("authorizeCredentials: the counting rule", () => {
     expect(h.fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("lets no parallel burst past the limit: attempts in flight hold their places (FX39)", async () => {
+    // Every /auth/local answer waits until the whole burst was started.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const local = h.fetchMock.getMockImplementation()!;
+    h.fetchMock.mockImplementation(async (input, init) => {
+      await gate;
+      return local(input, init);
+    });
+    h.answers.local = { status: 400 };
+    const burst = Array.from({ length: IDENTIFIER_MAX_FAILURES + 5 }, (_, i) =>
+      h.signIn(EMAIL, "pw", `10.9.0.${i}`),
+    );
+    await Promise.resolve();
+    release();
+    await expect(Promise.all(burst)).resolves.toEqual(burst.map(() => null));
+    // Exactly the limit reached Strapi; the transition was logged once.
+    expect(h.fetchMock).toHaveBeenCalledTimes(IDENTIFIER_MAX_FAILURES);
+    expect(h.warn).toHaveBeenCalledTimes(1);
+    expect(h.limiter.isBlocked("10.9.1.1", EMAIL, T0)).toBe(true);
+  });
+
+  it("gives an outage's places back: a burst during a 503 blocks nobody afterwards", async () => {
+    h.answers.local = { status: 503 };
+    await Promise.all(
+      Array.from({ length: IDENTIFIER_MAX_FAILURES }, (_, i) =>
+        h.signIn(EMAIL, "pw", `10.9.2.${i}`),
+      ),
+    );
+    expect(h.limiter.size()).toBe(0);
+    expect(h.limiter.isBlocked(IP, EMAIL, T0)).toBe(false);
+  });
+
   it("names the statuses that count", () => {
     for (const status of [400, 401, 403, 404])
       expect(countsAsFailure(status), `${status}`).toBe(true);

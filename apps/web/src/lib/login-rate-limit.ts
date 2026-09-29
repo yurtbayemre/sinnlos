@@ -6,15 +6,27 @@
  * Auth.js additionally exposes POST /api/auth/callback/local, which calls
  * authorize() directly (the CSRF token is fetchable from /api/auth/csrf,
  * trivially scriptable). A limiter on any outer route alone is therefore
- * bypassable; the authoritative gate sits in authorize() (see @/auth), with
- * the Traefik router limit (infra/docker-compose.traefik.yml) as a coarse
- * pre-filter only.
+ * bypassable; the authoritative gate sits in authorize() (see @/auth,
+ * lib/auth/credentials.ts), with the Traefik router limit
+ * (infra/docker-compose.traefik.yml) as a coarse pre-filter only. The
+ * register action uses the same limiter.
  *
  * Two dimensions, both counting FAILURES only — an office NAT produces many
  * legitimate logins from one IP and those must never throttle anyone:
  *  - per client IP: fast brute force from a single host,
  *  - per identifier (case-insensitive) across ALL IPs: distributed guessing
  *    against one account; a successful login resets this bucket.
+ *
+ * Reserve, then verify (FX39): tryAcquire() checks AND reserves a place in
+ * both buckets in one synchronous step, before the Strapi call; settle()
+ * then turns the reservation into a failure, or gives it back (success, and
+ * the "neutral" outcomes: Strapi's 429, a 5xx, a network error). The former
+ * check-then-record split let a burst of parallel attempts all pass the
+ * check before the first failure was recorded, so a burst went past the
+ * limit. An attempt in flight therefore holds its place until it settles:
+ * at most the limit's number of attempts per IP and per identifier are in
+ * flight at once (a sign-in takes well under a second, see the 5 s timeout).
+ * Only failures stay counted.
  *
  * The store is process-local and resets on container restart — accepted and
  * fine: an attacker cannot trigger restarts, and a few forgotten failure
@@ -48,19 +60,42 @@ export const MAX_TRACKED_KEYS = 10_000;
 /** How many head-of-map buckets eviction probes for a non-blocked victim. */
 export const EVICTION_SCAN_LIMIT = 100;
 
+declare const loginAttemptBrand: unique symbol;
+
+/** A reserved attempt (tryAcquire), settled exactly once (settle). Opaque. */
+export interface LoginAttemptTicket {
+  readonly [loginAttemptBrand]: true;
+}
+
+/**
+ * How a reserved attempt ended: "failure" = a genuine verification failure
+ * (it stays counted); "success" gives the place back and clears the
+ * identifier bucket; "neutral" (Strapi's 429, a 5xx, a network error, no
+ * verdict) gives the place back.
+ */
+export type LoginAttemptOutcome = "success" | "failure" | "neutral";
+
 /** The limiter consulted by authorize() — see createLoginRateLimiter. */
 export interface LoginRateLimiter {
-  /** Read-only check (never counts as an attempt). */
+  /**
+   * Read-only check (never counts as an attempt): whether an attempt now
+   * would be refused. Attempts in flight hold their place too.
+   */
   isBlocked(ip: string, identifier: string, now?: number): boolean;
   /**
-   * Count one FAILED verification against both dimensions. Returns true
-   * only when THIS failure tips a bucket into the block state — callers
-   * log that transition (once per lock window), not every rejected
-   * follow-up attempt, so a scripted flood cannot spam the log.
+   * Check and reserve in one step: "blocked" (nothing recorded), or a
+   * ticket holding one place in the IP and in the identifier bucket until
+   * it is settled.
    */
-  recordFailure(ip: string, identifier: string, now?: number): boolean;
-  /** Successful login: clear the identifier bucket (the IP bucket stays). */
-  recordSuccess(identifier: string): void;
+  tryAcquire(ip: string, identifier: string, now?: number): LoginAttemptTicket | "blocked";
+  /**
+   * Settles a ticket (a second settle, or a ticket of another limiter, is
+   * ignored and answers false). Returns true only when THIS failure tips a
+   * bucket into the block state — callers log that transition (once per
+   * lock window), not every rejected follow-up attempt, so a scripted flood
+   * cannot spam the log.
+   */
+  settle(ticket: LoginAttemptTicket, outcome: LoginAttemptOutcome, now?: number): boolean;
   /** Total tracked buckets across both dimensions — pins the cap in tests. */
   size(): number;
 }
@@ -127,33 +162,50 @@ export function maskIdentifier(identifier: string): string {
   return `${local.slice(0, 2)}***${domain}`;
 }
 
+/** One attempt in a bucket: reserved (pending) or a counted failure. */
+interface Attempt {
+  /** When it was reserved (or, re-added after its bucket went, failed). */
+  at: number;
+  pending: boolean;
+}
+
+/** What a ticket reserved. */
+interface Reservation {
+  ipKey: string;
+  identifierKey: string;
+  ipAttempt: Attempt;
+  identifierAttempt: Attempt;
+}
+
 /**
  * Create an isolated limiter instance. Production uses the singleton below;
  * tests create their own so state never leaks between test cases.
  */
 export function createLoginRateLimiter(): LoginRateLimiter {
-  // key -> timestamps (ms) of failed attempts, oldest first.
-  const ipFailures = new Map<string, number[]>();
-  const identifierFailures = new Map<string, number[]>();
+  // key -> attempts (reserved or failed), oldest first.
+  const ipAttempts = new Map<string, Attempt[]>();
+  const identifierAttempts = new Map<string, Attempt[]>();
+  // Open tickets of THIS limiter; a settled one is removed.
+  const open = new WeakMap<LoginAttemptTicket, Reservation>();
 
-  /** Drop expired timestamps for one key; delete the bucket when empty. */
-  function liveFailures(
-    store: Map<string, number[]>,
+  /** Drop expired attempts for one key; delete the bucket when empty. */
+  function liveAttempts(
+    store: Map<string, Attempt[]>,
     key: string,
     windowMs: number,
     now: number,
-  ): number[] {
-    const stamps = store.get(key);
-    if (!stamps) return [];
-    const live = stamps.filter((t) => now - t < windowMs);
+  ): Attempt[] {
+    const attempts = store.get(key);
+    if (!attempts) return [];
+    const live = attempts.filter((a) => now - a.at < windowMs);
     if (live.length === 0) store.delete(key);
-    else if (live.length !== stamps.length) store.set(key, live);
+    else if (live.length !== attempts.length) store.set(key, live);
     return live;
   }
 
   /**
    * Evict one bucket to keep the map under the cap. Blocked buckets are no
-   * longer touched (authorize() rejects before recordFailure), so they age
+   * longer touched (tryAcquire refuses before reserving), so they age
    * towards the Map head — naive oldest-first eviction would let an
    * attacker wash an ACTIVE lockout out of the store by flooding fresh
    * identifier keys. Prefer the least-recently-touched bucket that is NOT
@@ -162,15 +214,15 @@ export function createLoginRateLimiter(): LoginRateLimiter {
    * memory cap always wins over lockout persistence.
    */
   function evictOne(
-    store: Map<string, number[]>,
+    store: Map<string, Attempt[]>,
     windowMs: number,
     maxFailures: number,
     now: number,
   ) {
     let scanned = 0;
-    for (const [key, stamps] of store) {
+    for (const [key, attempts] of store) {
       if (scanned++ >= EVICTION_SCAN_LIMIT) break;
-      const liveCount = stamps.filter((t) => now - t < windowMs).length;
+      const liveCount = attempts.filter((a) => now - a.at < windowMs).length;
       if (liveCount < maxFailures) {
         store.delete(key);
         return;
@@ -180,64 +232,132 @@ export function createLoginRateLimiter(): LoginRateLimiter {
     if (oldest !== undefined) store.delete(oldest);
   }
 
-  /**
-   * Append a failure, keeping the map within MAX_TRACKED_KEYS. Returns true
-   * when this failure moves the bucket exactly TO the limit — i.e. the
-   * transition into the block state (while blocked, callers stop recording,
-   * so the count only re-reaches the limit after the window slid past).
-   */
-  function record(
-    store: Map<string, number[]>,
+  /** Append an attempt, keeping the map within MAX_TRACKED_KEYS. */
+  function append(
+    store: Map<string, Attempt[]>,
     key: string,
+    attempt: Attempt,
     windowMs: number,
     maxFailures: number,
     now: number,
-  ): boolean {
-    const live = liveFailures(store, key, windowMs, now);
-    live.push(now);
+  ) {
+    const live = liveAttempts(store, key, windowMs, now);
+    live.push(attempt);
     // Delete + set moves the key to the end of the Map's insertion order,
-    // so eviction below scans least-recently-touched buckets first.
+    // so eviction scans least-recently-touched buckets first.
     store.delete(key);
     if (store.size >= MAX_TRACKED_KEYS) {
       evictOne(store, windowMs, maxFailures, now);
     }
     store.set(key, live);
-    return live.length === maxFailures;
+  }
+
+  /**
+   * Turns a reservation into a failure. Its bucket may have gone meanwhile
+   * (a concurrent success cleared the identifier, or eviction): the failure
+   * is then counted afresh, as a failure recorded now always was. Returns
+   * true when this failure moves the bucket's failures exactly TO the limit
+   * — the transition into the block state (the block itself engages as
+   * soon as reservations and failures reach it).
+   */
+  function confirm(
+    store: Map<string, Attempt[]>,
+    key: string,
+    attempt: Attempt,
+    windowMs: number,
+    maxFailures: number,
+    now: number,
+  ): boolean {
+    const live = liveAttempts(store, key, windowMs, now);
+    if (live.includes(attempt)) {
+      attempt.pending = false;
+    } else {
+      append(store, key, { at: now, pending: false }, windowMs, maxFailures, now);
+    }
+    const failures = liveAttempts(store, key, windowMs, now).filter((a) => !a.pending);
+    return failures.length === maxFailures;
+  }
+
+  /** Gives a reservation back (success or neutral outcome). */
+  function refund(store: Map<string, Attempt[]>, key: string, attempt: Attempt) {
+    const attempts = store.get(key);
+    const index = attempts ? attempts.indexOf(attempt) : -1;
+    if (!attempts || index === -1) return;
+    attempts.splice(index, 1);
+    if (attempts.length === 0) store.delete(key);
+  }
+
+  function isBlocked(ip: string, identifier: string, now: number): boolean {
+    return (
+      liveAttempts(ipAttempts, rateLimitKeyForIp(ip), IP_WINDOW_MS, now).length >=
+        IP_MAX_FAILURES ||
+      liveAttempts(identifierAttempts, normalizeIdentifier(identifier), IDENTIFIER_WINDOW_MS, now)
+        .length >= IDENTIFIER_MAX_FAILURES
+    );
   }
 
   return {
     isBlocked(ip, identifier, now = Date.now()) {
-      return (
-        liveFailures(ipFailures, rateLimitKeyForIp(ip), IP_WINDOW_MS, now).length >=
-          IP_MAX_FAILURES ||
-        liveFailures(identifierFailures, normalizeIdentifier(identifier), IDENTIFIER_WINDOW_MS, now)
-          .length >= IDENTIFIER_MAX_FAILURES
-      );
+      return isBlocked(ip, identifier, now);
     },
-    recordFailure(ip, identifier, now = Date.now()) {
-      // Evaluate both dimensions unconditionally — the transition of either
-      // one must be reported (no short-circuit).
-      const ipTipped = record(
-        ipFailures,
-        rateLimitKeyForIp(ip),
+    tryAcquire(ip, identifier, now = Date.now()) {
+      // One synchronous step: nothing can interleave between the check and
+      // the reservation (FX39).
+      if (isBlocked(ip, identifier, now)) return "blocked";
+      const reservation: Reservation = {
+        ipKey: rateLimitKeyForIp(ip),
+        identifierKey: normalizeIdentifier(identifier),
+        ipAttempt: { at: now, pending: true },
+        identifierAttempt: { at: now, pending: true },
+      };
+      append(
+        ipAttempts,
+        reservation.ipKey,
+        reservation.ipAttempt,
         IP_WINDOW_MS,
         IP_MAX_FAILURES,
         now,
       );
-      const identifierTipped = record(
-        identifierFailures,
-        normalizeIdentifier(identifier),
+      append(
+        identifierAttempts,
+        reservation.identifierKey,
+        reservation.identifierAttempt,
         IDENTIFIER_WINDOW_MS,
         IDENTIFIER_MAX_FAILURES,
         now,
       );
-      return ipTipped || identifierTipped;
+      const ticket = Object.freeze({}) as LoginAttemptTicket;
+      open.set(ticket, reservation);
+      return ticket;
     },
-    recordSuccess(identifier) {
-      identifierFailures.delete(normalizeIdentifier(identifier));
+    settle(ticket, outcome, now = Date.now()) {
+      const reservation = open.get(ticket);
+      if (!reservation) return false;
+      open.delete(ticket);
+      const { ipKey, identifierKey, ipAttempt, identifierAttempt } = reservation;
+      if (outcome === "failure") {
+        // Evaluate both dimensions unconditionally — the transition of
+        // either one must be reported (no short-circuit).
+        const ipTipped = confirm(ipAttempts, ipKey, ipAttempt, IP_WINDOW_MS, IP_MAX_FAILURES, now);
+        const identifierTipped = confirm(
+          identifierAttempts,
+          identifierKey,
+          identifierAttempt,
+          IDENTIFIER_WINDOW_MS,
+          IDENTIFIER_MAX_FAILURES,
+          now,
+        );
+        return ipTipped || identifierTipped;
+      }
+      refund(ipAttempts, ipKey, ipAttempt);
+      refund(identifierAttempts, identifierKey, identifierAttempt);
+      // A successful login resets the identifier bucket (the IP bucket
+      // stays: an attacker sharing the NAT stays blocked).
+      if (outcome === "success") identifierAttempts.delete(identifierKey);
+      return false;
     },
     size() {
-      return ipFailures.size + identifierFailures.size;
+      return ipAttempts.size + identifierAttempts.size;
     },
   };
 }
