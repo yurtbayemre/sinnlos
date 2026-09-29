@@ -47,3 +47,41 @@ export function listPolls(): Promise<StrapiListResponse<PollListItem>> {
 export function pollResults(ref: PollRef): Promise<PollResults> {
   return strapi<PollResults>(`/api/polls/${encodeURIComponent(String(ref))}/results`);
 }
+
+/** Most polls per GET /api/poll-results request (the cms caps it at 50). */
+const POLL_RESULTS_CHUNK = 50;
+
+/**
+ * The results of several polls in one request (WD04): GET
+ * /api/poll-results?ids=<refs>, each body exactly what pollResults gives
+ * for that poll and caller. The cms decides canSeePoll per poll and leaves
+ * out every poll the caller may not see, a draft and a missing one alike
+ * (no 404 per poll): a poll absent from the answer is simply not shown.
+ * The polls page lists at most 20, so this is one request, chunked by the
+ * cms's cap only as a safeguard. Order: the order of `refs`.
+ */
+export async function pollResultsMany(refs: readonly PollRef[]): Promise<PollResults[]> {
+  const chunks: PollRef[][] = [];
+  for (let i = 0; i < refs.length; i += POLL_RESULTS_CHUNK) {
+    chunks.push(refs.slice(i, i + POLL_RESULTS_CHUNK));
+  }
+  const pages = await Promise.all(
+    chunks.map((chunk) =>
+      strapi<{ data?: unknown }>(withQuery("/api/poll-results", strapiQuery().list("ids", chunk))),
+    ),
+  );
+  return pages.flatMap((page) => (Array.isArray(page?.data) ? (page.data as PollResults[]) : []));
+}
+
+/**
+ * The results of `ref` among a pollResultsMany answer: by documentId (the
+ * address, which a republish keeps) or, for a numeric address, by row id.
+ */
+export function findPollResults(
+  results: readonly PollResults[],
+  ref: PollRef,
+): PollResults | undefined {
+  return results.find((entry) =>
+    typeof ref === "string" ? entry.poll.documentId === ref : entry.poll.id === ref,
+  );
+}

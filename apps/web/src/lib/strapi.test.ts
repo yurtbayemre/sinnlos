@@ -33,7 +33,7 @@ vi.mock("@/lib/config", () => ({
 vi.mock("next/navigation", () => ({ redirect: (url: string) => redirectMock(url) }));
 vi.stubGlobal("fetch", fetchMock);
 
-const { api, pollRef, strapi } = await import("./strapi");
+const { api, findPollResults, pollRef, strapi } = await import("./strapi");
 const { demo } = await import("./demo");
 const { StrapiError } = await import("./strapi-error");
 
@@ -74,6 +74,7 @@ const READS: Record<string, () => Promise<unknown>> = {
   "events.rsvpSummaries": () => api.events.rsvpSummaries(["doc-1"]),
   "polls.list": () => api.polls.list(),
   "polls.results": () => api.polls.results(1),
+  "polls.resultsMany": () => api.polls.resultsMany(["k3m9x0000000000000000001", 7]),
   "documents.list": () => api.documents.list(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(iso),
@@ -215,6 +216,48 @@ describe("api.polls (decision 02)", () => {
     // Not in Strapi's documentId shape (e.g. the demo fixtures) or missing.
     expect(pollRef({ id: 7, documentId: "demo-poll-1" })).toBe(7);
     expect(pollRef({ id: 7 })).toBe(7);
+  });
+
+  it("reads many polls' results in one request per 50, in order (WD04)", async () => {
+    const refs = [
+      ...Array.from({ length: 51 }, (_, i) => `k3m9x00000000000000000${String(i).padStart(2, "0")}`),
+      7,
+    ];
+    const body = (n: number) => ({
+      poll: { id: n, documentId: `doc-${n}`, question: "q", options: ["a"] },
+      counts: [0],
+      total: 0,
+      myVoteIndex: null,
+    });
+    fetchMock
+      .mockImplementationOnce(async () => jsonResponse({ data: [body(1), body(2)] }))
+      .mockImplementationOnce(async () => jsonResponse({ data: [body(3)] }));
+    const results = await api.polls.resultsMany(refs);
+    const urls = fetchMock.mock.calls.map(([url]) => url);
+    expect(urls).toEqual([
+      `http://cms.test/api/poll-results?ids=${refs.slice(0, 50).join(",")}`,
+      `http://cms.test/api/poll-results?ids=${refs.slice(50).join(",")}`,
+    ]);
+    expect(results.map((entry) => entry.poll.id)).toEqual([1, 2, 3]);
+    // A body without data reads as no results.
+    fetchMock.mockImplementationOnce(async () => jsonResponse({}));
+    await expect(api.polls.resultsMany(["k3m9x0000000000000000001"])).resolves.toEqual([]);
+  });
+
+  it("finds a poll's entry by its documentId, or by row id for a numeric address", () => {
+    const entry = (id: number, documentId?: string) => ({
+      poll: { id, documentId, question: "q", options: [] },
+      counts: [],
+      total: 0,
+      myVoteIndex: null,
+    });
+    const results = [entry(21, "k3m9x0000000000000000001"), entry(7)];
+    // Republished since the list read: the documentId still finds it.
+    expect(findPollResults(results, "k3m9x0000000000000000001")?.poll.id).toBe(21);
+    expect(findPollResults(results, 7)?.poll.id).toBe(7);
+    expect(findPollResults(results, 21)?.poll.id).toBe(21);
+    expect(findPollResults(results, "k3m9x0000000000000000002")).toBeUndefined();
+    expect(findPollResults(results, 8)).toBeUndefined();
   });
 
   it("reads the results at the address it is given, encoded", async () => {

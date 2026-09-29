@@ -18,7 +18,7 @@ import { departmentBySlug, listDepartments, listTeams, teamBySlug } from "@/lib/
 import { listWikiSpaces, wikiPageBySlug, wikiSpaceBySlug } from "@/lib/api/wiki";
 import { listAnnouncements, listRequiringAck } from "@/lib/api/announcements";
 import { eventsInWindow, pastEvents, rsvpSummaries, upcomingEvents } from "@/lib/api/events";
-import { listPolls, pollResults } from "@/lib/api/polls";
+import { listPolls, pollResults, pollResultsMany } from "@/lib/api/polls";
 import { listDocuments } from "@/lib/api/documents";
 import { listCelebrations, listKudos } from "@/lib/api/kudos";
 import { classifiedById, listClassifieds, myClassifieds } from "@/lib/api/marketplace";
@@ -33,7 +33,7 @@ export {
   type StrapiPagination,
 } from "@/lib/strapi/client";
 export { eventsPastFilter, eventsUpcomingFilter } from "@/lib/api/events";
-export { pollRef, type PollRef } from "@/lib/api/polls";
+export { findPollResults, pollRef, type PollRef } from "@/lib/api/polls";
 
 /**
  * Convenience reads for the main collections, grouped as the pages use
@@ -51,7 +51,7 @@ export const api = {
     window: eventsInWindow,
     rsvpSummaries,
   },
-  polls: { list: listPolls, results: pollResults },
+  polls: { list: listPolls, results: pollResults, resultsMany: pollResultsMany },
   documents: { list: listDocuments },
   kudos: { list: listKudos },
   classifieds: { list: listClassifieds, mine: myClassifieds, one: classifiedById },

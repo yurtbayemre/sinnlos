@@ -76,6 +76,7 @@ const API_READS: Record<string, () => Promise<unknown>> = {
   "events.rsvpSummaries": () => api.events.rsvpSummaries(["demo-event-1", "demo-event-2"]),
   "polls.list": () => api.polls.list(),
   "polls.results": () => api.polls.results("demo-poll-1"),
+  "polls.resultsMany": () => api.polls.resultsMany([1, "demo-poll-2"]),
   "documents.list": () => api.documents.list(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": () => api.classifieds.list(zonedDateKey(NOW, ZONE)),
@@ -274,6 +275,13 @@ describe("DEMO_MODE: poll results", () => {
     expect(byDocumentId.poll.id).toBe(2);
     expect(await api.polls.results(2)).toEqual(byDocumentId);
     expect(byDocumentId).toMatchObject({ counts: [14, 5, 1], total: 20, myVoteIndex: 0 });
+  });
+
+  it("lists many polls' results in one answer, each like the single read, leaving out unknown ones (WD04)", async () => {
+    const many = await api.polls.resultsMany([2, "demo-poll-9", "demo-poll-1", "demo-poll-2"]);
+    expect(many.map((entry) => entry.poll.id)).toEqual([2, 1]);
+    expect(many[0]).toEqual(await api.polls.results(2));
+    expect(many[1]).toEqual(await api.polls.results("demo-poll-1"));
   });
 
   it("answers an unknown poll with a 404, like the cms (the card is dropped)", async () => {

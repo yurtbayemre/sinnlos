@@ -16,7 +16,8 @@
  *     `meta.pagination` (page walks end); /api/users answers a BARE ARRAY
  *     paged by start/limit like the users-permissions plugin,
  *     /api/users/:id and /api/users/me the bare user;
- *   - an unknown poll's results answer 404 (a StrapiError, like the cms);
+ *   - an unknown poll's results answer 404 (a StrapiError, like the cms),
+ *     and the batched /api/poll-results leaves it out;
  *   - anything else (a mutation, an unknown path) falls through to an
  *     empty list, with a console.warn outside production;
  *   - a production server refuses DEMO_MODE=1 at start (auth.ts).
@@ -442,6 +443,7 @@ function pollResultsOf(poll: Poll): PollResults | null {
   return {
     poll: {
       id: poll.id,
+      documentId: poll.documentId,
       question: poll.question,
       options: poll.options,
       closesAt: poll.closesAt,
@@ -975,6 +977,20 @@ function rsvpSummaries(params: URLSearchParams) {
 /** A poll by its address: documentId or row id (DA01). */
 const pollByRef = (ref: string) => polls.find((p) => p.documentId === ref || String(p.id) === ref);
 
+/**
+ * GET /api/poll-results?ids= (WD04): the results of the known polls, in the
+ * order asked, each once; an unknown address is left out, like the cms.
+ */
+function pollResultsBatch(params: URLSearchParams) {
+  const data: PollResults[] = [];
+  for (const ref of (params.get("ids") ?? "").split(",")) {
+    const poll = pollByRef(ref);
+    const results = poll ? pollResultsOf(poll) : null;
+    if (results && !data.some((entry) => entry.poll.id === results.poll.id)) data.push(results);
+  }
+  return { data };
+}
+
 /** What Strapi answers for an unknown entry. */
 const notFound = () =>
   new StrapiError(
@@ -1016,6 +1032,7 @@ const ROUTES: [RegExp, Handler][] = [
     },
   ],
   [/^\/api\/polls$/, (p) => list(polls, p)],
+  [/^\/api\/poll-results$/, (p) => pollResultsBatch(p)],
   [/^\/api\/kudos-entries$/, (p) => list(kudosEntries, p)],
   [/^\/api\/celebrations$/, () => ({ data: celebrations })],
   [/^\/api\/documents$/, (p) => list(documents, p)],

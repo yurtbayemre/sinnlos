@@ -37,6 +37,8 @@ export interface PollAudienceDepartment {
 export interface PollResults {
   poll: {
     id: number;
+    /** The poll's stable address (DA01); absent from a cms before batch 10. */
+    documentId?: string;
     question: string;
     options: string[];
     closesAt?: string | null;

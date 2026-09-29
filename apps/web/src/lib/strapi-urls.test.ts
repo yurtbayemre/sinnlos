@@ -174,6 +174,14 @@ const API_READS: Record<string, () => Promise<unknown>> = {
     await api.polls.results("k3m9x0000000000000000001");
     await api.polls.results(7);
   },
+  "polls.resultsMany": () =>
+    api.polls.resultsMany([
+      ...Array.from(
+        { length: 50 },
+        (_, i) => `k3m9x00000000000000000${String(i).padStart(2, "0")}`,
+      ),
+      7,
+    ]),
   "documents.list": () => api.documents.list(),
   "kudos.list": () => api.kudos.list(),
   "classifieds.list": async () => {
