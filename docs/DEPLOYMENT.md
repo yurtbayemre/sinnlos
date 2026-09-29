@@ -1289,7 +1289,10 @@ adds one cms endpoint:
   unexpected response was received from the server" and lose the typed
   input; it now lands on `/sign-in?expired=1` with the "session expired"
   notice, like a page load (which now shows that notice too, whenever the
-  browser still sent a session cookie).
+  browser still sent a session cookie). This holds for a form posted
+  without JavaScript as well:
+  it gets a 303 and the browser loads the sign-in page (before, the 307
+  made it post the form to `/sign-in` again, which answered 500).
 - **Data client (WD01).** The web's Strapi client is split into a
   transport, a query encoder and one typed read per request. Every request
   it sends is byte-identical to before (pinned in a test), so the cms sees

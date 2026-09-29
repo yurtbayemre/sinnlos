@@ -24,7 +24,7 @@ const { default: proxy, isPublicPath } = await import("./proxy");
 /**
  * The proxy.ts public allowlist (S06). Two failure modes are silent in
  * production, so both directions are pinned:
- *   - an internal webhook dropped from the list gets a 307 to /sign-in and
+ *   - an internal webhook dropped from the list gets a redirect to /sign-in and
  *     the CMS→web pipeline dies without an error (/api/live/emit — the only
  *     one left since D-DC01 removed /api/revalidate);
  *   - a per-session path added to it (/uploads bytes, /live/* SSE) becomes
@@ -158,15 +158,32 @@ describe("isPublicPath — raw prefix entries (current state)", () => {
   });
 });
 
-/** A request as the proxy sees it; `cookie` and the action header are optional. */
+/** A request as the proxy sees it; `cookie`, the action header and a body are optional. */
 function request(
   path: string,
-  { method = "GET", cookie, action }: { method?: string; cookie?: string; action?: boolean } = {},
+  {
+    method = "GET",
+    cookie,
+    action,
+    body,
+  }: { method?: string; cookie?: string; action?: boolean; body?: BodyInit } = {},
 ): NextRequest {
   const headers = new Headers();
   if (cookie) headers.set("cookie", cookie);
   if (action) headers.set("next-action", "7f3a9c");
-  return new NextRequest(`https://intranet.example.test${path}`, { method, headers });
+  return new NextRequest(`https://intranet.example.test${path}`, { method, headers, body });
+}
+
+/**
+ * The body a progressively enhanced form posts without JavaScript: React's
+ * hidden `$ACTION_ID_<id>` field next to the form's own fields, multipart,
+ * and no Next-Action header.
+ */
+function noJsFormBody(): FormData {
+  const form = new FormData();
+  form.append("$ACTION_ID_7f3a9c", "");
+  form.append("message", "Thanks for the help");
+  return form;
 }
 
 /** NextResponse.next() marks "continue" with this header. */
@@ -268,10 +285,37 @@ describe("proxy() — a request without a session", () => {
     expect(res.headers.get("x-action-redirect")).toBe("/sign-in?from=%2Fkudos;push");
   });
 
-  it("treats a form post without the action header like a page", async () => {
-    const res = await proxy(request("/kudos", { method: "POST", cookie: STALE_COOKIE }));
-    expect(res.status).toBe(307);
-    expect(res.headers.get("x-action-redirect")).toBeNull();
+  it("sends a form post without the action header to the sign-in page with a 303", async () => {
+    // A 307 would make the browser POST the form's $ACTION_ID_ fields to
+    // /sign-in, which has no worker for that action (500). A 303 is
+    // followed with a GET.
+    for (const body of [noJsFormBody(), new URLSearchParams({ message: "hi" }), undefined]) {
+      const res = await proxy(request("/kudos", { method: "POST", cookie: STALE_COOKIE, body }));
+      expect(res.status).toBe(303);
+      expect(res.headers.get("location")).toBe(
+        "https://intranet.example.test/sign-in?expired=1&from=%2Fkudos",
+      );
+      expect(res.headers.get("x-action-redirect")).toBeNull();
+    }
+    const signedOut = await proxy(request("/kudos", { method: "POST", body: noJsFormBody() }));
+    expect(signedOut.status).toBe(303);
+    expect(signedOut.headers.get("location")).toBe(
+      "https://intranet.example.test/sign-in?from=%2Fkudos",
+    );
+  });
+
+  it("keeps the 307 for GET and HEAD and answers other methods with a 303", async () => {
+    for (const method of ["GET", "HEAD"]) {
+      const res = await proxy(request("/polls", { method, cookie: STALE_COOKIE }));
+      expect(res.status, method).toBe(307);
+    }
+    for (const method of ["PUT", "PATCH", "DELETE"]) {
+      const res = await proxy(request("/polls", { method, cookie: STALE_COOKIE }));
+      expect(res.status, method).toBe(303);
+      expect(res.headers.get("location"), method).toBe(
+        "https://intranet.example.test/sign-in?expired=1&from=%2Fpolls",
+      );
+    }
   });
 
   it("lets a Server Action with a session through", async () => {

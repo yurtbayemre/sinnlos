@@ -731,6 +731,8 @@ it), every path ends on the sign-in page with the "session expired"
 notice: `web/src/proxy.ts` sends a page load to `/sign-in?expired=1&from=…`
 and answers a Server Action (a button or form on an open page) with the
 redirect Next's action client follows, instead of a 307 it cannot use;
+a form posted without JavaScript gets a 303, so the browser loads the
+sign-in page with a GET instead of posting the form to it again;
 a Strapi 401 inside a render or an action redirects the same way.
 
 **Microsoft Entra ID → Strapi role** (only with `ENTRA_ENABLED=1`;
