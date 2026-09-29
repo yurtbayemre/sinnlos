@@ -135,8 +135,14 @@ async function expectScheduledAt(tasks: Tasks, timeZone: string) {
 /**
  * Boots @strapi/core's cron provider on the given config (init, bootstrap)
  * and returns the names of the jobs it scheduled, then destroys it.
+ * `pluginJobs` are added to its cron service between init and bootstrap,
+ * as Strapi's own metrics jobs are (the admin's sendProjectInformation, the
+ * upload plugin's uploadWeekly, the telemetry ping).
  */
-async function scheduledByProvider(config: ReturnType<typeof serverConfig>): Promise<string[]> {
+async function scheduledByProvider(
+  config: ReturnType<typeof serverConfig>,
+  pluginJobs: Record<string, unknown> = {},
+): Promise<string[]> {
   const provider = loadStrapiCore<CronProvider>("providers", "cron.js");
   return withGlobalStrapi(async () => {
     const services = new Map<string, unknown>();
@@ -152,6 +158,7 @@ async function scheduledByProvider(config: ReturnType<typeof serverConfig>): Pro
       get: (name) => services.get(name),
     };
     provider.init(host);
+    (host.get("cron") as CronService).add(pluginJobs);
     await provider.bootstrap(host);
     try {
       return (host.get("cron") as CronService).jobs.map(({ name }) => String(name));
@@ -215,6 +222,19 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       expect(config.cron.enabled, value).toBe(false);
       expect(await scheduledByProvider(config), value).toEqual([]);
     }
+  });
+
+  it("leaves the jobs Strapi's plugins add running when off (only the app's tasks stop)", async () => {
+    const metrics = { uploadWeekly: { task: async () => {}, options: "0 0 12 * * 1" } };
+    const off = serverConfig({ env: makeEnv({ CRON_ENABLED: "0" }) });
+    expect(await scheduledByProvider(off, metrics)).toEqual(["uploadWeekly"]);
+    const on = serverConfig({ env: makeEnv() });
+    expect(await scheduledByProvider(on, metrics)).toEqual([
+      "uploadWeekly",
+      "uploads-janitor",
+      "search-log-janitor",
+      "digest-mailer",
+    ]);
   });
 });
 

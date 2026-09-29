@@ -240,8 +240,8 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
   `yes` and `on`, and so does `infra/deploy.sh --check`).
   `CRON_ENABLED=0` (or `false`, `no`, `off`) switches off the three cms
-  crons (uploads and search-log janitors, digest mailer); unset or empty
-  keeps them on. Each run logs `[cron] <name> took <n>ms`, and a run that
+  crons (uploads and search-log janitors, digest mailer; Strapi's own
+  metrics jobs are not among them); unset or empty keeps them on. Each run logs `[cron] <name> took <n>ms`, and a run that
   would overlap the previous one of the same task is skipped.
 
 ## 4. Run locally (two terminals)

@@ -19,9 +19,15 @@
  *    the crons (compose runs one cms container), so the guard is enough; it
  *    is not a cluster lock.
  *
- * CRON_ENABLED switches every task off (`cronEnabled`), for a second cms
- * pointed at the same database (a rehearsal, a restore drill) that must not
- * mail digests or sweep uploads.
+ * CRON_ENABLED switches off the app's cron tasks, i.e. `server.cron.tasks`
+ * (`cronEnabled`), for a second cms pointed at the same database (a
+ * rehearsal, a restore drill) that must not mail digests or sweep uploads.
+ * Strapi's own jobs are not among them: @strapi/core starts its cron service
+ * either way, so the telemetry ping (sendPingEvent, which
+ * STRAPI_TELEMETRY_DISABLED=true, lane 5A's compose default, stops), the
+ * admin's daily sendProjectInformation and the upload plugin's weekly
+ * uploadWeekly (which writes its own schedule into the core store) keep
+ * running. None of them mails, sweeps or deletes anything.
  */
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
 import { pruneSearchLogs } from "./prune-search-logs";
@@ -82,7 +88,7 @@ export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
  * CRON_ENABLED: unset or blank keeps the crons on (the default); otherwise
  * it is read like every other on/off switch of the cms (`parseEnvFlag`:
  * 1/true/yes/on, trimmed, any case), so `0`, `false`, `no` or `off` switch
- * every task off. Strapi's `env.bool` would read `1` and a blank value as
+ * every app task off (not Strapi's own jobs, see the module comment). Strapi's `env.bool` would read `1` and a blank value as
  * off, the opposite of what the repo's other switches mean.
  */
 export function cronEnabled(value: string | undefined): boolean {

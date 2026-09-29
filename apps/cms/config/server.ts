@@ -61,8 +61,10 @@ export default ({ env }: { env: Env }) => ({
   // the process zone (UTC in the container) plays no part. The janitors run
   // after the 03:00 host backup (keep the host in APP_TIME_ZONE,
   // docs/DEPLOYMENT.md §7.3). CRON_ENABLED=0 (or false/no/off) switches
-  // every task off: with `enabled` false @strapi/core
-  // (dist/providers/cron.js) adds none of them.
+  // the app's tasks off: with `enabled` false @strapi/core
+  // (dist/providers/cron.js) adds none of `tasks`, but still starts its cron
+  // service, so the jobs Strapi's plugins add (metrics) keep running
+  // (src/cron/registry.ts).
   cron: {
     enabled: cronEnabled(env("CRON_ENABLED")),
     tasks: buildCronTasks(cronRegistry(cronTimeZone(env))),

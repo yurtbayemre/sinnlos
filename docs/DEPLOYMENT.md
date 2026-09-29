@@ -1400,7 +1400,14 @@ rollback; merged in order (5A, then 5B), batch 10 ships both together.
   `[cron] <name> took <n>ms` line per run, an in-process overlap guard and
   the kill switch `CRON_ENABLED` (unset or blank = on; `0`, `false`, `no`
   or `off` = off). The compose file passes it from batch 10 lane 5A on;
-  without that the crons stay on.
+  without that the crons stay on. It switches off the app's three tasks
+  (Strapi's `server.cron.tasks`), not Strapi's own jobs: @strapi/core still
+  starts its cron service, so its telemetry ping (`sendPingEvent`, stopped
+  by `STRAPI_TELEMETRY_DISABLED=true`, lane 5A's compose default), the
+  admin's daily `sendProjectInformation` and the upload plugin's weekly
+  `uploadWeekly` (which writes its own schedule into Strapi's core store)
+  run on. None of them mails, sweeps or deletes anything, so a second cms
+  on the same database (a rehearsal) is safe with `CRON_ENABLED=0`.
 
 **Before the deploy**
 
