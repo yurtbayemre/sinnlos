@@ -24,3 +24,8 @@ pnpm-lock.yaml
 
 # Misc
 *.log
+
+# Hand-formatted long docs: prettier's Markdown parser re-renders stray
+# `*`/`_` in prose and blockquoted SHAs differently from GitHub.
+docs/DEPLOYMENT.md
+docs/architecture.md
