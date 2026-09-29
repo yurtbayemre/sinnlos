@@ -2002,6 +2002,63 @@ container interrupted the site for about 20 s. Not exercised here:
 network `frontend` was renamed for the rehearsal; lane 5B ran it end to
 end), a public domain with Let's Encrypt, and the production host.
 
+**Fix round of the integration (2026-09-29).** The review, Codex and a
+second rehearsal, which ran this runbook with `infra/deploy.sh` end to end
+on the integrated tree, found six points, all fixed on `batch/10`:
+
+- live-smoke failed a healthy stack whose cms had kept running: after some
+  weeks of uptime its `[datetime]` boot line has rotated out of `docker
+  logs` (the cms logs every request, the healthcheck's included), and a
+  deploy that changes nothing the cms image is built from keeps the cms
+  container. live-smoke now asks `node` in the running cms container for
+  the zone instead (`datetime contract OK (process time zone UTC), from the
+  running cms container`);
+- without a state, a running image `deploy.sh` cannot tag `:rollback`, or
+  an `infra.bootstrap` it cannot write, stops the run before the build
+  (step 8), so a first run never records an older `:rollback` of one
+  service next to the current image of the other;
+- a backup run that skipped the uploads or the `.env` is `partial` and
+  refreshes no `last-success`, and `restore-drill.sh --all` checks the
+  uploads and `.env` of the dump's own run
+  ([§7.3](#73-automated-daily-backups-cron));
+- the offsite dirs a root run creates belong to the backup root's owner
+  (before: root, which locked the owner's nightly cron out on a new host),
+  and gpg neither reads nor writes `random_seed` and, as root, no longer
+  warns about the keyring's owner ([§7.3](#73-automated-daily-backups-cron));
+- step 11 and the rollback above say how many `batchResults` rows a
+  roll-forward grants after a rollback.
+
+Verified on throwaway resources (compose project `b10i-staging` with its
+own volumes, the fixed tree, the scripts run as root and as the owner in a
+Linux container against Docker 29.7.2 with the containerd image store, a
+new backup root without an offsite dir, a test key off-box): live-smoke
+passed `from the cms boot line`; once 400 `/_health` requests had rotated
+that line out of a 16 KB × 2 cms log, it passed `from the running cms
+container` (stream uncompressed, ping and notification frame, the residue
+count unchanged), where the live-smoke of `ebc31e8` failed the same healthy
+stack with `no [datetime] boot line`; a container of the cms image in
+`Europe/Berlin` failed it, and a stopped one failed with `did not answer`.
+`deploy.sh` as root took its pre-deploy backup into the new backup root:
+`offsite/` and `offsite/sinnlos/` and every artifact belonged to the
+owner, the keyring got no `random_seed`, and gpg printed nothing (the
+second rehearsal had root-owned dirs, three `unsafe ownership on homedir`
+warnings, and then `Permission denied` on `random_seed` in the owner's
+nightly run); the owner's nightly run afterwards printed nothing on
+stderr. With the running web image named by no tag (a build with
+BuildKit's attestations had moved `:latest`; a `docker rmi -f` of its only
+tag had kept it resolvable), the run stopped before the build with the
+`--force-recreate` command, the older `:rollback` tags untouched and no
+marker written, and `--dry-run` printed `WOULD STOP`; after that command
+the dry run planned both `:rollback` tags. With its state dir on a full
+tmpfs the run stopped with `could not write …bootstrap; nothing was
+built`. A nightly run with a wrong `SINNLOS_ENV_FILE` logged `done nightly
+partial (skipped: sinnlos-env)`, warned and left `last-success` alone;
+`restore-drill.sh --all` then failed naming that run's missing `.env`
+artifact, and restored the complete nightly run and a pre-deploy run (105
+tables each) with their uploads and `.env`. Not exercised: a deploy past
+step 2 with the fixes (their code runs in step 2, in the backup and in
+live-smoke, each exercised above) and the production host.
+
 #### Upgrading to the CI and edge changes (batch 10, lane 5A)
 
 This release (branch `ops/ci-and-edge`, on `batch/9` `5be7dc7`) changes the
