@@ -22,8 +22,24 @@ export function stripHtml(s?: string | null): string {
 }
 
 /** Private-use markers around a protected piece (an escape or a code span). */
-const HOLD_OPEN = "";
-const HOLD_CLOSE = "";
+const HOLD_OPEN = "\uE000";
+const HOLD_CLOSE = "\uE001";
+
+/**
+ * Most characters of a body stripMarkdown reads by default; the rest is cut
+ * before any rule runs. A preview shows a few lines, and some rules scan
+ * from an opener without a closer to the end of its line, which is
+ * quadratic on a pathological line (about 0.8 s for 50 000 characters of
+ * "[a" or "**a "; the cap keeps that in the low milliseconds).
+ */
+export const STRIP_MARKDOWN_MAX_INPUT = 4_000;
+
+/** The first `max` UTF-16 units of `s`, never ending on half a surrogate pair. */
+function cutAt(s: string, max: number): string {
+  if (s.length <= max) return s;
+  const code = s.charCodeAt(max - 1);
+  return s.slice(0, code >= 0xd800 && code <= 0xdbff ? max - 1 : max);
+}
 
 /**
  * Markdown (a Strapi richtext body) as one line of plain text, for
@@ -36,15 +52,19 @@ const HOLD_CLOSE = "";
  *
  * Not a parser and not a sanitiser: the result is rendered as text (React
  * escapes it), never as HTML. Deliberately conservative where Markdown is
- * ambiguous: `snake_case`, "2 * 3" and a lone "<" stay as written.
+ * ambiguous: `snake_case`, "2 * 3" and a lone "<" stay as written. Reads
+ * only the first `maxInput` characters ({@link STRIP_MARKDOWN_MAX_INPUT}).
  */
-export function stripMarkdown(s?: string | null): string {
+export function stripMarkdown(
+  s?: string | null,
+  { maxInput = STRIP_MARKDOWN_MAX_INPUT }: { maxInput?: number } = {},
+): string {
   if (!s) return "";
   const held: string[] = [];
   const hold = (value: string) => `${HOLD_OPEN}${held.push(value) - 1}${HOLD_CLOSE}`;
 
-  let text = s
-    .replace(/[]/g, "")
+  let text = cutAt(s, maxInput)
+    .replace(/[\uE000\uE001]/g, "")
     .replace(/\r\n?/g, "\n")
     // Escaped punctuation is literal text: kept out of every rule below.
     .replace(/\\([!-/:-@[-`{-~])/g, (_, ch: string) => hold(ch))

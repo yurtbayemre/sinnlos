@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeInternalPath, stripMarkdown } from "./utils";
+import { STRIP_MARKDOWN_MAX_INPUT, safeInternalPath, stripMarkdown } from "./utils";
 
 /**
  * `safeInternalPath` is the open-redirect guard for every ?from= value (the
@@ -224,9 +224,24 @@ describe("stripMarkdown", () => {
   });
 
   it("never leaves its internal markers behind", () => {
-    const out = stripMarkdown("x `\\*` \\_ [a](b)");
-    expect(out).not.toMatch(/[]/);
+    const out = stripMarkdown("\uE000x\uE001 `\\*` \\_ [a](b)");
+    expect(out).not.toMatch(/[\uE000\uE001]/);
     expect(out).toBe("x * _ a");
+  });
+
+  it("reads only the first STRIP_MARKDOWN_MAX_INPUT characters", () => {
+    expect(stripMarkdown("a".repeat(STRIP_MARKDOWN_MAX_INPUT + 500))).toBe(
+      "a".repeat(STRIP_MARKDOWN_MAX_INPUT),
+    );
+    expect(stripMarkdown("**bold** and more", { maxInput: 8 })).toBe("bold");
+    // Pathological lines (quadratic rules) stay bounded by the cap.
+    expect(stripMarkdown("[a".repeat(25_000))).toHaveLength(STRIP_MARKDOWN_MAX_INPUT);
+  });
+
+  it("never cuts a surrogate pair in half", () => {
+    const text = "x".repeat(STRIP_MARKDOWN_MAX_INPUT - 1) + "\u{1F600}y";
+    expect(stripMarkdown(text)).toBe("x".repeat(STRIP_MARKDOWN_MAX_INPUT - 1));
+    expect(stripMarkdown("ab\u{1F600}", { maxInput: 4 })).toBe("ab\u{1F600}");
   });
 
   it("turns the demo announcements into readable excerpts", () => {
