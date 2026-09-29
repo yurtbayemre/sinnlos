@@ -3,11 +3,8 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
+import { Markdown } from "@/components/markdown";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -17,11 +14,12 @@ import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/l
 import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
 
 /**
- * Lesson player (issue #29): markdown body (same pipeline as the wiki —
- * react-markdown + gfm, NO rehype-raw ⇒ no raw HTML/XSS), the YouTube
- * render gate, the client-only self-check quiz and the completion
- * button. PDFs/documents are linked inside the markdown (documents
- * module decision) — no attachment UI.
+ * Lesson player (issue #29): markdown body (the shared renderer of the
+ * wiki, components/markdown.tsx — react-markdown + gfm, NO rehype-raw ⇒ no
+ * raw HTML/XSS, unsafe URL schemes dropped), the YouTube render gate, the
+ * client-only self-check quiz and the completion button. PDFs/documents
+ * are linked inside the markdown (documents module decision) — no
+ * attachment UI.
  */
 export default async function LessonPage({
   params,
@@ -80,16 +78,7 @@ export default async function LessonPage({
 
       <LessonVideo videoUrl={lesson.videoUrl} />
 
-      {lesson.body && (
-        <div className="prose prose-slate max-w-none dark:prose-invert">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeSlug, [rehypeAutolinkHeadings, { behavior: "wrap" }]]}
-          >
-            {lesson.body}
-          </ReactMarkdown>
-        </div>
-      )}
+      {lesson.body && <Markdown headingAnchors>{lesson.body}</Markdown>}
 
       <LessonCompletion
         quiz={quiz}
