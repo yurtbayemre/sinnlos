@@ -480,6 +480,66 @@ describe("ownerGate (PL02)", () => {
     }
     expect([...results]).toEqual(["boolean"]);
   });
+
+  describe("unknownRow: 'handler' and refusal: 'forbidden' (PL03)", () => {
+    const adapted = ownerGate({
+      uid: RSVP,
+      ownerField: "user",
+      bypass: [ADMIN],
+      unknownRow: "handler",
+      refusal: "forbidden",
+    });
+    const outcome = async (user: StubUser | null | undefined, id: unknown) => {
+      try {
+        return await run(user, id, adapted);
+      } catch (error) {
+        return { error };
+      }
+    };
+    const refused = (value: unknown) => {
+      expect(value).toHaveProperty("error");
+      const { error } = value as { error: unknown };
+      expect(error).toBeInstanceOf(errors.ForbiddenError);
+      expect(error).not.toBeInstanceOf(errors.PolicyError);
+      expect(error).toMatchObject({ name: "ForbiddenError", message: "Forbidden", details: {} });
+    };
+
+    it("passes the owner and the bypass roles exactly like the default gate", async () => {
+      await expect(outcome(as("member", 5), "1")).resolves.toMatchObject({ result: true });
+      await expect(outcome(as("member", 5), OWN_DOC)).resolves.toMatchObject({ result: true });
+      await expect(outcome(as("admin_role", 6), "1")).resolves.toMatchObject({
+        result: true,
+        calls: [],
+      });
+    });
+
+    it("throws ctx.forbidden()'s error instead of returning false", async () => {
+      refused(await outcome(as("member", 6), "1"));
+      refused(await outcome(as("member", 5), "2"));
+      refused(await outcome(as("editor", 6), "1"));
+      refused(await outcome({ role: { type: "member" } }, "1"));
+      refused(await outcome(undefined, "1"));
+      refused(await outcome(null, "1"));
+    });
+
+    it("passes an id that names no row on to the handler, a malformed one without a lookup", async () => {
+      await expect(outcome(as("member", 5), "99")).resolves.toMatchObject({ result: true });
+      for (const id of [undefined, "", ...MALFORMED_ENTRY_IDS]) {
+        await expect(outcome(as("member", 5), id), String(id)).resolves.toMatchObject({
+          result: true,
+          calls: [],
+        });
+      }
+    });
+
+    it("still refuses a caller without a numeric id before the lookup, even for an unknown id", async () => {
+      for (const id of ["99", "abc"]) refused(await outcome({ role: { type: "member" } }, id));
+    });
+
+    it("keeps the defaults apart: a plain gate refuses an unknown id with false", async () => {
+      await expect(run(as("member", 5), "99")).resolves.toMatchObject({ result: false });
+    });
+  });
 });
 
 describe("configuredBypass", () => {

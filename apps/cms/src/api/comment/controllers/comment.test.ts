@@ -15,7 +15,11 @@ import commentController from "./comment";
  *      byte-identical (no existence oracle, §5.17),
  *   3. delete takes a numeric id or a documentId; anything else is an
  *      unknown comment (404) and never reaches the lookup, where Postgres
- *      failed on a malformed row id with a 500 (EVT-ICS-ID class).
+ *      failed on a malformed row id with a 500 (EVT-ICS-ID class). Who may
+ *      delete is the route policy's decision since PL03
+ *      (policies/is-comment-author.test.ts); the HTTP answers of both
+ *      together are pinned byte for byte in
+ *      integration/comment-delete.integration.test.ts.
  *
  * `super.create`/`super.delete` are spies on the prototype, exactly where
  * @strapi/core 5.49 createCoreController puts the base controller;
@@ -238,19 +242,26 @@ describe("comment delete: numeric id or documentId, nothing else", () => {
     expect(mocks.superDelete).not.toHaveBeenCalled();
   });
 
-  it("still refuses a stranger", async () => {
-    const { controller, ctx } = setupDelete("7", { id: 99, role: { type: "member" } });
+  it("reads only the id and the documentId, never the author", async () => {
+    const { controller, ctx, findOne } = setupDelete("7");
     await controller.delete(ctx);
-    expect(ctx.forbidden).toHaveBeenCalled();
-    expect(mocks.superDelete).not.toHaveBeenCalled();
+    expect(findOne.mock.calls).toEqual([[{ where: { id: 7 }, select: ["id", "documentId"] }]]);
   });
 
-  it("lets no caller without a numeric id own a comment whose author is gone", async () => {
-    const idless = { role: { type: "member" } } as unknown as DeleteCtx["state"]["user"];
-    const { controller, ctx, findOne } = setupDelete("7", idless);
-    findOne.mockResolvedValueOnce({ id: 7, documentId: COMMENT_DOC, author: null });
-    await controller.delete(ctx);
-    expect(ctx.forbidden).toHaveBeenCalled();
-    expect(mocks.superDelete).not.toHaveBeenCalled();
+  it("leaves ownership to the route policy: whoever the policy admits is translated (PL03)", async () => {
+    // global::is-comment-author runs before the controller (routes/comment.ts,
+    // pinned in routes.matrix.test.ts): the author, admin_role and editor
+    // reach it; everyone else is refused there.
+    for (const user of [
+      { id: 1, role: { type: "admin_role" } },
+      { id: 2, role: { type: "editor" } },
+    ]) {
+      mocks.superDelete.mockClear();
+      const { controller, ctx } = setupDelete("7", user);
+      await controller.delete(ctx);
+      expect(ctx.forbidden, user.role.type).not.toHaveBeenCalled();
+      expect(mocks.superDelete, user.role.type).toHaveBeenCalledOnce();
+      expect(ctx.params.id, user.role.type).toBe(COMMENT_DOC);
+    }
   });
 });

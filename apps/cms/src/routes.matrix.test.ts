@@ -290,7 +290,8 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::comment.comment.find": ["global::comment-target-visibility"],
   "api::comment.comment.findOne": ["global::comment-target-visibility"],
   "api::comment.comment.create": [],
-  "api::comment.comment.delete": [],
+  // PL03: author, or admin_role/editor; the controller keeps the id translation and the 404.
+  "api::comment.comment.delete": ["global::is-comment-author"],
 
   "api::course.course.find": training("course"),
   "api::course.course.findOne": training("course"),
@@ -1068,6 +1069,19 @@ describe("route → policy matrix (S01)", async () => {
           .find((roles) => roles !== undefined);
       expect(bypassOf("api::classified.classified.update")).toEqual([ADMIN]);
       expect(bypassOf("api::classified.classified.delete")).toEqual([...MODERATORS]);
+    });
+
+    it("PL03: comment and reaction delete are owner-gated by a route policy, not in the controller alone", () => {
+      expect(policiesOf("api::comment.comment.delete").map(policyName)).toEqual([
+        "global::is-comment-author",
+      ]);
+      expect(policiesOf("api::reaction.reaction.delete").map(policyName)).toEqual([
+        "global::is-reaction-author",
+      ]);
+      // Both controllers still override delete: the numeric id → documentId
+      // translation the v5 core delete lacks.
+      expect(isOverridden("api::comment.comment.delete")).toBe(true);
+      expect(isOverridden("api::reaction.reaction.delete")).toBe(true);
     });
 
     it("FX01: removed core actions have no route, no grant and are revoked for every role", () => {

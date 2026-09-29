@@ -1,3 +1,4 @@
+import { errors } from "@strapi/utils";
 import { hasRole, isRoleType, type RoleType } from "../bootstrap/roles";
 import { isRowId, parseEntryRef } from "./entry-id";
 import {
@@ -32,7 +33,9 @@ import {
  *   5. draft & publish types get status=published AFTER the bypass
  *      (forcePublishedStatus);
  *   6. every branch returns a strict boolean: Strapi counts `undefined` as
- *      a pass.
+ *      a pass. The one other outcome is an ownerGate built with
+ *      `refusal: "forbidden"`, which throws its refusals as
+ *      ForbiddenError("Forbidden") (is-comment-author, PL03).
  *
  * Strapi resolves `global::<name>` by file name, so every policy keeps its
  * own small file in src/policies that calls a factory with its rules
@@ -332,7 +335,31 @@ export interface OwnerGateOptions {
    * applies without one.
    */
   bypassFromConfig?: boolean;
+  /**
+   * A `:id` that names no row (malformed, out of range, missing, unknown):
+   *   - "refuse" (the default): refused like a foreign row, so the answer
+   *     never tells the two apart;
+   *   - "handler": passed on to the route handler, which answers it itself
+   *     (the comment delete's 404, PL03). There is no row to protect, and
+   *     the handler must look the id up again anyway (findByRef) to
+   *     translate it. A caller without a numeric id is still refused.
+   */
+  unknownRow?: "refuse" | "handler";
+  /**
+   * How a refusal reaches the client:
+   *   - "policy" (the default): the gate returns false and Strapi answers
+   *     its PolicyError (403, message "Policy Failed");
+   *   - "forbidden": the gate throws ForbiddenError("Forbidden"), which
+   *     Strapi's error middleware turns into exactly the body of
+   *     `ctx.forbidden()`. For a route whose controller used to refuse by
+   *     itself, so moving the check into a policy changes no byte of the
+   *     answer (PL03).
+   */
+  refusal?: "policy" | "forbidden";
 }
+
+/** The ctx.forbidden() answer, thrown from a policy (OwnerGateOptions.refusal). */
+export const FORBIDDEN_MESSAGE = "Forbidden";
 
 /** The bypass roles a route config names (see OwnerGateOptions.bypassFromConfig). */
 export function configuredBypass(
@@ -354,24 +381,32 @@ export function configuredBypass(
  *
  * Passing the policy does not translate the id for the core route: the
  * controllers that accept a numeric id do that with findByRef themselves.
+ *
+ * `unknownRow` and `refusal` adapt the answers for a route whose
+ * controller used to check ownership itself (see OwnerGateOptions); the
+ * defaults are the rules above.
  */
 export function ownerGate(options: OwnerGateOptions): Policy<BypassRolesConfig | undefined> {
+  const refuse = (): false => {
+    if (options.refusal === "forbidden") throw new errors.ForbiddenError(FORBIDDEN_MESSAGE);
+    return false;
+  };
   return async (policyContext, config, { strapi }) => {
     const user = policyContext.state?.user;
-    if (!user) return false;
+    if (!user) return refuse();
     const bypass = options.bypassFromConfig
       ? configuredBypass(config, options.bypass)
       : options.bypass;
     if (hasRole(user, bypass)) return true;
 
     const caller = identifiedCaller(user);
-    if (!caller) return false;
+    if (!caller) return refuse();
 
     const row = await findByRef(strapi, options.uid, policyContext.params?.id, {
       populate: { [options.ownerField]: { select: ["id"] } },
     });
-    if (!row) return false;
+    if (!row) return options.unknownRow === "handler" ? true : refuse();
     const owner = row[options.ownerField];
-    return isRecord(owner) && owner.id === caller.id;
+    return isRecord(owner) && owner.id === caller.id ? true : refuse();
   };
 }
