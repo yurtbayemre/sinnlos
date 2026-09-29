@@ -177,6 +177,11 @@ services:
     pids_limit: 512
     security_opt:
       - no-new-privileges:true
+    # No Linux capabilities (IN02), like the web: Strapi runs as `node` on
+    # the unprivileged port 1337 and writes only files it owns (uploads
+    # volume, sharp's image formats), so it needs none of Docker's defaults.
+    cap_drop:
+      - ALL
 
   web:
     build:

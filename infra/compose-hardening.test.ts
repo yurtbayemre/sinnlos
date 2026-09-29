@@ -5,7 +5,10 @@
  *      (IN05), so a chatty container cannot fill the host's disk;
  *   2. the internal URLs use the unique aliases sinnlos-db, sinnlos-cms and
  *      sinnlos-web, defined on the project's own network only (IN04);
- *   3. the cms gets CRON_ENABLED (default true) for its cron registry
+ *   3. every service runs with no-new-privileges and memory, CPU and pid
+ *      limits (caddy since FX33), and cms and web drop every Linux
+ *      capability (IN02, cms part);
+ *   4. the cms gets CRON_ENABLED (default true) for its cron registry
  *      (LF03) and runs without Strapi telemetry (B05).
  *
  * Line-based like container-start.test.ts: the repo has no YAML parser at
@@ -99,6 +102,27 @@ describe("internal service names (IN04)", () => {
       "utf8",
     ).replace(/\r\n/g, "\n");
     expect(overlay).not.toMatch(/aliases:/);
+  });
+});
+
+describe("container hardening (IN02, FX33)", () => {
+  it.each(SERVICES)("%s runs with no-new-privileges and resource limits", (service) => {
+    const lines = block(`  ${service}:`);
+    const opt = lines.indexOf("    security_opt:");
+    expect(opt, `${service} security_opt`).toBeGreaterThanOrEqual(0);
+    expect(lines[opt + 1]).toBe("      - no-new-privileges:true");
+    for (const limit of ["mem_limit", "cpus", "pids_limit"]) {
+      expect(lines.some((line) => line.startsWith(`    ${limit}: `)), `${service} ${limit}`).toBe(true);
+    }
+  });
+
+  // The two app containers need no Linux capability at all.
+  it.each(["cms", "web"])("%s drops every capability", (service) => {
+    const lines = block(`  ${service}:`);
+    const drop = lines.indexOf("    cap_drop:");
+    expect(drop, `${service} cap_drop`).toBeGreaterThanOrEqual(0);
+    expect(lines[drop + 1]).toBe("      - ALL");
+    expect(lines.some((line) => line.startsWith("    cap_add:"))).toBe(false);
   });
 });
 
