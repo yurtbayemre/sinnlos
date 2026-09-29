@@ -41,9 +41,11 @@
  *    (deploy) reconnects with the fleet spread, `rotate` after the normal
  *    backoff. The client closes the EventSource itself, so the browser's
  *    native 3 s retry never reopens such a stream.
- *  - Subscriptions are synced in one POST per tick (WD04): every channel
- *    registered or dropped in the same commit (a page mounting 20 comment
- *    sections) goes out together, at most MAX_SUBSCRIBE_LIST per list.
+ *  - Subscriptions are synced once per tick (WD04) as the FULL desired
+ *    set with a monotonic revision (LF05): every channel registered or
+ *    dropped in the same commit (a page mounting 20 comment sections)
+ *    goes out together, at most MAX_SUBSCRIBE_LIST per POST, and a late
+ *    POST can never undo a newer set (the bus ignores a stale revision).
  */
 import {
   ANNOUNCEMENTS_CHANNEL,
@@ -57,6 +59,7 @@ import {
   type ContentChannel,
   type LiveChannel,
   type LiveFrame,
+  type LiveSubscribeRequest,
 } from "@/lib/live-contract";
 
 /** A channel listener: a refetch; errors are its own business. */
@@ -84,8 +87,8 @@ export interface LiveClientDeps {
     /** Calls `listener` on every change; returns the removal. */
     subscribe(listener: () => void): () => void;
   };
-  /** POSTs a JSON body (the subscribe route); the answer is not read. */
-  post(url: string, body: unknown): Promise<unknown>;
+  /** POSTs a JSON body (the subscribe route); true when the server took it (2xx). */
+  post(url: string, body: unknown): Promise<boolean>;
 }
 
 /** EventSource.CLOSED: the connection is gone and the browser will not retry. */
@@ -132,11 +135,11 @@ export class LiveClient {
   private readonly inflight = new Map<LiveChannel, { dirty: boolean }>();
   private readonly catchupQueue: LiveChannel[] = [];
   private catchupActive = 0;
-  private readonly pendingSync = {
-    add: new Set<ContentChannel>(),
-    remove: new Set<ContentChannel>(),
-    scheduled: false,
-  };
+  /** The last subscription revision sent; counts up across connections. */
+  private rev = 0;
+  /** The set the current connection has (sorted, joined), once sent. */
+  private sent: { connId: string; key: string } | null = null;
+  private syncScheduled = false;
 
   /** `onHealth` gets every health change (the provider's state setter). */
   constructor(
@@ -179,13 +182,13 @@ export class LiveClient {
       this.listeners.set(channel, set);
     }
     set.add(listener);
-    if (isNewChannel) this.syncSubscriptions([channel]);
+    if (isNewChannel && isContentChannel(channel)) this.scheduleSync();
     const listeners = set;
     return () => {
       listeners.delete(listener);
       if (listeners.size === 0) {
         this.listeners.delete(channel);
-        this.syncSubscriptions([], [channel]);
+        if (isContentChannel(channel)) this.scheduleSync();
       }
     };
   };
@@ -212,7 +215,9 @@ export class LiveClient {
         this.connId = null;
       }
       this.onHealth(true);
-      this.syncSubscriptions([...this.listeners.keys()]);
+      // A new connection starts with no channels: send the set if there is one.
+      if (this.connId) this.sent = { connId: this.connId, key: "" };
+      this.scheduleSync();
       // Catch-up covers the gap since the last stream (missed pings have
       // no replay). Skipped on the very first open — that data was just
       // server-rendered.
@@ -463,44 +468,54 @@ export class LiveClient {
 
   // --- Subscriptions -------------------------------------------------------
 
-  private syncSubscriptions(add: LiveChannel[], remove: LiveChannel[] = []): void {
-    // Only content channels are subscribed on the bus; the global ones
-    // reach every connection that may receive them. Changes of one tick
-    // are merged (the last one per channel wins) and sent together.
-    const pending = this.pendingSync;
-    for (const channel of add) {
-      if (!isContentChannel(channel)) continue;
-      pending.remove.delete(channel);
-      pending.add.add(channel);
-    }
-    for (const channel of remove) {
-      if (!isContentChannel(channel)) continue;
-      pending.add.delete(channel);
-      pending.remove.add(channel);
-    }
-    if (pending.scheduled || (pending.add.size === 0 && pending.remove.size === 0)) return;
-    pending.scheduled = true;
+  /**
+   * Schedules one full-set sync for the end of the current tick: every
+   * registration and removal of one commit (a page mounting 20 comment
+   * sections, a navigation swapping them) goes out together.
+   */
+  private scheduleSync(): void {
+    if (this.syncScheduled) return;
+    this.syncScheduled = true;
     queueMicrotask(() => {
-      pending.scheduled = false;
-      const wanted = [...pending.add];
-      const dropped = [...pending.remove];
-      pending.add.clear();
-      pending.remove.clear();
-      // No stream yet: the next hello subscribes every registered channel.
-      const connId = this.connId;
-      if (!connId) return;
-      for (let i = 0; i < Math.max(wanted.length, dropped.length); i += MAX_SUBSCRIBE_LIST) {
-        this.deps
-          .post(SUBSCRIBE_URL, {
-            connId,
-            add: wanted.slice(i, i + MAX_SUBSCRIBE_LIST),
-            remove: dropped.slice(i, i + MAX_SUBSCRIBE_LIST),
-          })
-          .catch(() => {
-            // Stream eviction/rotation races are resolved by the next hello.
-          });
-      }
+      this.syncScheduled = false;
+      this.sendSubscriptions();
     });
+  }
+
+  /**
+   * Sends the FULL desired set of content channels (LF05, the contract's
+   * LiveSubscribeRequest) under the next revision, in POSTs of at most
+   * MAX_SUBSCRIBE_LIST; only content channels are subscribed on the bus,
+   * the global ones reach every connection that may receive them. Nothing
+   * goes out without a stream (the next hello sends the set) or when the
+   * set is the one this connection already has. A POST the server did not
+   * take (network error, 404 after an eviction) forgets that, so the next
+   * change sends the whole set again.
+   */
+  private sendSubscriptions(): void {
+    const connId = this.connId;
+    if (!connId) return;
+    const channels = [...this.listeners.keys()].filter(isContentChannel);
+    const key = [...channels].sort().join("\n");
+    if (this.sent?.connId === connId && this.sent.key === key) return;
+    const sent = { connId, key };
+    this.sent = sent;
+    this.rev += 1;
+    const rev = this.rev;
+    const parts: ContentChannel[][] = [];
+    for (let i = 0; i < channels.length; i += MAX_SUBSCRIBE_LIST) {
+      parts.push(channels.slice(i, i + MAX_SUBSCRIBE_LIST));
+    }
+    if (parts.length === 0) parts.push([]);
+    for (const part of parts) {
+      const request: LiveSubscribeRequest = { connId, rev, channels: part };
+      void this.deps
+        .post(SUBSCRIBE_URL, request)
+        .catch(() => false)
+        .then((taken) => {
+          if (!taken && this.sent === sent) this.sent = null;
+        });
+    }
   }
 }
 
@@ -521,5 +536,5 @@ export const browserLiveClientDeps: LiveClientDeps = {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body),
-    }),
+    }).then((res) => res.ok),
 };

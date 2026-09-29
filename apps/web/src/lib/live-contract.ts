@@ -19,6 +19,7 @@ export {
   isContentChannel,
   parseByeFrame,
   parseLiveFrame,
+  parseSubscribeRequest,
   type ByeFrame,
   type ByeReason,
   type ContentChannel,
@@ -26,6 +27,7 @@ export {
   type LiveChannel,
   type LiveEvent,
   type LiveFrame,
+  type LiveSubscribeRequest,
   type LiveTargetType,
   type LiveTargetTypesMatchCommentTargets,
 } from "@sinnlos/domain";

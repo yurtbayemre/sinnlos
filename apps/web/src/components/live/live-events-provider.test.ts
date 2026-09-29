@@ -17,8 +17,10 @@ import {
  * stop after five instant closes and its five-minute self-heal, the 65 s
  * heartbeat watchdog, the hidden-tab teardown, the catch-up queue
  * (notifications first, two at a time), the ping coalescing with its
- * single-flight refetch, and the one-POST-per-tick subscription sync (WD04).
- * These pin the behaviour the extraction into lib/live-client.ts keeps.
+ * single-flight refetch, and the once-per-tick subscription sync (WD04).
+ * These pinned the behaviour the extraction into lib/live-client.ts kept;
+ * the LF05 changes since (the full channel set with a revision, …) are
+ * pinned here and in lib/live-client.test.ts.
  *
  * Math.random is fixed per test, so every jittered delay is exact.
  */
@@ -59,12 +61,15 @@ async function hello(source: FakeEventSource, connId = "conn-1") {
   await browser.act(() => source.emit("hello", { connId }));
 }
 
-/** The subscribe POSTs so far, as { add, remove } lists. */
+/** The subscribe POSTs so far (LiveSubscribeRequest bodies). */
 function subscribeBodies() {
   return browser.calls
     .filter((call) => call.url === "/live/subscribe")
-    .map((call) => call.body as { connId: string; add: string[]; remove: string[] });
+    .map((call) => call.body as { connId: string; rev: number; channels: string[] });
 }
+
+/** The status /live/subscribe answers with. */
+let subscribeStatus = 200;
 
 /** A listener whose calls the test resolves one by one. */
 function deferredListener(log: string[], name: string) {
@@ -84,7 +89,8 @@ function deferredListener(log: string[], name: string) {
 
 beforeEach(() => {
   vi.useFakeTimers();
-  browser = installFakeBrowser();
+  subscribeStatus = 200;
+  browser = installFakeBrowser(async () => Response.json({}, { status: subscribeStatus }));
   vi.spyOn(Math, "random").mockReturnValue(0);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -480,7 +486,7 @@ describe("catch-up after a reconnect", () => {
   });
 });
 
-describe("subscription sync (WD04)", () => {
+describe("subscription sync (WD04, LF05: the full set with a revision)", () => {
   const noop = () => undefined;
 
   it("sends nothing before the hello, then every content channel in one POST", async () => {
@@ -492,11 +498,11 @@ describe("subscription sync (WD04)", () => {
     expect(subscribeBodies()).toEqual([]);
     await hello(FakeEventSource.latest());
     expect(subscribeBodies()).toEqual([
-      { connId: "conn-1", add: ["announcement:a", "wiki-page:w"], remove: [] },
+      { connId: "conn-1", rev: 1, channels: ["announcement:a", "wiki-page:w"] },
     ]);
   });
 
-  it("coalesces the registrations and removals of one tick into one POST", async () => {
+  it("sends the whole set once per tick, with the next revision", async () => {
     await mount();
     await hello(FakeEventSource.latest());
     let removeA = noop as () => void;
@@ -510,19 +516,22 @@ describe("subscription sync (WD04)", () => {
       registry.register("wiki-page:w", noop);
     });
     expect(subscribeBodies()).toEqual([
-      { connId: "conn-1", add: ["announcement:a", "announcement:b"], remove: [] },
-      { connId: "conn-1", add: ["wiki-page:w"], remove: ["announcement:a"] },
+      { connId: "conn-1", rev: 1, channels: ["announcement:a", "announcement:b"] },
+      { connId: "conn-1", rev: 2, channels: ["announcement:b", "wiki-page:w"] },
     ]);
   });
 
-  it("the last change of a channel within one tick wins", async () => {
+  it("sends nothing when a tick leaves the set as it was", async () => {
     await mount();
     await hello(FakeEventSource.latest());
     await browser.act(() => {
       const remove = registry.register("announcement:a", noop);
       remove();
     });
-    expect(subscribeBodies()).toEqual([{ connId: "conn-1", add: [], remove: ["announcement:a"] }]);
+    await browser.act(() => {
+      registry.register("notifications", noop);
+    });
+    expect(subscribeBodies()).toEqual([]);
   });
 
   it("subscribes a channel with its first listener and drops it with its last", async () => {
@@ -539,23 +548,22 @@ describe("subscription sync (WD04)", () => {
     await browser.act(() => first());
     expect(subscribeBodies()).toHaveLength(1);
     await browser.act(() => second());
-    expect(subscribeBodies().at(-1)).toEqual({
-      connId: "conn-1",
-      add: [],
-      remove: ["announcement:a"],
-    });
+    expect(subscribeBodies().at(-1)).toEqual({ connId: "conn-1", rev: 2, channels: [] });
   });
 
-  it("splits a tick's changes into lists of at most 100", async () => {
+  it("splits a set of more than 100 into POSTs of the same revision", async () => {
     await mount();
     await hello(FakeEventSource.latest());
     await browser.act(() => {
       for (let i = 0; i < 250; i += 1) registry.register(`announcement:doc-${i}`, noop);
     });
-    expect(subscribeBodies().map((body) => body.add.length)).toEqual([100, 100, 50]);
+    const bodies = subscribeBodies();
+    expect(bodies.map((body) => body.channels.length)).toEqual([100, 100, 50]);
+    expect(bodies.map((body) => body.rev)).toEqual([1, 1, 1]);
+    expect(new Set(bodies.flatMap((body) => body.channels)).size).toBe(250);
   });
 
-  it("resubscribes every channel with each hello", async () => {
+  it("sends the set to each new connection, the revision still counting up", async () => {
     await mount(createElement(Channel, { channel: "announcement:a", onPing: noop }));
     await hello(FakeEventSource.latest());
     await advance(3_000);
@@ -563,8 +571,25 @@ describe("subscription sync (WD04)", () => {
     await advance(750);
     await hello(FakeEventSource.latest(), "conn-2");
     expect(subscribeBodies()).toEqual([
-      { connId: "conn-1", add: ["announcement:a"], remove: [] },
-      { connId: "conn-2", add: ["announcement:a"], remove: [] },
+      { connId: "conn-1", rev: 1, channels: ["announcement:a"] },
+      { connId: "conn-2", rev: 2, channels: ["announcement:a"] },
+    ]);
+  });
+
+  it("sends the set again after a POST the server did not take", async () => {
+    await mount(createElement(Channel, { channel: "announcement:a", onPing: noop }));
+    subscribeStatus = 404;
+    await hello(FakeEventSource.latest());
+    subscribeStatus = 200;
+    // The same set: normally skipped, but the last POST was refused.
+    await browser.act(() => {
+      registry.register("announcement:a", () => undefined);
+      registry.register("notifications", noop);
+      registry.register("announcement:b", noop)();
+    });
+    expect(subscribeBodies()).toEqual([
+      { connId: "conn-1", rev: 1, channels: ["announcement:a"] },
+      { connId: "conn-1", rev: 2, channels: ["announcement:a"] },
     ]);
   });
 });

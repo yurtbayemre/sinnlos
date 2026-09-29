@@ -73,6 +73,7 @@ const CASES: Array<{
       isContentChannel: "isContentChannel",
       parseByeFrame: "parseByeFrame",
       parseLiveFrame: "parseLiveFrame",
+      parseSubscribeRequest: "parseSubscribeRequest",
     },
     own: [],
   },

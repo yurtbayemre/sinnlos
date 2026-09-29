@@ -414,13 +414,16 @@ TARGET_DOC_ID="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^TARGET=//p')"
 TARGET_KIND="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^KIND=//p')"
 [[ -n "${TARGET_DOC_ID}" ]] || fail "could not pick an announcement: ${DISCOVERED}"
 
+# The full desired channel set at revision 1 (LF05): the connection's first.
 SUBSCRIBE_STATUS="$(curl -sS -o "${WORKDIR}/subscribe.json" -w '%{http_code}' --max-time 15 -b "${COOKIES}" \
   -X POST "${BASE_URL}/live/subscribe" \
   -H 'content-type: application/json' \
-  --data "{\"connId\":\"${CONN_ID}\",\"add\":[\"announcement:${TARGET_DOC_ID}\"]}")" ||
+  --data "{\"connId\":\"${CONN_ID}\",\"rev\":1,\"channels\":[\"announcement:${TARGET_DOC_ID}\"]}")" ||
   fail "subscribe: POST ${BASE_URL}/live/subscribe did not answer"
 [[ "${SUBSCRIBE_STATUS}" == "200" ]] ||
   fail "subscribe: POST ${BASE_URL}/live/subscribe answered HTTP ${SUBSCRIBE_STATUS}: $(head -c 200 "${WORKDIR}/subscribe.json")"
+grep -q '"applied":true' "${WORKDIR}/subscribe.json" ||
+  fail "subscribe: POST ${BASE_URL}/live/subscribe did not apply the channel set: $(head -c 200 "${WORKDIR}/subscribe.json")"
 
 # From here on the cleanup removes the comment notifications of this run.
 RUN_STARTED="$(db_psql -c 'SELECT clock_timestamp()' < /dev/null)" ||

@@ -43,7 +43,7 @@ function harness(): Harness {
     },
     post: async (url, body) => {
       posts.push({ url, body });
-      return undefined;
+      return true;
     },
   };
   return {
@@ -88,7 +88,7 @@ describe("LiveClient without browser globals", () => {
     await Promise.resolve();
     expect(h.health).toEqual([true]);
     expect(h.posts).toEqual([
-      { url: "/live/subscribe", body: { connId: "c1", add: ["announcement:a"], remove: [] } },
+      { url: "/live/subscribe", body: { connId: "c1", rev: 1, channels: ["announcement:a"] } },
     ]);
     h.client.stop();
   });

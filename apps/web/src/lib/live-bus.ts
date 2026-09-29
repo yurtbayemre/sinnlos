@@ -16,7 +16,7 @@
  * module-scope singleton would give each layer its own, empty bus).
  *
  * Sizing (200-employee profile, plan §7): 500 connections total,
- * 5 per user with oldest-first eviction.
+ * 5 per user with oldest-first eviction, 200 channels per connection.
  */
 
 import {
@@ -35,6 +35,8 @@ type Connection = {
   id: string;
   userId: number;
   channels: Set<string>;
+  /** The revision of `channels` (LF05 sync); a new connection starts at 0. */
+  rev?: number;
   openedAt: number;
   /** Returns false when the underlying stream rejected the frame. */
   enqueue: (frame: LiveFrame) => boolean;
@@ -47,7 +49,13 @@ type Connection = {
 
 const MAX_CONNECTIONS_TOTAL = 500;
 const MAX_CONNECTIONS_PER_USER = 5;
-const MAX_CHANNELS_PER_CONNECTION = 200;
+export const MAX_CHANNELS_PER_CONNECTION = 200;
+
+/** What a full-set sync did (the /live/subscribe answer). */
+export type SyncResult =
+  | { status: "unknown" }
+  | { status: "stale"; rev: number }
+  | { status: "applied"; rev: number; channels: number; dropped: number };
 
 class LiveBus {
   private connections = new Map<string, Connection>();
@@ -88,9 +96,50 @@ class LiveBus {
   }
 
   /**
-   * Update a connection's channel subscriptions. The caller (the
-   * session-gated /live/subscribe route) must pass the session's userId —
-   * a connId alone is NOT proof of ownership.
+   * Sets a connection's channels to the client's full desired set at
+   * revision `rev` (LF05, LiveSubscribeRequest in the live contract). The
+   * caller (the session-gated /live/subscribe route) must pass the
+   * session's userId — a connId alone is NOT proof of ownership.
+   *   - an older revision than the connection's is stale: ignored, so a
+   *     late POST cannot undo a newer set;
+   *   - a newer one replaces the set with these channels;
+   *   - the same one adds them (the other parts of a set sent in several
+   *     POSTs, in any order).
+   * At most MAX_CHANNELS_PER_CONNECTION channels are kept; the rest are
+   * dropped, counted in the result and logged (the page asked for more
+   * channels than one stream serves; its poll backstop covers them).
+   */
+  sync(connId: string, userId: number, rev: number, channels: readonly string[]): SyncResult {
+    const conn = this.connections.get(connId);
+    if (!conn || conn.userId !== userId) return { status: "unknown" };
+    const current = conn.rev ?? 0;
+    if (rev < current) return { status: "stale", rev: current };
+    if (rev > current) {
+      conn.channels.clear();
+      conn.rev = rev;
+    }
+    let dropped = 0;
+    for (const channel of channels) {
+      if (conn.channels.has(channel)) continue;
+      if (conn.channels.size >= MAX_CHANNELS_PER_CONNECTION) {
+        dropped += 1;
+        continue;
+      }
+      conn.channels.add(channel);
+    }
+    if (dropped > 0) {
+      console.warn(
+        `[live] subscribe of user ${userId} capped at ${MAX_CHANNELS_PER_CONNECTION} channels: ${dropped} dropped (rev ${rev})`,
+      );
+    }
+    return { status: "applied", rev, channels: conn.channels.size, dropped };
+  }
+
+  /**
+   * The add/remove form of the subscription update from before LF05, for
+   * tabs still running the previous client bundle after a deploy (they
+   * reconnect with the old code until reloaded). Same ownership rule as
+   * sync(). Remove once no such tab can remain (the release after LF05).
    */
   subscribe(connId: string, userId: number, add: string[], remove: string[]): boolean {
     const conn = this.connections.get(connId);

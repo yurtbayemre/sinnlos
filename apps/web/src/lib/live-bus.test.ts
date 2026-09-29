@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getLiveBus, parseLiveEvents, type LiveFrame } from "./live-bus";
 import { MAX_EVENTS_PER_EMIT, channelFor, type ByeReason } from "./live-contract";
@@ -149,6 +149,86 @@ describe("subscription ownership", () => {
       { kind: "content", targetType: "announcement", targetDocumentId: "abc" },
     ]);
     expect(conn.frames).toHaveLength(1);
+  });
+});
+
+describe("full-set sync with a revision (LF05)", () => {
+  const ping = (documentId: string) =>
+    getLiveBus().publish([
+      { kind: "content", targetType: "announcement", targetDocumentId: documentId },
+    ]);
+  const channels = (conn: TestConn) => {
+    conn.frames = [];
+    for (const doc of ["a", "b", "c", "d"]) ping(doc);
+    return conn.frames.map((frame) => (frame.type === "content" ? frame.channel : frame.type));
+  };
+
+  it("replaces the set with a newer revision", () => {
+    const conn = connect({ userId: 1 });
+    expect(getLiveBus().sync(conn.id, 1, 1, ["announcement:a", "announcement:b"])).toEqual({
+      status: "applied",
+      rev: 1,
+      channels: 2,
+      dropped: 0,
+    });
+    expect(channels(conn)).toEqual(["announcement:a", "announcement:b"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:c"]);
+    expect(channels(conn)).toEqual(["announcement:c"]);
+    getLiveBus().sync(conn.id, 1, 3, []);
+    expect(channels(conn)).toEqual([]);
+  });
+
+  it("ignores a stale revision: a late POST cannot undo a newer set", () => {
+    const conn = connect({ userId: 1 });
+    getLiveBus().sync(conn.id, 1, 5, ["announcement:c"]);
+    expect(getLiveBus().sync(conn.id, 1, 4, ["announcement:a"])).toEqual({
+      status: "stale",
+      rev: 5,
+    });
+    expect(channels(conn)).toEqual(["announcement:c"]);
+  });
+
+  it("adds the parts of one revision, whichever arrives first", () => {
+    const conn = connect({ userId: 1 });
+    getLiveBus().sync(conn.id, 1, 1, ["announcement:d"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:b"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:a"]);
+    expect(channels(conn)).toEqual(["announcement:a", "announcement:b"]);
+  });
+
+  it("caps a connection at 200 channels and reports what it dropped", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const conn = connect({ userId: 7 });
+    const set = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => `announcement:d${from + i}`);
+    expect(getLiveBus().sync(conn.id, 7, 1, set(0, 100))).toMatchObject({ dropped: 0 });
+    expect(getLiveBus().sync(conn.id, 7, 1, set(100, 100))).toMatchObject({
+      channels: 200,
+      dropped: 0,
+    });
+    expect(warn).not.toHaveBeenCalled();
+    expect(getLiveBus().sync(conn.id, 7, 1, [...set(150, 60)])).toEqual({
+      status: "applied",
+      rev: 1,
+      channels: 200,
+      dropped: 10,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[live] subscribe of user 7 capped at 200 channels: 10 dropped (rev 1)",
+    );
+    // A new revision starts from an empty set again.
+    expect(getLiveBus().sync(conn.id, 7, 2, set(0, 1))).toMatchObject({
+      channels: 1,
+      dropped: 0,
+    });
+    warn.mockRestore();
+  });
+
+  it("refuses an unknown or foreign connection", () => {
+    const conn = connect({ userId: 1 });
+    expect(getLiveBus().sync("nope", 1, 1, ["announcement:a"])).toEqual({ status: "unknown" });
+    expect(getLiveBus().sync(conn.id, 2, 1, ["announcement:a"])).toEqual({ status: "unknown" });
+    expect(channels(conn)).toEqual([]);
   });
 });
 

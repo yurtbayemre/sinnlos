@@ -7,12 +7,14 @@ import {
   GLOBAL_CHANNELS,
   LIVE_TARGET_TYPES,
   MAX_EVENTS_PER_EMIT,
+  MAX_SUBSCRIBE_LIST,
   NOTIFICATIONS_CHANNEL,
   channelFor,
   frameChannel,
   isContentChannel,
   parseByeFrame,
   parseLiveFrame,
+  parseSubscribeRequest,
   type LiveFrame,
 } from "./live-contract.js";
 import { COMMENT_TARGET_TYPES } from "./comment-target.js";
@@ -120,6 +122,55 @@ describe("stream events (LF05)", () => {
     }
     for (const value of [null, "evicted", {}, { reason: "gone" }, { reason: ["evicted"] }]) {
       expect(parseByeFrame(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+});
+
+describe("subscribe requests (LF05)", () => {
+  const channels = [`announcement:${DOC}`, "wiki-page:w-1"];
+
+  it("takes the connection, a positive revision and at most 100 content channels", () => {
+    expect(parseSubscribeRequest({ connId: "c1", rev: 1, channels })).toEqual({
+      connId: "c1",
+      rev: 1,
+      channels,
+    });
+    expect(parseSubscribeRequest({ connId: "c1", rev: 7, channels: [] })).toEqual({
+      connId: "c1",
+      rev: 7,
+      channels: [],
+    });
+    const full = Array.from({ length: MAX_SUBSCRIBE_LIST }, (_, i) => `announcement:d${i}`);
+    expect(parseSubscribeRequest({ connId: "c1", rev: 2, channels: full })?.channels).toEqual(full);
+  });
+
+  it("drops duplicate channels", () => {
+    expect(
+      parseSubscribeRequest({ connId: "c1", rev: 1, channels: [channels[0], channels[0]] }),
+    ).toEqual({ connId: "c1", rev: 1, channels: [channels[0]] });
+  });
+
+  it("refuses anything else, the global channels and the old add/remove body included", () => {
+    const tooMany = Array.from({ length: MAX_SUBSCRIBE_LIST + 1 }, (_, i) => `announcement:d${i}`);
+    for (const value of [
+      null,
+      "c1",
+      { rev: 1, channels },
+      { connId: "", rev: 1, channels },
+      { connId: "x".repeat(101), rev: 1, channels },
+      { connId: "c1", channels },
+      { connId: "c1", rev: 0, channels },
+      { connId: "c1", rev: 1.5, channels },
+      { connId: "c1", rev: "1", channels },
+      { connId: "c1", rev: Number.MAX_SAFE_INTEGER + 1, channels },
+      { connId: "c1", rev: 1 },
+      { connId: "c1", rev: 1, channels: "announcement:a" },
+      { connId: "c1", rev: 1, channels: tooMany },
+      { connId: "c1", rev: 1, channels: ["notifications"] },
+      { connId: "c1", rev: 1, channels: ["event:abc"] },
+      { connId: "c1", add: channels, remove: [] },
+    ]) {
+      expect(parseSubscribeRequest(value), JSON.stringify(value)).toBeNull();
     }
   });
 });

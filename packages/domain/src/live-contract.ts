@@ -78,7 +78,10 @@ export type LiveFrame =
  */
 export const MAX_EVENTS_PER_EMIT = 1000;
 
-/** Most channels in one `add` or `remove` list of POST /live/subscribe. */
+/**
+ * Most channels in one POST /live/subscribe: a bigger set goes out in
+ * several POSTs of the same revision (LiveSubscribeRequest).
+ */
 export const MAX_SUBSCRIBE_LIST = 100;
 
 /** The documentId part of a content channel (Strapi's are 24 characters). */
@@ -109,6 +112,34 @@ export function channelFor(target: {
   if (typeof targetType !== "string" || typeof targetDocumentId !== "string") return null;
   const channel = `${targetType}:${targetDocumentId}`;
   return isContentChannel(channel) ? channel : null;
+}
+
+/**
+ * The body of POST /live/subscribe (LF05): the FULL set of content channels
+ * the tab wants on connection `connId` (from the stream's hello), at
+ * revision `rev`. The client counts `rev` up by one for every set it
+ * sends, across all its connections, so a POST that arrives late (after a
+ * newer set) is recognised and ignored instead of undoing the newer one. A
+ * set of more than MAX_SUBSCRIBE_LIST channels goes out in several POSTs
+ * with the same `rev`: the first of them to arrive replaces the
+ * connection's set, the others add to it, in whatever order they arrive.
+ * The empty set is one POST with no channels.
+ */
+export type LiveSubscribeRequest = {
+  connId: string;
+  rev: number;
+  channels: ContentChannel[];
+};
+
+/** A subscribe body, or null when malformed (the route answers 400). */
+export function parseSubscribeRequest(value: unknown): LiveSubscribeRequest | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { connId, rev, channels } = value as Record<string, unknown>;
+  if (typeof connId !== "string" || connId === "" || connId.length > 100) return null;
+  if (typeof rev !== "number" || !Number.isSafeInteger(rev) || rev < 1) return null;
+  if (!Array.isArray(channels) || channels.length > MAX_SUBSCRIBE_LIST) return null;
+  if (!channels.every(isContentChannel)) return null;
+  return { connId, rev, channels: [...new Set(channels)] };
 }
 
 /** The channel a client refetches when `frame` arrives. */

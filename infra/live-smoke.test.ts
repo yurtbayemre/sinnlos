@@ -119,6 +119,14 @@ describe("live-smoke.sh: what it touches", () => {
     expect(SCRIPT.match(/cms_probe comment/g)).toHaveLength(1);
   });
 
+  it("subscribes with the full channel set at revision 1 and checks that the set was applied (LF05)", () => {
+    expect(SCRIPT).toContain(
+      '--data "{\\"connId\\":\\"${CONN_ID}\\",\\"rev\\":1,\\"channels\\":[\\"announcement:${TARGET_DOC_ID}\\"]}"',
+    );
+    expect(SCRIPT).not.toContain('\\"add\\"');
+    expect(SCRIPT).toContain(`grep -q '"applied":true' "\${WORKDIR}/subscribe.json"`);
+  });
+
   it("fetches the stream compressed and refuses a Content-Encoding on it", () => {
     expect(SCRIPT).toMatch(/curl -sS -N --compressed -D "\$\{STREAM_HEADERS\}"/);
     expect(SCRIPT).toContain("grep -qi '^content-type: *text/event-stream'");

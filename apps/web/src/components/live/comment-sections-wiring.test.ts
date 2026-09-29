@@ -119,7 +119,7 @@ describe("CommentSectionsProvider on the live provider", () => {
     await mount([section("a", "a1"), section("b", "b1"), section("a", "a2")]);
     await hello();
     expect(subscribeBodies()).toEqual([
-      { connId: "conn-1", add: ["announcement:a", "announcement:b"], remove: [] },
+      { connId: "conn-1", rev: 1, channels: ["announcement:a", "announcement:b"] },
     ]);
   });
 
@@ -154,8 +154,8 @@ describe("CommentSectionsProvider on the live provider", () => {
     await mount([section("b", "b1")]);
     expect(subscribeBodies().at(-1)).toEqual({
       connId: "conn-1",
-      add: [],
-      remove: ["announcement:a"],
+      rev: 2,
+      channels: ["announcement:b"],
     });
   });
 
