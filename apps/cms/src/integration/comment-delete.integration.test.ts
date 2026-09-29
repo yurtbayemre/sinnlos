@@ -29,6 +29,10 @@ import {
 
 const COMMENT = "api::comment.comment";
 
+interface Notify {
+  __fanoutsSettledForTest(): Promise<void>;
+}
+
 const FORBIDDEN =
   '{"data":null,"error":{"status":403,"name":"ForbiddenError","message":"Forbidden","details":{}}}';
 const NOT_FOUND =
@@ -48,9 +52,13 @@ describe.each(testEngines())("comment delete on %s", (engine) => {
       status: "published",
     });
     targetDocumentId = announcement.documentId;
+    // The publish fan-out runs after the commit; let it finish before the
+    // suite, and before stop() closes the pool under it.
+    await t.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
   });
 
   afterAll(async () => {
+    await t?.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
     await t?.stop();
   });
 
