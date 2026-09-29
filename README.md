@@ -41,6 +41,8 @@ anonymous search analytics, and an **English/German UI**
 ├── apps/
 │   ├── cms/                Strapi v5 backend
 │   └── web/                Next.js 16 frontend
+├── packages/
+│   └── domain/             @sinnlos/domain: the pure rules both apps share (built to dist/cjs + dist/esm)
 ├── infra/
 │   ├── docker-compose.yml          base stack (db, cms, web, caddy)
 │   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy; needs DOMAIN)
@@ -59,7 +61,9 @@ anonymous search analytics, and an **English/German UI**
 - Node.js 22.13+ or 24 LTS (root and `apps/cms` `engines`:
   `^22.13.0 || ^24.0.0`; CI and the Docker images use Node 24; Node 20 is
   end-of-life)
-- pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
+- pnpm 10 (`corepack enable && corepack prepare pnpm@10.34.6 --activate`;
+  the root `packageManager` names the exact version, `engines` refuses
+  pnpm 9)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant in which you may register an app and grant
   admin consent — only for the optional Microsoft sign-in
@@ -70,10 +74,58 @@ anonymous search analytics, and an **English/German UI**
 
 ```bash
 pnpm install
+pnpm build:domain
 ```
 
-Run it again after pulling a change to the lockfile (hardening batch 2, for
-example, brought vitest 4.1.11 and Vite 7.3.6 for the root test tooling).
+Run `pnpm install` again after pulling a change to the lockfile (hardening
+batch 2, for example, brought vitest 4.1.11 and Vite 7.3.6 for the root test
+tooling). The first install with pnpm 10 over a `node_modules` that pnpm 9
+created asks to remove and rebuild it; answer yes (without a terminal, run
+it with `CI=true`). pnpm 10 runs dependency install scripts only for the
+root `package.json`'s `pnpm.onlyBuiltDependencies` (better-sqlite3's native
+binding, esbuild, sharp); the others it skips are listed under
+`pnpm.ignoredBuiltDependencies`, so a new one shows up as a warning to
+review.
+
+`pnpm build:domain` builds the workspace package `packages/domain`
+(`@sinnlos/domain`, see [Shared domain package](#shared-domain-package)),
+which both apps import from its `dist`. Run it once after installing and
+again after changing anything in `packages/domain/src`; `pnpm dev`,
+`pnpm typecheck` and `pnpm test:integration` run it first on their own, and
+`pnpm build` builds it before the apps.
+
+### Shared domain package
+
+`packages/domain` holds the pure rules the cms and the web both apply,
+where each app used to keep its own copy (SH01): the announcement audience
+predicate (no admin/editor bypass: the cms checks `MODERATORS` before it
+asks), the comment/reaction anchor helpers, the entry-id checks, the YouTube
+parser and the quiz schema, the role vocabulary, the live-event contract,
+the marketplace limits, the poll close rule and the Intl-only calendar-date
+helpers. No runtime dependencies and no I/O: it compiles against ES2020 plus
+the URL parser only, so browser-only or Node-only APIs fail its typecheck,
+and its ESLint config allows no imports but its own modules. Database
+lookups stay in the cms.
+
+- The old module paths are thin re-exports under their old names
+  (`apps/cms/src/utils/plain-date.ts`, `apps/web/src/lib/plain-date.ts`,
+  `apps/cms/src/bootstrap/roles.ts`, …), so importers did not change;
+  `domain-reexports.test.ts` in both apps pins which names come from the
+  package.
+- `pnpm --filter @sinnlos/domain build` (`pnpm build:domain`) writes
+  `dist/cjs` (CommonJS + `.d.ts`: `main`/`types` and `exports.require`, what
+  the cms compiles and runs against) and `dist/esm` (ES modules + `.d.ts`:
+  `exports.import`, what Next.js bundles into the web). `dist` is not
+  committed.
+- Tests: `vitest.config.ts` resolves `@sinnlos/domain` to the package
+  source, so `pnpm test` needs no build and always sees the current rules;
+  the package's own suites live next to its modules
+  (`packages/domain/src/*.test.ts`), and `dist.test.ts` checks that both
+  builds load and export exactly the source's names (skipped locally until
+  `dist` exists, required in CI).
+- Both Dockerfiles copy `packages/domain` and build it before the app; the
+  cms image ships `dist/cjs` (its `node_modules/@sinnlos/domain` is a
+  symlink to it), the web bundles the package into its standalone output.
 
 ## 2. Optional: Microsoft Entra ID sign-in
 
@@ -242,8 +294,10 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   router's host rule.
 - **cms runtime:** `STRAPI_TELEMETRY_DISABLED=true` (compose default) sends
   no usage telemetry to Strapi. `CRON_ENABLED` (unset, empty or `true`, the
-  default) runs the three cms crons (uploads and search-log janitors,
-  digest mailer); `false` (also `0`/`no`/`off`) switches them off in that
+  default) runs the five cms crons (uploads and search-log janitors, the
+  notification janitor that deletes read notifications 90 days after
+  reading, the classified janitor that deletes ads 90 days after their last
+  day, digest mailer); `false` (also `0`/`no`/`off`) switches them off in that
   process (Strapi's own metrics jobs are not among them). The cms reads it
   like its other on/off switches. Each run logs
   `[cron] <name> took <n>ms`, and a run that would overlap the previous one
@@ -256,11 +310,17 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   without it every run is skipped and `infra/deploy.sh` refuses to deploy).
   Digest links use `PUBLIC_WEB_URL` (compose default: `WEB_PUBLIC_URL`), and
   `DIGESTS_DISABLED=1` is the kill switch (the cms also accepts `true`,
-  `yes` and `on`, and so does `infra/deploy.sh --check`).
+  `yes` and `on`, and so does `infra/deploy.sh --check`). A digest is
+  written in the recipient's profile language; `DIGEST_DEFAULT_LOCALE`
+  (`en` or `de`, default `en`) is the language for a user whose profile
+  has none.
 
 ## 4. Run locally (two terminals)
 
 ```bash
+# Once, and after every change in packages/domain (step 1)
+pnpm build:domain
+
 # Terminal A — Strapi
 pnpm --filter @sinnlos/cms dev
 
@@ -344,9 +404,9 @@ Strapi ships 22 collection types plus two routes-only APIs
 | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **department**      | Top-level org unit with head, members, teams, pages. Master data **without draft & publish**: one row per department with a stable id; saving in the admin is live immediately (no Publish/Unpublish), hiding a unit means deleting it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **team**            | Belongs to a department, has a lead and members. Like department: **no draft & publish**, one row per team, a save is live                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **announcement**    | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| **announcement**    | Dashboard news items, targeted via `audience` / `audienceRoles` / departments; optional read confirmation (`requiresAck` + `ackDeadline`); from its `expiresAt` instant it leaves lists, threads and digests for everyone but admins/editors                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **acknowledgement** | Read receipt for a mandatory announcement — one per user, anchored to the target's **`targetDocumentId`** (stable across re-publish), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **comment**         | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **comment**         | Comments on announcements and wiki pages (`targetType` + `targetDocumentId` — the target's documentId, stable across re-publishes; no FK). Reads and creates are filtered to targets the caller may see (#28); an unpublished announcement's thread answers like a missing target until it is published again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | **reaction**        | Emoji reactions, same polymorphic `targetType`/`targetDocumentId` anchor and the same #28 target-visibility enforcement. `create` toggles; with the optional boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store it; each create keeps the oldest copy and deletes the others right after its insert. Removing deletes every copy (also copies from an older release). Delete takes the documentId or the numeric id                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | **kudos**           | Peer recognition (`from` → `to` user, message, company value); `from` is always the sender, `to` must be another user's id                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **notification**    | Per-user notification rows (recipient, actor, link), written by the lifecycles through `apps/cms/src/utils/notify.ts` (one row per recipient, titles at most 255 characters, shortened with `…`). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (`announcement.find` / `event.find`, read from the permissions table at runtime) and who are not blocked, after the publish is saved, with the title and audience of the entry as saved at that moment; one failing row costs that recipient only, and the next publish delivers it. Admins and editors get strictly the targeted audience. Comment and kudos notifications are also written after the comment or kudos is saved, so a failing notification never discards it. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows; delete takes the documentId or the numeric id |
@@ -354,15 +414,15 @@ Strapi ships 22 collection types plus two routes-only APIs
 | **event-rsvp**      | Attendance answer (`yes`/`no`/`maybe`) per user + event, anchored to the event's `documentId`; `create` is an **upsert**; the capacity gate, like the summary, counts each user's newest answer. Raw reads (`GET /api/event-rsvps`, `/:id`) return only the caller's own rows (admin: all); everyone else's answers come aggregated from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events per request: the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms)                                                                                                                                                                                                                                                                                                                                             |
 | **poll**            | Question + options (2 to 10 different, non-empty answers, checked for every writer including the admin panel), `closesAt`, `anonymous` flag, author (set to the caller on `POST /api/polls`), **department targeting** (`departments` + `audience`, see below): a poll without departments is company-wide (every signed-in role sees it, votes and sees its results; guests only as below); a poll with departments is visible, votable and has results only for the members of those departments, while admins and editors see every poll and its results but vote only in their own department's polls. **Guest access** (`visibleToGuests`, `guestsCanVote`, both off by default): hidden from guests unless an admin or editor opens the poll to them                                                                                                                                                              |
 | **poll-vote**       | One vote per user per poll, cast and counted only via the custom `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` routes; `:id` is the poll's documentId (what the web sends; it survives a republish) or its published row id. There are no generic `/api/poll-votes` routes. A vote cannot be changed, so the results count each voter's first ballot only (the lowest row id), in one SQL statement with a GROUP BY, and a vote removes the voter's later rows right after it is stored (parallel votes)                                                                                                                                                                                                                                                                                                                                                                                                  |
-| **document**        | File library entry; `departments` m2m — no relation = company-wide                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| **classified**      | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list without a cron                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| **quick-link**      | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide. No frontend editing UI — maintained in the Strapi admin panel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **document**        | File library entry; `departments` m2m — no relation = company-wide; `audience` = `departments` (set on every row that links a department, by each write and a boot backfill) keeps it admin/editor-only once its departments are gone (deleted or removed) until re-targeted or set back to `all`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **classified**      | Employee marketplace ad (`/marketplace`): 5 categories (sale, giveaway, wanted, service-offer/-wanted), up to 4 photos, `expiresAt` auto-set to +30 days (max 90) — expired ads drop out of the list at once and are deleted, with their photos, 90 days after `expiresAt` (03:45 cron)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **quick-link**      | Central link gateway on the dashboard (label, URL, icon, category, order); `departments` m2m — no relation = company-wide; `audience` as for documents. No frontend editing UI — maintained in the Strapi admin panel                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **course**          | Training course (draft & publish): ordered lessons, `mandatory` flag, `completionMode` (`confirm` \| `quizGate` — quiz must be passed before completion unlocks). Maintained in the Strapi admin panel; the content api is read-only                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **lesson**          | One lesson of a course: markdown body, `order`, YouTube-only `videoUrl` (validated in a lifecycle AND render-gated in the web player), `quiz` JSON self-check (quiz text typed in the admin panel is parsed and stored as the array; a cleared quiz is stored as null). First validating `beforeCreate`/`beforeUpdate` lifecycle in the repo (admin writes bypass content-api controllers)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **lesson-progress** | Completion receipt per user + lesson, anchored on the lesson's `documentId` (survives re-publish); own-rows read policy, admin report at `/manage/training`. Course completion is derived at read time — a lesson added later re-opens the course                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **search-log**      | Anonymous search telemetry (term + result count, deliberately NO user relation): write-only content api, aggregated admin-only `/search-logs/summary`, 90-day retention cron. Feeds the Meilisearch go/no-go decision                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| **wiki-space**      | Namespace for wiki pages with scoped visibility                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| **wiki-page**       | Markdown body, tags, parent/children, author, revisions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| **wiki-space**      | Namespace for wiki pages with scoped visibility; `icon` takes an icon-map name (as quick links), else the book icon                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **wiki-page**       | Markdown body, tags (chips), `order` in the space's list, table of contents unless `tocEnabled` is false, parent/children, author, revisions                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | **wiki-revision**   | Auto-captured snapshot of a page before each update                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | _profile_           | Routes-only API (no schema): `GET`/`PUT /api/me` self-service profile (incl. the birthday fields and the e-mail digest opt-ins below). `PUT` trims display name, job title, phone and office location, answers 400 above 255 characters, stores an empty display name as null and accepts `locale` `en` or `de` only. For a user bound to Microsoft Entra those four fields belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields` (the form shows them read-only)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | _entra-auth_        | Routes-only API (no schema): `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (`auth: false`; authenticated by `ENTRA_EXCHANGE_SECRET` and the cms's own ID-token check). 404 while `ENTRA_ENABLED` is not `1`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -663,8 +723,8 @@ range, or a documentId in the shape Strapi generates (the FX07 write policies ke
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
 used to fail such a lookup, which Strapi answered with a 500. The web's ICS
-route applies the same check (`apps/web/src/lib/entry-id.ts`, a
-byte-identical copy).
+route applies the same check (`apps/web/src/lib/entry-id.ts`; both files
+re-export it from `@sinnlos/domain`).
 
 Global guards that apply to **every** content-API route, not per route:
 
@@ -956,12 +1016,39 @@ Strapi would refuse.
 The UI ships in **English and German** via `next-intl`. Locale selection is
 **cookie-based** (no locale segment in URLs): `apps/web/src/i18n/locale.ts`
 reads the `locale` cookie and falls back to the `DEFAULT_LOCALE` env var
-(built-in default `de` when the var is unset or invalid; supported values
+(built-in default `en` when the var is unset or invalid; supported values
 `en`, `de`). Users switch languages with the
 locale switcher in the UI, which sets the cookie through a Server Action
-(`apps/web/src/lib/locale-actions.ts`). Message catalogs live in
-`apps/web/messages/en.json` and `apps/web/messages/de.json` — new
-user-visible strings must be added to **both** files.
+(`apps/web/src/lib/locale-actions.ts`) and also stores the choice on the
+user's profile (`PUT /api/me { locale }`, best-effort, at most 3 s), so
+the e-mail digests use it; a user without a stored language gets their
+digest in `DIGEST_DEFAULT_LOCALE` (cms env, default `en`). Message
+catalogs live in `apps/web/messages/en.json` and
+`apps/web/messages/de.json` — new user-visible strings must be added to
+**both** files.
+
+The catalogs are typed: `apps/web/src/global.d.ts` declares next-intl's
+`AppConfig` with the shape of `en.json`, so `pnpm typecheck` rejects a
+`t("key")` or `useTranslations("namespace")` that `en.json` lacks. ICU
+arguments are not type-checked (a JSON import types every message as a
+plain string), so pass them as the message says;
+`apps/web/src/i18n/messages.test.ts` keeps `de.json` in step (same keys,
+same arguments). A key built at runtime needs a map typed against the
+catalog (`satisfies Record<…, keyof Messages["namespace"]>`), not a cast.
+
+Server Actions never return display text. The mutations behind buttons
+answer an `ActionResult` (`apps/web/src/lib/action-result.ts`):
+`{ ok: true }` or `{ ok: false, code }`, where `code` is the action's own
+code (for example `full` for a booked-out event) or one of `forbidden`,
+`notFound`, `invalid`, `conflict`, `unavailable`, `failed`. Wrap the
+`strapi()` call in `runCmsAction` (it lets the expired-session redirect
+through and maps the CMS answer by status), call the action from a
+component through `startCmsAction`, and translate the code there; the
+shared texts of `forbidden`, `notFound`, `conflict` and `unavailable` live
+in the `actionErrors` namespace. Form actions (`useActionState`) answer
+`{ error?, success?, values? }` with codes too; the sign-in, register,
+profile and password forms translate theirs through
+`apps/web/src/lib/auth/form-messages.ts`.
 
 ## 6. Production deployment
 
@@ -1048,24 +1135,34 @@ image from before the ICS and cms start fixes, whose
 `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
 (including `infra-cms:rollback` right after deploying that release), still
 runs `pnpm start` and downloads pnpm at every start, which matters when
-rolling back to one. Full details — upgrading an existing
+rolling back to one. The cms image keeps its dependency tree in its own
+layer, copied straight from the install stage, and the app (compiled
+`dist`, the migrations, `public/`, the built `@sinnlos/domain`) in another:
+while the lockfile is unchanged and the build cache still holds the install
+stage, a rebuild for a code change reuses the ~850 MB dependency layer and
+writes only the ~15 MB app layer, and the SHA-tagged images of successive
+deploys share that layer on disk. Full details — upgrading an existing
 instance, backup/restore, rollback, hardening — are in
 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**.
 
 ## 7. Useful scripts
 
 ```bash
-pnpm dev               # run every workspace in parallel
-pnpm build             # build every workspace (the cms build deletes apps/cms/dist first)
-pnpm typecheck         # tsc for both apps + typecheck:tests (also run in CI)
+pnpm dev               # build packages/domain, then run every workspace in parallel
+pnpm build             # build every workspace, packages/domain first (the cms build
+                       # deletes apps/cms/dist first)
+pnpm build:domain      # build packages/domain (@sinnlos/domain) into dist/cjs + dist/esm
+pnpm typecheck         # build:domain, tsc for the package and both apps + typecheck:tests
+                       # (also run in CI)
 pnpm typecheck:tests   # type-check every *.test.ts: tsconfig.test.json (web + infra,
                        # strict) and tsconfig.test.cms.json (cms, Strapi's settings)
 pnpm test              # vitest 4 unit tests from the repo root (also run in CI)
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
                        # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
-pnpm test:integration  # the real cms booted in process, driven over HTTP per role, on
-                       # SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job `integration`
-pnpm format:check      # prettier over the tree (CI; reporting only until the format sweep)
+pnpm test:integration  # build:domain, then the real cms booted in process, driven over HTTP
+                       # per role, on SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job
+                       # `integration`
+pnpm format:check      # prettier over the tree (CI, blocking)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
@@ -1086,9 +1183,17 @@ Caddy mode, Traefik mode, which must refuse to render without `DOMAIN`, and
 the rollback overrides) and `images · cms`/`images · web` (both Dockerfiles
 built with buildx, not pushed). `format:check` and shellcheck block since
 the one-time format sweep after batch 10 (the two long hand-formatted docs,
-`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). Dependabot
+`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). The
+`build`, `datetime` and `integration` jobs build `packages/domain` right
+after the install. Every action runs at a full commit SHA with its release
+tag in a trailing comment (`uses: actions/checkout@<sha> # v4.4.0`), and
+each Dockerfile pulls `node:24-alpine` by digest in one `FROM` line (the
+stage `node-base` every other stage builds on); `infra/build-pins.test.ts`
+refuses an unpinned action, a second base image and a pnpm version that
+differs between `packageManager`, CI and the images. Dependabot
 (`.github/dependabot.yml`) opens weekly grouped update pull requests for the
-npm workspace, the Dockerfiles' base image and the GitHub Actions.
+npm workspace, the Dockerfiles' base image and the GitHub Actions (it
+updates a pinned SHA and its version comment together).
 `.gitattributes` stores and checks out every text file with LF.
 
 The Postgres integration suites (`apps/cms/src/database/*.pg.test.ts`: the
@@ -1173,8 +1278,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
   enums against the web unions and constants (the live channel pattern from
   `apps/web/src/lib/live-contract.ts`), relation pairs, and the web
   role sets against the permission matrix. The live contract itself (event,
-  frame and channel shapes of the SSE pipeline) is one file kept
-  byte-identical in both apps (`apps/web/src/lib/live-contract-mirror.test.ts`). Known gaps are listed in the file
+  frame and channel shapes of the SSE pipeline), like the audience rule, the
+  YouTube parser and the anchors, now lives once in `@sinnlos/domain`
+  (`packages/domain`, see [Shared domain package](#shared-domain-package));
+  both apps re-export it. Known gaps are listed in the file
   and asserted as they are, so closing one means removing its entry. A web
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
@@ -1185,11 +1292,14 @@ Safety nets for refactors (roadmap S03–S06, S09):
   role-less caller, and scans `apps/web/src` for any other filter or sort
   on a contact field (or a `_q`): a web query that the guard would refuse
   for guests fails here, not on a guest's page.
-- The server actions in `apps/web/src/lib` have characterisation tests next
-  to them: the event, classified, acknowledgement, kudos, training and
-  notification actions (S09), and the auth, comment, poll and profile
-  actions. `announcement-live-actions.ts` and `locale-actions.ts` have
-  none yet. The ⌘K search is no Server Action any more: it runs through
+- The server actions in `apps/web/src/lib` have tests next to them: the
+  event, classified, acknowledgement, kudos, training and notification
+  actions (S09), and the auth, comment, poll, profile and locale actions;
+  every mutation that answers an `ActionResult` is tested for success, a
+  specific refusal, the expired-session redirect and a network error.
+  `lib/auth/credentials.ts` (the sign-in's verification with the login
+  limiter) and `lib/auth/callbacks.ts` are tested without Auth.js.
+  `announcement-live-actions.ts` has none yet. The ⌘K search is no Server Action any more: it runs through
   `GET /search` (`apps/web/src/app/search/route.ts`), covered by
   `apps/web/src/lib/search.test.ts`.
   `/api/live/emit` is covered by `apps/web/src/lib/live-emit.test.ts`; its
@@ -1197,7 +1307,8 @@ Safety nets for refactors (roadmap S03–S06, S09):
 
 ## 8. Verification checklist
 
-- [ ] `pnpm install` completes cleanly
+- [ ] `pnpm install` completes cleanly (no "Ignored build scripts" warning)
+- [ ] `pnpm build:domain` writes `packages/domain/dist/cjs` and `dist/esm`
 - [ ] Strapi admin loads at `:1337/admin`, first admin created
 - [ ] The six intranet roles visible under _Settings → Users & Permissions →
       Roles_ (next to the built-in _Authenticated_ and _Public_)

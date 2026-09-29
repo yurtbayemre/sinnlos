@@ -1,17 +1,13 @@
 {
   "common": {
-    "appName": "Sinnlos Intranet",
     "selfHosted": "Self-hosted Intranet · v0.1",
     "loading": "Wird geladen…",
     "noResults": "Keine Ergebnisse gefunden.",
     "download": "Herunterladen",
     "updated": "Aktualisiert",
     "viewAll": "Alle anzeigen",
-    "back": "Zurück",
     "save": "Speichern",
     "saving": "Speichert…",
-    "send": "Senden",
-    "sending": "Sendet…",
     "cancel": "Abbrechen",
     "delete": "Löschen",
     "or": "oder",
@@ -71,10 +67,16 @@
     "namePlaceholder": "Max Mustermann",
     "creatingAccount": "Konto wird erstellt…",
     "demoMode": "Demo-Modus",
-    "registrationDisabled": "Die Registrierung ist derzeit deaktiviert.",
     "sessionExpired": "Ihre Sitzung ist abgelaufen – bitte melden Sie sich erneut an.",
-    "rateLimited": "Zu viele Anmeldeversuche – bitte warten Sie eine Minute und versuchen Sie es erneut.",
     "signInFailed": "Die Anmeldung ist fehlgeschlagen. Bitte versuchen Sie es erneut.",
+    "error_invalidCredentials": "E-Mail-Adresse oder Passwort ist falsch.",
+    "error_rateLimited": "Zu viele Anmeldeversuche – bitte warten Sie einige Minuten und versuchen Sie es erneut.",
+    "error_registrationDisabled": "Die Registrierung ist derzeit deaktiviert.",
+    "error_missingFields": "Bitte füllen Sie alle Felder aus.",
+    "error_passwordTooShort": "Das Passwort braucht mindestens {min} Zeichen.",
+    "error_emailTaken": "Es gibt bereits ein Konto mit dieser E-Mail-Adresse oder diesem Namen.",
+    "error_registrationFailed": "Die Registrierung ist fehlgeschlagen – bitte versuchen Sie es erneut.",
+    "error_accountCreatedSignInManually": "Ihr Konto wurde erstellt – bitte melden Sie sich an.",
     "entra_tenant": "Dieses Microsoft-Konto gehört zu einer anderen Organisation. Bitte melden Sie sich mit Ihrem Firmenkonto an.",
     "entra_account_exists": "Es gibt bereits ein Intranet-Konto mit Ihrer E-Mail-Adresse. Bitten Sie einen Administrator, es mit Ihrem Microsoft-Konto zu verknüpfen.",
     "entra_not_assigned": "Ihr Microsoft-Konto hat keinen Zugang zum Intranet. Bitten Sie Ihre IT-Administration, es zuzuweisen.",
@@ -124,7 +126,6 @@
     "teams": "Teams",
     "reportsTo": "Berichtet an",
     "directReports": "Direkte Mitarbeiter",
-    "collapse": "Einklappen",
     "expand": "Ausklappen",
     "emptyTitle": "Noch keine Personen",
     "emptyHint": "Personen erscheinen hier, sobald sie sich anmelden.",
@@ -169,6 +170,8 @@
     "description": "Wissensdatenbank, Handbücher und Anleitungen in Bereichen organisiert.",
     "backToSpace": "Zurück zum Bereich",
     "lastEditedBy": "zuletzt bearbeitet von {name}",
+    "tags": "Schlagwörter",
+    "contents": "Inhalt",
     "emptySpacesTitle": "Noch keine Wiki-Bereiche",
     "emptySpacesHint": "Erstellen Sie einen Bereich im Strapi-Admin, um Wissen zu sammeln.",
     "emptyPagesTitle": "Noch keine Seiten in diesem Bereich",
@@ -318,6 +321,7 @@
     "emptyTitleGuest": "Noch keine Umfragen für Sie",
     "emptyHintGuest": "Umfragen, an denen Sie teilnehmen können, erscheinen hier.",
     "voteFailed": "Ihre Stimme konnte nicht gespeichert werden – vielleicht haben Sie bereits abgestimmt.",
+    "pollOptionsChanged": "Die Antworten dieser Umfrage wurden inzwischen geändert – bitte prüfen Sie die aktualisierte Umfrage und stimmen Sie erneut ab.",
     "audienceDepartments": "Nur für: {departments}",
     "notInAudience": "Nur Mitglieder dieser Abteilungen können abstimmen.",
     "audienceMissing": "Die Zielabteilung existiert nicht mehr – niemand kann abstimmen. Abteilungen neu wählen und erneut veröffentlichen.",
@@ -350,6 +354,10 @@
     "formError_missingQuestion": "Bitte gib eine Frage ein.",
     "formError_tooFewOptions": "Bitte gib mindestens zwei verschiedene Antwortmöglichkeiten an.",
     "formError_forbidden": "Nur Admins und Editoren können Umfragen erstellen.",
+    "formError_invalid": "Die Umfrage konnte nicht gespeichert werden – bitte prüfen Sie Ihre Eingaben.",
+    "formError_notFound": "Etwas, auf das sich die Umfrage bezieht, existiert nicht mehr – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "formError_conflict": "Jemand hat das inzwischen geändert – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "formError_unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal.",
     "formError_failed": "Die Umfrage konnte nicht erstellt werden. Bitte versuche es erneut."
   },
   "documents": {
@@ -394,6 +402,7 @@
     "passwordMismatch": "Die Passwörter stimmen nicht überein.",
     "passwordChangeFailed": "Das Passwort konnte nicht geändert werden – bitte prüfen Sie Ihr aktuelles Passwort.",
     "passwordRateLimited": "Zu viele Versuche, das Passwort zu ändern – bitte warten Sie eine Minute und versuchen Sie es erneut.",
+    "passwordChangeUnavailable": "Das Passwort konnte gerade nicht geändert werden – bitte versuchen Sie es gleich noch einmal.",
     "digestSection": "E-Mail-Zusammenfassungen",
     "digestHint": "Erhalte morgens eine Zusammenfassung per E-Mail — täglich oder wöchentlich (montags). Ohne Auswahl wird nichts versendet.",
     "digestAnnouncements": "Neuigkeiten & Ankündigungen",
@@ -485,10 +494,7 @@
     "sendComment": "Kommentar senden",
     "sendFailed": "Kommentar konnte nicht gesendet werden – bitte erneut versuchen.",
     "deleteFailed": "Kommentar konnte nicht gelöscht werden – bitte erneut versuchen.",
-    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen.",
-    "today": "heute",
-    "yesterday": "gestern",
-    "daysAgo": "vor {days} T."
+    "reactionFailed": "Reaktion konnte nicht gespeichert werden – bitte erneut versuchen."
   },
   "relativeTime": {
     "justNow": "gerade eben",
@@ -503,11 +509,7 @@
     "markAllRead": "Alle als gelesen markieren",
     "markReadFailed": "Konnte nicht als gelesen markiert werden – bitte erneut versuchen.",
     "noNotificationsYet": "Noch keine Benachrichtigungen",
-    "unread": "ungelesen",
-    "justNow": "gerade eben",
-    "minutesAgo": "vor {min} Min.",
-    "hoursAgo": "vor {hours} Std.",
-    "daysAgo": "vor {days} T."
+    "unread": "ungelesen"
   },
   "search": {
     "label": "Suche (Strg+K)",
@@ -531,8 +533,11 @@
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
     "backToDashboard": "Zurück zum Dashboard"
   },
-  "locale": {
-    "label": "Sprache"
+  "actionErrors": {
+    "forbidden": "Dazu sind Sie nicht berechtigt.",
+    "notFound": "Dieser Eintrag existiert nicht mehr – bitte laden Sie die Seite neu.",
+    "conflict": "Jemand hat das inzwischen geändert – bitte laden Sie die Seite neu und versuchen Sie es erneut.",
+    "unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal."
   },
   "localeSwitcher": {
     "label": "Sprache wählen"

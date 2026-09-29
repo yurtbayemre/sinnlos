@@ -150,9 +150,10 @@ export default tseslint.config(
     },
   },
   {
-    // The one module exempt from the local-Date ban: the mirrored,
-    // Intl-only calendar-date helpers (byte-identical to
-    // apps/cms/src/utils/plain-date.ts). It uses only UTC Date fields.
+    // The one module exempt from the local-Date ban: the Intl-only
+    // calendar-date helpers. Since SH01 it only re-exports them from
+    // @sinnlos/domain (packages/domain/src/plain-date.ts, exempt in the
+    // package's own config); it uses only UTC Date fields.
     files: ["src/lib/plain-date.ts"],
     rules: {
       "no-restricted-syntax": ["error", ...NO_SERVER_CACHE_SYNTAX],

@@ -2,16 +2,18 @@
 
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
-import { signInWithCredentials } from "@/lib/auth-actions";
+import { signInWithCredentials, type SignInFormState } from "@/lib/auth-actions";
+import { AUTH_FORM_MESSAGES } from "@/lib/auth/form-messages";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
 
 export function LocalSignInForm({ from = "/" }: { from?: string }) {
   const t = useTranslations("auth");
-  const [state, formAction, isPending] = useActionState(signInWithCredentials, {
-    error: undefined,
-  });
+  const [state, formAction, isPending] = useActionState<SignInFormState, FormData>(
+    signInWithCredentials,
+    {},
+  );
 
   return (
     <form action={formAction} className="space-y-3">
@@ -27,6 +29,9 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
           type="email"
           autoComplete="email"
           required
+          // Echoed by a failed attempt: React 19 resets the form on every
+          // settled submission (the password is never echoed).
+          defaultValue={state.values?.identifier ?? ""}
           placeholder={t("emailPlaceholder")}
           className={inputClass}
         />
@@ -44,7 +49,11 @@ export function LocalSignInForm({ from = "/" }: { from?: string }) {
           className={inputClass}
         />
       </div>
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+      {state.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {t(AUTH_FORM_MESSAGES[state.error])}
+        </p>
+      )}
       <button
         type="submit"
         disabled={isPending}

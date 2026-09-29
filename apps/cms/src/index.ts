@@ -12,6 +12,8 @@ import {
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
 import { seedAdminUser } from "./utils/admin-seed";
+import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
+import { registerDepartmentAudienceGuard } from "./utils/department-audience-guard";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
@@ -83,6 +85,13 @@ export default {
     // Here, before any plugin or bootstrap code writes a poll; throws when
     // strapi.documents.use is gone.
     registerPollAudienceGuard(strapi);
+    // FX29 residual, the same for documents and quick links (batch 12 review
+    // B12-01): a row that links a department carries audience='departments'
+    // from the write that linked it (utils/department-audience-guard.ts), so
+    // a department delete cannot open it, not even through a publish or an
+    // admin form that copied the row before the delete. Same place, same
+    // refusal to boot.
+    registerDepartmentAudienceGuard(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
@@ -115,6 +124,12 @@ export default {
     // utils/poll-audience-backfill.ts). Before the draft-twin repair below,
     // so a cloned draft copies the flag.
     await backfillPollAudience(strapi);
+    // FX29 residual (B12-01): every document and quick-link row that links a
+    // department gets audience='departments' (raise only; later boots find
+    // nothing). One transaction; on any error it rolls back and THROWS, so
+    // the cms does not start (utils/department-audience-backfill.ts).
+    // Before the demo seed and the draft-twin repair, like the poll one.
+    await backfillDepartmentAudience(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.

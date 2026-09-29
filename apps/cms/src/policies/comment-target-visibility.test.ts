@@ -279,9 +279,11 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
   );
 
   it("reads exactly the visible threads on the full path", async () => {
-    await expect(read(eng)).resolves.toMatchObject({ ids: [1, 2, 3, 4] });
-    await expect(read(sales)).resolves.toMatchObject({ ids: [1, 3, 4, 5, 6] });
-    await expect(read(null)).resolves.toMatchObject({ ids: [1, 3, 4] });
+    // Comment 3 sits on a never-published announcement: no one's thread
+    // (owner answer 2026-09-29 (b), the answer of a missing target).
+    await expect(read(eng)).resolves.toMatchObject({ ids: [1, 2, 4] });
+    await expect(read(sales)).resolves.toMatchObject({ ids: [1, 4, 5, 6] });
+    await expect(read(null)).resolves.toMatchObject({ ids: [1, 4] });
   });
 
   it("injects the full path's branch for a visible anchor, $and-narrowed", async () => {
@@ -302,6 +304,8 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
       // A space widened only in its draft opens nothing (published row decides).
       [eng, "wiki-page", PAGE_WIDENED],
       [eng, "announcement", GHOST],
+      // An unpublished announcement answers exactly like GHOST.
+      [eng, "announcement", ANN_DRAFT],
       [eng, "event", ANN_ALL],
       [eng, "constructor", ANN_ALL],
     ] as const) {
@@ -317,7 +321,7 @@ describe("comment-target-visibility: single-anchor fast path (PL04)", () => {
     expect(inAnd.calls.some((call) => call.uid === "api::wiki-space.wiki-space")).toBe(false);
 
     const full = await read(eng, { targetType: { $eq: "announcement" } });
-    expect(full.ids).toEqual([1, 2, 3]);
+    expect(full.ids).toEqual([1, 2]);
     expect(full.calls.some((call) => call.uid === "api::wiki-space.wiki-space")).toBe(true);
   });
 

@@ -5,11 +5,13 @@ import {
   Briefcase,
   Building2,
   Calendar,
+  Code,
   Contact,
   ExternalLink,
   FileText,
   Globe,
   GraduationCap,
+  Heart,
   Home,
   LifeBuoy,
   Link2,
@@ -28,8 +30,10 @@ import {
  * serializable — see nav-link.tsx / sidebar.tsx). This module carries no
  * "use client" directive on purpose: client components (NavLink) resolve
  * names in the browser bundle, server components (QuickLinks widget)
- * resolve them during SSR. CMS-managed content (quick-link.icon) stores
- * these names as strings.
+ * resolve them during SSR. CMS-managed content (quick-link.icon,
+ * wiki-space.icon) stores these names as strings; Code and Heart are here
+ * for the wiki spaces of the demo seed ("code", "heart";
+ * lib/wiki-content.ts wikiSpaceIconName).
  */
 export const ICONS = {
   Award,
@@ -38,11 +42,13 @@ export const ICONS = {
   Briefcase,
   Building2,
   Calendar,
+  Code,
   Contact,
   ExternalLink,
   FileText,
   Globe,
   GraduationCap,
+  Heart,
   Home,
   LifeBuoy,
   Link2,

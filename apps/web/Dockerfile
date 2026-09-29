@@ -1,23 +1,38 @@
 # syntax=docker/dockerfile:1
-FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS base
+# The Node base of every stage, pinned by digest in this one place: `base`
+# (and so deps and builder) and `runner` both start FROM this stage. A stage
+# alias rather than a build ARG, because Dependabot's docker updater reads
+# FROM lines only: a digest in an ARG default would never be bumped again.
+FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS node-base
+
+FROM node-base AS base
 RUN apk add --no-cache libc6-compat
 WORKDIR /app
-RUN corepack enable && corepack prepare pnpm@9.12.0 --activate
+# pnpm = package.json packageManager (dependency build scripts: see the root
+# package.json's pnpm.onlyBuiltDependencies).
+RUN corepack enable && corepack prepare pnpm@10.34.6 --activate
 
 FROM base AS deps
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY apps/web/package.json ./apps/web/
+# The web depends on the workspace package @sinnlos/domain (SH01).
+COPY packages/domain/package.json ./packages/domain/
 RUN pnpm install --filter @sinnlos/web... --frozen-lockfile
 
 FROM base AS builder
 COPY apps/web ./apps/web
+COPY packages/domain ./packages/domain
 COPY pnpm-workspace.yaml package.json tsconfig.base.json ./
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY --from=deps /app/packages/domain/node_modules ./packages/domain/node_modules
+# dist/esm of @sinnlos/domain: next build bundles it into the standalone
+# output, so the runtime stage needs nothing of the package.
+RUN pnpm --filter @sinnlos/domain build
 WORKDIR /app/apps/web
 RUN pnpm build && mkdir -p public
 
-FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS runner
+FROM node-base AS runner
 # D-SESSION-01: this web keeps the Strapi JWT server-side (never on
 # /api/auth/session). infra/deploy.sh demands a JWT_SECRET rotation when the
 # running web lacks this label, i.e. when it still exposed the JWTs.

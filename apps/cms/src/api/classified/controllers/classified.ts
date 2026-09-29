@@ -1,3 +1,4 @@
+import { CLASSIFIED_MAX_IMAGES } from "@sinnlos/domain";
 import { factories } from "@strapi/strapi";
 
 import { MODERATORS, hasRole } from "../../../bootstrap/roles";
@@ -27,7 +28,8 @@ import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/
  * targetDocumentId anchoring used by acknowledgements.
  */
 
-const MAX_IMAGES = 4;
+/** Images per ad, shared with the web form (@sinnlos/domain, SH01). */
+const MAX_IMAGES = CLASSIFIED_MAX_IMAGES;
 
 const CLASSIFIED_UID = "api::classified.classified";
 

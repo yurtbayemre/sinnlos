@@ -248,6 +248,66 @@ describe("sendDigests orchestrator", () => {
     );
   });
 
+  it("leaves out announcements expired by the run's now, for every recipient (DA02)", async () => {
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn(), [USER.carol]: optIn() },
+      announcements: [
+        news("Ended at dawn", minutesAfter(MONDAY_RUN, 5), {
+          expiresAt: minutesAfter(NOW.toISOString(), -60),
+        }),
+        news("Ends right now", minutesAfter(MONDAY_RUN, 6), { expiresAt: NOW.toISOString() }),
+        news("Ends tonight", minutesAfter(MONDAY_RUN, 7), {
+          expiresAt: minutesAfter(NOW.toISOString(), 12 * 60),
+        }),
+        news("Never ends", minutesAfter(MONDAY_RUN, 8), { expiresAt: null }),
+      ],
+    });
+    await sendDigests(strapi, NOW);
+    for (const user of ["alice", "carol"]) {
+      const text = mailTo(mails(), user)?.text ?? "";
+      expect(text, user).toContain("• Ends tonight");
+      expect(text, user).toContain("• Never ends");
+      expect(text, user).not.toContain("Ended at dawn");
+      expect(text, user).not.toContain("Ends right now");
+    }
+  });
+
+  it("writes the expiry-filtered list in each recipient's language (DA02 with AC04)", async () => {
+    // Batch 12: lane 7C filters expired announcements out of the digest
+    // query, lane 7A picks the language per recipient (profile locale, else
+    // DIGEST_DEFAULT_LOCALE). Both apply to the same run.
+    vi.stubEnv("DIGEST_DEFAULT_LOCALE", "de");
+    const { strapi, mails } = digestStub({
+      users: {
+        [USER.alice]: optIn({ locale: null }),
+        [USER.bob]: optIn({ locale: "fr" }),
+        [USER.carol]: optIn({ locale: "en" }),
+      },
+      announcements: [
+        news("Ended at dawn", minutesAfter(MONDAY_RUN, 5), {
+          expiresAt: minutesAfter(NOW.toISOString(), -60),
+        }),
+        news("Ends tonight", minutesAfter(MONDAY_RUN, 7), {
+          expiresAt: minutesAfter(NOW.toISOString(), 12 * 60),
+        }),
+      ],
+    });
+    await sendDigests(strapi, NOW);
+    const subjects = Object.fromEntries(
+      ["alice", "bob", "carol"].map((user) => [user, mailTo(mails(), user)?.subject]),
+    );
+    expect(subjects).toEqual({
+      alice: "Sinnlos-Intranet: 1 Neuigkeit für dich",
+      bob: "Sinnlos-Intranet: 1 Neuigkeit für dich",
+      carol: "Sinnlos intranet: 1 update for you",
+    });
+    for (const user of ["alice", "bob", "carol"]) {
+      const text = mailTo(mails(), user)?.text ?? "";
+      expect(text, user).toContain("• Ends tonight");
+      expect(text, user).not.toContain("Ended at dawn");
+    }
+  });
+
   it("reads users, scopes, grants, announcements and anchors once per run", async () => {
     const users = Object.fromEntries(
       [USER.alice, USER.bob, USER.carol, USER.dave, USER.anna].map((id) => [id, optIn()]),

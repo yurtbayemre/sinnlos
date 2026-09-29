@@ -1,19 +1,16 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import de from "../../messages/de.json";
-import en from "../../messages/en.json";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrapiError } from "./strapi-error";
 
 /**
  * FX11 for the change-password action: the client IP is forwarded as
  * X-Forwarded-For (the CMS trusts it via server.proxy.koa, like sign-in and
  * register), and Strapi's throttle 429 becomes the distinct
- * profile.passwordRateLimited message instead of "check your current
- * password". FX26 for the profile save: trimmed values, the 255-character
- * limit answered before any write, and a CMS 400 told apart from an
- * outage. Every message comes from the catalogs (profile.*), in the
- * viewer's language: the translator stub answers the key and throws for a
- * key that en.json or de.json lacks. `@/lib/strapi` is mocked; its
- * StrapiError is the real class.
+ * passwordRateLimited code instead of "check your current password". FX26
+ * for the profile save: trimmed values, the 255-character limit answered
+ * before any write, and a CMS 400 told apart from an outage. Both answer
+ * machine codes (AC02); the forms translate them
+ * (lib/auth/form-messages.ts, whose test checks both catalogs).
+ * `@/lib/strapi` is mocked; its StrapiError is the real class.
  */
 const strapiMock = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
 const state = vi.hoisted(() => ({ headers: new Headers() }));
@@ -27,16 +24,6 @@ vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 vi.mock("next/navigation", () => ({
   unstable_rethrow: (e: unknown) => {
     if (e instanceof Error && e.message.startsWith("NEXT_REDIRECT")) throw e;
-  },
-}));
-vi.mock("next-intl/server", () => ({
-  getTranslations: async (namespace: "profile") => (key: string, values?: object) => {
-    for (const catalog of [en, de]) {
-      if (typeof (catalog[namespace] as Record<string, unknown>)[key] !== "string") {
-        throw new Error(`missing message ${namespace}.${key}`);
-      }
-    }
-    return values ? `${namespace}.${key} ${JSON.stringify(values)}` : `${namespace}.${key}`;
   },
 }));
 
@@ -59,6 +46,12 @@ beforeEach(() => {
   strapiMock.mockResolvedValue({ jwt: "x" });
   refreshMock.mockReset();
   state.headers = new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.2" });
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 /** The profile form as the browser submits it (checked boxes send "on"). */
@@ -96,7 +89,7 @@ describe("updateProfile (FX26)", () => {
       phone: " +49 30 1 ",
       officeLocation: " Remote\n",
     });
-    await expect(updateProfile({}, form)).resolves.toEqual({ success: "profile.profileUpdated" });
+    await expect(updateProfile({}, form)).resolves.toEqual({ success: "profileSaved" });
     expect(sentProfile()).toEqual({
       displayName: "Sam C.",
       jobTitle: "Engineer",
@@ -119,7 +112,7 @@ describe("updateProfile (FX26)", () => {
 
   it("answers a text over 255 characters with the field's name, without a write", async () => {
     const result = await updateProfile({}, profileForm({ jobTitle: "x".repeat(300) }));
-    expect(result.error).toBe('profile.error_tooLong {"field":"profile.jobTitle","max":255}');
+    expect(result).toMatchObject({ error: "tooLong", field: "jobTitle" });
     // The typed values come back, so the form keeps them.
     expect(result.values?.jobTitle).toBe("x".repeat(300));
     expect(result.values?.displayName).toBe("Sam Chen");
@@ -134,10 +127,13 @@ describe("updateProfile (FX26)", () => {
     expect(sentProfile().officeLocation).toBe("\u{1F3E2}".repeat(255));
   });
 
-  it("maps the CMS refusing a value (400) to a translated message", async () => {
-    strapiMock.mockRejectedValue(new StrapiError(400, "Bad Request", "{}"));
+  it("maps the CMS refusing a value (400) to invalid, never its message", async () => {
+    strapiMock.mockRejectedValue(
+      new StrapiError(400, "Bad Request", '{"error":{"message":"birthday must be a valid date"}}'),
+    );
     const result = await updateProfile({}, profileForm());
-    expect(result.error).toBe("profile.error_invalid");
+    expect(result.error).toBe("invalid");
+    expect(JSON.stringify(result)).not.toContain("birthday must");
     expect(result.values?.displayName).toBe("Sam Chen");
   });
 
@@ -145,7 +141,7 @@ describe("updateProfile (FX26)", () => {
     strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
     const result = await updateProfile({}, profileForm({ jobTitle: "Lead" }));
     expect(result).toMatchObject({
-      error: "profile.error_saveFailed",
+      error: "profileSaveFailed",
       values: { jobTitle: "Lead" },
     });
     expect(refreshMock).not.toHaveBeenCalled();
@@ -159,9 +155,7 @@ describe("updateProfile (FX26)", () => {
 
 describe("changePassword", () => {
   it("forwards the client IP to Strapi's change-password route", async () => {
-    await expect(changePassword({}, form())).resolves.toEqual({
-      success: "profile.passwordChanged",
-    });
+    await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
     const [path, init] = strapiMock.mock.calls[0]!;
     expect(path).toBe("/api/auth/change-password");
     expect(init?.method).toBe("POST");
@@ -170,15 +164,29 @@ describe("changePassword", () => {
 
   it("maps Strapi's throttle (429) to the passwordRateLimited message", async () => {
     strapiMock.mockRejectedValue(new StrapiError(429, "Too Many Requests", "{}"));
-    await expect(changePassword({}, form())).resolves.toEqual({
-      error: "profile.passwordRateLimited",
-    });
+    await expect(changePassword({}, form())).resolves.toEqual({ error: "passwordRateLimited" });
   });
 
   it("keeps the current-password hint for a rejected current password (400)", async () => {
-    strapiMock.mockRejectedValue(new StrapiError(400, "Bad Request", "{}"));
+    strapiMock.mockRejectedValue(
+      new StrapiError(
+        400,
+        "Bad Request",
+        '{"error":{"name":"ValidationError","message":"The provided current password is invalid"}}',
+      ),
+    );
     await expect(changePassword({}, form())).resolves.toEqual({
-      error: "profile.passwordChangeFailed",
+      error: "passwordWrongOrThrottled",
+    });
+  });
+
+  it.each([
+    ["a 502", new StrapiError(502, "Bad Gateway", "")],
+    ["a network error", new TypeError("fetch failed")],
+  ])("says the change is unavailable for %s", async (_label, error) => {
+    strapiMock.mockRejectedValue(error);
+    await expect(changePassword({}, form())).resolves.toEqual({
+      error: "passwordChangeUnavailable",
     });
   });
 
@@ -189,10 +197,10 @@ describe("changePassword", () => {
 
   it("validates locally before calling Strapi", async () => {
     await expect(changePassword({}, form({ password: "short" }))).resolves.toEqual({
-      error: 'profile.passwordTooShort {"min":6}',
+      error: "passwordTooShort",
     });
     await expect(changePassword({}, form({ passwordConfirmation: "different" }))).resolves.toEqual({
-      error: "profile.passwordMismatch",
+      error: "passwordMismatch",
     });
     expect(strapiMock).not.toHaveBeenCalled();
   });

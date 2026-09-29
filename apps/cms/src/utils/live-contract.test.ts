@@ -4,10 +4,10 @@ import { TARGET_UIDS } from "./comment-target";
 import { CHANNEL_RE, LIVE_TARGET_TYPES, channelFor } from "./live-contract";
 
 /**
- * The cms copy of the live contract (LF04). It is byte-identical to the web
- * copy (apps/web/src/lib/live-contract-mirror.test.ts), which carries the
- * behaviour tests; this suite ties the channel types to the cms's own list
- * of comment targets.
+ * The live contract (LF04) as the cms sees it. The module is @sinnlos/domain's
+ * (packages/domain/src/live-contract.test.ts carries the behaviour tests);
+ * this suite ties the channel types to the cms's own list of comment
+ * targets.
  */
 describe("live contract (cms)", () => {
   it("has a content channel for exactly the comment target types", () => {

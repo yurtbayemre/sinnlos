@@ -11,7 +11,9 @@ import {
   BarChart3,
   ClipboardCheck,
   GraduationCap,
+  type LucideIcon,
 } from "lucide-react";
+import type { Messages } from "next-intl";
 import { getTranslations } from "next-intl/server";
 // Browser-facing URL — inside Docker the internal STRAPI_URL
 // (http://cms:1337) is not reachable from the user's browser.
@@ -36,6 +38,7 @@ const ROLE_COLORS = [
   "bg-muted text-muted-foreground",
 ];
 
+/** The Strapi admin shortcuts; label and description keys of the `admin` namespace. */
 const QUICK_LINK_META = [
   {
     href: "/admin/content-manager",
@@ -67,7 +70,12 @@ const QUICK_LINK_META = [
     descKey: "announcementsLinkDesc",
     icon: Megaphone,
   },
-];
+] as const satisfies readonly {
+  href: string;
+  labelKey: keyof Messages["admin"];
+  descKey: keyof Messages["admin"];
+  icon: LucideIcon;
+}[];
 
 export default async function AdminPage() {
   if (!isAdmin((await getViewer()).role)) {
@@ -160,10 +168,10 @@ export default async function AdminPage() {
                       <Icon className="h-5 w-5" />
                     </div>
                     <CardTitle className="flex items-center gap-2 text-base">
-                      {t(link.labelKey as any)}
+                      {t(link.labelKey)}
                       <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
                     </CardTitle>
-                    <CardDescription>{t(link.descKey as any)}</CardDescription>
+                    <CardDescription>{t(link.descKey)}</CardDescription>
                   </CardHeader>
                 </Card>
               </a>

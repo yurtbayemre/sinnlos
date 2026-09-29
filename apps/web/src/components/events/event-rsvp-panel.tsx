@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Check, HelpCircle, Users, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { rsvpToEvent } from "@/lib/event-actions";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
+import { rsvpToEvent, type RsvpErrorCode } from "@/lib/event-actions";
 import type { EventRsvpSummary, RsvpStatus } from "@/lib/types";
 
 /**
@@ -32,8 +33,9 @@ export function EventRsvpPanel({
   summary: EventRsvpSummary;
 }) {
   const t = useTranslations("events");
+  const tErrors = useTranslations("actionErrors");
   const router = useRouter();
-  const [error, setError] = useState<"full" | "failed" | null>(null);
+  const [error, setError] = useState<RsvpErrorCode | CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const applyRsvp = (prev: EventRsvpSummary, status: RsvpStatus): EventRsvpSummary => {
@@ -62,13 +64,13 @@ export function EventRsvpPanel({
   const respond = (status: RsvpStatus) => {
     if (isPending || local.myStatus === status) return;
     setError(null);
-    startTransition(async () => {
-      applyOptimistic(status);
-      const result = await rsvpToEvent(eventDocumentId, status);
-      if (result.error) {
-        setError(result.error);
+    startCmsAction(startTransition, {
+      optimistic: () => applyOptimistic(status),
+      action: () => rsvpToEvent(eventDocumentId, status),
+      onFailure: (code) => {
+        setError(code);
         router.refresh();
-      }
+      },
     });
   };
 
@@ -111,7 +113,11 @@ export function EventRsvpPanel({
 
       {error && (
         <p role="alert" className="text-xs text-destructive">
-          {error === "full" ? t("rsvpFull") : t("rsvpFailed")}
+          {error === "full"
+            ? t("rsvpFull")
+            : isSharedErrorCode(error)
+              ? tErrors(error)
+              : t("rsvpFailed")}
         </p>
       )}
 

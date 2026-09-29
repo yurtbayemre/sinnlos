@@ -2,7 +2,7 @@
   "name": "@sinnlos/web",
   "private": true,
   "version": "0.1.0",
-  "description": "Next.js 15 frontend for the Sinnlos intranet",
+  "description": "Next.js 16 frontend for the Sinnlos intranet",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",
@@ -19,6 +19,7 @@
     "@radix-ui/react-slot": "1.1.0",
     "@radix-ui/react-tabs": "1.1.1",
     "@radix-ui/react-tooltip": "1.1.4",
+    "@sinnlos/domain": "workspace:*",
     "@tailwindcss/typography": "0.5.15",
     "class-variance-authority": "0.7.0",
     "clsx": "2.1.1",
@@ -39,7 +40,6 @@
     "tailwindcss-animate": "1.0.7"
   },
   "devDependencies": {
-    "@next/eslint-plugin-next": "^16.2.9",
     "@types/node": "24.13.3",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
@@ -47,7 +47,7 @@
     "eslint": "^9.13.0",
     "eslint-config-next": "16.3.4",
     "postcss": "8.5.28",
-    "typescript": "5.6.3",
+    "typescript": "5.9.3",
     "typescript-eslint": "^8.18.0"
   }
 }

@@ -8,7 +8,8 @@ import {
   type AnnouncementAudience,
   type AudienceScope,
 } from "../apps/web/src/lib/audience";
-import { AD_CATEGORIES, AD_CATEGORY_KEYS } from "../apps/web/src/lib/classified-shared";
+import { AD_CATEGORIES } from "../apps/web/src/lib/classified-shared";
+import { AD_CATEGORY_LABELS } from "../apps/web/src/lib/classified-labels";
 import {
   anchorOf,
   type CommentTargetType as WebCommentTargetType,
@@ -592,8 +593,8 @@ describe("schema.json enums = web unions and constants", () => {
     ],
     ["classified-shared AD_CATEGORIES", AD_CATEGORIES, "api::classified.classified", "category"],
     [
-      "classified-shared AD_CATEGORY_KEYS",
-      Object.keys(AD_CATEGORY_KEYS),
+      "classified-labels AD_CATEGORY_LABELS",
+      Object.keys(AD_CATEGORY_LABELS),
       "api::classified.classified",
       "category",
     ],

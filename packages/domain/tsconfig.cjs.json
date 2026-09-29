@@ -1,0 +1,11 @@
+// CommonJS build for the cms (Strapi compiles and runs CommonJS and
+// resolves packages the node10 way: package.json main/types).
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node10",
+    "outDir": "dist/cjs",
+    "noEmit": false
+  }
+}

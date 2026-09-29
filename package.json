@@ -2,18 +2,19 @@
   "name": "sinnlos-intranet",
   "private": true,
   "version": "0.1.0",
-  "description": "Self-hosted intranet platform: Strapi v5 + Next.js 16 + Microsoft Entra ID login",
-  "packageManager": "pnpm@9.12.0",
+  "description": "Self-hosted intranet platform: Strapi v5 + Next.js 16, local sign-in with optional Microsoft Entra ID",
+  "packageManager": "pnpm@10.34.6",
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm build:domain && pnpm -r --parallel dev",
     "build": "pnpm -r build",
+    "build:domain": "pnpm --filter @sinnlos/domain build",
     "start": "pnpm -r --parallel start",
     "lint": "pnpm -r lint",
-    "typecheck": "pnpm -r typecheck && pnpm typecheck:tests",
+    "typecheck": "pnpm build:domain && pnpm -r typecheck && pnpm typecheck:tests",
     "typecheck:tests": "pnpm --filter @sinnlos/web exec tsc -p ../../tsconfig.test.json && pnpm --filter @sinnlos/cms exec tsc -p ../../tsconfig.test.cms.json",
     "test": "vitest run",
     "test:tz": "node scripts/test-tz.mjs",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "pnpm build:domain && vitest run --config vitest.integration.config.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "cms:dev": "pnpm --filter @sinnlos/cms dev",
@@ -26,7 +27,7 @@
   },
   "engines": {
     "node": "^22.13.0 || ^24.0.0",
-    "pnpm": ">=9"
+    "pnpm": ">=10"
   },
   "pnpm": {
     "overrides": {
@@ -34,6 +35,17 @@
       "postcss@>=8.0.0 <8.5.23": "^8.5.23",
       "qs@>=6.0.0 <6.16.0": "^6.16.0",
       "sharp@>=0.35.0 <0.35.4": "^0.35.4"
-    }
+    },
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild",
+      "sharp"
+    ],
+    "ignoredBuiltDependencies": [
+      "@parcel/watcher",
+      "@swc/core",
+      "core-js-pure",
+      "unrs-resolver"
+    ]
   }
 }

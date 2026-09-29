@@ -3,9 +3,19 @@
  * server actions. Lives outside classified-actions.ts because a
  * "use server" module may only export async functions.
  *
- * The limits mirror the CMS enforcement (classified controller + upload
- * extension) — the client checks are UX only, the CMS is authoritative.
+ * The limits are the CMS's own numbers, from @sinnlos/domain (SH01,
+ * packages/domain/src/classified.ts; the classified controller and the
+ * upload extension enforce them): the client checks are UX only, the CMS is
+ * authoritative.
  */
+import {
+  CLASSIFIED_DEFAULT_LIFETIME_DAYS,
+  CLASSIFIED_IMAGE_TYPES,
+  CLASSIFIED_MAX_IMAGES,
+  CLASSIFIED_MAX_IMAGE_BYTES,
+  CLASSIFIED_MAX_IMAGE_MB,
+} from "@sinnlos/domain";
+
 import { addDaysToKey, formatPlainDate, isPlainDate, zonedDateKey } from "@/lib/plain-date";
 import type { ClassifiedCategory } from "@/lib/types";
 
@@ -17,24 +27,18 @@ export const AD_CATEGORIES: ClassifiedCategory[] = [
   "service-wanted",
 ];
 
-/** i18n keys (marketplace namespace) per category. */
-export const AD_CATEGORY_KEYS: Record<ClassifiedCategory, string> = {
-  sale: "categorySale",
-  giveaway: "categoryGiveaway",
-  wanted: "categoryWanted",
-  "service-offer": "categoryServiceOffer",
-  "service-wanted": "categoryServiceWanted",
-};
-
-export const MAX_AD_IMAGES = 4;
-export const MAX_AD_IMAGE_MB = 5;
-export const MAX_AD_IMAGE_BYTES = MAX_AD_IMAGE_MB * 1024 * 1024;
+export const MAX_AD_IMAGES = CLASSIFIED_MAX_IMAGES;
+export const MAX_AD_IMAGE_MB = CLASSIFIED_MAX_IMAGE_MB;
+export const MAX_AD_IMAGE_BYTES = CLASSIFIED_MAX_IMAGE_BYTES;
 /** Client-declared types; the CMS re-verifies via magic bytes. */
-export const AD_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"];
+export const AD_IMAGE_TYPES: string[] = [...CLASSIFIED_IMAGE_TYPES];
 
-/** Selectable ad lifetimes; the CMS clamps to [today, +90] regardless. */
+/**
+ * Selectable ad lifetimes; the CMS clamps to [today, +90]
+ * (CLASSIFIED_MAX_LIFETIME_DAYS) regardless.
+ */
 export const AD_DURATION_DAYS = [7, 14, 30, 60, 90];
-export const AD_DEFAULT_DURATION_DAYS = 30;
+export const AD_DEFAULT_DURATION_DAYS = CLASSIFIED_DEFAULT_LIFETIME_DAYS;
 
 export function isClassifiedCategory(value: string): value is ClassifiedCategory {
   return (AD_CATEGORIES as string[]).includes(value);

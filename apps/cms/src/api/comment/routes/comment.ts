@@ -10,6 +10,8 @@ export default factories.createCoreRouter("api::comment.comment", {
     find: { policies: ["global::comment-target-visibility"] },
     findOne: { policies: ["global::comment-target-visibility"] },
     create: { policies: [] },
-    delete: { policies: [] },
+    // Author, or admin_role/editor (PL03). The controller translates the
+    // id and answers an unknown one with 404.
+    delete: { policies: ["global::is-comment-author"] },
   },
 });
