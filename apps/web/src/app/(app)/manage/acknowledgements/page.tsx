@@ -11,7 +11,7 @@ import {
   type ReportAnnouncement,
   type ReportUser,
 } from "@/lib/ack-report";
-import { isAdmin } from "@/lib/roles";
+import { ANNOUNCEMENT_READER_ROLES, capabilitiesFor } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { listAckReportAnnouncements } from "@/lib/api/announcements";
 import { fetchAnnouncementAckIndex } from "@/lib/acknowledgements";
@@ -28,23 +28,14 @@ export async function generateMetadata() {
 }
 
 /**
- * Role types holding `announcement.find` in the CMS permission matrix
- * (apps/cms/src/index.ts) — only they can ever see, and therefore be
- * expected to confirm, a mandatory announcement. `guest` deliberately has
- * NO announcement read and must not inflate the report's denominator.
- * infra/contracts.test.ts pins this copy against the matrix.
+ * The denominator counts the role types holding `announcement.find`
+ * (lib/roles.ts ANNOUNCEMENT_READER_ROLES, pinned to the CMS matrix by
+ * roles-matrix-parity.test.ts): only they can ever see, and therefore be
+ * expected to confirm, a mandatory announcement. `guest` has NO
+ * announcement read and must not inflate it.
  */
-const ANNOUNCEMENT_READER_ROLES = new Set([
-  "admin_role",
-  "editor",
-  "department_head",
-  "team_lead",
-  "member",
-  "authenticated",
-]);
-
 export default async function AcknowledgementReportPage() {
-  if (!isAdmin((await getViewer()).role)) {
+  if (!capabilitiesFor((await getViewer()).role).reports.acknowledgements) {
     redirect("/");
   }
 

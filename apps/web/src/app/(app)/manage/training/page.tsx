@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant, SHORT_DAY } from "@/lib/date-format";
-import { isAdmin } from "@/lib/roles";
+import { capabilitiesFor, TRAINING_ROLES } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { fetchCourseProgress, fetchCourses } from "@/lib/training";
 import {
@@ -28,31 +28,20 @@ export async function generateMetadata() {
 type ReportUser = UserLite & TrainingReportUser;
 
 /**
- * Role types holding `course.find` in the CMS permission matrix — only
- * they can take a training, so only they belong in the denominator.
- * `guest` deliberately has NO training grants (issue #29).
- * infra/contracts.test.ts pins this copy against the matrix.
- */
-const TRAINING_ROLES = new Set([
-  "admin_role",
-  "editor",
-  "department_head",
-  "team_lead",
-  "member",
-  "authenticated",
-]);
-
-/**
  * Completion report per mandatory course (issue #29; clone of
  * /manage/acknowledgements). admin_role bypasses both training policies,
  * so courses include drafts — filtered out here — and progress rows span
  * ALL users. Progress is walked PER COURSE (lib/training.ts
  * fetchCourseProgress) so the walk cap scales with course size, not with
  * the global row count. Fail-closed: any truncated/failed input suppresses
- * the numbers ("–"), never false-green (lib/training-report.ts).
+ * the numbers ("–"), never false-green (lib/training-report.ts). The
+ * denominator counts the training roles (lib/roles.ts TRAINING_ROLES, the
+ * role types holding the course, lesson and progress reads; pinned to the
+ * CMS matrix by roles-matrix-parity.test.ts): `guest` has NO training
+ * grants (issue #29).
  */
 export default async function TrainingReportPage() {
-  if (!isAdmin((await getViewer()).role)) {
+  if (!capabilitiesFor((await getViewer()).role).reports.training) {
     redirect("/");
   }
 

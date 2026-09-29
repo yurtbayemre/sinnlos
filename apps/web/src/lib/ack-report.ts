@@ -132,9 +132,10 @@ export interface AckReportRow<U extends ReportUser, A extends ReportAnnouncement
  * Only unblocked users whose role can actually read announcements count
  * toward the report — a blocked account or a guest can never confirm
  * anything, and would permanently drag every percentage down. The page
- * passes its ANNOUNCEMENT_READER_ROLES (the role types holding
- * announcement.find; infra/contracts.test.ts pins that page-local copy
- * against the CMS matrix until SH02 moves it).
+ * passes lib/roles.ts ANNOUNCEMENT_READER_ROLES (the role types holding
+ * announcement.find, pinned to the CMS matrix by
+ * roles-matrix-parity.test.ts); infra/contracts.test.ts checks that the
+ * report counts exactly the users the cms notifies.
  */
 export function eligibleReportUsers<U extends ReportUser>(
   users: U[],

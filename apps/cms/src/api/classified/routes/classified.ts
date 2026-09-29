@@ -10,8 +10,9 @@ import type { RoleType } from "../../../bootstrap/roles";
  * via the policy below: editing bypasses ownership only for admins, while
  * delete keeps the editor takedown (moderation) bypass.
  *
- * The bypass lists stay literal (infra/contracts.test.ts reads them from
- * this file for the web role sets) but are typed by the role vocabulary;
+ * The bypass lists stay literal (apps/web/src/lib/roles-matrix-parity.test.ts
+ * reads them from this file for the web's canEditAnyAd / canDeleteAnyAd) but
+ * are typed by the role vocabulary;
  * routes.matrix.test.ts pins them to ADMIN and MODERATORS (B02).
  */
 export default factories.createCoreRouter("api::classified.classified", {

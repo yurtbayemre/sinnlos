@@ -17,7 +17,6 @@ import {
 import { NO_GUEST_ACCESS, normalizeGuestAccess } from "../apps/web/src/lib/poll-guest-access";
 import { CHANNEL_RE, LIVE_TARGET_TYPES } from "../apps/web/src/lib/live-contract";
 import { ALL_EMOJIS } from "../apps/web/src/lib/reaction-summary";
-import * as webRoles from "../apps/web/src/lib/roles";
 import { youtubeVideoId as webYoutubeVideoId } from "../apps/web/src/lib/training-shared";
 import type {
   Acknowledgement,
@@ -61,8 +60,10 @@ import type {
  *      (event-actions STATUSES, give-kudos VALUES) and the exported ones are
  *      compared with the schema at run time;
  *   5. every mappedBy has its inversedBy and back (KNOWN gaps listed);
- *   6. the web role sets against PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS
- *      (KNOWN gaps listed until SH02).
+ *   6. the web search's contact-field roles against the cms's (FX22). The
+ *      web role predicates and capabilities (lib/roles.ts, SH02) are pinned
+ *      against PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS by
+ *      apps/web/src/lib/roles-matrix-parity.test.ts.
  * Constants a module does not export are read from the source file; a
  * declaration that moves fails loudly, and the move updates this file.
  * A KNOWN gap is asserted as it is today, so closing it fails here too and
@@ -86,10 +87,9 @@ async function cms<T>(relative: string): Promise<T> {
 
 type RoleGrants = Record<string, Record<string, readonly string[] | undefined>>;
 
-const { PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS } = await cms<{
-  PERMISSION_MATRIX: RoleGrants;
-  CUSTOM_ACTION_GRANTS: Record<string, readonly string[] | "*" | undefined>;
-}>("bootstrap/permission-matrix.ts");
+const { PERMISSION_MATRIX } = await cms<{ PERMISSION_MATRIX: RoleGrants }>(
+  "bootstrap/permission-matrix.ts",
+);
 
 const { isAnnouncementVisible } = await cms<{
   isAnnouncementVisible(announcement: AnnouncementAudience, scope: AudienceScope | null): boolean;
@@ -736,63 +736,13 @@ describe("relations: every mappedBy has its inversedBy and back", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. Web role sets vs the cms permission matrix
+// 6. Contact-search roles (the web role predicates: roles-matrix-parity.test.ts)
 // ---------------------------------------------------------------------------
 
-describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
+describe("web search CONTACT_SEARCH_ROLES = the cms contact-field roles (FX22)", () => {
   const MATRIX_ROLES = Object.keys(PERMISSION_MATRIX);
 
-  const rolesWith = (uid: string, action: string) =>
-    sorted(MATRIX_ROLES.filter((role) => PERMISSION_MATRIX[role]?.[uid]?.includes(action)));
-
-  const grantedTo = (key: string) => {
-    const grant = CUSTOM_ACTION_GRANTS[key];
-    if (grant === undefined) throw new Error(`no custom grant ${key}`);
-    return sorted(grant === "*" ? MATRIX_ROLES : grant);
-  };
-
-  const intersect = (a: readonly string[], b: readonly string[]) =>
-    a.filter((role) => b.includes(role));
-
-  /** The is-classified-author bypass per route (api/classified/routes/classified.ts). */
-  const classifiedBypass = (action: "update" | "delete") =>
-    sorted(
-      sourceStrings(
-        "apps/cms/src/api/classified/routes/classified.ts",
-        new RegExp(`${action}: \\{[\\s\\S]*?bypassRoles: \\[([^\\]]*)\\]`),
-      ),
-    );
-
-  it("ADMIN_ROLES: the admin-only analytics and role grants", () => {
-    expect(sorted(webRoles.ADMIN_ROLES)).toEqual(grantedTo("api::search-log.search-log.summary"));
-    expect(sorted(webRoles.ADMIN_ROLES)).toEqual(grantedTo("plugin::users-permissions.role.find"));
-  });
-
-  it("ADMIN_ROLES: editing any ad = the classified update bypass", () => {
-    expect(sorted(webRoles.ADMIN_ROLES)).toEqual(classifiedBypass("update"));
-  });
-
-  it("POLL_CREATOR_ROLES: poll create", () => {
-    expect(sorted(webRoles.POLL_CREATOR_ROLES)).toEqual(rolesWith("api::poll.poll", "create"));
-  });
-
-  it("RSVP_ROLES: event-rsvp create and update", () => {
-    expect(sorted(webRoles.RSVP_ROLES)).toEqual(rolesWith("api::event-rsvp.event-rsvp", "create"));
-    expect(sorted(webRoles.RSVP_ROLES)).toEqual(rolesWith("api::event-rsvp.event-rsvp", "update"));
-  });
-
-  it("AD_POSTER_ROLES: classified create AND the upload grant; the cleanup grant too", () => {
-    const posters = intersect(
-      rolesWith("api::classified.classified", "create"),
-      grantedTo("plugin::upload.content-api.upload"),
-    );
-    expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(posters);
-    expect(sorted(webRoles.AD_POSTER_ROLES)).toEqual(
-      grantedTo("api::classified.classified.cleanupUploads"),
-    );
-  });
-
-  it("search CONTACT_SEARCH_ROLES = the cms contact-field roles (FX22)", async () => {
+  it("names exactly the roles the cms lets filter by e-mail", async () => {
     // Only these roles may filter users by e-mail: the cms guard
     // (middlewares/sensitive-query-guard.ts) refuses the clause for every
     // other role, so a drift makes the web search 400 or hide results.
@@ -805,60 +755,5 @@ describe("web role sets = PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS", () => {
     );
     expect(sorted(web)).toEqual(sorted(PRIVILEGED_ROLE_TYPES));
     expect(web.every((role) => MATRIX_ROLES.includes(role))).toBe(true);
-  });
-
-  it("GUEST_ROLES: a real matrix role", () => {
-    expect(sorted(webRoles.GUEST_ROLES)).toEqual(["guest"]);
-    expect(MATRIX_ROLES).toContain("guest");
-  });
-
-  it("the report denominators: announcement.find and course.find", () => {
-    const readers = sourceStrings(
-      "apps/web/src/app/(app)/manage/acknowledgements/page.tsx",
-      /const ANNOUNCEMENT_READER_ROLES = new Set\(\[([^\]]*)\]\)/,
-    );
-    expect(sorted(readers)).toEqual(rolesWith("api::announcement.announcement", "find"));
-    const trainees = sourceStrings(
-      "apps/web/src/app/(app)/manage/training/page.tsx",
-      /const TRAINING_ROLES = new Set\(\[([^\]]*)\]\)/,
-    );
-    expect(sorted(trainees)).toEqual(rolesWith("api::course.course", "find"));
-  });
-
-  it("voting stays per poll: vote and results are granted to every role, the web has no role gate", () => {
-    expect(CUSTOM_ACTION_GRANTS["api::poll-vote.poll-vote.vote"]).toBe("*");
-    expect(CUSTOM_ACTION_GRANTS["api::poll-vote.poll-vote.results"]).toBe("*");
-    expect(Object.keys(webRoles)).not.toContain("canVote");
-  });
-
-  /**
-   * KNOWN until SH02, asserted as they are today:
-   *   - ANNOUNCEMENT_READER_ROLES and TRAINING_ROLES are page-local copies,
-   *     not roles.ts exports (their VALUES are pinned above);
-   *   - no canComment / canReact: the web offers the comment form and the
-   *     reaction bar to every role, while the matrix gives guest neither
-   *     create;
-   *   - no canDeleteAnyAd: the cms lets editor take any ad down (delete
-   *     bypass), the web offers delete to the author and admins only.
-   */
-  it("KNOWN gaps (SH02) are exactly these", () => {
-    const exported = Object.keys(webRoles);
-    for (const missing of [
-      "ANNOUNCEMENT_READER_ROLES",
-      "TRAINING_ROLES",
-      "canComment",
-      "canReact",
-      "canDeleteAnyAd",
-      "canEditAnyAd",
-      "canTrain",
-    ]) {
-      expect(exported, missing).not.toContain(missing);
-    }
-    const withoutCreate = (uid: string) =>
-      MATRIX_ROLES.filter((role) => !rolesWith(uid, "create").includes(role));
-    expect(withoutCreate("api::comment.comment")).toEqual(["guest"]);
-    expect(withoutCreate("api::reaction.reaction")).toEqual(["guest"]);
-    const deleteBypass = classifiedBypass("delete");
-    expect(deleteBypass.filter((role) => !webRoles.ADMIN_ROLES.has(role))).toEqual(["editor"]);
   });
 });
