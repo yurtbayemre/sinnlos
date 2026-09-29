@@ -11,8 +11,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  * Covered: every `api.*` helper (the coverage check below fails when one is
  * added without a case), the lib helpers that call strapi() directly for
  * reads (users, teams, acknowledgements, training, the viewer, the topbar's
- * notification feed, the ⌘K search), and the pages that do (the three
- * /manage reports, the person page, the profile page).
+ * notification feed, the ⌘K search, the comment sections: the batched
+ * reactions read in chunks of 50, the newest-100 comment windows and the
+ * own-reaction lookup), and the pages that do (the three /manage reports,
+ * the person page, the profile page). Not covered: the image lookup of
+ * updateClassified (classified-actions.ts), a read inside a mutation.
  *
  * Mocked: global fetch (canned bodies per path, below), `@/lib/session`
  * (a signed-in session with the token `jwt-test`), `@/lib/config` (the CMS
@@ -69,6 +72,8 @@ const onePage = (data: unknown[] = []) => ({
   data,
   meta: { pagination: { page: 1, pageSize: 100, pageCount: 1, total: data.length } },
 });
+/** A comment target whose reactions overflow the newest-500 window. */
+const OVERFLOW_DOC = "overflow-doc";
 
 /**
  * The canned body per path: enough for every caller to go on to its next
@@ -101,6 +106,18 @@ function respond(url: string): Response {
   }
   if (path.startsWith("/api/announcements?filters[requiresAck][$eq]=true&populate[department]")) {
     return json(onePage([{ id: 1, documentId: "ann-doc-1", requiresAck: true }]));
+  }
+  if (
+    path.startsWith("/api/reactions?") &&
+    path.includes(`$eq]=${OVERFLOW_DOC}`) &&
+    !path.includes("filters[author]")
+  ) {
+    // More rows than the window holds: the section reads the target on its
+    // own and then looks up the caller's own reactions.
+    return json({
+      data: [],
+      meta: { pagination: { page: 1, pageSize: 500, pageCount: 2, total: 501 } },
+    });
   }
   if (path.startsWith("/api/courses?")) {
     return json(
@@ -145,6 +162,7 @@ const training = await import("./training");
 const { getViewer } = await import("./viewer");
 const { getNotifications } = await import("./notification-actions");
 const { PRELOAD_KINDS, loadPreload, searchLive } = await import("./search-action");
+const { getCommentSection, getCommentSections } = await import("./comment-actions");
 const { default: AckReportPage } = await import("@/app/(app)/manage/acknowledgements/page");
 const { default: AnalyticsPage } = await import("@/app/(app)/manage/analytics/page");
 const { default: TrainingReportPage } = await import("@/app/(app)/manage/training/page");
@@ -218,6 +236,23 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   ),
   "search.searchLive(member)": () => searchLive("Ab&c", async () => "member"),
   "search.searchLive(guest)": () => searchLive("Ab&c", async () => "guest"),
+  "comments.getCommentSection": () =>
+    getCommentSection({ type: "announcement", documentId: "ann doc/1" }),
+  "comments.getCommentSections(1)": () =>
+    getCommentSections([{ type: "wiki-page", documentId: "wiki-doc-1" }]),
+  // 51 distinct targets of both types (two reaction batches: 50 + 1), plus
+  // a duplicate and a target without an anchor, which send nothing.
+  "comments.getCommentSections(51)": () =>
+    getCommentSections([
+      ...Array.from({ length: 51 }, (_, i) => ({
+        type: i % 2 === 0 ? ("announcement" as const) : ("wiki-page" as const),
+        documentId: `k3m9x00000000000000000${String(i).padStart(2, "0")}`,
+      })),
+      { type: "announcement", documentId: "k3m9x0000000000000000000" },
+      { type: "wiki-page", documentId: " " },
+    ]),
+  "comments.getCommentSection(reaction overflow)": () =>
+    getCommentSection({ type: "announcement", documentId: OVERFLOW_DOC }),
   "page.manage/acknowledgements": () => AckReportPage(),
   "page.manage/analytics": () => AnalyticsPage(),
   "page.manage/training": () => TrainingReportPage(),
