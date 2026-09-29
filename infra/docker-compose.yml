@@ -134,9 +134,10 @@ services:
       # no-ops and the app runs byte-for-byte on the pre-SSE polling.
       LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
       # Scheduled jobs (uploads and search-log janitors, digest mailer):
-      # unset or true runs them; false (also 0/no/off) switches every job
-      # off in this process. The cms reads it like its other on/off
-      # switches (apps/cms/src/cron/registry.ts, LF03).
+      # unset or true runs them; false (also 0/no/off) switches these
+      # three off in this process (Strapi's own metrics jobs run on). The
+      # cms reads it like its other on/off switches
+      # (apps/cms/src/cron/registry.ts, LF03).
       CRON_ENABLED: ${CRON_ENABLED:-true}
       # No usage telemetry to Strapi; also spares a stop the telemetry
       # lookups that run into the DNS timeout on a host without DNS (B05).
