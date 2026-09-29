@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { matchWhere } from "../test/strapi-stub.test.helper";
 import {
+  UNANCHORED_NOTIFICATION_WHERE,
+  isAnchoredNotification,
   notifiedRecipientIds,
   planFanout,
   resolveFanout,
@@ -421,5 +424,40 @@ describe("resolveFanout", () => {
 
     expect(recipients).toEqual([]);
     expect(strapi.logs).toEqual([]);
+  });
+});
+
+describe("isAnchoredNotification and UNANCHORED_NOTIFICATION_WHERE (LF07)", () => {
+  // The retention janitor (cron/prune-notifications.ts) deletes only rows
+  // these call un-anchored: an anchor row is the dedup ledger above, and a
+  // pruned one would make the next re-publish notify its recipient again.
+  const ROWS = [
+    { id: 1, sourceType: "announcement", sourceDocumentId: ANNOUNCEMENT_DOC },
+    { id: 2, sourceType: "event", sourceDocumentId: "evt-doc" },
+    // Half-set anchors are kept rather than guessed about.
+    { id: 3, sourceType: "announcement", sourceDocumentId: null },
+    { id: 4, sourceType: null, sourceDocumentId: ANNOUNCEMENT_DOC },
+    { id: 5, sourceType: null, sourceDocumentId: "" },
+    // Comment and kudos notifications, and the legacy pre-#12 fan-out rows.
+    { id: 6, sourceType: null, sourceDocumentId: null },
+    { id: 7 },
+  ];
+
+  it("calls every row with either anchor column set an anchor, blank values included", () => {
+    expect(ROWS.filter((row) => isAnchoredNotification(row)).map((row) => row.id)).toEqual([
+      1, 2, 3, 4, 5,
+    ]);
+  });
+
+  it("selects exactly the other rows as a query-engine where", () => {
+    const uid = "api::notification.notification";
+    const matched = ROWS.filter((row) =>
+      matchWhere(uid, row, { ...UNANCHORED_NOTIFICATION_WHERE }),
+    );
+    expect(matched.map((row) => row.id)).toEqual([6, 7]);
+  });
+
+  it("cannot be changed by a caller", () => {
+    expect(Object.isFrozen(UNANCHORED_NOTIFICATION_WHERE)).toBe(true);
   });
 });

@@ -1,5 +1,6 @@
 import { MODERATORS } from "../bootstrap/roles";
 import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
+import { notExpiredWhere } from "../utils/announcement-expiry";
 import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
 import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
 
@@ -30,6 +31,13 @@ import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
  * Anonymous callers get a null scope → only untargeted announcements. (No
  * role currently reads announcements anonymously — guest has no
  * `announcement.find` — but the policy must not depend on that.)
+ *
+ * Expiry (DA02, owner answer 2026-09-29 (b)): a row whose `expiresAt`
+ * instant has passed is not among the visible ids, so an expired
+ * announcement leaves the list, single reads, the ack banner and search
+ * for every non-bypass caller at that instant (utils/announcement-
+ * expiry.ts). The ids are read at request time; admin_role / editor keep
+ * reading expired announcements through the bypass.
  */
 
 type AnnouncementRow = AnnouncementTargeting & { id: number };
@@ -44,6 +52,7 @@ async function visibleAnnouncementIds({
   // automatically listed in `team.members` (toAudienceScope).
   const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
   const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    where: notExpiredWhere(new Date()),
     select: ["id", "audience"],
     populate: {
       department: { select: ["id"] },

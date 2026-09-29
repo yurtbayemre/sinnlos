@@ -1242,6 +1242,21 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the CMS data lifecycle leftovers (batch 12, lane 7C)?** A
+> normal deploy of cms and web **together** (`infra/deploy.sh`) once
+> batch 11 runs: no env, compose, grant or edge change. The first boot adds
+> an `audience` column to `documents` and `quick_links` (existing rows stay
+> NULL, visibility unchanged). Two new nightly crons delete read
+> notifications 90 days after reading (03:40) and marketplace ads 90 days
+> after their last day, with their images (03:45): take an **extra manual
+> backup** after the deploy and before that first night, and look at the
+> read-only counts first. Comment delete answers byte for byte as before;
+> expired announcements leave lists, threads and digests; an unpublished
+> announcement's thread answers like a missing one; deleting a department
+> keeps its documents and quick links admin/editor-only. Afterwards run the
+> census once and send section 9 (the duplicate scan) to the owner. Follow
+> [Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c).
+>
 > **Deploying batch 10 (2026-09-29)?** The CI and edge changes, the deploy,
 > backup and cron hardening and the web session with batched poll results
 > (the three notes below) ship as one deploy of cms and web **together**
@@ -1544,6 +1559,177 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)
+
+Lane 7C of batch 12 (branch `fix/cms-data-lifecycle-leftovers`, on `main`
+`7d9e52b`) finishes the cms leftovers the owner decided on 2026-09-29 (b).
+It changes the cms and the web's wiki pages; deploy both **together** with
+`infra/deploy.sh` once batch 11 runs. No env, compose, grant, route or edge
+change.
+
+**What changes**
+
+- **Retention crons (LF07).** Two new tasks in the cron registry, both
+  after the 03:00 host backup ([§7.3](#73-automated-daily-backups-cron)):
+  - `notification-janitor`, 03:40 `APP_TIME_ZONE`: deletes **read**
+    notifications 90 days after they were read. Unread notifications never
+    expire. Fan-out anchor rows (announcement and event notifications that
+    carry `sourceType`/`sourceDocumentId`) are never deleted, read or not:
+    they are what keeps a re-published announcement from notifying its
+    audience again. At most 100 000 rows a night; a backlog continues the
+    next night.
+  - `classified-janitor`, 03:45 `APP_TIME_ZONE`: deletes marketplace ads
+    whose last listed day (`expiresAt`) lies more than 90 days before today,
+    one by one like a delete in the admin panel, so their marketplace
+    images go too (admin uploads are never touched). Each ad is read again
+    (on Postgres under a row lock) right before its delete, so an ad its
+    author renews while the task runs stays. At most 1000 ads a night; an
+    ad whose delete fails is logged and retried the next night.
+
+  The values are code constants, not settings. `CRON_ENABLED=0` switches
+  both off with the other tasks. Log lines: `[cron] notification-janitor
+  took …ms` and `[cron] classified-janitor took …ms` every night, plus
+  `[notification-janitor] pruned N read notification(s) …` and
+  `[classified-janitor] purged N ad(s) expired before YYYY-MM-DD …` when
+  something went. Each purged ad with images also logs
+  `[uploads-janitor] removed N image(s) of deleted classified` (the ad's
+  delete lifecycle, after the ad's commit; not the 03:30 uploads task).
+  Deleted rows and images come back only from a backup.
+- **Department deletes (FX29 residual).** Documents and quick links are
+  scoped by their departments; without one they are company-wide. Deleting
+  a department used to leave a document or quick link that targeted only
+  that department with no department at all, so everyone (guests included)
+  saw it. Now the delete first sets the new `audience` field of every
+  document and quick link linked to the department to `departments`: with
+  no department left, only admins and editors see it until someone
+  re-targets it in the admin panel (link a department, or set Audience back
+  to `all` for company-wide). Rows that also link another department stay
+  visible to that department. The delete itself is never refused. On
+  Postgres the delete locks the department rows while it runs, so an edit
+  that links a document or quick link to the same department at that
+  moment either lands first (the delete waits for it and flags the row
+  too) or waits for the delete and then fails, because the department is
+  gone (save again with another department). The first boot adds the
+  `audience` column to `documents` and `quick_links`; existing rows stay
+  empty (NULL), which reads exactly as before.
+- **Comment delete (PL03).** Ownership is now checked by a route policy
+  instead of inside the controller. Every answer stays byte for byte the
+  same (author and moderators delete, anyone else gets the same 403, an
+  unknown id the same 404).
+- **Announcement expiry (DA02).** An announcement's `expiresAt` (Expires at
+  in the admin panel) now takes effect: from that moment the announcement
+  disappears for everyone below admin/editor from the list, its detail
+  read, the acknowledgement banner, search and its comment thread, and no
+  digest mentions it. Admins and editors still see it.
+- **Unpublished announcements.** While an announcement is unpublished,
+  reading or writing its comments and reactions answers exactly as for an
+  announcement that never existed (admins and editors cannot add comments
+  or reactions to it either; their reads still return the stored rows).
+  The thread comes back unchanged with the next publish. Wiki pages are
+  unchanged.
+- **Wiki (DA02).** A space lists its pages by their Order field (ties by
+  title), a page shows its tags as small chips and, unless Toc enabled is
+  switched off, a table of contents of its `##`/`###` headings, and a space
+  shows its icon on the wiki index and in its header. The icon field takes
+  a name from the same list as quick-link icons (`BookOpen`, `Wrench`,
+  `GraduationCap`, `Code`, `Heart`, …), in any letter case and with or
+  without hyphens (`wrench`, `graduation-cap`). Existing spaces keep their
+  look or gain one: the default `book` shows the book icon as before, the
+  demo seed's `code` and `heart` now show a code and a heart icon. Any
+  other value shows the book icon.
+- **Duplicate scan (DA04, measurement only).** `infra/diagnostics/census.sql`
+  gains section 9: counts of duplicate poll votes, acknowledgements, RSVPs,
+  lesson progress rows and reactions (no ids, no names), for the owner's
+  decision on unique constraints ([infra/diagnostics/README.md](../infra/diagnostics/README.md)).
+
+**Before the deploy (read-only)**
+
+1. How much the first night will delete (psql on the host, compose project
+   `infra`; nothing changes):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   SELECT count(*) AS notifications_to_prune
+     FROM notifications
+    WHERE read_at < now() - interval '90 days'
+      AND created_at < now() - interval '90 days'
+      AND source_type IS NULL AND source_document_id IS NULL;
+   SELECT count(*) AS ads_to_purge
+     FROM classifieds
+    WHERE expires_at < (now() AT TIME ZONE 'Europe/Berlin')::date - 90;
+   ROLLBACK;
+   SQL
+   ```
+
+   (Replace `Europe/Berlin` with your `APP_TIME_ZONE`.) A large first
+   number is expected on an instance that has run for months; the janitor
+   removes at most 100 000 a night.
+
+**Deploy**
+
+2. `infra/deploy.sh` (it takes its pre-deploy backup). On a standalone
+   Caddy box: `infra/backup/pg-backup.sh`, then `docker compose up -d
+   --build` from `infra/`.
+3. The cms log shows the boot as usual; no new boot line. Check the column:
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT table_name, column_name FROM information_schema.columns
+    WHERE column_name = 'audience' AND table_name IN ('documents', 'quick_links');
+   SQL
+   ```
+
+   Two rows.
+
+**Before the first night of the retention crons**
+
+4. Take an **extra manual backup** the same day, after the deploy and
+   before 03:00, and keep it until you have checked the next morning's
+   log. Run it as the user of the backup crontab line; the pre-deploy kind
+   is kept apart from the nightly rotation:
+
+   ```bash
+   SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
+   ```
+
+**The next morning**
+
+5. `docker logs infra-cms-1 2>&1 | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]|removed [0-9]+ image\(s\) of deleted classified'`
+   shows both tasks after 03:40 and 03:45 and what they removed; compare
+   with the counts of step 1 (the notification count is capped at 100 000
+   a night). The images of the purged ads show up as
+   `[uploads-janitor] removed N image(s) of deleted classified`, one line
+   per ad with images, next to the `[classified-janitor] purged …` line:
+   each ad's delete removes its images in the background after its commit
+   and logs under that prefix, so these lines can come just before or just
+   after the summary. They are not the 03:30 `uploads-janitor` task, which
+   logs `[cron] uploads-janitor took …ms`.
+6. Run the census once and send the section 9 numbers to the owner
+   (DA04 decision): `infra/diagnostics/census.sh`.
+
+**Checks (optional)**
+
+- A member no longer sees an announcement whose Expires at has passed;
+  an editor still does.
+- Unpublish a test announcement with a comment: the member's thread is
+  empty and a new comment answers 400 (as for a missing one); publish it
+  again and the comment is back.
+- In a test instance: delete a department that a document targets alone;
+  the document shows for admins and editors only, with Audience
+  `departments`.
+
+**Rollback**
+
+Re-up the previous images of cms **and** web (the SHA tags,
+[§3.6](#36-deploy)); no database step. The `audience` columns stay (the
+schema sync never drops columns here, `forceMigration: false`) and the
+previous cms ignores them: a document or quick link flagged by a department
+delete after this deploy and left without departments would read as
+company-wide there again. Re-target such rows (link a department) before
+rolling back, or accept it. Notifications and ads the janitors deleted come
+back only from the backup of step 4.
 
 #### Deploying batch 10 (2026-09-29)
 
@@ -7113,8 +7299,8 @@ the cms and the database, phase 2 the web):
 - **Admin panel.** Strapi's admin panel shows and takes times in the
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
-- **Cron and backups.** The janitors run at 03:30 / 03:35 and the digest at
-  07:30 `APP_TIME_ZONE`; the host crontab's 03:00 backup runs in the host's
+- **Cron and backups.** The janitors run at 03:30 / 03:35 (since batch 12
+  also 03:40 / 03:45) and the digest at 07:30 `APP_TIME_ZONE`; the host crontab's 03:00 backup runs in the host's
   zone and must come first (keep the host in `APP_TIME_ZONE`, or shift the
   crontab line).
 - **Local development.** SQLite needs nothing. With a local Postgres, set
@@ -8068,7 +8254,8 @@ container running for a look (`docker exec -it <name> psql -U drill -d drill`).
 Run it after changes to the backup and every few months.
 
 > **Order matters:** the crontab runs in the **host's** zone, while the
-> uploads and search-log janitors run at 03:30 / 03:35 **`APP_TIME_ZONE`**
+> janitors (uploads, search log, and since batch 12 notifications and
+> expired ads) run from 03:30 to 03:45 **`APP_TIME_ZONE`**
 > ([datetime contract](#310-datetime-contract)). The backup must come first,
 > so every swept file is still in the previous backup. With the host in
 > `APP_TIME_ZONE` the line above is right; on a UTC host with

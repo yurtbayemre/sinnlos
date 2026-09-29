@@ -60,7 +60,11 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     // #28: an existing-but-invisible target answers with the EXACT same
     // 400 as a nonexistent one (§5.17, no existence oracle). Checked
     // before the toggle lookup so an out-of-audience caller can neither
-    // add NOR remove a reaction in a hidden discussion.
+    // add NOR remove a reaction in a hidden discussion. An announcement
+    // without a published row is such a target for every caller, admin_role
+    // and editor included (owner answer 2026-09-29 (b)); an expired one for
+    // everyone below them (DA02). Removing a reaction by its id
+    // (DELETE /api/reactions/:id) stays possible, as for a missing target.
     const visible = await isTargetVisible(strapi, targetType, targetDocumentId, ctx.state.user);
     if (!visible) return ctx.badRequest(WRITE_TARGET_ERRORS["unresolved-target"]);
 

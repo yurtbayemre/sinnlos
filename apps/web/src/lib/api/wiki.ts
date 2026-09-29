@@ -16,9 +16,9 @@ export type WikiSpaceListItem = Omit<WikiSpace, "pages"> & {
   team?: TeamRow | null;
 };
 
-/** A space page's table of contents: title, slug and summary per page. */
+/** A space page's table of contents: title, slug, summary and position per page. */
 export type WikiSpaceDetail = Omit<WikiSpace, "pages"> & {
-  pages?: Pick<WikiPage, "id" | "documentId" | "title" | "slug" | "summary">[];
+  pages?: Pick<WikiPage, "id" | "documentId" | "title" | "slug" | "summary" | "order">[];
 };
 
 /** A byline user: display name and username only. */
@@ -62,7 +62,10 @@ export function listWikiSpaces(): Promise<WalkResult<WikiSpaceListItem>> {
  *
  * Field-limited (FX24, WD05): the space page lists each page's title, slug
  * and summary only, so neither the page bodies nor an author are loaded
- * (Strapi always adds id and documentId).
+ * (Strapi always adds id and documentId), plus its `order`, by which the
+ * page sorts the list (DA02; lib/wiki-content.ts sortWikiPages: the REST
+ * populate has no sort of its own here). The space's own fields include
+ * its `icon`.
  */
 export function wikiSpaceBySlug(slug: string): Promise<StrapiListResponse<WikiSpaceDetail>> {
   return strapi<StrapiListResponse<WikiSpaceDetail>>(
@@ -70,7 +73,7 @@ export function wikiSpaceBySlug(slug: string): Promise<StrapiListResponse<WikiSp
       "/api/wiki-spaces",
       strapiQuery()
         .filter("slug", "$eq", slug)
-        .populateFields("pages", ["title", "slug", "summary"]),
+        .populateFields("pages", ["title", "slug", "summary", "order"]),
     ),
   );
 }
@@ -78,7 +81,8 @@ export function wikiSpaceBySlug(slug: string): Promise<StrapiListResponse<WikiSp
 /**
  * No revisions (FX24): every view used to transfer the full body of every
  * historical revision, and none was rendered. The byline needs the author's
- * and last editor's names only; `id` tells them apart.
+ * and last editor's names only; `id` tells them apart. The page's own
+ * fields (not limited) carry `tocEnabled` and `tags` (DA02).
  */
 export function wikiPageBySlug(
   spaceSlug: string,

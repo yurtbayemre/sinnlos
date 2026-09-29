@@ -13,10 +13,11 @@ import {
  * the published row and creates a new one (new numeric id, same
  * documentId; draft and published rows never share an id):
  *   - comment and reaction anchors (targetType + targetDocumentId, issue #11)
- *     survive REST and Document Service republishes; an unpublish keeps the
- *     thread readable and writable through the draft fallback of
- *     findCommentTarget (KNOWN, pinned as it is today; docs/architecture.md
- *     §7b, owner decision pending), and the next publish keeps it;
+ *     survive REST and Document Service republishes; while an announcement
+ *     is unpublished its thread is treated like the thread of a missing
+ *     target, for reads and writes, byte for byte (owner answer
+ *     2026-09-29 (b); utils/target-visibility.ts), and the next publish
+ *     brings it back unchanged;
  *   - a poll vote follows the poll to its new published row (the
  *     unidirectional re-link, §5.17), an RSVP follows its event (documentId
  *     anchor);
@@ -139,50 +140,86 @@ describe.each(testEngines())("publish cycles on %s", (engine) => {
       expect((await thread()).reactions).toHaveLength(1);
     });
 
-    it("KNOWN: an unpublished announcement keeps its thread (draft fallback); the next publish keeps it too", async () => {
+    it("an unpublished announcement's thread answers like a missing target; the next publish brings it back", async () => {
       await t.strapi.documents(ANNOUNCEMENT).unpublish({ documentId: announcement.documentId });
       expect(await rowIds(ANNOUNCEMENT, announcement.documentId)).toMatchObject({ published: [] });
 
-      // Comment targets resolve published-first WITH the draft row as
-      // fallback (utils/comment-target.ts findCommentTarget, pinned in
-      // comment-target.test.ts "accepts a target that only exists as a
-      // draft"; target-visibility.ts judges the same row). So the thread
-      // stays readable, and writable, for everyone the DRAFT row targets.
-      // Asserted as it is today; see docs/architecture.md §7b.
-      const hidden = await thread();
-      expect(hidden.comments.map((c) => c.id)).toEqual([commentId]);
-      expect(hidden.reactions.map((r) => r.id)).toEqual([reactionId]);
-      const onDraft = await t.api<{ data: { id: number } }>("member", "/api/comments", {
+      // Owner answer 2026-09-29 (b): no published row, no target. The
+      // draft still resolves in findCommentTarget; target-visibility.ts
+      // refuses it, so every answer equals the one for a documentId that
+      // never existed (no existence oracle, §5.17).
+      const GHOST = "zzzzzzzzzzzzzzzzzzzzzzzz";
+      const threadOf = async (role: TestRole, documentId: string) => {
+        const filter = `filters[targetType][$eq]=announcement&filters[targetDocumentId][$eq]=${documentId}`;
+        const comments = await t.api(role, `/api/comments?${filter}`);
+        const reactions = await t.api(role, `/api/reactions?${filter}`);
+        return [comments.status, comments.text, reactions.status, reactions.text];
+      };
+      for (const role of ["member", "team_lead", "guest"] as const) {
+        const hidden = await threadOf(role, announcement.documentId);
+        expect(hidden, role).toEqual(await threadOf(role, GHOST));
+        expect(hidden.slice(0, 1), role).toEqual([200]);
+        expect(JSON.parse(String(hidden[1])).data, role).toEqual([]);
+      }
+
+      const write = (role: TestRole, documentId: string) =>
+        Promise.all([
+          t.api(role, "/api/comments", {
+            json: {
+              data: {
+                body: "while unpublished",
+                targetType: "announcement",
+                targetDocumentId: documentId,
+              },
+            },
+          }),
+          t.api(role, "/api/reactions", {
+            json: {
+              data: {
+                emoji: "celebrate",
+                reacted: true,
+                targetType: "announcement",
+                targetDocumentId: documentId,
+              },
+            },
+          }),
+        ]);
+      // Writes are refused for every caller, admin_role and editor included:
+      // a missing target is refused for them as well.
+      for (const role of ["member", "editor", "admin_role"] as const) {
+        const [comment, reaction] = await write(role, announcement.documentId);
+        const [ghostComment, ghostReaction] = await write(role, GHOST);
+        expect([comment.status, comment.text], role).toEqual([
+          ghostComment.status,
+          ghostComment.text,
+        ]);
+        expect([reaction.status, reaction.text], role).toEqual([
+          ghostReaction.status,
+          ghostReaction.text,
+        ]);
+        expect(comment.status, role).toBe(400);
+      }
+      // Removing the own reaction by toggle is a write on the target too.
+      const off = await t.api("member", "/api/reactions", {
         json: {
           data: {
-            body: "while unpublished",
+            emoji: "heart",
+            reacted: false,
             targetType: "announcement",
             targetDocumentId: announcement.documentId,
           },
         },
       });
-      expect(onDraft.status).toBe(201);
-      // A documentId that never existed stays the plain 400.
-      const onMissing = await t.api("member", "/api/comments", {
-        json: {
-          data: {
-            body: "hello?",
-            targetType: "announcement",
-            targetDocumentId: "zzzzzzzzzzzzzzzzzzzzzzzz",
-          },
-        },
-      });
-      expect(onMissing.status).toBe(400);
+      expect(off.status).toBe(400);
+      // The moderators' read bypass still returns the stored rows, as it
+      // does for the rows of a missing target.
+      expect((await thread("editor")).comments.map((c) => c.id)).toEqual([commentId]);
 
       await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: announcement.documentId });
       const back = await thread();
-      expect(back.comments.map((c) => c.id).sort((a, b) => a - b)).toEqual([
-        commentId,
-        onDraft.body.data.id,
-      ]);
+      expect(back.comments.map((c) => c.id)).toEqual([commentId]);
       expect(back.reactions.map((r) => r.id)).toEqual([reactionId]);
-      // admin/editor moderate the same thread.
-      expect((await thread("editor")).comments).toHaveLength(2);
+      expect((await thread("editor")).comments).toHaveLength(1);
     });
 
     it("wiki page comments survive a Document Service republish as well", async () => {

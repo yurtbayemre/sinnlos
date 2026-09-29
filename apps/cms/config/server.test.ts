@@ -179,6 +179,8 @@ describe("config/server", () => {
     expect(Object.entries(tasks).map(([name, { options }]) => ({ name, ...options }))).toEqual([
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Europe/Berlin" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Europe/Berlin" },
+      { name: "notification-janitor", rule: "40 3 * * *", tz: "Europe/Berlin" },
+      { name: "classified-janitor", rule: "45 3 * * *", tz: "Europe/Berlin" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Europe/Berlin" },
     ]);
   });
@@ -211,6 +213,8 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       expect(await scheduledByProvider(config), JSON.stringify(store)).toEqual([
         "uploads-janitor",
         "search-log-janitor",
+        "notification-janitor",
+        "classified-janitor",
         "digest-mailer",
       ]);
     }
@@ -233,6 +237,8 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       "uploadWeekly",
       "uploads-janitor",
       "search-log-janitor",
+      "notification-janitor",
+      "classified-janitor",
       "digest-mailer",
     ]);
   });

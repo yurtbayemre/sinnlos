@@ -1,15 +1,9 @@
 import { factories } from "@strapi/strapi";
-import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { WRITE_TARGET_ERRORS, resolveWriteTarget } from "../../../utils/comment-target";
-import { findByRef, identifiedCaller, type EntryRow } from "../../../utils/policy-factories";
+import { findByRef } from "../../../utils/policy-factories";
 import { isTargetVisible } from "../../../utils/target-visibility";
 
 const COMMENT_UID = "api::comment.comment";
-
-/** A comment with its author's id, for the delete ownership check. */
-interface CommentRow extends EntryRow {
-  author?: { id?: number } | null;
-}
 
 export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
   /**
@@ -40,7 +34,10 @@ export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
 
     // #28: an existing-but-invisible target answers with the EXACT same
     // 400 as a nonexistent one — create must not become an existence
-    // oracle for documentIds the caller may not read (§5.17).
+    // oracle for documentIds the caller may not read (§5.17). That covers
+    // an announcement without a published row for every caller (owner
+    // answer 2026-09-29 (b)) and an expired one below admin_role/editor
+    // (DA02, utils/target-visibility.ts).
     const visible = await isTargetVisible(
       strapi,
       target.targetType,
@@ -60,24 +57,20 @@ export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
     return super.create(ctx);
   },
 
+  /**
+   * DELETE /api/comments/:id, behind global::is-comment-author (author, or
+   * admin_role/editor; PL03). The policy decides who may delete; this keeps
+   * the id handling. The web addresses comments by numeric id, direct API
+   * consumers by documentId, and the v5 core delete resolves documentIds
+   * only (a numeric id deleted nothing and still answered 204), so a
+   * numeric id is translated here. A malformed, out-of-range or unknown id
+   * answers 404 without reaching the query (findByRef, utils/entry-id.ts: a
+   * malformed row id was a 500 on Postgres); the policy passes such an id
+   * on to this 404, exactly the answer the controller gave before PL03.
+   */
   async delete(ctx) {
-    // The web app addresses comments by numeric id; accept both that and a
-    // documentId so direct API consumers keep working. Anything else is an
-    // unknown comment and never reaches the query (findByRef,
-    // utils/entry-id.ts: a malformed row id was a 500 on Postgres).
-    const entity = await findByRef<CommentRow>(strapi, COMMENT_UID, ctx.params.id, {
-      populate: { author: { select: ["id"] } },
-    });
+    const entity = await findByRef(strapi, COMMENT_UID, ctx.params.id, { select: [] });
     if (!entity) return ctx.notFound();
-    const user = ctx.state.user;
-    // Without a numeric id the caller owns nothing, not even a comment whose
-    // author is gone (ownerGate's rule, utils/policy-factories.ts).
-    const caller = identifiedCaller(user);
-    const isOwner = caller !== null && entity.author?.id === caller.id;
-    const isPrivileged = hasRole(user, MODERATORS);
-    if (!isOwner && !isPrivileged) return ctx.forbidden();
-    // The v5 core controller resolves by documentId — a numeric id deletes
-    // nothing while still answering 204, so translate before delegating.
     ctx.params.id = entity.documentId;
     return super.delete(ctx);
   },
