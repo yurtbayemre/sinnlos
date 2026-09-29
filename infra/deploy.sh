@@ -1195,15 +1195,15 @@ if [[ -n "${DIRTY}" ]]; then
   echo "       Commit, stash or revert them (git -C ${CHECKOUT} status), then re-run. Nothing was changed." >&2
   exit 1
 fi
-# The Dockerfiles copy apps/cms and apps/web whole, and the root manifests;
-# .dockerignore drops only build output and .env files. An untracked file
-# there would be built into images tagged as this commit, and so would an
-# untracked directory, even an empty one, which `git status` never lists:
+# The Dockerfiles copy apps/cms, apps/web and packages/domain whole, and the
+# root manifests; .dockerignore drops only build output and .env files. An
+# untracked file there would be built into images tagged as this commit, and
+# so would an untracked directory, even an empty one, which `git status` never lists:
 # an empty apps/web/app/ makes Next.js build that (empty) app directory
 # instead of src/app (seen in the lane rehearsal: every page answered 500).
 # `git clean -n -d` (a dry run: it lists, never removes) names both, and
 # skips ignored files.
-BUILD_CONTEXT_PATHS=(apps/cms apps/web package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
+BUILD_CONTEXT_PATHS=(apps/cms apps/web packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json)
 UNTRACKED_IN_BUILD="$("${GIT[@]}" clean -n -d -- "${BUILD_CONTEXT_PATHS[@]}" | sed -n 's/^Would remove //p')"
 if [[ -n "${UNTRACKED_IN_BUILD}" ]]; then
   echo "ERROR: the checkout ${CHECKOUT} has untracked files or directories where the web and cms images are" >&2
