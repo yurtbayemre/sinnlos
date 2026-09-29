@@ -47,8 +47,10 @@ describe.each(testEngines())("comment delete on %s", (engine) => {
 
   beforeAll(async () => {
     t = await createTestStrapi({ engine });
+    // admin_role authors it: a comment then notifies them after its commit,
+    // which afterAll waits for (settleComments).
     const announcement = await t.strapi.documents("api::announcement.announcement").create({
-      data: { title: "IT comment delete", audience: "all" },
+      data: { title: "IT comment delete", audience: "all", author: t.fixtures.users.admin_role.id },
       status: "published",
     });
     targetDocumentId = announcement.documentId;
@@ -57,9 +59,40 @@ describe.each(testEngines())("comment delete on %s", (engine) => {
     await t.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
   });
 
+  /**
+   * A comment's author notification runs after its commit, outside the
+   * request. A last comment whose notification has arrived leaves no query
+   * in flight when stop() closes the pool (earlier comments' work is long
+   * done, or found its comment deleted). A plain loop: expect.poll works
+   * only inside a test.
+   */
+  const settleComments = async () => {
+    const since = new Date().toISOString();
+    await comment();
+    const notified = () =>
+      t.strapi.db.query("api::notification.notification").count({
+        where: {
+          type: "comment",
+          recipient: t.fixtures.users.admin_role.id,
+          createdAt: { $gte: since },
+        },
+      });
+    const deadline = Date.now() + 10_000;
+    while ((await notified()) === 0) {
+      if (Date.now() > deadline) throw new Error("the last comment's notification never arrived");
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  };
+
   afterAll(async () => {
-    await t?.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
-    await t?.stop();
+    try {
+      if (t) {
+        await settleComments();
+        await t.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
+      }
+    } finally {
+      await t?.stop();
+    }
   });
 
   /** A new comment by `author` on the announcement. */

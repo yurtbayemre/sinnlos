@@ -26,9 +26,12 @@ describe.each(testEngines())("announcement expiry on %s", (engine) => {
   beforeAll(async () => {
     t = await createTestStrapi({ engine });
     const now = Date.now();
+    // An author, so a comment's notification (written after the comment's
+    // commit) is something the test can wait for before stop().
+    const author = t.fixtures.users.editor.id;
     const create = async (title: string, expiresAt: string | null) => {
       const row = await t.strapi.documents(ANNOUNCEMENT).create({
-        data: { title, audience: "all", expiresAt },
+        data: { title, audience: "all", expiresAt, author },
         status: "published",
       });
       ids[title] = row.documentId;
@@ -78,5 +81,14 @@ describe.each(testEngines())("announcement expiry on %s", (engine) => {
     expect([expired.status, expired.text]).toEqual([missing.status, missing.text]);
     expect(expired.status).toBe(400);
     expect((await comment(ids["IT ends tomorrow"])).status).toBe(201);
+    // The author's notification is written after the comment's commit;
+    // wait for it, so no query is in flight when the suite stops.
+    await expect
+      .poll(() =>
+        t.strapi.db.query("api::notification.notification").count({
+          where: { type: "comment", recipient: t.fixtures.users.editor.id },
+        }),
+      )
+      .toBe(1);
   });
 });
