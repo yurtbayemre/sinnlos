@@ -1257,7 +1257,8 @@ systemctl start docker
 > deploy of cms and web with `infra/deploy.sh`, once batch 10 runs (batch
 > 11 was design work; nothing to deploy). No env, grant, route or edge
 > change; the first cms boot adds an `audience` column to `documents` and
-> `quick_links`, and the first build with pnpm 10 and the new layers is
+> `quick_links` and sets it on every row that links a department (one new
+> boot line), and the first build with pnpm 10 and the new layers is
 > slower. Two new nightly crons delete read notifications and long-expired
 > ads from the first night on, so look at their read-only counts first and
 > take an extra manual backup before that night. Read-only checks before
@@ -1265,26 +1266,33 @@ systemctl start docker
 > `infra/.env`, `deploy.sh --check` and `--dry-run`, the permission diff
 > (unchanged), the census with its new duplicate scan, the janitors' counts,
 > the users without a stored language, the expired and the unpublished
-> announcements. After it: the boot lines, the new column, the cron
+> announcements, the documents and quick links that link a department.
+> After it: the boot lines, the new column and its counts, the cron
 > registry, the English default, a member probe (comment delete, expired
 > and unpublished announcements) and the wiki fields, and the next morning
-> the janitors' lines. A rollback goes to the batch 10 SHA tags; the new
-> column stays, rows the janitors deleted come back only from a backup.
+> the janitors' lines. Editors notice one change: removing every
+> department from a document or quick link no longer makes it
+> company-wide; Audience must be set to `all` as well. A rollback goes to
+> the batch 10 SHA tags; the new column stays, rows the janitors deleted
+> come back only from a backup.
 > Follow [Deploying batch 12 (2026-09-29)](#deploying-batch-12-2026-09-29).
 >
 > **Deploying the CMS data lifecycle leftovers (batch 12, lane 7C)?** A
 > normal deploy of cms and web **together** (`infra/deploy.sh`) once
 > batch 11 runs: no env, compose, grant or edge change. The first boot adds
-> an `audience` column to `documents` and `quick_links` (existing rows stay
-> NULL, visibility unchanged). Two new nightly crons delete read
+> an `audience` column to `documents` and `quick_links` and sets it to
+> `departments` on the rows that link a department (the others stay NULL;
+> visibility unchanged). Two new nightly crons delete read
 > notifications 90 days after reading (03:40) and marketplace ads 90 days
 > after their last day, with their images (03:45): take an **extra manual
 > backup** after the deploy and before that first night, and look at the
 > read-only counts first. Comment delete answers byte for byte as before;
 > expired announcements leave lists, threads and digests; an unpublished
 > announcement's thread answers like a missing one; deleting a department
-> keeps its documents and quick links admin/editor-only. Afterwards run the
-> census once and send section 9 (the duplicate scan) to the owner. Follow
+> keeps its documents and quick links admin/editor-only, and removing their
+> departments keeps them so until Audience is set to `all`. Afterwards run
+> the census once and send section 9 (the duplicate scan) to the owner.
+> Follow
 > [Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c).
 >
 > **Deploying the action results, auth codes and English defaults (batch 12,
@@ -1629,7 +1637,8 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   days after reading at 03:40, ads 90 days after their last day with their
   images at 03:45, `APP_TIME_ZONE`, after the 03:00 backup); a department
   delete keeps its documents and quick links restricted to admins and
-  editors (a new `audience` column on both); expired announcements leave
+  editors (a new `audience` column on both, set on every row that links a
+  department); expired announcements leave
   lists, threads and digests; an unpublished announcement's thread answers
   like a missing one; the wiki shows page order, tags, a table of contents
   and space icons; the census gains a duplicate scan (section 9);
@@ -1650,15 +1659,25 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   a comment or reaction on an announcement that was unpublished, expired
   or deleted while the page was open says "This item no longer exists —
   reload the page." instead of asking to try again; the ad detail page
-  reads the typed category labels.
+  reads the typed category labels;
+- from the integration's fix round: a document or quick link that links a
+  department carries Audience `departments` from the moment it is saved
+  (a write-time guard like the polls', and at every boot a backfill for
+  the rows saved before), so a department delete keeps it restricted even
+  when an editor had it open, or published it, at that moment. Removing
+  every department in the admin panel no longer makes it company-wide by
+  itself: the editor also sets Audience to `all` (the poll rule).
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
 and starts both; the rollback below takes both back. No env change is
 needed (the new `DIGEST_DEFAULT_LOCALE` defaults to `en` in compose), no
 permission, route, edge or Traefik change. The database container is not recreated; cms and
 web are, so the site is down while the cms boots. The first boot adds the
-`audience` column to `documents` and `quick_links` (two `ALTER TABLE`s;
-existing rows stay NULL and read exactly as before). **The first build is
+`audience` column to `documents` and `quick_links` (two `ALTER TABLE`s)
+and, in one transaction, sets it to `departments` on every row that links
+a department; the other rows stay NULL. Nobody's view changes: a linked
+row is restricted by its links already. If that transaction fails, the
+cms does not start (step 9). **The first build is
 slower:** pnpm 10 installs both images from scratch (a new pnpm store,
 nothing cached) and the cms dependency layer (about 820 MB) is written once
 next to the images kept for rollback; later code-only deploys add about
@@ -1755,8 +1774,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    names); keep it for the DA04 decision on unique constraints
    ([infra/diagnostics/README.md](../infra/diagnostics/README.md)).
 
-6. **What the first night deletes, the stored languages, and which
-   announcements members stop seeing** (one read-only transaction):
+6. **What the first night deletes, the stored languages, which
+   announcements members stop seeing, and which rows the first boot
+   flags** (one read-only transaction):
 
    ```bash
    psql_db -X <<'SQL'
@@ -1797,12 +1817,20 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     GROUP BY a.document_id
    HAVING bool_and(a.published_at IS NULL)
     ORDER BY 1;
+   \echo '== documents and quick links that link a department (the first boot flags them)'
+   SELECT 'documents' AS rows_of, count(*) AS total,
+          count(*) FILTER (WHERE EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)) AS linked
+     FROM documents d
+   UNION ALL
+   SELECT 'quick_links', count(*),
+          count(*) FILTER (WHERE EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id))
+     FROM quick_links q;
    ROLLBACK;
    SQL
    ```
 
    (With another `APP_TIME_ZONE`, replace `Europe/Berlin`.) Note the
-   numbers for step 17:
+   numbers for steps 9, 10 and 17:
    - `notifications_to_prune`: read notifications that were read, and
      created, more than 90 days ago and are no fan-out anchor. The
      janitor deletes at most 100 000 a night; a larger backlog continues
@@ -1821,6 +1849,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      threads read as empty for members and take no new comments or
      reactions, from moderators neither, until the announcement is
      published again (the thread is kept and comes back).
+   - `linked`: the document and quick-link rows that link a department
+     (a document's draft and published row count apart). The first boot
+     sets their Audience to `departments` (steps 9 and 10).
 
 7. **The language of a fresh browser** (no cookie), for comparison in step
    14:
@@ -1845,29 +1876,57 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 9. **Boot lines:**
 
    ```bash
-   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime)\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|department-audience)\]|Strapi started'
    "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed'
    ```
 
    `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
    `[bootstrap] permission drift: none (report-only check of 120 managed
-   actions)` (as in batch 10), no `granted` or `revoked` line, `Strapi
-   started successfully`; the second command prints nothing.
+   actions)` (as in batch 10), no `granted` or `revoked` line,
+   `[department-audience] set the audience of N existing document row(s)
+   and M existing quick-link row(s) to 'departments' (they link a
+   department)` with N and M the `linked` counts of step 6 (a type with
+   none is left out, and there is no line when neither has one; later
+   boots print none), `Strapi started successfully`; the second command
+   prints nothing.
 
-10. **The new column** (empty until a department is deleted or an editor
-    sets it):
+   **If the cms does not start** and logs `[department-audience] could
+   not backfill the audience of documents and quick links (<reason>);
+   nothing was changed (the transaction rolled back), and the cms does not
+   start, …`: that is deliberate, as for the poll backfill ([Upgrading to
+   poll department targeting](#upgrading-to-poll-department-targeting)),
+   because a linked row without the flag could turn company-wide on a
+   later department delete. `infra/deploy.sh` stops at `up -d` and prints
+   the rollback; the backfill wrote nothing, only the new columns stay.
+   Fix the cause the log names (e.g. a lock another session holds on
+   `documents`) and start again with `"${COMPOSE[@]}" up -d` (every start
+   retries), or roll back (below).
+
+10. **The new column and the rows the first boot flagged:**
 
     ```bash
     psql_db -X <<'SQL'
     SELECT table_name, column_name FROM information_schema.columns
      WHERE column_name = 'audience' AND table_name IN ('documents', 'quick_links') ORDER BY 1;
-    SELECT 'documents' AS rows_of, count(*) AS total, count(audience) AS with_audience FROM documents
+    SELECT 'documents' AS rows_of, count(*) AS total, count(audience) AS with_audience,
+           count(*) FILTER (WHERE audience = 'departments') AS departments,
+           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)) AS linked
+      FROM documents d
     UNION ALL
-    SELECT 'quick_links', count(*), count(audience) FROM quick_links;
+    SELECT 'quick_links', count(*), count(audience),
+           count(*) FILTER (WHERE audience = 'departments'),
+           count(*) FILTER (WHERE EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id))
+      FROM quick_links q;
     SQL
     ```
 
-    Two column rows, and `with_audience` `0` for both.
+    Two column rows. Per type, `with_audience`, `departments` and `linked`
+    are one number: the `linked` count of step 6 and the N or M of step
+    9's boot line. Every row that links a department carries
+    `departments`, every other row is still NULL. (Edits in the admin
+    panel since the deploy can move them apart: saving a row sets its
+    Audience, and a row whose departments were removed keeps
+    `departments` without counting as `linked`.)
 
 11. **An extra manual backup before the first night of the retention
     crons:** the same day, after the deploy and before 03:00, as the user
@@ -2027,8 +2086,11 @@ profile messages are translated; more than ten sign-ins at the same moment
 from one office network can be refused with "Too many sign-in attempts"
 (a retry a moment later works); the language switch remembers the choice
 for the e-mail digests; deleting a department keeps its documents and
-quick links for admins and editors until someone re-targets them. The
-admin panel no longer shows "Deploy to Strapi Cloud".
+quick links for admins and editors until someone re-targets them. For
+editors: removing every department from a document or quick link in the
+admin panel keeps it for admins and editors; to make it company-wide, also
+set Audience to `all`. The admin panel no longer shows "Deploy to Strapi
+Cloud".
 
 **Rollback: both images, to the batch 10 SHA tags, no database step.**
 Follow the hint `infra/deploy.sh` prints when the deploy fails. After a
@@ -2051,10 +2113,12 @@ database, and how the batch 10 images take it (rehearsed):
 
 - **The `audience` columns stay** (the schema sync never drops columns,
   `forceMigration: false`); the batch 10 cms boots on them and ignores
-  them. A document or quick link a department delete flagged after this
-  deploy, and left without any department, reads as **company-wide**
-  there, for guests too. List them first and re-target them (link a
-  department in the admin panel) before rolling back, or accept it:
+  them. A document or quick link flagged and left without any department
+  after this deploy (by a department delete, or by an editor who removed
+  its departments without setting Audience to `all`) reads as
+  **company-wide** there, for guests too. List them first and re-target
+  them (link a department in the admin panel) before rolling back, or
+  accept it:
 
   ```bash
   psql_db -X <<'SQL'
@@ -2089,7 +2153,8 @@ database, and how the batch 10 images take it (rehearsed):
 
 A roll-forward is a normal `infra/deploy.sh` (it notes that the containers
 do not run the last-known-good images); the flags written before the
-rollback take effect again.
+rollback take effect again, and the boot backfill flags any row the batch
+10 cms linked to a department in between.
 
 **Rehearsal (2026-09-29, the integrated `batch/12`):** both images built
 from the tree through compose (`docker compose -p b12i-staging … build`,
@@ -2135,6 +2200,36 @@ the probe of step 13 printed `2` on both images. Not exercised here:
 03:45 (their rules and both engines are covered by
 `retention.integration.test.ts`), a large notification backlog, the pnpm
 10 cold build time, and the production host.
+
+**Fix-round rehearsal (2026-09-29, the write-time guard and the backfill
+for documents and quick links):** the rehearsal above ran before them, so
+its `audience` columns stayed empty. The cms images of `7d9e52b` and of
+the fixed `batch/12`, built from clean `git archive` trees, ran as the
+throwaway project `b12i-staging` again (db and cms only, demo data). On
+the `7d9e52b` cms an editor linked two documents (one to Finance, one to
+Marketing and Design) and created a quick link for Finance through the
+content API; step 6's new count gave 12 document rows with 4 `linked` and
+2 quick-link rows with 2 `linked`. The fixed cms booted with
+`[department-audience] set the audience of 4 existing document row(s) and
+2 existing quick-link row(s) to 'departments' (they link a department)`,
+step 9's second command printed nothing, and step 10 showed
+`with_audience`, `departments` and `linked` at 4 for documents and at 2
+for quick links. The admin opened the Finance document in the Content
+Manager (Audience `departments`), an `admin_role` user deleted Finance, and
+Publish from the still open form (the Content Manager's own request, the
+loaded fields and unchanged relations) kept `departments`: neither a
+member nor a guest read the document or the quick link, an editor read
+both. Removing both departments of the other document in the Content
+Manager and publishing kept it for editors only; setting Audience to `all`
+and publishing opened it to the member and the guest. The rollback to the
+`7d9e52b` cms listed the document and the quick link in the query above
+and showed them to the guest, as described; the roll forward restricted
+them again and printed no backfill line (nothing left to flag). The
+publish and "Discard changes" that read a row before a department delete
+committed are rehearsed by `department-delete.integration.test.ts` on
+Postgres 16: without the guard the recreated row came out `all` with no
+department. Still not exercised: `infra/deploy.sh` end to end, Traefik,
+live-smoke and the web checks through the edge.
 
 #### Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)
 
@@ -2187,8 +2282,14 @@ change.
   moment either lands first (the delete waits for it and flags the row
   too) or waits for the delete and then fails, because the department is
   gone (save again with another department). The first boot adds the
-  `audience` column to `documents` and `quick_links`; existing rows stay
-  empty (NULL), which reads exactly as before.
+  `audience` column to `documents` and `quick_links` and sets it to
+  `departments` on every row that links a department (the other rows stay
+  empty, NULL); nobody's view changes. Since the batch 12 fix round every
+  save in the admin panel or through the API sets it the same way, so a
+  document stays restricted even when an editor had it open, or published
+  it, while its department was deleted. Removing every department in the
+  admin panel therefore no longer makes a document or quick link
+  company-wide: set Audience to `all` as well.
 - **Comment delete (PL03).** Ownership is now checked by a route policy
   instead of inside the controller. Every answer stays byte for byte the
   same (author and moderators delete, anyone else gets the same 403, an
@@ -2248,7 +2349,10 @@ change.
 2. `infra/deploy.sh` (it takes its pre-deploy backup). On a standalone
    Caddy box: `infra/backup/pg-backup.sh`, then `docker compose up -d
    --build` from `infra/`.
-3. The cms log shows the boot as usual; no new boot line. Check the column:
+3. The cms log shows one new boot line, `[department-audience] set the
+   audience of N existing document row(s) and M existing quick-link row(s)
+   to 'departments' (they link a department)` (a type without such rows is
+   left out, and no line at all when there are none). Check the column:
 
    ```bash
    docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
