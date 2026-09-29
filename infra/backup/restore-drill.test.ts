@@ -6,7 +6,10 @@
  *      nightly and -predeploy alike, and nothing else;
  *   2. the throwaway Postgres has no network and keeps its data on a tmpfs,
  *      and is removed with its volumes on exit;
- *   3. the decrypted dump is streamed into pg_restore, never written to disk.
+ *   3. the decrypted dump is streamed into pg_restore, never written to disk;
+ *   4. --all checks the uploads and .env artifacts of the dump's own run
+ *      (its timestamp and kind), never the newest of each series, and fails
+ *      when one of them is missing (B10-T3; run with docker and gpg stubbed).
  */
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -106,3 +109,132 @@ describe("restore-drill.sh: a throwaway database that leaves nothing behind", ()
     expect(lines).toContain("umask 077");
   });
 });
+
+/** What a stubbed `restore-drill.sh --all` run printed. */
+interface DrillReport {
+  status: number;
+  stdout: string;
+  stderr: string;
+}
+
+/**
+ * Runs `restore-drill.sh --all <dir or file>` on artifacts made in a temp
+ * dir ($d/art), with docker and gpg stubbed: gpg --decrypt prints the file
+ * (the artifacts here are plain gzip: a dump, a tar of two files, an .env of
+ * two keys), docker plays the throwaway Postgres (ready at once, the restore
+ * reads its input, the row count lists up_users). `target` is relative to
+ * $d/art ("" = the directory).
+ */
+function drillAll(files: Record<string, "dump" | "tar" | "env">, target = ""): DrillReport {
+  const script = [
+    "set -uo pipefail",
+    'd="$(mktemp -d)"',
+    "trap 'rm -rf \"$d\"' EXIT",
+    'mkdir "$d/art" "$d/u"; echo a > "$d/u/a.png"; echo b > "$d/u/b.png"',
+    "mkart() {",
+    '  case "$2" in',
+    '    dump) echo PGDMP | gzip > "$d/art/$1" ;;',
+    '    tar) tar -cf - -C "$d/u" . | gzip > "$d/art/$1" ;;',
+    "    env) printf 'APP_KEYS=x\nJWT_SECRET=y\n' | gzip > \"$d/art/$1\" ;;",
+    "  esac",
+    "}",
+    ...Object.entries(files).map(([name, kind]) => `mkart ${name} ${kind}`),
+    "docker() {",
+    '  case "$1" in',
+    "    run) echo stub-container ;;",
+    "    exec)",
+    '      if [[ "$*" == *pg_isready* ]]; then return 0; fi',
+    '      if [[ "$*" == *pg_restore* ]]; then cat > /dev/null; return 0; fi',
+    '      if [[ "$*" == *psql* ]]; then cat > /dev/null; printf "polls 2\nup_users 3\n"; return 0; fi',
+    "      return 9 ;;",
+    "    rm) return 0 ;;",
+    "    *) return 9 ;;",
+    "  esac",
+    "}",
+    'gpg() { local last; for last; do :; done; if [[ "$*" == *--decrypt* ]]; then cat "$last"; fi; }',
+    "gpgconf() { :; }",
+    "export -f docker gpg gpgconf",
+    "cat > \"$d/restore-drill.sh\" <<'RESTORE_DRILL_EOF'",
+    SCRIPT.trimEnd(),
+    "RESTORE_DRILL_EOF",
+    `bash "$d/restore-drill.sh" --all --name b10i-drill-stub "$d/art/${target}" > "$d/out" 2> "$d/err"; rc=$?`,
+    'echo "STATUS $rc"',
+    'sed "s/^/OUT /" "$d/out"',
+    'sed "s/^/ERR /" "$d/err"',
+    "",
+  ].join("\n");
+  const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+  expect(res.stderr, "harness stderr").toBe("");
+  const lines = res.stdout.split("\n");
+  const pick = (prefix: string) =>
+    lines
+      .filter((l) => l.startsWith(`${prefix} `))
+      .map((l) => l.slice(prefix.length + 1))
+      .join("\n");
+  return { status: Number(pick("STATUS")), stdout: pick("OUT"), stderr: pick("ERR") };
+}
+
+describe.skipIf(!HAS_BASH)(
+  "restore-drill.sh --all: the artifacts of the dump's own run (B10-T3)",
+  { timeout: 30_000 },
+  () => {
+    it("checks the uploads and .env of the dump's run, not the newest of each series", () => {
+      const run = drillAll({
+        "sinnlos-db-20260928-030000.dump.gz.gpg": "dump",
+        "sinnlos-uploads-20260928-030000.tar.gz.gpg": "tar",
+        "sinnlos-env-20260928-030000.env.gz.gpg": "env",
+        // Newer uploads and .env artifacts of other runs.
+        "sinnlos-uploads-20260928-141500-predeploy.tar.gz.gpg": "tar",
+        "sinnlos-env-20260929-030000.env.gz.gpg": "env",
+      });
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toContain(
+        "restore-drill: uploads: sinnlos-uploads-20260928-030000.tar.gz.gpg holds 2 file(s)",
+      );
+      expect(run.stdout).toContain(
+        "restore-drill: env: sinnlos-env-20260928-030000.env.gz.gpg holds 2 key(s) (values not shown)",
+      );
+      expect(run.stdout).toContain(
+        "restore-drill: OK — sinnlos-db-20260928-030000.dump.gz.gpg restored: 2 tables, 5 rows, 3 user(s)",
+      );
+    });
+
+    it("fails when the dump's run has no uploads or .env artifact, even with older ones there", () => {
+      const run = drillAll({
+        "sinnlos-db-20260928-030000.dump.gz.gpg": "dump",
+        "sinnlos-uploads-20260928-030000.tar.gz.gpg": "tar",
+        "sinnlos-env-20260928-030000.env.gz.gpg": "env",
+        // The newest run skipped its .env (a partial run).
+        "sinnlos-db-20260929-030000.dump.gz.gpg": "dump",
+        "sinnlos-uploads-20260929-030000.tar.gz.gpg": "tar",
+      });
+      expect(run.status).toBe(1);
+      expect(run.stdout).toContain(
+        "restore-drill: uploads: sinnlos-uploads-20260929-030000.tar.gz.gpg holds 2 file(s)",
+      );
+      expect(run.stderr).toContain(
+        "restore-drill: FAIL — --all: the run of sinnlos-db-20260929-030000.dump.gz.gpg has no sinnlos-env-20260929-030000.env.gz.gpg in ",
+      );
+      expect(run.stdout).not.toContain("OK —");
+    });
+
+    it("pairs a given pre-deploy dump with that run's -predeploy artifacts", () => {
+      const files = {
+        "sinnlos-db-20260928-141500-predeploy.dump.gz.gpg": "dump",
+        "sinnlos-uploads-20260928-141500-predeploy.tar.gz.gpg": "tar",
+        "sinnlos-env-20260928-141500-predeploy.env.gz.gpg": "env",
+        "sinnlos-db-20260929-030000.dump.gz.gpg": "dump",
+      } as const;
+      const run = drillAll(files, "sinnlos-db-20260928-141500-predeploy.dump.gz.gpg");
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.stdout).toContain("uploads: sinnlos-uploads-20260928-141500-predeploy.tar.gz.gpg");
+      expect(run.stdout).toContain("env: sinnlos-env-20260928-141500-predeploy.env.gz.gpg");
+      // The newest dump of the directory (a nightly one) has neither: both missing.
+      const newest = drillAll(files);
+      expect(newest.status).toBe(1);
+      expect(newest.stderr).toContain(
+        "has no sinnlos-uploads-20260929-030000.tar.gz.gpg sinnlos-env-20260929-030000.env.gz.gpg in ",
+      );
+    });
+  },
+);

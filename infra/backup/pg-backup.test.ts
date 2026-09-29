@@ -11,6 +11,8 @@
  *   3. a run: 0600 artifacts, no plaintext left, the last-success file
  *      (nightly runs; pre-deploy runs write last-success-predeploy), ok /
  *      skip / done lines in backup.log, pruning only after the encryption;
+ *      a run that skipped the uploads or the .env is partial: it logs so,
+ *      warns and refreshes no last-success (B10-T3);
  *   4. a failed run and a run killed mid-way leave no plaintext and no
  *      partial artifact, log a FAIL line, prune nothing and keep the old
  *      last-success;
@@ -451,7 +453,41 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(
       noEnv.log.some((l) => /^skip sinnlos-env \S+\/checkout\/infra\/\.env not found$/.test(l)),
     ).toBe(true);
-    expect(noEnv.log.at(-1)).toBe("done nightly");
+  });
+
+  it("records a run that skipped the uploads or the .env as partial, and not as a success (B10-T3)", () => {
+    // The last complete nightly run, which a partial one must not refresh.
+    const nightly = "2026-09-28T03:00:07+02:00 nightly sinnlos-db-20260928-030000.dump.gz.gpg";
+    const setup = `echo '${nightly}' > "$OFFSITE/last-success"`;
+    const noUploads = backupRun({ uploads: false, setup });
+    expect(noUploads.status, noUploads.stderr).toBe(0);
+    expect(noUploads.log.at(-1)).toBe("done nightly partial (skipped: sinnlos-uploads)");
+    expect(noUploads.lastSuccess).toBe(nightly);
+    expect(noUploads.stderr).toContain(
+      "pg-backup: WARNING: partial nightly run, skipped sinnlos-uploads (see ",
+    );
+    expect(noUploads.stderr).toContain("); last-success not refreshed");
+    // The other artifacts of the run are there.
+    expect(noUploads.offsite.filter((n) => /^sinnlos-(db|env)-.*\.gz\.gpg$/.test(n))).toHaveLength(
+      2,
+    );
+
+    const neither = backupRun({ uploads: false, envFile: false, setup });
+    expect(neither.status, neither.stderr).toBe(0);
+    expect(neither.log.at(-1)).toBe("done nightly partial (skipped: sinnlos-uploads sinnlos-env)");
+    expect(neither.lastSuccess).toBe(nightly);
+
+    // A pre-deploy run alike: last-success-predeploy stays as it was (none here).
+    const predeploy = backupRun({ envFile: false, env: { SINNLOS_BACKUP_KIND: "predeploy" } });
+    expect(predeploy.status, predeploy.stderr).toBe(0);
+    expect(predeploy.log.at(-1)).toBe("done predeploy partial (skipped: sinnlos-env)");
+    expect(predeploy.lastPredeploy).toBe("");
+
+    // Without the quick-access copy (never created, only refreshed) the run is complete.
+    const noQuick = backupRun({ quickAccess: false, setup });
+    expect(noQuick.log.at(-1)).toBe("done nightly");
+    expect(noQuick.lastSuccess).not.toBe(nightly);
+    expect(noQuick.stderr).not.toContain("partial");
   });
 
   it("gives the offsite dirs a root run creates the backup root's owner, not root's (B10-T4)", () => {

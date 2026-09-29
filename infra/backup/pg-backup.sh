@@ -34,7 +34,10 @@
 # "FAIL" lines, and "done" at the end. last-success (same dir) holds the time
 # of the last complete NIGHTLY run, for an external freshness monitor (older
 # than 26 h = the cron stopped); a pre-deploy run writes
-# last-success-predeploy instead, so a deploy never hides a dead cron.
+# last-success-predeploy instead, so a deploy never hides a dead cron. A run
+# that skipped the uploads or the .env artifact (volume or file not found)
+# is partial: it logs "done <kind> partial (skipped: ...)", warns on stderr
+# and leaves last-success alone, so the monitor alerts; it still exits 0.
 set -Eeuo pipefail
 umask 077
 
@@ -91,6 +94,8 @@ printf -v TS '%(%Y%m%d-%H%M%S)T' -1
 
 # Files this run writes that must not survive it (see the EXIT trap).
 OUT="" UOUT="" EOUT="" PARTIAL="" TRIM_TMP=""
+# The artifact series this run skipped (uploads, env): a partial run.
+SKIPPED=()
 STEP="start"
 FAILED_LINE=""
 
@@ -227,6 +232,7 @@ if docker volume inspect "$UPLOADS_VOL" >/dev/null 2>&1; then
   finalize "$UOUT" sinnlos-uploads tar sinnlos-uploads
 else
   log_line "skip sinnlos-uploads volume $UPLOADS_VOL not found"
+  SKIPPED+=(sinnlos-uploads)
 fi
 
 # ---- infra/.env ----
@@ -252,18 +258,25 @@ if [[ -f "$ENV_SRC" ]]; then
   fi
 else
   log_line "skip sinnlos-env $ENV_SRC not found"
+  SKIPPED+=(sinnlos-env)
 fi
 
 # ---- last success ----
 # For an external monitor: the time of the last complete run of this kind,
 # the kind and its database artifact (last-success: nightly runs only, see
 # the header). Refreshed in place (`cat >`-style `>`), so the file keeps its
-# owner.
+# owner. A partial run (a skipped series: a wrong SINNLOS_ENV_FILE or
+# uploads volume leaves secrets or media unbacked) refreshes nothing.
 STEP="last-success"
-[[ -e "$LAST_SUCCESS" ]] || { : > "$LAST_SUCCESS"; own_like_offsite "$LAST_SUCCESS"; }
-iso_now
-echo "$ISO_NOW $KIND $DB_ARTIFACT" > "$LAST_SUCCESS"
-log_line "done $KIND"
+if ((${#SKIPPED[@]})); then
+  log_line "done $KIND partial (skipped: ${SKIPPED[*]})"
+  echo "pg-backup: WARNING: partial $KIND run, skipped ${SKIPPED[*]} (see $LOG); ${LAST_SUCCESS##*/} not refreshed" >&2
+else
+  [[ -e "$LAST_SUCCESS" ]] || { : > "$LAST_SUCCESS"; own_like_offsite "$LAST_SUCCESS"; }
+  iso_now
+  echo "$ISO_NOW $KIND $DB_ARTIFACT" > "$LAST_SUCCESS"
+  log_line "done $KIND"
+fi
 
 # Keep the log bounded — it lives in the NAS-replicated offsite dir and would
 # otherwise grow forever. The last 500 lines cover months of nightly runs.

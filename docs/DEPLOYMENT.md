@@ -1876,7 +1876,9 @@ needs setting)
     03:00 backup cron still writes: `ok` lines, `pruned` lines for
     artifacts older than 7 days beyond the newest 7, and `done nightly`;
     `last-success` names that run (a freshness monitor, once chosen,
-    alerts when it is older than 26 hours). `WARN stale plaintext <name>`
+    alerts when it is older than 26 hours). `done nightly partial
+    (skipped: …)` means a series was not backed up (its `skip` line says
+    why), and `last-success` then still names the night before. `WARN stale plaintext <name>`
     lines name plaintext that killed or failed runs left in the backup
     root before this batch: review and delete those files by hand (the
     pre-datetime dump has another name and is kept until the class-C
@@ -1889,8 +1891,9 @@ needs setting)
     `infra/backup/restore-drill.sh --all /path/to/copy/of/offsite/sinnlos`
     (your keyring; or `--key private.asc --passphrase-file pass.txt`). It
     restores the newest dump into a throwaway, network-less Postgres 16,
-    prints the row counts and checks the newest uploads and `.env`
-    artifacts ([§7.3](#73-automated-daily-backups-cron)).
+    prints the row counts and checks the uploads and `.env` artifacts of
+    the same run; either missing fails the drill
+    ([§7.3](#73-automated-daily-backups-cron)).
 17. **The old live-smoke residue,** with
     `infra/diagnostics/cleanup-live-smoke-notifications.sql`: first
     without arguments (a dry run that prints `residue_rows`, the count of
@@ -2181,8 +2184,9 @@ rollback; merged in order (5A, then 5B), batch 10 ships both together.
   newest 7 per series, pre-deploy artifacts (`…-predeploy…`) in series of
   their own; `backup.log` gains `skip`, `FAIL`, `pruned` and `done` lines;
   a `last-success` file records the last complete nightly run
-  (`last-success-predeploy` the last pre-deploy run). Same paths, same
-  cron line.
+  (`last-success-predeploy` the last pre-deploy run; a run that skipped the
+  uploads or the `.env` is `partial` and refreshes neither). Same paths,
+  same cron line.
 - **`infra/backup/restore-drill.sh`** (new): restores the newest encrypted
   dump into a throwaway Postgres 16, off-box.
 - **`infra/live-smoke.sh`** ([§6.1](#61-health-checks)): finds its target
@@ -7906,7 +7910,12 @@ snippets above:
   writes `last-success` there (`<time> nightly <db artifact>`) after every
   complete **nightly** run, for a freshness monitor. A pre-deploy run
   writes `last-success-predeploy` instead, so a deploy never makes a dead
-  cron look fresh.
+  cron look fresh. A run that skipped the uploads or the `.env` artifact
+  (a wrong `SINNLOS_UPLOADS_VOLUME`, `SINNLOS_ENV_FILE` or checkout path
+  leaves the media or the secrets unbacked) is **partial**: it ends with
+  `done <kind> partial (skipped: sinnlos-uploads sinnlos-env)`, prints a
+  `WARNING` on stderr and refreshes neither file, so the monitor alerts;
+  it still exits 0 (the skipped quick-access copy does not count).
 
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 `SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
@@ -7930,7 +7939,9 @@ defaults are the owner's host, which the cron line relies on.
 
 **Is it running?** `tail -n 5 <offsite>/backup.log` ends with `done nightly`
 after 03:00, and `cat <offsite>/last-success` names last night. A `FAIL`
-line names the step; the plaintext of that run is already gone. The rule
+line names the step; the plaintext of that run is already gone. `done
+nightly partial (skipped: …)` names the series that run did not back up;
+the `skip` lines above it say why (fix the path or volume name). The rule
 for a monitor: `last-success` (its modification time, or the time it
 starts with) younger than 26 hours; older means the nightly cron stopped
 or failed. Only nightly runs write it.
@@ -7978,8 +7989,10 @@ infra/backup/restore-drill.sh /path/to/copy/of/offsite/sinnlos           # your 
 infra/backup/restore-drill.sh --key private.asc --passphrase-file pass.txt --all /path/to/copy/of/offsite/sinnlos
 ```
 
-`--all` also decrypts the newest uploads and `.env` artifacts and checks
-them (a tar listing and a key count; no value is shown). `--keep` leaves the
+`--all` also decrypts the uploads and `.env` artifacts of the same run as
+the dump (the same `<timestamp>[-predeploy]` in their names) and checks
+them (a tar listing and a key count; no value is shown); when either is
+missing, a partial run, the drill fails and names it. `--keep` leaves the
 container running for a look (`docker exec -it <name> psql -U drill -d drill`).
 Run it after changes to the backup and every few months.
 

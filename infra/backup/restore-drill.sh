@@ -17,9 +17,10 @@
 #      error;
 #   4. prints the row count of every table and a summary, and fails unless
 #      the users table (up_users) came back.
-# With --all it also decrypts the newest uploads and .env artifacts of the
-# same directory and checks them (a tar listing, a key count; nothing is
-# printed or written).
+# With --all it also decrypts the uploads and .env artifacts of the same
+# backup run (pg-backup.sh names all three with one timestamp and kind) and
+# checks them (a tar listing, a key count; nothing is printed or written);
+# either one missing fails the drill (a partial run).
 #
 # Needs bash, gpg, gunzip, tar and docker. Exit codes: 0 restored, 1 failed,
 # 2 usage.
@@ -33,7 +34,7 @@ Usage: infra/backup/restore-drill.sh [options] <artifact dir | sinnlos-db-<ts>.d
                           (default: your own keyring, GNUPGHOME or ~/.gnupg)
   --passphrase-file FILE  the key's passphrase, for unattended runs
                           (default: gpg asks on the terminal)
-  --all                   also check the newest uploads and .env artifacts
+  --all                   also check the uploads and .env artifacts of the same run
   --image IMAGE           default postgres:16-alpine
   --name NAME             container name (default sinnlos-restore-drill-<pid>)
   --keep                  leave the container running for inspection
@@ -98,6 +99,8 @@ DUMP_NAME="${DUMP##*/}"
 [[ "$DUMP_NAME" =~ ^sinnlos-db-([0-9]{8})-([0-9]{6})(-predeploy)?\.dump\.gz\.gpg$ ]] ||
   fail "$DUMP_NAME is not named like a pg-backup.sh database artifact"
 D="${BASH_REMATCH[1]}" T="${BASH_REMATCH[2]}" KIND="nightly"
+# <ts><tag> of the run that wrote this dump, for --all.
+RUN_ID="${D}-${T}${BASH_REMATCH[3]}"
 [[ -z "${BASH_REMATCH[3]}" ]] || KIND="pre-deploy"
 TAKEN="${D:0:4}-${D:4:2}-${D:6:2} ${T:0:2}:${T:2:2}:${T:4:2}"
 say "artifact $DUMP_NAME ($KIND, taken $TAKEN host time)"
@@ -191,21 +194,28 @@ done <<<"$COUNTS"
 [[ -n "$users" ]] || fail "the restored database has no up_users table: not a sinnlos backup?"
 
 if ((CHECK_ALL)); then
-  UPLOADS="$(newest_artifact "$DIR" sinnlos-uploads tar)"
-  if [[ -n "$UPLOADS" ]]; then
+  # The artifacts of the dump's own run, never the newest of each series:
+  # retention keeps a series' newest 7 however old, so a series that stopped
+  # weeks ago would pass.
+  missing=()
+  UPLOADS="$DIR/sinnlos-uploads-$RUN_ID.tar.gz.gpg"
+  if [[ -f "$UPLOADS" ]]; then
     files="$("${GPG[@]}" --decrypt "$UPLOADS" | gunzip | tar -tf - | awk '!/\/$/ { n++ } END { print n + 0 }')" ||
       fail "${UPLOADS##*/} did not decrypt to a tar archive"
     say "uploads: ${UPLOADS##*/} holds ${files} file(s)"
   else
-    say "uploads: no sinnlos-uploads artifact in $DIR"
+    missing+=("${UPLOADS##*/}")
   fi
-  ENV_ARTIFACT="$(newest_artifact "$DIR" sinnlos-env env)"
-  if [[ -n "$ENV_ARTIFACT" ]]; then
+  ENV_ARTIFACT="$DIR/sinnlos-env-$RUN_ID.env.gz.gpg"
+  if [[ -f "$ENV_ARTIFACT" ]]; then
     keys="$("${GPG[@]}" --decrypt "$ENV_ARTIFACT" | gunzip | awk '/^[A-Z][A-Z0-9_]*=/ { n++ } END { print n + 0 }')" ||
       fail "${ENV_ARTIFACT##*/} did not decrypt"
     say "env: ${ENV_ARTIFACT##*/} holds ${keys} key(s) (values not shown)"
   else
-    say "env: no sinnlos-env artifact in $DIR"
+    missing+=("${ENV_ARTIFACT##*/}")
+  fi
+  if ((${#missing[@]})); then
+    fail "--all: the run of $DUMP_NAME has no ${missing[*]} in $DIR (a partial backup run: its backup.log names the skipped series; or the copy is incomplete)"
   fi
 fi
 
