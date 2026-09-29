@@ -25,6 +25,16 @@ All methods share the same [prerequisites](#prerequisites); the optional
 (`ENTRA_ENABLED=1` switches it on) and set up the same way for each.
 
 > **Upgrading an existing instance?** On an instance that runs `main`
+> `0b1a2df` (batch 9), batch 10 (the CI and edge changes, the deploy,
+> backup and cron hardening, the web session and batched poll results) is
+> one deploy of cms and web together with the new `infra/deploy.sh`, with
+> read-only checks before and after it: follow
+> [Deploying batch 10 (2026-09-29)](#deploying-batch-10-2026-09-29). Set
+> `DOMAIN` in `infra/.env` to the bare public host name first (its
+> preflight refuses anything the Traefik routers cannot match); every
+> container is recreated (a short outage), the first boot grants one new
+> permission, and a rollback re-ups both images, never one alone.
+> On an instance that runs `main`
 > `03d4ea0` (batch 8), batch 9 (the policy primitives, the live contract
 > and poll documentIds, and the optional Entra sign-in, switched off) is
 > one normal deploy of cms and web together with `ENTRA_ENABLED` unset,
@@ -55,7 +65,7 @@ All methods share the same [prerequisites](#prerequisites); the optional
 > On an instance that already runs the
 > datetime release (the owner instance since 2026-09-27), the current release
 > is a normal deploy with read-only checks first. Work through the notes of
-> what the instance does not run yet, newest first: batch 9, batch 8, batch 7, batch 6,
+> what the instance does not run yet, newest first: batch 10, batch 9, batch 8, batch 7, batch 6,
 > [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting)
 > (read-only checks before the deploy; polls that have departments become
 > visible to those departments' members only, plus admins and editors, and
@@ -1226,6 +1236,25 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 10 (2026-09-29)?** The CI and edge changes, the deploy,
+> backup and cron hardening and the web session with batched poll results
+> (the three notes below) ship as one deploy of cms and web **together**
+> once batch 9 runs, with the new `infra/deploy.sh` itself. Its preflight
+> refuses a `DOMAIN` the Traefik routers cannot match, so first make sure
+> `infra/.env` says `DOMAIN=sinnlos.yurtbay.dev` (the only possible env
+> change). It recreates every container, Postgres included: a short outage.
+> The first boot grants one new permission (the batched poll results, every
+> role); no schema change. The first run has no last-known-good state yet
+> and rolls back to `:rollback` (the batch 9 images); from its success on,
+> failed deploys roll back to SHA tags. Read-only checks before it: a clean
+> checkout, `DOMAIN`, the image store, `deploy.sh --check` and `--dry-run`,
+> the permission diff (exactly seven new rows missing), the live-smoke
+> residue, the response headers. After it: the routers and headers, the
+> SHA tags and the state, the grant and the permission diff, `/polls`, the
+> expired-session redirect, the residue, and the next morning the cron and
+> backup lines. A rollback re-ups both images and needs no database step.
+> Follow [Deploying batch 10 (2026-09-29)](#deploying-batch-10-2026-09-29).
+>
 > **Deploying the CI and edge changes (batch 10, lane 5A)?** First make sure
 > `infra/.env` sets `DOMAIN` to the bare public host name (the owner
 > instance: `DOMAIN=sinnlos.yurtbay.dev`): the Traefik overlay now takes
@@ -1509,6 +1538,446 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 10 (2026-09-29)
+
+Batch 10 (branch `batch/10`, on `main` `0b1a2df`, the batch 9 merge) ships
+three lanes in one deploy, once batch 9 runs (the owner instance deploys
+batch 8, then batch 9, then this). The runbooks below explain each change in
+detail; **this section is the one sequence to follow** on the owner instance
+(srv-prod-01, Traefik mode, checkout `/home/bigemo/git/sinnlos`, compose
+project `infra`):
+
+- [the CI and edge changes](#upgrading-to-the-ci-and-edge-changes-batch-10-lane-5a)
+  (lane 5A): every Traefik router matches the host in `DOMAIN`, the cms
+  router brings its own middlewares (`/admin` and `/api` stay up while the
+  web restarts), `/live/*` has its own router without compression, every
+  container's log is rotated (10 MB × 5), the containers reach each other
+  by the aliases `sinnlos-db`, `sinnlos-cms` and `sinnlos-web`, the cms runs
+  without Linux capabilities, sends no telemetry and gets `CRON_ENABLED`;
+  CI hardening and Dependabot (nothing of that runs on the host);
+- [the deploy, backup and cron hardening](#upgrading-to-the-deploy-backup-and-cron-hardening-batch-10-lane-5b)
+  (lane 5B): the new `infra/deploy.sh` (one deploy at a time, a clean
+  checkout, the CI result, SHA tags and a last-known-good state, the
+  rollback to that state, `--dry-run`), `pg-backup.sh` without plaintext
+  leftovers and with `-predeploy` artifacts and a `last-success` file,
+  the off-box `restore-drill.sh`, a live-smoke that leaves no residue,
+  asserts an uncompressed stream and the notification frame, and the cms
+  cron registry;
+- [the web session, data client and batched poll results](#upgrading-to-the-web-session-data-client-and-batched-poll-results-batch-10-lane-5c)
+  (lane 5C): one session read per render, an ended session lands on
+  `/sign-in?expired=1` from any button or form, the web's data client split
+  (every request byte-identical), and `/polls` reads all results with one
+  `GET /api/poll-results` (a new permission for every role, granted by the
+  first boot);
+- from the integration: the preflight of `infra/deploy.sh` (also
+  `--check`) refuses a `DOMAIN` the routers cannot match, and the smoke URL
+  follows `DOMAIN` ([§3.6 B](#b-shared-traefik-live-production-layout)).
+
+It is **one deploy of cms and web together**, run with the new
+`infra/deploy.sh` itself (the `git pull` of step 1 brings it). It recreates
+every container, Postgres included (new labels, log rotation, network
+aliases, the cms without capabilities), so the site is down for a Postgres
+restart, the cms boot and the web start: about 20 s on the rehearsal stack,
+plan for a minute. No schema change, nothing to migrate by hand; the first
+cms boot grants the one new permission. The only `infra/.env` change, if
+any, is `DOMAIN` (step 2). **Why together:** the new web reads the poll
+results from `GET /api/poll-results`, which the batch 9 cms does not have
+(`/polls` would show the error banner and no cards); a batch 9 web in front
+of the new cms works fully.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only, except the `DOMAIN` line of step 2 if it
+needs setting)
+
+1. **Fast-forward to the new `main`, with a clean checkout:**
+
+   ```bash
+   git status --short        # no modified tracked file (the new deploy.sh refuses one)
+   git pull --ff-only
+   git log -1 --oneline      # the batch 10 merge
+   git clean -n -d -- apps package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   command -v flock
+   ```
+
+   The `git clean -n` dry run removes nothing and must print nothing: the
+   new `deploy.sh` refuses untracked files and directories, an empty one
+   included, where the images are built from (other untracked files only
+   earn a note). `command -v flock` prints a path (util-linux).
+
+2. **`DOMAIN`:**
+
+   ```bash
+   grep -E '^DOMAIN=' infra/.env
+   ```
+
+   It must print exactly `DOMAIN=sinnlos.yurtbay.dev` and nothing else of
+   `infra/.env`. Until now Traefik mode ignored `DOMAIN` (the overlay named
+   the host literally), so an `infra/.env` made from the example may still
+   say `DOMAIN=intranet.example.com`. If the line is missing or different,
+   set it to `DOMAIN=sinnlos.yurtbay.dev`: the only `infra/.env` change of
+   this batch. Then check what compose renders (five times your host,
+   nothing else):
+
+   ```bash
+   "${COMPOSE[@]}" config --format json | grep -o 'Host(`[^`]*`)' | sort | uniq -c
+   ```
+
+3. **The image store and the credentials file:**
+
+   ```bash
+   docker info -f '{{.Driver}} {{.DriverStatus}}'
+   grep -c '^alex.morgan@' /home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt
+   ```
+
+   `overlay2 [[Backing Filesystem …] …]` is Docker's classic image store;
+   `overlayfs [[driver-type io.containerd.snapshotter.v1]]` is the
+   containerd image store, where an image that no tag names can no longer
+   be resolved by its id. `deploy.sh` handles both (the `:pre-deploy` tags,
+   [§3.6](#36-deploy)); on the containerd store roll back by tag, never by
+   a bare image id. The `grep -c` prints `1`: live-smoke then streams as
+   `alex.morgan`, an announcement author, and checks the notification
+   frame; with `0` the deploy still passes, with a warning and
+   `LIVE_SMOKE=passed (notification frame not checked)` in the state.
+
+4. **The preflight and the plan:**
+
+   ```bash
+   infra/deploy.sh --check
+   infra/deploy.sh --dry-run
+   ```
+
+   `--check` prints `Preflight OK` and
+   `Traefik host: sinnlos.yurtbay.dev; smoke URL: https://sinnlos.yurtbay.dev`.
+   A `DOMAIN` the routers cannot match stops it with
+   `ERROR: DOMAIN in infra/.env does not fit this instance:` and the reason
+   (not a bare host name, a placeholder such as `intranet.example.com`, not
+   the host of `WEB_PUBLIC_URL` or `CMS_PUBLIC_URL`): fix `infra/.env` and
+   re-run; nothing was changed. `--dry-run` runs every deploy check and
+   prints the plan without changing anything: `lock: free`, the clean
+   checkout at the batch 10 commit, the CI result of that commit (a
+   `WARNING: CI is …` only informs; the deploy would go on), then `would
+   tag infra-web-1 (sha256:…) as infra-web:pre-deploy` and `… as
+   infra-web:rollback` (likewise the cms), `-> the images that ran before
+   this deploy (:rollback)` (there is no state file yet),
+   `4. smoke check https://sinnlos.yurtbay.dev; live-smoke: run` and
+   `5. tag infra-{web,cms}:<sha12> (commit …), record
+   /home/bigemo/git/sinnlos/.git/sinnlos-deploy/infra.state`.
+
+5. **Permissions: the post-batch-9 state**, read with the new file:
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   The file now describes batch 10, so it shows what batch 9 left (on
+   production the two informational `MISSING_IN_DB` rows for
+   `authenticated`, `plugin::users-permissions.auth.getSessions` and
+   `…auth.revokeSession`) **plus exactly seven** `MISSING_IN_DB` rows of
+   `api::poll.poll.batchResults` (source `custom`), one each for
+   `admin_role`, `authenticated`, `department_head`, `editor`, `guest`,
+   `member` and `team_lead`. Keep the output for step 11. Any other row was
+   there before this batch: compare it with the output you kept from the
+   batch 9 deploy.
+
+6. **The live-smoke residue** (the comment notifications earlier live-smoke
+   runs left; 33 in the 2026-09-25 census, one or two more per deploy
+   since):
+
+   ```bash
+   psql_db -X -q -tA <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   SELECT count(*) FROM notifications n
+     JOIN notifications_actor_lnk a ON a.notification_id = n.id
+     JOIN up_users u ON u.id = a.user_id
+    WHERE lower(u.email) = 'sam.chen@sinnlos.local' AND n.type = 'comment'
+      AND n.link = '/announcements' AND n.title LIKE '% commented on "%';
+   ROLLBACK;
+   SQL
+   ```
+
+   Note the number: the new live-smoke removes what it causes, so it stays
+   the same through the deploy (step 14).
+
+7. **The response headers of both routers,** kept outside the checkout for
+   step 9:
+
+   ```bash
+   for p in /sign-in /admin; do echo "== $p"; curl -sI "https://sinnlos.yurtbay.dev$p" | tr -d '\r' |
+     grep -iE '^(strict-transport-security|x-frame-options|x-content-type-options|referrer-policy|permissions-policy):' | sort; done > /tmp/b10-headers-before.txt
+   ```
+
+   Optionally note the counts of two or three cards on `/polls`.
+
+**Deploy**
+
+8. Run `infra/deploy.sh`. This first run of the new script has no
+   last-known-good state yet. In order it:
+   - runs the preflight (with the `DOMAIN` check of step 4), takes the lock
+     `.git/sinnlos-deploy/infra.lock`, checks the clean checkout and the CI
+     result (a warning when GitHub has no green run for the commit yet);
+   - takes the pre-deploy backup: `sinnlos-{db,uploads,env}-<ts>-predeploy…`
+     in the offsite dir, `done predeploy` in `backup.log`, and
+     `last-success-predeploy` (the nightly `last-success` is not touched);
+   - picks the rollback target: without a state it tags the running batch 9
+     images `infra-web:rollback` and `infra-cms:rollback` (replacing the
+     batch 8 images the batch 9 deploy had tagged so) and writes
+     `.git/sinnlos-deploy/infra.bootstrap` with their ids; it also tags
+     them `:pre-deploy`, which keeps them resolvable through the build on
+     the containerd store. **For this one run the rollback target is
+     `:rollback`, the batch 9 images.** A re-run after a failure keeps that
+     `:rollback` (`:rollback kept from <time>`) instead of tagging the
+     failed images;
+   - builds both images (`BUILDX_NO_DEFAULT_ATTESTATIONS=1`) and runs
+     `up -d --no-build`: db (log rotation, alias), cms (new image, no
+     capabilities, `STRAPI_TELEMETRY_DISABLED`, `CRON_ENABLED`, its own
+     middlewares, log rotation, alias) and web (new image, the new router
+     labels, log rotation, alias) are recreated; the short outage above;
+   - smoke-checks `https://sinnlos.yurtbay.dev`, then runs live-smoke: the
+     datetime check, the stream opened with `--compressed` must be
+     `text/event-stream` without `Content-Encoding` (the new `sinnlos-live`
+     router), the ping and the notification frame of one probe comment,
+     and on exit the probe comment and its notifications are removed;
+   - only then tags the running images `infra-{web,cms}:<sha12>` (the first
+     12 characters of the batch 10 commit), writes
+     `.git/sinnlos-deploy/infra.state` and `infra.history`, deletes
+     `infra.bootstrap` and prunes nothing yet (one SHA tag so far). From
+     now on a failed deploy rolls back to the SHA tags of the state.
+
+   A failure from the start on prints the rollback commands to
+   `:rollback` (below). `came back compressed (content-encoding: …)` from
+   live-smoke means the host Traefik did not pick up the `sinnlos-live`
+   router: check that router in its dashboard or log. If the deploy ends
+   with `WARNING: live-smoke did not run; this deploy is NOT recorded as
+   last-known-good`, the credentials file was not readable: nothing was
+   recorded; fix `PASSWORDS_FILE` and re-run, or run `infra/live-smoke.sh`
+   by hand and re-run with `--record-without-live-smoke`.
+
+**After the deploy** (read-only)
+
+9. **Routers and headers:**
+
+   ```bash
+   for p in /sign-in /api/auth/csrf /admin /api/events '/api/poll-results?ids=1'; do
+     curl -s -o /dev/null -w "%{http_code} $p\n" "https://sinnlos.yurtbay.dev$p"; done
+   for p in /sign-in /admin; do echo "== $p"; curl -sI "https://sinnlos.yurtbay.dev$p" | tr -d '\r' |
+     grep -iE '^(strict-transport-security|x-frame-options|x-content-type-options|referrer-policy|permissions-policy):' | sort; done > /tmp/b10-headers-after.txt
+   diff /tmp/b10-headers-before.txt /tmp/b10-headers-after.txt && echo "headers identical"
+   ```
+
+   Expect `200 /sign-in` (`sinnlos-web`), `200 /api/auth/csrf`
+   (`sinnlos-auth`), `200 /admin` and `403 /api/events` (`sinnlos-cms`; a
+   `404` would mean the cms router is missing), `403
+   /api/poll-results?ids=1` (the new route exists, and the anonymous
+   `public` role has no grant; a `404` would mean a batch 9 cms), and
+   `headers identical` (HSTS, `X-Frame-Options: DENY`, `nosniff`, the
+   `Referrer-Policy` and the `Permissions-Policy` on both routers). In the
+   host Traefik's dashboard, if it has one, `sinnlos-auth`, `-signin`,
+   `-cms`, `-live` and `-web` are enabled. `/live/stream` is not
+   compressed: live-smoke asserted it in step 8 (run `infra/live-smoke.sh`
+   again to see it: `stream open (text/event-stream, uncompressed)`). The
+   container checks of lane 5A:
+
+   ```bash
+   docker inspect -f '{{.Name}} {{json .HostConfig.LogConfig}} {{json .HostConfig.CapDrop}}' infra-db-1 infra-cms-1 infra-web-1
+   docker exec infra-cms-1 getent hosts sinnlos-web sinnlos-db
+   docker exec infra-web-1 getent hosts sinnlos-cms
+   docker exec infra-cms-1 printenv STRAPI_TELEMETRY_DISABLED CRON_ENABLED
+   ```
+
+   `json-file` with `max-file` `5` and `max-size` `10m` on all three,
+   `["ALL"]` on cms and web, one address line per alias, `true` twice.
+
+10. **SHA tags and the state:**
+
+    ```bash
+    cat .git/sinnlos-deploy/infra.state
+    ls .git/sinnlos-deploy/
+    git rev-parse --short=12 HEAD
+    docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' | grep -E '^infra-(web|cms):'
+    ```
+
+    The state has `TAG=` the same 12 characters as `git rev-parse`,
+    `LIVE_SMOKE=passed` and the two image ids; the directory holds
+    `infra.state`, `infra.history` and `infra.lock`, no `infra.bootstrap`.
+    Each image has `latest` and the SHA tag on one id, and `rollback` and
+    `pre-deploy` on the batch 9 image.
+
+11. **The grant and the permissions after:**
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\] (granted|revoked|permission drift)'
+    psql_db -X < infra/diagnostics/prod-perm-diff.sql
+    ```
+
+    Expect `[bootstrap] granted 7 permission(s) across intranet roles` and
+    `[bootstrap] permission drift: none (report-only check of 120 managed
+    actions)` (batch 9: 119), and the step-5 output without the seven
+    `batchResults` rows (on production: only the two informational
+    `MISSING_IN_DB` rows for `authenticated`). Keep it for the next batch.
+
+12. **Poll results.** As a member, `/polls` shows every card with the
+    counts of step 7, and a vote still works. The logs stay clean:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 30m cms | grep -F '[poll-results]'
+    "${COMPOSE[@]}" logs --since 30m web | grep -F '[demo]'
+    ```
+
+    Both print nothing.
+
+13. **An ended session ends at `/sign-in?expired=1`.** A request that
+    carries a session cookie without a valid session (a Strapi JWT that
+    expired while the page was open) is sent to the sign-in page with the
+    notice; a probe with a made-up cookie shows it without signing anyone
+    out:
+
+    ```bash
+    curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -b '__Secure-authjs.session-token=expired-probe' https://sinnlos.yurtbay.dev/polls
+    curl -s -o /dev/null -w '%{http_code} %{redirect_url}\n' -b '__Secure-authjs.session-token=expired-probe' \
+      -X POST -H 'Content-Type: application/x-www-form-urlencoded' --data 'x=1' https://sinnlos.yurtbay.dev/profile
+    ```
+
+    `307 https://sinnlos.yurtbay.dev/sign-in?expired=1&from=%2Fpolls` for
+    the page and `303 …/sign-in?expired=1&from=%2Fprofile` for the form
+    posted without JavaScript (a Server Action gets `200` with
+    `x-action-redirect: /sign-in?expired=1&from=…;push`).
+
+14. **The residue** of step 6 again: the same number.
+
+15. **The next morning:**
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 12h cms | grep -F '[cron]'
+    tail -n 20 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
+    cat /home/bigemo/backups/momsbest/offsite/sinnlos/last-success
+    ```
+
+    The cron registry logs `[cron] uploads-janitor took …ms` after 03:30,
+    `[cron] search-log-janitor took …ms` after 03:35 and
+    `[cron] digest-mailer took …ms` after 07:30 (`APP_TIME_ZONE`). The
+    03:00 backup cron still writes: `ok` lines, `pruned` lines for
+    artifacts older than 7 days beyond the newest 7, and `done nightly`;
+    `last-success` names that run (a freshness monitor, once chosen,
+    alerts when it is older than 26 hours). `WARN stale plaintext <name>`
+    lines name plaintext that killed or failed runs left in the backup
+    root before this batch: review and delete those files by hand (the
+    pre-datetime dump has another name and is kept until the class-C
+    review is done).
+
+**Owner-run extras** (once, at a time of your choosing)
+
+16. **Restore drill,** off-box on the NAS or the owner machine, where the
+    private key is, against a copy of `offsite/sinnlos`:
+    `infra/backup/restore-drill.sh --all /path/to/copy/of/offsite/sinnlos`
+    (your keyring; or `--key private.asc --passphrase-file pass.txt`). It
+    restores the newest dump into a throwaway, network-less Postgres 16,
+    prints the row counts and checks the newest uploads and `.env`
+    artifacts ([§7.3](#73-automated-daily-backups-cron)).
+17. **The old live-smoke residue,** with
+    `infra/diagnostics/cleanup-live-smoke-notifications.sql`: first
+    without arguments (a dry run that prints `residue_rows`, the count of
+    step 6, and the titles, and removes nothing), then armed with exactly
+    that count
+    ([infra/diagnostics/README.md](../infra/diagnostics/README.md)):
+
+    ```bash
+    docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+      < infra/diagnostics/cleanup-live-smoke-notifications.sql
+    docker exec -i -e PGOPTIONS='-c sinnlos.cleanup_expected_rows=<residue_rows>' infra-db-1 \
+      sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+      < infra/diagnostics/cleanup-live-smoke-notifications.sql
+    ```
+
+    Read the dry run's titles first: a real comment by
+    `sam.chen@sinnlos.local` would match as well.
+
+**What users notice** (worth a short release note): a short outage during
+the deploy; when a session ends while a page is open, any button or form
+now lands on the sign-in page with the "session expired" notice; `/polls`
+loads its results in one request. Sign-in, pages and counts are otherwise
+unchanged.
+
+**Rollback: both images together, no database step.** Follow the hint
+`infra/deploy.sh` prints. For this deploy the target is `:rollback`, the
+batch 9 images (the batch 9 deploy used the old script, which set no SHA
+tag, so batch 9 has none):
+
+```bash
+docker tag infra-web:rollback infra-web:latest
+docker tag infra-cms:rollback infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+None of the special cases of the rollback hint applies from batch 10 to
+batch 9, and the hint probes each: the batch 9 cms knows poll guest access
+(no guest-vote removal before and after the retag), starts without pnpm
+(no direct-start override), the database has no naive datetime columns
+since the 2026-09-27 repair (no `docker-compose.cms-legacy-tz.yml`), and
+the batch 9 web renders in `APP_TIME_ZONE` by itself (label
+`org.sinnlos.datetime=zone-explicit`, no `docker-compose.web-legacy-tz.yml`).
+The edge configuration stays: the batch 9 images run under the new labels,
+aliases, log rotation and `cap_drop` (lane 5A changes no image), and the
+batch 9 cms ignores `CRON_ENABLED` (its crons run as before). To return to
+the batch 9 edge as well, follow the rollback of the
+[lane 5A runbook](#upgrading-to-the-ci-and-edge-changes-batch-10-lane-5a).
+Nothing in the database needs undoing: the `batchResults` permission rows
+are inert for the batch 9 cms (which may drop them at its boot), and a
+roll-forward grants them again. **Never roll back one image alone:** a
+batch 10 web in front of the batch 9 cms shows no poll cards. Once this
+deploy is recorded, the batch 9 images keep `:rollback` (the new script
+never moves it while a state exists) and `:pre-deploy` until the next
+deploy moves it; the rollback above works the same then. After such a
+manual rollback the state still names batch 10; roll forward with
+`infra/deploy.sh` as usual (it notes that the containers do not run the
+last-known-good images). From batch 11 on, a failed deploy rolls back to
+the batch 10 SHA tags of the state.
+
+**After the whole batch merged:** the mechanical format pull request
+(`git add --renormalize . && pnpm format`) follows, then `format:check` and
+shellcheck become blocking in CI; the owner then marks `infra · shellcheck ·
+compose config`, `images · cms` and `images · web` as required checks.
+Dependabot's first run is Monday 05:00 Europe/Berlin (check its tab for
+config errors). Optional, host Traefik: setting `aliasHeadersStrategy`
+(`delete` or `reject`) on the websecure entrypoint silences Traefik 3.7's
+start warning; Next and Strapi are not affected.
+
+**Rehearsal (2026-09-29, the integrated `batch/10`):** both images built
+and run as the throwaway compose project `b10i-staging` (own volumes,
+Postgres 16, demo data) behind a throwaway Traefik v3.7.13 that read the
+overlay's labels (the external network renamed, `DOMAIN=b10i.localhost`,
+the edge on a local port). `infra/deploy.sh --check` with the real compose
+rendering printed `Preflight OK` with the Traefik host and the smoke URL,
+and refused `intranet.example.com`, a scheme, a port and a host other than
+that of `WEB_PUBLIC_URL`/`CMS_PUBLIC_URL`, each with its reason (an unset
+`DOMAIN`: compose's own refusal). The first cms boot granted the
+permissions with `permission drift: none (report-only check of 120 managed
+actions)`, and `prod-perm-diff.sql` returned no rows. Through the edge:
+`/sign-in` 200, `/api/auth/csrf` 200, `/admin` 200, `/api/events` 403,
+`/api/poll-results?ids=1` 403 anonymous; the five security headers
+identical on `/sign-in` and `/admin`; with the web stopped `/admin` 200 and
+`/api/events` 403; a cookie without a valid session gave 307 to
+`/sign-in?expired=1&from=%2Fpolls` on a page, 303 on a form post and the
+`x-action-redirect` on a Server Action; as `alex.morgan` the batched
+results matched the three single reads (totals 7, 5 and 0). The new
+`infra/live-smoke.sh` through Traefik 3.7.13 passed: stream uncompressed,
+ping and notification frame, one probe comment and one notification
+removed, the residue count unchanged. `LogConfig`, `cap_drop`, the aliases
+and `STRAPI_TELEMETRY_DISABLED`/`CRON_ENABLED` as in step 9; compose hands
+the cms `true` for an unset or empty `CRON_ENABLED`. `deploy.sh`'s rollback
+hint, run against the images (Dockerfiles unchanged since batch 9), printed
+the plain retag and `up`, without any special case. Recreating every
+container interrupted the site for about 20 s. Not exercised here:
+`infra/deploy.sh` end to end on the integrated tree (the overlay's external
+network `frontend` was renamed for the rehearsal; lane 5B ran it end to
+end), a public domain with Let's Encrypt, and the production host.
 
 #### Upgrading to the CI and edge changes (batch 10, lane 5A)
 
