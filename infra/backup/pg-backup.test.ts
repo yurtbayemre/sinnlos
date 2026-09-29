@@ -257,6 +257,8 @@ interface RunReport {
   stderr: string;
   /** The stubbed chown calls of a `root` run, with the backup root shown as BK. */
   chowns: string[];
+  /** The stubbed gpg calls, with the backup root shown as BK. */
+  gpgCalls: string[];
   /** Mode of each offsite dir level that exists ("offsite", "offsite/sinnlos"). */
   dirs: Record<string, string>;
 }
@@ -306,6 +308,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     "  esac",
     "}",
     "gpg() {",
+    '  printf "gpg %s\n" "${*//$BK/BK}" >> "$T/gpg.log"',
     '  local out="" in=""',
     '  while (($#)); do case "$1" in --output) out="$2"; shift 2 ;; *) in="$1"; shift ;; esac; done',
     '  [[ -z "$STUB_GPG_FAIL" ]] || return 2',
@@ -348,6 +351,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     'if [[ -f "$BK/quick/.env" ]]; then echo "QUICK $(cat "$BK/quick/.env")"; fi',
     'sed "s/^/STDERR /" "$T/stderr"',
     'if [[ -f "$T/chown.log" ]]; then sed "s/^/CHOWN /" "$T/chown.log"; fi',
+    'if [[ -f "$T/gpg.log" ]]; then sed "s/^/GPG /" "$T/gpg.log"; fi',
     'for d in offsite offsite/sinnlos; do if [[ -d "$BK/$d" ]]; then echo "DIR $d $(stat -c %a "$BK/$d")"; fi; done',
     "",
   ].join("\n");
@@ -368,6 +372,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     quickAccess: pick("QUICK")[0] ?? "",
     stderr: pick("STDERR").join("\n"),
     chowns: pick("CHOWN"),
+    gpgCalls: pick("GPG"),
     dirs: Object.fromEntries(pick("DIR").map((l) => l.split(" "))),
   };
 }
@@ -476,6 +481,23 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     expect(owner.status, owner.stderr).toBe(0);
     expect(owner.chowns).toEqual([]);
     expect(Object.keys(owner.dirs)).toEqual(["offsite", "offsite/sinnlos"]);
+  });
+
+  it("never touches gpg's random_seed, and keeps a root run quiet about the keyring's owner (B10-T5)", () => {
+    const owner = backupRun();
+    expect(owner.status, owner.stderr).toBe(0);
+    expect(owner.gpgCalls).toHaveLength(3);
+    for (const call of owner.gpgCalls) {
+      expect(call).toMatch(
+        /^gpg --homedir BK\/\.gnupg --batch --yes --trust-model always --no-random-seed-file --encrypt /,
+      );
+    }
+    const root = backupRun({ root: true });
+    expect(root.status, root.stderr).toBe(0);
+    expect(root.gpgCalls).toHaveLength(3);
+    for (const call of root.gpgCalls) {
+      expect(call).toContain(" --no-random-seed-file --no-permission-warning --encrypt ");
+    }
   });
 
   it("refuses a backup root that does not exist, creating nothing", () => {

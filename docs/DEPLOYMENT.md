@@ -7868,7 +7868,12 @@ snippets above:
   secret; the dumps do not hold it);
 - gzips each artifact, then **GPG-encrypts** it to the VPS backup public key
   (asymmetric — a host/NAS compromise can't decrypt; the private key lives
-  off-box);
+  off-box). gpg runs with `--no-random-seed-file`, so it never reads or
+  writes `random_seed` in the keyring (a root run once left a root-owned
+  one there, and every later cron run printed `can't open … random_seed:
+  Permission denied`; such a leftover is ignored now and can be deleted),
+  and as root (`deploy.sh`) with `--no-permission-warning`, so the owner's
+  keyring no longer draws `unsafe ownership on homedir`;
 - writes into the offsite dir under a `sinnlos/` namespace so the existing
   NAS `rrsync` pull replicates it automatically;
 - leaves **no plaintext** behind: everything it writes is `0600` (umask

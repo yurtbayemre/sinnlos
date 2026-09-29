@@ -176,8 +176,14 @@ finalize() {  # <file(uncompressed)> <stem> <ext> <label>
   target="$OFFSITE/${f##*/}.gz.gpg"
   gzip -f "$f"
   PARTIAL="$OFFSITE/.${target##*/}.partial"
-  gpg --homedir "$GNUPGHOME" --batch --yes --trust-model always \
-      --encrypt --recipient "$KEYID" --output "$PARTIAL" "$f.gz"
+  # The keyring belongs to the backup root's owner. --no-random-seed-file:
+  # gpg neither reads nor writes random_seed there, so a root run never
+  # leaves a root-owned one that every later run of the owner's cron fails
+  # to open (encrypting needs no seed file). A root run (deploy.sh) also
+  # skips gpg's warning about the keyring's owner.
+  local -a gpg_opts=(--homedir "$GNUPGHOME" --batch --yes --trust-model always --no-random-seed-file)
+  if ((EUID == 0)); then gpg_opts+=(--no-permission-warning); fi
+  gpg "${gpg_opts[@]}" --encrypt --recipient "$KEYID" --output "$PARTIAL" "$f.gz"
   [[ -s "$PARTIAL" ]] || { echo "pg-backup: gpg wrote nothing for $label" >&2; return 1; }
   chmod 600 "$PARTIAL"
   own_like_offsite "$PARTIAL"
