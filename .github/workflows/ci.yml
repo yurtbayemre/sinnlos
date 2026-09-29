@@ -212,7 +212,7 @@ jobs:
           echo "Caddy mode (base file only)"
           compose config -q
           echo "Caddy mode without DOMAIN serves localhost"
-          test "$(DOMAIN= compose config --format json | jq -r '.services.caddy.environment.DOMAIN')" = localhost
+          test "$(DOMAIN='' compose config --format json | jq -r '.services.caddy.environment.DOMAIN')" = localhost
           echo "Traefik mode"
           compose -f infra/docker-compose.traefik.yml config -q
           echo "Traefik mode: every router rule takes its Host from DOMAIN"
@@ -228,7 +228,7 @@ jobs:
             and (.services.cms.networks.frontend.aliases // []) == []
             and (.services.web.networks.frontend.aliases // []) == []'
           echo "Traefik mode refuses to render without DOMAIN"
-          if DOMAIN= compose -f infra/docker-compose.traefik.yml config -q 2> "${RUNNER_TEMP}/domain.err"; then
+          if DOMAIN='' compose -f infra/docker-compose.traefik.yml config -q 2> "${RUNNER_TEMP}/domain.err"; then
             echo "::error::docker-compose.traefik.yml rendered without DOMAIN"
             exit 1
           fi
