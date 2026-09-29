@@ -2,8 +2,10 @@ import { getSession } from "@/lib/session";
 import { getCommentSections } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
 import { summarize, type CommentSectionData } from "@/lib/reaction-summary";
+import { canComment, canDeleteOwnComments, canReact } from "@/lib/roles";
+import { getViewer } from "@/lib/viewer";
 import { Skeleton } from "@/components/ui/skeleton";
-import { LiveCommentSection } from "./live-comment-section";
+import { LiveCommentSection, type CommentControls } from "./live-comment-section";
 
 /**
  * Server entry points of the comment sections: load the initial comments
@@ -12,7 +14,22 @@ import { LiveCommentSection } from "./live-comment-section";
  *
  * The target is addressed by its documentId (issue #11) — the numeric row id
  * of a published entry changes on every publish and would orphan the thread.
+ *
+ * The controls follow the viewer's role (SH02, lib/roles.ts, fail-closed):
+ * the comment form needs comment create, the reaction bar reaction create,
+ * the delete button on one's own comments comment delete. A role without
+ * them (guest; `authenticated` for the delete) reads the thread without
+ * them instead of meeting a refusal. The CMS decides anyway.
  */
+
+/** The section controls of a role (lib/roles.ts; the CMS enforces the same grants). */
+export function commentControlsFor(role: string | null | undefined): CommentControls {
+  return {
+    comment: canComment(role),
+    react: canReact(role),
+    deleteOwn: canDeleteOwnComments(role),
+  };
+}
 
 /** The sections of a page, loaded together, by commentSectionKey. */
 export type CommentSectionsLoad = Promise<Map<string, CommentSectionData>>;
@@ -59,8 +76,10 @@ export async function CommentSection({
   /** The page's batched load (loadCommentSections); without it, this target alone. */
   sections?: CommentSectionsLoad;
 }) {
-  const [session, loaded] = await Promise.all([
+  // getViewer() is one /api/me read per render, shared by every section.
+  const [session, viewer, loaded] = await Promise.all([
     getSession(),
+    getViewer(),
     sections ?? loadCommentSections([target]),
   ]);
   const userId = session?.user?.id;
@@ -69,7 +88,14 @@ export async function CommentSection({
     reactions: summarize([], userId),
   };
 
-  return <LiveCommentSection target={target} currentUserId={userId} initial={initial} />;
+  return (
+    <LiveCommentSection
+      target={target}
+      currentUserId={userId}
+      initial={initial}
+      controls={commentControlsFor(viewer.role)}
+    />
+  );
 }
 
 /** What a section shows while its page's batch is still loading. */
