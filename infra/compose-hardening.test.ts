@@ -67,17 +67,20 @@ describe("internal service names (IN04)", () => {
   /** service → its alias on the project's own (default) network */
   const ALIASES = { db: "sinnlos-db", cms: "sinnlos-cms", web: "sinnlos-web" } as const;
 
-  it.each(Object.entries(ALIASES))("%s has the alias %s on the default network", (service, alias) => {
-    const lines = block(`  ${service}:`);
-    const start = lines.indexOf("    networks:");
-    expect(start, `${service} networks`).toBeGreaterThanOrEqual(0);
-    expect(lines.slice(start, start + 4)).toEqual([
-      "    networks:",
-      "      default:",
-      "        aliases:",
-      `          - ${alias}`,
-    ]);
-  });
+  it.each(Object.entries(ALIASES))(
+    "%s has the alias %s on the default network",
+    (service, alias) => {
+      const lines = block(`  ${service}:`);
+      const start = lines.indexOf("    networks:");
+      expect(start, `${service} networks`).toBeGreaterThanOrEqual(0);
+      expect(lines.slice(start, start + 4)).toEqual([
+        "    networks:",
+        "      default:",
+        "        aliases:",
+        `          - ${alias}`,
+      ]);
+    },
+  );
 
   // The generic service names resolve on every network a container joins,
   // in Traefik mode also on the shared `frontend` network.
@@ -112,7 +115,10 @@ describe("container hardening (IN02, FX33)", () => {
     expect(opt, `${service} security_opt`).toBeGreaterThanOrEqual(0);
     expect(lines[opt + 1]).toBe("      - no-new-privileges:true");
     for (const limit of ["mem_limit", "cpus", "pids_limit"]) {
-      expect(lines.some((line) => line.startsWith(`    ${limit}: `)), `${service} ${limit}`).toBe(true);
+      expect(
+        lines.some((line) => line.startsWith(`    ${limit}: `)),
+        `${service} ${limit}`,
+      ).toBe(true);
     }
   });
 

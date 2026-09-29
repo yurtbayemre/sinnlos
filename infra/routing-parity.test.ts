@@ -531,7 +531,8 @@ function parseTraefik(
   env: Readonly<Record<string, string>> = TRAEFIK_ENV,
 ): TraefikModel {
   const labels = parseTraefikLabels(source).map((label) => {
-    if (label.key.includes("$")) throw new Error(`unmodelled "$" in traefik label key ${label.key}`);
+    if (label.key.includes("$"))
+      throw new Error(`unmodelled "$" in traefik label key ${label.key}`);
     return { ...label, value: interpolateCompose(label.value, env) };
   });
   expect(labels.length, "traefik.* labels in docker-compose.traefik.yml").toBeGreaterThan(0);
@@ -1171,7 +1172,10 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     // One per container since FX34 (sinnlos-headers on web,
     // sinnlos-cms-headers on cms): each router applies exactly one.
     it("applies exactly one Traefik headers middleware on every router", () => {
-      expect([...headerMiddlewares.keys()].sort()).toEqual(["sinnlos-cms-headers", "sinnlos-headers"]);
+      expect([...headerMiddlewares.keys()].sort()).toEqual([
+        "sinnlos-cms-headers",
+        "sinnlos-headers",
+      ]);
       for (const router of traefik.routers.values()) {
         const applied = router.middlewares.filter((name) => headerMiddlewares.has(name));
         expect(applied, `headers middlewares of ${router.name}`).toHaveLength(1);
@@ -1226,9 +1230,11 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     // Plain HTTP on a real host name: browsers ignore HSTS there, and Caddy
     // redirects to HTTPS anyway; the edge adds none.
     it("adds no HSTS over plain HTTP on a real host name", () => {
-      expect(caddyResponseHeaders(caddy, "http", "intranet.example.com").has(
-        "strict-transport-security",
-      )).toBe(false);
+      expect(
+        caddyResponseHeaders(caddy, "http", "intranet.example.com").has(
+          "strict-transport-security",
+        ),
+      ).toBe(false);
     });
 
     it("defers every Caddy header block, so its values replace the upstream's", () => {
