@@ -17,6 +17,9 @@ import {
  *  - published-first: a documentId with a published AND a draft row is
  *    judged by the PUBLISHED row's targeting (a widened draft must not
  *    leak the published discussion),
+ *  - an announcement without a published row is no target at all, for
+ *    every caller on writes (owner answer 2026-09-29 (b): the answer of a
+ *    missing target),
  *  - wiki page without a space fails closed,
  *  - anonymous callers only see untargeted announcements / public spaces.
  */
@@ -95,26 +98,27 @@ const admin = { id: 99, role: { type: "admin_role" } };
 describe("visibleTargetAnchors", () => {
   it("gives an ENG member everything ENG-scoped plus untargeted", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), engMember);
-    expect(anchors.announcement.sort()).toEqual(["docA", "docB", "docC", "docD"]);
+    // docC is a draft only: no target (owner answer 2026-09-29 (b)).
+    expect(anchors.announcement.sort()).toEqual(["docA", "docB", "docD"]);
     expect(anchors["wiki-page"].sort()).toEqual(["pageP", "pageQ"]);
   });
 
   it("judges a mixed draft/published documentId by its PUBLISHED row", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), designMember);
     // docD's draft is untargeted, but the published row is ENG-only.
-    expect(anchors.announcement.sort()).toEqual(["docA", "docC"]);
+    expect(anchors.announcement.sort()).toEqual(["docA"]);
     expect(anchors["wiki-page"]).toEqual(["pageP"]);
   });
 
   it("restricts anonymous callers to untargeted / public targets", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), null);
-    expect(anchors.announcement.sort()).toEqual(["docA", "docC"]);
+    expect(anchors.announcement.sort()).toEqual(["docA"]);
     expect(anchors["wiki-page"]).toEqual(["pageP"]);
   });
 });
 
 describe("isTargetVisible", () => {
-  it("bypasses for admin_role without resolving anything", async () => {
+  it("bypasses for admin_role without resolving anything on a wiki page", async () => {
     const bomb = {
       db: {
         query: () => ({
@@ -127,7 +131,31 @@ describe("isTargetVisible", () => {
         }),
       },
     } as any;
-    await expect(isTargetVisible(bomb, "announcement", "docB", admin)).resolves.toBe(true);
+    await expect(isTargetVisible(bomb, "wiki-page", "pageQ", admin)).resolves.toBe(true);
+  });
+
+  it("checks only that an announcement is published for admin_role and editor", async () => {
+    for (const moderator of [admin, { id: 98, role: { type: "editor" } }]) {
+      // docB is ENG-scoped: the bypass still skips the audience.
+      await expect(isTargetVisible(stubStrapi(), "announcement", "docB", moderator)).resolves.toBe(
+        true,
+      );
+    }
+  });
+
+  it("refuses an unpublished announcement to everyone, like a missing one (owner 2026-09-29 (b))", async () => {
+    for (const user of [engMember, designMember, admin, null]) {
+      const label = String(user?.role.type ?? "anonymous");
+      // docC exists as a draft only; "ghost" never existed.
+      await expect(
+        isTargetVisible(stubStrapi(), "announcement", "docC", user),
+        label,
+      ).resolves.toBe(false);
+      await expect(
+        isTargetVisible(stubStrapi(), "announcement", "ghost", user),
+        label,
+      ).resolves.toBe(false);
+    }
   });
 
   it("hides a department-scoped announcement from the wrong department", async () => {

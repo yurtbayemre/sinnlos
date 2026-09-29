@@ -17,11 +17,24 @@
  *   - the comment/reaction create controllers: the single-target check.
  *
  * ONE rule for both, so a list and a single-anchor read can never
- * disagree: a target is judged by the row `findCommentTarget` would
- * resolve, its PUBLISHED row when it has one, else its draft. For an
- * announcement that row's targeting decides; for a wiki page that row's
- * space (a page's draft and published rows link the draft and published
- * rows of their spaces, whose visibility can differ until a publish).
+ * disagree:
+ *   - an announcement is judged by its PUBLISHED row, and one without a
+ *     published row (never published, or unpublished) is no target at all
+ *     (owner answer 2026-09-29 (b)): its thread is refused exactly like
+ *     the thread of a documentId that never existed, for reads and writes,
+ *     so the answer tells no one that an unpublished announcement exists
+ *     (§5.17). That holds for admin_role and editor too on WRITES (a new
+ *     comment or reaction on it is the missing-target 400); their reads
+ *     keep the read policy's bypass, which returns the rows of a missing
+ *     target as well. The thread comes back unchanged with the next
+ *     publish (the anchor is the documentId, #11). findCommentTarget still
+ *     resolves a draft (utils/comment-target.ts); this check is what
+ *     refuses it;
+ *   - a wiki page is judged by the row `findCommentTarget` would resolve,
+ *     its PUBLISHED row when it has one, else its draft: that row's space
+ *     decides (a page's draft and published rows link the draft and
+ *     published rows of their spaces, whose visibility can differ until a
+ *     publish). The owner decision covers announcements only.
  *
  * Fail-closed rules: unknown targetType → invisible; wiki page without a
  * space → invisible; missing rows → invisible.
@@ -74,16 +87,15 @@ const ANNOUNCEMENT_POPULATE = {
 const listOf = <T>(rows: unknown): T[] => (Array.isArray(rows) ? (rows as T[]) : []);
 
 /**
- * Pick the row whose targeting counts per documentId: published first,
- * draft as fallback — exactly `findCommentTarget`'s resolution order.
+ * The row whose targeting counts per documentId: the PUBLISHED one. A
+ * documentId with only a draft row is left out (no target, see the header).
  */
-function preferPublished(rows: AnnouncementRow[]): Map<string, AnnouncementRow> {
+function publishedByAnchor(rows: AnnouncementRow[]): Map<string, AnnouncementRow> {
   const byAnchor = new Map<string, AnnouncementRow>();
   for (const row of rows) {
     const anchor = targetAnchor(row.documentId);
-    if (anchor == null) continue;
-    const current = byAnchor.get(anchor);
-    if (!current || (!current.publishedAt && row.publishedAt)) byAnchor.set(anchor, row);
+    if (anchor == null || !row.publishedAt) continue;
+    byAnchor.set(anchor, row);
   }
   return byAnchor;
 }
@@ -165,6 +177,7 @@ export async function visibleTargetAnchors(
 
   const [announcementRows, spaceIds] = await Promise.all([
     strapi.db.query(ANNOUNCEMENT_UID).findMany({
+      where: { publishedAt: { $notNull: true } },
       select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
       populate: ANNOUNCEMENT_POPULATE,
     }),
@@ -172,7 +185,7 @@ export async function visibleTargetAnchors(
   ]);
 
   const now = new Date();
-  const announcement = [...preferPublished(listOf<AnnouncementRow>(announcementRows)).entries()]
+  const announcement = [...publishedByAnchor(listOf<AnnouncementRow>(announcementRows)).entries()]
     .filter(([, row]) => !isAnnouncementExpired(row, now) && isAnnouncementVisible(row, audience))
     .map(([anchor]) => anchor);
 
@@ -184,7 +197,12 @@ export async function visibleTargetAnchors(
  * the exact same 400 as a nonexistent target
  * (`WRITE_TARGET_ERRORS["unresolved-target"]`), so create stays free of
  * existence oracles (§5.17); the read policy uses it for a single-anchor
- * filter (PL04).
+ * filter (PL04), after its own admin_role / editor bypass.
+ *
+ * An announcement needs its published row first, for every caller: one
+ * without is refused like a missing target, admin_role and editor
+ * included (see the header). Everything else bypasses for them without a
+ * lookup.
  */
 export async function isTargetVisible(
   strapi: PolicyStrapi,
@@ -192,21 +210,24 @@ export async function isTargetVisible(
   targetDocumentId: string,
   user: CallerUser | null | undefined,
 ): Promise<boolean> {
-  if (hasRole(user, MODERATORS)) return true;
-  const raw = user ? await loadUserScope(strapi, user.id) : null;
-
   if (targetType === "announcement") {
     const rows = listOf<AnnouncementRow>(
       await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-        where: { documentId: targetDocumentId },
+        where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
         select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
         populate: ANNOUNCEMENT_POPULATE,
       }),
     );
-    const row = preferPublished(rows).get(targetDocumentId);
-    if (!row || isAnnouncementExpired(row, new Date())) return false;
+    const row = publishedByAnchor(rows).get(targetDocumentId);
+    if (!row) return false;
+    if (hasRole(user, MODERATORS)) return true;
+    if (isAnnouncementExpired(row, new Date())) return false;
+    const raw = user ? await loadUserScope(strapi, user.id) : null;
     return isAnnouncementVisible(row, toAudienceScope(raw));
   }
+
+  if (hasRole(user, MODERATORS)) return true;
+  const raw = user ? await loadUserScope(strapi, user.id) : null;
 
   if (targetType === "wiki-page") {
     type PageRow = { space?: { id?: number } | null } | null;

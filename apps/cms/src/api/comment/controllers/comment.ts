@@ -34,7 +34,10 @@ export default factories.createCoreController(COMMENT_UID, ({ strapi }) => ({
 
     // #28: an existing-but-invisible target answers with the EXACT same
     // 400 as a nonexistent one — create must not become an existence
-    // oracle for documentIds the caller may not read (§5.17).
+    // oracle for documentIds the caller may not read (§5.17). That covers
+    // an announcement without a published row for every caller (owner
+    // answer 2026-09-29 (b)) and an expired one below admin_role/editor
+    // (DA02, utils/target-visibility.ts).
     const visible = await isTargetVisible(
       strapi,
       target.targetType,
