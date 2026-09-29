@@ -284,7 +284,9 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
 ### Staging dry-run, then on
 
 1. Configure a staging instance with `ENTRA_ENABLED=1` and
-   `ENTRA_SYNC_MODE=dry-run` (the default); run `infra/deploy.sh --check`
+   `ENTRA_SYNC_MODE=dry-run` (the default), on its own host or behind its
+   own Traefik, never behind the production one
+   ([§3.6 B](#b-shared-traefik-live-production-layout)); run `infra/deploy.sh --check`
    until it prints `Preflight OK`, then deploy. The cms logs
    `[entra] enabled … mode=dry-run`.
    `infra/deploy.sh` ends with `infra/live-smoke.sh`, which signs in with
@@ -948,12 +950,24 @@ Traefik instead of the bundled Caddy. The second compose file
   described in [§3.9](#39-production-hardening).
 
 **`DOMAIN` is required here.** Every router matches ``Host(`$DOMAIN`)`` from
-`infra/.env`, so the same overlay serves any instance (it named
+`infra/.env`, so the overlay file is the same for every instance (it named
 `sinnlos.yurtbay.dev` literally until batch 10). Set it to the bare host name,
 without scheme or port, equal to the host of `WEB_PUBLIC_URL`. Without it
 `docker compose` refuses to render the file
 (`required variable DOMAIN is missing a value`), and `infra/deploy.sh` stops in
 its preflight before anything is touched.
+
+**One Sinnlos stack per Traefik.** The router, service and middleware names
+are fixed (`sinnlos-*`), and a Traefik docker provider keeps one set of names
+for every container it watches. A second instance (the employer instance, a
+staging copy such as the [Entra dry-run](#staging-dry-run-then-on)) needs its
+own host or its own Traefik; never start it behind the production Traefik.
+With a different `DOMAIN`, the routers of both stacks conflict and Traefik
+drops all of them (both sites answer 404; the Traefik log says
+`Router defined multiple times with different configurations`). With the same
+`DOMAIN`, the same-named services merge their servers, and production requests
+are load-balanced onto the other stack's containers and database. Neither
+case fails at deploy time.
 
 The routers, highest priority first (a request goes to the highest-priority
 router whose rule matches; `infra/routing-parity.test.ts` pins all of them):
@@ -1337,7 +1351,12 @@ and CI. The app code does not change.
 
 - **The Traefik host comes from `DOMAIN`.** The five routers of
   `infra/docker-compose.traefik.yml` match ``Host(`$DOMAIN`)`` instead of
-  the owner's host name, so the same overlay serves another instance.
+  the owner's host name, so the same overlay file serves another instance
+  on its own host or Traefik. One Sinnlos stack per Traefik: the router,
+  service and middleware names stay fixed (`sinnlos-*`), and a second
+  stack behind the production Traefik would delete production's routers
+  (different `DOMAIN`) or share its services (same `DOMAIN`), see
+  [§3.6 B](#b-shared-traefik-live-production-layout).
   `DOMAIN` is required: without it `docker compose` refuses to render the
   overlay (`required variable DOMAIN is missing a value`), and
   `infra/deploy.sh` stops in its preflight before touching anything.

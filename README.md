@@ -981,13 +981,17 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 ```
 
 Every Traefik router matches the host in `DOMAIN` (`infra/.env`, the bare
-host name), so the overlay is the same for every instance; compose refuses to
-render it without `DOMAIN`. The cms router brings its own middlewares, so
-`/admin` and `/api` stay up while the web container restarts, and `/live/*`
-(the SSE stream) has its own router without compression. The containers
-reach each other by the aliases `sinnlos-db`, `sinnlos-cms` and
-`sinnlos-web` on the project network, and every container's log is rotated
-(5 × 10 MB).
+host name), so the overlay file is the same for every instance; compose
+refuses to render it without `DOMAIN`. It is one Sinnlos stack per Traefik,
+though: the router, service and middleware names are fixed (`sinnlos-*`), so
+a second instance (employer, staging) needs its own host or Traefik. Behind
+the production Traefik it would delete production's routers (different
+`DOMAIN`) or share its services (same `DOMAIN`). The cms router brings its
+own middlewares, so `/admin` and `/api` stay up while the web container
+restarts, and `/live/*` (the SSE stream) has its own router without
+compression. The containers reach each other by the aliases `sinnlos-db`,
+`sinnlos-cms` and `sinnlos-web` on the project network, and every
+container's log is rotated (5 × 10 MB).
 
 `infra/deploy.sh` wraps this end to end: env preflight (`infra/.env` against
 the env contract, and `DATETIME_LEGACY_ZONE` while the running database

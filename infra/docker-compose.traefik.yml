@@ -6,6 +6,10 @@
 # nackte Name wie sinnlos.yurtbay.dev, ohne Schema und Port). Ohne DOMAIN
 # rendert compose diese Datei nicht (${DOMAIN:?}), und deploy.sh bricht im
 # Preflight ab, bevor etwas geändert ist.
+# Ein Sinnlos-Stack je Traefik: Router-, Service- und Middleware-Namen sind
+# fest (sinnlos-*). Eine zweite Instanz (Arbeitgeber, Staging) braucht einen
+# eigenen Host bzw. Traefik; hinter dem Produktions-Traefik löscht sie dessen
+# Router (anderes DOMAIN) oder teilt seine Services (gleiches DOMAIN).
 # Voraussetzung (FX11): der websecure-Entrypoint des Host-Traefik darf
 # client-gesetzte X-Forwarded-* NICHT übernehmen — kein
 # forwardedHeaders.insecure, trustedIPs nur für Proxys, die den Header
