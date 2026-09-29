@@ -1582,8 +1582,10 @@ change.
   - `classified-janitor`, 03:45 `APP_TIME_ZONE`: deletes marketplace ads
     whose last listed day (`expiresAt`) lies more than 90 days before today,
     one by one like a delete in the admin panel, so their marketplace
-    images go too (admin uploads are never touched). At most 1000 ads a
-    night; an ad whose delete fails is logged and retried the next night.
+    images go too (admin uploads are never touched). Each ad is read again
+    (on Postgres under a row lock) right before its delete, so an ad its
+    author renews while the task runs stays. At most 1000 ads a night; an
+    ad whose delete fails is logged and retried the next night.
 
   The values are code constants, not settings. `CRON_ENABLED=0` switches
   both off with the other tasks. Log lines: `[cron] notification-janitor

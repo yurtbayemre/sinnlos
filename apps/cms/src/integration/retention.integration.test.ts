@@ -2,6 +2,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { todayIn } from "../utils/time";
 import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  waitForLockWait,
+  type Settled,
+} from "./pg-lock.test.helper";
 
 /**
  * The LF07 retention janitors on the real query engine (owner answer
@@ -15,7 +22,9 @@ import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harn
  *     fan-out anchor rows stay;
  *   - classified-janitor: the plain-date comparison, and the purge through
  *     the Document Service, whose delete lifecycles remove the ad's
- *     marketplace images after the commit (an admin upload stays).
+ *     marketplace images after the commit (an admin upload stays); on
+ *     Postgres, that an ad renewed while the purge runs stays (the row
+ *     lock and re-read of purge-expired-classifieds.ts).
  */
 
 const NOTIFICATION = "api::notification.notification";
@@ -144,4 +153,47 @@ describe.each(testEngines())("retention janitors on %s", (engine) => {
       .toBe(0);
     expect(await t.strapi.db.query(FILE).count({ where: { id: adminUpload.id } })).toBe(1);
   });
+
+  it.runIf(engine === "postgres")(
+    "keeps an ad its author renews while the purge runs (Postgres lock)",
+    async () => {
+      const ad = await t.strapi.documents(CLASSIFIED).create({
+        data: {
+          title: "Race ad",
+          description: "retention",
+          category: "sale",
+          expiresAt: "2025-01-01",
+          author: t.fixtures.users.member.id,
+        },
+      });
+      const { purgeExpiredClassifieds } = t.requireBuilt<ClassifiedJanitor>(
+        "src/cron/purge-expired-classifieds",
+      );
+
+      // The renewal is written but not committed when the janitor reads
+      // its page, so the page still holds the ad as long expired. Without
+      // the row lock and the re-read, the janitor's delete waited for the
+      // renewal and then deleted the renewed ad.
+      const renewal = await holdTransaction(t);
+      let purging: Promise<Settled<number>> | undefined;
+      try {
+        await renewal.raw(
+          `UPDATE ${qualified(t, "classifieds")} SET expires_at = ? WHERE document_id = ?`,
+          ["2099-12-31", ad.documentId],
+        );
+        purging = settle(purgeExpiredClassifieds(t.strapi));
+        await waitForLockWait(t);
+        await renewal.commit();
+      } catch (err) {
+        await renewal.rollback();
+        throw err;
+      }
+      expect(await purging).toEqual({ ok: true, value: 0 });
+      const rows = await t.strapi.db.query(CLASSIFIED).findMany({
+        where: { documentId: ad.documentId },
+        select: ["expiresAt"],
+      });
+      expect(rows.map((row) => row.expiresAt)).toEqual(["2099-12-31"]);
+    },
+  );
 });

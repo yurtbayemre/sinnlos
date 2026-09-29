@@ -19,7 +19,9 @@ import {
  * Every purge goes through the Document Service, so the classified delete
  * lifecycles remove the images (the image cleanup itself is pinned in
  * api/classified/content-types/classified/lifecycles*.test.ts, the chain
- * on both engines in integration/retention.integration.test.ts).
+ * on both engines in integration/retention.integration.test.ts). Each ad
+ * is re-read (and on Postgres locked first) in its own transaction before
+ * its delete, so an ad renewed after the page read stays.
  */
 
 const CLASSIFIED = "api::classified.classified";
@@ -28,7 +30,12 @@ const TODAY = parsePlainDate("2026-09-29");
 /** 90 days before 2026-09-29. */
 const CUTOFF = "2026-07-01";
 
-function janitor(rows: Array<Omit<Row, "id">>, failFor: string[] = []) {
+/** A janitor over stub rows; `onDelete` runs inside each ad's delete (a concurrent write). */
+function janitor(
+  rows: Array<Omit<Row, "id">>,
+  failFor: string[] = [],
+  options: { dialect?: string; onDelete?: (documentId: string, tables: Row[]) => void } = {},
+) {
   const stub = createStrapiStub({
     tables: {
       [CLASSIFIED]: rows.map((row, index) => ({
@@ -40,7 +47,13 @@ function janitor(rows: Array<Omit<Row, "id">>, failFor: string[] = []) {
     },
   });
   const deleted: string[] = [];
+  /** Locks, re-reads and deletes, in order, with whether each ran in a transaction. */
+  const events: string[] = [];
+  const mark = (event: string) =>
+    events.push(`${event}${stub.db.inTransaction() ? "" : " (no transaction)"}`);
   const remove = vi.fn(async ({ documentId }: { documentId: string }) => {
+    mark(`delete ${documentId}`);
+    options.onDelete?.(documentId, stub.tables[CLASSIFIED]);
     if (failFor.includes(documentId)) throw new Error("deadlock detected");
     deleted.push(documentId);
     stub.tables[CLASSIFIED] = stub.tables[CLASSIFIED].filter(
@@ -49,9 +62,58 @@ function janitor(rows: Array<Omit<Row, "id">>, failFor: string[] = []) {
     return { documentId };
   });
   const documents = vi.fn((_uid: string) => ({ delete: remove }));
-  const strapi: ClassifiedJanitorStrapi = { db: stub.db, documents, log: stub.log };
-  return { strapi, stub, deleted, documents, remove };
+  const query = (uid: string) => {
+    const target = stub.db.query(uid);
+    return {
+      findMany: target.findMany,
+      findOne: async (params: { where: { id: number } }) => {
+        mark(`read ${params.where.id}`);
+        return target.findOne(params);
+      },
+    };
+  };
+  /** The query builder slice the Postgres row lock uses. */
+  const queryBuilder = vi.fn((uid: string) => {
+    const state: { select?: string[]; where?: { id?: unknown }; forUpdate: boolean } = {
+      forUpdate: false,
+    };
+    const builder = {
+      select(columns: string[]) {
+        state.select = columns;
+        return builder;
+      },
+      where(where: { id?: unknown }) {
+        state.where = where;
+        return builder;
+      },
+      forUpdate() {
+        state.forUpdate = true;
+        return builder;
+      },
+      async execute() {
+        expect(uid).toBe(CLASSIFIED);
+        expect(state.select).toEqual(["id"]);
+        expect(state.forUpdate).toBe(true);
+        mark(`lock ${String(state.where?.id)}`);
+        return [];
+      },
+    };
+    return builder;
+  });
+  const strapi: ClassifiedJanitorStrapi = {
+    db: {
+      query,
+      transaction: stub.db.transaction,
+      queryBuilder,
+      dialect: { client: options.dialect ?? "sqlite" },
+    },
+    documents,
+    log: stub.log,
+  };
+  return { strapi, stub, deleted, documents, remove, events, queryBuilder };
 }
+
+const docId = (n: number) => `ad${String(n).padStart(22, "0")}`;
 
 afterEach(() => {
   vi.useRealTimers();
@@ -135,6 +197,58 @@ describe("purgeExpiredClassifieds", () => {
       ["[classified-janitor] ad 1 could not be deleted: deadlock detected"],
     ]);
     expect(stub.log.info.mock.calls[0][0]).toContain("1 failed and stay for the next night");
+  });
+
+  it("re-reads each ad in its own transaction, locked first on Postgres", async () => {
+    const rows = [{ expiresAt: "2026-01-01" }, { expiresAt: "2026-01-02" }];
+    const postgres = janitor(rows, [], { dialect: "postgres" });
+    await expect(purgeExpiredClassifieds(postgres.strapi, TODAY)).resolves.toBe(2);
+    expect(postgres.events).toEqual([
+      "lock 1",
+      "read 1",
+      `delete ${docId(1)}`,
+      "lock 2",
+      "read 2",
+      `delete ${docId(2)}`,
+    ]);
+
+    const sqlite = janitor(rows);
+    await expect(purgeExpiredClassifieds(sqlite.strapi, TODAY)).resolves.toBe(2);
+    expect(sqlite.queryBuilder).not.toHaveBeenCalled();
+    expect(sqlite.events).toEqual(["read 1", `delete ${docId(1)}`, "read 2", `delete ${docId(2)}`]);
+  });
+
+  it("keeps an ad renewed after the page read (or deleted meanwhile), and says so", async () => {
+    for (const dialect of ["postgres", "sqlite"]) {
+      // While the janitor deletes ad 1, the author of ad 2 renews it and
+      // ad 3 is deleted in the admin panel: both were in the page it read.
+      const { strapi, deleted, stub } = janitor(
+        [{ expiresAt: "2026-01-01" }, { expiresAt: "2026-01-02" }, { expiresAt: "2026-01-03" }],
+        [],
+        {
+          dialect,
+          onDelete: (documentId, tables) => {
+            if (documentId !== docId(1)) return;
+            const renewed = tables.find((row) => row.documentId === docId(2));
+            if (renewed) renewed.expiresAt = "2026-11-28";
+            stub.tables[CLASSIFIED] = tables.filter((row) => row.documentId !== docId(3));
+          },
+        },
+      );
+      await expect(purgeExpiredClassifieds(strapi, TODAY), dialect).resolves.toBe(1);
+      expect(deleted, dialect).toEqual([docId(1)]);
+      expect(
+        stub.tables[CLASSIFIED].map((row) => [row.documentId, row.expiresAt]),
+        dialect,
+      ).toEqual([[docId(2), "2026-11-28"]]);
+      expect(stub.log.warn, dialect).not.toHaveBeenCalled();
+      expect(stub.log.info.mock.calls, dialect).toEqual([
+        [
+          "[classified-janitor] purged 1 ad(s) expired before 2026-07-01 " +
+            "(90 days after their last day), 2 renewed or deleted meanwhile and skipped",
+        ],
+      ]);
+    }
   });
 
   it("stays silent on a night without expired ads", async () => {

@@ -18,6 +18,19 @@
  * the nightly uploads janitor catches any image that refused to go. A bulk
  * `deleteMany` would skip those lifecycles.
  *
+ * RENEWED MEANWHILE. The candidates come from a page read, and the author
+ * can renew an expired ad (the web's Renew button sets a new `expiresAt`)
+ * between that read and the ad's delete. So each ad is deleted in its own
+ * transaction that first locks its row (`FOR UPDATE`, Postgres only; SQLite
+ * runs one transaction at a time), then re-reads it and deletes it only if
+ * the rule still holds. A renewal committed before the lock is seen by the
+ * re-read (a new statement under Read Committed) and the ad is skipped; a
+ * renewal that reaches the row after the lock waits for the purge's commit
+ * and then updates nothing (the ad is gone). The Document Service delete
+ * joins this transaction (@strapi/database 5.55.1 reuses an ambient one),
+ * so the image removal still runs after its commit, and a failed delete
+ * rolls back with it.
+ *
  * Runs at 03:45 APP_TIME_ZONE, after the 03:00 host backup (registry.ts),
  * so every ad and image it removes is still in that night's backup. At
  * most CLASSIFIED_PURGE_MAX_PER_RUN ads per run; the rest follows the next
@@ -42,12 +55,30 @@ export interface PurgeCandidate {
   expiresAt?: unknown;
 }
 
+/** The query builder slice that locks an ad row (Postgres). */
+interface LockQuery {
+  select(columns: string[]): LockQuery;
+  where(where: Record<string, unknown>): LockQuery;
+  forUpdate(): LockQuery;
+  execute(): Promise<unknown>;
+}
+
 /** The slice of the Strapi instance the janitor uses. */
 export interface ClassifiedJanitorStrapi {
   db: {
     query(uid: string): {
       findMany(params: Record<string, unknown>): Promise<unknown>;
+      findOne(params: Record<string, unknown>): Promise<unknown>;
     };
+    /**
+     * One transaction around `callback`: queries and Document Service calls
+     * inside join it (@strapi/database keeps it in AsyncLocalStorage).
+     */
+    transaction<T>(callback: () => Promise<T>): Promise<T>;
+    /** Joins the ambient transaction on execute(). */
+    queryBuilder(uid: string): LockQuery;
+    /** 'postgres' or 'sqlite'. */
+    dialect: { client: string };
   };
   documents(uid: string): { delete(params: { documentId: string }): Promise<unknown> };
   log: { info(message: string): void; warn(message: string): void };
@@ -73,11 +104,41 @@ export function isPurgeableClassified(row: PurgeCandidate, cutoff: PlainDate): b
   return expiresAt != null && comparePlainDates(expiresAt, cutoff) < 0;
 }
 
+const isCandidate = (row: unknown): row is PurgeCandidate =>
+  typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "number";
+
 const rowsOf = (value: unknown): PurgeCandidate[] =>
-  (Array.isArray(value) ? value : []).filter(
-    (row: unknown): row is PurgeCandidate =>
-      typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "number",
-  );
+  (Array.isArray(value) ? value : []).filter(isCandidate);
+
+/**
+ * Deletes one ad of a page read, unless it changed since: in its own
+ * transaction, locked (Postgres), re-read and re-checked (see RENEWED
+ * MEANWHILE). Returns whether it was deleted; a failure throws and rolls
+ * back.
+ */
+async function purgeOne(
+  strapi: ClassifiedJanitorStrapi,
+  row: PurgeCandidate,
+  cutoff: PlainDate,
+): Promise<boolean> {
+  return strapi.db.transaction(async () => {
+    if (strapi.db.dialect.client === "postgres") {
+      await strapi.db
+        .queryBuilder(CLASSIFIED_UID)
+        .select(["id"])
+        .where({ id: row.id })
+        .forUpdate()
+        .execute();
+    }
+    const fresh = await strapi.db.query(CLASSIFIED_UID).findOne({
+      where: { id: row.id },
+      select: ["id", "documentId", "expiresAt"],
+    });
+    if (!isCandidate(fresh) || !isPurgeableClassified(fresh, cutoff)) return false;
+    await strapi.documents(CLASSIFIED_UID).delete({ documentId: fresh.documentId as string });
+    return true;
+  });
+}
 
 /** Deletes the long-expired ads; returns how many went. */
 export async function purgeExpiredClassifieds(
@@ -87,6 +148,7 @@ export async function purgeExpiredClassifieds(
   const cutoff = classifiedPurgeCutoff(today);
   const ads = strapi.db.query(CLASSIFIED_UID);
   let purged = 0;
+  let skipped = 0;
   let failed = 0;
   let afterId = 0;
   let seen = 0;
@@ -105,8 +167,8 @@ export async function purgeExpiredClassifieds(
     for (const row of rows) {
       if (!isPurgeableClassified(row, cutoff)) continue;
       try {
-        await strapi.documents(CLASSIFIED_UID).delete({ documentId: row.documentId as string });
-        purged++;
+        if (await purgeOne(strapi, row, cutoff)) purged++;
+        else skipped++;
       } catch (err) {
         failed++;
         strapi.log.warn(
@@ -116,10 +178,11 @@ export async function purgeExpiredClassifieds(
     }
     if (rows.length < CLASSIFIED_PURGE_BATCH) break;
   }
-  if (purged > 0 || failed > 0) {
+  if (purged > 0 || skipped > 0 || failed > 0) {
     strapi.log.info(
       `[classified-janitor] purged ${purged} ad(s) expired before ${cutoff.toString()} ` +
         `(${CLASSIFIED_PURGE_DAYS} days after their last day)` +
+        (skipped > 0 ? `, ${skipped} renewed or deleted meanwhile and skipped` : "") +
         (failed > 0 ? `, ${failed} failed and stay for the next night` : ""),
     );
   }
