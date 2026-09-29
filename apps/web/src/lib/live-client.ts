@@ -32,10 +32,11 @@
  *    user at once) and refetches are single-flight with a dirty flag:
  *    the CMS lifecycle fires inside the write transaction, so an instant
  *    refetch could still read the pre-commit state.
- *  - Hidden tabs hold NO connection at all; visibility regain reopens
- *    and runs one catch-up refetch per channel through a small queue
- *    (concurrency 2, notifications first) — deduped with the reopen
- *    catch-up so it's one refetch per channel, not two.
+ *  - Hidden tabs hold NO connection at all and queue no catch-up;
+ *    visibility regain reopens and runs one catch-up refetch per channel
+ *    through a small queue (concurrency 2, notifications first) — deduped
+ *    with the reopen catch-up so it's one refetch per channel, not two.
+ *    Hiding the tab again drops what is still queued (LF05).
  *  - Repeated instant closes (5×) mean a terminal condition (kill
  *    switch, auth) → stop retrying until the next visibility regain;
  *    polling fallback covers from t=0.
@@ -186,6 +187,7 @@ export class LiveClient {
     this.watchdog = null;
     this.clearReconnect();
     this.clearCoalescing();
+    this.clearCatchup();
     this.teardown();
   }
 
@@ -365,9 +367,12 @@ export class LiveClient {
       }
     } else {
       // Zero background load: no stream, no pending reconnects, no
-      // pending dispatches while hidden.
+      // pending dispatches and no queued catch-up while hidden (LF05: the
+      // refetches still waiting in the queue are dropped; the ones running
+      // finish). The next visibility regain's hello queues them afresh.
       this.clearReconnect();
       this.clearCoalescing();
+      this.clearCatchup();
       this.teardown();
     }
   }
@@ -465,6 +470,11 @@ export class LiveClient {
         this.pumpCatchup();
       });
     }
+  }
+
+  /** Drops the catch-up refetches that have not started yet. */
+  private clearCatchup(): void {
+    this.catchupQueue.length = 0;
   }
 
   /** One refetch per registered channel, notifications first, bounded. */

@@ -229,6 +229,77 @@ describe("terminal bye frames (LF05)", () => {
   });
 });
 
+describe("catch-up queue (LF05)", () => {
+  it("hiding the tab drops the queued refetches; the running ones finish", async () => {
+    const h = harness();
+    const log: string[] = [];
+    const pending: (() => void)[] = [];
+    for (const channel of [
+      "notifications",
+      "announcement:a",
+      "announcement:b",
+      "wiki-page:w",
+    ] as const) {
+      h.client.register(
+        channel,
+        () =>
+          new Promise<void>((resolve) => {
+            log.push(channel);
+            pending.push(resolve);
+          }),
+      );
+    }
+    h.client.start();
+    FakeEventSource.latest().emit("hello", { connId: "c1" });
+    await advance(h, 3_000);
+    FakeEventSource.latest().fail();
+    await advance(h, 750);
+    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    // Two at a time: notifications first, then the first content channel.
+    expect(log).toEqual(["notifications", "announcement:a"]);
+
+    h.setVisible(false);
+    for (const resolve of pending.splice(0)) resolve();
+    await advance(h, 60_000);
+    expect(log).toEqual(["notifications", "announcement:a"]);
+
+    // The next regain's hello queues every channel again.
+    h.setVisible(true);
+    FakeEventSource.latest().emit("hello", { connId: "c3" });
+    await advance(h, 0);
+    expect(log.slice(2)).toEqual(["notifications", "announcement:a"]);
+    for (const resolve of pending.splice(0)) resolve();
+    await advance(h, 0);
+    expect(log.slice(4)).toEqual(["announcement:b", "wiki-page:w"]);
+    h.client.stop();
+  });
+
+  it("stop() drops the queued refetches too", async () => {
+    const h = harness();
+    const log: string[] = [];
+    const pending: (() => void)[] = [];
+    for (const channel of ["notifications", "announcement:a", "announcement:b"] as const) {
+      h.client.register(
+        channel,
+        () =>
+          new Promise<void>((resolve) => {
+            log.push(channel);
+            pending.push(resolve);
+          }),
+      );
+    }
+    h.client.start();
+    FakeEventSource.latest().emit("hello", { connId: "c1" });
+    FakeEventSource.latest().fail(FakeEventSource.CONNECTING);
+    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    expect(log).toEqual(["notifications", "announcement:a"]);
+    h.client.stop();
+    for (const resolve of pending.splice(0)) resolve();
+    await advance(h, 0);
+    expect(log).toEqual(["notifications", "announcement:a"]);
+  });
+});
+
 describe("two-leg health (LF05)", () => {
   it("is degraded while the hello or the heartbeats say the cms leg is not fresh", async () => {
     const h = harness();
