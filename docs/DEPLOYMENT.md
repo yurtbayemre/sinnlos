@@ -1655,9 +1655,8 @@ grants, policies and schema.
   and the guest's ⌘K search no longer asks for announcements, departments
   and teams (it found none of them anyway). The `authenticated` fallback
   role no longer asks for the birthday and anniversary tiles on `/kudos`,
-  which it cannot read. A user whose role the
-  web could not read (the cms briefly down) still gets the old error
-  banner, since the cms decides.
+  which it cannot read. A user whose role the web could not read (the cms
+  briefly down) still gets the old error banner, since the cms decides.
 - **Controls follow the role.** The comment form and the reaction bar show
   only for roles that may comment and react (never guest), and the delete
   button on one's own comments only for roles that may delete them (not
@@ -1687,16 +1686,35 @@ one code comment in it and none of its behaviour. Only the web changes.
 
 1. **Deploy:** `infra/deploy.sh`.
 2. **After: as a guest** (any guest account; on a phone or a narrow
-   window): the navigation shows Dashboard, People, Events, Wiki, Polls and
-   Documents only; open `/announcements`, `/departments`, `/kudos`,
-   `/marketplace` and `/training` by URL: each shows "Not available for
-   your account"; press ⌘K and search for a colleague. Then, on the host,
-   neither log names a 403 for that guest's requests:
+   window). First, on the host, in the checkout, note the time, so that
+   the log check below covers this walk only and not the deploy (the web
+   logs `[…] fetch failed` while `deploy.sh` recreates the cms):
 
    ```bash
-   "${COMPOSE[@]}" logs --since 15m web | grep -E 'fetch failed' || echo "web: none"
-   "${COMPOSE[@]}" logs --since 15m cms | grep -E ' 403$' || echo "cms: none"
+   cd /home/bigemo/git/sinnlos
+   COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
    ```
+
+   Then, as the guest: the navigation shows Dashboard, People, Events,
+   Wiki, Polls and Documents only; open `/announcements`, `/departments`,
+   `/kudos`, `/marketplace` and `/training` by URL: each shows "Not
+   available for your account"; press ⌘K and search for a colleague.
+   Afterwards, on the host, neither log names a failed read or a refused
+   section read since then:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since "$since" web | grep -E 'fetch failed' || echo "web: none"
+   "${COMPOSE[@]}" logs --since "$since" cms \
+     | grep -E 'GET /api/(announcements|departments|teams|kudos-entries|celebrations|classifieds|courses|lessons|lesson-progresses|acknowledgements)[?/ ].* 403$' \
+     || echo "cms: none"
+   ```
+
+   Strapi's request log names no user, so everyone's traffic in that
+   window shows up: a request to `/api/…` from outside without a session
+   (the public role answers 403) or another user's request in the same
+   minutes is not the guest's. If a line appears, repeat the walk in a
+   quiet moment with a fresh `since`.
 
 3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
    other sections; as an admin it lists _Admin_, as a member not. With the
