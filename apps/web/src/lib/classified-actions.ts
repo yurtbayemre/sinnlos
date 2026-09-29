@@ -28,7 +28,7 @@
  */
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
-import { runCmsAction, type ActionResult } from "@/lib/action-result";
+import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { DEMO_MODE, STRAPI_URL } from "@/lib/config";
 import { getStrapiToken } from "@/lib/session";
@@ -146,6 +146,15 @@ function parseAdForm(formData: FormData): { error: ClassifiedErrorCode } | Parse
   };
 }
 
+/**
+ * A Server Action's arguments come from the client: the ad id goes into
+ * the cms path only as a positive integer (as in comment-actions.ts), so a
+ * crafted value never reaches another route with the caller's JWT.
+ */
+function isAdId(id: unknown): id is number {
+  return typeof id === "number" && Number.isInteger(id) && id > 0;
+}
+
 /** Multipart upload to Strapi — strapi() always sends JSON, hence raw fetch. */
 async function uploadAdImages(files: File[]): Promise<number[]> {
   if (files.length === 0 || DEMO_MODE) return [];
@@ -247,6 +256,7 @@ export async function updateClassified(
 ): Promise<ClassifiedFormState> {
   // Same value replay as createClassified (React 19 post-action reset).
   const values = rawFormValues(formData);
+  if (!isAdId(id)) return { error: "failed", values };
   const parsed = parseAdForm(formData);
   if ("error" in parsed) return { error: parsed.error, values };
 
@@ -293,12 +303,14 @@ export async function updateClassified(
  * client's router.push("/marketplace") ran: a visible "not found" flash.
  *
  * A refused or failed delete answers an ActionResult (AC01: 403 forbidden,
- * 404 notFound, 5xx or no answer unavailable, …) and stays on the page.
+ * 404 notFound, 5xx or no answer unavailable, …) and stays on the page;
+ * an id that is no positive integer answers "invalid" before any request.
  * The success redirect is Next's control flow: on the client the action
  * call rejects with it, and startCmsAction rethrows it (never reports it
  * as a failure). strapi()'s 401 sign-in redirect propagates as before.
  */
 export async function deleteClassified(id: number): Promise<ActionResult> {
+  if (!isAdId(id)) return actionFailure("invalid");
   const result = await runCmsAction(() => strapi(`/api/classifieds/${id}`, { method: "DELETE" }), {
     label: "[classifieds] delete",
   });
@@ -311,6 +323,7 @@ export async function deleteClassified(id: number): Promise<ActionResult> {
 
 /** Re-arm an (expired) ad for another 30 days — a plain ownership-gated update. */
 export async function renewClassified(id: number): Promise<{ error?: "failed" }> {
+  if (!isAdId(id)) return { error: "failed" };
   try {
     await strapi(`/api/classifieds/${id}`, {
       method: "PUT",

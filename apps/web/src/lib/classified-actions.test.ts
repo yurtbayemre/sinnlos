@@ -16,7 +16,10 @@ import { StrapiError } from "@/lib/strapi-error";
  *     strapi() call, before any cleanup; the success redirect is a real
  *     NEXT_REDIRECT too, after refresh();
  *   - the delete redirects to /marketplace the same way (UI07) and answers
- *     a refusal or an outage as an AC01 ActionResult.
+ *     a refusal or an outage as an AC01 ActionResult;
+ *   - an ad id that is no positive integer (a Server Action's argument
+ *     comes from the client) never reaches strapi(): update, delete and
+ *     renew answer their failure before any request.
  * strapi(), the session, config and next/cache are mocked, fetch is stubbed;
  * next/navigation is the real one.
  */
@@ -51,6 +54,16 @@ const digestOf = (error: unknown) => String((error as { digest?: unknown }).dige
 
 const cmsError = (status: number) =>
   new StrapiError(status, "Error", JSON.stringify({ error: { status } }));
+
+/** Ids a hand-crafted action call could send instead of an ad id. */
+const CRAFTED_IDS: [string, unknown][] = [
+  ["a path", "1/../../upload/files/9"],
+  ["zero", 0],
+  ["a negative id", -3],
+  ["a fraction", 1.5],
+  ["NaN", Number.NaN],
+  ["a numeric string", "4"],
+];
 
 const image = (name: string, type = "image/jpeg", size = 16) =>
   new File([new Uint8Array(size)], name, { type });
@@ -363,6 +376,19 @@ describe("updateClassified", () => {
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
+  it.each(CRAFTED_IDS)(
+    "answers 'failed' with the values for %s as id, before any request",
+    async (_, id) => {
+      const answer = await updateClassified(id as number, {}, form({ images: [image("n.jpg")] }));
+      expect(answer).toEqual({
+        error: "failed",
+        values: expect.objectContaining({ title: "Bike" }),
+      });
+      expect(strapiMock).not.toHaveBeenCalled();
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("sweeps only the NEW uploads when the PUT fails, never the deselected ones", async () => {
     strapiMock.mockImplementation(async (path: string, init?: { method?: string }) => {
       if (path.startsWith("/api/classifieds?"))
@@ -447,6 +473,12 @@ describe("deleteClassified (UI07: server-side redirect, AC01 failures)", () => {
     await expect(deleteClassified(4)).resolves.toEqual({ ok: false, code: "unavailable" });
   });
 
+  it.each(CRAFTED_IDS)("answers %s as id with invalid, before any request", async (_, id) => {
+    await expect(deleteClassified(id as number)).resolves.toEqual({ ok: false, code: "invalid" });
+    expect(strapiMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
   it("lets strapi()'s 401 sign-in redirect propagate", async () => {
     const redirectError = signInRedirect();
     strapiMock.mockRejectedValueOnce(redirectError);
@@ -466,6 +498,12 @@ describe("renewClassified", () => {
       ],
     ]);
     expect(refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(CRAFTED_IDS)("answers 'failed' for %s as id, before any request", async (_, id) => {
+    await expect(renewClassified(id as number)).resolves.toEqual({ error: "failed" });
+    expect(strapiMock).not.toHaveBeenCalled();
+    expect(refreshMock).not.toHaveBeenCalled();
   });
 
   it("answers 'failed' for a 400 and propagates a 401 redirect", async () => {
