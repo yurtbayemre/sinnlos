@@ -53,7 +53,7 @@ export function sheetStaysOpen(openedOn: string | null, pathname: string, deskto
  * route renders, then it closes with the route change. It also closes when
  * the viewport reaches `md`, where it is hidden (sheetStaysOpen). When the
  * current page is in the sheet, the More tab carries aria-current="true"
- * and names that entry for screen readers ("More: Training"), as the tabs
+ * and its accessible name names that entry ("More: Training"), as the tabs
  * carry aria-current="page".
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
@@ -114,8 +114,11 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
               className={cn(TAB_CLASS, moreActive ? "text-primary" : "text-muted-foreground")}
               data-active={moreActive ? "true" : undefined}
               // "true", not "page": the button is not the page, one of its
-              // entries is (named below for screen readers).
+              // entries is. The name says which, starting with the visible
+              // label; one aria-label, because an sr-only span is a block
+              // and Chrome named the button "More : Training".
               aria-current={moreActive ? "true" : undefined}
+              aria-label={activeMore ? `${t("more")}: ${t(activeMore.labelKey)}` : undefined}
             >
               <Ellipsis
                 aria-hidden="true"
@@ -124,10 +127,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
                   moreActive && "scale-110",
                 )}
               />
-              <span className="max-w-full truncate px-0.5">
-                {t("more")}
-                {activeMore && <span className="sr-only">: {t(activeMore.labelKey)}</span>}
-              </span>
+              <span className="max-w-full truncate px-0.5">{t("more")}</span>
             </Dialog.Trigger>
             <Dialog.Portal>
               <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-sm md:hidden" />
