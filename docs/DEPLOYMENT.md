@@ -6931,15 +6931,28 @@ or failed. Only nightly runs write it.
 never on the VPS):
 
 ```bash
-gpg --decrypt sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump
-gpg --decrypt sinnlos-uploads-<ts>.tar.gz.gpg | gunzip > sinnlos-uploads-<ts>.tar
-gpg --decrypt sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env   # every secret: keep it 0600
+# Owner-only files in a private directory: the dump and the .env copy hold
+# every secret, and a plain `>` would create them with your umask (often 0644).
+umask 077
+mkdir -m 700 restore && cd restore
+gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump
+gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
 ```
 
 Then restore the dump as in §7.1 (copy it to the host first, or stream it:
 `gpg --decrypt … | gunzip | ssh <host> docker exec -i infra-db-1 pg_restore
--U sinnlos -d sinnlos --clean --if-exists`), and the uploads as in §7.2.
-Delete the plaintext afterwards.
+-U sinnlos -d sinnlos --clean --if-exists`). The uploads artifact is a
+gzipped **plain** tar: once decrypted and gunzipped it is an uncompressed
+`.tar`, which `tar xf` reads (the `tar xzf` of §7.2 is for its own
+`.tar.gz` and fails on it). Stream it into the volume, so no plaintext
+copy lands on disk:
+
+```bash
+gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip \
+  | ssh <host> docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads
+```
+
+Delete the plaintext afterwards (`cd .. && rm -rf restore`).
 
 **Restore drill** (off-box, where the key is): `infra/backup/restore-drill.sh`
 proves the newest database backup restores. It picks the newest
