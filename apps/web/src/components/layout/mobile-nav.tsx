@@ -9,6 +9,7 @@ import { useTranslations } from "next-intl";
 import { ICONS } from "@/components/icon-map";
 import { isNavActive, type NavItem } from "@/lib/nav-config";
 import { cn } from "@/lib/utils";
+import { LinkPendingIndicator } from "./nav-link";
 
 const TAB_CLASS = cn(
   "flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
@@ -22,14 +23,19 @@ const TAB_CLASS = cn(
  * others (training, departments, teams, kudos, marketplace, polls,
  * documents and /manage for admins) in a More sheet, so every section is
  * reachable on a phone. The sheet is a Radix dialog: focus moves into it
- * and back to the More tab, Escape and the backdrop close it, and so does
- * choosing an entry.
+ * and back to the More tab, Escape and the backdrop close it. Choosing an
+ * entry keeps it open with the entry's pending dot (UI05) until the new
+ * route renders, then it closes with the route change.
  */
 export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
-  const [open, setOpen] = useState(false);
+  // The pathname the sheet was opened on: it is open only while that is
+  // still the current route, so a navigation from it closes it.
+  const [openedOn, setOpenedOn] = useState<string | null>(null);
+  if (openedOn !== null && openedOn !== pathname) setOpenedOn(null);
+  const open = openedOn !== null;
 
   const primary = items.filter((item) => item.mobilePrimary);
   const more = items.filter((item) => !item.mobilePrimary);
@@ -52,10 +58,13 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
               aria-current={active ? "page" : undefined}
               className={cn(TAB_CLASS, active ? "text-primary" : "text-muted-foreground")}
             >
-              <Icon
-                aria-hidden="true"
-                className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
-              />
+              <span className="relative">
+                <Icon
+                  aria-hidden="true"
+                  className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
+                />
+                <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
+              </span>
               <span className="max-w-full truncate px-0.5">
                 {t(item.mobileLabelKey ?? item.labelKey)}
               </span>
@@ -64,7 +73,7 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
         })}
 
         {more.length > 0 && (
-          <Dialog.Root open={open} onOpenChange={setOpen}>
+          <Dialog.Root open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
             <Dialog.Trigger
               className={cn(TAB_CLASS, moreActive ? "text-primary" : "text-muted-foreground")}
               data-active={moreActive ? "true" : undefined}
@@ -101,7 +110,10 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
                 <MoreSheetLinks
                   items={more}
                   pathname={pathname}
-                  onNavigate={() => setOpen(false)}
+                  onChoose={(href) => {
+                    // The current section: no navigation will close it.
+                    if (href === pathname) setOpenedOn(null);
+                  }}
                 />
               </Dialog.Content>
             </Dialog.Portal>
@@ -114,16 +126,16 @@ export function MobileNav({ items }: { items: readonly NavItem[] }) {
 
 /**
  * The entries of the More sheet: a grid of links, the current section
- * marked. Choosing one closes the sheet (onNavigate) while the route loads.
+ * marked, each with its pending dot. onChoose gets the chosen href.
  */
 export function MoreSheetLinks({
   items,
   pathname,
-  onNavigate,
+  onChoose,
 }: {
   items: readonly NavItem[];
   pathname: string;
-  onNavigate: () => void;
+  onChoose: (href: string) => void;
 }) {
   const t = useTranslations("nav");
   return (
@@ -136,7 +148,7 @@ export function MoreSheetLinks({
             <Link
               href={item.href}
               aria-current={active ? "page" : undefined}
-              onClick={onNavigate}
+              onClick={() => onChoose(item.href)}
               className={cn(
                 "flex h-full flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs outline-none transition-colors",
                 "focus-visible:ring-2 focus-visible:ring-ring",
@@ -145,7 +157,10 @@ export function MoreSheetLinks({
                   : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
               )}
             >
-              <Icon aria-hidden="true" className="h-5 w-5" />
+              <span className="relative">
+                <Icon aria-hidden="true" className="h-5 w-5" />
+                <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
+              </span>
               <span className="max-w-full break-words">{t(item.labelKey)}</span>
             </Link>
           </li>

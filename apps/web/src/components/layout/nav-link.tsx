@@ -1,6 +1,6 @@
 "use client";
 
-import Link from "next/link";
+import Link, { useLinkStatus } from "next/link";
 import type { Route } from "next";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -13,8 +13,31 @@ import { ICONS, type IconName } from "@/components/icon-map";
 export type NavIconName = IconName;
 
 /**
- * Sidebar navigation link with an animated active state. Client
- * component so it can read the current pathname.
+ * Pending feedback of a navigation link (UI05): useLinkStatus is true from
+ * the click until the new route renders, also where no loading.tsx
+ * skeleton shows (a prefetched route, a slow Server Component). A pulsing
+ * dot, faded in after a short delay so an instant navigation does not
+ * flicker. It must render inside the <Link> it reports on; it is
+ * decorative (the route's loading state is announced by RouteProgress).
+ */
+export function LinkPendingIndicator({ className }: { className?: string }) {
+  const { pending } = useLinkStatus();
+  return (
+    <span
+      aria-hidden="true"
+      data-pending={pending ? "true" : undefined}
+      className={cn(
+        "h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-0 transition-opacity duration-150",
+        pending && "animate-pulse opacity-100 delay-150",
+        className,
+      )}
+    />
+  );
+}
+
+/**
+ * Sidebar navigation link with an animated active state and the pending
+ * dot. Client component so it can read the current pathname.
  */
 export function NavLink({ href, label, icon }: { href: Route; label: string; icon: NavIconName }) {
   const Icon = ICONS[icon];
@@ -48,6 +71,7 @@ export function NavLink({ href, label, icon }: { href: Route; label: string; ico
         )}
       />
       {label}
+      <LinkPendingIndicator className="ml-auto" />
     </Link>
   );
 }

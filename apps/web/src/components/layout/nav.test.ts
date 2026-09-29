@@ -10,13 +10,23 @@ import { navItemsFor, type NavItem } from "@/lib/nav-config";
  * FX30: the sidebar and the phone nav map the same entries (lib/nav-config.ts
  * navItemsFor, SH02). The phone nav shows the primary tabs plus a More
  * trigger for the rest (a Radix dialog: closed in server markup), and the
- * More sheet lists the others with the current one marked. The pathname,
- * the viewer and the server translations are mocked; the client markup uses
- * the real catalogs.
+ * More sheet lists the others with the current one marked. Every link shows
+ * a pending dot while its navigation runs (UI05, useLinkStatus). The
+ * pathname, the link status, the viewer and the server translations are
+ * mocked; the client markup uses the real catalogs.
  */
-const state = vi.hoisted(() => ({ pathname: "/", role: "member" as string | null }));
+const state = vi.hoisted(() => ({
+  pathname: "/",
+  role: "member" as string | null,
+  pending: false,
+}));
 
 vi.mock("next/navigation", () => ({ usePathname: () => state.pathname }));
+// UI05: the links' pending state, per test (the real hook reads the Link's context).
+vi.mock("next/link", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/link")>()),
+  useLinkStatus: () => ({ pending: state.pending }),
+}));
 vi.mock("@/lib/viewer", () => ({
   getViewer: async () => ({ id: 1, displayName: "V", role: state.role, department: null }),
 }));
@@ -60,6 +70,7 @@ const current = (html: string) =>
 beforeEach(() => {
   state.pathname = "/";
   state.role = "member";
+  state.pending = false;
 });
 
 describe("MobileNav", () => {
@@ -107,7 +118,7 @@ describe("MoreSheetLinks", () => {
 
   it("lists every other section, /manage for an admin only", () => {
     const member = render(
-      createElement(MoreSheetLinks, { items: more("member"), pathname: "/", onNavigate() {} }),
+      createElement(MoreSheetLinks, { items: more("member"), pathname: "/", onChoose() {} }),
     );
     expect(links(member)).toEqual([
       "/training",
@@ -119,7 +130,7 @@ describe("MoreSheetLinks", () => {
       "/documents",
     ]);
     const admin = render(
-      createElement(MoreSheetLinks, { items: more("admin_role"), pathname: "/", onNavigate() {} }),
+      createElement(MoreSheetLinks, { items: more("admin_role"), pathname: "/", onChoose() {} }),
     );
     expect(links(admin).at(-1)).toBe("/manage");
     expect(admin).toContain(`>${en.nav.admin}<`);
@@ -130,24 +141,52 @@ describe("MoreSheetLinks", () => {
       createElement(MoreSheetLinks, {
         items: more("member"),
         pathname: "/kudos",
-        onNavigate() {},
+        onChoose() {},
       }),
     );
     expect(current(html)).toEqual(["/kudos"]);
   });
 
-  it("closes the sheet when an entry is chosen", () => {
-    const onNavigate = vi.fn();
+  it("reports the chosen entry", () => {
+    const onChoose = vi.fn();
     // Called inside a render, so its hooks have the provider.
     let list: ReactNode = null;
     render(
       createElement(() => {
-        list = MoreSheetLinks({ items: more("member"), pathname: "/", onNavigate });
+        list = MoreSheetLinks({ items: more("member"), pathname: "/", onChoose });
         return null;
       }),
     );
     const link = elements(list).find((el) => el.props.href === "/kudos");
-    expect(link?.props.onClick).toBe(onNavigate);
+    (link?.props.onClick as () => void)();
+    expect(onChoose).toHaveBeenCalledWith("/kudos");
+  });
+});
+
+describe("pending feedback (UI05)", () => {
+  const pendingDots = (html: string) => html.match(/data-pending="true"/g)?.length ?? 0;
+
+  it("shows no dot while no navigation runs", () => {
+    const html = render(createElement(MobileNav, { items: navItemsFor("member") }));
+    expect(pendingDots(html)).toBe(0);
+    expect(html).toContain('aria-hidden="true" class="h-1.5 w-1.5');
+  });
+
+  it("shows the dot in a pending tab, sidebar link and sheet entry", () => {
+    state.pending = true;
+    const tabs = render(createElement(MobileNav, { items: navItemsFor("member") }));
+    expect(pendingDots(tabs)).toBe(5);
+    const link = render(createElement(NavLink, { href: "/kudos", label: "Kudos", icon: "Award" }));
+    expect(pendingDots(link)).toBe(1);
+    expect(link).toMatch(/<span aria-hidden="true" data-pending="true" class="[^"]*animate-pulse/);
+    const sheet = render(
+      createElement(MoreSheetLinks, {
+        items: navItemsFor("member").filter((item) => !item.mobilePrimary),
+        pathname: "/",
+        onChoose() {},
+      }),
+    );
+    expect(pendingDots(sheet)).toBe(7);
   });
 });
 

@@ -4,8 +4,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * Content-shaped loading layouts shared by the route-level loading.tsx
- * files. Each mirrors the real page closely enough that the swap from
- * skeleton to content doesn't shift the layout.
+ * files (UI05): every page under app/(app) has a loading.tsx that renders
+ * or re-exports one of these (pinned by app/(app)/loading-files.test.ts).
+ * Each page-level skeleton starts with RouteProgress, mirrors the real page
+ * closely enough that the swap from skeleton to content doesn't shift the
+ * layout, and uses no fixed width wider than a phone (w-80 and up take
+ * max-w-full).
  */
 
 export function HeaderSkeleton({ withEyebrow = false }: { withEyebrow?: boolean }) {
@@ -118,6 +122,159 @@ export function ArticleSkeleton() {
             />
           ))}
         </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The dashboard (the (app) root): greeting, stat cards, the news grid.
+ */
+export function DashboardSkeleton() {
+  return (
+    <>
+      <RouteProgress />
+      <div className="space-y-8">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-40 max-w-full" />
+          <Skeleton className="h-9 w-64 max-w-full" />
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="flex items-center gap-4 p-6">
+                <Skeleton className="h-11 w-11 rounded-xl" />
+                <div className="space-y-2">
+                  <Skeleton className="h-3 w-20" />
+                  <Skeleton className="h-7 w-12" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="space-y-4">
+          <Skeleton className="h-6 w-32" />
+          <div className="grid gap-4 lg:grid-cols-5">
+            <Skeleton className="h-64 rounded-lg lg:col-span-3" />
+            <div className="flex flex-col gap-3 lg:col-span-2">
+              {Array.from({ length: 3 }).map((_, i) => (
+                <Skeleton key={i} className="h-[76px] rounded-lg" />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** /training: the course cards, two per row. */
+export function CourseListSkeleton() {
+  return (
+    <>
+      <RouteProgress />
+      <div className="space-y-8">
+        <HeaderSkeleton withEyebrow />
+        <CardGridSkeleton count={4} columns="md:grid-cols-2" />
+      </div>
+    </>
+  );
+}
+
+/** A list of rows in one card: the lessons of a course. */
+function RowListSkeleton({ rows }: { rows: number }) {
+  return (
+    <Card>
+      <CardContent className="divide-y p-0">
+        {Array.from({ length: rows }).map((_, i) => (
+          <div key={i} className="flex items-center gap-3 px-4 py-3">
+            <Skeleton className="h-4 w-4 shrink-0 rounded-full" />
+            <Skeleton className="h-4" style={{ width: `${[70, 55, 80, 62, 48][i % 5]}%` }} />
+          </div>
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+/** /training/[slug]: back link, title, progress and the lesson list. */
+export function CourseSkeleton() {
+  return (
+    <>
+      <RouteProgress />
+      <div className="space-y-8">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-9 w-72 max-w-full" />
+          <Skeleton className="h-5 w-80 max-w-full" />
+          <Skeleton className="h-8 w-36" />
+        </div>
+        <RowListSkeleton rows={5} />
+      </div>
+    </>
+  );
+}
+
+/** /training/[slug]/[lessonId]: back link, title, the video and the text. */
+export function LessonSkeleton() {
+  return (
+    <>
+      <RouteProgress />
+      <div className="mx-auto max-w-3xl space-y-6">
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-32 max-w-full" />
+          <Skeleton className="h-9 w-3/4" />
+          <Skeleton className="h-4 w-24" />
+        </div>
+        <Skeleton className="aspect-video w-full rounded-xl" />
+        <div className="space-y-3">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <Skeleton key={i} className="h-4" style={{ width: `${[100, 94, 88, 97, 52][i]}%` }} />
+          ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** /manage: the header and the tile sections. */
+export function ManageSkeleton() {
+  return (
+    <>
+      <RouteProgress />
+      <div className="space-y-8">
+        <HeaderSkeleton withEyebrow />
+        {Array.from({ length: 2 }).map((_, i) => (
+          <div key={i} className="space-y-3">
+            <Skeleton className="h-6 w-40 max-w-full" />
+            <CardGridSkeleton count={4} columns="sm:grid-cols-2" />
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
+/** A form page (/polls/new): header, the fields in a card, the submit button. */
+export function FormPageSkeleton({ fields = 4 }: { fields?: number }) {
+  return (
+    <>
+      <RouteProgress />
+      <div className="space-y-8">
+        <HeaderSkeleton />
+        <Card>
+          <CardContent className="space-y-5 p-6">
+            {Array.from({ length: fields }).map((_, i) => (
+              <div key={i} className="space-y-2">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-10 w-full rounded-xl" />
+              </div>
+            ))}
+            <Skeleton className="h-10 w-36 rounded-xl" />
+          </CardContent>
+        </Card>
       </div>
     </>
   );
