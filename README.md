@@ -972,7 +972,9 @@ catalogs live in `apps/web/messages/en.json` and
 
 The catalogs are typed: `apps/web/src/global.d.ts` declares next-intl's
 `AppConfig` with the shape of `en.json`, so `pnpm typecheck` rejects a
-`t("key")` whose key is missing and checks its ICU arguments;
+`t("key")` or `useTranslations("namespace")` that `en.json` lacks. ICU
+arguments are not type-checked (a JSON import types every message as a
+plain string), so pass them as the message says;
 `apps/web/src/i18n/messages.test.ts` keeps `de.json` in step (same keys,
 same arguments). A key built at runtime needs a map typed against the
 catalog (`satisfies Record<…, keyof Messages["namespace"]>`), not a cast.
