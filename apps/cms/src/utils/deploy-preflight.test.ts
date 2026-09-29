@@ -48,7 +48,16 @@ import {
  *      hint adds infra/docker-compose.web-legacy-tz.yml for a :rollback web
  *      without the org.sinnlos.datetime label apps/web/Dockerfile sets (or
  *      one it cannot check); that override restores exactly the TZ the
- *      compose file gave the web before the port.
+ *      compose file gave the web before the port,
+ *   9. FX35: the hint names the rollback target of the deploy (the SHA tag
+ *      of the last-known-good state, :rollback without one, nothing on a
+ *      fresh install) and runs every probe on that target's images,
+ *  10. B05: the preflight reads DIGESTS_DISABLED like the cms
+ *      (parseEnvFlag: 1/true/yes/on, trimmed, any case), and live-smoke's
+ *      switches come from the env compose hands the apps
+ *      (LIVE_EVENTS_DISABLED, the Entra-only case), not from the shell.
+ * The state, tag and lock logic of FX35 (and a full stubbed deploy) is
+ * pinned in infra/deploy-flow.test.ts.
  *
  * The SQL itself runs against Postgres 16 in
  * revoke-guest-poll-vote.pg.test.ts.
@@ -233,6 +242,55 @@ describe("deploy.sh preflight mirrors env-guard.ts (C7)", () => {
     },
     30_000,
   );
+
+  it.skipIf(!HAS_AWK)(
+    "reads every DIGESTS_DISABLED spelling as the cms does (B05, parseEnvFlag)",
+    () => {
+      // SMTP set, the sender missing: misconfigured unless the switch is on.
+      const base = {
+        SMTP_HOST: "mail.example.com",
+        SMTP_USER: "u",
+        SMTP_PASS: "p",
+        DIGEST_FROM: "",
+      };
+      let onButNotOne = 0;
+      for (const disabled of [
+        "0",
+        "1",
+        "true",
+        " TRUE ",
+        "Yes",
+        "on",
+        "ON",
+        "off",
+        "no",
+        "false",
+        "",
+        "2",
+        "enabled",
+      ]) {
+        const env = {
+          ...base,
+          PUBLIC_WEB_URL: "https://intranet.example.com",
+          DIGESTS_DISABLED: disabled,
+        };
+        const findings = runAwk(PREFLIGHT_AWK, { fatal_keys: "", warn_keys: "" }, composeJson(env));
+        const gate = digestsEnabled(env);
+        if (gate.kind === "skip" && disabled.trim() !== "1") onButNotOne += 1;
+        expect(findings.includes("digest DIGEST_FROM"), JSON.stringify(disabled)).toBe(
+          gate.kind === "misconfigured",
+        );
+      }
+      // Spellings other than 1 that switch the digests off do occur in the table.
+      expect(onButNotOne).toBe(5);
+    },
+    30_000,
+  );
+
+  it("reads DIGESTS_DISABLED through the cms's switch rule, not as the string 1", () => {
+    expect(PREFLIGHT_AWK).toContain('if (!flag(env["DIGESTS_DISABLED"]) && env["SMTP_HOST"] != ""');
+    expect(PREFLIGHT_AWK).not.toContain('env["DIGESTS_DISABLED"] != "1"');
+  });
 
   it("makes the digest finding fatal, not a warning (C4)", () => {
     const block = DEPLOY.slice(DEPLOY.indexOf('if [[ -n "${digest_keys}" ]]; then'));
@@ -569,35 +627,49 @@ interface HintProbes {
   hang?: string[];
   /**
    * What `docker image inspect -f '{{ index .Config.Labels
-   * "org.sinnlos.datetime" }}'` prints for infra-web:rollback: default
+   * "org.sinnlos.datetime" }}'` prints for the target web image: default
    * "zone-explicit" (a web from the datetime port on), "<no value>" for an
    * older one (docker 29 prints an empty line there; any other value counts
    * as older), null when that image does not exist.
    */
   webLabel?: string | null;
+  /**
+   * The rollback target (ROLLBACK_REF): "rollback" (default, the images this
+   * run tagged without a state), a 12-digit SHA tag of the last-known-good
+   * state, or "" (nothing to roll back to).
+   */
+  ref?: string;
 }
+
+/** The state file the hint names for a SHA target (harness value). */
+const STATE_FILE_STUB = "/srv/.git/sinnlos-deploy/infra.state";
 
 /**
  * print_rollback_hint with docker and `timeout` stubbed and the real probe
  * functions of deploy.sh: `cmd` is what `docker image inspect -f
- * '{{json .Config.Cmd}}'` prints for infra-cms:rollback, null when that
- * image does not exist. The docker stub logs every call to stdout (fd 3,
- * also from inside a command substitution) as "bounded docker …" when it
- * runs under the `timeout` stub and "UNBOUNDED docker …" otherwise, and
- * "permission probe" when a query it is handed reads up_permissions.
+ * '{{json .Config.Cmd}}'` prints for the target cms image
+ * (infra-cms:<ref>), null when that image does not exist. The docker stub
+ * logs every call to stdout (fd 3, also from inside a command
+ * substitution) as "bounded docker …" when it runs under the `timeout` stub
+ * and "UNBOUNDED docker …" otherwise, and "permission probe" when a query
+ * it is handed reads up_permissions.
  */
 function rollbackHintRun(
   cmd: string | null,
   probes: HintProbes = {},
 ): { stdout: string; stderr: string } {
+  const ref = probes.ref ?? "rollback";
   const script = [
     "set -euo pipefail",
     "exec 3>&1",
     "PROJECT=infra",
-    "SCRIPT_DIR=/srv/infra",
+    "INFRA_DIR=/srv/infra",
     "COMPOSE=(docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml)",
     "COMPOSE_LEGACY_TZ=/srv/infra/docker-compose.cms-legacy-tz.yml",
     "COMPOSE_WEB_LEGACY_TZ=/srv/infra/docker-compose.web-legacy-tz.yml",
+    `ROLLBACK_REF=${shellQuote(ref)}`,
+    `ROLLBACK_ORIGIN=${shellQuote(ref === "rollback" ? "the images that ran before this deploy (:rollback)" : ref ? `the last-known-good deploy ${ref} (2026-09-29T10:00:00+02:00)` : "")}`,
+    `STATE_FILE=${STATE_FILE_STUB}`,
     shellLine("PROBE_TIMEOUT=("),
     shellLine("WEB_DATETIME_LABEL="),
     shellLine("WEB_DATETIME_VALUE="),
@@ -618,7 +690,7 @@ function rollbackHintRun(
     "  if ((BOUNDED)); then printf 'bounded docker %s\\n' \"$*\" >&3; else printf 'UNBOUNDED docker %s\\n' \"$*\" >&3; fi",
     '  case "$1 ${2:-}" in',
     '    "image inspect")',
-    '      if [[ "$*" == *" infra-web:rollback" ]]; then',
+    '      if [[ "$*" == *" infra-web:"* ]]; then',
     '        [[ -n "${STUB_WEB_LABEL}" ]] || return 1; printf \'%s\\n\' "${STUB_WEB_LABEL}"; return 0',
     "      fi",
     '      [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
@@ -664,9 +736,9 @@ describe("rollback hint: cms images that start with pnpm", BASH_BUDGET, () => {
     // The :rollback image of the fix's first deploy was built on the same
     // day as the fix, so a date told the operator the wrong thing.
     expect(DEPLOY).not.toMatch(/built before 20\d\d-\d\d-\d\d/);
-    expect(shellFunction("print_rollback_hint")).toContain(
-      `docker image inspect -f '{{json .Config.Cmd}}' "\${PROJECT}-cms:rollback"`,
-    );
+    const hint = shellFunction("print_rollback_hint");
+    expect(hint).toContain('cms_image="${PROJECT}-cms:${ROLLBACK_REF}"');
+    expect(hint).toContain(`docker image inspect -f '{{json .Config.Cmd}}' "\${cms_image}"`);
   });
 
   it.skipIf(!HAS_BASH)("prints the direct start for a :rollback image that runs pnpm start", () => {
@@ -728,12 +800,14 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
   const FULL_SEQUENCE = [
     `${COMPOSE_LINE} stop cms`,
     REVOKE_LINE,
-    "To roll back:",
+    "To roll back to ",
+    "docker tag infra-web:rollback infra-web:latest",
+    "docker tag infra-cms:rollback infra-cms:latest",
     `${COMPOSE_LINE} up -d --no-build web cms`,
     "THEN, once the previous cms is up, run the removal again. It must remove nothing",
     "(guest_links_removed 0, permission_rows_removed 0)",
     REVOKE_LINE,
-    "A re-run of this script tags whatever runs then as :rollback",
+    "tags whatever runs then as :rollback",
   ];
 
   it("checks the in-image path of the poll schema that the cms Dockerfile ships", () => {
@@ -856,7 +930,7 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
       expectInOrder(hint, [
         `${COMPOSE_LINE} stop cms`,
         REVOKE_LINE,
-        "To roll back:",
+        "To roll back to ",
         `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml up -d --no-build web cms`,
         `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
         "THEN, once the previous cms is up",
@@ -934,7 +1008,7 @@ describe(
           "FIRST, before the retag, unless infra-cms:rollback knows poll guest access",
           `${COMPOSE_LINE} stop cms`,
           "rollback/revoke-guest-poll-vote.sql",
-          "To roll back:",
+          "To roll back to ",
           "(the database could not be asked whether the datetime repair has run",
           "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
           "(infra-web:rollback could not be checked for the web's datetime port, so the web",
@@ -944,7 +1018,7 @@ describe(
           "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
           "THEN, once the previous cms is up",
           "rollback/revoke-guest-poll-vote.sql",
-          "A re-run of this script tags whatever runs then as :rollback",
+          "tags whatever runs then as :rollback",
         ]);
       },
     );
@@ -1019,14 +1093,14 @@ describe(
         "      APP_TIME_ZONE: ${APP_TIME_ZONE:-Europe/Berlin}",
       );
       expect(shellAssignment("COMPOSE_WEB_LEGACY_TZ")).toBe(
-        "${SCRIPT_DIR}/docker-compose.web-legacy-tz.yml",
+        "${INFRA_DIR}/docker-compose.web-legacy-tz.yml",
       );
     });
 
     it.skipIf(!HAS_BASH)("adds the override for a :rollback web from before the port", () => {
       const hint = rollbackHint(STRAPI_CMD, "0", { webLabel: "<no value>" });
       expectInOrder(hint, [
-        "To roll back:",
+        "To roll back to ",
         "(infra-web:rollback predates the web's datetime port: it renders dates in its process",
         // Both kinds of old web: one with the start check (500), one without (UTC times).
         "zone, so in UTC it fails to start or shows UTC times; hence the web override",
@@ -1148,3 +1222,129 @@ describe("Entra preflight messages and exit code (D-ENTRA-01)", BASH_BUDGET, () 
     expect(run.stderr).toBe("");
   });
 });
+
+describe("rollback hint: the target of the last-known-good state (FX35)", BASH_BUDGET, () => {
+  const COMPOSE_LINE =
+    "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+  const SHA = "5be7dc7a1b2c";
+  const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+
+  it.skipIf(!HAS_BASH)("retags the SHA images of the state, never :rollback", () => {
+    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: SHA });
+    expectInOrder(stderr, [
+      `To roll back to the last-known-good deploy ${SHA} (2026-09-29T10:00:00+02:00), retag, then start without a build:`,
+      `docker tag infra-web:${SHA} infra-web:latest`,
+      `docker tag infra-cms:${SHA} infra-cms:latest`,
+      `${COMPOSE_LINE} up -d --no-build web cms`,
+      `Rollback target: the last-known-good state (${STATE_FILE_STUB}); a re-run of this`,
+    ]);
+    expect(stderr).not.toContain(":rollback");
+    // Every probe looks at the target's images.
+    expect(stdout).toContain(
+      `bounded docker image inspect -f {{json .Config.Cmd}} infra-cms:${SHA}`,
+    );
+    expect(stdout).toContain(
+      `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:${SHA}`,
+    );
+    expect(stdout).toContain(`--entrypoint grep infra-cms:${SHA} -q visibleToGuests`);
+    expect(stdout).not.toContain(":rollback");
+  });
+
+  it.skipIf(!HAS_BASH)("keeps every special case for a SHA target", () => {
+    const hint = rollbackHint('["pnpm","start"]', "2", {
+      ref: SHA,
+      imageCheck: 1,
+      webLabel: "<no value>",
+    });
+    expectInOrder(hint, [
+      `FIRST, before the retag: infra-cms:${SHA} predates poll guest access.`,
+      `${COMPOSE_LINE} stop cms`,
+      "rollback/revoke-guest-poll-vote.sql",
+      `docker tag infra-web:${SHA} infra-web:latest`,
+      `(infra-web:${SHA} predates the web's datetime port`,
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
+      `infra-cms:${SHA} starts with pnpm (Cmd ["pnpm","start"])`,
+      `${COMPOSE_LINE} -f /srv/infra/docker-compose.cms-legacy-tz.yml -f /srv/infra/docker-compose.web-legacy-tz.yml -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+      "THEN, once the previous cms is up",
+      "rollback/revoke-guest-poll-vote.sql",
+    ]);
+  });
+
+  it.skipIf(!HAS_BASH)("says there is nothing to roll back to on a fresh install", () => {
+    const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: "" });
+    expect(stderr).toContain("There is no earlier release on this host to roll back to");
+    expect(stderr).not.toContain("docker tag");
+    expect(stdout).not.toContain("docker ");
+  });
+});
+
+describe(
+  "live-smoke switches come from compose, as the apps read them (B05, FX35)",
+  BASH_BUDGET,
+  () => {
+    /** live_smoke_mode of deploy.sh with compose answering `env` and PASSWORDS_FILE readable or not. */
+    function liveSmokeMode(
+      env: Record<string, string>,
+      opts: { passwords?: boolean; smokeEnv?: boolean } = {},
+    ) {
+      const script = [
+        "set -euo pipefail",
+        "compose_stub() {",
+        "cat <<'COMPOSE_JSON'",
+        composeJson(env),
+        "COMPOSE_JSON",
+        "}",
+        "COMPOSE=(compose_stub)",
+        'T="$(mktemp -d)"',
+        "trap 'rm -rf \"$T\"' EXIT",
+        opts.passwords ? 'echo "casey.jones@sinnlos.local pw" > "$T/pw"' : "",
+        'PASSWORDS_FILE="$T/pw"',
+        opts.smokeEnv
+          ? "export SMOKE_PASSWORD=a SMOKE_AUTHOR_PASSWORD=b"
+          : "unset SMOKE_PASSWORD SMOKE_AUTHOR_PASSWORD",
+        shellFunction("compose_env_value"),
+        shellFunction("live_smoke_mode"),
+        "live_smoke_mode",
+        "",
+      ].join("\n");
+      const res = runBash(script);
+      expect(res.status, res.stderr).toBe(0);
+      return res.stdout.trim();
+    }
+
+    it("reads LIVE_EVENTS_DISABLED from compose, not from the shell", () => {
+      expect(DEPLOY).not.toMatch(/\$\{LIVE_EVENTS_DISABLED/);
+      expect(shellFunction("live_smoke_mode")).toContain("compose_env_value LIVE_EVENTS_DISABLED");
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "skips it only for LIVE_EVENTS_DISABLED exactly 1 (the apps' rule)",
+      () => {
+        expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "1" }, { passwords: true })).toMatch(
+          /^skip: LIVE_EVENTS_DISABLED=1/,
+        );
+        for (const value of ["0", "", "true"]) {
+          expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: value }, { passwords: true }), value).toBe(
+            "run",
+          );
+        }
+      },
+    );
+
+    it.skipIf(!HAS_BASH)("runs it on an Entra-only instance without the credentials file", () => {
+      expect(
+        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "0" }),
+      ).toMatch(/^run \(Entra-only/);
+      // With local sign-in next to Entra the demo accounts sign in as usual.
+      expect(
+        liveSmokeMode({ LIVE_EVENTS_DISABLED: "0", ENTRA_ENABLED: "1", AUTH_LOCAL_ENABLED: "1" }),
+      ).toMatch(/^skip: demo credentials file .* not readable/);
+    });
+
+    it.skipIf(!HAS_BASH)("needs the credentials file, or both passwords in the environment", () => {
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" })).toMatch(/^skip: demo credentials file/);
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" }, { passwords: true })).toBe("run");
+      expect(liveSmokeMode({ LIVE_EVENTS_DISABLED: "0" }, { smokeEnv: true })).toBe("run");
+    });
+  },
+);
