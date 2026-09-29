@@ -4,7 +4,7 @@
  * load before the `strapi` global exists) and holds no schedule state of its
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
- * Order: the janitors run at 03:30 and 03:35 APP_TIME_ZONE, AFTER the 03:00
+ * Order: the janitors run from 03:30 to 03:45 APP_TIME_ZONE, AFTER the 03:00
  * pg-backup of the host crontab (infra/backup/pg-backup.sh; the host runs in
  * APP_TIME_ZONE, docs/DEPLOYMENT.md §7.3), so every row or file they remove
  * is still in the previous night's backup. The digest mails at 07:30.
@@ -30,11 +30,13 @@
  * running. None of them mails, sweeps or deletes anything.
  */
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
+import { pruneNotifications, type NotificationJanitorStrapi } from "./prune-notifications";
 import { pruneSearchLogs } from "./prune-search-logs";
+import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 
-/** The slice of the Strapi instance the tasks use (the digest run needs the most). */
-export type CronStrapi = DigestStrapi;
+/** The slice of the Strapi instance the tasks use: what each of them needs. */
+export type CronStrapi = DigestStrapi & NotificationJanitorStrapi & ClassifiedJanitorStrapi;
 
 /** One cron task: a pure description, no state. */
 export interface CronTaskSpec {
@@ -72,6 +74,26 @@ export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
       rule: "35 3 * * *",
       tz: timeZone,
       fn: (strapi) => pruneSearchLogs(strapi),
+    },
+    // LF07: read notifications 90 days after they were read; unread rows
+    // and fan-out anchors stay (prune-notifications.ts).
+    {
+      name: "notification-janitor",
+      rule: "40 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await pruneNotifications(strapi);
+      },
+    },
+    // LF07: ads (and their images) 90 days after their last listed day
+    // (purge-expired-classifieds.ts).
+    {
+      name: "classified-janitor",
+      rule: "45 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await purgeExpiredClassifieds(strapi);
+      },
     },
     // Morning e-mail digests (issue #18): daily users every day, weekly users
     // on Mondays (digest-plan.ts); without SMTP_* env a logged no-op.
