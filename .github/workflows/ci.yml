@@ -25,7 +25,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Enable Corepack (pnpm 9.12.0)
         run: |
@@ -34,7 +34,7 @@ jobs:
 
       # Node 24 matches the runtime baked into both Dockerfiles (node:24-alpine).
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -96,7 +96,7 @@ jobs:
       SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Enable Corepack (pnpm 9.12.0)
         run: |
@@ -104,7 +104,7 @@ jobs:
           corepack prepare pnpm@9.12.0 --activate
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -144,7 +144,7 @@ jobs:
       SINNLOS_TEST_PG_URL: postgres://sinnlos:sinnlos@localhost:5432/sinnlos
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Enable Corepack (pnpm 9.12.0)
         run: |
@@ -152,7 +152,7 @@ jobs:
           corepack prepare pnpm@9.12.0 --activate
 
       - name: Setup Node 24
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: pnpm
@@ -171,7 +171,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Every tracked *.sh plus extensionless files with a shell shebang.
       # Blocking since the sweep after batch 10.
@@ -246,13 +246,13 @@ jobs:
         app: [cms, web]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Build apps/${{ matrix.app }}/Dockerfile (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: apps/${{ matrix.app }}/Dockerfile
