@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StrapiError } from "@/lib/strapi-error";
 
@@ -13,9 +13,9 @@ import { StrapiError } from "@/lib/strapi-error";
  *     polls on), a failed count alone keeps the list and counts the unread
  *     among it; strapi()'s 401 sign-in redirect from either request
  *     propagates (otherwise the bell would poll an expired session forever);
- *   - markNotificationsRead / markAllNotificationsRead have no catch: a 400
- *     rejects with the StrapiError, a 401 redirect propagates. Neither
- *     refreshes (the bell refetches itself).
+ *   - markNotificationsRead / markAllNotificationsRead answer ActionResults
+ *     (AC01): a 400 is "invalid", a network error "unavailable", a 401
+ *     redirect propagates. Neither refreshes (the bell refetches itself).
  */
 
 const strapiMock = vi.fn();
@@ -68,6 +68,12 @@ beforeEach(() => {
   cms();
   sessionMock.mockReset();
   sessionMock.mockResolvedValue({ user: { id: 7 } });
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("getNotifications", () => {
@@ -180,7 +186,7 @@ describe.each([
   ],
 ])("%s", (_label, action, path, body) => {
   it("posts to its custom route", async () => {
-    await expect(action()).resolves.toBeUndefined();
+    await expect(action()).resolves.toEqual({ ok: true });
     expect(strapiMock).toHaveBeenCalledTimes(1);
     const [calledPath, init] = strapiMock.mock.calls[0] as [
       string,
@@ -191,10 +197,14 @@ describe.each([
     expect(JSON.parse(init.body)).toEqual(body);
   });
 
-  it("rejects with the cms's 400", async () => {
-    const error = cmsError(400);
-    strapiMock.mockRejectedValue(error);
-    await expect(action()).rejects.toBe(error);
+  it("answers the cms's 400 as invalid", async () => {
+    strapiMock.mockRejectedValue(cmsError(400));
+    await expect(action()).resolves.toEqual({ ok: false, code: "invalid" });
+  });
+
+  it("answers a network error as unavailable", async () => {
+    strapiMock.mockRejectedValue(new TypeError("fetch failed"));
+    await expect(action()).resolves.toEqual({ ok: false, code: "unavailable" });
   });
 
   it("lets strapi()'s 401 sign-in redirect propagate", async () => {

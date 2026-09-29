@@ -1,9 +1,9 @@
 "use client";
 
 import { useOptimistic, useRef, useState, useTransition } from "react";
-import { unstable_rethrow } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { toggleReaction } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
 import { applyReactionIntent, reactionIntent } from "@/lib/optimistic";
@@ -31,8 +31,9 @@ export function ReactionBar({
   onChanged?: () => void | Promise<void>;
 }) {
   const t = useTranslations("comments");
+  const tErrors = useTranslations("actionErrors");
   const [, startTransition] = useTransition();
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<CommonCode | null>(null);
   // Optimistic update (issue #34, FX28): the bar shows the new state at
   // once, the awaited refetch in the same transition delivers the
   // authoritative summary as the new base state, and a rejected action
@@ -51,21 +52,16 @@ export function ReactionBar({
     if (!canReact || pendingRef.current.has(emoji)) return;
     const intent = reactionIntent(optimisticReactions, emoji);
     pendingRef.current.add(emoji);
-    setFailed(false);
-    startTransition(async () => {
-      applyIntent(intent);
-      try {
-        await toggleReaction(target, intent.emoji, intent.reacted);
-        await onChanged?.();
-      } catch (e) {
-        // An expired session redirects (NEXT_REDIRECT); anything else stays
-        // here as an inline error instead of replacing the page with the
-        // error boundary.
-        unstable_rethrow(e);
-        setFailed(true);
-      } finally {
-        pendingRef.current.delete(emoji);
-      }
+    setFailed(null);
+    // A refused or failed write stays here as an inline error (AC01; the
+    // helper rethrows an expired session's redirect), and the optimistic
+    // state falls back to the unchanged base.
+    startCmsAction(startTransition, {
+      optimistic: () => applyIntent(intent),
+      action: () => toggleReaction(target, intent.emoji, intent.reacted),
+      onSuccess: () => onChanged?.(),
+      onFailure: setFailed,
+      onSettled: () => pendingRef.current.delete(emoji),
     });
   };
 
@@ -102,7 +98,7 @@ export function ReactionBar({
       </div>
       {failed && (
         <p role="alert" className="text-xs text-destructive">
-          {t("reactionFailed")}
+          {isSharedErrorCode(failed) ? tErrors(failed) : t("reactionFailed")}
         </p>
       )}
     </div>
