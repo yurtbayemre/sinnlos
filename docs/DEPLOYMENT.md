@@ -1592,7 +1592,10 @@ change.
   took …ms` and `[cron] classified-janitor took …ms` every night, plus
   `[notification-janitor] pruned N read notification(s) …` and
   `[classified-janitor] purged N ad(s) expired before YYYY-MM-DD …` when
-  something went. Deleted rows and images come back only from a backup.
+  something went. Each purged ad with images also logs
+  `[uploads-janitor] removed N image(s) of deleted classified` (the ad's
+  delete lifecycle, after the ad's commit; not the 03:30 uploads task).
+  Deleted rows and images come back only from a backup.
 - **Department deletes (FX29 residual).** Documents and quick links are
   scoped by their departments; without one they are company-wide. Deleting
   a department used to leave a document or quick link that targeted only
@@ -1693,10 +1696,16 @@ change.
 
 **The next morning**
 
-5. `docker logs infra-cms-1 2>&1 | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]'`
+5. `docker logs infra-cms-1 2>&1 | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]|removed [0-9]+ image\(s\) of deleted classified'`
    shows both tasks after 03:40 and 03:45 and what they removed; compare
    with the counts of step 1 (the notification count is capped at 100 000
-   a night).
+   a night). The images of the purged ads show up as
+   `[uploads-janitor] removed N image(s) of deleted classified`, one line
+   per ad with images, next to the `[classified-janitor] purged …` line:
+   each ad's delete removes its images in the background after its commit
+   and logs under that prefix, so these lines can come just before or just
+   after the summary. They are not the 03:30 `uploads-janitor` task, which
+   logs `[cron] uploads-janitor took …ms`.
 6. Run the census once and send the section 9 numbers to the owner
    (DA04 decision): `infra/diagnostics/census.sh`.
 
