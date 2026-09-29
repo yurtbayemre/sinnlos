@@ -634,7 +634,10 @@ cp .env.example .env
 Edit `infra/.env`:
 
 ```dotenv
-DOMAIN=localhost
+# Plain HTTP on port 80 for local use. DOMAIN=localhost (or unset) serves
+# HTTPS with a certificate from Caddy's internal CA instead; then use
+# https:// in the two URLs below.
+DOMAIN=http://localhost
 
 WEB_PUBLIC_URL=http://localhost
 CMS_PUBLIC_URL=http://localhost
@@ -698,8 +701,17 @@ DIGESTS_DISABLED=0
 > or `INTERNAL_UPLOAD_TOKEN` still holds `<…>`, `change-me…` or
 > `toBeModified…`.
 
-> **Tip:** For localhost, Caddy runs without HTTPS (no domain ownership proof
-> needed). Redirect URIs in Entra should use `http://localhost/...`.
+> **Tip:** Compose passes `DOMAIN` to Caddy as its site address. With
+> `DOMAIN=http://localhost` (above) Caddy serves plain HTTP, and Entra
+> redirect URIs use `http://localhost/...`. With `DOMAIN=localhost` or no
+> `DOMAIN`, Caddy serves HTTPS on `localhost` with a certificate from its
+> internal CA (the browser warns until you import that CA's root,
+> `docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt .`,
+> into the browser or OS trust store, or accept the warning) and
+> redirects HTTP to HTTPS; set both URLs to `https://localhost` then. Only a
+> real host name gets a Let's Encrypt certificate (§3.6 A). Caddy sends the
+> same security headers as the production Traefik, HSTS only for a real
+> host name over HTTPS.
 
 > **Time zone:** set `APP_TIME_ZONE` in `.env` if your company is not in
 > `Europe/Berlin` (the default). It is the zone of every business date: "today",
@@ -820,6 +832,8 @@ cp .env.example .env
 Edit `/opt/sinnlos/infra/.env`:
 
 ```dotenv
+# The bare public host name (no scheme, no port): Caddy's certificate in
+# mode A, every router's Host rule in mode B (§3.6). Required in mode B.
 DOMAIN=intranet.example.com
 WEB_PUBLIC_URL=https://intranet.example.com
 CMS_PUBLIC_URL=https://intranet.example.com
@@ -907,8 +921,17 @@ cd /opt/sinnlos/infra
 docker compose up -d --build
 ```
 
-Caddy automatically requests a **Let's Encrypt TLS certificate** for your domain.
-Wait ~30 seconds, then visit **https://intranet.example.com**.
+Compose passes `DOMAIN` from `infra/.env` to Caddy as its site address. With
+`DOMAIN` set to your public host name (and DNS plus ports 80/443 pointing at
+the box) Caddy requests a **Let's Encrypt TLS certificate** for it by itself
+and redirects HTTP to HTTPS. Wait ~30 seconds, then visit
+**https://intranet.example.com**. Without `DOMAIN` Caddy only serves
+`localhost`, with a certificate from its internal CA that browsers do not
+trust: there is no Let's Encrypt certificate without a `DOMAIN`. Caddy sends
+the same security headers as the Traefik layout of mode B (`nosniff`,
+`Referrer-Policy`, `X-Frame-Options: DENY`, the `Permissions-Policy`, and HSTS
+for a real host name over HTTPS), but has no edge rate limit
+([§3.9](#39-production-hardening)).
 
 #### B. Shared Traefik (live production layout)
 
@@ -924,6 +947,35 @@ Traefik instead of the bundled Caddy. The second compose file
   via the `lehttp` certresolver, and apply the security headers + rate limits
   described in [§3.9](#39-production-hardening).
 
+**`DOMAIN` is required here.** Every router matches ``Host(`$DOMAIN`)`` from
+`infra/.env`, so the same overlay serves any instance (it named
+`sinnlos.yurtbay.dev` literally until batch 10). Set it to the bare host name,
+without scheme or port, equal to the host of `WEB_PUBLIC_URL`. Without it
+`docker compose` refuses to render the file
+(`required variable DOMAIN is missing a value`), and `infra/deploy.sh` stops in
+its preflight before anything is touched.
+
+The routers, highest priority first (a request goes to the highest-priority
+router whose rule matches; `infra/routing-parity.test.ts` pins all of them):
+
+| Router | Rule (besides the host) | Priority | Target | Middlewares |
+|---|---|---|---|---|
+| `sinnlos-auth` | `PathPrefix(/api/auth)` | 100 | web | headers, ratelimit, compress |
+| `sinnlos-signin` | `POST` on `/sign-in` or `/register` | 90 | web | headers, authlimit, compress |
+| `sinnlos-cms` | `/api`, `/admin`, `/upload`, `/upload/…`, `/email`, `/content-manager`, `/content-type-builder`, `/users-permissions`, `/i18n`, `/content-api` | 50 | cms | cms-headers, cms-ratelimit, cms-compress |
+| `sinnlos-live` | `PathPrefix(/live/)` (the SSE stream and subscribe) | 10 | web | headers only |
+| `sinnlos-web` | everything else, `/uploads/…` included | 1 | web | headers, compress |
+
+Each container defines the middlewares its own routers use in its own labels
+(`sinnlos-headers`, `-ratelimit`, `-authlimit`, `-compress` on web;
+`sinnlos-cms-headers`, `-cms-ratelimit`, `-cms-compress` on cms, with the same
+values). Traefik drops all labels of a container while it is starting,
+unhealthy or stopped; until batch 10 the cms router used the web's middlewares,
+so `/admin` and `/api` answered 404 during every web restart. The live router
+carries no compression: Traefik 3.7's `compress` middleware gzips a
+`text/event-stream` response despite `Cache-Control: no-transform`, and both
+compress middlewares also exclude that content type.
+
 Deploy with **both** files and the fixed project name `infra` (so container and
 image names stay `infra-web-1`, `infra-cms-1`, `infra-db-1` / `infra-web`,
 `infra-cms`):
@@ -935,6 +987,15 @@ docker compose -p infra \
   -f infra/docker-compose.traefik.yml \
   up -d --build
 ```
+
+Inside the stack the containers reach each other by the network aliases
+`sinnlos-db`, `sinnlos-cms` and `sinnlos-web` (`DATABASE_HOST`, `STRAPI_URL`
+and `WEB_INTERNAL_URL` in the compose file), which exist on the project's own
+network only. The plain service names `db`, `cms` and `web` resolve on every
+network a container joins, in this layout also on the shared `frontend`
+network, where another project's `web` or `cms` container could answer them.
+Container names (`infra-cms-1`, …) are unchanged; `deploy.sh`, `live-smoke.sh`
+and the backup address the containers by those.
 
 In practice you don't run that by hand — use the wrapper:
 
@@ -1009,6 +1070,17 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the CI and edge changes (batch 10, lane 5A)?** First make sure
+> `infra/.env` sets `DOMAIN` to the bare public host name (the owner
+> instance: `DOMAIN=sinnlos.yurtbay.dev`): the Traefik overlay now takes
+> every router's host from it, and compose, and with it
+> `infra/deploy.sh --check`, refuses to render without it. Then a normal
+> `infra/deploy.sh`. It recreates all containers, Postgres included (new
+> labels, log rotation, network aliases, no capabilities for the cms), so
+> the site is down for a Postgres restart plus a cms boot. No schema,
+> permission, data or app code change. See
+> [Upgrading to the CI and edge changes (batch 10, lane 5A)](#upgrading-to-the-ci-and-edge-changes-batch-10-lane-5a).
+>
 > **Deploying batch 9 (2026-09-28)?** The policy primitives, the live
 > contract and poll documentIds, and the (switched off) Entra sign-in (the
 > three notes below) ship as one normal deploy of cms and web **together**
@@ -1256,6 +1328,137 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the CI and edge changes (batch 10, lane 5A)
+
+This release (branch `ops/ci-and-edge`, on `batch/9` `5be7dc7`) changes the
+compose files, the Traefik labels, the Caddyfile, the `.env.example` files
+and CI. The app code does not change.
+
+- **The Traefik host comes from `DOMAIN`.** The five routers of
+  `infra/docker-compose.traefik.yml` match ``Host(`$DOMAIN`)`` instead of
+  the owner's host name, so the same overlay serves another instance.
+  `DOMAIN` is required: without it `docker compose` refuses to render the
+  overlay (`required variable DOMAIN is missing a value`), and
+  `infra/deploy.sh` stops in its preflight before touching anything.
+- **The cms routes no longer depend on the web container (FX34).** The cms
+  labels define their own `sinnlos-cms-headers`, `sinnlos-cms-ratelimit`
+  and `sinnlos-cms-compress` with the web's values. Traefik drops all
+  labels of a container while it is starting, unhealthy or stopped, and
+  until now the cms router used the web's middlewares, so `/admin` and
+  `/api` answered 404 during every web restart (a web-only deploy, a web
+  crash, a slow web start).
+- **The live stream is no longer compressed (FX34).** A new router
+  `sinnlos-live` (priority 10) serves `/live/*` with the security headers
+  only. Traefik 3.7's `compress` gzipped the `text/event-stream` response
+  despite its `Cache-Control: no-transform`; it still streamed, because
+  Traefik flushes, but through a gzip layer. Both compress middlewares
+  also exclude `text/event-stream`.
+- **Caddy mode (FX33).** Compose passes `DOMAIN` to Caddy (before, a
+  standalone install always served `localhost`), the Caddyfile sends the
+  Traefik security headers (`X-Frame-Options: DENY`, the
+  `Permissions-Policy`, HSTS for a real host name over HTTPS, none on
+  `localhost`), and the caddy service runs with `no-new-privileges` and
+  memory, CPU and pid limits ([§3.6](#36-deploy) A, [§2.1](#21-clone-and-prepare-env)).
+- **Log rotation (IN05).** db, cms, web and caddy log through `json-file`
+  with at most 5 files of 10 MB each. Log lines older than the newest
+  50 MB of a container are gone.
+- **Network aliases (IN04).** `DATABASE_HOST`, `STRAPI_URL` and
+  `WEB_INTERNAL_URL` use `sinnlos-db`, `sinnlos-cms` and `sinnlos-web`,
+  aliases on the project network only; the plain names `db`, `cms` and
+  `web` also resolve on the shared `frontend` network, where another
+  project's container could answer. Container names stay `infra-*-1`.
+- **No capabilities for the cms (IN02).** `cap_drop: [ALL]`, as the web
+  already had.
+- **cms environment (B05, LF03).** `STRAPI_TELEMETRY_DISABLED=true` (no
+  usage telemetry to Strapi; a stop on a host without DNS no longer waits
+  for its lookups) and `CRON_ENABLED` (default `true`) for the cms's cron
+  registry of batch 10. Leave `CRON_ENABLED` unset or `true` on
+  production: `false` stops the nightly janitors and the digest mailer.
+  `apps/cms/.env.example` now lists every setting `apps/cms/config` reads.
+- **CI.** New jobs `infra · shellcheck · compose config` and
+  `images · cms`/`images · web` (buildx, no push), a blocking critical
+  `pnpm audit`, `pnpm format:check` and shellcheck (both reporting only
+  until the format sweep after batch 10), a read-only token, timeouts, and
+  push builds on `main` only (pull requests as before, a branch without
+  one through "Run workflow"). Dependabot opens weekly grouped update pull
+  requests for npm, the Dockerfile base image and the GitHub Actions.
+  Nothing of this runs on the host.
+
+**Owner steps (mode B).** In the checkout (`/opt/sinnlos` in this guide;
+the owner instance uses its own path):
+
+1. **Before (read-only):** fast-forward and check `DOMAIN`:
+
+   ```bash
+   git pull --ff-only
+   grep -E '^DOMAIN=' infra/.env
+   ```
+
+   It must print the bare host name of `WEB_PUBLIC_URL`, without scheme or
+   port (owner instance: `DOMAIN=sinnlos.yurtbay.dev`). If the line is
+   missing, add it: the only `infra/.env` change of this lane. Then:
+
+   ```bash
+   infra/deploy.sh --check
+   docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
+     config --format json | grep -o 'Host(`[^`]*`)' | sort | uniq -c
+   ```
+
+   `deploy.sh --check` prints `Preflight OK`; the second command prints
+   ``5 Host(`sinnlos.yurtbay.dev`)`` (your host) and nothing else, without
+   printing any other value of `infra/.env`.
+2. **Deploy:** `infra/deploy.sh`. All containers are recreated, Postgres
+   included (its logging and network alias change): expect the site to be
+   down for a Postgres restart plus a cms boot, somewhat longer than a
+   code-only deploy. `live-smoke.sh` at the end exercises the new live
+   router and the cms-to-web ping over `sinnlos-web`.
+3. **After (read-only):**
+
+   ```bash
+   docker inspect -f '{{.Name}} {{json .HostConfig.LogConfig}}' infra-db-1 infra-cms-1 infra-web-1
+   docker inspect -f '{{json .HostConfig.CapDrop}}' infra-cms-1
+   docker exec infra-cms-1 getent hosts sinnlos-web
+   docker exec infra-cms-1 getent hosts sinnlos-db
+   docker exec infra-web-1 getent hosts sinnlos-cms
+   docker exec infra-cms-1 printenv STRAPI_TELEMETRY_DISABLED CRON_ENABLED
+   curl -sI https://sinnlos.yurtbay.dev/admin | grep -iE '^(HTTP|strict-transport-security|x-frame-options|permissions-policy)'
+   curl -s -o /dev/null -w '%{http_code}\n' https://sinnlos.yurtbay.dev/api/events
+   ```
+
+   Expect `json-file` with `max-file` `5` and `max-size` `10m` on all three,
+   `["ALL"]`, one address line per alias, `true` twice, a 200 with HSTS,
+   `X-Frame-Options: DENY` and the `Permissions-Policy`, and `403` from Strapi for the
+   anonymous `/api/events` (a `404` would mean the cms router is missing).
+   In the host Traefik's dashboard, if it has one, the routers
+   `sinnlos-auth`, `-signin`, `-cms`, `-live` and `-web` are enabled. In a
+   browser's developer tools, `/live/stream` has no `content-encoding`.
+
+**Rollback:** the images do not change with this lane, so there is nothing
+to retag for it. The previous compose files also work with these images. To
+return to the previous edge configuration, check out the previous commit and
+re-create the containers from its files without building:
+`git checkout <previous commit>`, then
+`docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build`,
+and back to `main` once the cause is fixed. (The old overlay names
+`sinnlos.yurtbay.dev` literally and ignores `DOMAIN`.)
+
+**Rehearsal (throwaway compose project with its own volumes, behind a local
+Traefik v3.7.13 reading the labels, images built from this branch):** all
+five routers enabled; with the web container stopped, `/admin` and
+`/admin/init` answered 200 and `/api/events` 403 (with a member's JWT 200),
+where the batch 9 overlay answered 404 on all of them; the security headers
+of 15 edge paths were identical to the batch 9 overlay's, the only change
+being no gzip on `/live/*`; `/live/stream` with a session and
+`curl --compressed` came back as `text/event-stream` without
+`content-encoding`; `infra/live-smoke.sh` passed (ping over `sinnlos-web`);
+`getent` resolved all three aliases, which exist on the project network
+only; `LogConfig` as above on every container; the cms with no capabilities
+stored a member's image upload with all four sharp formats, answered
+`/_health` with 204 and stopped in under a second. Caddy mode: with a
+non-localhost `DOMAIN` it served that host with HSTS, `DENY` and the
+policy on `/` and `/admin`, on `localhost` without HSTS (Strapi's own
+included); `/live/stream` uncompressed under both.
 
 #### Deploying batch 9 (2026-09-28)
 
@@ -5637,22 +5840,42 @@ The live deployment applies these (already encoded in the compose files — no
 extra steps):
 
 - **Non-root containers.** Both `web` and `cms` run as an unprivileged user with
-  `no-new-privileges`, the `web` container additionally drops all Linux
-  capabilities (`cap_drop: ALL`). The Postgres and app services also carry
-  `mem_limit` / `cpus` / `pids_limit` caps.
-- **Security response headers** are set at the **Traefik** layer (override file),
-  not in the app: `X-Content-Type-Options: nosniff`, `frameDeny`,
+  `no-new-privileges` and drop all Linux capabilities (`cap_drop: ALL`; the
+  cms since batch 10, checked with an image upload through sharp, `/_health`
+  and a `docker stop` in under a second). Every service (Postgres, cms, web,
+  and Caddy in mode A) carries `no-new-privileges` and `mem_limit` / `cpus` /
+  `pids_limit` caps.
+- **Log rotation.** Every service logs through Docker's `json-file` driver
+  with rotation (`x-logging` in `docker-compose.yml`): at most 5 files of
+  10 MB per container. `docker logs` reads across them; lines beyond the
+  newest 50 MB are gone, so a `[digest]` or `[bootstrap]` line from weeks
+  ago may no longer be there. Check with
+  `docker inspect -f '{{json .HostConfig.LogConfig}}' infra-cms-1`.
+- **Security response headers** are set at the edge, not in the app: in
+  mode B by the **Traefik** headers middlewares (override file; one per
+  container, same values), in mode A by the Caddyfile. Both send
+  `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
   `Referrer-Policy: strict-origin-when-cross-origin`, a restrictive
   `Permissions-Policy` (`camera=(), microphone=(), geolocation=(), payment=(),
-  usb=()`), and HSTS (`max-age=31536000; includeSubDomains`).
+  usb=()`), and HSTS (`max-age=31536000; includeSubDomains`), and they
+  replace the values Strapi's security middleware sets on cms responses
+  (`X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: no-referrer`). Caddy
+  sends HSTS only for a real host name over HTTPS and removes Strapi's on
+  `localhost`. `infra/routing-parity.test.ts` keeps the two sets equal.
+- **Compression.** Traefik compresses the web and cms responses (the Strapi
+  admin bundle goes out as about 1.9 MB instead of 5.5 MB; Strapi does not
+  compress itself), except `/live/*`, which has its own router without
+  compression, and any `text/event-stream` response. Caddy's `encode` skips
+  the SSE stream because of its `Cache-Control: no-transform`.
 - **Rate limiting** guards brute-force / floods, again at Traefik
-  (rateLimit middleware, **not** an IP allowlist): `sinnlos-ratelimit`
-  (avg 100 req/s per client IP, burst 100) on the auth router (`/api/auth/*`)
-  and the cms router (`/api`, `/admin`, `/upload`, … — not `/uploads`, which
-  goes to web), and `sinnlos-authlimit` (10 req/s, burst 20) on the
-  `sinnlos-signin` router (`POST /sign-in` and `POST /register`). The web
-  catch-all router deliberately carries **no** rate limit. The authoritative
-  login limiter lives in the app (`authorize()` in `apps/web/src/auth.ts`).
+  (rateLimit middleware, **not** an IP allowlist): 100 req/s per client IP,
+  burst 100, on the auth router (`/api/auth/*`, `sinnlos-ratelimit`) and the
+  cms router (`/api`, `/admin`, `/upload`, … — not `/uploads`, which goes to
+  web; `sinnlos-cms-ratelimit`), and `sinnlos-authlimit` (10 req/s, burst 20)
+  on the `sinnlos-signin` router (`POST /sign-in` and `POST /register`). The
+  web catch-all and the live router deliberately carry **no** rate limit.
+  The authoritative login limiter lives in the app (`authorize()` in
+  `apps/web/src/auth.ts`).
 - **Client IP trust.** The cms trusts `X-Forwarded-For`/`-Proto`
   (`proxy: { koa: true }` in `apps/cms/config/server.ts`). Its sign-in
   throttles therefore count per client IP (users-permissions
@@ -5678,12 +5901,10 @@ extra steps):
   change matters only where `public/` sits on a case-insensitive file
   system. It ships with a normal deploy, no env change.
 
-> For a standalone Caddy box (mode A) only part of this applies: the
-> Caddyfile sets `X-Content-Type-Options` and `Referrer-Policy` and removes
-> `Server`, but has no HSTS, no `X-Frame-Options`/`Permissions-Policy` and
-> no rate limit. Add equivalent directives or front the box with your own
-> proxy if you need them. The cms-side guards and the app's login limiter
-> apply either way.
+> For a standalone Caddy box (mode A) all of this applies except the edge
+> rate limits: the Caddyfile has none. Front the box with your own proxy if
+> you need them. The cms-side guards and the app's login limiter apply
+> either way.
 
 ### 3.10 Datetime contract
 
@@ -5959,7 +6180,9 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Caddy requests TLS automatically. Visit **https://intranet.example.com**.
+With `DOMAIN` set to that host name (DNS pointing at the VM, ports 80/443
+open), Caddy requests a Let's Encrypt certificate automatically. Visit
+**https://intranet.example.com**.
 
 ### 4.9 Persistent disk (recommended for production)
 
@@ -6336,7 +6559,7 @@ the `x-revalidate-secret` header (the names are historical):
 | Var                  | On CMS | On Web | Purpose                                              |
 | -------------------- | :----: | :----: | ---------------------------------------------------- |
 | `REVALIDATE_SECRET`  |   ✓    |   ✓    | Shared secret for `/api/live/emit`; must match on both sides |
-| `WEB_INTERNAL_URL`   |   ✓    |   —    | How the CMS reaches Next.js (e.g. `http://web:3000`) |
+| `WEB_INTERNAL_URL`   |   ✓    |   —    | How the CMS reaches Next.js (compose: `http://sinnlos-web:3000`) |
 
 Generate the secret once (`openssl rand -hex 32`) and paste the same value
 into both services' env. If either variable is unset on the cms, it sends no
@@ -6933,7 +7156,7 @@ images are deployed again:
 
 | | Bare-metal local | Docker local | VPS | Azure VM | Container Apps |
 |---|---|---|---|---|---|
-| TLS | none | none | Auto (Let's Encrypt) | Auto (Let's Encrypt) | Managed by Azure |
+| TLS | none | none (`DOMAIN=http://localhost`) or Caddy's internal CA | Auto (Let's Encrypt, needs `DOMAIN`) | Auto (Let's Encrypt, needs `DOMAIN`) | Managed by Azure |
 | Scaling | single process | single host | single host | single VM | auto-scales |
 | Cost | free | free | €5–30/mo | €30–60/mo | pay-per-use |
 | Setup effort | low | low | medium | medium | high |
@@ -6968,11 +7191,16 @@ Both Dockerfiles install with `pnpm install --frozen-lockfile`, so the root
 `pnpm-lock.yaml` must match the package manifests. After changing any
 `package.json`, run `pnpm install` locally and commit the updated lockfile.
 
-**Caddy "certificate authority not found" on localhost**
+**Browser certificate warning on `https://localhost`**
 
-For local Docker, use `http://localhost` — don't use HTTPS for `localhost` without
-a local CA. The Caddyfile's `{$DOMAIN:localhost}` block serves HTTP on localhost
-automatically.
+With `DOMAIN` unset or `localhost`, Caddy serves `https://localhost` with a
+certificate from its own internal CA, which the browser does not trust. For
+local Docker either set `DOMAIN=http://localhost` (plain HTTP, and `http://`
+in `WEB_PUBLIC_URL`/`CMS_PUBLIC_URL`), or import Caddy's root certificate
+(`docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt .`)
+into the browser or OS trust store. (`caddy trust` inside the container only
+trusts it inside the container.) Let's Encrypt only issues for a real host
+name in `DOMAIN`.
 
 **Microsoft sign-in returns "AADSTS50011: The redirect URI does not match"**
 
