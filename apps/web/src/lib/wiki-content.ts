@@ -14,8 +14,8 @@
  *     static component, not one made during render);
  *   - rehypeWikiToc: the table of contents, built inside the Markdown
  *     pipeline from the headings rehype-slug has given ids, so every link
- *     matches its heading exactly. It adds no text of its own (no new
- *     message key): the list is labelled with the page title.
+ *     matches its heading exactly. It adds no visible text of its own: the
+ *     caller passes the nav's accessible name (the page uses wiki.contents).
  */
 import { ICONS, isIconName, type IconName } from "@/components/icon-map";
 
@@ -205,7 +205,7 @@ export function tocNavigation(entries: readonly TocEntry[], label: string): Hast
 }
 
 export interface WikiTocOptions {
-  /** The accessible name of the list (the page title: no new message key). */
+  /** The accessible name of the nav (the page passes wiki.contents). */
   label: string;
   minEntries?: number;
 }

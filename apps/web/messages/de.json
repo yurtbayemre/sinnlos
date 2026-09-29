@@ -170,6 +170,8 @@
     "description": "Wissensdatenbank, Handbücher und Anleitungen in Bereichen organisiert.",
     "backToSpace": "Zurück zum Bereich",
     "lastEditedBy": "zuletzt bearbeitet von {name}",
+    "tags": "Schlagwörter",
+    "contents": "Inhalt",
     "emptySpacesTitle": "Noch keine Wiki-Bereiche",
     "emptySpacesHint": "Erstellen Sie einen Bereich im Strapi-Admin, um Wissen zu sammeln.",
     "emptyPagesTitle": "Noch keine Seiten in diesem Bereich",

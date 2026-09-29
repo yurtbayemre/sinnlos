@@ -38,14 +38,15 @@ export default async function WikiPage({ params }: Props) {
   // An instant, shown as its day in APP_TIME_ZONE (next-intl's formatter).
   const updated = formatInstant(format, entry.updatedAt, LONG_DAY);
   // DA02: tags as chips, and the table of contents unless the page turns it
-  // off; the TOC is labelled with the page title (no new message key).
+  // off. Both lists are named for screen readers (wiki.tags, wiki.contents):
+  // the chips' only other label is an aria-hidden icon.
   const tags = wikiTags(entry.tags);
   const rehypePlugins: NonNullable<MarkdownOptions["rehypePlugins"]> = [
     rehypeSlug,
     [rehypeAutolinkHeadings, { behavior: "wrap" }],
   ];
   // After rehype-slug: the TOC links the ids it gave the headings.
-  if (showsToc(entry.tocEnabled)) rehypePlugins.push([rehypeWikiToc, { label: entry.title }]);
+  if (showsToc(entry.tocEnabled)) rehypePlugins.push([rehypeWikiToc, { label: t("contents") }]);
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -77,7 +78,7 @@ export default async function WikiPage({ params }: Props) {
         {tags.length > 0 ? (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <Tag className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-            <ul className="flex flex-wrap gap-1.5">
+            <ul className="flex flex-wrap gap-1.5" aria-label={t("tags")}>
               {tags.map((tag) => (
                 <li
                   key={tag}

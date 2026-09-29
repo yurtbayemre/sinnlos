@@ -170,6 +170,8 @@
     "description": "Knowledge base, handbooks and how-tos organised in spaces.",
     "backToSpace": "Back to space",
     "lastEditedBy": "last edited by {name}",
+    "tags": "Tags",
+    "contents": "Contents",
     "emptySpacesTitle": "No wiki spaces yet",
     "emptySpacesHint": "Create a space in the Strapi admin to start collecting knowledge.",
     "emptyPagesTitle": "No pages yet in this space",

@@ -165,7 +165,7 @@ describe("rehypeWikiToc in the page's Markdown pipeline", () => {
       rehypeSlug,
       [rehypeAutolinkHeadings, { behavior: "wrap" }],
     ];
-    if (toc) rehypePlugins.push([rehypeWikiToc, { label: "Handbook" }]);
+    if (toc) rehypePlugins.push([rehypeWikiToc, { label: "Contents" }]);
     return renderToStaticMarkup(createElement(ReactMarkdown, { rehypePlugins }, markdown));
   };
 
@@ -178,9 +178,9 @@ describe("rehypeWikiToc in the page's Markdown pipeline", () => {
     "## Ünïcode & *emphasis*",
   ].join("\n\n");
 
-  it("puts a list of links to the headings' own ids first, labelled with the page title", () => {
+  it("puts a list of links to the headings' own ids first, named by the given label", () => {
     const html = render(BODY);
-    expect(html.startsWith('<nav aria-label="Handbook"')).toBe(true);
+    expect(html.startsWith('<nav aria-label="Contents"')).toBe(true);
     const links = [...html.matchAll(/<li[^>]*><a href="#([^"]+)"[^>]*>([^<]*)<\/a><\/li>/g)].map(
       ([, href, label]) => [href, label],
     );
