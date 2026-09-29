@@ -1195,9 +1195,10 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     // Traefik only serves the TLS websecure entrypoint for a real host. Caddy
     // also serves localhost (internal CA) and plain HTTP, where HSTS would
     // pin the browser to HTTPS on every local port (or is ignored). Strapi's
-    // security middleware sends its own HSTS on cms responses (the upstream
-    // below, as measured through Caddy on 2026-09-29), so on localhost that
-    // one has to go too.
+    // security middleware (strapi::security, helmet with Strapi's defaults
+    // in @strapi/core 5.55.1) sends the headers below on cms responses, its
+    // own HSTS included (seen on /admin through a localhost Caddy on
+    // 2026-09-29), so on localhost that one has to go too.
     const STRAPI_UPSTREAM = new Map([
       ["strict-transport-security", "max-age=31536000; includeSubDomains"],
       ["x-frame-options", "SAMEORIGIN"],
