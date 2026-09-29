@@ -281,6 +281,8 @@
     "deleteConfirmBody": "Die Anzeige „{title}“ wird dauerhaft entfernt.",
     "deleting": "Löscht…",
     "deleteFailed": "Löschen fehlgeschlagen – bitte erneut versuchen.",
+    "moderationTitle": "Moderation",
+    "moderationHint": "Sie können diese Anzeige als Moderator:in entfernen.",
     "backToList": "Zurück zu den Kleinanzeigen",
     "backToAd": "Zurück zur Anzeige",
     "formTitleNew": "Neue Anzeige",

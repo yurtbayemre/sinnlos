@@ -281,6 +281,8 @@
     "deleteConfirmBody": "The ad “{title}” will be removed permanently.",
     "deleting": "Deleting…",
     "deleteFailed": "Deleting failed – please try again.",
+    "moderationTitle": "Moderation",
+    "moderationHint": "You can remove this ad as a moderator.",
     "backToList": "Back to the marketplace",
     "backToAd": "Back to the ad",
     "formTitleNew": "New ad",

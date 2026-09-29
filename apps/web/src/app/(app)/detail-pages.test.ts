@@ -1,5 +1,7 @@
+import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DeleteClassified } from "@/components/marketplace/delete-classified";
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
@@ -12,8 +14,10 @@ import { StrapiError } from "@/lib/strapi-error";
  * varchar comparison never fails) and follow the same rules otherwise.
  *
  * `next/navigation` is the real module (notFound's own error); the CMS
- * client, session, viewer and translations are mocked.
+ * client, session, viewer and translations are mocked. The viewer's role
+ * and the session user are per test (the ad controls, SH02).
  */
+const who = vi.hoisted(() => ({ role: "member" as string | null, userId: null as number | null }));
 const strapiMock = vi.fn<(path: string) => Promise<unknown>>();
 const classifiedMock = vi.fn<(id: string) => Promise<unknown>>();
 const departmentMock = vi.fn<(slug: string) => Promise<unknown>>();
@@ -33,9 +37,11 @@ vi.mock("@/lib/training", () => ({
   fetchCourseBySlug: (slug: string) => courseMock(slug),
   fetchMyProgress: () => progressMock(),
 }));
-vi.mock("@/lib/session", () => ({ getSession: async () => null }));
+vi.mock("@/lib/session", () => ({
+  getSession: async () => (who.userId === null ? null : { user: { id: who.userId } }),
+}));
 vi.mock("@/lib/viewer", () => ({
-  getViewer: async () => ({ id: 1, displayName: "M", role: "member", department: null }),
+  getViewer: async () => ({ id: who.userId, displayName: "M", role: who.role, department: null }),
 }));
 vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: string) => (key: string) => `${namespace}.${key}`,
@@ -56,6 +62,8 @@ const NOT_FOUND = { digest: "NEXT_HTTP_ERROR_FALLBACK;404" };
 const MALFORMED = ["abc", "1.5", "1e3", "0", "-1", "01", "2147483648", " 1", ""];
 
 beforeEach(() => {
+  who.role = "member";
+  who.userId = null;
   strapiMock.mockReset();
   classifiedMock.mockReset();
   departmentMock.mockReset();
@@ -124,6 +132,59 @@ describe("/marketplace/[id] and /marketplace/[id]/edit", () => {
     await expect(ad.generateMetadata(params("7"))).resolves.toEqual({
       title: "marketplace.title",
     });
+  });
+});
+
+/** Every element in a returned page tree (host and component elements, through children). */
+function elements(node: ReactNode): Array<{ type: unknown; props: Record<string, unknown> }> {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!isValidElement<Record<string, unknown>>(node)) return [];
+  return [{ type: node.type, props: node.props }, ...elements(node.props.children as ReactNode)];
+}
+
+describe("/marketplace/[id] controls (SH02: canEditAnyAd, canDeleteAnyAd)", () => {
+  const OWNER = 5;
+  const bike = { data: [{ id: 7, title: "Bike", author: { id: OWNER, displayName: "Olga" } }] };
+  const controls = async () => {
+    const tree = elements(await ad.default(params("7")));
+    return {
+      edit: tree.some((el) => el.props.href === "/marketplace/7/edit"),
+      takeDown: tree.some((el) => el.type === DeleteClassified),
+    };
+  };
+
+  beforeEach(() => classifiedMock.mockResolvedValue(bike));
+
+  it.each([
+    ["the owner edits (and deletes on the edit page)", "member", OWNER, true, false],
+    ["an editor takes someone else's ad down but cannot edit it", "editor", 1, false, true],
+    ["an admin edits and takes down", "admin_role", 1, true, true],
+    ["another member gets neither", "member", 1, false, false],
+    ["the `authenticated` fallback gets neither", "authenticated", 1, false, false],
+    ["an unreadable role gets neither", null, 1, false, false],
+  ])("%s", async (_label, role, userId, edit, takeDown) => {
+    who.role = role;
+    who.userId = userId;
+    await expect(controls()).resolves.toEqual({ edit, takeDown });
+  });
+
+  it("takes the ad down with the ad's id and title", async () => {
+    who.role = "editor";
+    who.userId = 1;
+    const tree = elements(await ad.default(params("7")));
+    const takedown = tree.find((el) => el.type === DeleteClassified);
+    expect(takedown?.props).toMatchObject({ id: 7, title: "Bike" });
+  });
+
+  it("the edit page lets an editor through only for their own ad", async () => {
+    who.role = "editor";
+    who.userId = 1;
+    await expect(adEdit.default(params("7"))).rejects.toMatchObject({
+      digest: expect.stringMatching(/^NEXT_REDIRECT;replace;\/marketplace\/7;/),
+    });
+    who.role = "admin_role";
+    const tree = elements(await adEdit.default(params("7")));
+    expect(tree.some((el) => el.type === DeleteClassified)).toBe(true);
   });
 });
 

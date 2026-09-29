@@ -7,7 +7,7 @@ import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { parseRowId } from "@/lib/entry-id";
-import { isAdmin } from "@/lib/roles";
+import { canEditAnyAd } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { PageHeader } from "@/components/page-header";
 import { ClassifiedForm } from "@/components/marketplace/classified-form";
@@ -38,11 +38,12 @@ export default async function EditClassifiedPage({ params }: { params: Promise<{
   const ad = (res.data?.[0] ?? null) as Classified | null;
   if (!ad) notFound();
 
-  // UI gate mirroring the CMS is-classified-author policy (owner, or
-  // admin bypass; editors may only delete, not edit) — the CMS enforces it
+  // UI gate mirroring the CMS is-classified-author policy (owner, or the
+  // update bypass, canEditAnyAd = admin_role; editors take ads down on the
+  // detail page but do not edit them) — the CMS enforces it
   // authoritatively via the update-route policy config.
   const isOwner = typeof session?.user?.id === "number" && ad.author?.id === session.user.id;
-  if (!isOwner && !isAdmin(viewer.role)) {
+  if (!isOwner && !canEditAnyAd(viewer.role)) {
     redirect(`/marketplace/${ad.id}`);
   }
 
