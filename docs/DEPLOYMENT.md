@@ -1242,6 +1242,19 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the action results, auth codes and English defaults (batch 12,
+> lane 7A)?** A normal deploy of cms and web with `infra/deploy.sh`; the two
+> do not depend on each other. No schema, permission, edge or required env
+> change; one new optional cms env, `DIGEST_DEFAULT_LOCALE` (`en` or `de`,
+> default `en`), the digest language for users whose profile has none. The
+> language switch now also stores the user's choice on the profile, so the
+> digests follow it; the web's built-in default language is English (compose
+> already defaulted `DEFAULT_LOCALE` to `en`). Buttons show a message instead
+> of an error page when the cms refuses or is down, the sign-in,
+> registration and profile messages are translated, and a burst of parallel
+> wrong logins can no longer exceed the login limit. Follow
+> [Upgrading to the action results, auth codes and English defaults (batch 12, lane 7A)](#upgrading-to-the-action-results-auth-codes-and-english-defaults-batch-12-lane-7a).
+>
 > **Deploying batch 10 (2026-09-29)?** The CI and edge changes, the deploy,
 > backup and cron hardening and the web session with batched poll results
 > (the three notes below) ship as one deploy of cms and web **together**
@@ -1544,6 +1557,109 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the action results, auth codes and English defaults (batch 12, lane 7A)
+
+This release (branch `refactor/action-results-and-i18n`, on `main`
+`7d9e52b`) changes the web's mutations, its sign-in path and the language
+defaults. The cms changes only the digest language.
+
+- **Buttons answer with a message (AC01).** Confirming an announcement,
+  sending kudos, posting and deleting comments, reactions, marking
+  notifications read, poll votes, RSVPs, completing a lesson and creating a
+  poll no longer throw when the cms refuses or is unreachable. The control
+  shows an inline message instead: "The intranet cannot be reached right
+  now…" during an outage, "You are not allowed to do this." for a refused
+  permission, "This item no longer exists…" for something deleted
+  meanwhile, and the control's own text otherwise. A vote on a poll whose
+  answers an editor changed while the page was open now says so ("The
+  answers of this poll were changed in the meantime…") and reloads the
+  card, instead of "maybe you already voted". An expired session still
+  lands on `/sign-in?expired=1`. The requests to the cms are unchanged.
+- **Translated sign-in, registration and profile messages (AC02).** Some
+  of these messages were English on German pages ("Invalid email or
+  password.", "Too many failed attempts…"), and a refused registration
+  showed Strapi's own text. All of them now come from the message catalogs.
+  The sign-in form keeps the typed e-mail after a failed attempt. A
+  registration with a taken e-mail or name says so; any other refusal
+  says "Registration failed". A password change during a cms outage says
+  it could not be changed right now, instead of asking to check the
+  current password.
+- **Login limit under parallel attempts (FX39).** The web reserves each
+  password attempt before it asks the cms and counts it only when the
+  cms refuses the password. Before, parallel wrong attempts against one
+  account (or from one IP) all passed the check before the first failure
+  was counted, so a burst could exceed the limit (10 failures per account
+  in 15 minutes, 10 per IP in a minute). Now at most that many attempts are
+  in flight at once; outages and Strapi's own throttle still count
+  nothing. The log line `[login-rate-limit] block engaged ip=… identifier=…`
+  is unchanged. The registration form uses the same limiter.
+- **Sign-in code split (WD09).** No visible change, except that a correct
+  password no longer fails when the cms's `/api/users/me` read right after
+  the sign-in fails (the sign-in's own user data is used then).
+- **Language (AC04, owner decision 2026-09-29: English by default).**
+  - The language switch now also stores the choice on the user's profile
+    (`locale`), best-effort: if that write fails, the switch still works
+    and the web logs `[locale] could not store the language on the
+    profile: …`.
+  - A digest is written in the recipient's profile language. A user whose
+    profile has no valid language gets `DIGEST_DEFAULT_LOCALE` (new,
+    optional, `en` or `de`, default `en`; an invalid value logs one warning
+    and uses `en`). Compose passes it with the default `en`.
+  - The web's built-in default is English when `DEFAULT_LOCALE` is unset or
+    invalid (it was German). Compose has passed `DEFAULT_LOCALE` with the
+    default `en` for a while, so a compose deployment sees no change.
+  - The user schema's `locale` default stays `en`; it applies to new users
+    only. Existing users keep their stored value. Most of them hold `en`,
+    the value the schema gave them when they were created, even if they
+    read the German UI; their digests stay English until they switch the
+    language once (any switch stores it).
+
+**A normal deploy with `infra/deploy.sh`.** No schema, permission, edge or
+Traefik change; the cms and the web can be deployed in either order.
+
+1. **Optional env:** an instance whose users should get German digests by
+   default sets `DIGEST_DEFAULT_LOCALE=de` (and `DEFAULT_LOCALE=de` for the
+   UI) in `infra/.env`. The owner instance keeps the English default:
+   nothing to set.
+2. **Deploy:** `infra/deploy.sh`.
+3. **After: sign-in.** In the German UI, sign in with a wrong password:
+   "E-Mail-Adresse oder Passwort ist falsch." Then sign in correctly.
+4. **After: the language is stored.** Switch the language in the top bar,
+   then check your user row (the helpers of the batch 8 section; read-only):
+
+   ```bash
+   echo "SELECT id, email, locale FROM up_users ORDER BY updated_at DESC LIMIT 3;" \
+     | docker exec -i infra-db-1 sh -c 'psql -X -U "$POSTGRES_USER" -d "$POSTGRES_DB"'
+   ```
+
+   Your row shows the language you switched to.
+5. **After: logs.**
+   `"${COMPOSE[@]}" logs --since 30m web | grep -E '\[locale\]|\[auth\] sign-in failed'`
+   prints nothing. The next morning the digest run logs as before.
+
+**Rollback:** re-up the previous images with the commands `infra/deploy.sh`
+prints; no database step. Profile languages the new language switch stored
+stay (the previous cms reads them for the digests the same way, the
+previous web ignores them).
+
+**Rehearsal (2026-09-29, lane 7A):** unit suite 4460 tests (4518 with
+Postgres 16.15), including every converted action with success, a
+specific refusal, the expired-session redirect and a network error; a
+parallel burst of 15 wrong sign-ins against one account, of which exactly
+10 reached the cms and one logged the block; every auth and profile code
+with its text in both catalogs; the digest language fallback; and a pin
+that compose, both `.env.example` files and the user schema all default to
+`en`. The time-zone matrix passed under Pacific/Auckland; under UTC and
+Europe/Berlin one `infra/live-smoke.test.ts` case hit its 30 s limit on a
+loaded host and passed when that file ran alone in both zones. The
+integration suite passed on SQLite (149 tests). On Postgres 16, 296 of 298
+tests passed; the per-role read snapshot and the Entra provisioning boot hit
+their time limits on the loaded host, and the snapshot test passed with a
+longer limit, matching the recorded snapshot. The cms and web production
+builds passed. Not exercised: a running stack (the German sign-in, the
+language switch writing the user row and a digest dry run were covered by
+unit tests only).
 
 #### Deploying batch 10 (2026-09-29)
 
