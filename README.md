@@ -982,24 +982,31 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
 
 Every Traefik router matches the host in `DOMAIN` (`infra/.env`, the bare
 host name), so the overlay file is the same for every instance; compose
-refuses to render it without `DOMAIN`. It is one Sinnlos stack per Traefik,
-though: the router, service and middleware names are fixed (`sinnlos-*`), so
-a second instance (employer, staging) needs its own host or Traefik. Behind
-the production Traefik it would delete production's routers (different
-`DOMAIN`) or share its services (same `DOMAIN`). The cms router brings its
-own middlewares, so `/admin` and `/api` stay up while the web container
-restarts, and `/live/*` (the SSE stream) has its own router without
-compression. The containers reach each other by the aliases `sinnlos-db`,
-`sinnlos-cms` and `sinnlos-web` on the project network, and every
-container's log is rotated (5 × 10 MB).
+refuses to render it without `DOMAIN`. Nothing checks the value beyond that:
+a scheme, a port or the example host renders, passes `deploy.sh --check`
+and leaves every router without a match (the site answers 404), so check
+the rendered hosts before a deploy that sets or changes it
+([docs/DEPLOYMENT.md §3.6 B](./docs/DEPLOYMENT.md#b-shared-traefik-live-production-layout)).
+It is one Sinnlos stack per Traefik, though: the router, service and
+middleware names are fixed (`sinnlos-*`), so a second instance (employer,
+staging) needs its own host or Traefik. Behind the production Traefik it
+would delete production's routers (different `DOMAIN`) or share its
+services (same `DOMAIN`). The cms router brings its own middlewares, so
+`/admin` and `/api` stay up while the web container restarts, and `/live/*`
+(the SSE stream) has its own router without compression. The containers
+reach each other by the aliases `sinnlos-db`, `sinnlos-cms` and
+`sinnlos-web` on the project network, and every container's log is rotated
+(5 × 10 MB).
 
 `infra/deploy.sh` wraps this end to end: env preflight (`infra/.env` against
 the env contract, and `DATETIME_LEGACY_ZONE` while the running database
 still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
 only this step) → pre-deploy DB backup → tag the running images `:rollback`
 → rebuild + restart (a failed `up` prints the rollback commands) → curl
-smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
-from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
+smoke-check → datetime and live-pipeline smoke (against `SMOKE_URL` and
+`BASE_URL`, which default to the owner's site: another instance sets both
+to its own address). Rolling back to a cms image from before the datetime
+contract needs `infra/docker-compose.cms-legacy-tz.yml`
 on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
 image from before the web datetime port needs
 `infra/docker-compose.web-legacy-tz.yml` (it runs that web in `APP_TIME_ZONE`,
