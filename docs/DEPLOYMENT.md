@@ -1251,6 +1251,17 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying the UI primitives and Markdown rendering (batch 13, lane
+> 8B)?** A normal `infra/deploy.sh` run that changes the **web only**: no
+> env, schema, permission, route, edge or dependency change, and no cms
+> restart is needed. Select menus, the language menu, the notification bell
+> and the two dialogs (delete an ad, give kudos) behave like before for a
+> mouse user but now work fully with the keyboard; announcement bodies now
+> render as Markdown like wiki pages (single line breaks inside a paragraph
+> join); deleting an ad lands on the marketplace without a "Page not found"
+> flash; the bell keeps its list during a cms outage. Follow
+> [Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b).
+>
 > **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
 > the action results with English defaults, and the domain package with
 > the new image layers and pnpm 10 (the three notes below) ship as one
@@ -1620,6 +1631,99 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
+
+This release (branch `feat/ui-primitives`, on `batch/12` `02f288e`) changes
+the web only. What users notice:
+
+- **Menus (UI02).** The marketplace category and duration selects, the
+  department filter on `/people`, the language menu in the top bar and the
+  notification bell's panel open with Enter or a click, move with the arrow
+  keys, jump to an entry by typing its first letter, close with Escape or a
+  click beside them, and give focus back to their button. Screen readers
+  hear the current value on a select's button ("Category For sale"). On a
+  phone the bell's panel keeps 12 px to each screen edge. The language menu
+  stays disabled until
+  the page is back in the new language, and a switch that cannot reach the
+  web server keeps the current language instead of showing the error page.
+  The search palette (Ctrl+K / ⌘K) no longer logs "DialogContent requires a
+  DialogTitle" in the browser console. The marketplace form still posts
+  `category` and `days` as before.
+- **The bell during a cms outage.** A refetch that cannot reach the cms
+  keeps the last list and badge instead of emptying them, and the open
+  panel says "The intranet cannot be reached right now…". The next
+  successful refetch clears it (the bell polls every 2 minutes, every 30
+  seconds while the live stream is degraded, and on a live ping).
+- **Markdown (UI03).** Announcement bodies (a Strapi rich-text field, i.e.
+  Markdown) now render like wiki pages and lessons: bold, lists, links and
+  images show as written. **Editors should know:** a single line break
+  inside a paragraph now joins the lines (Markdown rules); an empty line
+  starts a new paragraph. Raw HTML in any body (wiki, lesson, announcement)
+  is shown as text, never run; a link to `javascript:`, `data:` or another
+  unsafe scheme renders as plain text and such an image as its alt text.
+  Links to other intranet pages stay in the tab, links to other sites open
+  in a new tab. The dashboard's _Latest news_ cards show plain-text
+  excerpts (no `**`, `#` or link targets).
+- **Dialogs (UI07).** _Delete ad_ and _Give kudos_ keep the keyboard inside
+  the dialog, close with Escape or a click beside it and give focus back to
+  their button; _Cancel_ is focused first when deleting. Confirming a
+  delete now goes straight to `/marketplace`: before, the edit page of the
+  deleted ad flashed "Page not found" first. A delete the cms refuses or
+  cannot answer shows the matching message ("You are not allowed to do
+  this.", "This item no longer exists…", "The intranet cannot be reached
+  right now…" or "Deleting failed…") and the dialog stays open.
+
+**A normal deploy with `infra/deploy.sh`** (it rebuilds both images; only
+the web image changes). No `.env`, compose, schema, permission or Traefik
+change; no message keys were added. It can go out before or after the
+other batch 13 lanes' deploy steps; merged together they ship as one deploy.
+
+1. **Before (read-only):** `infra/deploy.sh --check` and `--dry-run` as
+   usual.
+2. **Deploy:** `infra/deploy.sh`.
+3. **After: the pages.** Signed in, open `/announcements` (the bodies show
+   formatting instead of raw `**` or backticks), `/` (the _Latest news_
+   excerpts are plain text), a wiki page with headings (the table of
+   contents and heading links work as before) and a lesson.
+4. **After: keyboard.** Tab to the language button in the top bar, press
+   Enter, then the arrow keys and Escape: the menu opens, moves, closes, and
+   the focus is back on the button. Press Ctrl+K and look at the browser
+   console: no "DialogTitle" error.
+5. **After: delete (optional, with a test ad).** Post a test ad, open
+   _Edit_, _Delete ad_, _Delete_: the browser lands on `/marketplace`
+   without a "Page not found" flash.
+6. **After: logs.** This prints only lines for deletes or language
+   switches that failed on purpose:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m web | grep -E '\[classifieds\] delete|\[locale\]'
+   ```
+
+**Rollback:** re-up the previous web image with the commands
+`infra/deploy.sh` prints; nothing else changed. Announcement bodies are
+shown as plain text again.
+
+**Rehearsal (2026-09-29, lane 8B):** unit suite 4730 tests (4788 with
+Postgres 16), the time-zone matrix under UTC, Europe/Berlin and
+Pacific/Auckland with Postgres 16, the integration suite on SQLite (163)
+and Postgres 16 (330), and the web production build passed. In the plain
+Postgres run one `infra/live-smoke.test.ts` case (a different one each
+run) hit its 30 s limit on the loaded host; the file passed alone (19/19).
+In a browser (headless Chrome against the demo web, `next dev` with
+`DEMO_MODE=1`), 48 checks passed with no console message from the app: the
+palette's dialog name and description; the language menu by keyboard and
+mouse, switching to German and back; the bell by click, arrow keys and
+Escape, at 1280 px and 360 px; both dialogs trapping Tab and closing on
+Escape with focus back on their button (the kudos dialog also on a backdrop
+click); the delete landing
+on `/marketplace` with the action answering `x-action-redirect:
+/marketplace` and no "Page not found" rendered on the way; the category
+select changing the form's `category`; and an announcement containing a
+`<script>`, an `onerror` image and `javascript:` and `data:` targets
+rendered harmlessly. Not exercised: a screen-reader pass (NVDA or
+VoiceOver) and the bell during a real cms outage (the demo has no cms; unit
+tests cover it).
 
 #### Deploying batch 12 (2026-09-29)
 

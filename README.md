@@ -1402,3 +1402,18 @@ APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
 - [ ] The first Tab on an app page shows _Skip to content_; the theme
       toggle switches on the first click also for a user whose system theme
       is dark
+- [ ] The language menu, the marketplace category and duration selects,
+      the _/people_ department filter and the notification bell open with
+      Enter, move with the arrow keys, jump by typing a letter, close with
+      Escape and give focus back to their button; ⌘K logs no
+      "DialogTitle" error in the browser console
+- [ ] _Delete ad_ and _Give kudos_ keep Tab inside the dialog, close with
+      Escape or a click beside it and give focus back to their button;
+      confirming a delete lands on `/marketplace` without a _Page not found_
+      flash
+- [ ] An announcement renders its Markdown (bold, lists, links, images);
+      `<script>` or an `onerror` attribute in a body shows as text, a
+      `javascript:` link as plain text; the dashboard's _Latest news_
+      excerpts show no `**`, `#` or link targets
+- [ ] With the cms stopped after a page loaded, the bell keeps its badge
+      and list and the open panel says the intranet cannot be reached
