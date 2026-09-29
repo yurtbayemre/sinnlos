@@ -1003,7 +1003,9 @@ infra/deploy.sh
    last-known-good`, and the rollback target stays the previous one. Run
    `infra/live-smoke.sh` by hand, then re-run with a readable
    `PASSWORDS_FILE`, or with `--record-without-live-smoke` to record it
-   anyway.
+   anyway. A state file that cannot be written only warns (the state keeps
+   naming the previous deploy), and then no SHA tag is removed; the prune
+   never removes the tag the state names.
 
 A failure from step 3 on prints the rollback commands for the target of
 step 2 (an ERR trap catches the unexpected ones, a failed tag included);

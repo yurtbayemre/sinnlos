@@ -127,7 +127,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL=",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -200,7 +200,9 @@ function deploys(steps: readonly Step[]): StepReport[] {
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
     "sleep() { :; }",
-    "export -f docker curl flock timeout sleep resolvable",
+    // STUB_STATE_WRITE_FAIL: the state file cannot be written (its mv fails).
+    'mv() { if [[ -n "$STUB_STATE_WRITE_FAIL" && "${*: -1}" == *.state ]]; then echo "mv: permission denied" >&2; return 1; fi; command mv "$@"; }',
+    "export -f docker curl flock timeout sleep resolvable mv",
   ];
   steps.forEach((step, n) => {
     const env = Object.entries(step.env ?? {})
@@ -295,6 +297,10 @@ describe.skipIf(!RUN_SEQUENCES)(
           env: { PASSWORDS_FILE: "/nonexistent/pw" },
           args: ["--record-without-live-smoke"],
         },
+        // The state cannot be written, with DEPLOY_KEEP_TAGS=1 …
+        /* 11 */ { before: "commit; KEEP=1; STUB_STATE_WRITE_FAIL=1" },
+        // … and the next deploy still finds the previous one.
+        /* 12 */ { before: "commit; STUB_STATE_WRITE_FAIL=" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -416,6 +422,33 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(forced.state.LIVE_SMOKE).toMatch(
         /^skip: demo credentials file \/nonexistent\/pw not readable/,
       );
+    });
+
+    it("prunes nothing when the state cannot be written, so the state's tags stay", () => {
+      const [good, unwritten, next] = [r[10], r[11], r[12]];
+      const orphan = historyTags(unwritten).at(-1) ?? "";
+      expect(unwritten.status, unwritten.stderr).toBe(0);
+      expect(unwritten.stderr).toContain(`WARNING: could not write `);
+      expect(unwritten.stderr).toContain("no SHA tag is pruned");
+      expect(called(unwritten, /^docker image rm/)).toEqual([]);
+      expect(unwritten.state).toEqual(good.state);
+      // Its own tag is in the history (a later prune removes it), the state's stays.
+      expect(orphan).not.toBe(tagOf(good));
+      expect(historyTags(unwritten)).toEqual([...historyTags(good), orphan]);
+      expect(unwritten.images).toEqual(
+        expect.arrayContaining([
+          `infra-web:${tagOf(good)}=${good.state.WEB_IMAGE}`,
+          `infra-cms:${tagOf(good)}=${good.state.CMS_IMAGE}`,
+        ]),
+      );
+      // The next deploy rolls back to that state, not to a :rollback fallback …
+      expect(next.status, next.stderr).toBe(0);
+      expect(next.stdout).toContain(`last-known-good: infra-{web,cms}:${tagOf(good)}`);
+      expect(called(next, /:rollback$/)).toEqual([]);
+      // … and with KEEP=1 prunes both older tags once its own state is written.
+      expect(historyTags(next)).toEqual([tagOf(next)]);
+      expect(next.stdout).toContain(`pruned infra-{web,cms}:${tagOf(good)}`);
+      expect(next.stdout).toContain(`pruned infra-{web,cms}:${orphan}`);
     });
 
     it("moves the state on the next good deploy, and prunes SHA tags beyond DEPLOY_KEEP_TAGS", () => {

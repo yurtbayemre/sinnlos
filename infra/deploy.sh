@@ -682,7 +682,8 @@ keep_running_images() {
 # images must resolve before either tag moves (never a new web tag next to
 # an old cms one). A failed tag is a failed deploy (the ERR trap prints the
 # rollback); a state that cannot be written only warns: the previous
-# last-known-good stays valid.
+# last-known-good stays valid, and RECORDED=0 keeps the prune from removing
+# its tags.
 record_last_known_good() {
   local web_id cms_id tmp id
   web_id="$(docker inspect --format '{{.Image}}' "${PROJECT}-web-1")"
@@ -700,6 +701,14 @@ record_last_known_good() {
   docker tag "${cms_id}" "${PROJECT}-cms:${NEW_TAG}"
   echo "  ${PROJECT}-web:${NEW_TAG} = ${web_id}"
   echo "  ${PROJECT}-cms:${NEW_TAG} = ${cms_id}"
+  # The history lists every SHA tag this script set, for the prune, also
+  # when the state below cannot be written.
+  if ! {
+    { [[ -e "${HISTORY_FILE}" ]] || { : > "${HISTORY_FILE}" && own_like_git_dir "${HISTORY_FILE}"; }; } &&
+      echo "${NEW_TAG} ${HEAD_SHA} $(date -Is)" >> "${HISTORY_FILE}"
+  }; then
+    echo "WARNING: could not append to ${HISTORY_FILE}: ${NEW_TAG} is never pruned automatically." >&2
+  fi
   if ! {
     tmp="${STATE_FILE}.tmp.$$" &&
       {
@@ -711,14 +720,14 @@ record_last_known_good() {
         echo "WEB_IMAGE=${web_id}"
         echo "CMS_IMAGE=${cms_id}"
         echo "LIVE_SMOKE=${LIVE_SMOKE_RESULT}"
-      } > "${tmp}" && own_like_git_dir "${tmp}" && mv -f "${tmp}" "${STATE_FILE}" &&
-      { [[ -e "${HISTORY_FILE}" ]] || { : > "${HISTORY_FILE}" && own_like_git_dir "${HISTORY_FILE}"; }; } &&
-      echo "${NEW_TAG} ${HEAD_SHA} $(date -Is)" >> "${HISTORY_FILE}"
+      } > "${tmp}" && own_like_git_dir "${tmp}" && mv -f "${tmp}" "${STATE_FILE}"
   }; then
     rm -f "${tmp:-}" 2>/dev/null || true
     echo "WARNING: could not write ${STATE_FILE}: the last-known-good state still names the previous deploy." >&2
+    RECORDED=0
     return 0
   fi
+  RECORDED=1
   echo "  recorded in ${STATE_FILE}"
   # From now on the state is the rollback target; :rollback is no longer kept.
   rm -f "${BOOTSTRAP_FILE}" 2>/dev/null || true
@@ -741,11 +750,15 @@ tags_to_prune() {
 
 # Removes <project>-{web,cms}:<tag> of every tag beyond the newest
 # KEEP_TAGS, then drops them from the history. Only tags this script
-# created; never fails the deploy.
+# created, never the one the state file names (the rollback target), which
+# stays in the history too; never fails the deploy. Runs only after the
+# state was written (RECORDED).
 prune_sha_tags() {
-  local tag keep
+  local tag keep protected
+  protected="$(sed -n 's/^TAG=//p' "${STATE_FILE}" 2>/dev/null || true)"
+  protected="${protected%%$'\n'*}"
   while IFS= read -r tag; do
-    [[ -n "${tag}" && "${tag}" != "${NEW_TAG}" ]] || continue
+    [[ -n "${tag}" && "${tag}" != "${NEW_TAG}" && "${tag}" != "${protected}" ]] || continue
     if docker image rm "${PROJECT}-web:${tag}" "${PROJECT}-cms:${tag}" >/dev/null 2>&1; then
       echo "  pruned ${PROJECT}-{web,cms}:${tag}"
     else
@@ -753,6 +766,7 @@ prune_sha_tags() {
     fi
   done < <(tags_to_prune "${NEW_TAG}")
   keep="$(history_tags | tail -n "${KEEP_TAGS}")"
+  if [[ -n "${protected}" ]]; then keep+=$'\n'"${protected}"; fi
   if [[ -w "${HISTORY_FILE}" ]]; then
     awk 'NR == FNR { keep[$1] = 1; next } ($1 in keep)' <(printf '%s\n' "${keep}") "${HISTORY_FILE}" \
       > "${HISTORY_FILE}.tmp.$$" && cat "${HISTORY_FILE}.tmp.$$" > "${HISTORY_FILE}"
@@ -1206,9 +1220,15 @@ if unrecorded_live_smoke_skip; then
 fi
 PHASE="record"
 log "Recording ${PROJECT}-{web,cms}:${NEW_TAG} as last-known-good"
+RECORDED=0
 record_last_known_good
 PHASE="prune"
-log "Pruning SHA tags beyond the newest ${KEEP_TAGS}"
-prune_sha_tags || echo "WARNING: pruning the SHA tags failed; the deploy itself is complete." >&2
+if ((RECORDED)); then
+  log "Pruning SHA tags beyond the newest ${KEEP_TAGS}"
+  prune_sha_tags || echo "WARNING: pruning the SHA tags failed; the deploy itself is complete." >&2
+else
+  # The state still names the previous deploy: its SHA tags must stay.
+  echo "WARNING: the state was not written, so no SHA tag is pruned (every older one stays)." >&2
+fi
 PHASE="done"
 log "Deploy complete."
