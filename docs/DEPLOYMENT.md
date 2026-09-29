@@ -619,7 +619,10 @@ fixture user Ada Lovelace (a member of Engineering, with a populated
 notification bell); list reads apply their filters, sort and paging to the
 fixtures; writes are not stored (a path without a fixture logs
 `[demo] no fixture for …` and answers an empty list). A production server
-(`NODE_ENV=production`) refuses to start with `DEMO_MODE=1`.
+(`NODE_ENV=production`) with `DEMO_MODE=1` comes up but answers every page
+and API route with a 500 (`apps/web/src/auth.ts` throws on its first load,
+and the log names `DEMO_MODE`), so the web healthcheck fails; only the
+internal `/api/live/emit` and static files still answer.
 
 ---
 
@@ -1285,12 +1288,13 @@ adds one cms endpoint:
   the cms token, the notification bell), and `proxy.ts` no longer decodes it
   for public paths (`/sign-in`, `/register`, `/api/auth/*`, `/api/live/emit`,
   static files). When a session has ended (its Strapi JWT expired) while a
-  page was open, a click on any button or form used to fail with "An
-  unexpected response was received from the server" and lose the typed
-  input; it now lands on `/sign-in?expired=1` with the "session expired"
-  notice, like a page load (which now shows that notice too, whenever the
-  browser still sent a session cookie). This holds for a form posted
-  without JavaScript as well:
+  page was open, forms such as the profile and new-poll forms failed with
+  "An unexpected response was received from the server" and lost the typed
+  input; other buttons (a poll vote, sign-out) ended at `/sign-in` without
+  the notice. Any button or form now lands on `/sign-in?expired=1` with the
+  "session expired" notice, like a page load (which now shows that notice
+  too, whenever the browser still sent a session cookie). This holds for a
+  form posted without JavaScript as well:
   it gets a 303 and the browser loads the sign-in page (before, the 307
   made it post the form to `/sign-in` again, which answered 500).
 - **Data client (WD01).** The web's Strapi client is split into a
@@ -1309,8 +1313,9 @@ adds one cms endpoint:
   Which polls a caller gets stays decided per poll (department targeting,
   guest access).
 - **DEMO_MODE** (`DEMO_MODE=1`, development only) answers much more like
-  Strapi; nothing changes for a production instance, which refuses to
-  start with it.
+  Strapi; nothing changes for a production instance, which must never set
+  it: with `DEMO_MODE=1` a production web answers every page and API route
+  with a 500 (the log names `DEMO_MODE`), so its healthcheck fails.
 
 **A normal deploy of cms and web together with `infra/deploy.sh`.** No env,
 schema, edge or Traefik change. The helpers of the batch 8 section (on a

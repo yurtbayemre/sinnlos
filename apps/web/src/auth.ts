@@ -48,9 +48,15 @@ import { strapiJwtExp, strapiSessionExpired } from "@/lib/strapi-jwt";
 
 const IS_BUILD = process.env.NEXT_PHASE === "phase-production-build";
 
-// The one DEMO_MODE source is lib/config.ts (WD08). A production server
-// refuses to start with it: the demo has no sign-in at all (lib/session.ts
-// DEMO_SESSION, proxy.ts lets every request through).
+// The one DEMO_MODE source is lib/config.ts (WD08). The demo has no sign-in
+// at all (lib/session.ts DEMO_SESSION, proxy.ts lets every request through),
+// so a production server (NODE_ENV=production) must not serve it. Next loads
+// this module lazily: `next start` still comes up and prints Ready, but the
+// throw below fires on the first load, so every page and route that reads
+// the session answers 500 with this message in the log (only the session-less
+// /api/live/emit and the static files still answer), and the web healthcheck
+// on / fails. It stays here rather than in instrumentation.ts: Next 16 does
+// not exit on a throwing instrumentation hook either (see its header).
 if (!IS_BUILD && DEMO_MODE && process.env.NODE_ENV === "production") {
   throw new Error("DEMO_MODE=1 must not be enabled in production — it disables all auth checks.");
 }

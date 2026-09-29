@@ -20,7 +20,8 @@
  *     and the batched /api/poll-results leaves it out;
  *   - anything else (a mutation, an unknown path) falls through to an
  *     empty list, with a console.warn outside production;
- *   - a production server refuses DEMO_MODE=1 at start (auth.ts).
+ *   - a production server with DEMO_MODE=1 answers every page and route
+ *     that reads the session with a 500 (auth.ts throws on its first load).
  */
 import { appTimeZone } from "@/lib/app-time-zone";
 import {
