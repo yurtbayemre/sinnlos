@@ -1678,6 +1678,12 @@ grants, policies and schema.
   loading skeleton with the progress bar (the training pages had none and
   overflowed on phones; `/manage`, `/manage/training` and `/polls/new`
   showed the dashboard's).
+- **The header fits beside the sidebar.** From 768 px up the header has
+  512 px next to the sidebar, but the search box and the name and e-mail
+  kept their full text width: the page scrolled sideways and _Sign out_
+  sat off-screen at 768 px, and with a long e-mail also at 1024 px (older
+  than this batch). The search box now shrinks, and the name and e-mail
+  show from 1024 px on, capped and cut with an ellipsis.
 
 **A normal deploy with `infra/deploy.sh`.** No env, schema, permission,
 compose, edge or Traefik change, nothing in the database. The cms image is
@@ -1721,7 +1727,8 @@ none of its behaviour. Only the web changes.
    other sections; as an admin it lists _Admin_, as a member not. With the
    sheet open, rotate the phone to landscape (or widen the window past
    768 px): the sheet closes, and the page scrolls and answers the first
-   tap.
+   tap. At exactly 768 px the page does not scroll sideways and _Sign out_
+   is visible.
 4. **After: as an editor:** on an ad posted by someone else, _Moderation_ →
    _Delete ad_ is offered and no _Edit_ link. (Take a test ad down, not a
    real one.)
