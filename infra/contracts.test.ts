@@ -4,20 +4,33 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  buildAckReportRows,
+  eligibleReportUsers,
+  type ReportAnnouncement,
+  type ReportUser,
+} from "../apps/web/src/lib/ack-report";
+import {
   isAnnouncementVisibleTo,
+  teamIdsByUser,
   type AnnouncementAudience,
-  type AudienceScope,
+  type TeamMembership,
 } from "../apps/web/src/lib/audience";
 import { AD_CATEGORIES } from "../apps/web/src/lib/classified-shared";
 import { AD_CATEGORY_LABELS } from "../apps/web/src/lib/classified-labels";
 import {
   anchorOf,
+  matchesTarget,
+  targetFilterQuery,
   type CommentTargetType as WebCommentTargetType,
 } from "../apps/web/src/lib/comment-target";
 import { NO_GUEST_ACCESS, normalizeGuestAccess } from "../apps/web/src/lib/poll-guest-access";
 import { CHANNEL_RE, LIVE_TARGET_TYPES } from "../apps/web/src/lib/live-contract";
 import { ALL_EMOJIS } from "../apps/web/src/lib/reaction-summary";
-import { youtubeVideoId as webYoutubeVideoId } from "../apps/web/src/lib/training-shared";
+import { ANNOUNCEMENT_READER_ROLES } from "../apps/web/src/lib/roles";
+import {
+  youtubeEmbedUrl,
+  youtubeVideoId as webYoutubeVideoId,
+} from "../apps/web/src/lib/training-shared";
 import type {
   Acknowledgement,
   ClassifiedCategory,
@@ -36,17 +49,26 @@ import type {
 
 /**
  * Cross-app contract (roadmap S05): the cms and the web are separate Docker
- * build contexts, so every rule both apps apply exists twice, and the web's
- * types and constants restate the cms schemas by hand. This root suite pins
- * the pairs to each other:
+ * build contexts, and the web's types and constants restate the cms schemas
+ * by hand. The pure rules both apps apply live once, in @sinnlos/domain
+ * (SH01; the package's own suites test them, and each app's
+ * domain-reexports.test.ts pins that its old module paths hand out the
+ * package's functions). This root suite pins what is still stated twice,
+ * or where the two apps meet:
  *
- *   1. the announcement audience (cms utils/announcement-audience.ts, the
- *      policy; web lib/audience.ts, the ack report): a decision table plus a
- *      seeded fuzz that must agree case by case;
- *   2. youtubeVideoId (cms training-validation.ts, author feedback; web
- *      training-shared.ts, the AUTHORITATIVE render gate) over the union of
- *      both suites' corpora plus a seeded fuzz;
- *   3. comment/reaction anchor normalisation (targetAnchor vs anchorOf);
+ *   1. the announcement audience: the web acknowledgement report (lib/
+ *      ack-report.ts, run as admin_role over the directory and the team
+ *      roster) counts exactly the users the cms notifies and lets read
+ *      (utils/visible-ids.ts announcementRecipients over loadAllUserScopes):
+ *      the reader roles, blocked accounts and "member OR lead" of a team are
+ *      built separately on each side; a seeded fuzz over whole orgs;
+ *   2. lesson videos: the cms lesson validation (training-validation.ts,
+ *      author feedback) saves exactly the URLs the web player (the
+ *      AUTHORITATIVE render gate) embeds, and the embed stays on the
+ *      no-cookie host; a corpus plus a seeded fuzz;
+ *   3. comment/reaction targets: both apps and the schemas know the same
+ *      target types, and a write the web sends is stored by the cms under
+ *      the anchor the web's own section reads (filter and row re-check);
  *   4. schema.json enums against the web unions and constants (types.ts,
  *      AD_CATEGORIES, ALL_EMOJIS, the kudos form values, the RSVP statuses,
  *      the quick-link CATEGORY_ORDER, the live CHANNEL_RE, poll audience and
@@ -92,13 +114,45 @@ const { PERMISSION_MATRIX } = await cms<{ PERMISSION_MATRIX: RoleGrants }>(
 );
 
 const { isAnnouncementVisible } = await cms<{
-  isAnnouncementVisible(announcement: AnnouncementAudience, scope: AudienceScope | null): boolean;
+  isAnnouncementVisible(announcement: AnnouncementAudience, scope: unknown): boolean;
 }>("utils/announcement-audience.ts");
 
-const { TARGET_UIDS, isCommentTargetType, targetAnchor } = await cms<{
+/** The slice of Strapi's db.query the cms helpers below read (a fake here). */
+interface FakeQueryStrapi {
+  db: {
+    query(uid: string): {
+      findMany(params: Record<string, unknown>): Promise<unknown>;
+      findOne(params: Record<string, unknown>): Promise<unknown>;
+    };
+  };
+}
+
+interface RecipientScope {
+  userId: number;
+}
+
+const { NOT_BLOCKED, announcementRecipients, loadAllUserScopes } = await cms<{
+  NOT_BLOCKED: unknown;
+  loadAllUserScopes(strapi: FakeQueryStrapi): Promise<RecipientScope[]>;
+  announcementRecipients(
+    announcement: AnnouncementAudience,
+    scopes: readonly RecipientScope[],
+    readers: ReadonlySet<number>,
+  ): RecipientScope[];
+}>("utils/visible-ids.ts");
+
+type WriteTargetResolution =
+  | { status: "ok"; targetType: string; targetDocumentId: string }
+  | { status: "rejected"; reason: string };
+
+const { TARGET_UIDS, isCommentTargetType, resolveWriteTarget, targetMatchWhere } = await cms<{
   TARGET_UIDS: Record<string, string>;
   isCommentTargetType(value: unknown): boolean;
-  targetAnchor(value: unknown): string | null;
+  targetMatchWhere(targetType: string, targetDocumentId: string): Record<string, unknown>;
+  resolveWriteTarget(
+    strapi: FakeQueryStrapi,
+    input: { targetType?: string | null; targetDocumentId?: string | null },
+  ): Promise<WriteTargetResolution>;
 }>("utils/comment-target.ts");
 
 interface GuestFlags {
@@ -114,7 +168,8 @@ const { POLL_AUDIENCE_ALL, POLL_AUDIENCE_DEPARTMENTS, canGuestsVoteOnPoll, isPol
     isPollVisibleToGuests(poll: GuestFlags): boolean;
   }>("utils/poll-audience.ts");
 
-const { youtubeVideoId: cmsYoutubeVideoId } = await cms<{
+const { validateLessonData, youtubeVideoId: cmsYoutubeVideoId } = await cms<{
+  validateLessonData(data: Record<string, unknown>): { normalized: unknown } | { error: string };
   youtubeVideoId(rawUrl: unknown): string | null;
 }>("utils/training-validation.ts");
 
@@ -233,143 +288,193 @@ function sourceStrings(file: string, pattern: RegExp, literal = /"([^"]*)"/g): s
 }
 
 // ---------------------------------------------------------------------------
-// 1. Announcement audience
+// 1. Announcement audience: the web ack report = the cms recipients
 // ---------------------------------------------------------------------------
 
-describe("announcement audience: cms announcement-audience.ts = web audience.ts", () => {
-  const MEMBER_ROLE = 5;
-  const GUEST_ROLE = 6;
-  const scope = (
-    departmentId: number | null,
-    teamIds: number[],
-    roleId: number | null,
-  ): AudienceScope => ({
-    departmentId,
-    teamIds,
-    roleId,
-  });
+describe("announcement audience: the web ack report counts whom the cms notifies", () => {
+  /** Role row ids of the fuzzed orgs: the cms decides by role id, the web report by type. */
+  const ROLE_IDS = new Map(Object.keys(PERMISSION_MATRIX).map((type, index) => [type, index + 1]));
+  const ROLE_TYPES = [...ROLE_IDS.keys()];
+  /** What up_permissions holds: the role ids with announcement.find. */
+  const READERS: ReadonlySet<number> = new Set(
+    ROLE_TYPES.filter((type) =>
+      PERMISSION_MATRIX[type]?.["api::announcement.announcement"]?.includes("find"),
+    ).map((type) => ROLE_IDS.get(type)!),
+  );
 
-  const TABLE: Array<[string, AnnouncementAudience, AudienceScope | null, boolean]> = [
-    ["untargeted, anonymous", {}, null, true],
-    ["untargeted, any caller", { audience: "all" }, scope(11, [], GUEST_ROLE), true],
-    [
-      "audience 'departments' without a department link stays company-wide",
-      { audience: "departments" },
-      scope(11, [], 1),
-      true,
-    ],
-    ["department, anonymous", { department: { id: 10 } }, null, false],
-    ["department, member of it", { department: { id: 10 } }, scope(10, [], MEMBER_ROLE), true],
-    [
-      "department, member of another",
-      { department: { id: 10 } },
-      scope(11, [], MEMBER_ROLE),
-      false,
-    ],
-    [
-      "department, caller without one",
-      { department: { id: 10 } },
-      scope(null, [], MEMBER_ROLE),
-      false,
-    ],
-    [
-      "a department restricts even with audience 'all'",
-      { audience: "all", department: { id: 10 } },
-      scope(11, [], 1),
-      false,
-    ],
-    ["team, member or lead", { team: { id: 30 } }, scope(null, [30], MEMBER_ROLE), true],
-    ["team, outsider", { team: { id: 30 } }, scope(10, [31], MEMBER_ROLE), false],
-    ["team, anonymous", { team: { id: 30 } }, null, false],
-    ["roles, holder", { audienceRoles: [{ id: MEMBER_ROLE }] }, scope(null, [], MEMBER_ROLE), true],
-    [
-      "roles, other role",
-      { audienceRoles: [{ id: MEMBER_ROLE }] },
-      scope(10, [30], GUEST_ROLE),
-      false,
-    ],
-    [
-      "roles, caller without a role",
-      { audienceRoles: [{ id: MEMBER_ROLE }] },
-      scope(10, [30], null),
-      false,
-    ],
-    ["roles, anonymous", { audienceRoles: [{ id: MEMBER_ROLE }] }, null, false],
-    ["an empty role list does not restrict", { audienceRoles: [] }, scope(null, [], null), true],
-    [
-      "department AND team: team missing",
-      { department: { id: 10 }, team: { id: 30 } },
-      scope(10, [], 5),
-      false,
-    ],
-    [
-      "department AND team: both",
-      { department: { id: 10 }, team: { id: 30 } },
-      scope(10, [30], 5),
-      true,
-    ],
-    [
-      "all three criteria met",
-      { department: { id: 10 }, team: { id: 30 }, audienceRoles: [{ id: 5 }, { id: 6 }] },
-      scope(10, [30], 6),
-      true,
-    ],
-    [
-      "all three criteria, role missing",
-      { department: { id: 10 }, team: { id: 30 }, audienceRoles: [{ id: 5 }] },
-      scope(10, [30], 6),
-      false,
-    ],
-    [
-      "null relations count as unset",
-      { department: null, team: null, audienceRoles: null },
-      null,
-      true,
-    ],
-  ];
+  const DEPARTMENTS = [10, 11, 12];
+  const TEAMS = [30, 31, 32, 33];
 
-  it.each(TABLE)("%s", (_label, announcement, callerScope, expected) => {
-    expect(isAnnouncementVisible(announcement, callerScope)).toBe(expected);
-    expect(isAnnouncementVisibleTo(announcement, callerScope)).toBe(expected);
-  });
+  interface OrgUser {
+    id: number;
+    roleType: string | null;
+    departmentId: number | null;
+    /** A column value: users imported or seeded outside users-permissions can carry NULL. */
+    blocked: boolean | null;
+  }
 
-  it("agrees on 5000 seeded random announcements and scopes", () => {
-    const random = prng(0x5eed);
-    const ids = [1, 2, 3];
-    const outcomes = new Set<boolean>();
-    for (let i = 0; i < 5000; i += 1) {
-      const announcement: AnnouncementAudience = {
-        audience: pick(random, ["all", "departments", null, undefined]),
-        department: random() < 0.5 ? null : { id: pick(random, ids) },
-        team: random() < 0.5 ? null : { id: pick(random, ids) },
-        audienceRoles: random() < 0.3 ? null : subset(random, [1, 2, 3, 4]).map((id) => ({ id })),
-      };
-      const callerScope =
-        random() < 0.15
+  interface OrgTeam {
+    id: number;
+    leadId: number | null;
+    memberIds: number[];
+  }
+
+  interface Org {
+    users: OrgUser[];
+    teams: OrgTeam[];
+  }
+
+  function randomOrg(random: () => number): Org {
+    const users = Array.from({ length: 12 }, (_, index) => ({
+      id: index + 1,
+      roleType: random() < 0.1 ? null : pick(random, ROLE_TYPES),
+      departmentId: random() < 0.2 ? null : pick(random, DEPARTMENTS),
+      blocked: pick(random, [false, false, false, true, null]),
+    }));
+    const ids = users.map((user) => user.id);
+    const teams = TEAMS.map((id) => ({
+      id,
+      // A lead is not automatically a member (team.lead has no inverse on the user).
+      leadId: random() < 0.25 ? null : pick(random, ids),
+      memberIds: subset(random, ids),
+    }));
+    return { users, teams };
+  }
+
+  function randomAnnouncement(random: () => number, id: number): ReportAnnouncement {
+    return {
+      id,
+      documentId: `doc${id}`,
+      requiresAck: true,
+      audience: pick(random, ["all", "departments", null]),
+      department: random() < 0.5 ? null : { id: pick(random, DEPARTMENTS) },
+      team: random() < 0.5 ? null : { id: pick(random, TEAMS) },
+      audienceRoles:
+        random() < 0.5
           ? null
-          : {
-              roleId: random() < 0.2 ? null : pick(random, [1, 2, 3, 4]),
-              departmentId: random() < 0.2 ? null : pick(random, ids),
-              teamIds: subset(random, ids),
-            };
-      const cms = isAnnouncementVisible(announcement, callerScope);
-      expect(
-        isAnnouncementVisibleTo(announcement, callerScope),
-        JSON.stringify({ announcement, callerScope }),
-      ).toBe(cms);
-      outcomes.add(cms);
+          : subset(random, ROLE_TYPES).map((type) => ({ id: ROLE_IDS.get(type)! })),
+    };
+  }
+
+  /** The cms reads: loadAllUserScopes over a db.query fake that answers like the database. */
+  function cmsStrapi(org: Org): FakeQueryStrapi {
+    return {
+      db: {
+        query: (uid) => ({
+          findOne: async () => {
+            throw new Error("findOne is not expected here");
+          },
+          findMany: async (params) => {
+            if (uid === "plugin::users-permissions.user") {
+              expect(params.where).toEqual(NOT_BLOCKED);
+              // NOT_BLOCKED in SQL: blocked is false or NULL.
+              return org.users
+                .filter((user) => user.blocked !== true)
+                .map((user) => ({
+                  id: user.id,
+                  role:
+                    user.roleType === null
+                      ? null
+                      : { id: ROLE_IDS.get(user.roleType), type: user.roleType },
+                  department: user.departmentId === null ? null : { id: user.departmentId },
+                  teams: org.teams
+                    .filter((team) => team.memberIds.includes(user.id))
+                    .map((team) => ({ id: team.id })),
+                }));
+            }
+            if (uid === "api::team.team") {
+              return org.teams.map((team) => ({
+                id: team.id,
+                lead: team.leadId === null ? null : { id: team.leadId },
+              }));
+            }
+            throw new Error(`unexpected query ${uid}`);
+          },
+        }),
+      },
+    };
+  }
+
+  /** The web report over the directory and the roster as the page fetches them (JSON). */
+  function webTargets(org: Org, announcement: ReportAnnouncement): number[] {
+    const users = JSON.parse(
+      JSON.stringify(
+        org.users.map((user) => ({
+          id: user.id,
+          role:
+            user.roleType === null
+              ? null
+              : { id: ROLE_IDS.get(user.roleType), type: user.roleType },
+          department: user.departmentId === null ? null : { id: user.departmentId },
+          blocked: user.blocked,
+        })),
+      ),
+    ) as ReportUser[];
+    const teams: TeamMembership[] = org.teams.map((team) => ({
+      id: team.id,
+      lead: team.leadId === null ? null : { id: team.leadId },
+      members: team.memberIds.map((id) => ({ id })),
+    }));
+    const [row] = buildAckReportRows({
+      announcements: [announcement],
+      acks: new Map(),
+      eligibleUsers: eligibleReportUsers(users, ANNOUNCEMENT_READER_ROLES),
+      userTeamIds: teamIdsByUser(teams),
+      usersUnknown: false,
+      teamsUnknown: false,
+    });
+    return (row?.targetUsers ?? []).map((user) => user.id).sort((a, b) => a - b);
+  }
+
+  it("both apps decide with the one @sinnlos/domain predicate", () => {
+    expect(isAnnouncementVisibleTo).toBe(isAnnouncementVisible);
+  });
+
+  it("agrees on 300 seeded orgs with 5 announcements each", async () => {
+    const random = prng(0x5eed);
+    const sizes = new Set<string>();
+    for (let orgIndex = 0; orgIndex < 300; orgIndex += 1) {
+      const org = randomOrg(random);
+      const scopes = await loadAllUserScopes(cmsStrapi(org));
+      for (let i = 0; i < 5; i += 1) {
+        const announcement = randomAnnouncement(random, i + 1);
+        const cms = announcementRecipients(announcement, scopes, READERS)
+          .map((scope) => scope.userId)
+          .sort((a, b) => a - b);
+        expect(webTargets(org, announcement), JSON.stringify({ org, announcement })).toEqual(cms);
+        sizes.add(cms.length === 0 ? "none" : cms.length === 12 ? "all" : "some");
+      }
     }
-    expect(outcomes).toEqual(new Set([true, false]));
+    // The fuzz reaches empty and partial audiences (a full one is rare with blocked users).
+    expect(sizes).toContain("none");
+    expect(sizes).toContain("some");
+  });
+
+  it("counts a team's lead as targeted, like a member, on both sides", async () => {
+    const org: Org = {
+      users: [
+        { id: 1, roleType: "member", departmentId: null, blocked: false },
+        { id: 2, roleType: "team_lead", departmentId: null, blocked: null },
+        { id: 3, roleType: "guest", departmentId: null, blocked: false },
+      ],
+      teams: [{ id: 30, leadId: 2, memberIds: [1, 3] }],
+    };
+    const announcement: ReportAnnouncement = { id: 1, documentId: "doc1", team: { id: 30 } };
+    const scopes = await loadAllUserScopes(cmsStrapi(org));
+    const cms = announcementRecipients(announcement, scopes, READERS).map((scope) => scope.userId);
+    // The guest member is targeted but reads no announcements: neither side counts them.
+    expect(cms.sort()).toEqual([1, 2]);
+    expect(webTargets(org, announcement)).toEqual([1, 2]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 2. youtubeVideoId
+// 2. Lesson videos: what the cms saves = what the web embeds
 // ---------------------------------------------------------------------------
 
-describe("youtubeVideoId: cms training-validation.ts = web training-shared.ts", () => {
+describe("lesson videos: the cms saves exactly the URLs the web player embeds", () => {
   const ID = "dQw4w9WgXcQ";
-  /** Both suites' corpora (training-validation.test.ts, training-shared.test.ts) plus edge cases. */
+  /** Accepted forms, refusals and edge cases of both apps' former suites. */
   const CORPUS: Array<[unknown, string | null]> = [
     [`https://www.youtube.com/watch?v=${ID}`, ID],
     [`https://youtu.be/${ID}`, ID],
@@ -378,18 +483,6 @@ describe("youtubeVideoId: cms training-validation.ts = web training-shared.ts", 
     [`https://m.youtube.com/watch?v=${ID}`, ID],
     [`https://www.youtube.com/shorts/${ID}`, ID],
     [`  https://www.youtube.com/watch?v=${ID}  `, ID],
-    [`http://www.youtube.com/watch?v=${ID}`, null],
-    [`https://evil.example/watch?v=${ID}`, null],
-    [`https://www.youtube.com.evil.example/watch?v=${ID}`, null],
-    ["https://www.youtube.com/watch?v=<script>", null],
-    ["https://www.youtube.com/watch?v=short", null],
-    ["javascript:alert(1)", null],
-    ["https://vimeo.com/12345678", null],
-    ["https://vimeo.com/123", null],
-    ["", null],
-    [null, null],
-    [42, null],
-    // Edge cases beyond both suites.
     [`https://www.youtube.com/live/${ID}`, ID],
     [`https://www.youtube.com/embed/${ID}?start=30`, ID],
     [`https://youtube.com/watch?v=${ID}&t=1s`, ID],
@@ -397,23 +490,54 @@ describe("youtubeVideoId: cms training-validation.ts = web training-shared.ts", 
     [`https://www.youtube.com:443/watch?v=${ID}`, ID],
     [`https://www.youtube-nocookie.com/watch?v=${ID}`, ID],
     [`https://youtu.be/${ID}/extra`, ID],
+    [`http://www.youtube.com/watch?v=${ID}`, null],
+    [`https://evil.example/watch?v=${ID}`, null],
+    [`https://www.youtube.com.evil.example/watch?v=${ID}`, null],
+    ["https://www.youtube.com/watch?v=<script>", null],
+    ["https://www.youtube.com/watch?v=short", null],
     [`https://www.youtube.com/watch?v=${ID}x`, null],
     ["https://www.youtube.com/playlist?list=PL0123456789", null],
     ["https://youtu.be/", null],
     ["https://www.youtube.com/embed/", null],
     [`//www.youtube.com/watch?v=${ID}`, null],
     [`https://music.youtube.com/watch?v=${ID}`, null],
+    ["javascript:alert(1)", null],
     [`javascript:alert(1)//https://www.youtube.com/watch?v=${ID}`, null],
     [`data:text/html,https://youtu.be/${ID}`, null],
+    ["https://vimeo.com/12345678", null],
     ["   ", null],
-    [undefined, null],
+    [42, null],
     [{}, null],
     [[`https://youtu.be/${ID}`], null],
   ];
 
-  it.each(CORPUS)("%s -> %s", (url, expected) => {
-    expect(cmsYoutubeVideoId(url)).toBe(expected);
-    expect(webYoutubeVideoId(url)).toBe(expected);
+  /** A value the cms lesson validation treats as "no video" (keys-present rule). */
+  const cleared = (value: unknown) => value === null || value === undefined || value === "";
+
+  /** Whether the cms accepts `videoUrl` on a lesson write. */
+  const cmsSaves = (videoUrl: unknown) => !("error" in validateLessonData({ videoUrl }));
+
+  it("both apps parse with the one @sinnlos/domain function", () => {
+    expect(webYoutubeVideoId).toBe(cmsYoutubeVideoId);
+  });
+
+  it.each(CORPUS)("%s", (url, id) => {
+    // The web player renders an embed exactly for a parsed id...
+    expect(webYoutubeVideoId(url)).toBe(id);
+    // ...and the cms saves the URL exactly then: no saved video stays blank.
+    expect(cmsSaves(url)).toBe(id !== null);
+    if (id !== null) {
+      expect(youtubeEmbedUrl(id)).toBe(`https://www.youtube-nocookie.com/embed/${id}`);
+    }
+  });
+
+  it("saves a cleared video (no URL), which the player renders as nothing", () => {
+    for (const value of [null, undefined, ""]) {
+      expect(cleared(value)).toBe(true);
+      expect(cmsSaves(value), String(value)).toBe(true);
+      expect(webYoutubeVideoId(value), String(value)).toBeNull();
+    }
+    expect(cmsSaves("   ")).toBe(false);
   });
 
   it("agrees on 3000 seeded random URLs", () => {
@@ -443,30 +567,31 @@ describe("youtubeVideoId: cms training-validation.ts = web training-shared.ts", 
       () => `/watch?x=1&v=${randomId()}`,
       () => `/playlist?list=${randomId()}`,
     ];
-    const accepted = new Set<boolean>();
+    const saved = new Set<boolean>();
     for (let i = 0; i < 3000; i += 1) {
       const url = `${pick(random, schemes)}${pick(random, hosts)}${pick(random, paths)()}`;
-      const cms = cmsYoutubeVideoId(url);
-      expect(webYoutubeVideoId(url), url).toBe(cms);
-      accepted.add(cms !== null);
+      const renders = webYoutubeVideoId(url) !== null;
+      expect(cmsSaves(url), url).toBe(renders);
+      saved.add(renders);
     }
-    expect(accepted).toEqual(new Set([true, false]));
+    expect(saved).toEqual(new Set([true, false]));
   });
 });
 
 // ---------------------------------------------------------------------------
-// 3. Comment / reaction anchors
+// 3. Comment / reaction targets
 // ---------------------------------------------------------------------------
 
-describe("comment/reaction anchors: cms targetAnchor = web anchorOf", () => {
+describe("comment/reaction targets: the web reads what the cms stores for its writes", () => {
+  /** documentId values as a section's target may carry them. */
   const VALUES: unknown[] = [
     "k3m9x0000000000000000000",
     " k3m9x0000000000000000000 ",
     "\tabc\n",
-    " abc ",
+    " abc ",
     "",
     "   ",
-    " ",
+    " ",
     null,
     undefined,
     0,
@@ -478,9 +603,29 @@ describe("comment/reaction anchors: cms targetAnchor = web anchorOf", () => {
     { documentId: "abc" },
   ];
 
-  it.each(VALUES)("%j", (value) => {
-    expect(anchorOf(value)).toBe(targetAnchor(value));
-  });
+  /** Every target that exists: the anchors of the string values. */
+  const EXISTING = new Set(
+    VALUES.filter((value): value is string => typeof value === "string" && value.trim() !== "").map(
+      (value) => value.trim(),
+    ),
+  );
+
+  /** The cms lookups of resolveWriteTarget: a target row exists for EXISTING anchors. */
+  const strapi: FakeQueryStrapi = {
+    db: {
+      query: () => ({
+        findMany: async () => {
+          throw new Error("findMany is not expected here");
+        },
+        findOne: async (params) => {
+          const where = params.where as { documentId?: unknown };
+          return typeof where.documentId === "string" && EXISTING.has(where.documentId)
+            ? { id: 1, documentId: where.documentId }
+            : null;
+        },
+      }),
+    },
+  };
 
   it("both apps know the same target types, and they are the schema's", () => {
     const web = unionValues<WebCommentTargetType>()(["announcement", "wiki-page"]);
@@ -492,6 +637,46 @@ describe("comment/reaction anchors: cms targetAnchor = web anchorOf", () => {
     // Plain non-members only; prototype keys are pinned in comment-target.test.ts (FX27).
     for (const type of ["document", "Announcement", "wiki_page", ""])
       expect(isCommentTargetType(type), type).toBe(false);
+  });
+
+  it.each(VALUES)("%j", async (value) => {
+    for (const type of Object.keys(TARGET_UIDS) as WebCommentTargetType[]) {
+      const target = { type, documentId: value as string | null | undefined };
+      // The web writes the anchor only (comment-actions.ts writeAnchor).
+      const sent = anchorOf(value);
+      if (sent === null) {
+        // No anchor: the web neither writes nor reads, and the cms would
+        // refuse the raw value too.
+        expect(targetFilterQuery(target), type).toBeNull();
+        const refused = await resolveWriteTarget(strapi, {
+          targetType: type,
+          targetDocumentId: value as string | null | undefined,
+        });
+        expect(refused, type).toEqual({ status: "rejected", reason: "missing-target" });
+        continue;
+      }
+      const stored = await resolveWriteTarget(strapi, { targetType: type, targetDocumentId: sent });
+      expect(stored.status, type).toBe("ok");
+      if (stored.status !== "ok") continue;
+      const row = { targetType: stored.targetType, targetDocumentId: stored.targetDocumentId };
+      // The section's query filters on the stored anchor, and its per-row
+      // re-check keeps the row; the other target type never does.
+      expect(targetFilterQuery(target), type).toBe(
+        `filters[targetType][$eq]=${encodeURIComponent(type)}` +
+          `&filters[targetDocumentId][$eq]=${encodeURIComponent(stored.targetDocumentId)}`,
+      );
+      expect(matchesTarget(row, target), type).toBe(true);
+      const other = type === "announcement" ? "wiki-page" : "announcement";
+      expect(matchesTarget(row, { type: other, documentId: value as string }), type).toBe(false);
+      // The cms's own lookups of the thread use the same pair.
+      expect(targetMatchWhere(type, stored.targetDocumentId)).toEqual(row);
+    }
+  });
+
+  it("refuses a write to a target that does not exist", async () => {
+    await expect(
+      resolveWriteTarget(strapi, { targetType: "announcement", targetDocumentId: "missing" }),
+    ).resolves.toEqual({ status: "rejected", reason: "unresolved-target" });
   });
 });
 
