@@ -17,7 +17,10 @@ vi.mock("@/auth", () => ({
 }));
 vi.mock("@/lib/session", () => ({ getSession: async () => null }));
 vi.mock("next/headers", () => ({ headers: async () => new Headers() }));
-vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/navigation", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/navigation")>()),
+  redirect: vi.fn(),
+}));
 vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: string) => (key: string) => `${namespace}.${key}`,
 }));
@@ -52,7 +55,15 @@ describe("signInWithCredentials", () => {
   });
 
   it("rethrows the NEXT_REDIRECT that signals a successful sign-in", async () => {
-    const redirect = Object.assign(new Error("NEXT_REDIRECT"), { digest: "NEXT_REDIRECT;push;/" });
+    // The error Next's own redirect() throws, as Auth.js' signIn() does.
+    const { redirect: nextRedirect } =
+      await vi.importActual<typeof import("next/navigation")>("next/navigation");
+    let redirect: unknown;
+    try {
+      nextRedirect("/");
+    } catch (error) {
+      redirect = error;
+    }
     signInMock.mockRejectedValue(redirect);
     await expect(signInWithCredentials(undefined, form())).rejects.toBe(redirect);
   });

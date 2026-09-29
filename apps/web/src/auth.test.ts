@@ -165,6 +165,7 @@ const BASE_ENV: Env = {
   AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
   NEXT_PHASE: undefined,
   DEMO_MODE: undefined,
+  NODE_ENV: "test",
 };
 
 /** Microsoft sign-in switched on (next to local sign-in). */
@@ -851,6 +852,22 @@ describe("getStrapiToken() reads the cookie Auth.js actually set", () => {
     // Auth.js defaults to https when neither AUTH_URL nor the header is set.
     expect(usesSecureSessionCookie({}, h())).toBe(true);
     expect(usesSecureSessionCookie({ AUTH_URL: "" }, h("http"))).toBe(false);
+  });
+});
+
+describe("DEMO_MODE never runs in production (WD08/WD09)", () => {
+  it("refuses to load with DEMO_MODE=1 and NODE_ENV=production, except during next build", async () => {
+    await expect(load({ DEMO_MODE: "1", NODE_ENV: "production" })).rejects.toThrow(
+      /DEMO_MODE=1 must not be enabled in production/,
+    );
+    const build = await load({
+      DEMO_MODE: "1",
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(build.handlers).toBeDefined();
+    const dev = await load({ DEMO_MODE: "1", NODE_ENV: "development" });
+    expect(dev.handlers).toBeDefined();
   });
 });
 

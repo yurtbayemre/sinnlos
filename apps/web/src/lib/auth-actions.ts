@@ -7,7 +7,7 @@
  * previous topbar sign-out button) don't work reliably.
  */
 import { headers } from "next/headers";
-import { redirect } from "next/navigation";
+import { redirect, unstable_rethrow } from "next/navigation";
 import type { Route } from "next";
 import { getTranslations } from "next-intl/server";
 import { signIn, signOut } from "@/auth";
@@ -42,8 +42,9 @@ export async function signInWithCredentials(_prev: unknown, formData: FormData) 
       redirectTo: safeInternalPath(formData.get("from")),
     });
   } catch (err) {
-    // Auth.js signals success via a NEXT_REDIRECT throw — rethrow it.
-    if ((err as any)?.digest?.startsWith?.("NEXT_REDIRECT")) throw err;
+    // Auth.js signals success via a NEXT_REDIRECT throw — rethrow it (and
+    // every other Next control-flow error).
+    unstable_rethrow(err);
     // Strapi's own throttle answered 429 (FX11): not a wrong password.
     if (isRateLimitedSignIn(err)) return { error: (await getTranslations("auth"))("rateLimited") };
     return { error: "Invalid email or password." };
@@ -126,7 +127,8 @@ export async function registerLocalAccount(
   try {
     await signIn("local", { identifier: email, password, redirectTo: "/" });
   } catch (err) {
-    if ((err as any)?.digest?.startsWith?.("NEXT_REDIRECT")) throw err;
+    // The success redirect (NEXT_REDIRECT) must reach Next.
+    unstable_rethrow(err);
     return { values, error: "Account created — sign in manually." };
   }
   return {};
