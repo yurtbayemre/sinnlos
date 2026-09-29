@@ -964,7 +964,8 @@ infra/deploy.sh
    the state file `.git/sinnlos-deploy/infra.state` of the checkout.
    Without a usable state (the first run of this version of `deploy.sh`,
    or those images are gone) it tags the running images `:rollback`, as
-   before. On every run it also tags the running images
+   before, and a re-run before the first recorded deploy keeps that
+   `:rollback` (`.git/sinnlos-deploy/infra.bootstrap`). On every run it also tags the running images
    `infra-{web,cms}:pre-deploy` (moved each run, never pruned, never a
    rollback target): on Docker's containerd image store an image that no
    tag names can no longer be resolved by its id, and without that tag a
@@ -1415,7 +1416,10 @@ usual.
    green run for the checked-out commit yet (the deploy goes on; pass
    `--require-green-ci` to refuse instead). This first run tags the
    running images `:rollback` (no state yet), exactly as before, and a
-   failure prints the `:rollback` commands. After the smoke check and
+   failure prints the `:rollback` commands. A fix-forward re-run after
+   such a failure keeps that `:rollback` (`:rollback kept from <time>`)
+   instead of tagging the failed images, until a deploy is recorded
+   ([§7.4](#74-update-procedure-production-safe)). After the smoke check and
    live-smoke it prints `Recording infra-{web,cms}:<sha> as last-known-good`.
    If it ends with `WARNING: live-smoke did not run; this deploy is NOT
    recorded as last-known-good`, the credentials file of step 3 was not
@@ -6978,9 +6982,13 @@ through the build); the script never rolls back to it, and after a failed
 deploy it may name that failed deploy's images. **First run of this version:**
 there is no state yet, so that one run tags the running images
 `infra-web:rollback` / `infra-cms:rollback` before the build, as every
-earlier version did, and prints those in its rollback commands (a re-run
-before a successful deploy tags whatever runs then); use `:rollback` in the
-commands above in that case. The special cases below apply whatever the
+earlier version did, and prints those in its rollback commands; use
+`:rollback` in the commands above in that case. It notes their image ids
+in `.git/sinnlos-deploy/infra.bootstrap`: a re-run before the first
+successful deploy keeps the first run's `:rollback` (the images from
+before this version, not the ones a failed run left running) and says
+`:rollback kept from <time>`. The first recorded deploy deletes that file;
+delete it by hand only to have the next run tag what runs then. The special cases below apply whatever the
 target is called (rolling back the datetime release needs an extra override
 file, see [Rolling back this release](#rolling-back-this-release); rolling
 back the web to an image from before the web datetime port (batch 8) needs

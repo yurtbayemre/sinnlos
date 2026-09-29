@@ -643,6 +643,8 @@ interface HintProbes {
 
 /** The state file the hint names for a SHA target (harness value). */
 const STATE_FILE_STUB = "/srv/.git/sinnlos-deploy/infra.state";
+/** The bootstrap marker the hint names for a :rollback target (harness value). */
+const BOOTSTRAP_FILE_STUB = "/srv/.git/sinnlos-deploy/infra.bootstrap";
 
 /**
  * print_rollback_hint with docker and `timeout` stubbed and the real probe
@@ -670,6 +672,7 @@ function rollbackHintRun(
     `ROLLBACK_REF=${shellQuote(ref)}`,
     `ROLLBACK_ORIGIN=${shellQuote(ref === "rollback" ? "the images that ran before this deploy (:rollback)" : ref ? `the last-known-good deploy ${ref} (2026-09-29T10:00:00+02:00)` : "")}`,
     `STATE_FILE=${STATE_FILE_STUB}`,
+    `BOOTSTRAP_FILE=${BOOTSTRAP_FILE_STUB}`,
     shellLine("PROBE_TIMEOUT=("),
     shellLine("WEB_DATETIME_LABEL="),
     shellLine("WEB_DATETIME_VALUE="),
@@ -807,7 +810,7 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
     "THEN, once the previous cms is up, run the removal again. It must remove nothing",
     "(guest_links_removed 0, permission_rows_removed 0)",
     REVOKE_LINE,
-    "tags whatever runs then as :rollback",
+    "a re-run before the first successful deploy keeps this :rollback",
   ];
 
   it("checks the in-image path of the poll schema that the cms Dockerfile ships", () => {
@@ -1018,7 +1021,7 @@ describe(
           "docker image inspect -f '{{json .Config.Cmd}}' infra-cms:rollback",
           "THEN, once the previous cms is up",
           "rollback/revoke-guest-poll-vote.sql",
-          "tags whatever runs then as :rollback",
+          "a re-run before the first successful deploy keeps this :rollback",
         ]);
       },
     );

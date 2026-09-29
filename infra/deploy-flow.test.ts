@@ -8,7 +8,8 @@
  *      live-smoke passed; the state names the images web and cms run;
  *   2. the rollback target comes from that state (no :rollback retag); only
  *      without a state (the first run of this version) are the running
- *      images tagged :rollback;
+ *      images tagged :rollback, and re-runs keep that :rollback until a
+ *      deploy is recorded (the bootstrap marker);
  *   3. a failed smoke check, live-smoke, build, start or tag prints the
  *      right message (the rollback commands from "start" on) and leaves the
  *      state alone;
@@ -60,6 +61,8 @@ interface StepReport {
   /** The state file of compose project infra after the run (empty without one). */
   state: Record<string, string>;
   history: string[];
+  /** The lines of the bootstrap marker (infra.bootstrap) after the run. */
+  bootstrap: string[];
   /** Every image reference docker knows after the run, "name:tag=id". */
   images: string[];
   /** Whether the state dir exists after the run. */
@@ -164,7 +167,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     '          ref="${*: -1}"',
     '          if [[ "$ref" == sha256:* ]]; then resolvable "$ref"; return; fi',
     '          [[ -f "$T/img/${ref//:/__}" ]] || return 1',
-    '          if [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; fi ;;',
+    '          if [[ "$*" == *"{{.Id}}"* ]]; then cat "$T/img/${ref//:/__}"; elif [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; fi ;;',
     '        rm) shift 2; for ref in "$@"; do rm -f "$T/img/${ref//:/__}"; done ;;',
     "      esac ;;",
     "    tag)",
@@ -217,6 +220,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
       'if [[ -d "$S" ]]; then echo "@@STATEDIR"; fi',
       'if [[ -f "$S/infra.state" ]]; then sed "s/^/@@STATE /" "$S/infra.state"; fi',
       'if [[ -f "$S/infra.history" ]]; then sed "s/^/@@HIST /" "$S/infra.history"; fi',
+      'if [[ -f "$S/infra.bootstrap" ]]; then sed "s/^/@@BOOT /" "$S/infra.bootstrap"; fi',
       'for f in "$T"/img/*; do if [[ -e "$f" ]]; then r="${f##*/}"; echo "@@IMG ${r/__/:}=$(< "$f")"; fi; done',
     );
   });
@@ -238,6 +242,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
         history: [],
         images: [],
         stateDir: false,
+        bootstrap: [],
       };
       reports.push(current);
       continue;
@@ -250,6 +255,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     else if (tag === "@@CALL") current.calls.push(value);
     else if (tag === "@@STDIN") current.curlStdin += `${value}\n`;
     else if (tag === "@@STATEDIR") current.stateDir = true;
+    else if (tag === "@@BOOT") current.bootstrap.push(value);
     else if (tag === "@@STATE" && !value.startsWith("#")) {
       const eq = value.indexOf("=");
       current.state[value.slice(0, eq)] = value.slice(eq + 1);
@@ -497,6 +503,53 @@ describe.skipIf(!RUN_SEQUENCES)(
   },
 );
 
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh before its first recorded deploy: the first run's :rollback stays (FX35)",
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = deploys([
+        // The first run: the images from before run, no state; it fails after `up`.
+        /* 0 */ { before: "running sha256:oldweb sha256:oldcms; STUB_SMOKE_CODE=502" },
+        // A fix-forward re-run that fails after `up` again …
+        /* 1 */ { before: "commit" },
+        // … and one that passes.
+        /* 2 */ { before: "commit; STUB_SMOKE_CODE=200" },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("tags :rollback once and keeps it through failed re-runs", () => {
+      const [first, again] = r;
+      const rollback = ["infra-web:rollback=sha256:oldweb", "infra-cms:rollback=sha256:oldcms"];
+      expect(first.status).toBe(1);
+      expect(first.images).toEqual(expect.arrayContaining(rollback));
+      expect(first.bootstrap).toEqual(
+        expect.arrayContaining(["WEB_IMAGE=sha256:oldweb", "CMS_IMAGE=sha256:oldcms"]),
+      );
+      expect(first.stderr).toContain("docker tag infra-web:rollback infra-web:latest");
+      expect(first.stderr).toContain(
+        "a re-run before the first successful deploy keeps this :rollback",
+      );
+      expect(again.status).toBe(1);
+      expect(again.stdout).toContain(":rollback kept from ");
+      expect(called(again, /^docker tag \S+ infra-(web|cms):rollback$/)).toEqual([]);
+      expect(again.images).toEqual(expect.arrayContaining(rollback));
+      expect(again.stderr).toContain(
+        "To roll back to the images that ran before the first deploy with this script (:rollback, tagged ",
+      );
+      expect(again.bootstrap).toEqual(first.bootstrap);
+    });
+
+    it("drops the marker once a deploy is recorded", () => {
+      const done = r[2];
+      expect(done.status, done.stderr).toBe(0);
+      expect(done.stdout).toContain(":rollback kept from ");
+      expect(done.state.WEB_IMAGE).toBe("sha256:web3");
+      expect(done.bootstrap).toEqual([]);
+    });
+  },
+);
+
 describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35)", () => {
   let r: StepReport[] = [];
   const green = JSON.stringify(
@@ -576,6 +629,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(called(run, /^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
     // The lock of step 1 left the state dir; the dry run added nothing to it.
     expect(run.state).toEqual({});
+    expect(run.bootstrap).toEqual([]);
     expect(run.images).toEqual([]);
   });
 
@@ -603,6 +657,8 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
       ]),
     );
     expect(run.state.WEB_IMAGE).toBe("sha256:web1");
+    // Recorded: the :rollback bootstrap marker is gone.
+    expect(run.bootstrap).toEqual([]);
   });
 
   it("plans no record when live-smoke would lack the demo credentials", () => {

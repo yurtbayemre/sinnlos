@@ -504,9 +504,9 @@ print_rollback_hint() {
     print_guest_vote_recheck_hint
   fi
   if [[ "${ROLLBACK_REF}" == "rollback" ]]; then
-    echo "       Rollback target: :rollback, the images that ran before this deploy (no last-known-good state yet);" >&2
-    echo "       a re-run of this script before a successful deploy tags whatever runs then as :rollback" >&2
-    echo "       (docs/DEPLOYMENT.md §7.4)." >&2
+    echo "       Rollback target: :rollback, the images that ran before the first deploy with this script (no" >&2
+    echo "       last-known-good state yet); a re-run before the first successful deploy keeps this :rollback" >&2
+    echo "       (${BOOTSTRAP_FILE}, docs/DEPLOYMENT.md §7.4)." >&2
   else
     echo "       Rollback target: the last-known-good state (${STATE_FILE}); a re-run of this" >&2
     echo "       script keeps it until a deploy passes the smoke check and live-smoke (docs/DEPLOYMENT.md §7.4)." >&2
@@ -533,6 +533,50 @@ read_state() {
     esac
   done < "${STATE_FILE}"
   [[ "${STATE_TAG}" =~ ^[0-9a-f]{12}$ ]]
+}
+
+# Before the first recorded deploy: the run that tagged :rollback (step 2
+# without a state) writes BOOTSTRAP_FILE with the image ids of both
+# :rollback tags; step 5 deletes it once the state is written. While it
+# exists and both :rollback tags still name those ids, a later run without
+# a state keeps them instead of tagging whatever runs then (after a failed
+# first deploy that is the failed images). Read by key, never sourced.
+BOOTSTRAP_KEYS="WEB_IMAGE CMS_IMAGE TAGGED_AT"
+
+# True (0) when BOOTSTRAP_FILE names the ids both :rollback tags still have
+# (BOOT_<KEY> set from it).
+bootstrap_rollback_intact() {
+  local key value
+  for key in ${BOOTSTRAP_KEYS}; do printf -v "BOOT_${key}" '%s' ""; done
+  [[ -r "${BOOTSTRAP_FILE}" ]] || return 1
+  while IFS='=' read -r key value; do
+    case " ${BOOTSTRAP_KEYS} " in
+      *" ${key} "*) printf -v "BOOT_${key}" '%s' "${value}" ;;
+    esac
+  done < "${BOOTSTRAP_FILE}"
+  [[ -n "${BOOT_WEB_IMAGE}" && -n "${BOOT_CMS_IMAGE}" ]] || return 1
+  [[ "$(docker image inspect -f '{{.Id}}' "${PROJECT}-web:rollback" 2>/dev/null)" == "${BOOT_WEB_IMAGE}" ]] &&
+    [[ "$(docker image inspect -f '{{.Id}}' "${PROJECT}-cms:rollback" 2>/dev/null)" == "${BOOT_CMS_IMAGE}" ]]
+}
+
+# Writes BOOTSTRAP_FILE for the :rollback tags this run set; a failure only
+# warns (a later run then tags what runs, as before).
+write_bootstrap() {
+  local web_id cms_id tmp="${BOOTSTRAP_FILE}.tmp.$$"
+  if web_id="$(docker image inspect -f '{{.Id}}' "${PROJECT}-web:rollback" 2>/dev/null)" &&
+    cms_id="$(docker image inspect -f '{{.Id}}' "${PROJECT}-cms:rollback" 2>/dev/null)" &&
+    {
+      echo "# infra/deploy.sh: the :rollback images of compose project ${PROJECT} before its first recorded"
+      echo "# deploy; kept by later runs until a deploy is recorded (then deleted; do not edit)"
+      echo "WEB_IMAGE=${web_id}"
+      echo "CMS_IMAGE=${cms_id}"
+      echo "TAGGED_AT=$(date -Is)"
+    } > "${tmp}" && own_like_git_dir "${tmp}" && mv -f "${tmp}" "${BOOTSTRAP_FILE}"; then
+    echo "  kept in ${BOOTSTRAP_FILE} until the first deploy is recorded"
+  else
+    rm -f "${tmp}" 2>/dev/null || true
+    echo "  WARNING: could not write ${BOOTSTRAP_FILE}; a re-run before a recorded deploy tags what runs then." >&2
+  fi
 }
 
 # A file this script creates in the state dir as root gets the owner of the
@@ -568,7 +612,18 @@ resolve_rollback_target() {
   # First run with the state-keeping deploy.sh (or its images are gone):
   # today's :rollback tags. Re-upping MUST use --no-build: with --build
   # compose would rebuild (and re-deploy) the broken image instead of
-  # starting the retagged one.
+  # starting the retagged one. A run before this one that set them, with
+  # no deploy recorded since, keeps them (BOOTSTRAP_FILE).
+  if bootstrap_rollback_intact; then
+    ROLLBACK_REF="rollback"
+    ROLLBACK_ORIGIN="the images that ran before the first deploy with this script (:rollback, tagged ${BOOT_TAGGED_AT})"
+    echo "  :rollback kept from ${BOOT_TAGGED_AT} (no deploy recorded since, ${BOOTSTRAP_FILE}):"
+    echo "  ${PROJECT}-web:rollback = ${BOOT_WEB_IMAGE}, ${PROJECT}-cms:rollback = ${BOOT_CMS_IMAGE}"
+    return 0
+  fi
+  if [[ -e "${BOOTSTRAP_FILE}" ]]; then
+    echo "  NOTE: the :rollback tags no longer name the images in ${BOOTSTRAP_FILE}; tagging what runs now."
+  fi
   for svc in web cms; do
     container="${PROJECT}-${svc}-1"
     if img="$(docker inspect --format '{{.Image}}' "${container}" 2>/dev/null)" && [[ -n "${img}" ]]; then
@@ -593,6 +648,9 @@ resolve_rollback_target() {
     docker image inspect "${PROJECT}-cms:rollback" >/dev/null 2>&1; then
     ROLLBACK_REF="rollback"
     ROLLBACK_ORIGIN=":rollback (only one of web and cms ran before this deploy)"
+  fi
+  if [[ "${ROLLBACK_REF}" == "rollback" ]] && ! ((DRY_RUN)); then
+    write_bootstrap
   fi
 }
 
@@ -662,6 +720,8 @@ record_last_known_good() {
     return 0
   fi
   echo "  recorded in ${STATE_FILE}"
+  # From now on the state is the rollback target; :rollback is no longer kept.
+  rm -f "${BOOTSTRAP_FILE}" 2>/dev/null || true
 }
 
 # SHA tags this script created (the history file), newest last, each once.
@@ -926,6 +986,7 @@ GIT_DIR="$("${GIT[@]}" rev-parse --absolute-git-dir)"
 STATE_DIR="${DEPLOY_STATE_DIR:-${GIT_DIR}/sinnlos-deploy}"
 STATE_FILE="${STATE_DIR}/${PROJECT}.state"
 HISTORY_FILE="${STATE_DIR}/${PROJECT}.history"
+BOOTSTRAP_FILE="${STATE_DIR}/${PROJECT}.bootstrap"
 LOCK_FILE="${STATE_DIR}/${PROJECT}.lock"
 
 if ! command -v flock >/dev/null 2>&1; then
