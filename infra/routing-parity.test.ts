@@ -15,8 +15,10 @@
  *  1. the set of first path segments routed to cms is identical and equals
  *     the canonical list below,
  *  2. ALL Traefik routers with their load-bearing priorities (auth 100 >
- *     signin 90 > cms 50 > web 1): /api/auth/* and POST /sign-in|/register
- *     must win over the cms /api rule and the catch-all,
+ *     signin 90 > cms 50 > live 10 > web 1): /api/auth/* and POST
+ *     /sign-in|/register must win over the cms /api rule and the catch-all,
+ *     /live/* over the catch-all; each router uses only middlewares of its
+ *     own container, and the live router no compression (FX34),
  *  3. the Caddy route order as Caddy computes it — @nextauth must stay
  *     before @strapi in the FILE (see caddySortedRoutes),
  *  4. a probe table of concrete requests routes identically under both
@@ -26,7 +28,8 @@
  *  5. where the proxies DIFFER (case variants, traversal, exact-vs-prefix),
  *     each difference is pinned explicitly instead of being ignored,
  *  6. security-header parity between the Traefik headers middleware and the
- *     Caddyfile header block, with the current gaps listed (FX33).
+ *     Caddyfile header blocks (FX33): the same names and values, HSTS in
+ *     Caddy only for a real domain over HTTPS, every block deferred.
  *
  * Both parsers fail closed: a Caddyfile directive, Traefik label style or
  * router option they do not model throws instead of being skipped, so the
@@ -74,13 +77,15 @@ const CMS_PREFIXES = [
 /**
  * Router name → priority. Load-bearing (roadmap "Do not touch without
  * care"): auth must beat the cms /api rule, and the sign-in POST router must
- * beat the catch-all so its tighter rate limit applies. Any new router must
- * be added here consciously.
+ * beat the catch-all so its tighter rate limit applies; the live router
+ * (FX34) must beat the catch-all so the SSE stream skips compression. Any new
+ * router must be added here consciously.
  */
 const TRAEFIK_ROUTER_PRIORITIES: Record<string, number> = {
   "sinnlos-auth": 100,
   "sinnlos-signin": 90,
   "sinnlos-cms": 50,
+  "sinnlos-live": 10,
   "sinnlos-web": 1,
 };
 
@@ -166,6 +171,12 @@ const TRAEFIK_ROUTER_PROBES: Array<[Method, string, string]> = [
   ["GET", "/admin", "sinnlos-cms"],
   ["GET", "/", "sinnlos-web"],
   ["GET", "/uploads/document_9f8e7d.pdf", "sinnlos-web"],
+  // Live SSE (FX34): stream and subscribe on their own router without
+  // compression; look-alike paths stay on the catch-all.
+  ["GET", "/live/stream", "sinnlos-live"],
+  ["POST", "/live/subscribe", "sinnlos-live"],
+  ["GET", "/live", "sinnlos-web"],
+  ["GET", "/livestream", "sinnlos-web"],
 ];
 
 /**
@@ -220,17 +231,6 @@ const KNOWN_DIFFERENCES: Array<[string, Backend, Backend]> = [
   ["/api/auth", "web", "cms"],
   ["/api/authx", "web", "cms"],
 ];
-
-/**
- * Security headers the Traefik headers middleware sets but the Caddyfile
- * header block does not (FX33 adds them to Caddy). Closing a gap must remove
- * it from this list; a NEW gap fails the parity test.
- */
-const KNOWN_CADDY_HEADER_GAPS = [
-  "permissions-policy",
-  "strict-transport-security",
-  "x-frame-options",
-].sort();
 
 function readInfraFile(name: string): string {
   return readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
@@ -497,8 +497,44 @@ interface TraefikModel {
  */
 const IGNORED_ROUTER_OPTIONS = new Set(["tls.certresolver"]);
 
-function parseTraefik(source = readInfraFile("docker-compose.traefik.yml")): TraefikModel {
-  const labels = parseTraefikLabels(source);
+/** The infra/.env the model renders the labels with (see interpolateCompose). */
+const TRAEFIK_ENV: Readonly<Record<string, string>> = { DOMAIN: "intranet.example.com" };
+
+/**
+ * Docker Compose variable interpolation, as `docker compose` applies it to
+ * the label values before Traefik ever sees them: `${VAR}`, `${VAR:-default}`,
+ * `${VAR-default}`, `${VAR:?message}` (unset or empty refuses to render),
+ * `${VAR?message}` (unset refuses) and `$$` for a literal `$`. Anything else
+ * with a `$` (`$VAR`, an unterminated `${`, nested defaults) throws, so the
+ * model never guesses what compose renders.
+ */
+function interpolateCompose(value: string, env: Readonly<Record<string, string>>): string {
+  return value.replace(
+    /\$\$|\$\{([A-Za-z_][A-Za-z0-9_]*)(?:(:-|-|:\?|\?)([^${}]*))?\}|\$/g,
+    (match: string, name?: string, op?: string, arg?: string): string => {
+      if (match === "$$") return "$";
+      if (name === undefined) throw new Error(`unmodelled "$" in compose value: ${value}`);
+      const raw = Object.hasOwn(env, name) ? env[name] : undefined;
+      const unsetOrEmpty = raw === undefined || raw === "";
+      if ((op === ":?" && unsetOrEmpty) || (op === "?" && raw === undefined)) {
+        throw new Error(`required variable ${name} is missing a value: ${arg ?? ""}`);
+      }
+      if (op === ":-" && unsetOrEmpty) return arg ?? "";
+      if (op === "-" && raw === undefined) return arg ?? "";
+      return raw ?? "";
+    },
+  );
+}
+
+function parseTraefik(
+  source = readInfraFile("docker-compose.traefik.yml"),
+  env: Readonly<Record<string, string>> = TRAEFIK_ENV,
+): TraefikModel {
+  const labels = parseTraefikLabels(source).map((label) => {
+    if (label.key.includes("$"))
+      throw new Error(`unmodelled "$" in traefik label key ${label.key}`);
+    return { ...label, value: interpolateCompose(label.value, env) };
+  });
   expect(labels.length, "traefik.* labels in docker-compose.traefik.yml").toBeGreaterThan(0);
 
   const partial = new Map<string, Partial<TraefikRouter> & { container: string }>();
@@ -627,49 +663,133 @@ interface CaddyRoute {
   line: number;
 }
 
+/**
+ * A named matcher block (`@name { … }`) used by a `header` directive. Only
+ * `protocol http|https`, `host <hosts…>` and `not host <hosts…>` are
+ * modelled; all conditions of one block must hold (Caddy ANDs them).
+ */
+interface CaddyCondition {
+  protocol?: "http" | "https";
+  /** lowercased; empty = any host */
+  hosts: string[];
+  /** lowercased */
+  notHosts: string[];
+}
+
+interface CaddyHeaderSet {
+  value: string;
+  /** condition matcher of the `header @name { … }` block, if any */
+  matcher?: string;
+}
+
+interface CaddyHeaderRemoval {
+  /** lowercased header name */
+  name: string;
+  matcher?: string;
+}
+
+interface CaddyHeaderBlock {
+  matcher?: string;
+  /**
+   * Applied when the response is written (after the upstream's headers are
+   * in), so a set REPLACES the upstream's value. Caddy defers a block that
+   * says `defer` or deletes a field.
+   */
+  deferred: boolean;
+}
+
 interface CaddyModel {
   /** named `path` matcher → patterns as written */
   matchers: Map<string, string[]>;
+  /** named matcher block → its conditions */
+  conditions: Map<string, CaddyCondition>;
   routes: CaddyRoute[];
-  headerSets: Map<string, string>;
-  headerRemovals: string[];
+  /** lowercased header name → value (and the block's matcher) */
+  headerSets: Map<string, CaddyHeaderSet>;
+  headerRemovals: CaddyHeaderRemoval[];
+  headerBlocks: CaddyHeaderBlock[];
 }
+
+type CaddyBlock =
+  | { kind: "header"; matcher?: string; defer: boolean; removes: boolean }
+  | { kind: "matcher"; name: string; condition: CaddyCondition };
 
 /**
  * Parses the flat Caddyfile used here. Only the directives below are
- * modelled; anything else (handle, route, redir, a non-path matcher, …)
- * throws, so a structural change forces a conscious model update.
+ * modelled; anything else (handle, route, redir, a single-line matcher other
+ * than `path`, a matcher block condition other than `protocol`, `host` or
+ * `not host`, a header directive outside a block, …) throws, so a structural
+ * change forces a conscious model update.
  */
-function parseCaddy(): CaddyModel {
-  const lines = readInfraFile("Caddyfile").split(/\r?\n/);
+function parseCaddy(source = readInfraFile("Caddyfile")): CaddyModel {
+  const lines = source.split(/\r?\n/);
   const matchers = new Map<string, string[]>();
+  const conditions = new Map<string, CaddyCondition>();
   const routes: CaddyRoute[] = [];
-  const headerSets = new Map<string, string>();
-  const headerRemovals: string[] = [];
-  let inHeaderBlock = false;
+  const headerSets = new Map<string, CaddyHeaderSet>();
+  const headerRemovals: CaddyHeaderRemoval[] = [];
+  const headerBlocks: CaddyHeaderBlock[] = [];
+  let block: CaddyBlock | undefined;
 
   lines.forEach((raw, line) => {
     const text = raw.replace(/(^|\s)#.*$/, "").trim();
     if (!text) return;
-    if (inHeaderBlock) {
+    if (block?.kind === "header") {
       if (text === "}") {
-        inHeaderBlock = false;
+        headerBlocks.push({ matcher: block.matcher, deferred: block.defer || block.removes });
+        block = undefined;
+        return;
+      }
+      if (text === "defer") {
+        block.defer = true;
         return;
       }
       const removal = text.match(/^-(\S+)$/);
       if (removal) {
-        headerRemovals.push(removal[1].toLowerCase());
+        block.removes = true;
+        headerRemovals.push({ name: removal[1].toLowerCase(), matcher: block.matcher });
         return;
       }
       const set = text.match(/^([A-Za-z0-9-]+)\s+(?:"([^"]*)"|(\S+))$/);
       if (!set) throw new Error(`unmodelled Caddyfile header operation: ${text}`);
-      headerSets.set(set[1].toLowerCase(), set[2] ?? set[3]);
+      const name = set[1].toLowerCase();
+      if (headerSets.has(name)) throw new Error(`Caddyfile sets ${name} twice`);
+      headerSets.set(name, { value: set[2] ?? set[3], matcher: block.matcher });
       return;
+    }
+    if (block?.kind === "matcher") {
+      if (text === "}") {
+        conditions.set(block.name, block.condition);
+        block = undefined;
+        return;
+      }
+      const protocol = text.match(/^protocol\s+(https?)$/);
+      if (protocol) {
+        block.condition.protocol = protocol[1] as "http" | "https";
+        return;
+      }
+      const host = text.match(/^(not\s+)?host\s+(.+)$/);
+      if (host) {
+        const hosts = host[2].trim().toLowerCase().split(/\s+/);
+        (host[1] ? block.condition.notHosts : block.condition.hosts).push(...hosts);
+        return;
+      }
+      throw new Error(`unmodelled condition in Caddy matcher @${block.name}: ${text}`);
     }
     if (/^\{\$DOMAIN(:[^}]*)?\}\s*\{$/.test(text) || text === "}") return;
     if (/^encode\s/.test(text)) return;
-    if (text === "header {") {
-      inHeaderBlock = true;
+    const header = text.match(/^header\s+(?:@(\S+)\s+)?\{$/);
+    if (header) {
+      block = { kind: "header", matcher: header[1], defer: false, removes: false };
+      return;
+    }
+    const matcherBlock = text.match(/^@(\S+)\s*\{$/);
+    if (matcherBlock) {
+      block = {
+        kind: "matcher",
+        name: matcherBlock[1],
+        condition: { hosts: [], notHosts: [] },
+      };
       return;
     }
     const matcher = text.match(/^@(\S+)\s+(\S+)\s+(.+)$/);
@@ -687,8 +807,57 @@ function parseCaddy(): CaddyModel {
     }
     throw new Error(`unmodelled Caddyfile directive: ${text}`);
   });
+  if (block) throw new Error(`unclosed ${block.kind} block in Caddyfile`);
+  // Routes select by path only; a condition matcher on a proxy (or an
+  // undefined matcher anywhere) would route requests the model never sees.
+  for (const route of routes) {
+    if (route.matcher !== undefined && !matchers.has(route.matcher)) {
+      throw new Error(`reverse_proxy @${route.matcher} is not a path matcher`);
+    }
+  }
+  for (const { matcher } of headerBlocks) {
+    if (matcher !== undefined && !conditions.has(matcher)) {
+      throw new Error(`header @${matcher} names no matcher block`);
+    }
+  }
   expect(routes.length, "reverse_proxy routes in Caddyfile").toBeGreaterThan(0);
-  return { matchers, routes, headerSets, headerRemovals };
+  return { matchers, conditions, routes, headerSets, headerRemovals, headerBlocks };
+}
+
+/**
+ * The response headers after Caddy's (deferred) header blocks, for a request
+ * on `host` over `protocol` whose upstream answered with `upstream`
+ * (lowercased names): removals and sets of every block whose matcher holds.
+ * No header is both set and removed under conditions that can hold together
+ * (checked), so the order of the blocks does not matter.
+ */
+function caddyResponseHeaders(
+  model: CaddyModel,
+  protocol: "http" | "https",
+  host: string,
+  upstream: ReadonlyMap<string, string> = new Map(),
+): Map<string, string> {
+  const requestHost = host.toLowerCase();
+  const holds = (name: string | undefined): boolean => {
+    if (name === undefined) return true;
+    const condition = model.conditions.get(name)!;
+    return (
+      (condition.protocol === undefined || condition.protocol === protocol) &&
+      (condition.hosts.length === 0 || condition.hosts.includes(requestHost)) &&
+      !condition.notHosts.includes(requestHost)
+    );
+  };
+  const headers = new Map(upstream);
+  for (const { name, matcher } of model.headerRemovals) {
+    if (!holds(matcher)) continue;
+    const set = model.headerSets.get(name);
+    if (set && holds(set.matcher)) throw new Error(`Caddy both sets and removes ${name}`);
+    headers.delete(name);
+  }
+  for (const [name, set] of model.headerSets) {
+    if (holds(set.matcher)) headers.set(name, set.value);
+  }
+  return headers;
 }
 
 /**
@@ -802,19 +971,83 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
       expect(priorities).toEqual(TRAEFIK_ROUTER_PRIORITIES);
     });
 
-    it("orders auth > signin > cms > catch-all", () => {
+    it("orders auth > signin > cms > live > catch-all", () => {
       const p = (name: string) => traefik.routers.get(name)?.priority ?? -1;
       expect(p("sinnlos-auth")).toBeGreaterThan(p("sinnlos-signin"));
       expect(p("sinnlos-signin")).toBeGreaterThan(p("sinnlos-cms"));
-      expect(p("sinnlos-cms")).toBeGreaterThan(p("sinnlos-web"));
+      expect(p("sinnlos-cms")).toBeGreaterThan(p("sinnlos-live"));
+      expect(p("sinnlos-live")).toBeGreaterThan(p("sinnlos-web"));
+    });
+
+    // Traefik's compress middleware gzips a text/event-stream response
+    // despite `Cache-Control: no-transform` (checked against Traefik
+    // v3.7.13 on 2026-09-29), and only excludedContentTypes, matched on the
+    // RESPONSE type, stops it. So: the SSE router carries no compression at
+    // all, and every compress middleware excludes SSE for any other route.
+    it("keeps the live SSE router free of compression (FX34)", () => {
+      const live = traefik.routers.get("sinnlos-live");
+      expect(live?.service).toBe("sinnlos-web");
+      const compressing = (live?.middlewares ?? []).filter((name) =>
+        [...(traefik.middlewares.get(name)?.options.keys() ?? [])].some((option) =>
+          option.startsWith("compress"),
+        ),
+      );
+      expect(compressing).toEqual([]);
+      expect(live?.middlewares).toContain("sinnlos-headers");
+    });
+
+    it("excludes text/event-stream in every compress middleware", () => {
+      const compress = [...traefik.middlewares].filter(([, middleware]) =>
+        [...middleware.options.keys()].some((option) => option.startsWith("compress")),
+      );
+      expect(compress.length).toBeGreaterThan(0);
+      for (const [name, middleware] of compress) {
+        expect(middleware.options.get("compress.excludedcontenttypes"), name).toBe(
+          "text/event-stream",
+        );
+      }
     });
 
     it("serves one host on the websecure entrypoint from every router", () => {
-      expect(hosts).toHaveLength(1);
+      expect(hosts).toEqual([TRAEFIK_ENV.DOMAIN]);
       for (const router of traefik.routers.values()) {
         expect(hostsOf(router.rule), `Host() in ${router.name}`).toEqual(hosts);
         expect(router.entrypoints, `entrypoints of ${router.name}`).toBe("websecure");
       }
+    });
+
+    // One compose file for every instance (the owner's and the employer's):
+    // the host comes from infra/.env. Required, never defaulted, so an
+    // instance without DOMAIN fails to render instead of answering on
+    // another instance's domain.
+    it("takes every Host() from a required DOMAIN, never a literal host", () => {
+      const rules = parseTraefikLabels(readInfraFile("docker-compose.traefik.yml")).filter(
+        ({ key }) => /^http\.routers\.[^.]+\.rule$/.test(key),
+      );
+      const rawHosts = rules.flatMap(({ value }) =>
+        [...value.matchAll(/Host\(`([^`]*)`\)/g)].map((host) => host[1]),
+      );
+      expect(rawHosts).toHaveLength(traefik.routers.size);
+      for (const raw of rawHosts) expect(raw).toMatch(/^\$\{DOMAIN:\?[^}]+\}$/);
+    });
+
+    it.each(["intranet.example.com", "sinnlos.example.org"])(
+      "renders every Host() with DOMAIN=%s",
+      (domain) => {
+        const model = parseTraefik(undefined, { DOMAIN: domain });
+        for (const router of model.routers.values()) {
+          expect(hostsOf(router.rule), router.name).toEqual([domain]);
+        }
+      },
+    );
+
+    it.each([
+      ["unset", {}],
+      ["empty", { DOMAIN: "" }],
+    ])("refuses to render with DOMAIN %s, as docker compose does", (_what, env) => {
+      expect(() => parseTraefik(undefined, env)).toThrow(
+        /required variable DOMAIN is missing a value/,
+      );
     });
 
     it.each(TRAEFIK_ROUTER_PROBES)("%s %s is handled by %s", (method, path, name) => {
@@ -824,26 +1057,45 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
     it("rate-limits the sign-in POSTs tighter than the auth and cms routers", () => {
       expect(traefik.routers.get("sinnlos-signin")?.middlewares).toContain("sinnlos-authlimit");
       expect(traefik.routers.get("sinnlos-auth")?.middlewares).toContain("sinnlos-ratelimit");
-      expect(traefik.routers.get("sinnlos-cms")?.middlewares).toContain("sinnlos-ratelimit");
+      expect(traefik.routers.get("sinnlos-cms")?.middlewares).toContain("sinnlos-cms-ratelimit");
     });
 
-    it("references only middlewares that are defined", () => {
+    // FX34: Traefik's docker provider drops ALL labels of a container while
+    // it is starting, unhealthy or stopped, and a router whose middleware is
+    // missing is not served. A router that borrowed a middleware from
+    // another container therefore went down with that container: /api and
+    // /admin disappeared with every web restart.
+    it("references only middlewares defined on its own container (FX34)", () => {
       for (const router of traefik.routers.values()) {
         for (const name of router.middlewares) {
-          expect(traefik.middlewares.has(name), `${router.name} → middleware ${name}`).toBe(true);
+          expect(
+            traefik.middlewares.get(name)?.container,
+            `${router.name} (${router.container}) → middleware ${name}`,
+          ).toBe(router.container);
         }
       }
     });
 
-    it("currently defines the cms router's middlewares on the web container (FX34)", () => {
-      // Known coupling: while web is starting or stopped, Traefik drops web's
-      // labels — and with them the middlewares the cms router needs, so
-      // /api and /admin go down too. FX34 moves the definitions off web;
-      // that change must flip this assertion.
+    it("defines the cms router's middlewares on the cms container (FX34)", () => {
       const containers = new Set(
         (cmsRouter?.middlewares ?? []).map((name) => traefik.middlewares.get(name)?.container),
       );
-      expect([...containers]).toEqual(["web"]);
+      expect([...containers]).toEqual(["cms"]);
+    });
+
+    it("defines no middleware that no router uses", () => {
+      const used = new Set([...traefik.routers.values()].flatMap((router) => router.middlewares));
+      expect([...traefik.middlewares.keys()].filter((name) => !used.has(name))).toEqual([]);
+    });
+
+    // The cms copies keep today's behaviour: same limits, same compression.
+    it.each([
+      ["sinnlos-ratelimit", "sinnlos-cms-ratelimit"],
+      ["sinnlos-compress", "sinnlos-cms-compress"],
+    ])("%s and %s have the same options", (webName, cmsName) => {
+      const options = (name: string) => [...(traefik.middlewares.get(name)?.options ?? [])].sort();
+      expect(options(webName).length, webName).toBeGreaterThan(0);
+      expect(options(cmsName)).toEqual(options(webName));
     });
   });
 
@@ -904,41 +1156,149 @@ describe("Traefik/Caddy routing parity (issue #22)", () => {
   );
 
   describe("security-header parity", () => {
-    const headerMiddlewares = [...traefik.middlewares].filter(([, middleware]) =>
-      [...middleware.options.keys()].some((option) => option.startsWith("headers.")),
+    const headerMiddlewares = new Map(
+      [...traefik.middlewares].filter(([, middleware]) =>
+        [...middleware.options.keys()].some((option) => option.startsWith("headers.")),
+      ),
     );
-    const [headersName, headersMiddleware] = headerMiddlewares[0] ?? ["", undefined];
-    const traefikHeaders = headersMiddleware
-      ? traefikResponseHeaders(headersMiddleware.options)
-      : new Map<string, string>();
+    const headersByMiddleware = new Map(
+      [...headerMiddlewares].map(([name, middleware]) => [
+        name,
+        traefikResponseHeaders(middleware.options),
+      ]),
+    );
+    const traefikHeaders = headersByMiddleware.get("sinnlos-headers") ?? new Map<string, string>();
 
-    it("has exactly one Traefik headers middleware, applied on every router", () => {
-      expect(headerMiddlewares).toHaveLength(1);
+    // One per container since FX34 (sinnlos-headers on web,
+    // sinnlos-cms-headers on cms): each router applies exactly one.
+    it("applies exactly one Traefik headers middleware on every router", () => {
+      expect([...headerMiddlewares.keys()].sort()).toEqual([
+        "sinnlos-cms-headers",
+        "sinnlos-headers",
+      ]);
       for (const router of traefik.routers.values()) {
-        expect(router.middlewares, `middlewares of ${router.name}`).toContain(headersName);
+        const applied = router.middlewares.filter((name) => headerMiddlewares.has(name));
+        expect(applied, `headers middlewares of ${router.name}`).toHaveLength(1);
       }
     });
 
-    it("sets every shared header to the same value in both proxies", () => {
-      const shared = [...caddy.headerSets.keys()].filter((name) => traefikHeaders.has(name));
-      expect(shared.length).toBeGreaterThan(0);
-      for (const name of shared) {
-        expect(caddy.headerSets.get(name), `Caddy ${name}`).toBe(traefikHeaders.get(name));
+    it("sets the same headers on cms and web routes", () => {
+      for (const [name, headers] of headersByMiddleware) {
+        expect([...headers].sort(), name).toEqual([...traefikHeaders].sort());
       }
     });
 
-    it("lacks in Caddy exactly the known FX33 gaps", () => {
-      const missing = [...traefikHeaders.keys()].filter((name) => !caddy.headerSets.has(name));
-      expect(missing.sort()).toEqual(KNOWN_CADDY_HEADER_GAPS);
+    it("sets every Traefik header in Caddy too, to the same value (FX33)", () => {
+      expect(traefikHeaders.size).toBeGreaterThan(0);
+      expect([...caddy.headerSets.keys()].sort()).toEqual([...traefikHeaders.keys()].sort());
+      for (const [name, value] of traefikHeaders) {
+        expect(caddy.headerSets.get(name)?.value, `Caddy ${name}`).toBe(value);
+      }
     });
 
-    it("sets no header in Caddy that Traefik lacks", () => {
-      expect([...caddy.headerSets.keys()].filter((name) => !traefikHeaders.has(name))).toEqual([]);
+    // Traefik only serves the TLS websecure entrypoint for a real host. Caddy
+    // also serves localhost (internal CA) and plain HTTP, where HSTS would
+    // pin the browser to HTTPS on every local port (or is ignored). Strapi's
+    // security middleware (strapi::security, helmet with Strapi's defaults
+    // in @strapi/core 5.55.1) sends the headers below on cms responses, its
+    // own HSTS included (seen on /admin through a localhost Caddy on
+    // 2026-09-29), so on localhost that one has to go too.
+    const STRAPI_UPSTREAM = new Map([
+      ["strict-transport-security", "max-age=31536000; includeSubDomains"],
+      ["x-frame-options", "SAMEORIGIN"],
+      ["referrer-policy", "no-referrer"],
+      ["x-content-type-options", "nosniff"],
+    ]);
+    it.each([
+      ["https", "intranet.example.com", true],
+      ["https", "localhost", false],
+      ["https", "LOCALHOST", false],
+      ["http", "localhost", false],
+    ] as const)("Caddy over %s for %s sends HSTS: %s", (protocol, requestHost, hsts) => {
+      for (const upstream of [new Map<string, string>(), STRAPI_UPSTREAM]) {
+        const headers = caddyResponseHeaders(caddy, protocol, requestHost, upstream);
+        expect(headers.get("strict-transport-security")).toBe(
+          hsts ? traefikHeaders.get("strict-transport-security") : undefined,
+        );
+        // Every other header is unconditional, with the edge's value.
+        for (const [name, value] of traefikHeaders) {
+          if (name !== "strict-transport-security") expect(headers.get(name), name).toBe(value);
+        }
+      }
     });
 
-    it("only strips Caddy's own Server header", () => {
-      expect(caddy.headerRemovals).toEqual(["server"]);
+    // Plain HTTP on a real host name: browsers ignore HSTS there, and Caddy
+    // redirects to HTTPS anyway; the edge adds none.
+    it("adds no HSTS over plain HTTP on a real host name", () => {
+      expect(
+        caddyResponseHeaders(caddy, "http", "intranet.example.com").has(
+          "strict-transport-security",
+        ),
+      ).toBe(false);
     });
+
+    it("defers every Caddy header block, so its values replace the upstream's", () => {
+      expect(caddy.headerBlocks.length).toBeGreaterThan(0);
+      for (const block of caddy.headerBlocks) {
+        expect(block.deferred, `header ${block.matcher ? `@${block.matcher} ` : ""}block`).toBe(
+          true,
+        );
+      }
+    });
+
+    it("strips only Caddy's own Server header, and HSTS on localhost", () => {
+      expect(caddy.headerRemovals).toEqual([
+        { name: "server", matcher: undefined },
+        { name: "strict-transport-security", matcher: "localhost" },
+      ]);
+      expect(caddy.conditions.get("localhost")).toEqual({
+        hosts: ["localhost"],
+        notHosts: [],
+      });
+    });
+  });
+});
+
+describe("Caddyfile parser fails closed (FX33)", () => {
+  const site = (...lines: string[]): string =>
+    ["{$DOMAIN:localhost} {", ...lines.map((line) => `    ${line}`), "}"].join("\n");
+  const proxy = "reverse_proxy web:3000";
+
+  it("models a header block behind a protocol/host condition", () => {
+    const model = parseCaddy(
+      site(
+        proxy,
+        "@secure {",
+        "    protocol https",
+        "    not host localhost other.local",
+        "}",
+        "header @secure {",
+        '    X-Test "1"',
+        "}",
+      ),
+    );
+    expect(model.conditions.get("secure")).toEqual({
+      protocol: "https",
+      hosts: [],
+      notHosts: ["localhost", "other.local"],
+    });
+    expect(model.headerSets.get("x-test")).toEqual({ value: "1", matcher: "secure" });
+    // Neither `defer` nor a deletion: Caddy applies it before the upstream.
+    expect(model.headerBlocks).toEqual([{ matcher: "secure", deferred: false }]);
+  });
+
+  it.each([
+    ["an unmodelled condition", site(proxy, "@x {", "    path /admin*", "}")],
+    ["a header block naming no matcher block", site(proxy, "header @nope {", '    X-A "1"', "}")],
+    [
+      "a proxy behind a condition matcher",
+      site("@x {", "    protocol https", "}", "reverse_proxy @x cms:1337", proxy),
+    ],
+    ["a header directive outside a block", site(proxy, 'header X-A "1"')],
+    ["the same header twice", site(proxy, "header {", '    X-A "1"', '    X-A "2"', "}")],
+    ["an unclosed block", ["{$DOMAIN:localhost} {", proxy, "header {"].join("\n")],
+  ])("rejects %s", (_what, source) => {
+    expect(() => parseCaddy(source)).toThrow();
   });
 });
 
@@ -1019,5 +1379,28 @@ describe("Traefik label parser fails closed (S10 review)", () => {
     const cmsRule = "Host(`sinnlos.yurtbay.dev`) && PathPrefix(`/api`)";
     const source = cmsLabels(`- "traefik.http.routers.sinnlos-cms.rule=${cmsRule}"`, label);
     expect(() => parseTraefik(source)).toThrow(error);
+  });
+
+  it.each([
+    ["${DOMAIN}", { DOMAIN: "a.example" }, "a.example"],
+    ["${DOMAIN:?set it}", { DOMAIN: "a.example" }, "a.example"],
+    ["${DOMAIN:-b.example}", {}, "b.example"],
+    ["${DOMAIN:-b.example}", { DOMAIN: "" }, "b.example"],
+    ["${DOMAIN-b.example}", { DOMAIN: "" }, ""],
+    ["${DOMAIN-b.example}", {}, "b.example"],
+    ["Host(`${DOMAIN}`) costs $$5", { DOMAIN: "a.example" }, "Host(`a.example`) costs $5"],
+  ])("interpolates %s like docker compose", (value, env, expected) => {
+    expect(interpolateCompose(value, env)).toBe(expected);
+  });
+
+  it.each([
+    ["an unbraced variable", "$DOMAIN", { DOMAIN: "a.example" }],
+    ["an unterminated brace", "${DOMAIN", { DOMAIN: "a.example" }],
+    ["a nested default", "${DOMAIN:-${OTHER}}", {}],
+    ["a required variable that is unset", "${DOMAIN:?set it}", {}],
+    ["a required variable that is empty", "${DOMAIN:?set it}", { DOMAIN: "" }],
+    ["an unset ?-variable", "${DOMAIN?set it}", {}],
+  ])("rejects %s", (_what, value, env) => {
+    expect(() => interpolateCompose(value, env)).toThrow();
   });
 });

@@ -35,16 +35,19 @@ anonymous search analytics, and an **English/German UI**
 
 ```
 .
+├── .github/
+│   ├── workflows/ci.yml    CI (build, datetime, integration, infra, images)
+│   └── dependabot.yml      weekly grouped version updates
 ├── apps/
 │   ├── cms/                Strapi v5 backend
 │   └── web/                Next.js 16 frontend
 ├── infra/
 │   ├── docker-compose.yml          base stack (db, cms, web, caddy)
-│   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy)
+│   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy; needs DOMAIN)
 │   ├── deploy.sh                   direct prod deploy (env preflight → backup → tag → build → smoke; --check = preflight only)
 │   ├── live-smoke.sh               end-to-end SSE pipeline probe (run by deploy.sh)
 │   ├── backup/pg-backup.sh         nightly encrypted Postgres + uploads backup
-│   ├── Caddyfile                   used only for local full-stack runs
+│   ├── Caddyfile                   the bundled Caddy (standalone boxes, local full-stack runs)
 │   └── .env.example
 ├── pnpm-workspace.yaml
 └── package.json
@@ -228,7 +231,19 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
   SQLite install, move that file to the absolute path, or switch to the
   equivalent relative value, before upgrading, otherwise the cms starts on a
   new, empty database. Relative values and Postgres are unaffected. The cms
-  sends no `X-Powered-By` header.
+  sends no `X-Powered-By` header. `apps/cms/.env.example` lists every setting
+  `apps/cms/config` reads (Postgres connection, pool, TLS, the destructive
+  `DATABASE_FORCE_MIGRATION`, the admin feature flags); a test keeps it
+  complete.
+- **Edge:** `DOMAIN` is the bare public host name. The bundled Caddy uses it
+  as its site address (unset: `localhost` with Caddy's internal CA;
+  `http://localhost`: plain HTTP); the Traefik overlay requires it for every
+  router's host rule.
+- **cms runtime:** `STRAPI_TELEMETRY_DISABLED=true` (compose default) sends
+  no usage telemetry to Strapi. `CRON_ENABLED` (unset or `true`, the
+  default) runs the cms's scheduled jobs; `false` (also `0`/`no`/`off`)
+  switches all of them off in that process. The cms reads it like its other
+  on/off switches.
 - **Optional:** `LIVE_EVENTS_DISABLED=1` switches the live SSE pipeline off
   (same value on cms and web). `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`
   enable the e-mail digests (dark without them); `SMTP_PORT` 465 uses
@@ -943,12 +958,15 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-Caddy obtains a Let's Encrypt certificate for `$DOMAIN`, proxies `/api/*`
+Caddy obtains a Let's Encrypt certificate for `$DOMAIN` (a real host name;
+without `DOMAIN` it serves only `localhost`, with a certificate from its
+internal CA), proxies `/api/*`
 (except `/api/auth/*`, which is Auth.js on Next.js), `/admin*`, `/upload*`
 (the media-library API) and the other Strapi admin paths to Strapi, and
 everything else to Next.js — including `/uploads/*`, the file bytes, which
-Next.js serves through its session-gated proxy route. Point your DNS
-A/AAAA record at the host and the stack is live.
+Next.js serves through its session-gated proxy route. It sends the same
+security headers as the production Traefik (HSTS only for a real host name).
+Point your DNS A/AAAA record at the host and the stack is live.
 
 ### Live production (srv-prod-01, Traefik)
 
@@ -962,13 +980,33 @@ docker compose -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml \
   up -d --build          # compose project name must stay 'infra'
 ```
 
+Every Traefik router matches the host in `DOMAIN` (`infra/.env`, the bare
+host name), so the overlay file is the same for every instance; compose
+refuses to render it without `DOMAIN`. Nothing checks the value beyond that:
+a scheme, a port or the example host renders, passes `deploy.sh --check`
+and leaves every router without a match (the site answers 404), so check
+the rendered hosts before a deploy that sets or changes it
+([docs/DEPLOYMENT.md §3.6 B](./docs/DEPLOYMENT.md#b-shared-traefik-live-production-layout)).
+It is one Sinnlos stack per Traefik, though: the router, service and
+middleware names are fixed (`sinnlos-*`), so a second instance (employer,
+staging) needs its own host or Traefik. Behind the production Traefik it
+would delete production's routers (different `DOMAIN`) or share its
+services (same `DOMAIN`). The cms router brings its own middlewares, so
+`/admin` and `/api` stay up while the web container restarts, and `/live/*`
+(the SSE stream) has its own router without compression. The containers
+reach each other by the aliases `sinnlos-db`, `sinnlos-cms` and
+`sinnlos-web` on the project network, and every container's log is rotated
+(5 × 10 MB).
+
 `infra/deploy.sh` wraps this end to end: env preflight (`infra/.env` against
 the env contract, and `DATETIME_LEGACY_ZONE` while the running database
 still holds pre-contract datetime columns; `infra/deploy.sh --check` runs
 only this step) → pre-deploy DB backup → tag the running images `:rollback`
 → rebuild + restart (a failed `up` prints the rollback commands) → curl
-smoke-check → datetime and live-pipeline smoke. Rolling back to a cms image
-from before the datetime contract needs `infra/docker-compose.cms-legacy-tz.yml`
+smoke-check → datetime and live-pipeline smoke (against `SMOKE_URL` and
+`BASE_URL`, which default to the owner's site: another instance sets both
+to its own address). Rolling back to a cms image from before the datetime
+contract needs `infra/docker-compose.cms-legacy-tz.yml`
 on top (it runs that cms in `DATETIME_LEGACY_ZONE`), and rolling back to a web
 image from before the web datetime port needs
 `infra/docker-compose.web-legacy-tz.yml` (it runs that web in `APP_TIME_ZONE`,
@@ -979,7 +1017,8 @@ response headers, and the edge rate limits all live at the Traefik layer
 (see the override labels). The cms trusts the `X-Forwarded-For` the edge
 sets (its sign-in throttles count per client IP), so the host Traefik must
 not accept that header from clients. The web and cms containers run
-**non-root** with `no-new-privileges`. Neither needs pnpm or registry access
+**non-root** with `no-new-privileges` and no Linux capabilities
+(`cap_drop: ALL`). Neither needs pnpm or registry access
 to start: the web runs `node apps/web/server.js`, the cms Strapi's own
 `node_modules/.bin/strapi start` under docker-init (`init: true`). A cms
 image from before the ICS and cms start fixes, whose
@@ -1003,6 +1042,7 @@ pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/
                        # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
 pnpm test:integration  # the real cms booted in process, driven over HTTP per role, on
                        # SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job `integration`
+pnpm format:check      # prettier over the tree (CI; reporting only until the format sweep)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
@@ -1010,6 +1050,20 @@ infra/live-smoke.sh    # datetime contract check, then the SSE live pipeline end
 # read-only report of the one-time datetime repair (in the cms container)
 node dist/scripts/datetime-migration-report.js [--around <ISO>] [--all] [--baseline <url>]
 ```
+
+CI (`.github/workflows/ci.yml`) runs on every pull request and on pushes to
+`main` (any other branch through "Run workflow"), with a read-only token and
+a timeout per job: `build` (typecheck, lint, `format:check`, test, build, a
+blocking `pnpm audit --prod --audit-level=critical` and an advisory one at
+`high`), `datetime` (`pnpm test:tz` with Postgres 16), `integration`,
+`infra` (shellcheck over every shell script; `docker compose config` of
+Caddy mode, Traefik mode, which must refuse to render without `DOMAIN`, and
+the rollback overrides) and `images · cms`/`images · web` (both Dockerfiles
+built with buildx, not pushed). `format:check` and shellcheck only report
+until the one-time format sweep after batch 10. Dependabot
+(`.github/dependabot.yml`) opens weekly grouped update pull requests for the
+npm workspace, the Dockerfiles' base image and the GitHub Actions.
+`.gitattributes` stores and checks out every text file with LF.
 
 The Postgres integration suites (`apps/cms/src/database/*.pg.test.ts`: the
 timestamptz guard, the one-time repair through Strapi's own migration

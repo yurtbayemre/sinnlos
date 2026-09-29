@@ -1,0 +1,68 @@
+# Dependabot version updates (roadmap IN01). Dependabot alerts are switched
+# on in the repository settings; this file adds weekly update pull requests
+# that CI checks like any other. Grouped, so a week brings a handful of pull
+# requests instead of one per package.
+version: 2
+updates:
+  # The pnpm workspace: the root package.json, apps/cms, apps/web and
+  # pnpm-lock.yaml.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      # All @strapi/* packages stay on one version (lockstep).
+      strapi:
+        patterns: ["@strapi/*"]
+      # Next.js and its ESLint config move together.
+      nextjs:
+        patterns: ["next", "@next/*", "eslint-config-next"]
+      # Everything else: one pull request for the week's minor and patch
+      # updates. A major update comes on its own.
+      minor-and-patch:
+        update-types: [minor, patch]
+    ignore:
+      # The type definitions follow the Node line of the images (Node 24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  # The base image of both Dockerfiles (node:24-alpine, pinned by digest):
+  # new digests of the same tag. Moving to another Node major is a planned
+  # change (engines, CI, both images), not a weekly bump. The compose images
+  # (postgres:16-alpine, caddy:2-alpine) are deliberately not covered: a
+  # Postgres major needs a dump and restore.
+  - package-ecosystem: docker
+    directories: ["/apps/cms", "/apps/web"]
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    commit-message:
+      prefix: build
+      include: scope
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]
+
+  # The actions used in .github/workflows, in one pull request.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "05:00"
+      timezone: Europe/Berlin
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
