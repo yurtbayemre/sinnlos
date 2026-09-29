@@ -104,7 +104,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     COMPOSE_JSON,
     "COMPOSE_JSON",
     // A throwaway repo: identity and line endings on the command line only.
-    'G=(git -C "$REPO" -c user.name=deploy-test -c user.email=deploy-test@example.invalid -c commit.gpgsign=false -c core.autocrlf=false -c core.safecrlf=false -c init.defaultBranch=main)',
+    'G=(git -C "$REPO" -c user.name=deploy-test -c user.email=deploy-test@example.invalid -c commit.gpgsign=false -c core.autocrlf=false -c core.safecrlf=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
     '"${G[@]}" init -q',
     '"${G[@]}" add -A',
     '"${G[@]}" commit -q -m "first"',
