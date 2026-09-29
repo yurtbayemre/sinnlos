@@ -46,6 +46,34 @@ export function nextFeed(previous: NotificationFeed, next: NotificationFeed): No
 }
 
 /**
+ * The bell's refetch: loads a feed and hands `update` the step to apply
+ * (nextFeed), in order. Only a good answer moves the order on
+ * (`lastGood`): any answer to a request older than the last good one is
+ * dropped, so an older snapshot never overwrites a newer one (it would
+ * flip the badge back to unread right after "Mark all read") and a late
+ * failure never flags a newer good feed. A failure itself stays out of
+ * the order: it flags the shown feed but never blocks an older good
+ * answer still in flight (after a navigation, Next lets the refetches of
+ * the old page run on), which would otherwise keep a stale, flagged feed
+ * until the next poll. `load` must not reject: the caller turns a failed
+ * call into an unavailable feed.
+ */
+export function createFeedRefetch(
+  load: () => Promise<NotificationFeed>,
+  update: (step: (previous: NotificationFeed) => NotificationFeed) => void,
+): () => Promise<void> {
+  let lastIssued = 0;
+  let lastGood = 0;
+  return async () => {
+    const seq = ++lastIssued;
+    const next = await load();
+    if (seq <= lastGood) return;
+    if (!next.unavailable) lastGood = seq;
+    update((previous) => nextFeed(previous, next));
+  };
+}
+
+/**
  * The topbar bell. The panel is a Radix DropdownMenu (UI02, the primitive
  * of SelectMenu): portaled out of the blurred topbar, arrow keys and
  * typeahead over the notifications, Escape and outside click close it, and
@@ -186,7 +214,10 @@ export function NotificationBell({
             </p>
           )}
           <div className="max-h-80 overflow-y-auto">
-            {notifications.length === 0 ? (
+            {/* Unavailable before any feed arrived (the cms was down when the
+                page loaded): the note above says so, and "no notifications
+                yet" would claim what nobody knows. */}
+            {notifications.length === 0 && !unavailable ? (
               <div className="px-4 py-8 text-center text-sm text-muted-foreground">
                 {t("noNotificationsYet")}
               </div>

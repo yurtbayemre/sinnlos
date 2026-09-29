@@ -2,6 +2,7 @@ import { isValidElement, type ReactElement, type ReactNode } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionResult } from "@/lib/action-result";
+import type { NotificationFeed } from "@/lib/notification-actions";
 import type { Notification } from "@/lib/types";
 
 /**
@@ -86,7 +87,7 @@ vi.mock("next-intl", () => ({
   useTimeZone: () => "Europe/Berlin",
 }));
 
-const { NotificationBell, nextFeed } = await import("./notification-bell");
+const { NotificationBell, createFeedRefetch, nextFeed } = await import("./notification-bell");
 
 const unread: Notification = {
   id: 1,
@@ -151,6 +152,8 @@ function render(notifications: Notification[] = [unread], unreadTotal = 1, unava
       .filter((el) => el.type === "p" && el.props.role === undefined)
       .map((el) => el.props.children),
     listed: all.filter((el) => el.type === DropdownMenu.Item && el.key !== null).length,
+    /** The "no notifications yet" text is in the panel. */
+    saysEmpty: all.some((el) => el.props.children === "noNotificationsYet"),
     showsError: all.some((el) => el.props.role === "alert"),
     alertText: all.find((el) => el.props.role === "alert")?.props.children ?? null,
     /** A click on the bell: Radix toggles the menu through onOpenChange. */
@@ -294,5 +297,86 @@ describe("NotificationBell during a cms outage (batch-12 deferral)", () => {
     const bell = render();
     expect(bell.notes).toEqual([]);
     expect(bell.description).toBeNull();
+  });
+
+  it("shows only the note, not 'no notifications yet', when the cms was down from the start", () => {
+    render([], 0, true).clickBell();
+    const bell = render([], 0, true);
+    expect(bell.notes).toEqual(["unavailable"]);
+    expect(bell.saysEmpty).toBe(false);
+    // A real empty feed still says so.
+    expect(render([], 0).saysEmpty).toBe(true);
+  });
+});
+
+describe("createFeedRefetch: overlapping refetches in order", () => {
+  const initial: NotificationFeed = { items: [unread], unreadTotal: 1 };
+  const down: NotificationFeed = { items: [], unreadTotal: 0, unavailable: true };
+  const good = (unreadTotal: number): NotificationFeed => ({
+    items: [read(unreadTotal + 10)],
+    unreadTotal,
+  });
+
+  /**
+   * A bell's state plus a refetch whose loads the test answers one by one,
+   * in any order (Next can overlap them after a navigation).
+   */
+  function setup() {
+    let feed = initial;
+    const pending: ((value: NotificationFeed) => void)[] = [];
+    const refetch = createFeedRefetch(
+      () => new Promise<NotificationFeed>((resolve) => void pending.push(resolve)),
+      (step) => {
+        feed = step(feed);
+      },
+    );
+    /** Starts a refetch; `answer` settles its load and waits for it. */
+    const start = () => {
+      const done = refetch();
+      const resolve = pending[pending.length - 1];
+      return async (value: NotificationFeed) => {
+        resolve(value);
+        await done;
+      };
+    };
+    return { start, feed: () => feed };
+  }
+
+  it("applies an older good answer that arrives after a newer failure", async () => {
+    const bell = setup();
+    const older = bell.start();
+    const newer = bell.start();
+    await newer(down);
+    expect(bell.feed()).toEqual({ ...initial, unavailable: true });
+    await older(good(3));
+    expect(bell.feed()).toEqual(good(3));
+  });
+
+  it("ignores a late failure after a newer good answer", async () => {
+    const bell = setup();
+    const older = bell.start();
+    const newer = bell.start();
+    await newer(good(2));
+    await older(down);
+    expect(bell.feed()).toEqual(good(2));
+  });
+
+  it("never lets an older good answer overwrite a newer one", async () => {
+    const bell = setup();
+    const older = bell.start();
+    const newer = bell.start();
+    await newer(good(0));
+    await older(good(5));
+    expect(bell.feed()).toEqual(good(0));
+  });
+
+  it("flags the kept feed during an outage and recovers with the next good answer", async () => {
+    const bell = setup();
+    await bell.start()(down);
+    expect(bell.feed()).toEqual({ ...initial, unavailable: true });
+    await bell.start()(down);
+    expect(bell.feed()).toEqual({ ...initial, unavailable: true });
+    await bell.start()(good(4));
+    expect(bell.feed()).toEqual(good(4));
   });
 });
