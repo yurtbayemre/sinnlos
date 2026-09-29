@@ -34,6 +34,13 @@
  *  - Repeated instant closes (5×) mean a terminal condition (kill
  *    switch, auth) → stop retrying until the next visibility regain;
  *    polling fallback covers from t=0.
+ *  - A stream the server ends on purpose says why in a terminal `bye`
+ *    event (live contract): `evicted` and `expired` stop the client until
+ *    the next visibility regain (no timed self-heal: reconnecting would
+ *    evict the next tab of the same user, or be refused), `shutdown`
+ *    (deploy) reconnects with the fleet spread, `rotate` after the normal
+ *    backoff. The client closes the EventSource itself, so the browser's
+ *    native 3 s retry never reopens such a stream.
  *  - Subscriptions are synced in one POST per tick (WD04): every channel
  *    registered or dropped in the same commit (a page mounting 20 comment
  *    sections) goes out together, at most MAX_SUBSCRIBE_LIST per list.
@@ -44,7 +51,9 @@ import {
   NOTIFICATIONS_CHANNEL,
   frameChannel,
   isContentChannel,
+  parseByeFrame,
   parseLiveFrame,
+  type ByeReason,
   type ContentChannel,
   type LiveChannel,
   type LiveFrame,
@@ -112,6 +121,8 @@ export class LiveClient {
   private instantCloses = 0;
   private stopped = false;
   private stoppedAt = 0;
+  /** Whether the watchdog may end the stop (instant closes: yes; a bye: no). */
+  private selfHeal = true;
   private reconnectTimer: Timer | null = null;
   private watchdog: ReturnType<typeof setInterval> | null = null;
   private unsubscribeVisibility: (() => void) | null = null;
@@ -214,6 +225,16 @@ export class LiveClient {
       this.onHealth(true);
     });
 
+    source.addEventListener("bye", (event) => {
+      let reason: ByeReason = "rotate";
+      try {
+        reason = parseByeFrame(JSON.parse(String(event.data)))?.reason ?? reason;
+      } catch {
+        // Not JSON: an unknown reason is treated as a rotation.
+      }
+      this.onBye(reason);
+    });
+
     source.addEventListener("ping", (event) => {
       this.lastBeat = this.deps.now();
       let frame: LiveFrame | null = null;
@@ -242,8 +263,7 @@ export class LiveClient {
           // watchdog additionally retries after STOPPED_RETRY_MS so a
           // tab that stays visible through a long deploy recovers on its
           // own. Polling fallback is active throughout.
-          this.stopped = true;
-          this.stoppedAt = this.deps.now();
+          this.stopRetrying(true);
           return;
         }
       } else {
@@ -253,6 +273,38 @@ export class LiveClient {
       // rotation — spread the fleet's reopen instead of stampeding.
       this.scheduleReconnect(lifetime > STABLE_STREAM_MS ? REOPEN_SPREAD_MS : 0);
     };
+  }
+
+  /** The server ended the stream on purpose (a terminal `bye`). */
+  private onBye(reason: ByeReason): void {
+    this.teardown();
+    this.instantCloses = 0;
+    switch (reason) {
+      case "evicted":
+      case "expired":
+        // A newer stream of this user took the place, or the session ends:
+        // reconnecting would evict the next tab or be refused. Wait for the
+        // next visibility regain; the poll backstop covers meanwhile.
+        this.stopRetrying(false);
+        return;
+      case "shutdown":
+        // Deploy: the whole fleet reconnects to the new process, spread.
+        this.scheduleReconnect(REOPEN_SPREAD_MS);
+        return;
+      case "rotate":
+        this.scheduleReconnect(0);
+        return;
+    }
+  }
+
+  /**
+   * Stops retrying until the next visibility regain and, with `selfHeal`,
+   * the watchdog's fresh attempt STOPPED_RETRY_MS later.
+   */
+  private stopRetrying(selfHeal: boolean): void {
+    this.stopped = true;
+    this.selfHeal = selfHeal;
+    this.stoppedAt = this.deps.now();
   }
 
   private teardown(): void {
@@ -304,7 +356,11 @@ export class LiveClient {
     // Self-heal a terminal stop (deploy outlasted the retry budget while
     // the tab stayed visible): one fresh attempt every STOPPED_RETRY_MS.
     if (this.stopped) {
-      if (this.deps.visibility.visible() && this.deps.now() - this.stoppedAt > STOPPED_RETRY_MS) {
+      if (
+        this.selfHeal &&
+        this.deps.visibility.visible() &&
+        this.deps.now() - this.stoppedAt > STOPPED_RETRY_MS
+      ) {
         this.stopped = false;
         this.instantCloses = 0;
         this.attempt = 0;

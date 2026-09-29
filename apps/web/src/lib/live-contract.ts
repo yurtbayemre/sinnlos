@@ -7,6 +7,7 @@
  */
 export {
   ANNOUNCEMENTS_CHANNEL,
+  BYE_REASONS,
   CHANNEL_RE,
   GLOBAL_CHANNELS,
   LIVE_TARGET_TYPES,
@@ -16,7 +17,10 @@ export {
   channelFor,
   frameChannel,
   isContentChannel,
+  parseByeFrame,
   parseLiveFrame,
+  type ByeFrame,
+  type ByeReason,
   type ContentChannel,
   type GlobalChannel,
   type LiveChannel,

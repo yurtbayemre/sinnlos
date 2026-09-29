@@ -61,6 +61,7 @@ const CASES: Array<{
     exports: liveContract,
     fromDomain: {
       ANNOUNCEMENTS_CHANNEL: "ANNOUNCEMENTS_CHANNEL",
+      BYE_REASONS: "BYE_REASONS",
       CHANNEL_RE: "CHANNEL_RE",
       GLOBAL_CHANNELS: "GLOBAL_CHANNELS",
       LIVE_TARGET_TYPES: "LIVE_TARGET_TYPES",
@@ -70,6 +71,7 @@ const CASES: Array<{
       channelFor: "channelFor",
       frameChannel: "frameChannel",
       isContentChannel: "isContentChannel",
+      parseByeFrame: "parseByeFrame",
       parseLiveFrame: "parseLiveFrame",
     },
     own: [],

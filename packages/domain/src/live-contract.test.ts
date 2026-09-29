@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ANNOUNCEMENTS_CHANNEL,
+  BYE_REASONS,
   CHANNEL_RE,
   GLOBAL_CHANNELS,
   LIVE_TARGET_TYPES,
@@ -10,6 +11,7 @@ import {
   channelFor,
   frameChannel,
   isContentChannel,
+  parseByeFrame,
   parseLiveFrame,
   type LiveFrame,
 } from "./live-contract.js";
@@ -106,6 +108,18 @@ describe("frames", () => {
       { type: "unknown" },
     ]) {
       expect(parseLiveFrame(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+});
+
+describe("stream events (LF05)", () => {
+  it("parses a bye with one of the four reasons and nothing else", () => {
+    expect(BYE_REASONS).toEqual(["evicted", "shutdown", "rotate", "expired"]);
+    for (const reason of BYE_REASONS) {
+      expect(parseByeFrame({ reason, extra: 1 })).toEqual({ reason });
+    }
+    for (const value of [null, "evicted", {}, { reason: "gone" }, { reason: ["evicted"] }]) {
+      expect(parseByeFrame(value), JSON.stringify(value)).toBeNull();
     }
   });
 });

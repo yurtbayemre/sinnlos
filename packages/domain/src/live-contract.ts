@@ -14,7 +14,9 @@
  *   - `notification`: the recipient's notifications changed. Delivered to the
  *     recipient's own connections only.
  *   - `announcements`: the announcement list changed. Broadcast.
- * A frame names the channel the client refetches. The two GLOBAL channels
+ * A frame names the channel the client refetches. The stream's own events
+ * (hello, the heartbeat, the terminal `bye`) are described here too, so
+ * the stream route and the browser client read the same shapes. The two GLOBAL channels
  * ("notifications", "announcements") never contain ':', and every content
  * channel does, so a global channel can never be mistaken for, or
  * subscribed as, a content channel: `isContentChannel` is the one test for
@@ -119,6 +121,38 @@ export function frameChannel(frame: LiveFrame): LiveChannel {
     case "announcements":
       return ANNOUNCEMENTS_CHANNEL;
   }
+}
+
+/**
+ * Why the server ends a stream with a terminal `bye` event (LF05). Without
+ * it the browser's native retry (3 s) reopened every server-closed stream,
+ * so an evicted tab evicted the next one, round after round, and a deploy
+ * hit the stopping container. The client acts on the reason:
+ *   - `evicted`: a newer stream of the same user took this one's place (the
+ *     per-user or total cap); reconnecting would evict the next tab, so the
+ *     client waits for the tab's next visibility regain (the poll backstop
+ *     covers meanwhile);
+ *   - `shutdown`: the web process is stopping (deploy); reconnect with the
+ *     fleet spread, not at once;
+ *   - `rotate`: the planned lifetime rotation (a reconnect re-runs the
+ *     session check); reconnect after the normal short backoff;
+ *   - `expired`: the session ends now; a reconnect would be refused, so the
+ *     client waits for the next visibility regain like `evicted`.
+ */
+export const BYE_REASONS = ["evicted", "shutdown", "rotate", "expired"] as const;
+
+export type ByeReason = (typeof BYE_REASONS)[number];
+
+/** What the stream sends as the data of its last event, `bye`. */
+export type ByeFrame = { reason: ByeReason };
+
+/** A `bye` event's data, or null when malformed. */
+export function parseByeFrame(value: unknown): ByeFrame | null {
+  if (typeof value !== "object" || value === null) return null;
+  const reason = (value as { reason?: unknown }).reason;
+  return (BYE_REASONS as readonly unknown[]).includes(reason)
+    ? { reason: reason as ByeReason }
+    : null;
 }
 
 /** A frame as it arrives in a `ping` event's data, or null when malformed. */

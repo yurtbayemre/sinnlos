@@ -140,6 +140,95 @@ describe("LiveClient without browser globals", () => {
   });
 });
 
+describe("terminal bye frames (LF05)", () => {
+  /** A started client with a stream that said hello `stableMs` ago. */
+  async function openStream(h: Harness, stableMs = 5_000) {
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "c1" });
+    await advance(h, stableMs);
+    return source;
+  }
+
+  it("evicted: closes the stream and stays off, the watchdog included, until the tab is visible again", async () => {
+    const h = harness();
+    const source = await openStream(h);
+    source.emit("bye", { reason: "evicted" });
+    expect(source.closed).toBe(true);
+    expect(h.health.at(-1)).toBe(false);
+    await advance(h, 30 * 60_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    h.setVisible(false);
+    h.setVisible(true);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    h.client.stop();
+  });
+
+  it("expired: stays off like evicted", async () => {
+    const h = harness();
+    const source = await openStream(h);
+    source.emit("bye", { reason: "expired" });
+    await advance(h, 30 * 60_000);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    h.client.stop();
+  });
+
+  it("shutdown: reconnects with the fleet spread (up to 15 s more), not the browser's 3 s", async () => {
+    const h = harness();
+    h.rng.value = 0.5;
+    const source = await openStream(h);
+    source.emit("bye", { reason: "shutdown" });
+    expect(source.closed).toBe(true);
+    // 750 + 0.5·1500 + 0.5·15 000
+    await advance(h, 8_999);
+    expect(FakeEventSource.instances).toHaveLength(1);
+    await advance(h, 1);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    h.client.stop();
+  });
+
+  it("rotate: reconnects after the normal backoff and catches up on the hello", async () => {
+    const h = harness();
+    const calls: string[] = [];
+    h.client.register("notifications", () => {
+      calls.push("n");
+    });
+    const source = await openStream(h);
+    source.emit("bye", { reason: "rotate" });
+    await advance(h, 750);
+    expect(FakeEventSource.instances).toHaveLength(2);
+    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    await advance(h, 0);
+    expect(calls).toEqual(["n"]);
+    h.client.stop();
+  });
+
+  it("an unknown or malformed reason counts as a rotation", async () => {
+    for (const data of [{ reason: "gone" }, "not json"]) {
+      FakeEventSource.instances = [];
+      const h = harness();
+      const source = await openStream(h);
+      source.emit("bye", data);
+      expect(source.closed).toBe(true);
+      await advance(h, 750);
+      expect(FakeEventSource.instances).toHaveLength(2);
+      h.client.stop();
+    }
+  });
+
+  it("a bye is no instant close: five quick byes never make the terminal stop", async () => {
+    const h = harness();
+    h.client.start();
+    // Each within 2 s of its open, and no hello: the backoff still climbs.
+    for (const delay of [750, 1_500, 3_000, 6_000, 12_000, 24_000]) {
+      FakeEventSource.latest().emit("bye", { reason: "rotate" });
+      await advance(h, delay);
+    }
+    expect(FakeEventSource.instances).toHaveLength(7);
+    h.client.stop();
+  });
+});
+
 describe("start and stop (the provider's effect)", () => {
   it("stop() closes the stream, removes the visibility listener and every timer", async () => {
     const h = harness();

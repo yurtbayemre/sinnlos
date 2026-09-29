@@ -22,6 +22,7 @@
 import {
   MAX_EVENTS_PER_EMIT,
   channelFor,
+  type ByeReason,
   type LiveEvent,
   type LiveFrame,
 } from "@/lib/live-contract";
@@ -37,7 +38,11 @@ type Connection = {
   openedAt: number;
   /** Returns false when the underlying stream rejected the frame. */
   enqueue: (frame: LiveFrame) => boolean;
-  close: () => void;
+  /**
+   * Ends the stream. With a reason, a terminal `bye` event goes out first
+   * (LF05), so the client neither retries natively nor evicts the next tab.
+   */
+  close: (reason?: ByeReason) => void;
 };
 
 const MAX_CONNECTIONS_TOTAL = 500;
@@ -46,30 +51,36 @@ const MAX_CHANNELS_PER_CONNECTION = 200;
 
 class LiveBus {
   private connections = new Map<string, Connection>();
-  private counters = { emitsReceived: 0, pingsSent: 0 };
+  private counters = { emitsReceived: 0, pingsSent: 0, evictions: 0 };
   private statsTimer: NodeJS.Timeout | null = null;
-  private shutdownRegistered = false;
 
   register(conn: Connection): void {
     // Per-user cap: evict the OLDEST connection instead of rejecting the
-    // new one — reconnecting tabs must always win over stale streams.
+    // new one — reconnecting tabs must always win over stale streams. The
+    // evicted stream says `bye evicted`: its tab waits for its next
+    // visibility regain instead of reconnecting and evicting the next one.
     const mine = [...this.connections.values()]
       .filter((c) => c.userId === conn.userId)
       .sort((a, b) => a.openedAt - b.openedAt);
     while (mine.length >= MAX_CONNECTIONS_PER_USER) {
-      const oldest = mine.shift()!;
-      this.drop(oldest.id);
-      oldest.close();
+      this.evict(mine.shift()!);
     }
     if (this.connections.size >= MAX_CONNECTIONS_TOTAL) {
       const oldest = [...this.connections.values()].sort((a, b) => a.openedAt - b.openedAt)[0];
-      if (oldest) {
-        this.drop(oldest.id);
-        oldest.close();
-      }
+      if (oldest) this.evict(oldest);
     }
     this.connections.set(conn.id, conn);
     this.ensureBackgroundTasks();
+  }
+
+  private evict(conn: Connection): void {
+    this.drop(conn.id);
+    this.counters.evictions += 1;
+    try {
+      conn.close("evicted");
+    } catch {
+      /* stream already dead */
+    }
   }
 
   drop(connId: string): void {
@@ -122,12 +133,16 @@ class LiveBus {
     return this.connections.size;
   }
 
-  /** SIGTERM/SIGINT: close every stream so Next's server.close() drains. */
+  /**
+   * SIGTERM/SIGINT: close every stream so Next's server.close() drains.
+   * Each says `bye shutdown` first: the clients reconnect with the fleet
+   * spread instead of hitting the stopping process after 3 s.
+   */
   closeAll(): void {
     for (const conn of [...this.connections.values()]) {
       this.drop(conn.id);
       try {
-        conn.close();
+        conn.close("shutdown");
       } catch {
         /* stream already dead */
       }
@@ -142,30 +157,41 @@ class LiveBus {
     if (!this.statsTimer) {
       this.statsTimer = setInterval(() => {
         if (this.connections.size > 0 || this.counters.emitsReceived > 0) {
+          const evicted = this.counters.evictions > 0 ? ` evicted=${this.counters.evictions}` : "";
           console.log(
-            `[live] conns=${this.connections.size} emitsRx=${this.counters.emitsReceived} pingsTx=${this.counters.pingsSent}`,
+            `[live] conns=${this.connections.size} emitsRx=${this.counters.emitsReceived} pingsTx=${this.counters.pingsSent}${evicted}`,
           );
           this.counters.emitsReceived = 0;
           this.counters.pingsSent = 0;
+          this.counters.evictions = 0;
         }
       }, 60_000);
       this.statsTimer.unref?.();
     }
-    if (!this.shutdownRegistered) {
-      this.shutdownRegistered = true;
-      // Next 16's production SIGTERM handler awaits server.close(), which
-      // never resolves while SSE streams are open — without this hook every
-      // deploy would hang for the full stop_grace_period and die by SIGKILL.
-      const shutdown = () => this.closeAll();
-      process.on("SIGTERM", shutdown);
-      process.on("SIGINT", shutdown);
-    }
+    registerShutdownOnce();
   }
 }
 
 declare global {
   // eslint-disable-next-line no-var
   var __sinnlosLiveBus: LiveBus | undefined;
+  // eslint-disable-next-line no-var
+  var __sinnlosLiveBusShutdown: boolean | undefined;
+}
+
+/**
+ * Next 16's production SIGTERM handler awaits server.close(), which never
+ * resolves while SSE streams are open — without this hook every deploy
+ * would hang for the full stop_grace_period and die by SIGKILL. Once per
+ * process (pinned on globalThis like the bus), closing whichever bus is
+ * current: a bus replaced in a test leaves no listener behind.
+ */
+function registerShutdownOnce(): void {
+  if (globalThis.__sinnlosLiveBusShutdown) return;
+  globalThis.__sinnlosLiveBusShutdown = true;
+  const shutdown = () => globalThis.__sinnlosLiveBus?.closeAll();
+  process.on("SIGTERM", shutdown);
+  process.on("SIGINT", shutdown);
 }
 
 export function getLiveBus(): LiveBus {

@@ -1,13 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { getLiveBus, parseLiveEvents, type LiveFrame } from "./live-bus";
-import { MAX_EVENTS_PER_EMIT, channelFor } from "./live-contract";
+import { MAX_EVENTS_PER_EMIT, channelFor, type ByeReason } from "./live-contract";
 
 type TestConn = {
   id: string;
   userId: number;
   frames: LiveFrame[];
   closed: boolean;
+  /** The reason the bus closed it with (the stream's terminal bye), if any. */
+  bye: ByeReason | undefined;
 };
 
 function connect(
@@ -24,6 +26,7 @@ function connect(
     userId: overrides.userId ?? 1,
     frames: [],
     closed: false,
+    bye: undefined,
   };
   getLiveBus().register({
     id: conn.id,
@@ -35,8 +38,9 @@ function connect(
       conn.frames.push(frame);
       return true;
     },
-    close: () => {
+    close: (reason) => {
       conn.closed = true;
+      conn.bye = reason;
     },
   });
   return conn;
@@ -157,6 +161,41 @@ describe("connection caps", () => {
     expect(conns.slice(1).every((c) => !c.closed)).toBe(true);
     expect(sixth.closed).toBe(false);
     expect(getLiveBus().connectionCount()).toBe(5);
+  });
+
+  it("tells the evicted stream why (bye evicted), so its tab does not evict the next one (LF05)", () => {
+    const first = connect({ userId: 1, openedAt: 1 });
+    for (let i = 0; i < 5; i += 1) connect({ userId: 1, openedAt: 2 + i });
+    expect(first.bye).toBe("evicted");
+  });
+
+  it("evicts the oldest connection of anyone at the total cap, with bye evicted", () => {
+    const oldest = connect({ userId: 1, openedAt: 1 });
+    for (let i = 0; i < 499; i += 1) connect({ userId: 100 + i, openedAt: 2 + i });
+    expect(getLiveBus().connectionCount()).toBe(500);
+    const newcomer = connect({ userId: 9999, openedAt: 10_000 });
+    expect(oldest.bye).toBe("evicted");
+    expect(newcomer.closed).toBe(false);
+    expect(getLiveBus().connectionCount()).toBe(500);
+  });
+});
+
+describe("shutdown", () => {
+  it("registers its SIGTERM/SIGINT hook once per process, not once per bus", () => {
+    connect({ userId: 1 });
+    const hooks = [process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")];
+    getLiveBus().closeAll();
+    delete globalThis.__sinnlosLiveBus;
+    connect({ userId: 1 });
+    expect([process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")]).toEqual(hooks);
+  });
+
+  it("closes every stream with bye shutdown (the deploy's SIGTERM)", () => {
+    const a = connect({ userId: 1 });
+    const b = connect({ userId: 2 });
+    getLiveBus().closeAll();
+    expect([a.bye, b.bye]).toEqual(["shutdown", "shutdown"]);
+    expect(getLiveBus().connectionCount()).toBe(0);
   });
 });
 

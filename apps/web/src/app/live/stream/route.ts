@@ -16,10 +16,19 @@
  *
  * Frames are content-free pings; all data flows through the existing
  * session-authenticated server actions on refetch.
+ *
+ * Every close the server decides on ends with a terminal `bye {reason}`
+ * event (LF05, live contract): `evicted` (the bus's per-user or total
+ * cap), `shutdown` (SIGTERM, the bus's closeAll), `rotate` (the lifetime
+ * below) or `expired` (the session ends). The client closes its
+ * EventSource on it, so the browser's native 3 s retry no longer reopens a
+ * stream the server ended on purpose. A stream that died (a failed write,
+ * backpressure, the client's abort) gets no bye: nobody would read it.
  */
 import { getSession } from "@/lib/session";
 
 import { getLiveBus, liveEventsDisabled, type LiveFrame } from "@/lib/live-bus";
+import type { ByeReason } from "@/lib/live-contract";
 
 export const dynamic = "force-dynamic";
 
@@ -68,8 +77,9 @@ export async function GET(req: Request) {
         }
       };
 
-      const cleanup = () => {
+      const cleanup = (reason?: ByeReason) => {
         if (closed) return;
+        if (reason) write(`event: bye\ndata: ${JSON.stringify({ reason })}\n\n`);
         closed = true;
         if (heartbeat) clearInterval(heartbeat);
         if (lifetimeTimer) clearTimeout(lifetimeTimer);
@@ -119,13 +129,17 @@ export async function GET(req: Request) {
       const sessionMs = session?.expires
         ? new Date(session.expires).getTime() - Date.now()
         : Number.POSITIVE_INFINITY;
+      // `expired` when the session is what ends the stream: the client then
+      // waits for its next visibility regain instead of reconnecting into a
+      // refusal; otherwise the planned `rotate`.
+      const reason: ByeReason = sessionMs <= lifetime ? "expired" : "rotate";
       lifetimeTimer = setTimeout(
-        cleanup,
+        () => cleanup(reason),
         Math.max(60_000, Math.min(lifetime, sessionMs, SESSION_CLOSE_CAP_MS)),
       );
       lifetimeTimer.unref?.();
 
-      req.signal.addEventListener("abort", cleanup);
+      req.signal.addEventListener("abort", () => cleanup());
     },
     cancel() {
       // Client went away without an abort event (runtime-dependent).
