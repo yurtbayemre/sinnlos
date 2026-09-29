@@ -28,8 +28,10 @@
 # offsite dir are never pruned.
 #
 # backup.log (in the offsite dir): one "ok" line per artifact, "skip" and
-# "FAIL" lines, and "done" at the end; last-success (same dir) holds the time
-# of the last complete run, for an external monitor.
+# "FAIL" lines, and "done" at the end. last-success (same dir) holds the time
+# of the last complete NIGHTLY run, for an external freshness monitor (older
+# than 26 h = the cron stopped); a pre-deploy run writes
+# last-success-predeploy instead, so a deploy never hides a dead cron.
 set -Eeuo pipefail
 umask 077
 
@@ -46,7 +48,6 @@ OFFSITE="$BK/offsite/sinnlos"
 export GNUPGHOME="${SINNLOS_GNUPGHOME:-$BK/.gnupg}"
 KEYID_FILE="${SINNLOS_BACKUP_KEYID:-$BK/.backup-keyid}"
 LOG="$OFFSITE/backup.log"
-LAST_SUCCESS="$OFFSITE/last-success"
 RETENTION_DAYS=7
 RETENTION_KEEP=7
 RETENTION_VICTIMS=()
@@ -60,6 +61,8 @@ case "$KIND" in
     exit 2
     ;;
 esac
+# last-success for the nightly runs, last-success-predeploy for the others.
+LAST_SUCCESS="$OFFSITE/last-success$TAG"
 
 mkdir -p "$OFFSITE"; chmod 700 "$OFFSITE"
 # Timestamps come from bash's printf (strftime in the process zone, like
@@ -206,9 +209,10 @@ else
 fi
 
 # ---- last success ----
-# For an external monitor: the time of the last complete run, its kind and
-# its database artifact. Refreshed in place (`cat >`-style `>`), so the file
-# keeps its owner.
+# For an external monitor: the time of the last complete run of this kind,
+# the kind and its database artifact (last-success: nightly runs only, see
+# the header). Refreshed in place (`cat >`-style `>`), so the file keeps its
+# owner.
 STEP="last-success"
 [[ -e "$LAST_SUCCESS" ]] || { : > "$LAST_SUCCESS"; own_like_offsite "$LAST_SUCCESS"; }
 iso_now

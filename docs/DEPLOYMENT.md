@@ -1375,7 +1375,8 @@ usual.
   signals); retention keeps everything younger than 7 days and at least the
   newest 7 per series, pre-deploy artifacts (`…-predeploy…`) in series of
   their own; `backup.log` gains `skip`, `FAIL`, `pruned` and `done` lines;
-  a `last-success` file records the last complete run. Same paths, same
+  a `last-success` file records the last complete nightly run
+  (`last-success-predeploy` the last pre-deploy run). Same paths, same
   cron line.
 - **`infra/backup/restore-drill.sh`** (new): restores the newest encrypted
   dump into a throwaway Postgres 16, off-box.
@@ -1447,10 +1448,14 @@ usual.
    deploy). From the next deploy on, a failure rolls back to this SHA tag.
 7. The pre-deploy backup of this run is named
    `sinnlos-db-<ts>-predeploy.dump.gz.gpg` (uploads and `.env` alike) in the
-   offsite dir, and `backup.log` ends with `done predeploy`.
+   offsite dir, `backup.log` ends with `done predeploy`, and
+   `last-success-predeploy` names that run (`last-success` is left to the
+   nightly cron).
 8. The next morning, after the 03:00 cron: `tail backup.log` shows `ok`
    lines, `pruned` lines for artifacts older than 7 days beyond the newest
-   7, and `done nightly`; `cat last-success` names the nightly run. The new
+   7, and `done nightly`; `cat last-success` names the nightly run (a
+   freshness monitor, once chosen, alerts when `last-success` is older than
+   26 hours; pre-deploy runs never refresh it). The new
    script never touches older plaintext left in the backup root by failed
    runs before this change (`sinnlos-*.dump`, `.tar`, `.env`, `.gz`): review
    and delete those by hand, but keep the pre-datetime dump until the
@@ -6870,8 +6875,10 @@ snippets above:
 - logs to `backup.log` in the offsite dir: `ok <series> <artifact> <size>`,
   `pruned …`, `skip …` (no uploads volume, no `infra/.env`, no quick-access
   `.env` copy to refresh), `FAIL <kind> <step>` and `done <kind>`; and
-  writes `last-success` there (`<time> <kind> <db artifact>`) after every
-  complete run, for a freshness monitor.
+  writes `last-success` there (`<time> nightly <db artifact>`) after every
+  complete **nightly** run, for a freshness monitor. A pre-deploy run
+  writes `last-success-predeploy` instead, so a deploy never makes a dead
+  cron look fresh.
 
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 `SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
@@ -6895,7 +6902,10 @@ defaults are the owner's host, which the cron line relies on.
 
 **Is it running?** `tail -n 5 <offsite>/backup.log` ends with `done nightly`
 after 03:00, and `cat <offsite>/last-success` names last night. A `FAIL`
-line names the step; the plaintext of that run is already gone.
+line names the step; the plaintext of that run is already gone. The rule
+for a monitor: `last-success` (its modification time, or the time it
+starts with) younger than 26 hours; older means the nightly cron stopped
+or failed. Only nightly runs write it.
 
 **Restoring an encrypted artifact** (on a machine with the private key,
 never on the VPS):

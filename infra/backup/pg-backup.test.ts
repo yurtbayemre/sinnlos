@@ -8,7 +8,8 @@
  *      7 days (by the timestamp in its name) AND not among the newest 7 of
  *      its series; nightly and -predeploy artifacts are separate series;
  *      other files are never touched;
- *   3. a run: 0600 artifacts, no plaintext left, the last-success file, ok /
+ *   3. a run: 0600 artifacts, no plaintext left, the last-success file
+ *      (nightly runs; pre-deploy runs write last-success-predeploy), ok /
  *      skip / done lines in backup.log, pruning only after the encryption;
  *   4. a failed run and a run killed mid-way leave no plaintext and no
  *      partial artifact, log a FAIL line, prune nothing and keep the old
@@ -241,6 +242,8 @@ interface RunReport {
   modes: Record<string, string>;
   log: string[];
   lastSuccess: string;
+  /** last-success-predeploy (empty without one). */
+  lastPredeploy: string;
   quickAccess: string;
   stderr: string;
 }
@@ -322,6 +325,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     '(cd "$OFFSITE" && stat -c "OFFSITE %n %a" -- * .[!.]* 2> /dev/null) || true',
     'if [[ -f "$OFFSITE/backup.log" ]]; then sed "s/^/LOG /" "$OFFSITE/backup.log"; fi',
     'if [[ -f "$OFFSITE/last-success" ]]; then echo "LAST $(cat "$OFFSITE/last-success")"; fi',
+    'if [[ -f "$OFFSITE/last-success-predeploy" ]]; then echo "LASTPRE $(cat "$OFFSITE/last-success-predeploy")"; fi',
     'if [[ -f "$BK/quick/.env" ]]; then echo "QUICK $(cat "$BK/quick/.env")"; fi',
     'sed "s/^/STDERR /" "$T/stderr"',
     "",
@@ -339,6 +343,7 @@ function backupRun(options: RunOptions = {}): RunReport {
     modes: Object.fromEntries(offsiteEntries.map(([name, mode]) => [name, mode])),
     log: pick("LOG").map((l) => l.replace(/^\S+ /, "")),
     lastSuccess: pick("LAST")[0] ?? "",
+    lastPredeploy: pick("LASTPRE")[0] ?? "",
     quickAccess: pick("QUICK")[0] ?? "",
     stderr: pick("STDERR").join("\n"),
   };
@@ -368,6 +373,7 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     ]);
     const db = artifacts.find((n) => n.startsWith("sinnlos-db-"));
     expect(run.lastSuccess).toMatch(new RegExp(`^\\S+ nightly ${db?.replace(/\./g, "\\.")}$`));
+    expect(run.lastPredeploy).toBe("");
     // The quick-access copy is refreshed with the current .env.
     expect(run.quickAccess).toBe("APP_KEYS=secret1,secret2");
     if (POSIX_MODES) {
@@ -377,14 +383,23 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     }
   });
 
-  it("names pre-deploy artifacts -predeploy and says so in last-success", () => {
-    const run = backupRun({ env: { SINNLOS_BACKUP_KIND: "predeploy" } });
+  it("names pre-deploy artifacts -predeploy, and records them apart from last-success", () => {
+    // The last nightly run, which a pre-deploy run must not make look fresher.
+    const nightly = "2026-09-28T03:00:07+02:00 nightly sinnlos-db-20260928-030000.dump.gz.gpg";
+    const run = backupRun({
+      env: { SINNLOS_BACKUP_KIND: "predeploy" },
+      setup: `echo '${nightly}' > "$OFFSITE/last-success"`,
+    });
     expect(run.status, run.stderr).toBe(0);
     const artifacts = run.offsite.filter((name) => name.endsWith(".gz.gpg"));
     expect(artifacts.every((n) => /-predeploy\.(dump|tar|env)\.gz\.gpg$/.test(n))).toBe(true);
     expect(artifacts).toHaveLength(3);
-    expect(run.lastSuccess).toMatch(/ predeploy sinnlos-db-\d{8}-\d{6}-predeploy\.dump\.gz\.gpg$/);
+    expect(run.lastPredeploy).toMatch(
+      /^\S+ predeploy sinnlos-db-\d{8}-\d{6}-predeploy\.dump\.gz\.gpg$/,
+    );
+    expect(run.lastSuccess).toBe(nightly);
     expect(run.log.at(-1)).toBe("done predeploy");
+    if (POSIX_MODES) expect(run.modes["last-success-predeploy"]).toBe("600");
   });
 
   it("refuses an unknown kind before it writes anything", () => {
