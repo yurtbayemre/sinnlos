@@ -20,8 +20,12 @@
 #   2. The rollback target: the images of the last-known-good deploy,
 #      <project>-{web,cms}:<sha> from the state file (below). Without a usable
 #      state (the first run of this version of the script, or those images
-#      are gone) the running images are tagged :rollback, as before.
-#   3. Build web and cms, then restart the stack with the Traefik override.
+#      are gone) the running images are tagged :rollback, as before. The
+#      running images are also tagged :pre-deploy, on every run, so they
+#      stay resolvable through the build (keep_running_images).
+#   3. Build web and cms (without BuildKit's default attestations, so an
+#      unchanged rebuild keeps its image id), then restart the stack with
+#      the Traefik override.
 #   4. Curl smoke check of the live site, then infra/live-smoke.sh.
 #   5. Only after both passed: tag the images <project>-{web,cms}:<sha> (the
 #      first 12 characters of the commit), record them as last-known-good in
@@ -552,8 +556,11 @@ resolve_rollback_target() {
     if img="$(docker inspect --format '{{.Image}}' "${container}" 2>/dev/null)" && [[ -n "${img}" ]]; then
       if ((DRY_RUN)); then
         echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:rollback"
+      elif ! docker tag "${img}" "${PROJECT}-${svc}:rollback"; then
+        echo "  ${container} runs ${img}, which cannot be resolved here any more (no tag references it):"
+        echo "  nothing to roll back to for ${svc}"
+        continue
       else
-        docker tag "${img}" "${PROJECT}-${svc}:rollback"
         echo "  ${container} (${img}) -> ${PROJECT}-${svc}:rollback"
       fi
       tagged=$((tagged + 1))
@@ -571,13 +578,48 @@ resolve_rollback_target() {
   fi
 }
 
-# Step 5: tag what web and cms run now as :<NEW_TAG> and record it. A failed
-# tag is a failed deploy (the ERR trap prints the rollback); a state that
-# cannot be written only warns: the previous last-known-good stays valid.
+# Step 2, on every run: the images web and cms run now also get the tag
+# <project>-<svc>:pre-deploy, which each run moves; it is never a rollback
+# target and never pruned. On the containerd image store (docker info:
+# driver-type io.containerd.snapshotter.v1) an image that no tag references
+# can no longer be resolved by its id. After a deploy that failed after
+# `up`, only :latest references the running images; the next run's build
+# moves :latest, compose keeps a container whose content did not change,
+# and step 5 could not tag what it runs. A tag that cannot be set only
+# warns (step 5 then says whether it matters).
+keep_running_images() {
+  local svc container img
+  for svc in web cms; do
+    container="${PROJECT}-${svc}-1"
+    img="$(docker inspect --format '{{.Image}}' "${container}" 2>/dev/null)" && [[ -n "${img}" ]] || continue
+    if ((DRY_RUN)); then
+      echo "  would tag ${container} (${img}) as ${PROJECT}-${svc}:pre-deploy (keeps it resolvable through the build)"
+    elif docker tag "${img}" "${PROJECT}-${svc}:pre-deploy"; then
+      echo "  ${container} (${img}) -> ${PROJECT}-${svc}:pre-deploy (keeps it resolvable through the build)"
+    else
+      echo "WARNING: could not tag ${img} (${container}) as ${PROJECT}-${svc}:pre-deploy; it cannot be resolved here any more." >&2
+    fi
+  done
+}
+
+# Step 5: tag what web and cms run now as :<NEW_TAG> and record it. Both
+# images must resolve before either tag moves (never a new web tag next to
+# an old cms one). A failed tag is a failed deploy (the ERR trap prints the
+# rollback); a state that cannot be written only warns: the previous
+# last-known-good stays valid.
 record_last_known_good() {
-  local web_id cms_id tmp
+  local web_id cms_id tmp id
   web_id="$(docker inspect --format '{{.Image}}' "${PROJECT}-web-1")"
   cms_id="$(docker inspect --format '{{.Image}}' "${PROJECT}-cms-1")"
+  for id in "${web_id}" "${cms_id}"; do
+    if ! docker image inspect "${id}" >/dev/null 2>&1; then
+      echo "ERROR: the image ${id} that ${PROJECT}-web-1 or ${PROJECT}-cms-1 runs cannot be resolved here any more" >&2
+      echo "       (no tag references it), so it cannot be tagged ${NEW_TAG}. Nothing was tagged. Recreate the" >&2
+      echo "       containers from the current images, then re-run this script:" >&2
+      echo "                      ${COMPOSE[*]} up -d --no-build --force-recreate web cms" >&2
+      return 1
+    fi
+  done
   docker tag "${web_id}" "${PROJECT}-web:${NEW_TAG}"
   docker tag "${cms_id}" "${PROJECT}-cms:${NEW_TAG}"
   echo "  ${PROJECT}-web:${NEW_TAG} = ${web_id}"
@@ -900,9 +942,10 @@ if ((DRY_RUN)); then
   log "Dry run: the plan (nothing is changed)"
   echo "  1. pre-deploy backup: SINNLOS_BACKUP_KIND=predeploy ${BACKUP_SCRIPT} (none on a first install)"
   echo "  2. rollback target:"
+  keep_running_images
   resolve_rollback_target
   echo "     -> ${ROLLBACK_ORIGIN:-none: nothing ran here before (first install)}"
-  echo "  3. build web and cms, then ${COMPOSE[*]} up -d --no-build"
+  echo "  3. BUILDX_NO_DEFAULT_ATTESTATIONS=1 ${COMPOSE[*]} build, then ${COMPOSE[*]} up -d --no-build"
   echo "  4. smoke check ${SMOKE_URL}; live-smoke: $(live_smoke_mode)"
   echo "  5. tag ${PROJECT}-{web,cms}:${NEW_TAG} (commit ${HEAD_SHA}), record ${STATE_FILE}"
   PRUNE="$(tags_to_prune "${NEW_TAG}" | tr '\n' ' ')"
@@ -938,6 +981,7 @@ fi
 # --- 2. Rollback target -------------------------------------------------------
 PHASE="rollback-target"
 log "Rollback target"
+keep_running_images
 resolve_rollback_target
 if [[ -z "${ROLLBACK_REF}" ]]; then
   echo "  none: nothing ran here before (first install)"
@@ -946,7 +990,11 @@ fi
 # --- 3. Build + restart -----------------------------------------------------
 PHASE="build"
 log "Building web and cms"
-"${COMPOSE[@]}" build
+# Without BuildKit's default provenance attestation every build is a new
+# image index, also for unchanged content: :latest would move although
+# nothing changed (and, on the containerd image store, leave the running
+# image without a name; keep_running_images covers that as well).
+BUILDX_NO_DEFAULT_ATTESTATIONS=1 "${COMPOSE[@]}" build
 PHASE="start"
 log "Starting the stack"
 if ! "${COMPOSE[@]}" up -d --no-build; then

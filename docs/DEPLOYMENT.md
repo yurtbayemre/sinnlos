@@ -964,8 +964,14 @@ infra/deploy.sh
    the state file `.git/sinnlos-deploy/infra.state` of the checkout.
    Without a usable state (the first run of this version of `deploy.sh`,
    or those images are gone) it tags the running images `:rollback`, as
-   before.
-3. Builds web and cms, then restarts the stack with the Traefik override
+   before. On every run it also tags the running images
+   `infra-{web,cms}:pre-deploy` (moved each run, never pruned, never a
+   rollback target): on Docker's containerd image store an image that no
+   tag names can no longer be resolved by its id, and without that tag a
+   re-run after a deploy that failed after `up` could not tag what runs.
+3. Builds web and cms with `BUILDX_NO_DEFAULT_ATTESTATIONS=1` (without
+   BuildKit's default provenance attestation an unchanged rebuild keeps its
+   image id), then restarts the stack with the Traefik override
    (`up -d --no-build`).
 4. Curl smoke-checks `https://sinnlos.yurtbay.dev` (override with
    `SMOKE_URL=`), then runs `infra/live-smoke.sh`: first the
@@ -1323,7 +1329,10 @@ usual.
   `.git/sinnlos-deploy/infra.state` (history next to it; the newest five
   SHA tags are kept). A failed deploy prints the rollback to those tags
   (with every override the target needs), also for a failed live-smoke or
-  tag. `--dry-run` shows the plan. `DIGESTS_DISABLED` is read like the cms
+  tag. The running images keep a `:pre-deploy` tag through the build, which
+  runs without BuildKit's default attestations (a re-run after a failed
+  deploy then records what runs, also on the containerd image store).
+  `--dry-run` shows the plan. `DIGESTS_DISABLED` is read like the cms
   reads it (`true`, `yes` and `on` count, not only `1`), and
   `LIVE_EVENTS_DISABLED` comes from `infra/.env` through compose, no longer
   from the shell.
@@ -1353,6 +1362,12 @@ usual.
    refuses one: commit, stash or revert it first. Untracked files only earn
    a note.
 2. `command -v flock` prints a path (util-linux; Debian and Ubuntu ship it).
+   Note which image store the host uses: `docker info -f '{{.DriverStatus}}'`
+   showing `io.containerd.snapshotter.v1` means the containerd image store,
+   where an image that no tag names cannot be resolved by its id any more
+   (plain `overlay2` keeps it until it is pruned). `deploy.sh` handles both
+   (the `:pre-deploy` tags, [§3.6](#36-deploy)); on the containerd store
+   roll back by tag, never by a bare image id.
 3. Optional: `infra/deploy.sh --dry-run`. It runs every check and prints
    the plan: on the first run `2. rollback target: … -> the images that ran
    before this deploy (:rollback)`, because there is no state yet.
@@ -1370,8 +1385,8 @@ usual.
 
 5. `cat .git/sinnlos-deploy/infra.state` shows `TAG=<sha>` and
    `LIVE_SMOKE=passed`; `docker images infra-web` lists `latest`, the SHA
-   tag and `rollback`. From the next deploy on, a failure rolls back to
-   this SHA tag.
+   tag, `rollback` and `pre-deploy` (the images that ran before this
+   deploy). From the next deploy on, a failure rolls back to this SHA tag.
 6. The pre-deploy backup of this run is named
    `sinnlos-db-<ts>-predeploy.dump.gz.gpg` (uploads and `.env` alike) in the
    offsite dir, and `backup.log` ends with `done predeploy`.
@@ -6915,7 +6930,10 @@ docker compose -p infra \
 
 `--no-build` is essential: `--build` would rebuild the broken image.
 `docker images infra-web` lists the SHA tags that are still there; any of
-them is a rollback target the same way. **First run of this version:**
+them is a rollback target the same way. `:pre-deploy` names the images that
+ran when the latest `deploy.sh` run started (it keeps them resolvable
+through the build); the script never rolls back to it, and after a failed
+deploy it may name that failed deploy's images. **First run of this version:**
 there is no state yet, so that one run tags the running images
 `infra-web:rollback` / `infra-cms:rollback` before the build, as every
 earlier version did, and prints those in its rollback commands (a re-run

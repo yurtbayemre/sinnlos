@@ -18,7 +18,11 @@
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
  *   6. the pre-deploy backup runs as SINNLOS_BACKUP_KIND=predeploy, and the
- *      compose project, smoke URL and checkout are parameters.
+ *      compose project, smoke URL and checkout are parameters;
+ *   7. on the containerd image store (an image no tag references cannot be
+ *      resolved), the running images keep a :pre-deploy tag through the
+ *      build, so a re-run after a failed deploy records what runs, and a
+ *      running image that cannot be resolved stops `record` before any tag.
  * Each sequence runs in one bash process. Git Bash forks slowly (a stubbed
  * deploy costs about 6 s there, both sequences about 100 s), so on Windows
  * the two sequences run only with SINNLOS_SLOW_SHELL_TESTS=1; CI (Linux)
@@ -81,7 +85,10 @@ const COMPOSE_JSON = JSON.stringify(
  * <cms-id>` (containers that run already), `ci <json-body>` (the GitHub
  * check-runs answer), KEEP (DEPLOY_KEEP_TAGS), and the STUB_* switches
  * (STUB_SMOKE_CODE, STUB_LIVE_RC, STUB_BUILD_FAIL, STUB_UP_FAIL,
- * STUB_TAG_FAIL, STUB_LOCK_HELD).
+ * STUB_TAG_FAIL, STUB_LOCK_HELD; STUB_CONTAINERD: an image id resolves only
+ * while a tag references it, as on the containerd image store, else once it
+ * was built or ran; STUB_UP_KEEP: `up` keeps the containers that exist, as
+ * compose does for unchanged content). Every build is a new image id.
  */
 function deploys(steps: readonly Step[]): StepReport[] {
   const script: string[] = [
@@ -109,13 +116,17 @@ function deploys(steps: readonly Step[]): StepReport[] {
     '"${G[@]}" add -A',
     '"${G[@]}" commit -q -m "first"',
     'commit() { "${G[@]}" commit -q --allow-empty -m "next"; }',
-    'running() { echo "$1" > "$T/ctr/infra-web-1"; echo "$2" > "$T/ctr/infra-cms-1"; }',
+    'running() { echo "$1" > "$T/ctr/infra-web-1"; echo "$2" > "$T/ctr/infra-cms-1"; printf "%s\\n%s\\n" "$1" "$2" >> "$T/ids"; }',
     'ci() { printf "%s\\n" "$1" > "$T/ci.json"; STUB_CI="$T/ci.json"; }',
     "KEEP=5",
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP=",
+    // Whether an image id resolves: on containerd only while a tag names it.
+    "resolvable() {",
+    '  if [[ -n "$STUB_CONTAINERD" ]]; then cat "$T"/img/* 2> /dev/null | grep -qxF "$1"; else grep -qxF "$1" "$T/ids" 2> /dev/null; fi',
+    "}",
     // docker keeps images in $T/img/<name>__<tag> and containers in $T/ctr.
     "docker() {",
     '  printf \'docker %s\\n\' "$*" >> "$T/calls"',
@@ -129,12 +140,16 @@ function deploys(steps: readonly Step[]): StepReport[] {
     '      case "$sub" in',
     '        config) if [[ "$*" == *"--format json"* ]]; then cat "$T/compose.json"; fi ;;',
     "        build)",
+    '          echo "build-env BUILDX_NO_DEFAULT_ATTESTATIONS=${BUILDX_NO_DEFAULT_ATTESTATIONS:-unset}" >> "$T/calls"',
     '          [[ -z "$STUB_BUILD_FAIL" ]] || return 1',
     '          id=$(( $(cat "$T/n") + 1 )); echo "$id" > "$T/n"',
-    '          echo "sha256:web$id" > "$T/img/$p-web__latest"; echo "sha256:cms$id" > "$T/img/$p-cms__latest" ;;',
+    '          echo "sha256:web$id" > "$T/img/$p-web__latest"; echo "sha256:cms$id" > "$T/img/$p-cms__latest"',
+    '          printf "sha256:web%s\\nsha256:cms%s\\n" "$id" "$id" >> "$T/ids" ;;',
     "        up)",
     '          [[ -z "$STUB_UP_FAIL" ]] || return 1',
-    '          cp "$T/img/$p-web__latest" "$T/ctr/$p-web-1"; cp "$T/img/$p-cms__latest" "$T/ctr/$p-cms-1" ;;',
+    '          for a in web cms; do',
+    '            if [[ -z "$STUB_UP_KEEP" || ! -f "$T/ctr/$p-$a-1" ]]; then cp "$T/img/$p-${a}__latest" "$T/ctr/$p-$a-1"; fi',
+    "          done ;;",
     "      esac ;;",
     "    inspect)",
     '      ref="${*: -1}"',
@@ -143,13 +158,18 @@ function deploys(steps: readonly Step[]): StepReport[] {
     "    image)",
     '      case "$2" in',
     "        inspect)",
-    '          ref="${*: -1}"; [[ -f "$T/img/${ref//:/__}" ]] || return 1',
+    '          ref="${*: -1}"',
+    '          if [[ "$ref" == sha256:* ]]; then resolvable "$ref"; return; fi',
+    '          [[ -f "$T/img/${ref//:/__}" ]] || return 1',
     '          if [[ "$*" == *org.sinnlos.datetime* ]]; then echo zone-explicit; elif [[ "$*" == *Config.Cmd* ]]; then echo \'["node_modules/.bin/strapi","start"]\'; fi ;;',
     '        rm) shift 2; for ref in "$@"; do rm -f "$T/img/${ref//:/__}"; done ;;',
     "      esac ;;",
     "    tag)",
     '      [[ -z "$STUB_TAG_FAIL" ]] || return 1',
-    '      if [[ "$2" == sha256:* ]]; then id="$2"; else [[ -f "$T/img/${2//:/__}" ]] || return 1; id="$(cat "$T/img/${2//:/__}")"; fi',
+    '      if [[ "$2" == sha256:* ]]; then',
+    '        resolvable "$2" || { echo "Error response from daemon: No such image: $2" >&2; return 1; }',
+    '        id="$2"',
+    '      else [[ -f "$T/img/${2//:/__}" ]] || return 1; id="$(cat "$T/img/${2//:/__}")"; fi',
     '      echo "$id" > "$T/img/${3//:/__}" ;;',
     "    exec) cat > /dev/null; echo 0 ;;",
     '    volume) [[ -z "$STUB_NO_VOLUMES" ]] ;;',
@@ -168,7 +188,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
     "sleep() { :; }",
-    "export -f docker curl flock timeout sleep",
+    "export -f docker curl flock timeout sleep resolvable",
   ];
   steps.forEach((step, n) => {
     const env = Object.entries(step.env ?? {})
@@ -355,6 +375,69 @@ describe.skipIf(!RUN_SEQUENCES)(
           `infra-web:${tagOf(third)}=${third.state.WEB_IMAGE}`,
         ]),
       );
+    });
+  },
+);
+
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh on the containerd image store: a re-run after a failed deploy (FX35)",
+  () => {
+    let r: StepReport[] = [];
+    const newTagCalls = (report: StepReport) =>
+      called(report, /^docker tag \S+ infra-(web|cms):[0-9a-f]{12}$/);
+    beforeAll(() => {
+      r = deploys([
+        /* 0 */ { before: "STUB_CONTAINERD=1" },
+        // Fails after `up`: web2/cms2 run, only :latest names them.
+        /* 1 */ { before: "commit; STUB_SMOKE_CODE=502" },
+        // The re-run of that commit: its build moves :latest to web3/cms3,
+        // and compose keeps the running containers.
+        /* 2 */ { before: "STUB_SMOKE_CODE=200; STUB_UP_KEEP=1" },
+        // Containers that run images no tag names (and never did).
+        /* 3 */ { before: "commit; running sha256:ghostweb sha256:ghostcms" },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("keeps the running images tagged :pre-deploy through the build, so the re-run records them", () => {
+      const [first, failed, rerun] = r;
+      expect(first.status, first.stderr).toBe(0);
+      expect(failed.status).toBe(1);
+      expect(failed.state).toEqual(first.state);
+      expect(rerun.status, rerun.stderr).toBe(0);
+      expect(rerun.state).toMatchObject({ WEB_IMAGE: "sha256:web2", CMS_IMAGE: "sha256:cms2" });
+      expect(tagOf(rerun)).not.toBe(tagOf(first));
+      const order = rerun.calls.filter((c) => / build$|^docker tag |^build-env /.test(c));
+      expect(order).toEqual([
+        "docker tag sha256:web2 infra-web:pre-deploy",
+        "docker tag sha256:cms2 infra-cms:pre-deploy",
+        expect.stringMatching(/ build$/),
+        "build-env BUILDX_NO_DEFAULT_ATTESTATIONS=1",
+        `docker tag sha256:web2 infra-web:${tagOf(rerun)}`,
+        `docker tag sha256:cms2 infra-cms:${tagOf(rerun)}`,
+      ]);
+      expect(rerun.images).toEqual(
+        expect.arrayContaining([
+          "infra-web:latest=sha256:web3",
+          "infra-web:pre-deploy=sha256:web2",
+          `infra-web:${tagOf(rerun)}=sha256:web2`,
+          `infra-cms:${tagOf(rerun)}=sha256:cms2`,
+        ]),
+      );
+    });
+
+    it("stops `record` before any tag when a running image cannot be resolved", () => {
+      const [, , good, bad] = r;
+      expect(bad.status).not.toBe(0);
+      expect(bad.stderr).toContain(
+        "WARNING: could not tag sha256:ghostweb (infra-web-1) as infra-web:pre-deploy",
+      );
+      expect(bad.stderr).toContain("the image sha256:ghostweb that infra-web-1 or infra-cms-1 runs");
+      expect(bad.stderr).toContain("up -d --no-build --force-recreate web cms");
+      expect(bad.stderr).toContain("infra/deploy.sh failed during 'record'");
+      expect(bad.stderr).toContain(`docker tag infra-web:${tagOf(good)} infra-web:latest`);
+      expect(newTagCalls(bad)).toEqual([]);
+      expect(bad.state).toEqual(good.state);
+      expect(bad.history).toEqual(good.history);
     });
   },
 );
