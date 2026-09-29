@@ -1,10 +1,11 @@
 /**
  * Per-tab SSE stream (issue #17/#27): one multiplexed EventSource per
  * visible tab, fed by the in-memory live bus. Deliberately OUTSIDE
- * /api/* — Traefik's prio-50 rule swallows /api/* into the cms router,
- * while /live/* falls through to the sinnlos-web catch-all (same
- * pattern as /events/[id]/ics). Keep it that way; the routing-parity
- * test pins it.
+ * /api/* — Traefik's prio-50 rule swallows /api/* into the cms router.
+ * /live/* has a Traefik router of its own, sinnlos-live (priority 10,
+ * above the sinnlos-web catch-all; batch 10, FX34): the security headers
+ * only, no compression and no rate limit. Keep it that way; the
+ * routing-parity test pins it.
  *
  * Edge note: the websecure entrypoint pins
  * respondingTimeouts.readTimeout=0 (host traefik.yaml) as a DEFENSIVE
@@ -142,7 +143,9 @@ export async function GET(req: Request) {
       // compress:true, and the compression middleware would pipe the
       // stream through zlib (text/* matches its filter). no-transform
       // makes it — and Caddy's encode in the fallback profile — skip
-      // this response entirely.
+      // this response entirely. Traefik's compress ignores no-transform
+      // (3.7), hence the sinnlos-live router without it, and both
+      // compress middlewares exclude text/event-stream as well.
       "cache-control": "no-store, no-transform",
       connection: "keep-alive",
       "x-accel-buffering": "no",
