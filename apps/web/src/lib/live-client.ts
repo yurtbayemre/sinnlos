@@ -68,7 +68,6 @@ import {
   type ByeReason,
   type ContentChannel,
   type LiveChannel,
-  type LiveFrame,
   type LiveSubscribeRequest,
 } from "@/lib/live-contract";
 
@@ -101,7 +100,7 @@ export interface LiveClientDeps {
   post(url: string, body: unknown): Promise<boolean>;
 }
 
-/** An event's data parsed as JSON, or undefined when it is none. */
+/** An event's data parsed as JSON, or undefined when it is none (a malformed frame). */
 function readJson(data: unknown): unknown {
   try {
     return JSON.parse(String(data));
@@ -250,23 +249,13 @@ export class LiveClient {
     });
 
     source.addEventListener("bye", (event) => {
-      let reason: ByeReason = "rotate";
-      try {
-        reason = parseByeFrame(JSON.parse(String(event.data)))?.reason ?? reason;
-      } catch {
-        // Not JSON: an unknown reason is treated as a rotation.
-      }
-      this.onBye(reason);
+      // An unknown or malformed reason is treated as a rotation.
+      this.onBye(parseByeFrame(readJson(event.data))?.reason ?? "rotate");
     });
 
     source.addEventListener("ping", (event) => {
       this.lastBeat = this.deps.now();
-      let frame: LiveFrame | null = null;
-      try {
-        frame = parseLiveFrame(JSON.parse(String(event.data)));
-      } catch {
-        // Not JSON: handled like any malformed frame below.
-      }
+      const frame = parseLiveFrame(readJson(event.data));
       // Malformed frame: ignore it; the poll backstop covers.
       if (frame) this.scheduleChannel(frameChannel(frame));
     });
