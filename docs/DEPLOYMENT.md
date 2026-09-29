@@ -1767,6 +1767,29 @@ arrived showed its pending dot for 2.4 s, then the page skeleton with the
 progress bar. Not exercised: `infra/deploy.sh`, Traefik, a real phone and
 a screen reader pass.
 
+**Fix round (2026-09-30, lane 8A):** the review and rehearsal findings are
+fixed: the sheet closes at 768 px, the _More_ tab exposes the current
+section, a guest's ⌘K search asks for no section the guest cannot read,
+the log check in step 2 covers the guest walk only, and the header fits
+beside the sidebar. Unit suite 4862 tests (4920 with Postgres 16.15), the
+time-zone matrix, the integration suite on SQLite (163 tests) and Postgres
+16 (330 tests) and the domain, cms and web builds passed. On the throwaway
+stack again, in headless Chrome:
+
+- with the sheet open at 744 px, widening the viewport to 1133 px closed
+  it (no scroll lock, no `pointer-events: none` on the body, nothing
+  `aria-hidden`), narrowing it again did not reopen it, and after widening
+  from 600 to 1024 px the first click on a sidebar link navigated;
+- on `/training` the _More_ tab carries `aria-current="true"` and Chrome
+  names it "More: Training"; on `/events` it is plain "More";
+- a guest's ⌘K search for "eng" logged no cms request for announcements,
+  departments or teams and no 403, and the guest's preloads of those kinds
+  answered no items; a member's and an `authenticated` user's search read
+  all three (200);
+- for the admin and the guest at 360, 768, 1024 and 1280 px the page did
+  not scroll sideways and _Sign out_ was visible; the name and e-mail show
+  from 1024 px on.
+
 #### Deploying batch 12 (2026-09-29)
 
 Batch 12 (branch `batch/12`, on `main` `7d9e52b`, batch 10 with the format
