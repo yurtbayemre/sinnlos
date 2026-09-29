@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   buildCronTasks,
@@ -94,6 +96,42 @@ describe("cronEnabled (CRON_ENABLED)", () => {
     ["disabled", false],
   ])("%j -> %s", (value, expected) => {
     expect(cronEnabled(value)).toBe(expected);
+  });
+});
+
+describe("CRON_ENABLED as compose and the env examples hand it over (lanes 5A and 5B)", () => {
+  const REPO_ROOT = join(__dirname, "..", "..", "..", "..");
+  const read = (...parts: string[]) =>
+    readFileSync(join(REPO_ROOT, ...parts), "utf8").replace(/\r\n/g, "\n");
+
+  it("switches the crons on with compose's default and the examples' value", () => {
+    // `${CRON_ENABLED:-<default>}`: compose hands over the default for an
+    // unset and for an empty value alike.
+    const fallback = /^ +CRON_ENABLED: \$\{CRON_ENABLED:-([^}]*)\}$/m.exec(
+      read("infra", "docker-compose.yml"),
+    )?.[1];
+    expect(fallback).toBe("true");
+    expect(cronEnabled(fallback)).toBe(true);
+    for (const file of [
+      ["infra", ".env.example"],
+      ["apps", "cms", ".env.example"],
+    ]) {
+      const value = /^CRON_ENABLED=(.*)$/m.exec(read(...file))?.[1];
+      expect(value, file.join("/")).toBeDefined();
+      expect(cronEnabled(value), file.join("/")).toBe(true);
+    }
+  });
+
+  it("switches them off with every value the examples document as off", () => {
+    for (const file of [
+      ["infra", ".env.example"],
+      ["apps", "cms", ".env.example"],
+    ]) {
+      expect(read(...file), file.join("/")).toContain("false (also 0/no/off)");
+    }
+    for (const value of ["false", "0", "no", "off"]) {
+      expect(cronEnabled(value), value).toBe(false);
+    }
   });
 });
 
