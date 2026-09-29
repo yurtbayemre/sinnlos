@@ -13,7 +13,9 @@
 # Plaintext never outlives the run: umask 077 for everything the run creates,
 # and an EXIT trap (errors, INT/TERM/HUP included; SIGKILL cannot be trapped)
 # removes this run's plaintext dump/tar/.env copies, their .gz and a partial
-# .gpg. The encrypted artifacts are 0600 and, when root runs this (deploy.sh),
+# .gpg. What a killed run (SIGKILL) left in the backup root is reported by
+# every later run ("WARN stale plaintext" in backup.log and on stderr).
+# The encrypted artifacts are 0600 and, when root runs this (deploy.sh),
 # owned like the offsite dir, so the owner's cron and the NAS pull keep
 # reading them.
 #
@@ -106,6 +108,26 @@ trap 'FAILED_LINE=$LINENO' ERR
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+# Plaintext that a killed run left behind (SIGKILL, the OOM killer: no trap
+# runs then): this script's own names in the backup root, older than 60
+# minutes, so a run going on right now is never meant. Reported in
+# backup.log and on stderr on every run until someone deletes it; removing
+# it is the owner's call.
+report_stale_plaintext() {
+  local path name re='^sinnlos-(db|uploads|env)-[0-9]{8}-[0-9]{6}(-predeploy)?\.(dump|tar|env)(\.gz)?$'
+  while IFS= read -r path; do
+    name="${path##*/}"
+    [[ "$name" =~ $re ]] || continue
+    case "${BASH_REMATCH[1]}.${BASH_REMATCH[3]}" in
+      db.dump | uploads.tar | env.env) ;;
+      *) continue ;;
+    esac
+    log_line "WARN stale plaintext $name (left by a killed run; review and delete it)"
+    echo "pg-backup: WARNING: stale plaintext $BK/$name (left by a killed run; review and delete it)" >&2
+  done < <(find "$BK" -maxdepth 1 -type f -name 'sinnlos-*' -mmin +60 2> /dev/null || true)
+}
+report_stale_plaintext
 
 # Sets RETENTION_VICTIMS to the artifacts of one series that retention
 # removes (paths): named <stem>-<YYYYmmdd-HHMMSS><tag>.<ext>.gz.gpg in <dir>,

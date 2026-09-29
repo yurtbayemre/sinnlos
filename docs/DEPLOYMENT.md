@@ -1455,11 +1455,13 @@ usual.
    lines, `pruned` lines for artifacts older than 7 days beyond the newest
    7, and `done nightly`; `cat last-success` names the nightly run (a
    freshness monitor, once chosen, alerts when `last-success` is older than
-   26 hours; pre-deploy runs never refresh it). The new
-   script never touches older plaintext left in the backup root by failed
-   runs before this change (`sinnlos-*.dump`, `.tar`, `.env`, `.gz`): review
-   and delete those by hand, but keep the pre-datetime dump until the
-   class-C review is done.
+   26 hours; pre-deploy runs never refresh it). The new script reports the
+   plaintext that killed or failed runs left in the backup root
+   (`sinnlos-{db,uploads,env}-<ts>[-predeploy].{dump,tar,env}[.gz]`, older
+   than an hour) as `WARN stale plaintext <name>` lines in `backup.log` and
+   on stderr, on every run, but never deletes it: review and delete those
+   files by hand. The pre-datetime dump has another name and is not
+   reported; keep it until the class-C review is done.
 9. The cms log shows `[cron] uploads-janitor took …ms` after 03:30,
    `[cron] search-log-janitor took …ms` after 03:35 and
    `[cron] digest-mailer took …ms` after 07:30.
@@ -6860,7 +6862,10 @@ snippets above:
 - leaves **no plaintext** behind: everything it writes is `0600` (umask
   077), and a cleanup trap removes this run's plaintext dump, tar, `.env`
   copy, their `.gz` and a partial `.gpg` on every exit, errors and
-  `INT`/`TERM`/`HUP` included (a `kill -9` cannot be trapped). A root run
+  `INT`/`TERM`/`HUP` included. A `kill -9` or the OOM killer cannot be
+  trapped: what such a run leaves in the backup root (outside the offsite
+  dir) every later run reports as `WARN stale plaintext <name>` in
+  `backup.log` and on stderr, until the owner deletes it. A root run
   (`deploy.sh`) gives the files it creates the owner of the offsite dir, so
   the cron user and the NAS pull keep reading them;
 - **retention**, per series (database, uploads, `.env`; each once for the

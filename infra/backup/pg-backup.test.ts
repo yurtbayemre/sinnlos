@@ -13,7 +13,10 @@
  *      skip / done lines in backup.log, pruning only after the encryption;
  *   4. a failed run and a run killed mid-way leave no plaintext and no
  *      partial artifact, log a FAIL line, prune nothing and keep the old
- *      last-success.
+ *      last-success;
+ *   5. plaintext of the script's own names older than an hour in the
+ *      backup root (a SIGKILLed run's) is reported as "WARN stale
+ *      plaintext" and never removed.
  *
  * Every file operation happens inside bash (a temp dir it creates), so no
  * Windows path crosses into the MSYS or WSL side (as in
@@ -451,6 +454,41 @@ describe.skipIf(!HAS_BASH)("pg-backup.sh runs (docker and gpg stubbed)", BASH_BU
     // Pruning comes after the ok line of the new artifact.
     expect(run.log.findIndex((l) => l.startsWith("pruned "))).toBeGreaterThan(
       run.log.findIndex((l) => l.startsWith("ok sinnlos-db ")),
+    );
+  });
+
+  it("reports, but keeps, the plaintext a killed run left behind", () => {
+    const setup = [
+      // A killed run's plaintext, 2 hours old …
+      'echo dump > "$BK/sinnlos-db-20260901-030000.dump"',
+      'echo tar > "$BK/sinnlos-uploads-20260901-030000-predeploy.tar.gz"',
+      'touch -d "2 hours ago" "$BK/sinnlos-db-20260901-030000.dump" "$BK/sinnlos-uploads-20260901-030000-predeploy.tar.gz"',
+      // … a run going on right now, and names that are not the script's own.
+      'echo now > "$BK/sinnlos-env-20260901-040000.env"',
+      'echo keep > "$BK/sinnlos-db-pre-datetime.dump"',
+      'echo keep > "$BK/sinnlos-db-20260901-030000.tar"',
+      'touch -d "2 hours ago" "$BK/sinnlos-db-pre-datetime.dump" "$BK/sinnlos-db-20260901-030000.tar"',
+    ].join("\n");
+    const run = backupRun({ setup });
+    expect(run.status, run.stderr).toBe(0);
+    const warned = run.log.filter((l) => l.startsWith("WARN "));
+    expect(warned.sort()).toEqual([
+      "WARN stale plaintext sinnlos-db-20260901-030000.dump (left by a killed run; review and delete it)",
+      "WARN stale plaintext sinnlos-uploads-20260901-030000-predeploy.tar.gz (left by a killed run; review and delete it)",
+    ]);
+    expect(run.stderr).toContain("pg-backup: WARNING: stale plaintext ");
+    expect(run.stderr).toContain("/sinnlos-db-20260901-030000.dump (left by a killed run");
+    // Reported before this run's own work, and never removed.
+    expect(run.log.findIndex((l) => l.startsWith("WARN "))).toBeLessThan(
+      run.log.findIndex((l) => l.startsWith("ok sinnlos-db ")),
+    );
+    expect(run.root).toEqual(
+      expect.arrayContaining([
+        "sinnlos-db-20260901-030000.dump",
+        "sinnlos-uploads-20260901-030000-predeploy.tar.gz",
+        "sinnlos-env-20260901-040000.env",
+        "sinnlos-db-pre-datetime.dump",
+      ]),
     );
   });
 
