@@ -18,3 +18,13 @@ coverage
 infra/pgdata
 .pnpm-store
 **/.pnpm-store
+# Local state and caches that must never reach an image (IN02): the cms dev
+# SQLite database (.tmp), build caches, Strapi's generated admin entry and
+# types, uploaded files (the image keeps only the empty uploads/ directory the
+# cms_uploads volume mounts on) and TypeScript build info.
+**/.tmp
+**/.cache
+**/.strapi
+apps/cms/public/uploads/*
+**/types/generated
+**/*.tsbuildinfo

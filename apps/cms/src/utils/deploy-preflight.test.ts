@@ -794,7 +794,7 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
   const PSQL = 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"';
   const REVOKE_LINE = `${COMPOSE_LINE} exec -T db sh -c '${PSQL}' < /srv/${REVOKE_SQL}`;
   const IMAGE_CHECK =
-    "docker run --rm --pull never --network none --entrypoint grep infra-cms:rollback -q visibleToGuests /app/apps/cms/src/api/poll/content-types/poll/schema.json";
+    "docker run --rm --pull never --network none --entrypoint grep infra-cms:rollback -q visibleToGuests /app/apps/cms/dist/src/api/poll/content-types/poll/schema.json";
   const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
   /**
    * The whole sequence, in the order the operator runs it: stop the cms,
@@ -815,12 +815,18 @@ describe("rollback hint: the guest vote permission of poll guest access", BASH_B
 
   it("checks the in-image path of the poll schema that the cms Dockerfile ships", () => {
     const path = shellAssignment("POLL_SCHEMA_IN_IMAGE");
-    expect(path).toBe("/app/apps/cms/src/api/poll/content-types/poll/schema.json");
-    // The runner stage copies the builder's /app, which holds apps/cms from the build context.
+    // The compiled schema Strapi loads (dist/src, from src/**/*.json). Every
+    // cms image has it: before batch 12 the runner copied the builder's
+    // whole /app, since then it copies dist without the sources (IN02).
+    expect(path).toBe("/app/apps/cms/dist/src/api/poll/content-types/poll/schema.json");
     const dockerfile = read("apps", "cms", "Dockerfile");
     expect(dockerfile).toContain("COPY apps/cms ./apps/cms");
-    expect(dockerfile).toContain("COPY --from=builder --chown=node:node /app /app");
-    expect(read(...path.replace(/^\/app\//, "").split("/"))).toContain('"visibleToGuests"');
+    expect(dockerfile).toContain(
+      "cp -a package.json tsconfig.json favicon.png dist database public /out/apps/cms/",
+    );
+    expect(dockerfile).toContain("COPY --from=builder --chown=node:node /out /app");
+    const source = path.replace(/^\/app\//, "").replace("/dist/src/", "/src/");
+    expect(read(...source.split("/"))).toContain('"visibleToGuests"');
   });
 
   it("removes only the guest role's links and the permission rows it unlinked, in one transaction", () => {
