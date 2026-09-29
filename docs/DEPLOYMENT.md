@@ -107,7 +107,7 @@ Install these on any machine you are deploying **from**:
 | Tool | Minimum version | Install |
 |---|---|---|
 | Node.js | 22.13+ or 24 LTS *(root `engines`: `^22.13.0 \|\| ^24.0.0`; CI and the images use 24; Node 20 is EOL — do not use)* | [nodejs.org](https://nodejs.org) |
-| pnpm | 9.x | `corepack enable && corepack prepare pnpm@9.12.0 --activate` |
+| pnpm | 10.x *(root `packageManager`: `pnpm@10.34.6`; `engines` refuses 9)* | `corepack enable && corepack prepare pnpm@10.34.6 --activate` |
 | Git | any recent | system package manager |
 | openssl | any recent | preinstalled on macOS/Linux; on Windows use Git Bash or WSL |
 | curl | any recent | preinstalled on macOS/Linux |
@@ -118,7 +118,7 @@ Check versions:
 
 ```bash
 node -v          # v22.13.0 or later on the 22 line, or v24.x.x
-pnpm -v          # 9.x.x
+pnpm -v          # 10.x.x
 docker -v        # Docker version 24.x.x
 docker compose version  # Docker Compose version v2.x.x
 openssl version  # OpenSSL 3.x.x
@@ -465,7 +465,16 @@ Best for active development.
 git clone https://github.com/yurtbayemre/sinnlos.git
 cd sinnlos
 pnpm install
+pnpm build:domain
 ```
+
+`pnpm build:domain` builds the workspace package `packages/domain`
+(`@sinnlos/domain`, the pure rules both apps import from its `dist`). Run it
+again after changing anything in `packages/domain/src`; `pnpm dev`,
+`pnpm typecheck` and `pnpm test:integration` build it first by themselves,
+`pnpm build` before the apps. A checkout whose `node_modules` pnpm 9
+created asks on the first pnpm 10 install to remove and rebuild it: answer
+yes (without a terminal: `CI=true pnpm install`).
 
 ### 1.2 Create environment files
 
@@ -1544,6 +1553,85 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the domain package, image layers and pnpm 10 (batch 12, lane 7B)
+
+This release (branch `build/domain-package-and-images`, on `main` `7d9e52b`)
+changes how the code is organised and how the images are built. What the
+cms and the web do at runtime stays the same:
+
+- **Shared domain package (SH01).** The rules both apps applied from their
+  own copies (announcement audience, comment anchors, entry ids, the
+  YouTube parser and quiz schema, the role vocabulary, the live-event
+  contract, the marketplace limits, the poll close rule, the calendar-date
+  helpers) now live once in `packages/domain` (`@sinnlos/domain`). Both
+  images build it from the checkout, so `infra/deploy.sh`'s clean-checkout
+  check covers `packages/` as well: an untracked file or directory there
+  stops the deploy before anything is touched, as in `apps/`.
+- **cms image layers (IN02).** The runtime image holds the dependency tree
+  in one layer, copied straight from the install stage, and the app in
+  another (compiled `dist`, `package.json`, `tsconfig.json`, `favicon.png`,
+  the user migrations in `database/`, `public/` with the empty `uploads/`
+  the `cms_uploads` volume mounts on, and the built `@sinnlos/domain`). The
+  TypeScript sources are no longer in the image; Strapi loads the compiled
+  files, the schemas included, from `dist` as before. While the lockfile is
+  unchanged and the build cache holds the install stage, a later code-only
+  deploy writes a ~15 MB layer instead of a new ~850 MB copy, and the
+  SHA-tagged images share the dependency layer on disk. Both Dockerfiles
+  pull `node:24-alpine` by digest in one `FROM` line.
+- **The rollback probe for poll guest access** (the rollback hint of
+  `infra/deploy.sh`, "Upgrading to poll department targeting") now reads
+  the compiled poll schema,
+  `/app/apps/cms/dist/src/api/poll/content-types/poll/schema.json`, which
+  cms images from before and after this release both carry (the source
+  path is gone from the new ones).
+- **Build context.** `.dockerignore` also keeps `apps/cms/.tmp` (a dev
+  SQLite database), `.cache`, `.strapi`, uploaded files, generated types
+  and `*.tsbuildinfo` out of the images; a production checkout has none of
+  them, so this matters for images built from a development tree.
+- **Toolchain (IN03).** The images install with pnpm 10.34.6 (the host
+  needs no pnpm: `deploy.sh` builds with Docker) and compile with
+  TypeScript 5.9.3, the version Strapi's own build already used.
+  `@strapi/plugin-cloud` is gone: the admin panel no longer shows the
+  "Deploy to Strapi Cloud" entry. CI runs every GitHub Action at a pinned
+  commit SHA.
+
+**A normal deploy of cms and web together with `infra/deploy.sh`.** No env,
+schema, permission, edge or Traefik change, and nothing in the database
+changes. The first build after this release is slower: pnpm 10 runs the
+install stage of both images from scratch (a new pnpm store, nothing cached)
+and the cms dependency layer is written once, about 850 MB next to the
+images that stay for rollback; check `df -h` has a few GB free. The helpers
+of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
+
+```bash
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+```
+
+1. **Before (read-only):** `infra/deploy.sh --check` and
+   `infra/deploy.sh --dry-run` (the dry run also lists untracked files in
+   `packages/`, if any).
+2. **Deploy:** `infra/deploy.sh`.
+3. **After: the layers.** `docker history infra-cms:latest | head -n 8`
+   shows `COPY … /out /app` (about 15 MB) above the two `node_modules`
+   copies (about 820 MB and 120 kB).
+4. **After: the probe on the new image** prints `2`:
+
+   ```bash
+   docker run --rm --pull never --network none --entrypoint grep infra-cms:latest \
+     -c visibleToGuests /app/apps/cms/dist/src/api/poll/content-types/poll/schema.json
+   ```
+
+5. **After: the admin panel.** `/admin` loads; uploading an image in the
+   media library creates its thumbnail and small/medium formats (sharp).
+6. **After: the logs.** `"${COMPOSE[@]}" logs --since 30m cms web` shows no
+   error lines.
+
+**Rollback:** the SHA-tag rollback `infra/deploy.sh` prints (to the
+last-known-good images recorded since batch 10); nothing to undo in the
+database or the env. The previous cms images still carry the compiled
+schema the rollback probe reads.
 
 #### Deploying batch 10 (2026-09-29)
 

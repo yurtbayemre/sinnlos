@@ -41,6 +41,8 @@ anonymous search analytics, and an **English/German UI**
 ├── apps/
 │   ├── cms/                Strapi v5 backend
 │   └── web/                Next.js 16 frontend
+├── packages/
+│   └── domain/             @sinnlos/domain: the pure rules both apps share (built to dist/cjs + dist/esm)
 ├── infra/
 │   ├── docker-compose.yml          base stack (db, cms, web, caddy)
 │   ├── docker-compose.traefik.yml  prod override (Traefik instead of Caddy; needs DOMAIN)
@@ -59,7 +61,9 @@ anonymous search analytics, and an **English/German UI**
 - Node.js 22.13+ or 24 LTS (root and `apps/cms` `engines`:
   `^22.13.0 || ^24.0.0`; CI and the Docker images use Node 24; Node 20 is
   end-of-life)
-- pnpm ≥ 9 (`corepack enable && corepack prepare pnpm@9.12.0 --activate`)
+- pnpm 10 (`corepack enable && corepack prepare pnpm@10.34.6 --activate`;
+  the root `packageManager` names the exact version, `engines` refuses
+  pnpm 9)
 - Docker + Docker Compose (for production / full stack run)
 - A Microsoft Entra ID tenant in which you may register an app and grant
   admin consent — only for the optional Microsoft sign-in
@@ -70,10 +74,58 @@ anonymous search analytics, and an **English/German UI**
 
 ```bash
 pnpm install
+pnpm build:domain
 ```
 
-Run it again after pulling a change to the lockfile (hardening batch 2, for
-example, brought vitest 4.1.11 and Vite 7.3.6 for the root test tooling).
+Run `pnpm install` again after pulling a change to the lockfile (hardening
+batch 2, for example, brought vitest 4.1.11 and Vite 7.3.6 for the root test
+tooling). The first install with pnpm 10 over a `node_modules` that pnpm 9
+created asks to remove and rebuild it; answer yes (without a terminal, run
+it with `CI=true`). pnpm 10 runs dependency install scripts only for the
+root `package.json`'s `pnpm.onlyBuiltDependencies` (better-sqlite3's native
+binding, esbuild, sharp); the others it skips are listed under
+`pnpm.ignoredBuiltDependencies`, so a new one shows up as a warning to
+review.
+
+`pnpm build:domain` builds the workspace package `packages/domain`
+(`@sinnlos/domain`, see [Shared domain package](#shared-domain-package)),
+which both apps import from its `dist`. Run it once after installing and
+again after changing anything in `packages/domain/src`; `pnpm dev`,
+`pnpm typecheck` and `pnpm test:integration` run it first on their own, and
+`pnpm build` builds it before the apps.
+
+### Shared domain package
+
+`packages/domain` holds the pure rules the cms and the web both apply,
+where each app used to keep its own copy (SH01): the announcement audience
+predicate (no admin/editor bypass: the cms checks `MODERATORS` before it
+asks), the comment/reaction anchor helpers, the entry-id checks, the YouTube
+parser and the quiz schema, the role vocabulary, the live-event contract,
+the marketplace limits, the poll close rule and the Intl-only calendar-date
+helpers. No runtime dependencies and no I/O: it compiles against ES2020 plus
+the URL parser only, so browser-only or Node-only APIs fail its typecheck,
+and its ESLint config allows no imports but its own modules. Database
+lookups stay in the cms.
+
+- The old module paths are thin re-exports under their old names
+  (`apps/cms/src/utils/plain-date.ts`, `apps/web/src/lib/plain-date.ts`,
+  `apps/cms/src/bootstrap/roles.ts`, …), so importers did not change;
+  `domain-reexports.test.ts` in both apps pins which names come from the
+  package.
+- `pnpm --filter @sinnlos/domain build` (`pnpm build:domain`) writes
+  `dist/cjs` (CommonJS + `.d.ts`: `main`/`types` and `exports.require`, what
+  the cms compiles and runs against) and `dist/esm` (ES modules + `.d.ts`:
+  `exports.import`, what Next.js bundles into the web). `dist` is not
+  committed.
+- Tests: `vitest.config.ts` resolves `@sinnlos/domain` to the package
+  source, so `pnpm test` needs no build and always sees the current rules;
+  the package's own suites live next to its modules
+  (`packages/domain/src/*.test.ts`), and `dist.test.ts` checks that both
+  builds load and export exactly the source's names (skipped locally until
+  `dist` exists, required in CI).
+- Both Dockerfiles copy `packages/domain` and build it before the app; the
+  cms image ships `dist/cjs` (its `node_modules/@sinnlos/domain` is a
+  symlink to it), the web bundles the package into its standalone output.
 
 ## 2. Optional: Microsoft Entra ID sign-in
 
@@ -261,6 +313,9 @@ Environment contract (details in [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)):
 ## 4. Run locally (two terminals)
 
 ```bash
+# Once, and after every change in packages/domain (step 1)
+pnpm build:domain
+
 # Terminal A — Strapi
 pnpm --filter @sinnlos/cms dev
 
@@ -663,8 +718,8 @@ range, or a documentId in the shape Strapi generates (the FX07 write policies ke
 their own, wider documentId rule). Anything else answers like an unknown
 entry (404, or `false` in an ownership policy) or, for a body, 400. Postgres
 used to fail such a lookup, which Strapi answered with a 500. The web's ICS
-route applies the same check (`apps/web/src/lib/entry-id.ts`, a
-byte-identical copy).
+route applies the same check (`apps/web/src/lib/entry-id.ts`; both files
+re-export it from `@sinnlos/domain`).
 
 Global guards that apply to **every** content-API route, not per route:
 
@@ -1048,24 +1103,34 @@ image from before the ICS and cms start fixes, whose
 `docker image inspect -f '{{json .Config.Cmd}}'` shows `["pnpm","start"]`
 (including `infra-cms:rollback` right after deploying that release), still
 runs `pnpm start` and downloads pnpm at every start, which matters when
-rolling back to one. Full details — upgrading an existing
+rolling back to one. The cms image keeps its dependency tree in its own
+layer, copied straight from the install stage, and the app (compiled
+`dist`, the migrations, `public/`, the built `@sinnlos/domain`) in another:
+while the lockfile is unchanged and the build cache still holds the install
+stage, a rebuild for a code change reuses the ~850 MB dependency layer and
+writes only the ~15 MB app layer, and the SHA-tagged images of successive
+deploys share that layer on disk. Full details — upgrading an existing
 instance, backup/restore, rollback, hardening — are in
 **[docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md)**.
 
 ## 7. Useful scripts
 
 ```bash
-pnpm dev               # run every workspace in parallel
-pnpm build             # build every workspace (the cms build deletes apps/cms/dist first)
-pnpm typecheck         # tsc for both apps + typecheck:tests (also run in CI)
+pnpm dev               # build packages/domain, then run every workspace in parallel
+pnpm build             # build every workspace, packages/domain first (the cms build
+                       # deletes apps/cms/dist first)
+pnpm build:domain      # build packages/domain (@sinnlos/domain) into dist/cjs + dist/esm
+pnpm typecheck         # build:domain, tsc for the package and both apps + typecheck:tests
+                       # (also run in CI)
 pnpm typecheck:tests   # type-check every *.test.ts: tsconfig.test.json (web + infra,
                        # strict) and tsconfig.test.cms.json (cms, Strapi's settings)
 pnpm test              # vitest 4 unit tests from the repo root (also run in CI)
 pnpm test:tz           # the same suite under TZ=UTC, Europe/Berlin and Pacific/Auckland
                        # (CI job `datetime`, with Postgres 16 for the *.pg.test.ts suites)
-pnpm test:integration  # the real cms booted in process, driven over HTTP per role, on
-                       # SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job `integration`
-pnpm format:check      # prettier over the tree (CI; reporting only until the format sweep)
+pnpm test:integration  # build:domain, then the real cms booted in process, driven over HTTP
+                       # per role, on SQLite (+ Postgres 16 with SINNLOS_TEST_PG_URL); CI job
+                       # `integration`
+pnpm format:check      # prettier over the tree (CI, blocking)
 pnpm cms:dev           # just Strapi
 pnpm web:dev           # just Next.js
 infra/deploy.sh --check  # validate infra/.env against the env contract, deploy nothing
@@ -1086,9 +1151,17 @@ Caddy mode, Traefik mode, which must refuse to render without `DOMAIN`, and
 the rollback overrides) and `images · cms`/`images · web` (both Dockerfiles
 built with buildx, not pushed). `format:check` and shellcheck block since
 the one-time format sweep after batch 10 (the two long hand-formatted docs,
-`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). Dependabot
+`docs/DEPLOYMENT.md` and `docs/architecture.md`, are in `.prettierignore`). The
+`build`, `datetime` and `integration` jobs build `packages/domain` right
+after the install. Every action runs at a full commit SHA with its release
+tag in a trailing comment (`uses: actions/checkout@<sha> # v4.4.0`), and
+each Dockerfile pulls `node:24-alpine` by digest in one `FROM` line (the
+stage `node-base` every other stage builds on); `infra/build-pins.test.ts`
+refuses an unpinned action, a second base image and a pnpm version that
+differs between `packageManager`, CI and the images. Dependabot
 (`.github/dependabot.yml`) opens weekly grouped update pull requests for the
-npm workspace, the Dockerfiles' base image and the GitHub Actions.
+npm workspace, the Dockerfiles' base image and the GitHub Actions (it
+updates a pinned SHA and its version comment together).
 `.gitattributes` stores and checks out every text file with LF.
 
 The Postgres integration suites (`apps/cms/src/database/*.pg.test.ts`: the
@@ -1173,8 +1246,10 @@ Safety nets for refactors (roadmap S03–S06, S09):
   enums against the web unions and constants (the live channel pattern from
   `apps/web/src/lib/live-contract.ts`), relation pairs, and the web
   role sets against the permission matrix. The live contract itself (event,
-  frame and channel shapes of the SSE pipeline) is one file kept
-  byte-identical in both apps (`apps/web/src/lib/live-contract-mirror.test.ts`). Known gaps are listed in the file
+  frame and channel shapes of the SSE pipeline), like the audience rule, the
+  YouTube parser and the anchors, now lives once in `@sinnlos/domain`
+  (`packages/domain`, see [Shared domain package](#shared-domain-package));
+  both apps re-export it. Known gaps are listed in the file
   and asserted as they are, so closing one means removing its entry. A web
   union is checked against its list in the file only by `pnpm typecheck`
   (the `typecheck:tests` step); `pnpm test` checks that list against the
@@ -1197,7 +1272,8 @@ Safety nets for refactors (roadmap S03–S06, S09):
 
 ## 8. Verification checklist
 
-- [ ] `pnpm install` completes cleanly
+- [ ] `pnpm install` completes cleanly (no "Ignored build scripts" warning)
+- [ ] `pnpm build:domain` writes `packages/domain/dist/cjs` and `dist/esm`
 - [ ] Strapi admin loads at `:1337/admin`, first admin created
 - [ ] The six intranet roles visible under _Settings → Users & Permissions →
       Roles_ (next to the built-in _Authenticated_ and _Public_)
