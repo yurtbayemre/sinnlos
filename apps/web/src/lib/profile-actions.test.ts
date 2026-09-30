@@ -206,8 +206,9 @@ describe("changePassword", () => {
     await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
     expect(updateMock).toHaveBeenCalledTimes(1);
     expect(updateMock).toHaveBeenCalledWith({ strapiJwt: "new.jwt.value" });
-    // No re-render of cms data after the change (refresh would not help:
-    // the request still carries the revoked JWT in its Cookie header).
+    // No refresh(): Next re-renders the page in this same request after an
+    // action that set a cookie, and strapi() there reads the new JWT from
+    // the cookie jar (lib/strapi-token.ts withJarCookies).
     expect(refreshMock).not.toHaveBeenCalled();
   });
 

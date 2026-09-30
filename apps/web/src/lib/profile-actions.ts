@@ -128,11 +128,13 @@ export async function updateProfile(
  * (FX40): unstable_update() runs the jwt callback with trigger "update",
  * which takes it for a local session of the same user
  * (lib/auth/callbacks.ts applyStrapiJwtUpdate) and re-issues the session
- * cookie with it. Nothing after this in the same request may call the cms:
- * the request still carries the old cookie, whose JWT the cms has just
- * revoked (changePassword re-renders nothing). Never throws: the password
- * did change, and without the new JWT this session merely ends with its
- * next cms request (/sign-in?expired=1), like every other one of the user.
+ * cookie with it through the request's cookie jar. Next then re-renders the
+ * page in this same request, and strapi() there already sends the new JWT:
+ * lib/strapi-token.ts reads the session from the cookie jar
+ * (withJarCookies), not from the request's Cookie header, which still
+ * carries the JWT the cms has just revoked. Never throws: the password did
+ * change, and without the new JWT this session merely ends with its next
+ * cms request (/sign-in?expired=1), like every other one of the user.
  */
 async function keepSessionSignedIn(jwt: unknown): Promise<void> {
   if (typeof jwt !== "string" || jwt === "") {
