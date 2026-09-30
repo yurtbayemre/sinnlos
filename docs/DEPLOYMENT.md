@@ -1652,28 +1652,38 @@ changed in four places:
   until it is shown again, so tabs no longer evict each other in turn),
   `shutdown` (the web's SIGTERM during a deploy; the tabs reconnect spread
   over up to 15 s instead of hitting the stopping container), `rotate` (the
-  15–30 minute rotation) and `expired` (the session ends). The per-minute
-  `[live]` line counts evictions as `evicted=N`.
+  15–30 minute rotation) and `expired` (the session ends first: its Strapi
+  JWT expires within the rotation). The per-minute `[live]` line counts
+  evictions as `evicted=N`.
 - **Full channel sets.** Each tab sends its whole set of comment channels
   with a revision number (`POST /live/subscribe`
   `{ connId, rev, channels }`, at most 100 channels per request, a bigger
   set in several requests of the same revision); a late request can no
   longer undo a newer one. A connection holds at most 200 channels; more
   are dropped and logged (`[live] subscribe of user … capped at 200
-  channels: N dropped`). The previous `{ connId, add, remove }` body is
-  still accepted, for tabs that run the old bundle until they are reloaded.
+  channels: N dropped`). A request the web did not take (a network blip,
+  a 5xx) is retried after 2, 4 and 8 s; until one is taken that tab polls
+  at the short intervals. The previous `{ connId, add, remove }` body is
+  still accepted, for tabs that run the old bundle until they are reloaded,
+  and a tab on the new bundle that meets a web from before this release (a
+  web-only rollback) sends that body to it.
 - **Two-leg health.** The cms POSTs a `keepalive` event to
-  `/api/live/emit` every 20 s (only while `WEB_INTERNAL_URL`,
-  `REVALIDATE_SECRET` are set and `LIVE_EVENTS_DISABLED` is not `1`). The
-  web's hello and every heartbeat say whether it heard from the cms within
-  the last 45 s (`emitFresh`). While it did not, the browsers count as
+  `/api/live/emit` as soon as it starts and then every 20 s (only while
+  `WEB_INTERNAL_URL`, `REVALIDATE_SECRET` are set and
+  `LIVE_EVENTS_DISABLED` is not `1`). The web's hello and every heartbeat
+  say whether it heard from the cms within the last 45 s (`emitFresh`). While it did not, the browsers count as
   degraded and poll at the short intervals (comments 10 s, bell 30 s)
   instead of trusting a stream that cannot ping; when the cms is back the
   web tells every stream at once. A web that has just started is degraded
-  until the first keepalive arrives (at most 20 s). A failing keepalive is
-  logged once, `[live-emit] keepalive status=… — the web's live streams
-  show degraded until it gets through …`, and its recovery once,
-  `[live-emit] keepalive reaches the web again`.
+  until the first keepalive arrives (at most 20 s); after a cms restart
+  the browsers are fresh again as soon as the cms is up. A failing
+  keepalive is logged once, `[live-emit] keepalive status=… — the web's
+  live streams show degraded until it gets through …` (or `keepalive
+  failed: …`), and its recovery once, `[live-emit] keepalive reaches the
+  web again`; a cms that starts before the web logs exactly that pair.
+  The browsers show no degraded note in the page yet: until the header
+  indicator of this batch's merge lands (lane 8A's layout), "degraded"
+  means the short polling intervals only.
 - **Shorter ping coalescing.** Since batch 7 (LF02) the cms pings after
   the commit, so the browsers wait less: comment pings 150 ms (was 400 ms),
   notification pings plus 0–1 s (was 0–3 s), announcement pings plus
@@ -1696,15 +1706,23 @@ the running sessions stay valid: **nobody is signed out by this deploy**.
 answers with a JWT of the new version; the web stores it in the session of
 the tab that changed the password, so that tab stays signed in, and every
 other session of the user (another browser or device) lands on
-`/sign-in?expired=1` with its next request. Tabs of the same browser share
-the session cookie and stay signed in together. Microsoft sign-ins are
-unaffected: their JWT carries the version as well and keeps its
-`ENTRA_SESSION_TTL`; the password form is only shown to local sessions.
-Known limits: a password set by an admin in the Strapi panel does not
+`/sign-in?expired=1` with its next request. Its live updates stop too:
+`/live/stream` now asks the cms whether the session's JWT is still
+accepted (the same cached check as `/uploads`, 60 s per JWT) and answers a
+revoked one with 401, and a stream that is already open ends at the latest
+with its 15–30 minute rotation. Only the server can hand a new JWT to a
+session: the update carries an HMAC of the JWT under `AUTH_SECRET`, so the
+browser's own `POST /api/auth/session` cannot store a JWT it made up, and a
+session that has already ended is never revived by an update. Tabs of the
+same browser share the session cookie and stay signed in together.
+Microsoft sign-ins are unaffected: their JWT carries the version as well
+and keeps its `ENTRA_SESSION_TTL`; the password form is only shown to
+local sessions. Known limits: a password set by an admin in the Strapi panel does not
 raise the version (only the user's own change does); the `/uploads`
 status cache (60 s, batch 7) can still serve file bytes to a revoked JWT
-for up to that minute. To sign one user out everywhere by hand, raise the
-version:
+for up to that minute, and an open live stream keeps its content-free
+pings until its next rotation (at most 30 minutes plus that minute). To
+sign one user out everywhere by hand, raise the version:
 
 ```bash
 docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
@@ -1740,8 +1758,10 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
    writes 0 when it creates a user, and reads NULL as 0), and every user
    at version 0.
 4. **After: the logs.** `"${COMPOSE[@]}" logs --since 30m cms web` shows no
-   `[live-emit] keepalive` warning and no error lines; the web's minute
-   line `[live] conns=…` goes on as before.
+   error lines and no `[live-emit] keepalive` warning, except at most one
+   `keepalive failed: …` directly followed by `keepalive reaches the web
+   again` (the new cms started before the new web answered); the web's
+   minute line `[live] conns=…` goes on as before.
 5. **After: the password change (two browsers).** Sign in as a test
    account in browser A and in a private window B. Change the password on
    /profile in A: A shows "Password changed" and keeps working; B's next
@@ -1755,13 +1775,21 @@ together**:
 - The previous cms ignores the `token_version` column (it stays), and it
   accepts the JWTs the new cms issued (it checks signature and expiry
   only), so nobody is signed out by the rollback either; until the next
-  roll-forward a password change revokes nothing.
+  roll-forward a password change revokes nothing. That includes the past:
+  every session and JWT that a password change on this release revoked
+  works again for the whole rollback window (a stolen token too), and is
+  revoked again after the roll-forward (the column keeps its values). If a
+  password was changed because of a compromise, keep the rollback short
+  or rotate `JWT_SECRET`, which signs everyone out (an operator decision).
 - Rolling forward again: the JWTs the previous cms issued in between carry
   no version (= 0), so a user whose version is above 0 (who changed the
   password on this release) signs in again once.
 - Only the web rolled back (new cms): the previous web answers the
   keepalive with 400, which the cms logs once (`[live-emit] keepalive
-  status=400 …`); live pings are unaffected.
+  status=400 …`); live pings are unaffected. Tabs still open on the new
+  bundle recognise the previous web by its hello (no `emitFresh`) and
+  subscribe with its `{ connId, add, remove }` body; they count as healthy,
+  as the previous web cannot say otherwise.
 - Only the cms rolled back (new web): no keepalive reaches the web, so
   every browser shows degraded and polls at the short intervals until the
   cms is new again.
