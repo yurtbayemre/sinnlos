@@ -54,6 +54,11 @@
  *    dropped in the same commit (a page mounting 20 comment sections)
  *    goes out together, at most MAX_SUBSCRIBE_LIST per POST, and a late
  *    POST can never undo a newer set (the bus ignores a stale revision).
+ *  - A web from before LF05 (its hello has no `emitFresh`: a web-only
+ *    rollback while this bundle is still open in a tab) knows only the
+ *    `{ connId, add, remove }` body and would take the set body as an empty
+ *    change. Such a connection gets the difference to what it was sent,
+ *    in the same chunks.
  */
 import {
   ANNOUNCEMENTS_CHANNEL,
@@ -98,6 +103,40 @@ export interface LiveClientDeps {
   };
   /** POSTs a JSON body (the subscribe route); true when the server took it (2xx). */
   post(url: string, body: unknown): Promise<boolean>;
+}
+
+/**
+ * The body of POST /live/subscribe on a web from before LF05: a change of
+ * the connection's channels, not the set. The current route still takes it.
+ */
+export type AddRemoveSubscribeRequest = {
+  connId: string;
+  add: ContentChannel[];
+  remove: ContentChannel[];
+};
+
+/**
+ * The change from `previous` (what the connection was sent) to `desired`,
+ * in add/remove bodies of at most MAX_SUBSCRIBE_LIST channels each; none
+ * when nothing changes.
+ */
+export function addRemoveRequests(
+  connId: string,
+  previous: ReadonlySet<ContentChannel>,
+  desired: readonly ContentChannel[],
+): AddRemoveSubscribeRequest[] {
+  const wanted = new Set(desired);
+  const add = desired.filter((channel) => !previous.has(channel));
+  const remove = [...previous].filter((channel) => !wanted.has(channel));
+  const requests: AddRemoveSubscribeRequest[] = [];
+  for (let i = 0; i < Math.max(add.length, remove.length); i += MAX_SUBSCRIBE_LIST) {
+    requests.push({
+      connId,
+      add: add.slice(i, i + MAX_SUBSCRIBE_LIST),
+      remove: remove.slice(i, i + MAX_SUBSCRIBE_LIST),
+    });
+  }
+  return requests;
 }
 
 /** An event's data parsed as JSON, or undefined when it is none (a malformed frame). */
@@ -155,8 +194,11 @@ export class LiveClient {
   private catchupActive = 0;
   /** The last subscription revision sent; counts up across connections. */
   private rev = 0;
-  /** The set the current connection has (sorted, joined), once sent. */
-  private sent: { connId: string; key: string } | null = null;
+  /** The set the current connection was sent (its sorted, joined key and channels). */
+  private sent: { connId: string; key: string; channels: ReadonlySet<ContentChannel> } | null =
+    null;
+  /** The current connection is a web from before LF05 (a hello without emitFresh). */
+  private legacy = false;
   private syncScheduled = false;
 
   /** `onHealth` gets every health change (the provider's state setter). */
@@ -228,13 +270,17 @@ export class LiveClient {
       this.attempt = 0;
       this.instantCloses = 0;
       this.lastBeat = this.deps.now();
-      const hello = parseHelloFrame(readJson(event.data));
+      const data = readJson(event.data);
+      const hello = parseHelloFrame(data);
       this.connId = hello?.connId ?? null;
+      // Every hello since LF05 says emitFresh; one without it is a web from
+      // before, whose subscribe route takes only the add/remove body.
+      this.legacy = typeof data === "object" && data !== null && !("emitFresh" in data);
       // Degraded while the cms leg is not fresh (LF05): the stream is up
       // but no ping can come, so the owners poll at the short intervals.
       this.onHealth(hello?.emitFresh ?? true);
       // A new connection starts with no channels: send the set if there is one.
-      if (this.connId) this.sent = { connId: this.connId, key: "" };
+      if (this.connId) this.sent = { connId: this.connId, key: "", channels: new Set() };
       this.scheduleSync();
       // Catch-up covers the gap since the last stream (missed pings have
       // no replay). Skipped on the very first open — that data was just
@@ -502,7 +548,8 @@ export class LiveClient {
    * Sends the FULL desired set of content channels (LF05, the contract's
    * LiveSubscribeRequest) under the next revision, in POSTs of at most
    * MAX_SUBSCRIBE_LIST; only content channels are subscribed on the bus,
-   * the global ones reach every connection that may receive them. Nothing
+   * the global ones reach every connection that may receive them. A web
+   * from before LF05 gets the change instead (addRemoveRequests). Nothing
    * goes out without a stream (the next hello sends the set) or when the
    * set is the one this connection already has. A POST the server did not
    * take (network error, 404 after an eviction) forgets that, so the next
@@ -513,18 +560,14 @@ export class LiveClient {
     if (!connId) return;
     const channels = [...this.listeners.keys()].filter(isContentChannel);
     const key = [...channels].sort().join("\n");
-    if (this.sent?.connId === connId && this.sent.key === key) return;
-    const sent = { connId, key };
+    const previous = this.sent?.connId === connId ? this.sent : null;
+    if (previous?.key === key) return;
+    const sent = { connId, key, channels: new Set(channels) };
     this.sent = sent;
-    this.rev += 1;
-    const rev = this.rev;
-    const parts: ContentChannel[][] = [];
-    for (let i = 0; i < channels.length; i += MAX_SUBSCRIBE_LIST) {
-      parts.push(channels.slice(i, i + MAX_SUBSCRIBE_LIST));
-    }
-    if (parts.length === 0) parts.push([]);
-    for (const part of parts) {
-      const request: LiveSubscribeRequest = { connId, rev, channels: part };
+    const requests = this.legacy
+      ? addRemoveRequests(connId, previous?.channels ?? new Set(), channels)
+      : this.setRequests(connId, channels);
+    for (const request of requests) {
       void this.deps
         .post(SUBSCRIBE_URL, request)
         .catch(() => false)
@@ -532,6 +575,19 @@ export class LiveClient {
           if (!taken && this.sent === sent) this.sent = null;
         });
     }
+  }
+
+  /** The full set under the next revision, in POSTs of at most MAX_SUBSCRIBE_LIST. */
+  private setRequests(connId: string, channels: ContentChannel[]): LiveSubscribeRequest[] {
+    this.rev += 1;
+    const rev = this.rev;
+    const requests: LiveSubscribeRequest[] = [];
+    for (let i = 0; i < channels.length; i += MAX_SUBSCRIBE_LIST) {
+      requests.push({ connId, rev, channels: channels.slice(i, i + MAX_SUBSCRIBE_LIST) });
+    }
+    // The empty set is one POST with no channels.
+    if (requests.length === 0) requests.push({ connId, rev, channels: [] });
+    return requests;
   }
 }
 

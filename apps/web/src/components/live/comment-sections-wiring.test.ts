@@ -76,7 +76,7 @@ async function mount(sections: ReactNode, enabled = true) {
 const advance = (ms: number) => browser.act(() => vi.advanceTimersByTimeAsync(ms).then(() => {}));
 
 const hello = (connId = "conn-1") =>
-  browser.act(() => FakeEventSource.latest().emit("hello", { connId }));
+  browser.act(() => FakeEventSource.latest().emit("hello", { connId, emitFresh: true }));
 
 const ping = (documentId: string) =>
   browser.act(() =>

@@ -58,7 +58,7 @@ async function mount(children: ReactNode = null, enabled = true) {
 const advance = (ms: number) => browser.act(() => vi.advanceTimersByTimeAsync(ms).then(() => {}));
 
 async function hello(source: FakeEventSource, connId = "conn-1") {
-  await browser.act(() => source.emit("hello", { connId }));
+  await browser.act(() => source.emit("hello", { connId, emitFresh: true }));
 }
 
 /** The subscribe POSTs so far (LiveSubscribeRequest bodies). */

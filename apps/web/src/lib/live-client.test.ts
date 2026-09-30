@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { FakeEventSource } from "@/components/live/fake-browser.test.helper";
-import { LiveClient, type LiveClientDeps } from "./live-client";
+import { LiveClient, type AddRemoveSubscribeRequest, type LiveClientDeps } from "./live-client";
 
 /**
  * LiveClient on injected dependencies (LF05): no window, document,
@@ -84,7 +84,7 @@ describe("LiveClient without browser globals", () => {
     h.client.register("announcement:a", () => undefined);
     h.client.start();
     expect(FakeEventSource.instances.map((source) => source.url)).toEqual(["/live/stream"]);
-    FakeEventSource.latest().emit("hello", { connId: "c1" });
+    FakeEventSource.latest().emit("hello", { connId: "c1", emitFresh: true });
     await Promise.resolve();
     expect(h.health).toEqual([true]);
     expect(h.posts).toEqual([
@@ -145,7 +145,7 @@ describe("terminal bye frames (LF05)", () => {
   async function openStream(h: Harness, stableMs = 5_000) {
     h.client.start();
     const source = FakeEventSource.latest();
-    source.emit("hello", { connId: "c1" });
+    source.emit("hello", { connId: "c1", emitFresh: true });
     await advance(h, stableMs);
     return source;
   }
@@ -197,7 +197,7 @@ describe("terminal bye frames (LF05)", () => {
     source.emit("bye", { reason: "rotate" });
     await advance(h, 750);
     expect(FakeEventSource.instances).toHaveLength(2);
-    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    FakeEventSource.latest().emit("hello", { connId: "c2", emitFresh: true });
     await advance(h, 0);
     expect(calls).toEqual(["n"]);
     h.client.stop();
@@ -250,11 +250,11 @@ describe("catch-up queue (LF05)", () => {
       );
     }
     h.client.start();
-    FakeEventSource.latest().emit("hello", { connId: "c1" });
+    FakeEventSource.latest().emit("hello", { connId: "c1", emitFresh: true });
     await advance(h, 3_000);
     FakeEventSource.latest().fail();
     await advance(h, 750);
-    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    FakeEventSource.latest().emit("hello", { connId: "c2", emitFresh: true });
     // Two at a time: notifications first, then the first content channel.
     expect(log).toEqual(["notifications", "announcement:a"]);
 
@@ -265,7 +265,7 @@ describe("catch-up queue (LF05)", () => {
 
     // The next regain's hello queues every channel again.
     h.setVisible(true);
-    FakeEventSource.latest().emit("hello", { connId: "c3" });
+    FakeEventSource.latest().emit("hello", { connId: "c3", emitFresh: true });
     await advance(h, 0);
     expect(log.slice(2)).toEqual(["notifications", "announcement:a"]);
     for (const resolve of pending.splice(0)) resolve();
@@ -289,9 +289,9 @@ describe("catch-up queue (LF05)", () => {
       );
     }
     h.client.start();
-    FakeEventSource.latest().emit("hello", { connId: "c1" });
+    FakeEventSource.latest().emit("hello", { connId: "c1", emitFresh: true });
     FakeEventSource.latest().fail(FakeEventSource.CONNECTING);
-    FakeEventSource.latest().emit("hello", { connId: "c2" });
+    FakeEventSource.latest().emit("hello", { connId: "c2", emitFresh: true });
     expect(log).toEqual(["notifications", "announcement:a"]);
     h.client.stop();
     for (const resolve of pending.splice(0)) resolve();
@@ -343,12 +343,98 @@ describe("two-leg health (LF05)", () => {
   });
 });
 
+describe("a web from before LF05 (a web-only rollback with this bundle open)", () => {
+  /** A started client whose stream said the old hello (no emitFresh). */
+  function legacyStream(h: Harness) {
+    h.client.start();
+    const source = FakeEventSource.latest();
+    source.emit("hello", { connId: "old-1" });
+    return source;
+  }
+
+  it("sends the change in the add/remove body its route knows, never the set body", async () => {
+    const h = harness();
+    const dropA = h.client.register("announcement:a", () => undefined);
+    h.client.register("announcement:b", () => undefined);
+    legacyStream(h);
+    await advance(h, 0);
+    expect(h.posts).toEqual([
+      {
+        url: "/live/subscribe",
+        body: { connId: "old-1", add: ["announcement:a", "announcement:b"], remove: [] },
+      },
+    ]);
+    // Only the difference to what this connection was sent.
+    dropA();
+    h.client.register("wiki-page:w", () => undefined);
+    await advance(h, 0);
+    expect(h.posts.at(-1)?.body).toEqual({
+      connId: "old-1",
+      add: ["wiki-page:w"],
+      remove: ["announcement:a"],
+    });
+    expect(h.posts).toHaveLength(2);
+    // Its hello and hb count as fresh.
+    expect(h.health).toEqual([true]);
+    h.client.stop();
+  });
+
+  it("chunks a big change at 100 channels per list", async () => {
+    const h = harness();
+    for (let i = 0; i < 150; i += 1) h.client.register(`announcement:a${i}`, () => undefined);
+    legacyStream(h);
+    await advance(h, 0);
+    const bodies = h.posts.map((post) => post.body as AddRemoveSubscribeRequest);
+    expect(bodies.map((body) => [body.add.length, body.remove.length])).toEqual([
+      [100, 0],
+      [50, 0],
+    ]);
+    h.client.stop();
+  });
+
+  it("after a POST it did not take, adds the whole set again", async () => {
+    const h = harness();
+    let accept = false;
+    h.deps.post = async (url, body) => {
+      h.posts.push({ url, body });
+      return accept;
+    };
+    h.client.register("announcement:a", () => undefined);
+    legacyStream(h);
+    await advance(h, 0);
+    accept = true;
+    h.client.register("announcement:b", () => undefined);
+    await advance(h, 0);
+    expect(h.posts.map((post) => post.body)).toEqual([
+      { connId: "old-1", add: ["announcement:a"], remove: [] },
+      { connId: "old-1", add: ["announcement:a", "announcement:b"], remove: [] },
+    ]);
+    h.client.stop();
+  });
+
+  it("a connection to a current web gets the set body again", async () => {
+    const h = harness();
+    h.client.register("announcement:a", () => undefined);
+    const source = legacyStream(h);
+    await advance(h, 3_000);
+    source.fail();
+    await advance(h, 750);
+    FakeEventSource.latest().emit("hello", { connId: "new-1", emitFresh: true });
+    await advance(h, 0);
+    expect(h.posts.map((post) => post.body)).toEqual([
+      { connId: "old-1", add: ["announcement:a"], remove: [] },
+      { connId: "new-1", rev: 1, channels: ["announcement:a"] },
+    ]);
+    h.client.stop();
+  });
+});
+
 describe("start and stop (the provider's effect)", () => {
   it("stop() closes the stream, removes the visibility listener and every timer", async () => {
     const h = harness();
     h.client.start();
     const source = FakeEventSource.latest();
-    source.emit("hello", { connId: "c1" });
+    source.emit("hello", { connId: "c1", emitFresh: true });
     source.emit("ping", { type: "notification" });
     h.client.stop();
     expect(source.closed).toBe(true);
