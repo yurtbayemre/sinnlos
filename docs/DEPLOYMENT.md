@@ -1643,10 +1643,11 @@ the web only. What users notice:
   keys, jump to an entry by typing its first letter, close with Escape or a
   click beside them, and give focus back to their button. Screen readers
   hear the current value on a select's button ("Category For sale"). On a
-  phone the bell's panel keeps 12 px to each screen edge. The language menu
-  stays disabled until
-  the page is back in the new language, and a switch that cannot reach the
-  web server keeps the current language instead of showing the error page.
+  phone the bell's panel keeps 12 px to each screen edge. After a language
+  is picked, the language button shows the switch as busy (dimmed) until
+  the page is back in the new language and keeps the keyboard focus;
+  picking again meanwhile does nothing. A switch that cannot reach the web
+  server keeps the current language instead of showing the error page.
   The search palette (Ctrl+K / ⌘K) no longer logs "DialogContent requires a
   DialogTitle" in the browser console. The marketplace form still posts
   `category` and `days` as before.
@@ -1654,7 +1655,9 @@ the web only. What users notice:
   keeps the last list and badge instead of emptying them, and the open
   panel says "The intranet cannot be reached right now…". The next
   successful refetch clears it (the bell polls every 2 minutes, every 30
-  seconds while the live stream is degraded, and on a live ping).
+  seconds while the live stream is degraded, and on a live ping). If the
+  cms was already down when the page loaded, the panel shows only that
+  note.
 - **Markdown (UI03).** Announcement bodies (a Strapi rich-text field, i.e.
   Markdown) now render like wiki pages and lessons: bold, lists, links and
   images show as written. **Editors should know:** a single line break
@@ -1663,8 +1666,9 @@ the web only. What users notice:
   is shown as text, never run; a link to `javascript:`, `data:` or another
   unsafe scheme renders as plain text and such an image as its alt text.
   Links to other intranet pages stay in the tab, links to other sites open
-  in a new tab. The dashboard's _Latest news_ cards show plain-text
-  excerpts (no `**`, `#` or link targets).
+  in a new tab. Footnotes (`[^1]`) in several announcements on one page
+  each jump to their own notes. The dashboard's _Latest news_ cards show
+  plain-text excerpts (no `**`, `#` or link targets).
 - **Dialogs (UI07).** _Delete ad_ and _Give kudos_ keep the keyboard inside
   the dialog, close with Escape or a click beside it and give focus back to
   their button; _Cancel_ is focused first when deleting. Confirming a
@@ -1688,8 +1692,11 @@ other batch 13 lanes' deploy steps; merged together they ship as one deploy.
    contents and heading links work as before) and a lesson.
 4. **After: keyboard.** Tab to the language button in the top bar, press
    Enter, then the arrow keys and Escape: the menu opens, moves, closes, and
-   the focus is back on the button. Press Ctrl+K and look at the browser
-   console: no "DialogTitle" error.
+   the focus is back on the button. Press Enter, ArrowUp to _Deutsch_ and
+   Enter: once the page is German, the focus is still on the language
+   button (Enter opens the menu again; switch back to English the same
+   way). Press Ctrl+K and look at the browser console: no "DialogTitle"
+   error.
 5. **After: delete (optional, with a test ad).** Post a test ad, open
    _Edit_, _Delete ad_, _Delete_: the browser lands on `/marketplace`
    without a "Page not found" flash.
@@ -1722,8 +1729,24 @@ on `/marketplace` with the action answering `x-action-redirect:
 select changing the form's `category`; and an announcement containing a
 `<script>`, an `onerror` image and `javascript:` and `data:` targets
 rendered harmlessly. Not exercised: a screen-reader pass (NVDA or
-VoiceOver) and the bell during a real cms outage (the demo has no cms; unit
-tests cover it).
+VoiceOver).
+
+**Fix round (2026-09-30, lane 8B):** unit suite 4763 tests (4821 with
+Postgres 16), the time-zone matrix with Postgres 16, the integration suite
+on SQLite (163) and Postgres 16 (330), and the builds of the domain
+package, cms and web passed; on the loaded host single cases of the shell
+tests (`infra/live-smoke.test.ts`, `deploy-preflight.test.ts`) and two
+timing checks in cms tests hit their limits in some full runs and passed
+alone. In a browser (headless Chrome against the built web with
+`next start` and Strapi on Postgres 16 with the demo seed), 30 checks
+passed: the keyboard language switch of step 4 keeps the focus on the
+language button (the same run against the previous language menu left the
+focus on the page body); a delete call with a tampered ad id is refused
+before any cms request while the real one still deletes; two
+announcements with footnotes have no duplicate ids and each footnote link
+stays in its card; and during a real cms stop the bell keeps its list
+and badge, a page loaded during the stop shows only the note, and
+everything is back after the restart.
 
 #### Deploying batch 12 (2026-09-29)
 
