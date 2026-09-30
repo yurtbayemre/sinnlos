@@ -207,13 +207,15 @@ function suite(name: string, open: () => Promise<Opened>, postgres: boolean) {
       delete process.env.REVALIDATE_SECRET;
     });
 
-    /** Flushes the live batch and returns every event POSTed so far. */
+    /** Flushes the live batch and returns every ping POSTed so far (no keepalive). */
     const pings = async (): Promise<LiveEvent[]> => {
       await __flushLiveEventsForTest();
-      return fetchMock.mock.calls.flatMap(
-        ([, init]) =>
-          (JSON.parse((init as { body: string }).body) as { events: LiveEvent[] }).events,
-      );
+      return fetchMock.mock.calls
+        .flatMap(
+          ([, init]) =>
+            (JSON.parse((init as { body: string }).body) as { events: LiveEvent[] }).events,
+        )
+        .filter((event) => event.kind !== "keepalive");
     };
 
     const notificationCount = () => engine.query(NOTIFICATION_UID).count();

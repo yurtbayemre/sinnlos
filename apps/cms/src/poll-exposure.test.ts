@@ -2,7 +2,11 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { targetUid } from "./utils/comment-target";
-import { __flushLiveEventsForTest, registerLiveEventSubscriber } from "./utils/live-events";
+import {
+  __flushLiveEventsForTest,
+  registerLiveEventSubscriber,
+  stopLiveKeepalive,
+} from "./utils/live-events";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
 
 /**
@@ -255,6 +259,9 @@ describe("live (SSE) pings", () => {
     };
     registerLiveEventSubscriber(strapi);
     if (!subscriber) throw new Error("no subscriber registered");
+    // The registration's first keepalive (LF05) is not a ping of these writes.
+    stopLiveKeepalive();
+    fetchMock.mockClear();
 
     const row = {
       id: 7,

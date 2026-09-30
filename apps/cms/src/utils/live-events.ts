@@ -33,14 +33,17 @@
  * controllers call it after their writes returned.
  *
  * Keepalive (LF05): while live events are on, a `keepalive` event goes to
- * the same endpoint every LIVE_KEEPALIVE_MS (20 s), started with the
- * subscriber. The web marks its streams' heartbeats `emitFresh: false`
+ * the same endpoint when the subscriber registers and then every
+ * LIVE_KEEPALIVE_MS (20 s). The first one goes out at once: after a cms
+ * restart the web's streams are fresh again as soon as the cms is up, not
+ * one interval later. The web marks its streams' heartbeats `emitFresh: false`
  * once it has heard nothing from the cms for EMIT_FRESH_MS (45 s), and the
  * browsers then count as degraded and poll at the short intervals: a
  * stopped cms, a wrong secret or a misrouted emit no longer look like a
  * healthy stream that just never pings. A failing keepalive is logged once
  * when it starts failing and once when it gets through again, not every
- * 20 s.
+ * 20 s (a cms that boots before the web logs one failure, then the
+ * recovery).
  */
 import { afterCommit, type CommitAwareDb } from "./after-commit";
 import {
@@ -149,13 +152,14 @@ async function sendKeepalive(): Promise<void> {
 }
 
 /**
- * Starts the keepalive: one `keepalive` event every LIVE_KEEPALIVE_MS while
- * live events are on (WEB_INTERNAL_URL and REVALIDATE_SECRET set,
- * LIVE_EVENTS_DISABLED not 1). Idempotent; the timer never keeps the
- * process alive.
+ * Starts the keepalive: one `keepalive` event now and then every
+ * LIVE_KEEPALIVE_MS while live events are on (WEB_INTERNAL_URL and
+ * REVALIDATE_SECRET set, LIVE_EVENTS_DISABLED not 1). Idempotent; the
+ * timer never keeps the process alive.
  */
 export function startLiveKeepalive(): void {
   if (keepaliveTimer || !liveEventsEnabled()) return;
+  void sendKeepalive();
   keepaliveTimer = setInterval(() => {
     void sendKeepalive();
   }, LIVE_KEEPALIVE_MS);
