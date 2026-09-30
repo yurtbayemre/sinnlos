@@ -21,7 +21,7 @@ import { headers } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { unstable_update } from "@/auth";
 import { runCmsAction } from "@/lib/action-result";
-import type { StrapiJwtUpdate } from "@/lib/auth/callbacks";
+import { strapiJwtUpdate } from "@/lib/auth/callbacks";
 import { PASSWORD_MIN_LENGTH, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
 import { clientIpFrom } from "@/lib/login-rate-limit";
 import { strapi } from "@/lib/strapi";
@@ -126,7 +126,9 @@ export async function updateProfile(
 /**
  * Hands the Strapi JWT of a password change to this tab's Auth.js session
  * (FX40): unstable_update() runs the jwt callback with trigger "update",
- * which takes it for a local session of the same user
+ * which takes it with the server's proof (strapiJwtUpdate: an HMAC under
+ * the Auth.js secret, so a browser's own POST /api/auth/session cannot
+ * store a JWT it made up) for a local session of the same user
  * (lib/auth/callbacks.ts applyStrapiJwtUpdate) and re-issues the session
  * cookie with it through the request's cookie jar. Next then re-renders the
  * page in this same request, and strapi() there already sends the new JWT:
@@ -143,7 +145,13 @@ async function keepSessionSignedIn(jwt: unknown): Promise<void> {
     );
     return;
   }
-  const update: StrapiJwtUpdate = { strapiJwt: jwt };
+  const update = strapiJwtUpdate(jwt);
+  if (!update) {
+    console.error(
+      "[profile] change password: no AUTH_SECRET to sign the session update; this session ends with its next request",
+    );
+    return;
+  }
   try {
     await unstable_update(update as unknown as Parameters<typeof unstable_update>[0]);
   } catch (error) {

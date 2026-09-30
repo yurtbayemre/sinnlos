@@ -17,16 +17,21 @@
  *    null makes Auth.js clear the cookie and auth() yield null.
  *  - jwt, trigger "update" (FX40): after a password change the cms revokes
  *    the user's older Strapi JWTs and answers with a new one, which
- *    lib/profile-actions.ts hands over through unstable_update(). The
- *    token takes it only for a local session and only when the new JWT
- *    names the session's own user and has not expired (applyStrapiJwtUpdate).
- *    A Microsoft session keeps its JWT: the one of the answer has the local
- *    7-day lifetime, not ENTRA_SESSION_TTL (that session then ends with its
- *    next cms request and signs in again). The same trigger also comes from
- *    a POST /api/auth/session of the browser, so nothing else of the update
- *    is ever read.
+ *    lib/profile-actions.ts hands over through unstable_update(). The same
+ *    trigger also comes from a POST /api/auth/session of the browser (with
+ *    its CSRF token), whose body the browser writes. So the token takes a
+ *    JWT only with the server's proof (an HMAC of the JWT under the Auth.js
+ *    secret, strapiJwtUpdate(): the browser has no way to make one), only
+ *    for a local session, only when the new JWT names the session's own
+ *    user and has not expired (applyStrapiJwtUpdate), and never for a
+ *    session that has already ended: the expiry check runs BEFORE the
+ *    update. Nothing else of the update is ever read. A Microsoft session
+ *    keeps its JWT: the one of the answer has the local 7-day lifetime, not
+ *    ENTRA_SESSION_TTL (that session then ends with its next cms request
+ *    and signs in again).
  *  - session: only id and provider reach the (public) Session object.
  */
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { NextAuthConfig, Session } from "next-auth";
 import type { EntraWebConfig } from "@/lib/auth-config";
 import { exchangeEntraSignIn, type EntraExchangeSuccess } from "@/lib/entra-exchange";
@@ -40,10 +45,45 @@ export const signInError = (code: string) => `/sign-in?error=${encodeURIComponen
 
 /**
  * The data of the session update that hands a new Strapi JWT to the
- * session (FX40, lib/profile-actions.ts). unstable_update() types its
- * argument as a partial Session, which this is not: the one cast is there.
+ * session (FX40, lib/profile-actions.ts), made by strapiJwtUpdate() only.
+ * unstable_update() types its argument as a partial Session, which this is
+ * not: the one cast is there.
  */
-export type StrapiJwtUpdate = { strapiJwt: string };
+export type StrapiJwtUpdate = { strapiJwt: string; proof: string };
+
+/** Keeps the proof's HMAC apart from every other use of the secret. */
+const UPDATE_PROOF_CONTEXT = "sinnlos/strapi-jwt-session-update/v1\n";
+
+/**
+ * The Auth.js secret, read like Auth.js itself (setEnvDefaults) and
+ * lib/strapi-token.ts read it; undefined without one.
+ */
+export function authSecret(env: Record<string, string | undefined> = process.env) {
+  return env.AUTH_SECRET || env.NEXTAUTH_SECRET || undefined;
+}
+
+function updateProof(jwt: string, secret: string): string {
+  return createHmac("sha256", secret)
+    .update(UPDATE_PROOF_CONTEXT + jwt)
+    .digest("base64url");
+}
+
+/**
+ * The session update that hands `jwt` to the session, with its proof: an
+ * HMAC of the JWT under the Auth.js secret. Server code only (the secret
+ * never reaches the browser); null without a secret.
+ */
+export function strapiJwtUpdate(jwt: string, secret = authSecret()): StrapiJwtUpdate | null {
+  return secret ? { strapiJwt: jwt, proof: updateProof(jwt, secret) } : null;
+}
+
+/** Whether `proof` is strapiJwtUpdate()'s proof of `jwt` (constant-time). */
+function hasServerProof(jwt: string, proof: unknown, secret: string | undefined): boolean {
+  if (!secret || typeof proof !== "string") return false;
+  const expected = Buffer.from(updateProof(jwt, secret));
+  const given = Buffer.from(proof);
+  return given.length === expected.length && timingSafeEqual(given, expected);
+}
 
 /** The token fields applyStrapiJwtUpdate reads and writes (a subset of the Auth.js JWT). */
 type UpdatableToken = {
@@ -56,18 +96,22 @@ type UpdatableToken = {
 /**
  * Takes the Strapi JWT of a session update into `token` (see the header):
  * true when it did. Refused, and the token left as it was: a Microsoft
- * session, an update without a string `strapiJwt`, a JWT of another user
- * or without a user id, and one without a future `exp`.
+ * session, an update without a string `strapiJwt` or without the server's
+ * proof of it (a JWT the browser made up, whatever it claims), a JWT of
+ * another user or without a user id, and one without a future `exp`. The
+ * JWT is decoded, not verified: the proof says it came from the server,
+ * which took it from the cms's answer.
  */
 export function applyStrapiJwtUpdate(
   token: UpdatableToken,
   update: unknown,
-  nowMs: number = Date.now(),
+  { nowMs = Date.now(), secret = authSecret() }: { nowMs?: number; secret?: string } = {},
 ): boolean {
   if (token.provider === ENTRA_PROVIDER_ID) return false;
   if (typeof update !== "object" || update === null) return false;
-  const jwt = (update as { strapiJwt?: unknown }).strapiJwt;
+  const { strapiJwt: jwt, proof } = update as { strapiJwt?: unknown; proof?: unknown };
   if (typeof jwt !== "string" || jwt === "") return false;
+  if (!hasServerProof(jwt, proof, secret)) return false;
   const exp = strapiJwtExp(jwt);
   const userId = strapiJwtUserId(jwt);
   if (exp === undefined || nowMs >= exp * 1000) return false;
@@ -135,6 +179,10 @@ export function createAuthCallbacks({
         token.strapiUserId = user.strapiUserId;
         token.strapiJwtExp = strapiJwtExp(user.strapiJwt);
         token.provider = "local";
+      } else if (strapiSessionExpired(token)) {
+        // An ended session stays ended: checked BEFORE an update could
+        // replace the JWT it carries (FX40), not only after it.
+        return null;
       } else if (
         trigger === "update" &&
         session &&
@@ -144,7 +192,7 @@ export function createAuthCallbacks({
         // FX40: the JWT the cms answered a password change with.
         if (!applyStrapiJwtUpdate(token, session)) {
           console.warn(
-            "[auth] session update refused: not a current Strapi JWT of this local session",
+            "[auth] session update refused: not a server-signed current Strapi JWT of this local session",
           );
         }
       }

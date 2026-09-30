@@ -13,8 +13,10 @@
  *
  * Since FX40 a password change revokes the user's older Strapi JWTs (the
  * cms's token version); the session of the tab that changed it takes the
- * new JWT through a session update, which the jwt callback accepts only for
- * the session's own user (strapiJwtUserId).
+ * new JWT through a session update, which the jwt callback accepts only
+ * with the server's proof (lib/auth/callbacks.ts strapiJwtUpdate), only for
+ * the session's own user (strapiJwtUserId) and never for a session that
+ * has already ended.
  */
 
 /** The token fields the expiry decision reads (a subset of the Auth.js JWT). */
@@ -39,11 +41,13 @@ function strapiJwtPayload(jwt: string): Record<string, unknown> | undefined {
 
 /**
  * `exp` (epoch seconds) from a Strapi JWT's payload — base64url-decoded
- * WITHOUT verifying the signature. That is safe here: the value only ever
- * SHORTENS the web session, the JWT comes straight from Strapi's own
- * /auth/local or provider-callback response, and Strapi verifies the
- * signature on every request anyway. undefined for anything malformed or
- * without a numeric exp.
+ * WITHOUT verifying the signature. That is safe here because every JWT a
+ * session records came straight from a cms answer to the web server
+ * (/auth/local, the Entra exchange, or the change-password answer handed
+ * over through a session update that carries the server's proof), never
+ * from the browser; the recorded exp ends the web session no later than
+ * that JWT ends, and Strapi verifies the signature on every request anyway.
+ * undefined for anything malformed or without a numeric exp.
  */
 export function strapiJwtExp(jwt: string): number | undefined {
   const exp = strapiJwtPayload(jwt)?.exp;
@@ -53,9 +57,10 @@ export function strapiJwtExp(jwt: string): number | undefined {
 /**
  * The user id (`id`) from a Strapi JWT's payload, unverified like
  * strapiJwtExp(): the session update after a password change (FX40) takes a
- * JWT only when it names the session's own user, so no session can be made
- * to carry another user's token; Strapi still verifies the signature on
- * every request. undefined for anything malformed or without a numeric id.
+ * JWT only with the server's proof and only when it names the session's own
+ * user, so no session can be made to carry another user's token; Strapi
+ * still verifies the signature on every request. undefined for anything
+ * malformed or without a numeric id.
  */
 export function strapiJwtUserId(jwt: string): number | undefined {
   const id = strapiJwtPayload(jwt)?.id;

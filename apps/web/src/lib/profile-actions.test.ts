@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { strapiJwtUpdate } from "./auth/callbacks";
 import { StrapiError } from "./strapi-error";
 
 /**
@@ -11,7 +12,8 @@ import { StrapiError } from "./strapi-error";
  * machine codes (AC02); the forms translate them
  * (lib/auth/form-messages.ts, whose test checks both catalogs). FX40: the
  * JWT the cms answers a password change with goes into this tab's session
- * (unstable_update), and nothing about it can turn the change into an error.
+ * (unstable_update, with the server's proof of it), and nothing about it
+ * can turn the change into an error.
  * `@/lib/strapi` and `@/auth` are mocked; StrapiError is the real class.
  */
 const strapiMock = vi.fn<(path: string, init?: RequestInit) => Promise<unknown>>();
@@ -33,6 +35,8 @@ vi.mock("@/auth", () => ({ unstable_update: (data: unknown) => updateMock(data) 
 
 const { changePassword, updateProfile } = await import("./profile-actions");
 
+const SECRET = "vitest-auth-secret-0123456789-abcdefghijklmnop";
+
 const form = (fields: Record<string, string> = {}) => {
   const data = new FormData();
   const values = {
@@ -52,12 +56,14 @@ beforeEach(() => {
   updateMock.mockReset();
   updateMock.mockResolvedValue(null);
   state.headers = new Headers({ "x-forwarded-for": "203.0.113.7, 10.0.0.2" });
+  vi.stubEnv("AUTH_SECRET", SECRET);
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
 });
 
 /** The profile form as the browser submits it (checked boxes send "on"). */
@@ -205,7 +211,10 @@ describe("changePassword", () => {
     strapiMock.mockResolvedValue({ jwt: "new.jwt.value", user: { id: 7 } });
     await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
     expect(updateMock).toHaveBeenCalledTimes(1);
-    expect(updateMock).toHaveBeenCalledWith({ strapiJwt: "new.jwt.value" });
+    // With the server's proof: an HMAC of the JWT under AUTH_SECRET.
+    const update = strapiJwtUpdate("new.jwt.value", SECRET);
+    expect(update).toEqual({ strapiJwt: "new.jwt.value", proof: expect.any(String) });
+    expect(updateMock).toHaveBeenCalledWith(update);
     // No refresh(): Next re-renders the page in this same request after an
     // action that set a cookie, and strapi() there reads the new JWT from
     // the cookie jar (lib/strapi-token.ts withJarCookies).
@@ -232,6 +241,15 @@ describe("changePassword", () => {
     expect(console.error).toHaveBeenCalledWith(
       "[profile] change password: could not store the new JWT in the session",
       expect.any(Error),
+    );
+
+    updateMock.mockReset();
+    vi.stubEnv("AUTH_SECRET", "");
+    vi.stubEnv("NEXTAUTH_SECRET", "");
+    await expect(changePassword({}, form())).resolves.toEqual({ success: "passwordChanged" });
+    expect(updateMock).not.toHaveBeenCalled();
+    expect(console.error).toHaveBeenCalledWith(
+      "[profile] change password: no AUTH_SECRET to sign the session update; this session ends with its next request",
     );
   });
 

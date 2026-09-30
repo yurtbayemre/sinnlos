@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { decode } from "next-auth/jwt";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { strapiJwtUpdate } from "./callbacks";
+
 /**
  * The session update after a password change (FX40) through the REAL
  * apps/web/src/auth.ts and Auth.js (@auth/core 0.41.3, next-auth
@@ -15,7 +17,12 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
  *      getStrapiToken() already reads the new JWT (lib/strapi-token.ts
  *      withJarCookies), never the revoked one of the Cookie header;
  *   3. a JWT of another user is refused on both paths, so no session can be
- *      made to carry someone else's token.
+ *      made to carry someone else's token;
+ *   4. the browser's POST cannot store a JWT it made up for its own user,
+ *      whatever its exp: only the server's update carries the proof
+ *      (strapiJwtUpdate, an HMAC under AUTH_SECRET);
+ *   5. an ended session (its Strapi JWT expired) is not revived by an
+ *      update, not even by the server's.
  * Only the network (Strapi's /api/auth/local) and next/headers are stubbed:
  * `headers()` is the incoming request, `cookies()` a jar that starts with
  * its cookies and takes the action's writes, as in Next.
@@ -134,6 +141,12 @@ function asActionRequest(jar: Map<string, string>) {
 const sessionToken = async (value: string | undefined) =>
   decode({ token: value, secret: SECRET, salt: COOKIE });
 
+/** unstable_update() as lib/profile-actions.ts calls it: the JWT with the server's proof. */
+const serverUpdate = (mod: Loaded, jwt: string) =>
+  mod.unstable_update(
+    strapiJwtUpdate(jwt, SECRET) as unknown as Parameters<typeof mod.unstable_update>[0],
+  );
+
 // The first import of @/auth transforms next-auth and @auth/core (inlined,
 // vitest.config.ts): seconds under a full parallel run. Paid once here,
 // under the hook timeout, as in auth.test.ts; load() then re-evaluates.
@@ -159,9 +172,7 @@ describe("unstable_update after a password change (Server Action)", () => {
 
     const exp = nowSec() + 7 * DAY + 60;
     const fresh = fakeStrapiJwt(7, exp, 1);
-    await mod.unstable_update({ strapiJwt: fresh } as unknown as Parameters<
-      typeof mod.unstable_update
-    >[0]);
+    await serverUpdate(mod, fresh);
 
     const token = await sessionToken(stub.jar.get(COOKIE));
     expect(token).toMatchObject({ strapiJwt: fresh, strapiJwtExp: exp, strapiUserId: 7 });
@@ -174,14 +185,29 @@ describe("unstable_update after a password change (Server Action)", () => {
   it("refuses a JWT of another user: the session keeps its own", async () => {
     const mod = await load();
     asActionRequest(await signIn(mod));
-    await mod.unstable_update({
-      strapiJwt: fakeStrapiJwt(8, nowSec() + DAY, 1),
-    } as unknown as Parameters<typeof mod.unstable_update>[0]);
+    await serverUpdate(mod, fakeStrapiJwt(8, nowSec() + DAY, 1));
     expect(await sessionToken(stub.jar.get(COOKIE))).toMatchObject({
       strapiJwt: stub.localJwt,
       strapiUserId: 7,
     });
     expect(await mod.getStrapiToken()).toBe(stub.localJwt);
+  });
+
+  it("does not revive an ended session: it stays signed out", async () => {
+    stub.localJwt = fakeStrapiJwt(7, nowSec() + 60);
+    const mod = await load();
+    asActionRequest(await signIn(mod));
+    expect(await mod.getStrapiToken()).toBe(stub.localJwt);
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // The session's Strapi JWT has expired by now.
+      vi.setSystemTime(Date.now() + 2 * 60_000);
+      await serverUpdate(mod, fakeStrapiJwt(7, nowSec() + 7 * DAY, 1));
+      expect(stub.jar.has(COOKIE)).toBe(false);
+      expect(await mod.getStrapiToken()).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -214,5 +240,27 @@ describe("POST /api/auth/session from the browser (the same trigger)", () => {
     });
     // Nor does the answer (the public session) ever carry a JWT.
     expect(JSON.stringify(await res.json())).not.toContain("sig-");
+  });
+
+  it("cannot put a JWT it made up for its own user into the session, whatever its exp", async () => {
+    const mod = await load();
+    const jar = await signIn(mod);
+    const forged = fakeStrapiJwt(7, nowSec() + 365 * DAY, 99);
+    for (const data of [
+      { strapiJwt: forged },
+      { strapiJwt: forged, proof: "A".repeat(43) },
+      // A proof of another JWT (the browser never sees one, but still).
+      { strapiJwt: forged, proof: strapiJwtUpdate(stub.localJwt, SECRET)?.proof },
+    ]) {
+      const res = await browserUpdate(mod, jar, data);
+      expect(res.status).toBe(200);
+      expect(await sessionToken(jar.get(COOKIE))).toMatchObject({
+        strapiJwt: stub.localJwt,
+        strapiUserId: 7,
+      });
+    }
+    expect(console.warn).toHaveBeenCalledWith(
+      "[auth] session update refused: not a server-signed current Strapi JWT of this local session",
+    );
   });
 });
