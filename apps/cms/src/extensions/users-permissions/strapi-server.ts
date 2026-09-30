@@ -24,13 +24,23 @@
  *    (apps/web/src/lib/profile-actions.ts); every other session of the user
  *    gets 401 on its next request and lands on /sign-in?expired=1.
  *
+ * A sign-in stamps the version the user had BEFORE the plugin checked the
+ * password: the wrapped `callback` (local provider) reads it first, with
+ * the plugin's own identifier lookup, and issue() takes it for that user
+ * (signInVersion, an AsyncLocalStorage). The plugin reads the hash, runs
+ * bcrypt and only then calls issue(); reading the version in issue() gave a
+ * login with the OLD password, whose hash read came before a concurrent
+ * change, a JWT of the NEW version that the change could not revoke. Now
+ * such a JWT carries the old version, which the change has revoked.
+ *
  * Entra sign-ins (POST /api/auth/entra/exchange, src/entra/provision.ts)
  * issue through the same service and await it, so their JWTs carry the
  * version too; their lifetime stays ENTRA_SESSION_TTL.
  *
- * The one extra read: verify() looks up the user's version, one primary-key
+ * The extra reads: verify() looks up the user's version, one primary-key
  * query per authenticated request (the strategy loads the user again right
- * after; the two are not merged, to keep the plugin's own code untouched).
+ * after; the two are not merged, to keep the plugin's own code untouched),
+ * and a local sign-in reads it once before the password check.
  *
  * How it hooks in: the Strapi v5 plugin extension pattern
  * (`export default (plugin) => plugin`, like extensions/upload): the
@@ -51,11 +61,12 @@
  * every wrapper here passes through untouched. Switching to it is a
  * separate decision (D-SESSION-01 and D-ENTRA-01 lifetimes).
  *
- * Upgrade tripwire: the factories, the service methods and the two password
- * actions are asserted at plugin load and at instantiation (still during
- * boot); a Strapi upgrade that changes them fails the boot instead of
- * silently dropping the revocation.
+ * Upgrade tripwire: the factories, the service methods, the sign-in action
+ * and the two password actions are asserted at plugin load and at
+ * instantiation (still during boot); a Strapi upgrade that changes them
+ * fails the boot instead of silently dropping the revocation.
  */
+import { AsyncLocalStorage } from "node:async_hooks";
 
 export const USER_UID = "plugin::users-permissions.user";
 
@@ -92,6 +103,8 @@ export interface JwtService extends Record<string, unknown> {
 export interface AuthContext {
   body?: unknown;
   state?: { user?: { id?: unknown } | null };
+  params?: { provider?: unknown };
+  request?: { body?: unknown };
 }
 
 type Action = (this: unknown, ctx: AuthContext, ...rest: unknown[]) => unknown;
@@ -103,6 +116,18 @@ export interface UsersPermissionsPlugin {
 
 /** The auth actions the wrapper changes beyond settling the JWT. */
 export const PASSWORD_ACTIONS = ["changePassword", "resetPassword"] as const;
+
+/** The sign-in action, whose version is read before its password check. */
+export const SIGN_IN_ACTION = "callback";
+
+/** A version read for one user, carried to issue() of the same request. */
+export interface VersionSnapshot {
+  userId: number;
+  version: number;
+}
+
+/** The version a sign-in read before its password check (patchAuthController). */
+const signInVersion = new AsyncLocalStorage<VersionSnapshot>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -150,6 +175,34 @@ export async function currentTokenVersion(
 }
 
 /**
+ * The version of the user a local sign-in names, read the way the plugin's
+ * `callback` finds that user (provider 'local', the identifier as the
+ * lower-cased email or as the username), before the plugin reads the
+ * password hash. null for another provider, a body without an identifier
+ * or no such user: the plugin refuses those itself.
+ */
+export async function signInTokenVersion(
+  strapi: TokenVersionStrapi,
+  ctx: AuthContext,
+): Promise<VersionSnapshot | null> {
+  const provider: unknown = ctx.params?.provider || "local";
+  if (provider !== "local") return null;
+  const body = ctx.request?.body;
+  const identifier = isRecord(body) ? body.identifier : undefined;
+  if (typeof identifier !== "string" || identifier === "") return null;
+  const row = await strapi.db.query(USER_UID).findOne({
+    where: {
+      provider: "local",
+      $or: [{ email: identifier.toLowerCase() }, { username: identifier }],
+    },
+    select: ["id", "tokenVersion"],
+  });
+  if (!isRecord(row)) return null;
+  const userId = userIdOf(row.id);
+  return userId === null ? null : { userId, version: versionOf(row.tokenVersion) };
+}
+
+/**
  * Counts the user's version up by one (read, then write: two changes of
  * one user in the same instant both end at +1, and both revoke every older
  * JWT, which is all that matters).
@@ -179,9 +232,10 @@ function assertJwtService(service: unknown): asserts service is JwtService {
 }
 
 function assertAuthController(controller: unknown): asserts controller is Record<string, unknown> {
+  const actions = [...PASSWORD_ACTIONS, SIGN_IN_ACTION];
   const missing = isRecord(controller)
-    ? PASSWORD_ACTIONS.filter((action) => typeof controller[action] !== "function")
-    : [...PASSWORD_ACTIONS];
+    ? actions.filter((action) => typeof controller[action] !== "function")
+    : actions;
   if (missing.length > 0) {
     throw new Error(
       `[users-permissions-extension] the auth controller no longer exposes ${missing.join(", ")}; ` +
@@ -205,7 +259,10 @@ function assertStrapi(strapi: unknown): asserts strapi is TokenVersionStrapi {
   }
 }
 
-/** Patches a jwt service instance: issue() stamps, verify() checks the version. */
+/**
+ * Patches a jwt service instance: issue() stamps the version (a sign-in's
+ * snapshot for its own user, else the current one), verify() checks it.
+ */
 export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi): JwtService {
   const originalIssue = service.issue;
   const originalVerify = service.verify;
@@ -217,8 +274,15 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
         ? (payload.toJSON as () => unknown)()
         : payload;
     const userId = isRecord(plain) ? userIdOf(plain.id) : null;
+    // Read now, in the caller's context: the sign-in's snapshot.
+    const snapshot = signInVersion.getStore();
     const pending = (async () => {
-      const version = userId === null ? null : await currentTokenVersion(strapi, userId);
+      const version =
+        userId === null
+          ? null
+          : snapshot?.userId === userId
+            ? snapshot.version
+            : await currentTokenVersion(strapi, userId);
       const stamped =
         version === null || !isRecord(plain) ? plain : { ...plain, [TOKEN_VERSION_CLAIM]: version };
       return originalIssue.call(this, stamped, options);
@@ -254,8 +318,9 @@ export async function settleIssuedJwt(ctx: AuthContext): Promise<void> {
 
 /**
  * Patches an auth controller instance: every action settles the JWT it
- * answers with; the password actions then revoke the older JWTs and answer
- * with one of the new version.
+ * answers with; a local sign-in reads the version before its password
+ * check; the password actions then revoke the older JWTs and answer with
+ * one of the new version.
  */
 export function patchAuthController(
   controller: Record<string, unknown>,
@@ -284,6 +349,17 @@ export function patchAuthController(
     };
     controller[name] = settles;
   }
+
+  const signIn = controller[SIGN_IN_ACTION] as Action;
+  controller[SIGN_IN_ACTION] = async function (
+    this: unknown,
+    ctx: AuthContext,
+    ...rest: unknown[]
+  ) {
+    const snapshot = refreshMode(strapi) ? null : await signInTokenVersion(strapi, ctx);
+    if (!snapshot) return signIn.call(this, ctx, ...rest);
+    return signInVersion.run(snapshot, () => signIn.call(this, ctx, ...rest));
+  };
 
   const changePassword = controller.changePassword as Action;
   controller.changePassword = async function (this: unknown, ctx: AuthContext, ...rest: unknown[]) {

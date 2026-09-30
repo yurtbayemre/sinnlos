@@ -4,8 +4,11 @@
  * jsonwebtoken signing and verifying with a test secret) and a fake `auth`
  * controller factory that behaves like the plugin's legacy code for what the
  * wrapper relies on: it puts issue()'s result into ctx.body.jwt without
- * awaiting it, and a refused password change throws. The end-to-end run
- * (the real controller over HTTP) is token-version.integration.test.ts.
+ * awaiting it, and a refused password change throws. The sign-in race
+ * (a password change between the hash read and issue()) runs through the
+ * plugin's REAL `callback` with a stubbed store, user service and
+ * sanitizer. The end-to-end run (the real controller over HTTP) is
+ * token-version.integration.test.ts.
  */
 import { describe, expect, it, vi } from "vitest";
 
@@ -13,6 +16,7 @@ import { cmsPackageDir, requirePackageFile } from "../../test/sqlite-engine.test
 import {
   TOKEN_VERSION_CLAIM,
   USER_UID,
+  bumpTokenVersion,
   createUsersPermissionsExtension,
   type AuthContext,
   type JwtService,
@@ -26,6 +30,12 @@ type Factory = (deps: { strapi: unknown }) => unknown;
 const realJwtFactory = requirePackageFile<{ __require(): Factory }>(
   cmsPackageDir("@strapi/plugin-users-permissions"),
   "dist/server/services/jwt.js",
+).__require();
+
+/** The plugin's own auth controller factory (controllers/auth.js). */
+const realAuthFactory = requirePackageFile<{ __require(): Factory }>(
+  cmsPackageDir("@strapi/plugin-users-permissions"),
+  "dist/server/controllers/auth.js",
 ).__require();
 
 /** The payload of a JWT, unverified. */
@@ -271,6 +281,187 @@ describe("auth controller", () => {
     const ctx = {} as AuthContext;
     await h.auth.logout(ctx);
     expect(ctx.body).toEqual({ ok: true });
+  });
+});
+
+describe("sign-in: the version is read before the password check (the plugin's real callback)", () => {
+  interface Row {
+    id: number;
+    username: string;
+    email: string;
+    provider: string;
+    password: string;
+    confirmed: boolean;
+    blocked: boolean;
+    tokenVersion: number;
+  }
+  type SignInCtx = AuthContext & { send(body: unknown): void; body?: { jwt?: unknown } };
+
+  /**
+   * The plugin's callback on a stubbed Strapi: `duringPasswordCheck` runs
+   * inside validatePassword, i.e. between the plugin's hash read and its
+   * issue(). getService() and sanitizeUser() read the global `strapi`.
+   */
+  function signInHarness(
+    duringPasswordCheck: (strapi: TokenVersionStrapi) => Promise<void> = async () => undefined,
+  ) {
+    const users = new Map<number, Row>([
+      [
+        5,
+        {
+          id: 5,
+          username: "casey",
+          email: "casey@example.test",
+          provider: "local",
+          password: "hash-of-old-password",
+          confirmed: true,
+          blocked: false,
+          tokenVersion: 2,
+        },
+      ],
+    ]);
+    const lookups: unknown[] = [];
+    const services: Record<string, unknown> = {
+      user: {
+        async validatePassword(given: string, hash: string) {
+          await duringPasswordCheck(strapi as unknown as TokenVersionStrapi);
+          return given === "old-password" && hash === "hash-of-old-password";
+        },
+      },
+    };
+    const config: Record<string, unknown> = {
+      "plugin::users-permissions.jwtSecret": "unit-test-secret",
+      "plugin::users-permissions.jwt": { expiresIn: "7d" },
+      "plugin::users-permissions.jwtManagement": "legacy-support",
+    };
+    const strapi = {
+      config: {
+        get: (path: string, fallback?: unknown) => (path in config ? config[path] : fallback),
+      },
+      db: {
+        query(uid: string) {
+          expect(uid).toBe(USER_UID);
+          return {
+            async findOne(args: Record<string, unknown>) {
+              const where = args.where as {
+                id?: number;
+                provider?: string;
+                $or?: [{ email: string }, { username: string }];
+              };
+              if (where.id !== undefined) {
+                const row = users.get(where.id);
+                return row ? { ...row } : null;
+              }
+              lookups.push(args);
+              const [byEmail, byName] = where.$or ?? [];
+              const row = [...users.values()].find(
+                (user) =>
+                  user.provider === where.provider &&
+                  (user.email === byEmail?.email || user.username === byName?.username),
+              );
+              return row ? { ...row } : null;
+            },
+            async update(args: Record<string, unknown>) {
+              const id = (args.where as { id: number }).id;
+              const row = { ...users.get(id)!, ...(args.data as Partial<Row>) };
+              users.set(id, row);
+              return row;
+            },
+          };
+        },
+      },
+      plugin: () => ({ service: (name: string) => services[name] }),
+      store: () => ({
+        get: async ({ key }: { key: string }) =>
+          key === "grant" ? { email: { enabled: true } } : { email_confirmation: false },
+      }),
+      getModel: () => ({ uid: USER_UID, attributes: {} }),
+      contentAPI: {
+        sanitize: { output: async (user: Row) => ({ id: user.id, username: user.username }) },
+      },
+      log: { info: () => undefined },
+    };
+    const plugin: UsersPermissionsPlugin = {
+      services: { jwt: realJwtFactory },
+      controllers: { auth: realAuthFactory },
+    };
+    createUsersPermissionsExtension()(plugin);
+    services.jwt = (plugin.services.jwt as Factory)({ strapi });
+    const auth = (plugin.controllers.auth as Factory)({ strapi }) as Record<
+      string,
+      (ctx: SignInCtx) => Promise<unknown>
+    >;
+    const signIn = async (identifier: string, password = "old-password") => {
+      const ctx: SignInCtx = {
+        params: {},
+        request: { body: { identifier, password } },
+        state: {},
+        send(body) {
+          ctx.body = body as SignInCtx["body"];
+        },
+      };
+      vi.stubGlobal("strapi", strapi);
+      try {
+        await auth.callback(ctx);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      return ctx.body?.jwt;
+    };
+    return {
+      strapi: strapi as unknown as TokenVersionStrapi,
+      users,
+      lookups,
+      jwt: services.jwt as JwtService,
+      signIn,
+    };
+  }
+
+  it("an undisturbed sign-in answers a JWT of the user's current version", async () => {
+    const h = signInHarness();
+    const jwt = await h.signIn("casey@example.test");
+    expect(typeof jwt).toBe("string");
+    expect(claims(jwt as string)).toMatchObject({ id: 5, tv: 2 });
+    await expect(h.jwt.verify(jwt as string)).resolves.toMatchObject({ id: 5 });
+  });
+
+  it("a password change between the hash read and issue() revokes that sign-in's JWT too", async () => {
+    // The concurrent change-password lands while bcrypt runs: its bump
+    // comes after the plugin read the old hash, before the plugin's issue().
+    const h = signInHarness(async (strapi) => {
+      await bumpTokenVersion(strapi, 5);
+    });
+    const jwt = (await h.signIn("casey@example.test")) as string;
+    expect(h.users.get(5)?.tokenVersion).toBe(3);
+    // The version from before the password check, which the change revoked.
+    expect(claims(jwt)).toMatchObject({ id: 5, tv: 2 });
+    await expect(h.jwt.verify(jwt)).rejects.toThrow("Invalid token.");
+  });
+
+  it("looks the user up with the plugin's own where (provider local, lower-cased email or username)", async () => {
+    const h = signInHarness();
+    expect(claims((await h.signIn("Casey@Example.TEST")) as string)).toMatchObject({ tv: 2 });
+    expect(claims((await h.signIn("casey")) as string)).toMatchObject({ tv: 2 });
+    const byEmail = {
+      provider: "local",
+      $or: [{ email: "casey@example.test" }, { username: "Casey@Example.TEST" }],
+    };
+    const byName = { provider: "local", $or: [{ email: "casey" }, { username: "casey" }] };
+    // Each sign-in: the version first, then the plugin's own lookup.
+    expect(h.lookups).toEqual([
+      { where: byEmail, select: ["id", "tokenVersion"] },
+      { where: byEmail },
+      { where: byName, select: ["id", "tokenVersion"] },
+      { where: byName },
+    ]);
+  });
+
+  it("a refused sign-in answers no JWT, as before", async () => {
+    const h = signInHarness();
+    await expect(h.signIn("casey@example.test", "wrong")).rejects.toThrow(
+      "Invalid identifier or password",
+    );
+    await expect(h.signIn("nobody@example.test")).rejects.toThrow("Invalid identifier or password");
   });
 });
 
