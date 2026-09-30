@@ -20,7 +20,8 @@
  * Every close the server decides on ends with a terminal `bye {reason}`
  * event (LF05, live contract): `evicted` (the bus's per-user or total
  * cap), `shutdown` (SIGTERM, the bus's closeAll), `rotate` (the lifetime
- * below) or `expired` (the session ends). The client closes its
+ * below) or `expired` (the session ends first: at its Strapi JWT's exp,
+ * which is what ends the session, D-SESSION-01). The client closes its
  * EventSource on it, so the browser's native 3 s retry no longer reopens a
  * stream the server ended on purpose. A stream that died (a failed write,
  * backpressure, the client's abort) gets no bye: nobody would read it.
@@ -42,6 +43,7 @@
  */
 import { STRAPI_URL } from "@/lib/config";
 import { getSession, getStrapiToken } from "@/lib/session";
+import { strapiJwtExp } from "@/lib/strapi-jwt";
 import { checkUploadAccess } from "@/lib/upload-block-cache";
 
 import { getLiveBus, liveEventsDisabled, type LiveFrame } from "@/lib/live-bus";
@@ -158,9 +160,11 @@ export async function GET(req: Request) {
 
       const lifetime =
         MAX_LIFETIME_MS_MIN + Math.random() * (MAX_LIFETIME_MS_MAX - MAX_LIFETIME_MS_MIN);
-      const sessionMs = session?.expires
-        ? new Date(session.expires).getTime() - Date.now()
-        : Number.POSITIVE_INFINITY;
+      // The session ends with its Strapi JWT (D-SESSION-01: the jwt
+      // callback ends it at the JWT's exp). Auth.js's own session.expires
+      // is no end at all: it slides to now + maxAge (7 days) on every read.
+      const exp = strapiJwtExp(jwt);
+      const sessionMs = exp !== undefined ? exp * 1000 - Date.now() : Number.POSITIVE_INFINITY;
       // `expired` when the session is what ends the stream: the client then
       // waits for its next visibility regain instead of reconnecting into a
       // refusal; otherwise the planned `rotate`.

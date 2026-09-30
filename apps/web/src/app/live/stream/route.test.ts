@@ -15,7 +15,8 @@ import { uploadBlockCache } from "@/lib/upload-block-cache";
  *   3. every close the server decides on ends with a terminal
  *      `bye {reason}` (LF05): `evicted` when the bus's per-user cap takes
  *      the place, `shutdown` on the bus's closeAll (SIGTERM), `rotate` at
- *      the lifetime rotation, `expired` when the session ends first; the
+ *      the lifetime rotation, `expired` when the session ends first (the
+ *      exp of its Strapi JWT, never Auth.js's sliding `expires`); the
  *      client's abort ends it without one;
  *   4. the hello and the 25 s heartbeat carry the cms leg's freshness
  *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
@@ -197,13 +198,28 @@ describe("GET /live/stream", () => {
     expect(getLiveBus().connectionCount()).toBe(0);
   });
 
-  it("says bye expired when the session ends before the rotation", async () => {
+  it("says bye expired when the session's Strapi JWT expires before the rotation", async () => {
+    // Auth.js's session.expires slides (now + 7 days on every read); the
+    // Strapi JWT's exp is what ends the session.
+    session.jwt = strapiJwt(1, Math.floor(Date.now() / 1000) + 5 * 60);
+    const stream = await open();
+    await stream.read();
+    // exp has whole seconds: the end falls within the last second.
+    await vi.advanceTimersByTimeAsync(5 * 60_000 - 1_000);
+    expect(stream.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect((await stream.read()).endsWith('event: bye\ndata: {"reason":"expired"}\n\n')).toBe(true);
+    expect(stream.done).toBe(true);
+  });
+
+  it("does not read Auth.js's session.expires: a near one still rotates", async () => {
     session.current = signedIn(1, 5 * 60_000);
     const stream = await open();
     await stream.read();
     await vi.advanceTimersByTimeAsync(5 * 60_000);
-    expect((await stream.read()).endsWith('event: bye\ndata: {"reason":"expired"}\n\n')).toBe(true);
-    expect(stream.done).toBe(true);
+    expect(stream.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
+    expect((await stream.read()).endsWith('event: bye\ndata: {"reason":"rotate"}\n\n')).toBe(true);
   });
 
   it("ends without a bye when the client goes away", async () => {
