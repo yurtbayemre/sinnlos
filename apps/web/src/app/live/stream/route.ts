@@ -29,8 +29,20 @@
  * reached the bus within the last 45 s (its keepalive runs every 20 s). A
  * stream without a fresh cms leg is up but gets no pings; the client then
  * counts as degraded, and its owners poll at the short intervals.
+ *
+ * Admission needs more than the Auth.js cookie: the session's Strapi JWT
+ * must still be accepted by the cms (the cached /api/users/me check of
+ * /uploads, lib/upload-block-cache.ts, 60 s per JWT). A password change
+ * (FX40), a block or a deleted account makes the cms refuse that JWT, so
+ * the stream answers 401 and the client's instant-close stop ends the
+ * retries; without that check the same cookie kept receiving the user's
+ * notification and channel pings until the JWT's exp. A cms that cannot
+ * say (an outage) does not keep a stream from opening: `emitFresh` already
+ * reports that leg as degraded.
  */
-import { getSession } from "@/lib/session";
+import { STRAPI_URL } from "@/lib/config";
+import { getSession, getStrapiToken } from "@/lib/session";
+import { checkUploadAccess } from "@/lib/upload-block-cache";
 
 import { getLiveBus, liveEventsDisabled, type LiveFrame } from "@/lib/live-bus";
 import type { ByeReason, HeartbeatFrame, HelloFrame } from "@/lib/live-contract";
@@ -40,11 +52,14 @@ export const dynamic = "force-dynamic";
 const HEARTBEAT_MS = 25_000;
 /**
  * Hard stream rotation. Second GC path for half-open connections the
- * enqueue error can't detect, AND the upper bound on how long a blocked/
- * demoted user keeps receiving pings (JWT sessions have no revocation —
- * reconnect re-runs auth(), so stream lifetime is a security parameter,
- * not a tuning knob). Randomized so post-deploy herds don't re-rotate in
- * lockstep.
+ * enqueue error can't detect, AND the upper bound on how long an open
+ * stream outlives its session's revocation: a revoked JWT (password change,
+ * block, deleted account) is only refused when a stream opens, and every
+ * reconnect re-runs the session and JWT check, so an open stream ends at
+ * the latest with its rotation (plus the check's 60 s cache). A demoted
+ * user's role is read per refetch, not here. So the stream lifetime is a
+ * security parameter, not a tuning knob. Randomized so post-deploy herds
+ * don't re-rotate in lockstep.
  */
 const MAX_LIFETIME_MS_MIN = 15 * 60_000;
 const MAX_LIFETIME_MS_MAX = 30 * 60_000;
@@ -60,6 +75,12 @@ export async function GET(req: Request) {
   }
   if (liveEventsDisabled()) {
     return Response.json({ error: "live events disabled" }, { status: 404 });
+  }
+  // No Strapi JWT, or one the cms refuses (revoked, blocked, deleted,
+  // invalid): 401, like a missing session. "unavailable" admits.
+  const jwt = await getStrapiToken();
+  if (!jwt || (await checkUploadAccess({ userId, jwt, strapiUrl: STRAPI_URL })) === "blocked") {
+    return Response.json({ error: "unauthorized" }, { status: 401 });
   }
 
   const bus = getLiveBus();

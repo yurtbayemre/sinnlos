@@ -2,11 +2,14 @@ import type { Session } from "next-auth";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getLiveBus } from "@/lib/live-bus";
+import { uploadBlockCache } from "@/lib/upload-block-cache";
 
 /**
  * The per-tab SSE stream (/live/stream) on the real in-memory bus. Pinned:
  *   1. no session → 401, LIVE_EVENTS_DISABLED=1 → 404, both before a
- *      connection exists;
+ *      connection exists; a session whose Strapi JWT is missing or refused
+ *      by the cms (revoked by a password change, blocked, deleted) → 401,
+ *      while a cms that cannot say (an outage) still gets its stream;
  *   2. the stream opens with `retry` and the hello naming the connection,
  *      and carries the headers the edge relies on;
  *   3. every close the server decides on ends with a terminal
@@ -17,12 +20,35 @@ import { getLiveBus } from "@/lib/live-bus";
  *   4. the hello and the 25 s heartbeat carry the cms leg's freshness
  *      (`emitFresh`, LF05), and a recovering cms leg is announced at once.
  *
- * `@/lib/session` is mocked (the real module pulls in next-auth).
+ * `@/lib/session` is mocked (the real module pulls in next-auth), as are
+ * `@/lib/config` and global fetch (the cms's /api/users/me); the JWT check's
+ * status map is the real one.
  */
-const session = vi.hoisted(() => ({ current: null as Session | null }));
-vi.mock("@/lib/session", () => ({ getSession: async () => session.current }));
+const session = vi.hoisted(() => ({
+  current: null as Session | null,
+  jwt: null as string | null,
+}));
+vi.mock("@/lib/session", () => ({
+  getSession: async () => session.current,
+  getStrapiToken: async () => session.jwt,
+}));
+vi.mock("@/lib/config", () => ({ STRAPI_URL: "http://cms.test" }));
+
+/** What the cms answers the JWT check (GET /api/users/me) with. */
+const cms = vi.hoisted(() => ({ me: (): Response => Response.json({ id: 1, blocked: false }) }));
+const fetchMock = vi.fn(async (url: string) => {
+  if (url === "http://cms.test/api/users/me?fields[0]=blocked") return cms.me();
+  throw new Error(`unexpected fetch ${url}`);
+});
+vi.stubGlobal("fetch", fetchMock);
 
 const { GET } = await import("./route");
+
+/** A Strapi-shaped JWT (the web decodes, never verifies it). */
+const strapiJwt = (id: number, exp = Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60) => {
+  const b64 = (o: object) => Buffer.from(JSON.stringify(o)).toString("base64url");
+  return `${b64({ alg: "HS256", typ: "JWT" })}.${b64({ id, exp })}.sig-${id}`;
+};
 
 const signedIn = (id: number, expiresInMs = 7 * 24 * 60 * 60_000): Session => ({
   user: { id, name: `user ${id}` },
@@ -66,6 +92,10 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.spyOn(Math, "random").mockReturnValue(0);
   session.current = signedIn(1);
+  session.jwt = strapiJwt(1);
+  cms.me = () => Response.json({ id: 1, blocked: false });
+  fetchMock.mockClear();
+  uploadBlockCache.clear();
   delete process.env.LIVE_EVENTS_DISABLED;
 });
 
@@ -84,6 +114,42 @@ describe("GET /live/stream", () => {
     process.env.LIVE_EVENTS_DISABLED = "1";
     expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(404);
     expect(getLiveBus().connectionCount()).toBe(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("refuses a session whose Strapi JWT is gone or no longer accepted by the cms (401)", async () => {
+    session.jwt = null;
+    expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
+    expect(fetchMock).not.toHaveBeenCalled();
+    // Revoked by a password change (FX40), blocked or deleted: Strapi's 401.
+    session.jwt = strapiJwt(1);
+    cms.me = () => new Response("Unauthorized", { status: 401 });
+    expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://cms.test/api/users/me?fields[0]=blocked",
+      expect.objectContaining({ headers: { Authorization: `Bearer ${session.jwt}` } }),
+    );
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+
+  it("opens while the cms cannot say (an outage is emitFresh's business, not a refusal)", async () => {
+    cms.me = () => new Response("Bad Gateway", { status: 502 });
+    const stream = await open();
+    expect(stream.res.status).toBe(200);
+    expect(await stream.read()).toMatch(/^retry: 3000\nevent: hello\n/);
+    expect(getLiveBus().connectionCount()).toBe(1);
+  });
+
+  it("asks the cms once per JWT and minute, not per stream", async () => {
+    await open();
+    await open();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // A reconnect after the check's 60 s asks again: a revocation reaches
+    // the next rotation.
+    await vi.advanceTimersByTimeAsync(60_000);
+    cms.me = () => new Response("Unauthorized", { status: 401 });
+    expect((await GET(new Request("http://web.test/live/stream"))).status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("opens with retry and the hello, as an uncompressed, unbuffered event stream", async () => {
