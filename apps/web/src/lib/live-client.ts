@@ -54,6 +54,11 @@
  *    dropped in the same commit (a page mounting 20 comment sections)
  *    goes out together, at most MAX_SUBSCRIBE_LIST per POST, and a late
  *    POST can never undo a newer set (the bus ignores a stale revision).
+ *    A POST the server did not take (a network blip, a 5xx) is retried
+ *    after 2, 4 and 8 s (SUBSCRIBE_RETRY_MS), then with the next change or
+ *    hello; until the set is taken the client reports unhealthy, so the
+ *    comment sections poll at the short interval instead of waiting for
+ *    pings that cannot come.
  *  - A web from before LF05 (its hello has no `emitFresh`: a web-only
  *    rollback while this bundle is still open in a tab) knows only the
  *    `{ connId, add, remove }` body and would take the set body as an empty
@@ -168,6 +173,8 @@ export const COALESCE_CONTENT_MS = 150;
 export const COALESCE_NOTIFICATIONS_JITTER_MS = 1_000;
 export const COALESCE_ANNOUNCEMENTS_JITTER_MS = 4_000;
 export const CATCHUP_CONCURRENCY = 2;
+/** Delays of the retries of a subscribe POST the server did not take. */
+export const SUBSCRIBE_RETRY_MS = [2_000, 4_000, 8_000] as const;
 
 type Timer = ReturnType<typeof setTimeout>;
 
@@ -199,6 +206,12 @@ export class LiveClient {
     null;
   /** The current connection is a web from before LF05 (a hello without emitFresh). */
   private legacy = false;
+  /** The cms leg's freshness, from the current stream's hello or last heartbeat. */
+  private streamFresh = false;
+  /** The current set was not taken (a failed subscribe POST), until one is. */
+  private subscribeFailed = false;
+  private subscribeRetries = 0;
+  private subscribeRetryTimer: Timer | null = null;
   private syncScheduled = false;
 
   /** `onHealth` gets every health change (the provider's state setter). */
@@ -278,8 +291,13 @@ export class LiveClient {
       this.legacy = typeof data === "object" && data !== null && !("emitFresh" in data);
       // Degraded while the cms leg is not fresh (LF05): the stream is up
       // but no ping can come, so the owners poll at the short intervals.
-      this.onHealth(hello?.emitFresh ?? true);
-      // A new connection starts with no channels: send the set if there is one.
+      this.streamFresh = hello?.emitFresh ?? true;
+      // A new connection starts with no channels and no failed POST: send
+      // the set if there is one.
+      this.subscribeFailed = false;
+      this.subscribeRetries = 0;
+      this.clearSubscribeRetry();
+      this.reportHealth();
       if (this.connId) this.sent = { connId: this.connId, key: "", channels: new Set() };
       this.scheduleSync();
       // Catch-up covers the gap since the last stream (missed pings have
@@ -291,7 +309,8 @@ export class LiveClient {
 
     source.addEventListener("hb", (event) => {
       this.lastBeat = this.deps.now();
-      this.onHealth(parseHeartbeatFrame(readJson(event.data)).emitFresh);
+      this.streamFresh = parseHeartbeatFrame(readJson(event.data)).emitFresh;
+      this.reportHealth();
     });
 
     source.addEventListener("bye", (event) => {
@@ -309,7 +328,8 @@ export class LiveClient {
     source.onerror = () => {
       // CONNECTING = native retry is handling a network drop; leave it.
       if (source.readyState !== EVENT_SOURCE_CLOSED) {
-        this.onHealth(false);
+        this.streamFresh = false;
+        this.reportHealth();
         return;
       }
       const lifetime = this.deps.now() - this.openedAt;
@@ -370,7 +390,18 @@ export class LiveClient {
     this.source?.close();
     this.source = null;
     this.connId = null;
-    this.onHealth(false);
+    this.streamFresh = false;
+    this.subscribeFailed = false;
+    this.clearSubscribeRetry();
+    this.reportHealth();
+  }
+
+  /**
+   * Healthy: the stream's cms leg is fresh (LF05) and its channel set was
+   * not refused. Unhealthy makes the owners poll at the short intervals.
+   */
+  private reportHealth(): void {
+    this.onHealth(this.streamFresh && !this.subscribeFailed);
   }
 
   private scheduleReconnect(extraSpreadMs = 0): void {
@@ -552,8 +583,8 @@ export class LiveClient {
    * from before LF05 gets the change instead (addRemoveRequests). Nothing
    * goes out without a stream (the next hello sends the set) or when the
    * set is the one this connection already has. A POST the server did not
-   * take (network error, 404 after an eviction) forgets that, so the next
-   * change sends the whole set again.
+   * take (network error, 5xx, 404 after an eviction) forgets that, so the
+   * next sync sends the whole set again (onSubscribeAnswer).
    */
   private sendSubscriptions(): void {
     const connId = this.connId;
@@ -571,10 +602,49 @@ export class LiveClient {
       void this.deps
         .post(SUBSCRIBE_URL, request)
         .catch(() => false)
-        .then((taken) => {
-          if (!taken && this.sent === sent) this.sent = null;
-        });
+        .then((taken) => this.onSubscribeAnswer(sent, taken));
     }
+  }
+
+  /**
+   * A subscribe POST's outcome. Only one of the connection's current set
+   * counts. Taken: a failure before it is over. Not taken: the set is
+   * forgotten (the next sync sends it whole), the client reports unhealthy
+   * and retries after SUBSCRIBE_RETRY_MS; after the last retry the next
+   * change or hello sends it.
+   */
+  private onSubscribeAnswer(sent: object, taken: boolean): void {
+    if (this.sent !== sent) return;
+    if (taken) {
+      this.subscribeRetries = 0;
+      if (this.subscribeFailed) {
+        this.subscribeFailed = false;
+        this.reportHealth();
+      }
+      return;
+    }
+    this.sent = null;
+    if (!this.subscribeFailed) {
+      this.subscribeFailed = true;
+      this.reportHealth();
+    }
+    this.scheduleSubscribeRetry();
+  }
+
+  private scheduleSubscribeRetry(): void {
+    if (this.subscribeRetryTimer) return;
+    const delay: number | undefined = SUBSCRIBE_RETRY_MS[this.subscribeRetries];
+    if (delay === undefined) return;
+    this.subscribeRetries += 1;
+    this.subscribeRetryTimer = setTimeout(() => {
+      this.subscribeRetryTimer = null;
+      this.sendSubscriptions();
+    }, delay);
+  }
+
+  private clearSubscribeRetry(): void {
+    if (this.subscribeRetryTimer) clearTimeout(this.subscribeRetryTimer);
+    this.subscribeRetryTimer = null;
   }
 
   /** The full set under the next revision, in POSTs of at most MAX_SUBSCRIBE_LIST. */

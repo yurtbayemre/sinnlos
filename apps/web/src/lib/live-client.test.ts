@@ -343,6 +343,94 @@ describe("two-leg health (LF05)", () => {
   });
 });
 
+describe("a subscribe POST the server did not take", () => {
+  /** A client whose subscribe POSTs answer `answers` in turn (then true). */
+  function failing(answers: boolean[]) {
+    const h = harness();
+    h.deps.post = async (url, body) => {
+      h.posts.push({ url, body });
+      return answers.shift() ?? true;
+    };
+    h.client.register("announcement:a", () => undefined);
+    h.client.start();
+    FakeEventSource.latest().emit("hello", { connId: "c1", emitFresh: true });
+    return h;
+  }
+  const revs = (h: Harness) => h.posts.map((post) => (post.body as { rev: number }).rev);
+
+  it("is retried after 2 and 4 s, degraded until one is taken", async () => {
+    const h = failing([false, false]);
+    await advance(h, 0);
+    expect(revs(h)).toEqual([1]);
+    // The set is not on the bus: the owners poll at the short intervals.
+    expect(h.health).toEqual([true, false]);
+    await advance(h, 1_999);
+    expect(revs(h)).toEqual([1]);
+    await advance(h, 1);
+    expect(revs(h)).toEqual([1, 2]);
+    expect(h.health.at(-1)).toBe(false);
+    await advance(h, 4_000);
+    expect(revs(h)).toEqual([1, 2, 3]);
+    expect(h.posts.at(-1)?.body).toEqual({ connId: "c1", rev: 3, channels: ["announcement:a"] });
+    expect(h.health.at(-1)).toBe(true);
+    // Taken: no more retries.
+    await advance(h, 60_000);
+    expect(revs(h)).toEqual([1, 2, 3]);
+    h.client.stop();
+  });
+
+  it("a fresh heartbeat does not hide the failure", async () => {
+    const h = failing([false]);
+    await advance(h, 0);
+    FakeEventSource.latest().emit("hb", { emitFresh: true });
+    expect(h.health.at(-1)).toBe(false);
+    await advance(h, 2_000);
+    FakeEventSource.latest().emit("hb", { emitFresh: true });
+    expect(h.health.at(-1)).toBe(true);
+    h.client.stop();
+  });
+
+  it("gives up after the third retry until the next change or hello", async () => {
+    const h = failing([false, false, false, false, false]);
+    await advance(h, 0);
+    await advance(h, 2_000 + 4_000 + 8_000);
+    expect(revs(h)).toEqual([1, 2, 3, 4]);
+    // The stream itself stays up (fresh heartbeats), the set stays untaken.
+    for (let i = 0; i < 4; i += 1) {
+      await advance(h, 20_000);
+      FakeEventSource.latest().emit("hb", { emitFresh: true });
+    }
+    expect(revs(h)).toEqual([1, 2, 3, 4]);
+    expect(h.health.at(-1)).toBe(false);
+    // A change sends the set again (and fails once more: no new retries).
+    h.client.register("announcement:b", () => undefined);
+    await advance(h, 20_000);
+    expect(revs(h)).toEqual([1, 2, 3, 4, 5]);
+    // The next hello starts over: a new connection, a new budget.
+    FakeEventSource.latest().emit("hello", { connId: "c2", emitFresh: true });
+    await advance(h, 0);
+    expect(revs(h)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(h.health.at(-1)).toBe(true);
+    h.client.stop();
+  });
+
+  it("hiding the tab or stop() drops the pending retry", async () => {
+    const h = failing([false, false]);
+    await advance(h, 0);
+    h.setVisible(false);
+    await advance(h, 60_000);
+    expect(revs(h)).toEqual([1]);
+    h.setVisible(true);
+    FakeEventSource.latest().emit("hello", { connId: "c2", emitFresh: true });
+    await advance(h, 0);
+    expect(revs(h)).toEqual([1, 2]);
+    h.client.stop();
+    expect(vi.getTimerCount()).toBe(0);
+    await advance(h, 60_000);
+    expect(revs(h)).toEqual([1, 2]);
+  });
+});
+
 describe("a web from before LF05 (a web-only rollback with this bundle open)", () => {
   /** A started client whose stream said the old hello (no emitFresh). */
   function legacyStream(h: Harness) {
