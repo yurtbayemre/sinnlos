@@ -18,7 +18,10 @@
  *      line) stop a deploy before anything is touched;
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
- *   6. the pre-deploy backup runs as SINNLOS_BACKUP_KIND=predeploy, and the
+ *   6. the pre-deploy backup runs as `sudo -n /usr/local/sbin/backup-run
+ *      --kind predeploy sinnlos` for project infra (BACKUP_RUN, given, runs
+ *      without sudo) and stops the deploy when it fails; another project
+ *      runs pg-backup.sh as SINNLOS_BACKUP_KIND=predeploy; and the
  *      compose project, smoke URL and checkout are parameters; the smoke
  *      URL defaults to https://<DOMAIN>, the host of the rendered router
  *      rules, and --check refuses the example DOMAIN (5A-T1);
@@ -107,7 +110,8 @@ const COMPOSE_JSON = composeJson(STUB_HOST);
 
 /**
  * Runs the steps in one bash process, in a fresh checkout ($REPO, one
- * commit) with the real deploy.sh and stub backup/live-smoke scripts.
+ * commit) with the real deploy.sh and stub backup/live-smoke scripts
+ * (BACKUP_RUN is a stub of backup-run; unset, `sudo` is a stub that logs).
  * Helpers for `before`: `commit` (a new empty commit), `running <web-id>
  * <cms-id>` (containers that run already), `ci <json-body>` (the GitHub
  * check-runs answer), KEEP (DEPLOY_KEEP_TAGS), and the STUB_* switches
@@ -133,10 +137,13 @@ function deploys(steps: readonly Step[]): StepReport[] {
     ': > "$REPO/infra/docker-compose.traefik.yml"',
     ': > "$REPO/infra/rollback/revoke-guest-poll-vote.sql"',
     `printf '#!/usr/bin/env bash\\necho "backup kind=$SINNLOS_BACKUP_KIND db=$SINNLOS_DB_CONTAINER dir=\${SINNLOS_BACKUP_DIR:-default} quick=\${SINNLOS_LOCAL_ENV_BACKUP:-default}"\\n' > "$REPO/infra/backup/pg-backup.sh"`,
+    // backup-run (project infra): STUB_BACKUP_RC makes it fail.
+    `printf '#!/usr/bin/env bash\\necho "backup-run stub: $*"\\nexit "\${STUB_BACKUP_RC:-0}"\\n' > "$T/backup-run"`,
     `printf '#!/usr/bin/env bash\\necho "live-smoke base=$BASE_URL cms=$CMS_CONTAINER"\\n' > "$REPO/infra/live-smoke.sh"`,
     // With STUB_LIVE_NOFRAME: the line live-smoke prints when the stream user owns no announcement.
     `printf 'if [[ -n "\${STUB_LIVE_NOFRAME:-}" ]]; then echo "live-smoke: WARNING - the notification frame path was not checked: stub"; fi\\nexit "\${STUB_LIVE_RC:-0}"\\n' >> "$REPO/infra/live-smoke.sh"`,
-    'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh"',
+    'chmod +x "$REPO/infra/deploy.sh" "$REPO/infra/backup/pg-backup.sh" "$REPO/infra/live-smoke.sh" "$T/backup-run"',
+    'export BACKUP_RUN="$T/backup-run"',
     "cat > \"$T/compose.json\" <<'COMPOSE_JSON'",
     COMPOSE_JSON,
     "COMPOSE_JSON",
@@ -156,7 +163,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     // The demo credentials file deploy.sh checks before it runs live-smoke.
     'echo "casey.jones@sinnlos.local pw" > "$T/passwords"',
     'export PASSWORDS_FILE="$T/passwords"',
-    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL=",
+    "export T STUB_SMOKE_CODE=200 STUB_LIVE_RC=0 STUB_LIVE_NOFRAME= STUB_BUILD_FAIL= STUB_UP_FAIL= STUB_TAG_FAIL= STUB_LOCK_HELD= STUB_CI= STUB_NO_VOLUMES= STUB_CONTAINERD= STUB_UP_KEEP= STUB_STATE_WRITE_FAIL= STUB_BOOTSTRAP_WRITE_FAIL= STUB_BACKUP_RC=",
     // Whether an image id resolves: on containerd only while a tag names it.
     "resolvable() {",
     // (No pipe: under deploy.sh's pipefail, grep -q ending early could fail cat.)
@@ -229,6 +236,8 @@ function deploys(steps: readonly Step[]): StepReport[] {
     'flock() { [[ -z "$STUB_LOCK_HELD" ]]; }',
     'timeout() { while [[ "$1" != docker ]]; do shift; done; "$@"; }',
     "sleep() { :; }",
+    // Production's backup-run call without BACKUP_RUN: logged, not run.
+    'sudo() { printf \'sudo %s\\n\' "$*" >> "$T/calls"; echo "sudo stub: $*"; }',
     // STUB_STATE_WRITE_FAIL / STUB_BOOTSTRAP_WRITE_FAIL: the state file or the
     // bootstrap marker cannot be written (its mv fails).
     "mv() {",
@@ -237,7 +246,7 @@ function deploys(steps: readonly Step[]): StepReport[] {
     "  fi",
     '  command mv "$@"',
     "}",
-    "export -f docker curl flock timeout sleep resolvable mv",
+    "export -f docker curl flock timeout sleep resolvable mv sudo",
   ];
   steps.forEach((step, n) => {
     const env = Object.entries(step.env ?? {})
@@ -304,6 +313,8 @@ function deploys(steps: readonly Step[]): StepReport[] {
 }
 
 const tagOf = (report: StepReport) => report.state.TAG;
+/** Output of a pre-deploy backup: pg-backup.sh's or backup-run's stub. */
+const BACKED_UP = /backup kind=|backup-run stub:/;
 const called = (report: StepReport, pattern: RegExp) => report.calls.filter((c) => pattern.test(c));
 const historyTags = (report: StepReport) => report.history.map((line) => line.split(" ")[0]);
 
@@ -336,6 +347,10 @@ describe.skipIf(!RUN_SEQUENCES)(
         /* 11 */ { before: "commit; KEEP=1; STUB_STATE_WRITE_FAIL=1" },
         // … and the next deploy still finds the previous one.
         /* 12 */ { before: "commit; STUB_STATE_WRITE_FAIL=" },
+        // The pre-deploy backup fails …
+        /* 13 */ { before: "commit; STUB_BACKUP_RC=3" },
+        // … and without BACKUP_RUN, production's call goes through sudo -n.
+        /* 14 */ { before: "STUB_BACKUP_RC=; unset BACKUP_RUN" },
       ]);
     }, SEQUENCE_BUDGET);
 
@@ -346,9 +361,10 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(first.stdout).toContain(
         "first install: neither infra-db-1 nor the volume infra_pgdata exists, nothing to back up",
       );
-      expect(first.stdout).not.toContain("backup kind=");
+      expect(first.stdout).not.toMatch(BACKED_UP);
       // … every later deploy does, as a pre-deploy backup.
-      expect(r[6].stdout).toContain("backup kind=predeploy db=infra-db-1");
+      expect(r[6].stdout).toContain("backup-run stub: --kind predeploy sinnlos");
+      expect(r[6].stdout).not.toContain("backup kind=");
       // The smoke URL follows DOMAIN (the host of every router).
       expect(first.stdout).toContain(`Traefik host: ${STUB_HOST}; smoke URL: https://${STUB_HOST}`);
       expect(first.stdout).toContain(`live-smoke base=https://${STUB_HOST} cms=infra-cms-1`);
@@ -489,6 +505,26 @@ describe.skipIf(!RUN_SEQUENCES)(
       expect(historyTags(next)).toEqual([tagOf(next)]);
       expect(next.stdout).toContain(`pruned infra-{web,cms}:${tagOf(good)}`);
       expect(next.stdout).toContain(`pruned infra-{web,cms}:${orphan}`);
+    });
+
+    it("stops before the build when the pre-deploy backup fails, and keeps the state", () => {
+      const [good, failed] = [r[12], r[13]];
+      expect(failed.status).toBe(3);
+      expect(failed.stdout).toContain("backup-run stub: --kind predeploy sinnlos");
+      expect(failed.stderr).toContain("failed during 'backup'");
+      expect(failed.stderr).toContain("The running containers are untouched.");
+      expect(called(failed, /^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
+      expect(failed.state).toEqual(good.state);
+    });
+
+    it("runs production's pre-deploy backup as sudo -n backup-run --kind predeploy sinnlos", () => {
+      const run = r[14];
+      expect(run.status, run.stderr).toBe(0);
+      expect(called(run, /^sudo /)).toEqual([
+        "sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos",
+      ]);
+      expect(run.stdout).not.toContain("backup-run stub:");
+      expect(run.stdout).not.toContain("backup kind=");
     });
 
     it("moves the state on the next good deploy, and prunes SHA tags beyond DEPLOY_KEEP_TAGS", () => {
@@ -814,7 +850,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("has changed tracked files");
     expect(run.stderr).toContain("infra/docker-compose.yml");
-    expect(run.stdout).not.toContain("backup kind=");
+    expect(run.stdout).not.toMatch(BACKED_UP);
     expect(called(run, / build$| up -d/)).toEqual([]);
   });
 
@@ -841,7 +877,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(run.stdout).toContain("stray.txt");
     expect(run.stdout).toContain("would tag infra-web-1 (sha256:oldweb) as infra-web:rollback");
     expect(run.stdout).toContain("Dry run complete: nothing was changed.");
-    expect(run.stdout).not.toContain("backup kind=");
+    expect(run.stdout).not.toMatch(BACKED_UP);
     expect(called(run, /^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
     // The lock of step 1 left the state dir; the dry run added nothing to it.
     expect(run.state).toEqual({});
@@ -852,7 +888,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
   it("refuses while another deploy holds the lock", () => {
     expect(r[3].status).toBe(1);
     expect(r[3].stderr).toContain("another infra/deploy.sh is running for compose project infra");
-    expect(r[3].stdout).not.toContain("backup kind=");
+    expect(r[3].stdout).not.toMatch(BACKED_UP);
   });
 
   it("refuses unknown CI with --require-green-ci, and only warns without it", () => {
@@ -860,7 +896,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(r[4].stderr).toContain(
       "ERROR: --require-green-ci, and CI is unknown: the origin remote is not on github.com",
     );
-    expect(r[4].stdout).not.toContain("backup kind=");
+    expect(r[4].stdout).not.toMatch(BACKED_UP);
     const run = r[5];
     expect(run.status, run.stderr).toBe(0);
     expect(run.stderr).toContain("WARNING: CI is unknown");
@@ -897,6 +933,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(dry.status, dry.stderr).toBe(0);
     expect(dry.stdout).toContain(`-> the last-known-good deploy ${tagOf(good)}`);
     expect(dry.stdout).toMatch(/5\. tag infra-\{web,cms\}:[0-9a-f]{12} \(commit [0-9a-f]{40}\)/);
+    expect(dry.stdout).toMatch(/1\. pre-deploy backup: \S+\/backup-run --kind predeploy sinnlos \(/);
     expect(called(dry, /^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
     expect(dry.state).toEqual(good.state);
     expect(dry.images.sort()).toEqual(good.images.sort());
@@ -929,7 +966,7 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         "ERROR: compose project b10-5b-staging is not isolated from production:",
       );
       expect(run.stderr).toContain("containers of compose project infra exist on this Docker host");
-      expect(run.stdout).not.toContain("backup kind=");
+      expect(run.stdout).not.toMatch(BACKED_UP);
       expect(called(run, / build$| up -d/)).toEqual([]);
     }
     expect(bare.stderr).toContain(
@@ -957,8 +994,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     ).toBe(true);
     // Its own state file; the infra state is untouched.
     expect(run.state).toEqual(r[9].state);
-    // Project infra keeps production's backup dir and quick-access copy (the defaults).
-    expect(r[7].stdout).toContain("backup kind=predeploy db=infra-db-1 dir=default quick=default");
+    // Project infra backs up through backup-run, not pg-backup.sh.
+    expect(r[7].stdout).toContain("backup-run stub: --kind predeploy sinnlos");
+    expect(r[7].stdout).not.toContain("backup kind=");
     expect(run.state.TAG).toBe(tagOf(r[7]));
   });
 });
@@ -973,6 +1011,8 @@ describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
       'PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"',
       'CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"',
       'KEEP_TAGS="${DEPLOY_KEEP_TAGS:-5}"',
+      'BACKUP_RUN="${BACKUP_RUN:-/usr/local/sbin/backup-run}"',
+      '  BACKUP_RUN_CMD=(sudo -n "${BACKUP_RUN}" --kind predeploy sinnlos)',
     ]) {
       expect(lines, line).toContain(line);
     }
