@@ -83,7 +83,16 @@ export interface TokenVersionStrapi {
   db: {
     query(uid: string): {
       findOne(args: Record<string, unknown>): Promise<unknown>;
-      update(args: Record<string, unknown>): Promise<unknown>;
+    };
+    /** knex: the version bump is one raw statement (bumpTokenVersion). */
+    connection: { raw(sql: string, bindings: readonly unknown[]): PromiseLike<unknown> };
+    dialect: { client: string };
+    getSchemaName(): string | undefined | null;
+    metadata: {
+      get(uid: string): {
+        tableName: string;
+        attributes: Record<string, { columnName?: string } | undefined>;
+      };
     };
   };
   plugin(name: string): { service(name: string): unknown };
@@ -203,19 +212,89 @@ export async function signInTokenVersion(
   return userId === null ? null : { userId, version: versionOf(row.tokenVersion) };
 }
 
+/** Where the version lives: the user table and its columns, from Strapi's metadata. */
+export interface TokenVersionTarget {
+  client: string;
+  /** Postgres schema (DATABASE_SCHEMA); ignored on SQLite. */
+  schema: string;
+  table: string;
+  idColumn: string;
+  versionColumn: string;
+}
+
+const quote = (identifier: string) => `"${identifier.replace(/"/g, '""')}"`;
+
 /**
- * Counts the user's version up by one (read, then write: two changes of
- * one user in the same instant both end at +1, and both revoke every older
- * JWT, which is all that matters).
+ * The bump as ONE statement that also returns the new value: the database
+ * serialises it per row, so overlapping changes of one user each get their
+ * own version and the stored version only ever grows. (Read, then write
+ * the read value + 1 let a change that read early overwrite a later one's
+ * higher version with a lower one, which made JWTs that the later change
+ * had revoked valid again.) A stored NULL counts as 0. Postgres and SQLite
+ * (>= 3.35, RETURNING; better-sqlite3 12.9.0 bundles 3.53.0); the bound id
+ * is knex's `?`.
+ */
+export function tokenVersionBumpSql(target: TokenVersionTarget): string {
+  const version = quote(target.versionColumn);
+  const set = `SET ${version} = COALESCE(${version}, 0) + 1 WHERE ${quote(target.idColumn)} = ? RETURNING ${version}`;
+  if (target.client === "postgres") {
+    return `UPDATE ${quote(target.schema)}.${quote(target.table)} ${set}`;
+  }
+  if (target.client === "sqlite") return `UPDATE ${quote(target.table)} ${set}`;
+  throw new Error(
+    `[users-permissions-extension] database client ${target.client} is not supported (Postgres or SQLite); ` +
+      "the token version cannot be raised (FX40).",
+  );
+}
+
+function tokenVersionTarget(strapi: TokenVersionStrapi): TokenVersionTarget {
+  const meta = strapi.db.metadata.get(USER_UID);
+  const column = (attribute: string, fallback: string) =>
+    meta.attributes[attribute]?.columnName ?? fallback;
+  return {
+    client: strapi.db.dialect.client,
+    schema: strapi.db.getSchemaName() || "public",
+    table: meta.tableName,
+    idColumn: column("id", "id"),
+    versionColumn: column("tokenVersion", "token_version"),
+  };
+}
+
+/** The value a RETURNING statement gave back (pg: `{ rows }`, better-sqlite3: the rows). */
+function returnedVersion(result: unknown, column: string): number | null {
+  const rows = Array.isArray(result)
+    ? result
+    : isRecord(result) && Array.isArray(result.rows)
+      ? result.rows
+      : [];
+  const row: unknown = rows[0];
+  if (!isRecord(row)) return null;
+  const value = row[column];
+  const version = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  return typeof version === "number" && Number.isSafeInteger(version) && version > 0
+    ? version
+    : null;
+}
+
+/**
+ * Raises the user's version by one, atomically (tokenVersionBumpSql), and
+ * returns the version this call committed. Throws when the database
+ * returned no row (no such user), so a caller never goes on as if the
+ * older JWTs were revoked.
  */
 export async function bumpTokenVersion(
   strapi: TokenVersionStrapi,
   userId: number,
 ): Promise<number> {
-  const current = (await currentTokenVersion(strapi, userId)) ?? 0;
-  const next = current + 1;
-  await strapi.db.query(USER_UID).update({ where: { id: userId }, data: { tokenVersion: next } });
-  return next;
+  const target = tokenVersionTarget(strapi);
+  const result = await strapi.db.connection.raw(tokenVersionBumpSql(target), [userId]);
+  const version = returnedVersion(result, target.versionColumn);
+  if (version === null) {
+    throw new Error(
+      `[users-permissions-extension] the token version of user ${userId} was not raised (no such user)`,
+    );
+  }
+  return version;
 }
 
 function assertJwtService(service: unknown): asserts service is JwtService {
@@ -246,16 +325,24 @@ function assertAuthController(controller: unknown): asserts controller is Record
 }
 
 function assertStrapi(strapi: unknown): asserts strapi is TokenVersionStrapi {
+  const db = isRecord(strapi) ? strapi.db : undefined;
   const ok =
     isRecord(strapi) &&
     isRecord(strapi.config) &&
     typeof strapi.config.get === "function" &&
-    isRecord(strapi.db) &&
-    typeof strapi.db.query === "function" &&
+    isRecord(db) &&
+    typeof db.query === "function" &&
+    (typeof db.connection === "function" || isRecord(db.connection)) &&
+    typeof (db.connection as { raw?: unknown }).raw === "function" &&
+    isRecord(db.dialect) &&
+    typeof db.getSchemaName === "function" &&
+    isRecord(db.metadata) &&
+    typeof db.metadata.get === "function" &&
     typeof strapi.plugin === "function";
   if (!ok) {
     throw new Error(
-      "[users-permissions-extension] a factory did not receive { strapi } with config/db/plugin (FX40 tripwire).",
+      "[users-permissions-extension] a factory did not receive { strapi } with config, plugin and a db " +
+        "with query/connection/dialect/getSchemaName/metadata (FX40 tripwire).",
     );
   }
 }

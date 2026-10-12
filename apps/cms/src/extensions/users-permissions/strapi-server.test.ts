@@ -7,17 +7,27 @@
  * awaiting it, and a refused password change throws. The sign-in race
  * (a password change between the hash read and issue()) runs through the
  * plugin's REAL `callback` with a stubbed store, user service and
- * sanitizer. The end-to-end run (the real controller over HTTP) is
+ * sanitizer. Overlapping password changes of one user run on a real
+ * SQLite database (@strapi/database 5.55.1), paused at chosen points of
+ * one change while the others go through. The end-to-end run (the real
+ * controller over HTTP, SQLite and Postgres) is
  * token-version.integration.test.ts.
  */
-import { describe, expect, it, vi } from "vitest";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { cmsPackageDir, requirePackageFile } from "../../test/sqlite-engine.test.helper";
+import {
+  cmsPackageDir,
+  openSqliteEngine,
+  requirePackageFile,
+  type SqliteEngine,
+} from "../../test/sqlite-engine.test.helper";
 import {
   TOKEN_VERSION_CLAIM,
   USER_UID,
   bumpTokenVersion,
   createUsersPermissionsExtension,
+  tokenVersionBumpSql,
   type AuthContext,
   type JwtService,
   type TokenVersionStrapi,
@@ -25,6 +35,49 @@ import {
 } from "./strapi-server";
 
 type Factory = (deps: { strapi: unknown }) => unknown;
+
+/** The bump statement on the user table as Strapi's metadata names it. */
+const BUMP_SQL =
+  'UPDATE "up_users" SET "token_version" = COALESCE("token_version", 0) + 1 WHERE "id" = ? RETURNING "token_version"';
+
+/** Strapi's metadata of the user table: what the bump reads. */
+const userMetadata = {
+  get: (uid: string) => {
+    expect(uid).toBe(USER_UID);
+    return {
+      tableName: "up_users",
+      attributes: { id: { columnName: "id" }, tokenVersion: { columnName: "token_version" } },
+    };
+  },
+};
+
+/**
+ * The db slice of a fake Strapi beyond query(): knex's raw() for the one
+ * statement the extension sends (the bump, applied to `rows` like SQLite
+ * would), SQLite as the dialect.
+ */
+function fakeBumpDb<T extends { tokenVersion?: number | null }>(
+  rows: Map<number, T>,
+  queries?: string[],
+) {
+  return {
+    connection: {
+      async raw(sql: string, bindings: readonly unknown[]) {
+        expect(sql).toBe(BUMP_SQL);
+        const id = bindings[0] as number;
+        queries?.push(`bump ${id}`);
+        const row = rows.get(id);
+        if (!row) return [];
+        const next = (row.tokenVersion ?? 0) + 1;
+        rows.set(id, { ...row, tokenVersion: next });
+        return [{ token_version: next }];
+      },
+    },
+    dialect: { client: "sqlite" },
+    getSchemaName: () => undefined,
+    metadata: userMetadata,
+  };
+}
 
 /** The plugin's own jwt service factory, as its server index registers it. */
 const realJwtFactory = requirePackageFile<{ __require(): Factory }>(
@@ -47,7 +100,7 @@ const claims = (jwt: string) =>
 
 interface Harness {
   strapi: TokenVersionStrapi;
-  users: Map<number, { id: number; tokenVersion?: number | null }>;
+  users: Map<number, { id: number; tokenVersion?: number | null; password?: string }>;
   jwt: JwtService;
   auth: Record<string, (ctx: AuthContext, ...rest: unknown[]) => Promise<unknown>>;
   queries: string[];
@@ -56,11 +109,35 @@ interface Harness {
   rawIssue(payload: object): string;
 }
 
-/** A fake auth controller factory with the plugin's legacy behaviour. */
+/**
+ * A fake users-permissions `user` service factory: edit() writes the given
+ * fields through the query engine (the plugin's goes through the Document
+ * Service, which hashes the password).
+ */
+function fakeUserFactory(): Factory {
+  type Writable = { query(uid: string): { update(args: object): Promise<unknown> } };
+  return ({ strapi }) => ({
+    async edit(userId: number, params: Record<string, unknown>) {
+      const db = (strapi as { db: Writable }).db;
+      return db.query(USER_UID).update({ where: { id: userId }, data: params });
+    },
+  });
+}
+
+type PasswordBody = { currentPassword?: string; password?: string };
+
+/**
+ * A fake auth controller factory with the plugin's legacy behaviour: the
+ * password actions persist the new password through the user service's
+ * edit(), then answer with issue()'s result, unawaited.
+ */
 function fakeAuthFactory(): Factory {
   return ({ strapi }) => {
-    const jwt = () =>
-      (strapi as TokenVersionStrapi).plugin("users-permissions").service("jwt") as JwtService;
+    const service = (name: string) =>
+      (strapi as TokenVersionStrapi).plugin("users-permissions").service(name);
+    const jwt = () => service("jwt") as JwtService;
+    const users = () =>
+      service("user") as { edit(id: number, params: Record<string, unknown>): Promise<unknown> };
     const answer = (ctx: AuthContext, id: number) => {
       // The plugin: ctx.send({ jwt: getService('jwt').issue({ id }), user })
       ctx.body = { jwt: jwt().issue({ id: id }), user: { id, username: `u${id}` } };
@@ -69,14 +146,21 @@ function fakeAuthFactory(): Factory {
       async callback(ctx: AuthContext & { request: { body: { id: number } } }) {
         answer(ctx, ctx.request.body.id);
       },
-      async changePassword(ctx: AuthContext & { request: { body: { currentPassword: string } } }) {
+      async changePassword(ctx: AuthContext & { request: { body: PasswordBody } }) {
         if (ctx.request.body.currentPassword !== "right") {
           throw new Error("The provided current password is invalid");
         }
-        answer(ctx, ctx.state?.user?.id as number);
+        const id = ctx.state?.user?.id as number;
+        await users().edit(id, { password: ctx.request.body.password ?? "new-password" });
+        answer(ctx, id);
       },
-      async resetPassword(ctx: AuthContext & { request: { body: { id: number } } }) {
-        answer(ctx, ctx.request.body.id);
+      async resetPassword(ctx: AuthContext & { request: { body: { id: number } & PasswordBody } }) {
+        const id = ctx.request.body.id;
+        await users().edit(id, {
+          resetPasswordToken: null,
+          password: ctx.request.body.password ?? "new-password",
+        });
+        answer(ctx, id);
       },
       async logout(ctx: AuthContext) {
         ctx.body = { ok: true };
@@ -86,7 +170,7 @@ function fakeAuthFactory(): Factory {
 }
 
 function harness(mode: "legacy-support" | "refresh" = "legacy-support"): Harness {
-  const users = new Map<number, { id: number; tokenVersion?: number | null }>([
+  const users: Harness["users"] = new Map([
     [1, { id: 1, tokenVersion: 0 }],
     [2, { id: 2, tokenVersion: 3 }],
     [3, { id: 3, tokenVersion: null }],
@@ -120,16 +204,18 @@ function harness(mode: "legacy-support" | "refresh" = "legacy-support"): Harness
           },
         };
       },
+      ...fakeBumpDb(users, queries),
     },
     plugin: () => ({ service: (name: string) => services[name] }),
     log: { info: (message) => logs.push(message) },
   };
   const plugin: UsersPermissionsPlugin = {
-    services: { jwt: realJwtFactory },
+    services: { jwt: realJwtFactory, user: fakeUserFactory() },
     controllers: { auth: fakeAuthFactory() },
   };
   createUsersPermissionsExtension()(plugin);
   services.jwt = (plugin.services.jwt as Factory)({ strapi });
+  services.user = (plugin.services.user as Factory)({ strapi });
   const auth = (plugin.controllers.auth as Factory)({ strapi }) as Harness["auth"];
   const raw = realJwtFactory({ strapi }) as JwtService;
   return {
@@ -369,6 +455,7 @@ describe("sign-in: the version is read before the password check (the plugin's r
             },
           };
         },
+        ...fakeBumpDb(users),
       },
       plugin: () => ({ service: (name: string) => services[name] }),
       store: () => ({
@@ -465,6 +552,228 @@ describe("sign-in: the version is read before the password check (the plugin's r
   });
 });
 
+describe("the bump statement", () => {
+  const target = {
+    schema: "public",
+    table: "up_users",
+    idColumn: "id",
+    versionColumn: "token_version",
+  };
+
+  it("is one UPDATE … RETURNING on SQLite, a stored NULL counting as 0", () => {
+    expect(tokenVersionBumpSql({ ...target, client: "sqlite" })).toBe(BUMP_SQL);
+  });
+
+  it("is schema-qualified on Postgres", () => {
+    expect(tokenVersionBumpSql({ ...target, client: "postgres", schema: "tenant_a" })).toBe(
+      'UPDATE "tenant_a"."up_users" SET "token_version" = COALESCE("token_version", 0) + 1 WHERE "id" = ? RETURNING "token_version"',
+    );
+  });
+
+  it("refuses other databases", () => {
+    expect(() => tokenVersionBumpSql({ ...target, client: "mysql" })).toThrow(/not supported/);
+  });
+
+  it("answers the version it committed, and throws for a user that does not exist", async () => {
+    const h = harness();
+    await expect(bumpTokenVersion(h.strapi, 3)).resolves.toBe(1);
+    await expect(bumpTokenVersion(h.strapi, 2)).resolves.toBe(4);
+    await expect(bumpTokenVersion(h.strapi, 99)).rejects.toThrow("was not raised (no such user)");
+  });
+});
+
+/** Which password change a database call belongs to ("A", "B", "C"). */
+const actor = new AsyncLocalStorage<string>();
+
+/** Where the race harness can hold a change, or make it fail. */
+type RacePoint = "before version write" | "after version write" | "before password write";
+
+interface RaceHook {
+  at(point: RacePoint): Promise<void>;
+}
+
+/**
+ * Holds the change `who` the first time it reaches `point`, until
+ * release(); `reached` resolves once it waits there. No timers: the test
+ * awaits `reached`, runs the other changes to their end, then releases.
+ */
+function pauseAt(who: string, point: RacePoint) {
+  let reach!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let held = false;
+  return {
+    reached,
+    release,
+    async at(current: RacePoint) {
+      if (held || current !== point || actor.getStore() !== who) return;
+      held = true;
+      reach();
+      await released;
+    },
+  };
+}
+
+const isPlainRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** The user table reduced to what a password change touches. */
+function raceUserModel() {
+  return {
+    uid: USER_UID,
+    singularName: "user",
+    tableName: "up_users",
+    attributes: {
+      id: { type: "increments" },
+      documentId: { type: "string" },
+      username: { type: "string" },
+      password: { type: "string" },
+      tokenVersion: { type: "integer" },
+    },
+  };
+}
+
+interface RaceHarness {
+  userId: number;
+  jwt: JwtService;
+  logs: string[];
+  /** The version the user's row held after each version write, in order. */
+  history: number[];
+  /** A JWT the user held before any change (version 0). */
+  before: string;
+  /** The change-password request of `who` (current password right); its answer's JWT. */
+  change(who: string, password: string): Promise<string>;
+  stored(): Promise<{ version: number; password: string }>;
+}
+
+/**
+ * The extension around the real jwt service, the fake auth controller and
+ * the fake user service, on a real SQLite database (@strapi/database
+ * 5.55.1) holding one user. Every version write (through the query engine
+ * or as raw SQL) and every password write passes the hooks, in the
+ * context of the change that made it.
+ */
+async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<RaceHarness> {
+  const engine = await openSqliteEngine([raceUserModel()], { schema: "sync" });
+  engines.push(engine);
+  const db = engine.db;
+  const created = await db.query(USER_UID).create({
+    data: { username: "casey", password: "old-password", tokenVersion: 0 },
+  });
+  const userId = created.id as number;
+  const at = async (point: RacePoint) => {
+    for (const hook of hooks) await hook.at(point);
+  };
+  const stored = async () => {
+    const row = await db.query(USER_UID).findOne({ where: { id: userId } });
+    return { version: Number(row?.tokenVersion ?? 0), password: String(row?.password) };
+  };
+  const history: number[] = [];
+  const afterVersionWrite = async () => {
+    history.push((await stored()).version);
+    await at("after version write");
+  };
+  const logs: string[] = [];
+  const services: Record<string, unknown> = {};
+  const config: Record<string, unknown> = {
+    "plugin::users-permissions.jwtSecret": "unit-test-secret",
+    "plugin::users-permissions.jwt": { expiresIn: "7d" },
+    "plugin::users-permissions.jwtManagement": "legacy-support",
+  };
+  const strapi: TokenVersionStrapi = {
+    config: { get: (path, fallback) => (path in config ? config[path] : fallback) },
+    db: {
+      query(uid) {
+        const repo = db.query(uid) as ReturnType<typeof db.query> & {
+          update(args: Record<string, unknown>): Promise<unknown>;
+        };
+        return {
+          findOne: (args) => repo.findOne(args),
+          async update(args: Record<string, unknown>) {
+            const data = isPlainRecord(args.data) ? args.data : {};
+            const writesVersion = "tokenVersion" in data;
+            if (writesVersion) await at("before version write");
+            if ("password" in data) await at("before password write");
+            const result = await repo.update(args);
+            if (writesVersion) await afterVersionWrite();
+            return result;
+          },
+        };
+      },
+      connection: {
+        async raw(sql, bindings) {
+          const writesVersion = /^UPDATE\b/.test(sql) && sql.includes('"token_version"');
+          if (writesVersion) await at("before version write");
+          const result = await db.connection.raw(sql, bindings);
+          if (writesVersion) await afterVersionWrite();
+          return result;
+        },
+      },
+      dialect: { client: "sqlite" },
+      getSchemaName: () => undefined,
+      metadata: db.metadata as unknown as TokenVersionStrapi["db"]["metadata"],
+    },
+    plugin: () => ({ service: (name: string) => services[name] }),
+    log: { info: (message) => logs.push(message), warn: (message) => logs.push(message) },
+  };
+  const plugin: UsersPermissionsPlugin = {
+    services: { jwt: realJwtFactory, user: fakeUserFactory() },
+    controllers: { auth: fakeAuthFactory() },
+  };
+  createUsersPermissionsExtension()(plugin);
+  services.jwt = (plugin.services.jwt as Factory)({ strapi });
+  services.user = (plugin.services.user as Factory)({ strapi });
+  const auth = (plugin.controllers.auth as Factory)({ strapi }) as Harness["auth"];
+  const jwt = services.jwt as JwtService;
+  const change = (who: string, password: string) =>
+    actor.run(who, async () => {
+      const ctx = {
+        state: { user: { id: userId } },
+        request: { body: { currentPassword: "right", password } },
+      } as AuthContext & { body?: { jwt?: unknown } };
+      await auth.changePassword(ctx);
+      return ctx.body?.jwt as string;
+    });
+  return {
+    userId,
+    jwt,
+    logs,
+    history,
+    before: (await jwt.issue({ id: userId })) as string,
+    change,
+    stored,
+  };
+}
+
+describe("overlapping password changes of one user (real SQLite)", () => {
+  const engines: SqliteEngine[] = [];
+
+  afterEach(async () => {
+    for (const engine of engines.splice(0)) await engine.close();
+  });
+
+  it("the version never moves backwards: A held between reading and writing it while B and C change", async () => {
+    const hold = pauseAt("A", "before version write");
+    const h = await raceHarness(engines, [hold]);
+    const a = h.change("A", "password-a");
+    await hold.reached;
+    const b = await h.change("B", "password-b");
+    const c = await h.change("C", "password-c");
+    // C revoked B's JWT.
+    await expect(h.jwt.verify(b)).rejects.toThrow("Invalid token.");
+    hold.release();
+    const jwtA = await a;
+    expect(h.history).toEqual([1, 2, 3]);
+    expect((await h.stored()).version).toBe(3);
+    // What C revoked stays revoked once A is through; A's own JWT is current.
+    for (const revoked of [h.before, b, c]) {
+      await expect(h.jwt.verify(revoked)).rejects.toThrow("Invalid token.");
+    }
+    await expect(h.jwt.verify(jwtA)).resolves.toMatchObject({ id: h.userId, tv: 3 });
+  }, 30_000);
+});
+
 describe("jwtManagement 'refresh': the plugin's own session revocation applies", () => {
   it("passes issue(), verify() and the password actions through untouched", async () => {
     const h = harness("refresh");
@@ -477,7 +786,12 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     };
     createUsersPermissionsExtension()(plugin);
     const service = (plugin.services.jwt as Factory)({ strapi: h.strapi }) as JwtService;
-    const strapi: TokenVersionStrapi = { ...h.strapi, plugin: () => ({ service: () => service }) };
+    const strapi: TokenVersionStrapi = {
+      ...h.strapi,
+      plugin: () => ({
+        service: (name) => (name === "jwt" ? service : h.strapi.plugin("x").service(name)),
+      }),
+    };
     const auth = (plugin.controllers.auth as Factory)({ strapi }) as Harness["auth"];
 
     expect(service.issue({ id: 2 })).toBe("session-token");
@@ -486,7 +800,10 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     await auth.changePassword(ctx);
     expect(ctx.body?.jwt).toBe("session-token");
     expect(h.users.get(2)?.tokenVersion).toBe(3);
-    expect(h.queries).toEqual([]);
+    // The password write of the plugin's action, nothing of the extension.
+    expect(h.queries).toEqual([
+      `update ${JSON.stringify({ where: { id: 2 }, data: { password: "new-password" } })}`,
+    ]);
   });
 });
 

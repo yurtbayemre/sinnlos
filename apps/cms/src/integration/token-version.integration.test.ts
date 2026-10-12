@@ -2,6 +2,11 @@ import { createHmac } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  bumpTokenVersion,
+  currentTokenVersion,
+  type TokenVersionStrapi,
+} from "../extensions/users-permissions/strapi-server";
+import {
   createTestStrapi,
   testEngines,
   type TestStrapi,
@@ -21,7 +26,9 @@ import {
  *      of that user gets 401, the JWT in its answer and a new sign-in work,
  *      and other users' JWTs stay valid;
  *   3. a refused change (wrong current password) revokes nothing;
- *   4. the version is private: not in any answer, not filterable.
+ *   4. the version is private: not in any answer, not filterable;
+ *   5. the bump is atomic on the real database: overlapping bumps of one
+ *      user each commit their own version, none is lost.
  */
 
 /** A JWT signed like the plugin's legacy issue() did before FX40: no `tv`. */
@@ -110,6 +117,22 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
       .query("plugin::users-permissions.user")
       .update({ where: { id: guest.id }, data: { tokenVersion: null } });
     expect((await me(legacyJwt(secret, guest.id))).status).toBe(200);
+  });
+
+  it("raises the version atomically: 20 overlapping bumps commit 20 versions (5 runs)", async () => {
+    const strapi = t.strapi as unknown as TokenVersionStrapi;
+    const id = t.fixtures.users.member.id;
+    for (let run = 0; run < 5; run += 1) {
+      const start = (await currentTokenVersion(strapi, id)) ?? 0;
+      const versions = await Promise.all(
+        Array.from({ length: 20 }, () => bumpTokenVersion(strapi, id)),
+      );
+      // Each bump got a version of its own, and the stored one is the last.
+      expect([...versions].sort((a, b) => a - b)).toEqual(
+        Array.from({ length: 20 }, (_, i) => start + i + 1),
+      );
+      expect(await currentTokenVersion(strapi, id)).toBe(start + 20);
+    }
   });
 
   it("keeps the version private: not filterable through the API", async () => {
