@@ -10671,67 +10671,119 @@ Restore into a **clean** database, never over the one that runs:
 newer release added, with its foreign keys into the dump's tables (the
 RSVP, acknowledgement and author links into `up_users`, for example),
 blocks those drops, and by default `pg_restore` carries on after such
-errors and leaves a mixture of both states. The steps below stop web and
-cms, drop and recreate the database, restore in one transaction that
-stops at the first error, check the result, give the cms a fresh
-`JWT_SECRET`, and only then start the apps. Run them in the checkout, on
-the owner's host as `bigemo` in `/home/bigemo/git/sinnlos`:
+errors and leaves a mixture of both states. The restore below therefore
+drops and recreates the database and restores in one transaction that
+stops at the first error. Run the five blocks in **one** shell, in order,
+in the checkout (on the owner's host as `bigemo`). Every block checks what
+the one before it left behind and prints a `STOP:` line instead of going
+on; nothing in them closes your shell. A block whose `STOP:` line you do
+not understand: stop there.
+
+**1. Set up** (changes nothing):
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos      # the owner's host; elsewhere your checkout, e.g. /opt/sinnlos
 COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)   # Caddy box: without the second -f
 DUMP=infra/backups/sinnlos-20260415-120000.dump
-
-# 1. Stop the apps; only the database keeps running
-"${COMPOSE[@]}" stop web cms
-
-# 2. Read the dump before anything is dropped: how many tables it holds
-"${COMPOSE[@]}" exec -T db pg_restore --list < "$DUMP" | awk '$4 == "TABLE" && $5 != "DATA"' | wc -l
-
-# 3. A clean database: drop it and create it empty
-"${COMPOSE[@]}" exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
-
-# 4. Restore in one transaction; the first error rolls everything back
-"${COMPOSE[@]}" exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' < "$DUMP"; echo "pg_restore exit $?"
-
-# 5. Check before any app starts: the tables of step 2, and the users
-"${COMPOSE[@]}" exec -T db sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
-SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');
-SELECT count(*) FROM up_users;
-SQL
+SAFETY="infra/backups/before-restore-$(date +%Y%m%d-%H%M%S).dump"
+umask 077
+RESTORE_READY= RESTORE_OK= ROTATED= ENV_PUT_BACK=
 ```
 
-Go on only when step 4 printed `pg_restore exit 0` and the first number of
-step 5 equals the number of step 2 (the second is the user count of the
-dump). Anything else (an error, a truncated or wrong file) left the
-database empty, because the transaction rolled back: fix the cause and
-repeat from step 3; never start web or cms on it. `--no-owner` makes the
-restoring user own everything, as the cms expects.
-
-Then give the cms a fresh `JWT_SECRET` **before** it starts, and start the
-apps:
+**2. Check the dump, stop the apps, keep a copy of the current database**
+(drops nothing). The copy is the way back if the restore goes wrong; on
+production a `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos`
+right before is a second one.
 
 ```bash
-# 6. A fresh JWT_SECRET (only the cms reads it; AUTH_SECRET stays)
-umask 077
-NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
-awk -v s="${NEW_JWT_SECRET}" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; n++; next } { print } END { exit n == 1 ? 0 : 1 }' \
-  infra/.env > infra/.env.rotated && mv infra/.env.rotated infra/.env
-unset NEW_JWT_SECRET
-ls -l infra/.env
-grep -c '^JWT_SECRET=' infra/.env
-
-# 7. Start the apps
-"${COMPOSE[@]}" up -d --no-build web cms
+if ! N="$(set -o pipefail; "${COMPOSE[@]}" exec -T db pg_restore --list < "$DUMP" | awk '$4 == "TABLE" && $5 != "DATA"' | wc -l)" || [ "${N:-0}" -le 0 ]; then
+  echo "STOP: $DUMP is missing or no readable dump (tables: ${N:-none}); nothing changed"
+elif ! "${COMPOSE[@]}" stop web cms; then
+  echo "STOP: web and cms did not stop; nothing dropped"
+elif ! "${COMPOSE[@]}" exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' > "$SAFETY" || [ ! -s "$SAFETY" ]; then
+  echo "STOP: no copy of the current database in $SAFETY; nothing dropped (web and cms are stopped: start them again with up -d --no-build web cms)"
+else
+  RESTORE_READY=yes
+  echo "OK: the dump holds $N tables; web and cms stopped; the current database is saved in $SAFETY"
+fi
 ```
 
-`-rw-------` and `1`; if `awk` fails (no `JWT_SECRET=` line, or several),
-nothing was moved: remove `infra/.env.rotated` and give `infra/.env`
-exactly one `JWT_SECRET=` line with a fresh value. Keep no copy of the old
-value. **Why step 6 is mandatory after every database or `.env` restore,
-also with the same images:** a dump holds every user's token version as it
-was when it was taken. A password change since then raised it and revoked
-that user's older JWTs; the restore lowers it again, so those JWTs, still
+**3. Drop, recreate, restore, check** (runs only after block 2 printed
+`OK`):
+
+```bash
+if [ "$RESTORE_READY" != yes ]; then
+  echo "STOP: block 2 did not pass; nothing dropped"
+elif ! "${COMPOSE[@]}" exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'; then
+  echo "STOP: dropping or creating the database failed; the copy is $SAFETY"
+elif ! "${COMPOSE[@]}" exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' < "$DUMP"; then
+  echo "STOP: pg_restore failed and rolled back, the database is empty; fix the cause and run this block again, or set DUMP=$SAFETY and run it to go back"
+else
+  T="$("${COMPOSE[@]}" exec -T db sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');
+SQL
+)"
+  U="$("${COMPOSE[@]}" exec -T db sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT count(*) FROM up_users;
+SQL
+)"
+  if [ "$T" = "$N" ]; then
+    RESTORE_OK=yes
+    echo "OK: restored $T tables (the dump has $N), $U users"
+  else
+    echo "STOP: $T tables in the database, $N in the dump; do not start the apps"
+  fi
+fi
+```
+
+**4. A fresh `JWT_SECRET`** (only the cms reads it; `AUTH_SECRET` stays),
+after block 3 restored the database, or after a backed-up `infra/.env`
+was put back (`ENV_PUT_BACK=yes`, see below). The block ends with its own
+check: `infra/.env` mode 600, exactly one `JWT_SECRET=` line, and a value
+whose checksum differs from the old one; the secret itself is never
+printed.
+
+```bash
+if [ "$RESTORE_OK" != yes ] && [ "$ENV_PUT_BACK" != yes ]; then
+  echo "STOP: nothing restored (block 3 did not pass, no .env put back); JWT_SECRET left alone"
+else
+  OLD_SUM="$(sed -n 's/^JWT_SECRET=//p' infra/.env | sha256sum)"
+  NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+  if awk -v s="${NEW_JWT_SECRET}" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; n++; next } { print } END { exit n == 1 ? 0 : 1 }' infra/.env > infra/.env.rotated \
+    && mv infra/.env.rotated infra/.env \
+    && [ "$(stat -c %a infra/.env)" = 600 ] \
+    && [ "$(grep -c '^JWT_SECRET=' infra/.env)" = 1 ] \
+    && [ "$(sed -n 's/^JWT_SECRET=//p' infra/.env | sha256sum)" != "$OLD_SUM" ]; then
+    ROTATED=yes
+    echo "OK: JWT_SECRET rotated (infra/.env 600, one JWT_SECRET line, a new value)"
+  else
+    rm -f infra/.env.rotated
+    echo "STOP: JWT_SECRET not rotated (no JWT_SECRET= line, several, or the write failed); give infra/.env exactly one JWT_SECRET= line with a fresh value, then run this block again"
+  fi
+  unset NEW_JWT_SECRET OLD_SUM
+fi
+```
+
+**5. Start the apps**, only when block 3 restored and checked the database
+and block 4 rotated the secret:
+
+```bash
+if [ "$RESTORE_OK" = yes ] && [ "$ROTATED" = yes ]; then
+  "${COMPOSE[@]}" up -d --no-build web cms
+else
+  echo "STOP: web and cms not started (restored and checked: ${RESTORE_OK:-no}; JWT_SECRET rotated: ${ROTATED:-no})"
+fi
+```
+
+A new shell forgets the flags, so its blocks 3 and 5 refuse; run blocks 1
+to 5 again there (block 2 then saves the restored database as a new copy,
+which is fine). Delete `$SAFETY` once the restored site works. `--no-owner`
+makes the restoring user own everything, as the cms expects.
+
+**Why block 4 is mandatory after every database or `.env` restore, also
+with the same images:** a dump holds every user's token version as it was
+when it was taken. A password change since then raised it and revoked that
+user's older JWTs; the restore lowers it again, so those JWTs, still
 unexpired and signed with the same key, would be accepted again (the cms
 compares the JWT's version with the stored one,
 `apps/cms/src/extensions/users-permissions/strapi-server.ts`). A restored
@@ -10742,7 +10794,14 @@ alike; the admin panel's sessions (`ADMIN_JWT_SECRET`) and the web's own
 key (`AUTH_SECRET`) stay. This is the rule of the owner decision of
 2026-10-12 for a rollback below batch 13
 ([Deploying batch 13](#deploying-batch-13-2026-10-12), R4), applied to
-restores.
+restores. **When the host lost `infra/.env`:** run block 1, put the
+backed-up file back (owned by the checkout owner, mode 600), set
+`ENV_PUT_BACK=yes` and run block 4, all **before** block 2. Without
+`infra/.env` compose refuses `stop`, `up` and `config` (the compose file
+requires its secrets; only `exec` into a running container still works),
+so block 2 would stop at its `stop` line, and the backed-up file can hold
+a secret that was rotated since. Then blocks 2, 3 and 5 (block 5 starts
+only once block 3 has passed too).
 
 The cms then brings the schema up to its own release on boot (it adds what
 an older dump lacks). A dump taken before the org draft/publish migration
@@ -10750,11 +10809,15 @@ needs that migration again first
 ([One-time: org draft/publish off](#one-time-org-draftpublish-off)); a dump
 from before the datetime release needs its runbook
 ([Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
-This procedure was walked verbatim on 2026-10-12 on throwaway containers
-with a dump of a real cms schema, including an older dump restored where
-the running database had newer tables (the old `--clean` restore left a
-mixture there; this one ends with exactly the dump's tables, or fails
-before any app starts).
+These blocks were walked verbatim on 2026-10-12 on throwaway containers
+with a dump of a real cms schema: a good dump, an older dump where the
+running database had newer tables (the old `--clean` restore left a
+mixture there), a missing dump file, two truncated dumps, a dump whose
+restore fails after the drop (a grant to a missing role: the transaction
+rolled back, the apps stayed down, and `DUMP=$SAFETY` brought the
+database back), a `.env` with two `JWT_SECRET=` lines and a missing
+`.env`. No failure dropped anything before block 2 had passed, and none
+started the apps.
 
 ### 7.2 Backup uploads volume
 
@@ -10826,26 +10889,33 @@ does not repeat them. What sinnlos needs around them:
    compare every plaintext with the generation: `sha256sum db.dump` must
    print the `plain.db.dump.sha256` value of `MANIFEST`, and so on for the
    others. A mismatch: stop, the file is not what was backed up.
-3. **The database:** copy `db.dump` to the host, into the owner-only
-   `infra/backups/` of the checkout, and restore it with
-   [Restoring a database dump](#restoring-a-database-dump): stop web and
-   cms, a clean database, `pg_restore --exit-on-error
-   --single-transaction`, the check, and a fresh `JWT_SECRET` before the
-   cms starts. Not with the plain `pg_restore --clean --if-exists` of
-   `docs/backup.md`: over the database that runs, that leaves a mixture
-   when the schemas differ. Delete the host's copy afterwards.
-4. **The uploads** (cms stopped): stream the plain tar into the volume,
-   `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C
-   /uploads < uploads.tar`; it adds and overwrites but deletes nothing, so
-   empty the volume first (`find /uploads -mindepth 1 -delete` in the same
-   container) when files created after the backup must go.
-5. **The `.env`:** `config.tar` holds `home/bigemo/git/sinnlos/infra/.env`.
-   Extract it into a scratch directory and put it back (owned by `bigemo`,
-   mode 600) only if the host lost its `infra/.env`; then rotate
-   `JWT_SECRET` (step 6 of the database restore) before the cms starts,
-   because the backed-up file can hold a secret that was rotated since.
-6. Start web and cms only after steps 3 to 5, and delete every plaintext
-   copy off the VPS.
+3. **The `.env` first, if the host lost it:** `config.tar` holds
+   `home/bigemo/git/sinnlos/infra/.env`. Extract it into a scratch
+   directory, put it back as `infra/.env` (owned by `bigemo`, mode 600):
+   run block 1 of [Restoring a database dump](#restoring-a-database-dump),
+   put the file back, set `ENV_PUT_BACK=yes` and run block 4, **before
+   block 2**. While `infra/.env` is missing, compose refuses `stop`, `up`
+   and `config` (the compose file requires its secrets), and the
+   backed-up file can hold a secret that was rotated since. A host that
+   kept its `infra/.env` skips this step.
+4. **The database:** copy `db.dump` to the host, into the owner-only
+   `infra/backups/` of the checkout, and run the blocks of
+   [Restoring a database dump](#restoring-a-database-dump) in order
+   (blocks 2 and 3 in the shell of step 3, if it ran; block 4 again does
+   no harm): check the dump, stop web and cms, keep a
+   copy, a clean database, `pg_restore --exit-on-error
+   --single-transaction`, the check. Not with the plain `pg_restore
+   --clean --if-exists` of `docs/backup.md`: over the database that runs,
+   that leaves a mixture when the schemas differ.
+5. **The uploads**, while web and cms are stopped (after block 2): stream
+   the plain tar into the volume, `docker run --rm -i -v
+   infra_cms_uploads:/uploads alpine tar xf - -C /uploads < uploads.tar`;
+   it adds and overwrites but deletes nothing, so empty the volume first
+   (`find /uploads -mindepth 1 -delete` in the same container) when files
+   created after the backup must go.
+6. **Start** with block 5 (it starts nothing unless the database is
+   restored and checked and `JWT_SECRET` rotated), then delete the host's
+   copy of `db.dump` and every plaintext copy off the VPS.
 
 The same holds for a `-predeploy` generation after a failed deploy (§7.4).
 
@@ -10979,8 +11049,9 @@ gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip \
 
 Put `infra.env` back as `infra/.env` of the checkout (owned by the
 checkout owner, mode 600) only if the host lost it, and then rotate its
-`JWT_SECRET` (step 6 of §7.1) before the cms starts: the backed-up file
-can hold a secret that was rotated since. Delete the plaintext afterwards
+`JWT_SECRET` as §7.1 says for that case (block 1, `ENV_PUT_BACK=yes`,
+block 4, before block 2): the backed-up file can hold a secret that was
+rotated since, and compose refuses `stop` and `up` without it. Delete the plaintext afterwards
 (`cd .. && rm -rf restore`). This procedure was walked verbatim on
 2026-10-12 against artifacts of `pg-backup.sh` with a throwaway key and
 Postgres 16 (decrypt, the §7.1 steps, the uploads stream, the `.env`, then
@@ -11009,7 +11080,7 @@ missing, a partial run, the drill fails and names it. `--keep` leaves the
 container running for a look (`docker exec -it <name> psql -U drill -d drill`).
 Run it after changes to the backup and every few months. The drill's
 database is a throwaway one that no cms ever uses, so it needs no new
-`JWT_SECRET`; a real restore does (§7.1, step 6).
+`JWT_SECRET`; a real restore does (§7.1, block 4).
 
 > **Planned (follow-up, not built yet):** `restore-drill.sh` support for
 > production's `backup-run` generations (above): check `COMPLETE` and
