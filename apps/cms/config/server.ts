@@ -58,10 +58,10 @@ export default ({ env }: { env: Env }) => ({
   // and an in-process overlap guard. `tz` is APP_TIME_ZONE for every task:
   // @strapi/core 5.55.1 dist/services/cron.js hands it to croner as
   // `timezone`, so a task runs at its wall-clock time in APP_TIME_ZONE and
-  // the process zone (UTC in the container) plays no part. The janitors run
-  // after the 03:00 host backup (keep the host in APP_TIME_ZONE,
-  // docs/DEPLOYMENT.md §7.3). CRON_ENABLED=0 (or false/no/off) switches
-  // the app's tasks off: with `enabled` false @strapi/core
+  // the process zone (UTC in the container) plays no part. When the host's
+  // nightly backup runs does not matter: the janitors remove only old rows
+  // and files (src/cron/registry.ts). CRON_ENABLED=0 (or false/no/off)
+  // switches the app's tasks off: with `enabled` false @strapi/core
   // (dist/providers/cron.js) adds none of `tasks`, but still starts its cron
   // service, so the jobs Strapi's plugins add (metrics) keep running
   // (src/cron/registry.ts).

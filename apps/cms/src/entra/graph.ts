@@ -11,8 +11,9 @@
  * Authorization header; results, errors and logs never contain it.
  *
  * The exchange runs the calls in parallel. A failure never fails the sign-in
- * of an existing user and never changes a role, department or manager
- * (spec K); how each result is used lives in roles.ts, profile.ts and
+ * of an existing user and by itself never changes a role, department or
+ * manager (spec K; a signed app-role match still applies when /me fails,
+ * roles.ts); how each result is used lives in roles.ts, profile.ts and
  * provision.ts.
  */
 import { GUID_PATTERN } from "./config";
