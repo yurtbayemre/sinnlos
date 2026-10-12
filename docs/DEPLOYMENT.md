@@ -2118,8 +2118,81 @@ admin panel keeps it for admins and editors; to make it company-wide, also
 set Audience to `all`. The admin panel no longer shows "Deploy to Strapi
 Cloud".
 
-**Rollback: both images, to the batch 10 SHA tags, no database step.**
-Follow the hint `infra/deploy.sh` prints when the deploy fails. After a
+**Rollback: both images, to the batch 10 SHA tags, after the stop rule.**
+
+**Stop rule, before any rollback of the cms to an image below batch 12**
+(this one, the hint of a deploy that failed after the batch 12 cms ran,
+or any older SHA tag): list the documents and quick links restricted by
+the Audience flag alone (read-only):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN TRANSACTION READ ONLY;
+SELECT 'document' AS type, d.document_id, max(d.title) AS title,
+       bool_or(d.published_at IS NOT NULL) AS published
+  FROM documents d
+ WHERE d.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
+ GROUP BY d.document_id
+UNION ALL
+SELECT 'quick link', q.document_id, max(q.label), bool_or(q.published_at IS NOT NULL)
+  FROM quick_links q
+ WHERE q.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+ GROUP BY q.document_id
+ ORDER BY 1, 2;
+ROLLBACK;
+SQL
+```
+
+Such a row has `audience = 'departments'` and no department: a department
+delete left it so, or an editor removed its departments without setting
+Audience to `all`. The batch 10 cms ignores the flag, so the row reads as
+company-wide there, guests included; worse, a Publish or "Discard changes"
+of it in the batch 10 admin panel re-creates the row without the column,
+the flag is gone for good, and the roll forward's boot backfill (it flags
+only rows that link a department) does not bring it back: the row stays
+company-wide after the roll forward too.
+
+- **No row:** roll back (below).
+- **Rows: do not roll back yet.** Either
+  1. re-target every listed row in the admin panel of the running batch 12
+     cms (link an existing department; set Audience to `all` only if it is
+     meant to be company-wide; or delete it) and run the listing again
+     until it prints no row. Unpublishing alone does not take a row off
+     the list: its draft keeps the flag, and a Publish in the batch 10
+     admin panel would write a published row without it. Or
+  2. save the listed documentIds right before the rollback (below), keep
+     the file until the roll forward, and run the re-apply below
+     **immediately after the roll forward**. Until then the listed rows are
+     company-wide, guests included, for as long as the batch 10 cms runs.
+
+```bash
+LIST=/home/bigemo/b12-flag-only-rows.txt
+psql_db -X -q -A -t -F ' ' > "$LIST" <<'SQL'
+SELECT DISTINCT 'documents', d.document_id
+  FROM documents d
+ WHERE d.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
+UNION
+SELECT DISTINCT 'quick_links', q.document_id
+  FROM quick_links q
+ WHERE q.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+ ORDER BY 1, 2;
+SQL
+wc -l < "$LIST"
+```
+
+It prints the number of saved documentIds (the listing's row count); the
+file holds one `documents <documentId>` or `quick_links <documentId>` per
+line.
+
+Avoid deleting a department while the batch 10 cms runs: a document or
+quick link the batch 10 cms wrote for that department alone carries no
+flag, loses its only link and comes back company-wide; no list names it.
+
+Then follow the hint `infra/deploy.sh` prints when the deploy fails. After a
 recorded batch 12 deploy, by hand (the batch 10 tags stay: the prune keeps
 the newest five):
 
@@ -2139,32 +2212,10 @@ database, and how the batch 10 images take it (rehearsed):
 
 - **The `audience` columns stay** (the schema sync never drops columns,
   `forceMigration: false`); the batch 10 cms boots on them and ignores
-  them. A document or quick link flagged and left without any department
-  after this deploy (by a department delete, or by an editor who removed
-  its departments without setting Audience to `all`) reads as
-  **company-wide** there, for guests too. List them first and re-target
-  them (link a department in the admin panel) before rolling back, or
-  accept it:
-
-  ```bash
-  psql_db -X <<'SQL'
-  BEGIN TRANSACTION READ ONLY;
-  SELECT 'document' AS type, d.document_id, max(d.title) AS title, bool_or(d.published_at IS NOT NULL) AS published
-    FROM documents d
-   WHERE d.audience = 'departments'
-     AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
-   GROUP BY d.document_id
-  UNION ALL
-  SELECT 'quick link', q.document_id, max(q.label), bool_or(q.published_at IS NOT NULL)
-    FROM quick_links q
-   WHERE q.audience = 'departments'
-     AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
-   GROUP BY q.document_id
-   ORDER BY 1, 2;
-  ROLLBACK;
-  SQL
-  ```
-
+  them. A document or quick link restricted by the flag alone reads as
+  **company-wide** there, for guests too, and the batch 10 admin panel can
+  erase its flag for good: hence the stop rule above, whose listing names
+  them, and the re-apply after the roll forward.
 - **Rows the janitors deleted do not come back** with the images:
   notifications and ads (with their image files) exist only in the
   backups (step 11, the nightly ones). Restoring a dump rolls back
@@ -2180,7 +2231,81 @@ database, and how the batch 10 images take it (rehearsed):
 A roll-forward is a normal `infra/deploy.sh` (it notes that the containers
 do not run the last-known-good images); the flags written before the
 rollback take effect again, and the boot backfill flags any row the batch
-10 cms linked to a department in between.
+10 cms linked to a department in between. A row restricted by the flag
+alone that the batch 10 admin panel published or discarded lost its flag
+for good; the listing above no longer names it once both of its rows lost
+it.
+
+**Right after the roll forward, with a saved list** (stop rule, case 2),
+before anyone works in the admin panel: re-apply the flag. The first run
+is a dry run: it prints the number of saved documentIds, every row of them
+as it is now (a row the batch 10 admin panel re-created shows an empty
+`audience`), the saved documentIds that no longer exist, and how many rows
+it would change (`UPDATE n`, documents, then quick links), and rolls back:
+
+```bash
+LIST=/home/bigemo/b12-flag-only-rows.txt
+wc -l < "$LIST"
+psql_db -X -v doc_ids="$(awk '$1 == "documents" { print $2 }' "$LIST" | paste -sd, -)" \
+  -v link_ids="$(awk '$1 == "quick_links" { print $2 }' "$LIST" | paste -sd, -)" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE b12_saved (rows_of text, document_id text) ON COMMIT DROP;
+INSERT INTO b12_saved
+SELECT 'documents', unnest(string_to_array(:'doc_ids', ','))
+UNION
+SELECT 'quick_links', unnest(string_to_array(:'link_ids', ','));
+\echo '== preview: every row of the saved documentIds, as it is now'
+SELECT 'documents' AS rows_of, d.document_id, d.id, d.title AS name,
+       d.published_at IS NOT NULL AS published, d.audience,
+       EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id) AS linked
+  FROM documents d JOIN b12_saved s ON s.rows_of = 'documents' AND s.document_id = d.document_id
+UNION ALL
+SELECT 'quick_links', q.document_id, q.id, q.label, q.published_at IS NOT NULL, q.audience,
+       EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+  FROM quick_links q JOIN b12_saved s ON s.rows_of = 'quick_links' AND s.document_id = q.document_id
+ ORDER BY 1, 2, 3;
+\echo '== saved documentIds with no row any more (deleted meanwhile, nothing to do)'
+SELECT s.rows_of, s.document_id
+  FROM b12_saved s
+ WHERE NOT EXISTS (SELECT 1 FROM documents d
+                    WHERE s.rows_of = 'documents' AND d.document_id = s.document_id)
+   AND NOT EXISTS (SELECT 1 FROM quick_links q
+                    WHERE s.rows_of = 'quick_links' AND q.document_id = s.document_id);
+UPDATE documents d SET audience = 'departments'
+  FROM b12_saved s
+ WHERE s.rows_of = 'documents' AND s.document_id = d.document_id
+   AND d.audience IS DISTINCT FROM 'departments';
+UPDATE quick_links q SET audience = 'departments'
+  FROM b12_saved s
+ WHERE s.rows_of = 'quick_links' AND s.document_id = q.document_id
+   AND q.audience IS DISTINCT FROM 'departments';
+\if :{?commit}
+COMMIT;
+\else
+ROLLBACK;
+\echo 'Dry run: nothing changed. If the preview is right, run it again with -v commit=1.'
+\endif
+SQL
+```
+
+If the preview is right, run the same command again with `-v commit=1`
+after `psql_db -X`; it ends with `COMMIT`. It sets
+`audience = 'departments'` on every row, draft and published, of every
+saved documentId and changes nothing else (`updated_at` stays); a second run
+changes 0 rows. A row an editor re-targeted during the rollback keeps its
+department and gets the flag the backfill would give it anyway; one that is
+meant to be company-wide gets Audience `all` in the admin panel afterwards.
+Then delete the file. (Rehearsed on a throwaway Postgres 16 with the batch
+12 cms: after a department delete the listing named three documents, one
+of them a draft only, and a quick link, and the save wrote the four lines;
+what the batch 10 admin panel does was replayed in SQL, re-creating rows
+without the column (a Publish of one document, a Publish of the draft-only
+one, a Publish and a "Discard changes" of another, a "Discard changes" of
+the quick link). After the roll forward, a member read all three documents,
+and the listing no longer named the document that had lost the flag on both
+rows. The dry run printed `UPDATE 4` and `UPDATE 1` and changed nothing,
+the commit run the same; then the member read none of the three, an editor
+all three, and a second run printed `UPDATE 0` twice.)
 
 **Rehearsal (2026-09-29, the integrated `batch/12`):** both images built
 from the tree through compose (`docker compose -p b12i-staging … build`,
@@ -2431,13 +2556,18 @@ compose, grant, route or edge change.
 **Rollback**
 
 Re-up the previous images of cms **and** web (the SHA tags,
-[§3.6](#36-deploy)); no database step. The `audience` columns stay (the
+[§3.6](#36-deploy)), **after the stop rule** of the [batch 12
+rollback](#deploying-batch-12-2026-09-29). The `audience` columns stay (the
 schema sync never drops columns here, `forceMigration: false`) and the
-previous cms ignores them: a document or quick link flagged by a department
-delete after this deploy and left without departments would read as
-company-wide there again. Re-target such rows (link a department) before
-rolling back, or accept it. Notifications and ads the janitors deleted come
-back only from the backup of step 4.
+previous cms ignores them: a document or quick link restricted by the flag
+alone (a department delete left it without departments) reads as
+company-wide there, guests included, and a Publish or "Discard changes" of
+it in the previous admin panel erases the flag for good (the roll forward's
+backfill flags only rows that link a department). So before rolling the cms
+back, run that section's read-only listing; if it prints rows, do not roll
+back until each is re-targeted (the listing prints none), or save the list
+there and run its re-apply right after the roll forward. Notifications and
+ads the janitors deleted come back only from the backup of step 4.
 
 #### Upgrading to the action results, auth codes and English defaults (batch 12, lane 7A)
 
