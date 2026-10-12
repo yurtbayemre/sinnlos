@@ -265,10 +265,25 @@ export function CommentSectionsProvider({ children }: { children: React.ReactNod
   );
 }
 
+/**
+ * What the viewer may do in a section, decided on the server from the role
+ * (comment-section.tsx commentControlsFor; SH02). Without a control the
+ * section only reads: no reaction bar, no comment form, no delete button.
+ */
+export interface CommentControls {
+  /** The comment form (comment create). */
+  comment: boolean;
+  /** The reaction bar (reaction create, which also takes a reaction back). */
+  react: boolean;
+  /** The delete button on the viewer's own comments (comment delete). */
+  deleteOwn: boolean;
+}
+
 type SectionProps = {
   target: CommentTarget;
   currentUserId?: number;
   initial: CommentSectionData;
+  controls: CommentControls;
 };
 
 /** One target's comments and reactions, kept fresh by the page's provider. */
@@ -278,7 +293,7 @@ export function LiveCommentSection(props: SectionProps) {
   return registry ? body : <CommentSectionsProvider>{body}</CommentSectionsProvider>;
 }
 
-function CommentSectionBody({ target, currentUserId, initial }: SectionProps) {
+function CommentSectionBody({ target, currentUserId, initial, controls }: SectionProps) {
   const registry = useContext(CommentSectionsContext);
   const [data, setData] = useState(initial);
 
@@ -323,11 +338,15 @@ function CommentSectionBody({ target, currentUserId, initial }: SectionProps) {
 
   return (
     <div className="space-y-4">
-      <ReactionBar target={stableTarget} reactions={data.reactions} onChanged={refetch} />
+      {controls.react && (
+        <ReactionBar target={stableTarget} reactions={data.reactions} onChanged={refetch} />
+      )}
       <CommentThread
         target={stableTarget}
         comments={data.comments}
         currentUserId={currentUserId}
+        canComment={controls.comment}
+        canDeleteOwn={controls.deleteOwn}
         onChanged={refetch}
       />
     </div>

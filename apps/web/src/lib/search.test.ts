@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { NextRequest } from "next/server";
 import { redirect } from "next/navigation";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,6 +15,8 @@ import type { SearchItem } from "@/lib/search-action";
  *      by id), links, subtitles, and rows without what their link needs are
  *      skipped,
  *   3. GET/POST /search: session gate, kinds, role-dependent people query,
+ *      no request for a kind the role cannot read (SH02: a guest's
+ *      departments, teams and announcements, pinned to the cms matrix),
  *      per-kind failure isolation, Next.js control flow, no-store, and the
  *      telemetry POST that never fails,
  *   4. the palette's plain functions: response parsing, the session-expiry
@@ -65,6 +68,7 @@ const format: import("./search-action").SearchFormat = {
 };
 
 const paths = () => strapiMock.mock.calls.map(([path]) => path);
+const sorted = (values: readonly string[]) => [...values].sort();
 
 beforeEach(() => {
   strapiMock.mockReset();
@@ -410,6 +414,7 @@ describe("GET /search", () => {
   });
 
   it("preloads one kind per request, uncached", async () => {
+    viewerMock.mockResolvedValue({ role: "member" });
     strapiMock.mockResolvedValue({
       data: [{ id: 1, documentId: "d1", name: "Engineering", slug: "engineering" }],
       meta: { pagination: { page: 1, pageCount: 1 } },
@@ -429,10 +434,12 @@ describe("GET /search", () => {
     });
     expect(paths()).toHaveLength(1);
     expect(paths()[0]).toMatch(/^\/api\/departments\?fields\[0\]=name&/);
-    expect(viewerMock).not.toHaveBeenCalled();
+    // Departments are role-gated: one viewer read decides (member reads).
+    expect(viewerMock).toHaveBeenCalledTimes(1);
   });
 
   it("walks every page of the complete kinds", async () => {
+    viewerMock.mockResolvedValue({ role: "member" });
     strapiMock
       .mockResolvedValueOnce({
         data: [{ id: 1, documentId: "t1", name: "A", slug: "a" }],
@@ -454,11 +461,10 @@ describe("GET /search", () => {
     expect(viewerMock).not.toHaveBeenCalled();
   });
 
-  it("searches as guest without the e-mail clause, in LIVE_KINDS order", async () => {
+  it("searches as guest without the e-mail clause and the announcements, in LIVE_KINDS order", async () => {
     answerLiveSearch();
     const body = (await (await get("?q=ada")).json()) as { items: SearchItem[] };
     expect(body.items.map((item) => item.kind)).toEqual([
-      "announcement",
       "wiki-page",
       "document",
       "event",
@@ -468,7 +474,25 @@ describe("GET /search", () => {
     const people = paths().find((path) => path.startsWith("/api/users"));
     expect(people).toBe(search.liveSearchPaths("ada", "guest").person);
     expect(people).not.toContain("email");
-    expect(paths()).toHaveLength(6);
+    // guest has no announcement.find: no request, so no cms 403.
+    expect(paths().some((path) => path.startsWith("/api/announcements"))).toBe(false);
+    expect(paths()).toHaveLength(5);
+    // One viewer read for the people clause and the announcement gate.
+    expect(viewerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("searches as member and as the authenticated fallback in every LIVE_KINDS kind", async () => {
+    for (const role of ["member", "authenticated"]) {
+      strapiMock.mockClear();
+      viewerMock.mockResolvedValue({ role });
+      answerLiveSearch();
+      const body = (await (await get("?q=ada")).json()) as { items: SearchItem[] };
+      expect(
+        body.items.map((item) => item.kind),
+        role,
+      ).toEqual([...search.LIVE_KINDS]);
+      expect(paths(), role).toHaveLength(6);
+    }
   });
 
   it("searches as member with the e-mail clause", async () => {
@@ -487,7 +511,8 @@ describe("GET /search", () => {
     expect(paths().find((path) => path.startsWith("/api/users"))).not.toContain("email");
   });
 
-  it("isolates a failed kind (a guest 403, a cms error)", async () => {
+  it("isolates a failed kind (a 403, a cms error)", async () => {
+    viewerMock.mockResolvedValue({ role: "member" });
     answerLiveSearch();
     const answer = strapiMock.getMockImplementation();
     strapiMock.mockImplementation(async (path: string) => {
@@ -525,6 +550,97 @@ describe("GET /search", () => {
 
   it("is not public in proxy.ts", () => {
     expect(isPublicPath("/search")).toBe(false);
+  });
+});
+
+describe("GET /search: no reads the role cannot make (SH02)", () => {
+  const GATED = ["department", "team", "announcement"] as const;
+
+  it.each(GATED)("a guest's %s preload is empty without a request", async (kind) => {
+    const res = await get(`?kind=${kind}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    expect(await res.json()).toEqual({ items: [] });
+    expect(strapiMock).not.toHaveBeenCalled();
+    expect(viewerMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["member", "authenticated", "admin_role"])("%s preloads them", async (role) => {
+    viewerMock.mockResolvedValue({ role });
+    for (const kind of GATED) await get(`?kind=${kind}`);
+    expect(paths().map((path) => path.split("?")[0])).toEqual([
+      "/api/departments",
+      "/api/teams",
+      "/api/announcements",
+    ]);
+  });
+
+  it("an unreadable (null) or unknown role still reads them: the cms decides", async () => {
+    for (const role of [null, "custom_role", "Guest"]) {
+      strapiMock.mockClear();
+      viewerMock.mockResolvedValue({ role });
+      for (const kind of GATED) await get(`?kind=${kind}`);
+      await get("?q=ada");
+      expect(
+        paths().filter((path) => path.startsWith("/api/announcements")),
+        String(role),
+      ).toHaveLength(2);
+      expect(
+        paths().filter((path) => path.startsWith("/api/departments")),
+        String(role),
+      ).toHaveLength(1);
+    }
+  });
+
+  it("reads the viewer only for the gated kinds", async () => {
+    for (const kind of search.PRELOAD_KINDS) await get(`?kind=${kind}`);
+    expect(viewerMock).toHaveBeenCalledTimes(GATED.length);
+    expect(sorted(search.PRELOAD_KINDS.filter(search.isRoleGatedKind))).toEqual(sorted(GATED));
+  });
+
+  it("skips exactly the kinds the cms matrix denies each role (and reads every other)", async () => {
+    // Loaded at run time through a typed facade like lib/roles-matrix-parity.test.ts:
+    // this strict program must not pull cms code in (S07).
+    const cms = join(
+      __dirname,
+      "..",
+      "..",
+      "..",
+      "cms",
+      "src",
+      "bootstrap",
+      "permission-matrix.ts",
+    );
+    const { PERMISSION_MATRIX, USER_READ_ACTIONS } = (await import(cms)) as {
+      PERMISSION_MATRIX: Record<string, Record<string, readonly string[] | undefined>>;
+      USER_READ_ACTIONS: readonly string[];
+    };
+    // The content type each kind reads; people are users, which every matrix
+    // role reads (USER_READ_ACTIONS, granted to all of them).
+    const READS: Record<import("./search-action").SearchKind, string | null> = {
+      department: "api::department.department",
+      team: "api::team.team",
+      "wiki-space": "api::wiki-space.wiki-space",
+      "wiki-page": "api::wiki-page.wiki-page",
+      announcement: "api::announcement.announcement",
+      person: null,
+      event: "api::event.event",
+      poll: "api::poll.poll",
+      document: "api::document.document",
+    };
+    expect(sorted(Object.keys(READS))).toEqual(sorted(search.SEARCH_KINDS));
+    const roles = Object.keys(PERMISSION_MATRIX);
+    expect(roles).toContain("guest");
+    for (const role of roles) {
+      for (const kind of search.SEARCH_KINDS) {
+        const uid = READS[kind];
+        const reads =
+          uid === null
+            ? USER_READ_ACTIONS.includes("find")
+            : PERMISSION_MATRIX[role]?.[uid]?.includes("find") === true;
+        expect(search.searchKindDenied(kind, role), `${role} ${kind}`).toBe(!reads);
+      }
+    }
   });
 });
 

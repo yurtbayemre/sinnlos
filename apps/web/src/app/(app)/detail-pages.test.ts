@@ -1,5 +1,8 @@
+import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { DeleteClassified } from "@/components/marketplace/delete-classified";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
@@ -12,14 +15,17 @@ import { StrapiError } from "@/lib/strapi-error";
  * varchar comparison never fails) and follow the same rules otherwise.
  *
  * `next/navigation` is the real module (notFound's own error); the CMS
- * client, session, viewer and translations are mocked.
+ * client, session, viewer and translations are mocked. The viewer's role
+ * and the session user are per test (the ad controls, SH02).
  */
+const who = vi.hoisted(() => ({ role: "member" as string | null, userId: null as number | null }));
 const strapiMock = vi.fn<(path: string) => Promise<unknown>>();
 const classifiedMock = vi.fn<(id: string) => Promise<unknown>>();
 const departmentMock = vi.fn<(slug: string) => Promise<unknown>>();
 const teamMock = vi.fn<(slug: string) => Promise<unknown>>();
 const courseMock = vi.fn<(slug: string) => Promise<unknown>>();
 const progressMock = vi.fn<() => Promise<unknown>>();
+const lessonMock = vi.fn<(documentId: string) => Promise<unknown>>();
 
 vi.mock("@/lib/strapi", () => ({
   strapi: (path: string) => strapiMock(path),
@@ -32,14 +38,18 @@ vi.mock("@/lib/strapi", () => ({
 vi.mock("@/lib/training", () => ({
   fetchCourseBySlug: (slug: string) => courseMock(slug),
   fetchMyProgress: () => progressMock(),
+  fetchLessonByDocumentId: (documentId: string) => lessonMock(documentId),
 }));
-vi.mock("@/lib/session", () => ({ getSession: async () => null }));
+vi.mock("@/lib/session", () => ({
+  getSession: async () => (who.userId === null ? null : { user: { id: who.userId } }),
+}));
 vi.mock("@/lib/viewer", () => ({
-  getViewer: async () => ({ id: 1, displayName: "M", role: "member", department: null }),
+  getViewer: async () => ({ id: who.userId, displayName: "M", role: who.role, department: null }),
 }));
 vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: string) => (key: string) => `${namespace}.${key}`,
   getLocale: async () => "en",
+  getFormatter: async () => ({ dateTime: () => "" }),
 }));
 
 const person = await import("./people/[id]/page");
@@ -48,6 +58,7 @@ const adEdit = await import("./marketplace/[id]/edit/page");
 const course = await import("./training/[slug]/page");
 const department = await import("./departments/[slug]/page");
 const team = await import("./teams/[slug]/page");
+const lesson = await import("./training/[slug]/[lessonId]/page");
 
 const params = (id: string) => ({ params: Promise.resolve({ id }) });
 const slugParams = (slug: string) => ({ params: Promise.resolve({ slug }) });
@@ -56,12 +67,15 @@ const NOT_FOUND = { digest: "NEXT_HTTP_ERROR_FALLBACK;404" };
 const MALFORMED = ["abc", "1.5", "1e3", "0", "-1", "01", "2147483648", " 1", ""];
 
 beforeEach(() => {
+  who.role = "member";
+  who.userId = null;
   strapiMock.mockReset();
   classifiedMock.mockReset();
   departmentMock.mockReset();
   teamMock.mockReset();
   courseMock.mockReset();
   progressMock.mockReset();
+  lessonMock.mockReset();
   // tryFetch logs every failed read it absorbs.
   vi.spyOn(console, "error").mockImplementation(() => {});
 });
@@ -124,6 +138,59 @@ describe("/marketplace/[id] and /marketplace/[id]/edit", () => {
     await expect(ad.generateMetadata(params("7"))).resolves.toEqual({
       title: "marketplace.title",
     });
+  });
+});
+
+/** Every element in a returned page tree (host and component elements, through children). */
+function elements(node: ReactNode): Array<{ type: unknown; props: Record<string, unknown> }> {
+  if (Array.isArray(node)) return node.flatMap(elements);
+  if (!isValidElement<Record<string, unknown>>(node)) return [];
+  return [{ type: node.type, props: node.props }, ...elements(node.props.children as ReactNode)];
+}
+
+describe("/marketplace/[id] controls (SH02: canEditAnyAd, canDeleteAnyAd)", () => {
+  const OWNER = 5;
+  const bike = { data: [{ id: 7, title: "Bike", author: { id: OWNER, displayName: "Olga" } }] };
+  const controls = async () => {
+    const tree = elements(await ad.default(params("7")));
+    return {
+      edit: tree.some((el) => el.props.href === "/marketplace/7/edit"),
+      takeDown: tree.some((el) => el.type === DeleteClassified),
+    };
+  };
+
+  beforeEach(() => classifiedMock.mockResolvedValue(bike));
+
+  it.each([
+    ["the owner edits (and deletes on the edit page)", "member", OWNER, true, false],
+    ["an editor takes someone else's ad down but cannot edit it", "editor", 1, false, true],
+    ["an admin edits and takes down", "admin_role", 1, true, true],
+    ["another member gets neither", "member", 1, false, false],
+    ["the `authenticated` fallback gets neither", "authenticated", 1, false, false],
+    ["an unreadable role gets neither", null, 1, false, false],
+  ])("%s", async (_label, role, userId, edit, takeDown) => {
+    who.role = role;
+    who.userId = userId;
+    await expect(controls()).resolves.toEqual({ edit, takeDown });
+  });
+
+  it("takes the ad down with the ad's id and title", async () => {
+    who.role = "editor";
+    who.userId = 1;
+    const tree = elements(await ad.default(params("7")));
+    const takedown = tree.find((el) => el.type === DeleteClassified);
+    expect(takedown?.props).toMatchObject({ id: 7, title: "Bike" });
+  });
+
+  it("the edit page lets an editor through only for their own ad", async () => {
+    who.role = "editor";
+    who.userId = 1;
+    await expect(adEdit.default(params("7"))).rejects.toMatchObject({
+      digest: expect.stringMatching(/^NEXT_REDIRECT;replace;\/marketplace\/7;/),
+    });
+    who.role = "admin_role";
+    const tree = elements(await adEdit.default(params("7")));
+    expect(tree.some((el) => el.type === DeleteClassified)).toBe(true);
   });
 });
 
@@ -198,5 +265,70 @@ describe("/training/[slug]", () => {
     const html = renderToStaticMarkup(await course.default(slugParams("security")));
     expect(html).toContain("Security basics");
     expect(html).toContain('<span class="text-muted-foreground">–</span>');
+  });
+});
+
+/**
+ * SH02 (the guest-403 fix): a role that cannot read the section (guest:
+ * no department, team, course, lesson or classified read) gets the
+ * explanation instead of the error page, and neither the page nor its
+ * metadata sends a request the CMS would refuse. The edit page sends a
+ * guest back to the marketplace, which explains.
+ */
+describe("a role without the section's read (guest)", () => {
+  const reads = () => [
+    strapiMock,
+    classifiedMock,
+    departmentMock,
+    teamMock,
+    courseMock,
+    progressMock,
+    lessonMock,
+  ];
+  const lessonParams = { params: Promise.resolve({ slug: "security", lessonId: "l1" }) };
+
+  beforeEach(() => {
+    who.role = "guest";
+    who.userId = 3;
+  });
+
+  it.each([
+    ["/departments/[slug]", () => department.default(slugParams("engineering"))],
+    ["/teams/[slug]", () => team.default(slugParams("frontend"))],
+    ["/training/[slug]", () => course.default(slugParams("security"))],
+    ["/training/[slug]/[lessonId]", () => lesson.default(lessonParams)],
+    ["/marketplace/[id]", () => ad.default(params("7"))],
+  ])("%s shows the explanation without a read", async (_route, page) => {
+    const tree = elements(await page());
+    expect(tree.some((el) => el.type === SectionUnavailable)).toBe(true);
+    for (const read of reads()) expect(read).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "/departments/[slug]",
+      () => department.generateMetadata(slugParams("x")),
+      "departments.title",
+    ],
+    ["/teams/[slug]", () => team.generateMetadata(slugParams("x")), "teams.title"],
+    ["/training/[slug]", () => course.generateMetadata(slugParams("x")), "training.title"],
+    ["/marketplace/[id]", () => ad.generateMetadata(params("7")), "marketplace.title"],
+  ])("%s titles the page with the section without a read", async (_route, meta, title) => {
+    await expect(meta()).resolves.toEqual({ title });
+    for (const read of reads()) expect(read).not.toHaveBeenCalled();
+  });
+
+  it("/marketplace/[id]/edit sends a guest back to the marketplace without a read", async () => {
+    await expect(adEdit.default(params("7"))).rejects.toMatchObject({
+      digest: expect.stringMatching(/^NEXT_REDIRECT;replace;\/marketplace;/),
+    });
+    expect(classifiedMock).not.toHaveBeenCalled();
+  });
+
+  it("an unreadable role (null) still reads: the CMS decides", async () => {
+    who.role = null;
+    departmentMock.mockResolvedValue({ data: [] });
+    await expect(department.default(slugParams("engineering"))).rejects.toMatchObject(NOT_FOUND);
+    expect(departmentMock).toHaveBeenCalledWith("engineering");
   });
 });

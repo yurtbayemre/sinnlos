@@ -14,7 +14,7 @@ const state = vi.hoisted(() => ({ locale: "en" as "en" | "de" }));
 
 vi.mock("./sidebar", () => ({ Sidebar: () => createElement("nav", { id: "sidebar" }) }));
 vi.mock("./topbar", () => ({ Topbar: () => createElement("header", { id: "topbar" }) }));
-vi.mock("./mobile-nav", () => ({ MobileNav: () => null }));
+vi.mock("./viewer-mobile-nav", () => ({ ViewerMobileNav: () => null }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/" }));
 vi.mock("next-intl/server", () => ({
   getTranslations: async (namespace: "common") => {

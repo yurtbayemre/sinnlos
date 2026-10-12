@@ -1275,6 +1275,17 @@ systemctl start docker
 > flash; the bell keeps its list during a cms outage. Follow
 > [Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b).
 >
+> **Deploying the capabilities, navigation and loading states (batch 13,
+> lane 8A)?** A normal deploy with `infra/deploy.sh`; only the web
+> changes (no env, schema, grant, compose or edge change). Guests no longer
+> get 403 banners or error pages on sections their role cannot read (the
+> pages say "Not available for your account" and ask the cms nothing), the
+> phone navigation gains a _More_ sheet with every other section, editors
+> can take down other people's marketplace ads, the comment and reaction
+> controls follow the role, and navigation shows a pending dot and a
+> skeleton per page. Follow
+> [Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a).
+>
 > **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
 > the action results with English defaults, and the domain package with
 > the new image layers and pnpm 10 (the three notes below) ship as one
@@ -1760,6 +1771,164 @@ announcements with footnotes have no duplicate ids and each footnote link
 stays in its card; and during a real cms stop the bell keeps its list
 and badge, a page loaded during the stop shows only the note, and
 everything is back after the restart.
+
+#### Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)
+
+This release (branch `feat/web-capabilities-and-nav`, on `batch/12`
+`02f288e`) changes only what the web shows and asks for; the cms keeps its
+grants, policies and schema.
+
+- **One set of role rules in the web (SH02).** Every role set and check the
+  web uses lives in `apps/web/src/lib/roles.ts`, in the capability shape of
+  decision 06 (§L2, including `authorScope`), and
+  `apps/web/src/lib/roles-matrix-parity.test.ts` fails CI when the cms
+  permission matrix changes without it. The acknowledgement and training
+  reports and the profile's digest options use these sets; what they show
+  is unchanged.
+- **No more 403 banners for guests.** A guest opening Announcements,
+  Departments, Teams, Kudos, Marketplace or Training (lists, detail pages
+  and lessons) saw "Some content couldn't be loaded" or the error page,
+  because the web asked the cms for sections the guest role cannot read;
+  each such request also logged a 403. The web now asks nothing there and
+  shows "Not available for your account" with a link to the dashboard. The
+  guest's dashboard leaves those sections out, and so does the navigation,
+  and the guest's ⌘K search no longer asks for announcements, departments
+  and teams (it found none of them anyway). The `authenticated` fallback
+  role no longer asks for the birthday and anniversary tiles on `/kudos`,
+  which it cannot read. A user whose role the web could not read (the cms
+  briefly down) still gets the old error banner, since the cms decides.
+- **Controls follow the role.** The comment form and the reaction bar show
+  only for roles that may comment and react (never guest), and the delete
+  button on one's own comments only for roles that may delete them (not
+  the `authenticated` fallback). On someone else's marketplace ad, an
+  editor (and an admin) now sees a _Moderation_ card with _Delete ad_: the
+  cms always allowed editors to take ads down, the web had no button.
+  Editors still cannot edit other people's ads; the edit page sends them
+  back to the ad.
+- **Every section reachable on a phone (FX30).** The bottom bar keeps its
+  five tabs (Home, People, Events, Wiki, News; a guest has no News tab) and
+  adds _More_: a sheet with Training, Departments, Teams, Kudos,
+  Marketplace, Polls, Documents and, for admins only, _Admin_. Before,
+  those sections could not be reached on a phone at all. The sidebar and
+  the phone nav use one list (`apps/web/src/lib/nav-config.ts`), and the
+  current-section highlight no longer confuses sections that share a
+  prefix.
+- **Loading feedback (UI05).** A clicked navigation link shows a small
+  pulsing dot until the new page can render, and every page has its own
+  loading skeleton with the progress bar (the training pages had none and
+  overflowed on phones; `/manage`, `/manage/training` and `/polls/new`
+  showed the dashboard's).
+- **The header fits beside the sidebar.** From 768 px up the header has
+  512 px next to the sidebar, but the search box and the name and e-mail
+  kept their full text width: the page scrolled sideways and _Sign out_
+  sat off-screen at 768 px, and with a long e-mail also at 1024 px (older
+  than this batch). The search box now shrinks, and the name and e-mail
+  show from 1024 px on, capped and cut with an ellipsis.
+
+**A normal deploy with `infra/deploy.sh`.** No env, schema, permission,
+compose, edge or Traefik change, nothing in the database. The cms image is
+rebuilt as in every deploy and its container recreated; this lane changes
+code comments in it (the classified routes and the permission matrix) and
+none of its behaviour. Only the web changes.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **After: as a guest** (any guest account; on a phone or a narrow
+   window). First, on the host, in the checkout, note the time, so that
+   the log check below covers this walk only and not the deploy (the web
+   logs `[…] fetch failed` while `deploy.sh` recreates the cms):
+
+   ```bash
+   cd /home/bigemo/git/sinnlos
+   COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+   ```
+
+   Then, as the guest: the navigation shows Dashboard, People, Events,
+   Wiki, Polls and Documents only; open `/announcements`, `/departments`,
+   `/kudos`, `/marketplace` and `/training` by URL: each shows "Not
+   available for your account"; press ⌘K and search for a colleague.
+   Afterwards, on the host, neither log names a failed read or a refused
+   section read since then:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since "$since" web | grep -E 'fetch failed' || echo "web: none"
+   "${COMPOSE[@]}" logs --since "$since" cms \
+     | grep -E 'GET /api/(announcements|departments|teams|kudos-entries|celebrations|classifieds|courses|lessons|lesson-progresses|acknowledgements)[?/ ].* 403$' \
+     || echo "cms: none"
+   ```
+
+   Strapi's request log names no user, so everyone's traffic in that
+   window shows up: a request to `/api/…` from outside without a session
+   (the public role answers 403) or another user's request in the same
+   minutes is not the guest's. If a line appears, repeat the walk in a
+   quiet moment with a fresh `since`.
+
+3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
+   other sections; as an admin it lists _Admin_, as a member not. With the
+   sheet open, rotate the phone to landscape (or widen the window past
+   768 px): the sheet closes, and the page scrolls and answers the first
+   tap. At exactly 768 px the page does not scroll sideways and _Sign out_
+   is visible.
+4. **After: as an editor:** on an ad posted by someone else, _Moderation_ →
+   _Delete ad_ is offered and no _Edit_ link. (Take a test ad down, not a
+   real one.)
+
+**Rollback:** re-up the previous images with the commands `infra/deploy.sh`
+prints; no database step.
+
+**Rehearsal (2026-09-29, lane 8A):** unit suite 4840 tests (4898 with Postgres
+16.15), including the parity test against the permission matrix (it fails
+as intended when a grant changes: a guest with comment create turns
+`canComment` red), every section page and the dashboard per role without a
+request, the phone nav and its sheet, and a loading file on the shared
+skeletons for every page. The time-zone matrix passed under UTC,
+Europe/Berlin and Pacific/Auckland; the integration suite on SQLite (163
+tests) and Postgres 16 (330 tests); the domain, cms and web builds.
+
+On a throwaway stack (the cms and web production builds, SQLite with the
+demo seed, one account each for `admin_role`, `editor`, `department_head`,
+`member`, `authenticated` and `guest`), 21 pages per role over HTTP:
+
+- the cms log showed no 401, 403 or 500 in any of the six runs and the web
+  log no `fetch failed` (a direct guest request for announcements, made as
+  a control, logged its 403 as expected);
+- the guest got "Not available for your account" on all section pages and
+  their detail pages, and a navigation without those sections; every other
+  role saw every section, and `/manage` only as `admin_role`;
+- an editor saw _Moderation_ / _Delete ad_ on the member's ad and no _Edit_
+  link, an admin both, the owner the _Edit_ link.
+
+In headless Chrome at 360 px, Enter on _More_ opened the sheet (the admin's
+with _Admin_, the guest's with Polls and Documents only), Tab stayed inside,
+Escape closed it and put focus back on _More_, choosing an entry navigated
+and closed it, and Back did not reopen it; no React or Radix warning was
+logged. With the network throttled, a link clicked before its prefetch
+arrived showed its pending dot for 2.4 s, then the page skeleton with the
+progress bar. Not exercised: `infra/deploy.sh`, Traefik, a real phone and
+a screen reader pass.
+
+**Fix round (2026-09-30, lane 8A):** the review and rehearsal findings are
+fixed: the sheet closes at 768 px, the _More_ tab exposes the current
+section, a guest's ⌘K search asks for no section the guest cannot read,
+the log check in step 2 covers the guest walk only, and the header fits
+beside the sidebar. Unit suite 4862 tests (4920 with Postgres 16.15), the
+time-zone matrix, the integration suite on SQLite (163 tests) and Postgres
+16 (330 tests) and the domain, cms and web builds passed. On the throwaway
+stack again, in headless Chrome:
+
+- with the sheet open at 744 px, widening the viewport to 1133 px closed
+  it (no scroll lock, no `pointer-events: none` on the body, nothing
+  `aria-hidden`), narrowing it again did not reopen it, and after widening
+  from 600 to 1024 px the first click on a sidebar link navigated;
+- on `/training` the _More_ tab carries `aria-current="true"` and Chrome
+  names it "More: Training"; on `/events` it is plain "More";
+- a guest's ⌘K search for "eng" logged no cms request for announcements,
+  departments or teams and no 403, and the guest's preloads of those kinds
+  answered no items; a member's and an `authenticated` user's search read
+  all three (200);
+- for the admin and the guest at 360, 768, 1024 and 1280 px the page did
+  not scroll sideways and _Sign out_ was visible; the name and e-mail show
+  from 1024 px on.
 
 #### Deploying batch 12 (2026-09-29)
 

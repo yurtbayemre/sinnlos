@@ -1,28 +1,81 @@
 "use client";
 
+import { useState, useSyncExternalStore } from "react";
 import Link from "next/link";
-import type { Route } from "next";
 import { usePathname } from "next/navigation";
-import { BookOpen, Calendar, Contact, Home, Megaphone } from "lucide-react";
-import { cn } from "@/lib/utils";
+import * as Dialog from "@radix-ui/react-dialog";
+import { Ellipsis, X } from "lucide-react";
 import { useTranslations } from "next-intl";
+import { ICONS } from "@/components/icon-map";
+import { isNavActive, type NavItem } from "@/lib/nav-config";
+import { cn } from "@/lib/utils";
+import { LinkPendingIndicator } from "./nav-link";
+
+const TAB_CLASS = cn(
+  "flex min-w-0 flex-1 flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
+  "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+);
+
+/** Tailwind `md` (not overridden in tailwind.config.ts): the bar and its sheet hide, the sidebar shows. */
+export const DESKTOP_QUERY = "(min-width: 768px)";
+
+/** useSyncExternalStore subscription: calls onChange when the viewport crosses DESKTOP_QUERY. */
+export function subscribeDesktop(onChange: () => void): () => void {
+  const query = window.matchMedia(DESKTOP_QUERY);
+  query.addEventListener("change", onChange);
+  return () => query.removeEventListener("change", onChange);
+}
+
+/** The client snapshot: whether the viewport is at DESKTOP_QUERY now. */
+export function isDesktopViewport(): boolean {
+  return window.matchMedia(DESKTOP_QUERY).matches;
+}
 
 /**
- * Bottom tab bar shown on small screens, where the sidebar is hidden.
- * Mirrors the sidebar's main destinations.
+ * Whether the sheet opened on `openedOn` stays open: only on that route and
+ * below `md`. From `md` up the sheet and its backdrop are hidden, and an
+ * open Radix dialog would keep the page scroll-locked, inert to the pointer
+ * and aria-hidden (a phone rotated or a window widened with the sheet open).
  */
-export function MobileNav() {
+export function sheetStaysOpen(openedOn: string | null, pathname: string, desktop: boolean) {
+  return openedOn === pathname && !desktop;
+}
+
+/**
+ * Bottom tab bar shown on small screens, where the sidebar is hidden (FX30).
+ * It maps the same entries as the sidebar (lib/nav-config.ts), which the
+ * server picked for the viewer's role: the `mobilePrimary` ones as tabs, all
+ * others (training, departments, teams, kudos, marketplace, polls,
+ * documents and /manage for admins) in a More sheet, so every section is
+ * reachable on a phone. The sheet is a Radix dialog: focus moves into it
+ * and back to the More tab, Escape and the backdrop close it. Choosing an
+ * entry keeps it open with the entry's pending dot (UI05) until the new
+ * route renders, then it closes with the route change. It also closes when
+ * the viewport reaches `md`, where it is hidden (sheetStaysOpen). When the
+ * current page is in the sheet, the More tab carries aria-current="true"
+ * and its accessible name names that entry ("More: Training"), as the tabs
+ * carry aria-current="page".
+ */
+export function MobileNav({ items }: { items: readonly NavItem[] }) {
   const pathname = usePathname();
   const t = useTranslations("nav");
   const tCommon = useTranslations("common");
+  // The server snapshot is false: server markup and hydration render the
+  // phone layout's state, the client then reads the real viewport.
+  const desktop = useSyncExternalStore(subscribeDesktop, isDesktopViewport, () => false);
+  // The pathname the sheet was opened on: it is open only while that is
+  // still the current route (a navigation from it closes it) and the
+  // viewport is below md.
+  const [openedOn, setOpenedOn] = useState<string | null>(null);
+  if (openedOn !== null && !sheetStaysOpen(openedOn, pathname, desktop)) setOpenedOn(null);
+  const open = openedOn !== null;
 
-  const items: { href: Route; label: string; icon: typeof Home }[] = [
-    { href: "/", label: t("home"), icon: Home },
-    { href: "/people", label: t("people"), icon: Contact },
-    { href: "/events", label: t("events"), icon: Calendar },
-    { href: "/wiki", label: t("wiki"), icon: BookOpen },
-    { href: "/announcements", label: t("news"), icon: Megaphone },
-  ];
+  const primary = items.filter((item) => item.mobilePrimary);
+  const more = items.filter((item) => !item.mobilePrimary);
+  // The sheet entry of the current page, if any: the More tab is then the
+  // bar's current item.
+  const activeMore = more.find((item) => isNavActive(pathname, item.href));
+  const moreActive = activeMore !== undefined;
 
   return (
     <nav
@@ -30,29 +83,131 @@ export function MobileNav() {
       className="fixed inset-x-0 bottom-0 z-40 border-t bg-background/90 backdrop-blur md:hidden"
       style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
     >
-      <div className="grid grid-cols-5">
-        {items.map((item) => {
-          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+      <div className="flex">
+        {primary.map((item) => {
+          const Icon = ICONS[item.icon];
+          const active = isNavActive(pathname, item.href);
           return (
             <Link
               key={item.href}
               href={item.href}
               aria-current={active ? "page" : undefined}
-              className={cn(
-                "flex flex-col items-center gap-1 py-2 text-[11px] outline-none transition-colors",
-                "focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                active ? "text-primary" : "text-muted-foreground",
-              )}
+              className={cn(TAB_CLASS, active ? "text-primary" : "text-muted-foreground")}
             >
-              <item.icon
-                aria-hidden="true"
-                className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
-              />
-              {item.label}
+              <span className="relative">
+                <Icon
+                  aria-hidden="true"
+                  className={cn("h-5 w-5 transition-transform duration-150", active && "scale-110")}
+                />
+                <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
+              </span>
+              <span className="max-w-full truncate px-0.5">
+                {t(item.mobileLabelKey ?? item.labelKey)}
+              </span>
             </Link>
           );
         })}
+
+        {more.length > 0 && (
+          <Dialog.Root open={open} onOpenChange={(next) => setOpenedOn(next ? pathname : null)}>
+            <Dialog.Trigger
+              className={cn(TAB_CLASS, moreActive ? "text-primary" : "text-muted-foreground")}
+              data-active={moreActive ? "true" : undefined}
+              // "true", not "page": the button is not the page, one of its
+              // entries is. The name says which, starting with the visible
+              // label; one aria-label, because an sr-only span is a block
+              // and Chrome named the button "More : Training".
+              aria-current={moreActive ? "true" : undefined}
+              aria-label={activeMore ? `${t("more")}: ${t(activeMore.labelKey)}` : undefined}
+            >
+              <Ellipsis
+                aria-hidden="true"
+                className={cn(
+                  "h-5 w-5 transition-transform duration-150",
+                  moreActive && "scale-110",
+                )}
+              />
+              <span className="max-w-full truncate px-0.5">{t("more")}</span>
+            </Dialog.Trigger>
+            <Dialog.Portal>
+              <Dialog.Overlay className="fixed inset-0 z-50 animate-fade-in bg-background/60 backdrop-blur-sm md:hidden" />
+              <Dialog.Content
+                // No description: the title and the entries say it all
+                // (Radix warns unless aria-describedby is set explicitly).
+                aria-describedby={undefined}
+                className="fixed inset-x-0 bottom-0 z-50 max-h-[80vh] overflow-y-auto rounded-t-2xl border-t bg-background p-4 shadow-2xl outline-none animate-in slide-in-from-bottom duration-200 motion-reduce:animate-none md:hidden"
+                style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 1rem)" }}
+              >
+                <div className="mb-3 flex items-center justify-between">
+                  <Dialog.Title className="text-base font-semibold">
+                    {t("moreSections")}
+                  </Dialog.Title>
+                  <Dialog.Close
+                    aria-label={tCommon("close")}
+                    className="rounded-lg p-1 outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <X className="h-4 w-4" aria-hidden="true" />
+                  </Dialog.Close>
+                </div>
+                <MoreSheetLinks
+                  items={more}
+                  pathname={pathname}
+                  onChoose={(href) => {
+                    // The current section: no navigation will close it.
+                    if (href === pathname) setOpenedOn(null);
+                  }}
+                />
+              </Dialog.Content>
+            </Dialog.Portal>
+          </Dialog.Root>
+        )}
       </div>
     </nav>
+  );
+}
+
+/**
+ * The entries of the More sheet: a grid of links, the current section
+ * marked, each with its pending dot. onChoose gets the chosen href.
+ */
+export function MoreSheetLinks({
+  items,
+  pathname,
+  onChoose,
+}: {
+  items: readonly NavItem[];
+  pathname: string;
+  onChoose: (href: string) => void;
+}) {
+  const t = useTranslations("nav");
+  return (
+    <ul className="grid grid-cols-3 gap-2">
+      {items.map((item) => {
+        const Icon = ICONS[item.icon];
+        const active = isNavActive(pathname, item.href);
+        return (
+          <li key={item.href}>
+            <Link
+              href={item.href}
+              aria-current={active ? "page" : undefined}
+              onClick={() => onChoose(item.href)}
+              className={cn(
+                "flex h-full flex-col items-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs outline-none transition-colors",
+                "focus-visible:ring-2 focus-visible:ring-ring",
+                active
+                  ? "border-primary/40 bg-primary/10 font-medium text-primary"
+                  : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+              )}
+            >
+              <span className="relative">
+                <Icon aria-hidden="true" className="h-5 w-5" />
+                <LinkPendingIndicator className="absolute -right-1.5 -top-0.5" />
+              </span>
+              <span className="max-w-full break-words">{t(item.labelKey)}</span>
+            </Link>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

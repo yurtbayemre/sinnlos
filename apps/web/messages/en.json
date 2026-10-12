@@ -42,7 +42,9 @@
     "home": "Home",
     "news": "News",
     "marketplace": "Marketplace",
-    "training": "Training"
+    "training": "Training",
+    "more": "More",
+    "moreSections": "More sections"
   },
   "auth": {
     "signIn": "Sign in",
@@ -281,6 +283,8 @@
     "deleteConfirmBody": "The ad “{title}” will be removed permanently.",
     "deleting": "Deleting…",
     "deleteFailed": "Deleting failed – please try again.",
+    "moderationTitle": "Moderation",
+    "moderationHint": "You can remove this ad as a moderator.",
     "backToList": "Back to the marketplace",
     "backToAd": "Back to the ad",
     "formTitleNew": "New ad",
@@ -531,7 +535,9 @@
     "reference": "Reference: {digest}",
     "notFoundTitle": "Page not found",
     "notFoundHint": "The page you requested does not exist or has moved.",
-    "backToDashboard": "Back to dashboard"
+    "backToDashboard": "Back to dashboard",
+    "sectionUnavailableTitle": "Not available for your account",
+    "sectionUnavailableHint": "Your role does not include this section. If you need it, contact your administrator."
   },
   "actionErrors": {
     "forbidden": "You are not allowed to do this.",

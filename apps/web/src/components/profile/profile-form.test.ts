@@ -13,7 +13,8 @@ import en from "../../../messages/en.json";
  */
 vi.mock("@/lib/profile-actions", () => ({ updateProfile: vi.fn() }));
 
-const { DIGEST_ROLES, ProfileForm } = await import("./profile-form");
+const { DIGEST_ROLES } = await import("@/lib/roles");
+const { ProfileForm } = await import("./profile-form");
 
 const render = (element: ReactElement) =>
   renderToStaticMarkup(

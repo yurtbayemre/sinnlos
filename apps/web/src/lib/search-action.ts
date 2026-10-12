@@ -28,6 +28,11 @@
  *     without the fields its link needs is skipped.
  *   - Per user and uncached: every read goes through strapi() (no-store,
  *     the caller's JWT, D-DC01).
+ *   - No reads the role cannot make (SH02): a kind whose section the
+ *     viewer's KNOWN role cannot read (SEARCH_KIND_SECTION, isReadDenied:
+ *     guest and announcements, departments, teams) is empty without a
+ *     request, in the preload (app/search/route.ts) and the live search. A
+ *     role that could not be read (null) still reads, the cms decides.
  */
 import "server-only";
 import type { Route } from "next";
@@ -36,6 +41,7 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { walkAllPages } from "@/lib/paginate";
 import { instantEpochMs, zonedDateKey, zonedDayStart } from "@/lib/plain-date";
+import { isReadDenied, type ReadSection } from "@/lib/roles";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 
 export const SEARCH_KINDS = [
@@ -113,6 +119,33 @@ export function canSearchByEmail(role: string | null | undefined): boolean {
 
 export function isPreloadKind(value: unknown): value is PreloadKind {
   return typeof value === "string" && (PRELOAD_KINDS as readonly string[]).includes(value);
+}
+
+/**
+ * The read section (lib/roles.ts) of each kind not every role may read;
+ * every role of the cms matrix reads the other kinds (both pinned against
+ * the matrix in search.test.ts).
+ */
+export const SEARCH_KIND_SECTION: Readonly<Partial<Record<SearchKind, ReadSection>>> =
+  Object.freeze({
+    department: "departments",
+    team: "teams",
+    announcement: "announcements",
+  });
+
+/** Whether the kind depends on the viewer's role at all (only then is the role read). */
+export function isRoleGatedKind(kind: SearchKind): boolean {
+  return SEARCH_KIND_SECTION[kind] !== undefined;
+}
+
+/**
+ * True when the viewer's role is a KNOWN role without the kind's read: the
+ * kind is skipped without a request (the cms would answer 403). Like
+ * isReadDenied it never grants: null or an unknown role reads as before.
+ */
+export function searchKindDenied(kind: SearchKind, role: string | null | undefined): boolean {
+  const section = SEARCH_KIND_SECTION[kind];
+  return section !== undefined && isReadDenied(role, section);
 }
 
 /** The term as the live search uses it: cut to MAX_TERM_LENGTH. */
@@ -390,8 +423,9 @@ async function searchFormat(): Promise<SearchFormat> {
 }
 
 /**
- * A failed read is an empty kind: the palette is best effort (guest, for
- * example, holds no announcement grant). Next.js control flow (the redirect
+ * A failed read is an empty kind: the palette is best effort (a cms error,
+ * the 403 of a role outside the matrix; a known role's missing grants are
+ * skipped before, see searchKindDenied). Next.js control flow (the redirect
  * strapi() raises on an expired session) is rethrown.
  */
 async function rowsOf(read: () => Promise<unknown>): Promise<unknown> {
@@ -430,25 +464,25 @@ export async function loadPreload(
 /**
  * The live search for `term`: LIVE_LIMIT rows of each LIVE_KINDS kind, in
  * that order. `viewerRole` resolves the viewer's role, which decides the
- * e-mail clause of the people query; it is called only for a term long
- * enough to search, and only the people query waits for it.
+ * e-mail clause of the people query and whether a role-gated kind
+ * (announcements) is read at all (searchKindDenied); it is called once,
+ * only for a term long enough to search, and only those queries wait for it.
  */
 export async function searchLive(
   term: string,
   viewerRole: () => Promise<string | null>,
 ): Promise<SearchItem[]> {
   if (term.length < MIN_TERM_LENGTH) return [];
-  // Only the people query depends on the role.
+  const role = viewerRole();
   const paths = liveSearchPaths(term, null);
+  const read = async (kind: LiveKind): Promise<unknown> => {
+    if (kind === "person") return strapi<unknown>(liveSearchPaths(term, await role).person);
+    if (isRoleGatedKind(kind) && searchKindDenied(kind, await role)) return [];
+    return strapi<unknown>(paths[kind]);
+  };
   const [format, ...lists] = await Promise.all([
     searchFormat(),
-    ...LIVE_KINDS.map((kind) =>
-      rowsOf(async () =>
-        strapi<unknown>(
-          kind === "person" ? liveSearchPaths(term, await viewerRole()).person : paths[kind],
-        ),
-      ),
-    ),
+    ...LIVE_KINDS.map((kind) => rowsOf(() => read(kind))),
   ]);
   return LIVE_KINDS.flatMap((kind, index) => toSearchItems(kind, lists[index], format));
 }

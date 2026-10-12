@@ -4,7 +4,9 @@ import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { api } from "@/lib/strapi";
 import { kudosRecipientQuery, toKudosRecipients } from "@/lib/people-dto";
+import { isReadDenied } from "@/lib/roles";
 import { getSession } from "@/lib/session";
+import { getViewer } from "@/lib/viewer";
 import { fetchAllUsers } from "@/lib/users";
 import { relativeTime } from "@/lib/relative-time";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -12,6 +14,7 @@ import type { Kudos, KudosValue, Celebration, UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
@@ -51,11 +54,25 @@ export default async function KudosPage() {
   const locale = await getLocale();
   const timeZone = appTimeZone();
   const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
-  const session = await getSession();
+  const [session, viewer] = await Promise.all([getSession(), getViewer()]);
+  // A role without kudos.find (guest) gets no request and an explanation
+  // instead of the CMS's 403 as an error banner (SH02).
+  if (isReadDenied(viewer.role, "kudos")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title={t("title")} description={t("description")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   const selfId = typeof session?.user?.id === "number" ? session.user.id : null;
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
     tryFetch(() => api.kudos.list(), "kudos"),
-    tryFetch(() => api.celebrations(), "celebrations"),
+    // The celebrations are the staff roles' only: the `authenticated`
+    // fallback reads kudos but not birthdays and anniversaries.
+    isReadDenied(viewer.role, "celebrations")
+      ? { data: null, failed: false }
+      : tryFetch(() => api.celebrations(), "celebrations"),
     // The picker gets a lean DTO (WD05): name, job title, avatar thumbnail
     // of every active colleague but the caller.
     tryFetch(() => fetchAllUsers<UserLite>(kudosRecipientQuery(selfId)), "people"),

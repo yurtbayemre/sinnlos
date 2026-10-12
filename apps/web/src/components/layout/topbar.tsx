@@ -36,7 +36,9 @@ export async function Topbar() {
     <header className="sticky top-0 z-30 flex h-16 items-center gap-2 border-b bg-background/80 px-3 backdrop-blur sm:gap-4 sm:px-6">
       <div className="hidden flex-1 md:block" />
 
-      <div className="flex-1 sm:max-w-xl">
+      {/* min-w-0: the search box shrinks (its placeholder truncates) instead
+          of pushing the header wider than the space beside the sidebar. */}
+      <div className="min-w-0 flex-1 sm:max-w-xl">
         <SearchCommand />
       </div>
 
@@ -46,9 +48,14 @@ export async function Topbar() {
         <LocaleSwitcher />
         {session?.user ? (
           <>
-            <div className="hidden text-right md:block">
-              <div className="text-sm font-medium leading-none">{name}</div>
-              <div className="text-xs text-muted-foreground">{email}</div>
+            {/* From lg only (at md the header has 512 px beside the
+                sidebar), capped and truncated: a long e-mail no longer
+                pushes Sign out off-screen. leading-tight, not none: the
+                truncation clips at the line box, which would cut the
+                descenders. */}
+            <div className="hidden min-w-0 max-w-48 text-right lg:block">
+              <div className="truncate text-sm font-medium leading-tight">{name}</div>
+              <div className="truncate text-xs text-muted-foreground">{email}</div>
             </div>
             <Link
               href="/profile"

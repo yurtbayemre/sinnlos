@@ -16,12 +16,18 @@ export function CommentThread({
   target,
   comments,
   currentUserId,
+  canComment,
+  canDeleteOwn,
   onChanged,
 }: {
   /** Target of the thread, anchored by documentId (issue #11). */
   target: CommentTarget;
   comments: Comment[];
   currentUserId?: number;
+  /** The viewer's role may comment (SH02): otherwise no form. */
+  canComment: boolean;
+  /** The viewer's role may delete its own comments (SH02): otherwise no delete button. */
+  canDeleteOwn: boolean;
   /** Called after a successful mutation so the owner can refetch its data. */
   onChanged?: () => void | Promise<void>;
 }) {
@@ -80,6 +86,7 @@ export function CommentThread({
             const name =
               c.author?.displayName ?? c.author?.username ?? c.author?.email ?? tCommon("unknown");
             const isOwner = currentUserId != null && c.author?.id === currentUserId;
+            const deletable = isOwner && canDeleteOwn;
             return (
               <div key={c.id} className="flex gap-3">
                 <Avatar className="h-8 w-8 shrink-0">
@@ -91,7 +98,7 @@ export function CommentThread({
                     <span className="text-xs text-muted-foreground">
                       {relativeTime(c.createdAt, tRel, { locale, timeZone })}
                     </span>
-                    {isOwner && (
+                    {deletable && (
                       <button
                         type="button"
                         onClick={() => handleDelete(c.id)}
@@ -121,24 +128,26 @@ export function CommentThread({
         </p>
       )}
 
-      <form onSubmit={handleSubmit} className="flex gap-2">
-        <input
-          type="text"
-          placeholder={tComments("writeComment")}
-          value={body}
-          onChange={(e) => setBody(e.target.value)}
-          disabled={isPending || !canWrite}
-          className="h-10 flex-1 rounded-xl border bg-muted/40 px-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          disabled={isPending || !canWrite || !body.trim()}
-          className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
-          aria-label={tComments("sendComment")}
-        >
-          <Send className="h-4 w-4" />
-        </button>
-      </form>
+      {canComment && (
+        <form onSubmit={handleSubmit} className="flex gap-2">
+          <input
+            type="text"
+            placeholder={tComments("writeComment")}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            disabled={isPending || !canWrite}
+            className="h-10 flex-1 rounded-xl border bg-muted/40 px-4 text-sm outline-none transition-colors placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring disabled:opacity-50"
+          />
+          <button
+            type="submit"
+            disabled={isPending || !canWrite || !body.trim()}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground outline-none transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+            aria-label={tComments("sendComment")}
+          >
+            <Send className="h-4 w-4" />
+          </button>
+        </form>
+      )}
     </div>
   );
 }

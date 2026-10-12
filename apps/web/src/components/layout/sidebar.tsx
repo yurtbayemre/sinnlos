@@ -1,31 +1,22 @@
 import { cn } from "@/lib/utils";
-import { isAdmin } from "@/lib/roles";
+import { navItemsFor } from "@/lib/nav-config";
 import { getViewer } from "@/lib/viewer";
-import type { Route } from "next";
-import { NavLink, type NavIconName } from "./nav-link";
+import { NavLink } from "./nav-link";
 import { getTranslations } from "next-intl/server";
 
+/**
+ * The desktop navigation (md and up): every entry of lib/nav-config.ts the
+ * viewer's role may use (navItemsFor). The phone tab bar maps the same
+ * entries (mobile-nav.tsx).
+ */
 export async function Sidebar({ className }: { className?: string }) {
-  const t = await getTranslations("nav");
-  const tCommon = await getTranslations("common");
-
-  // Role per request from the CMS (D-SESSION-01) — never from the session.
-  const showAdmin = isAdmin((await getViewer()).role);
-
-  const nav: { href: Route; label: string; icon: NavIconName }[] = [
-    { href: "/", label: t("dashboard"), icon: "Home" },
-    { href: "/people", label: t("people"), icon: "Contact" },
-    { href: "/events", label: t("events"), icon: "Calendar" },
-    { href: "/wiki", label: t("wiki"), icon: "BookOpen" },
-    { href: "/training", label: t("training"), icon: "GraduationCap" },
-    { href: "/departments", label: t("departments"), icon: "Building2" },
-    { href: "/teams", label: t("teams"), icon: "Users2" },
-    { href: "/announcements", label: t("announcements"), icon: "Megaphone" },
-    { href: "/kudos", label: t("kudos"), icon: "Award" },
-    { href: "/marketplace", label: t("marketplace"), icon: "ShoppingBag" },
-    { href: "/polls", label: t("polls"), icon: "BarChart3" },
-    { href: "/documents", label: t("documents"), icon: "FileText" },
-  ];
+  const [t, tCommon, viewer] = await Promise.all([
+    getTranslations("nav"),
+    getTranslations("common"),
+    // Role per request from the CMS (D-SESSION-01) — never from the session.
+    getViewer(),
+  ]);
+  const items = navItemsFor(viewer.role);
 
   return (
     <aside
@@ -44,12 +35,9 @@ export async function Sidebar({ className }: { className?: string }) {
         <span className="font-semibold tracking-tight">Sinnlos</span>
       </div>
       <nav aria-label={tCommon("mainNav")} className="flex-1 space-y-1 overflow-y-auto p-4">
-        {nav.map((item) => (
-          <NavLink key={item.href} {...item} />
+        {items.map((item) => (
+          <NavLink key={item.href} href={item.href} label={t(item.labelKey)} icon={item.icon} />
         ))}
-        {/* /manage, not /admin — the reverse proxy routes /admin* to the
-            Strapi admin panel, which would shadow an in-app /admin page. */}
-        {showAdmin && <NavLink href="/manage" label={t("admin")} icon="Settings" />}
       </nav>
       <div className="shrink-0 border-t p-4 text-xs text-muted-foreground">
         {tCommon("selfHosted")}

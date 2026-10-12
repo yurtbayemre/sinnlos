@@ -16,9 +16,8 @@ export interface TrainingReportUser {
 
 /**
  * Unblocked users of a training role: the report's denominator. The page
- * passes its TRAINING_ROLES (the role types holding course.find;
- * infra/contracts.test.ts pins that page-local copy against the CMS matrix
- * until SH02 moves it).
+ * passes lib/roles.ts TRAINING_ROLES (the role types holding the training
+ * reads, pinned to the CMS matrix by roles-matrix-parity.test.ts).
  */
 export function trainingStaff<U extends TrainingReportUser>(
   users: U[],
