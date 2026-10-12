@@ -1,0 +1,374 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadCourse (the course page) > success: lessons in course order with completion, the first open one 1`] = `
+{
+  "completed": 1,
+  "course": {
+    "documentId": "course-1",
+    "id": 1,
+    "lessons": [
+      {
+        "documentId": "lesson-12",
+        "id": 12,
+        "order": 2,
+        "title": "Lesson 12",
+      },
+      {
+        "documentId": "lesson-11",
+        "id": 11,
+        "order": 1,
+        "title": "Lesson 11",
+      },
+      {
+        "documentId": "lesson-13",
+        "id": 13,
+        "order": 3,
+        "title": "Lesson 13",
+      },
+    ],
+    "mandatory": true,
+    "slug": "security",
+    "title": "Security basics",
+  },
+  "done": false,
+  "firstOpen": {
+    "documentId": "lesson-12",
+    "id": 12,
+    "order": 2,
+    "title": "Lesson 12",
+  },
+  "lessons": [
+    {
+      "done": true,
+      "lesson": {
+        "documentId": "lesson-11",
+        "id": 11,
+        "order": 1,
+        "title": "Lesson 11",
+      },
+    },
+    {
+      "done": false,
+      "lesson": {
+        "documentId": "lesson-12",
+        "id": 12,
+        "order": 2,
+        "title": "Lesson 12",
+      },
+    },
+    {
+      "done": false,
+      "lesson": {
+        "documentId": "lesson-13",
+        "id": 13,
+        "order": 3,
+        "title": "Lesson 13",
+      },
+    },
+  ],
+  "statusUnknown": false,
+  "total": 3,
+}
+`;
+
+exports[`loadTrainingOverview (banner and list) > CMS down: the banner on the list, no courses and no empty state 1`] = `
+{
+  "courses": [],
+  "empty": false,
+  "failed": true,
+  "openMandatory": null,
+  "statusUnknown": true,
+  "truncated": false,
+}
+`;
+
+exports[`loadTrainingOverview (banner and list) > partial failure: no progress, the courses stay, the status is unknown 1`] = `
+{
+  "courses": [
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-1",
+        "id": 1,
+        "lessons": [
+          {
+            "documentId": "lesson-12",
+            "id": 12,
+            "order": 2,
+            "title": "Lesson 12",
+          },
+          {
+            "documentId": "lesson-11",
+            "id": 11,
+            "order": 1,
+            "title": "Lesson 11",
+          },
+          {
+            "documentId": "lesson-13",
+            "id": 13,
+            "order": 3,
+            "title": "Lesson 13",
+          },
+        ],
+        "mandatory": true,
+        "slug": "security",
+        "title": "Security basics",
+      },
+      "done": false,
+      "total": 3,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-2",
+        "id": 2,
+        "lessons": [
+          {
+            "documentId": "lesson-21",
+            "id": 21,
+            "order": 1,
+            "title": "Lesson 21",
+          },
+        ],
+        "mandatory": true,
+        "slug": "onboarding",
+        "title": "Onboarding",
+      },
+      "done": false,
+      "total": 1,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-3",
+        "id": 3,
+        "lessons": [],
+        "mandatory": true,
+        "slug": "soon",
+        "title": "Coming soon",
+      },
+      "done": false,
+      "total": 0,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-4",
+        "id": 4,
+        "lessons": [
+          {
+            "documentId": "lesson-41",
+            "id": 41,
+            "order": 1,
+            "title": "Lesson 41",
+          },
+        ],
+        "mandatory": false,
+        "slug": "excel",
+        "title": "Excel",
+      },
+      "done": false,
+      "total": 1,
+    },
+  ],
+  "empty": false,
+  "failed": true,
+  "openMandatory": null,
+  "statusUnknown": true,
+  "truncated": false,
+}
+`;
+
+exports[`loadTrainingOverview (banner and list) > success: completion per course, open mandatory courses with lessons 1`] = `
+{
+  "courses": [
+    {
+      "completed": 1,
+      "course": {
+        "documentId": "course-1",
+        "id": 1,
+        "lessons": [
+          {
+            "documentId": "lesson-12",
+            "id": 12,
+            "order": 2,
+            "title": "Lesson 12",
+          },
+          {
+            "documentId": "lesson-11",
+            "id": 11,
+            "order": 1,
+            "title": "Lesson 11",
+          },
+          {
+            "documentId": "lesson-13",
+            "id": 13,
+            "order": 3,
+            "title": "Lesson 13",
+          },
+        ],
+        "mandatory": true,
+        "slug": "security",
+        "title": "Security basics",
+      },
+      "done": false,
+      "total": 3,
+    },
+    {
+      "completed": 1,
+      "course": {
+        "documentId": "course-2",
+        "id": 2,
+        "lessons": [
+          {
+            "documentId": "lesson-21",
+            "id": 21,
+            "order": 1,
+            "title": "Lesson 21",
+          },
+        ],
+        "mandatory": true,
+        "slug": "onboarding",
+        "title": "Onboarding",
+      },
+      "done": true,
+      "total": 1,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-3",
+        "id": 3,
+        "lessons": [],
+        "mandatory": true,
+        "slug": "soon",
+        "title": "Coming soon",
+      },
+      "done": false,
+      "total": 0,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-4",
+        "id": 4,
+        "lessons": [
+          {
+            "documentId": "lesson-41",
+            "id": 41,
+            "order": 1,
+            "title": "Lesson 41",
+          },
+        ],
+        "mandatory": false,
+        "slug": "excel",
+        "title": "Excel",
+      },
+      "done": false,
+      "total": 1,
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "openMandatory": 1,
+  "statusUnknown": false,
+  "truncated": false,
+}
+`;
+
+exports[`loadTrainingOverview (banner and list) > truncated: a cut walk makes the status unknown and keeps the banner away 1`] = `
+{
+  "courses": [
+    {
+      "completed": 1,
+      "course": {
+        "documentId": "course-1",
+        "id": 1,
+        "lessons": [
+          {
+            "documentId": "lesson-12",
+            "id": 12,
+            "order": 2,
+            "title": "Lesson 12",
+          },
+          {
+            "documentId": "lesson-11",
+            "id": 11,
+            "order": 1,
+            "title": "Lesson 11",
+          },
+          {
+            "documentId": "lesson-13",
+            "id": 13,
+            "order": 3,
+            "title": "Lesson 13",
+          },
+        ],
+        "mandatory": true,
+        "slug": "security",
+        "title": "Security basics",
+      },
+      "done": false,
+      "total": 3,
+    },
+    {
+      "completed": 1,
+      "course": {
+        "documentId": "course-2",
+        "id": 2,
+        "lessons": [
+          {
+            "documentId": "lesson-21",
+            "id": 21,
+            "order": 1,
+            "title": "Lesson 21",
+          },
+        ],
+        "mandatory": true,
+        "slug": "onboarding",
+        "title": "Onboarding",
+      },
+      "done": true,
+      "total": 1,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-3",
+        "id": 3,
+        "lessons": [],
+        "mandatory": true,
+        "slug": "soon",
+        "title": "Coming soon",
+      },
+      "done": false,
+      "total": 0,
+    },
+    {
+      "completed": 0,
+      "course": {
+        "documentId": "course-4",
+        "id": 4,
+        "lessons": [
+          {
+            "documentId": "lesson-41",
+            "id": 41,
+            "order": 1,
+            "title": "Lesson 41",
+          },
+        ],
+        "mandatory": false,
+        "slug": "excel",
+        "title": "Excel",
+      },
+      "done": false,
+      "total": 1,
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "openMandatory": null,
+  "statusUnknown": true,
+  "truncated": true,
+}
+`;

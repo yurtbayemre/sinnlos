@@ -8,9 +8,7 @@ import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { isReadDenied } from "@/lib/roles";
-import { tryFetch } from "@/lib/safe-fetch";
-import { fetchCourses, fetchMyProgress } from "@/lib/training";
-import { courseCompletion } from "@/lib/training-shared";
+import { loadTrainingOverview } from "@/lib/loaders/training";
 import { getViewer } from "@/lib/viewer";
 
 export async function generateMetadata() {
@@ -38,32 +36,19 @@ export default async function TrainingPage() {
       />
     );
   }
-  const [coursesResult, progressResult] = await Promise.all([
-    tryFetch(() => fetchCourses(), "training"),
-    tryFetch(() => fetchMyProgress(), "training"),
-  ]);
-  const failed = coursesResult.failed || progressResult.failed;
-  const courses = coursesResult.data?.courses ?? [];
-  const statusUnknown =
-    failed || (progressResult.data?.truncated ?? true) || (coursesResult.data?.truncated ?? true);
-  const completed = new Set(progressResult.data?.completed.keys() ?? []);
+  const overview = await loadTrainingOverview();
 
   return (
     <div className="space-y-8">
       <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
 
-      {failed && <FetchErrorBanner />}
+      {overview.failed && <FetchErrorBanner />}
 
-      {courses.length === 0 ? (
+      {overview.empty ? (
         <EmptyState icon={GraduationCap} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <div className="stagger grid gap-4 md:grid-cols-2">
-          {courses.map((course) => {
-            const {
-              total,
-              completed: doneCount,
-              done,
-            } = courseCompletion(course.lessons ?? [], completed);
+          {overview.courses.map(({ course, total, completed: doneCount, done }) => {
             return (
               <Link key={course.id} href={`/training/${course.slug}`} className="focus-card">
                 <Card interactive className="h-full transition-colors hover:border-primary/40">
@@ -85,7 +70,7 @@ export default async function TrainingPage() {
                       <span className="text-muted-foreground">
                         {t("lessonCount", { count: total })}
                       </span>
-                      {statusUnknown ? (
+                      {overview.statusUnknown ? (
                         <span className="text-muted-foreground">–</span>
                       ) : done ? (
                         <span className="inline-flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">

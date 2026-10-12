@@ -7,8 +7,8 @@ import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
-import { fetchCourseBySlug, fetchMyProgress } from "@/lib/training";
-import { courseCompletion, sortLessons } from "@/lib/training-shared";
+import { loadCourse } from "@/lib/loaders/training";
+import { fetchCourseBySlug } from "@/lib/training";
 import { getViewer } from "@/lib/viewer";
 
 type Params = { params: Promise<{ slug: string }> };
@@ -41,17 +41,9 @@ export default async function CoursePage({ params }: Params) {
     return <SectionUnavailablePage title={t("title")} />;
   }
 
-  const [course, progressResult] = await Promise.all([
-    fetchCourseBySlug(slug),
-    tryFetch(() => fetchMyProgress(), "training"),
-  ]);
-  if (!course) notFound();
-
-  const lessons = sortLessons(course.lessons ?? []);
-  const completed = new Set(progressResult.data?.completed.keys() ?? []);
-  const statusUnknown = progressResult.failed || (progressResult.data?.truncated ?? true);
-  const { total, completed: doneCount, done } = courseCompletion(lessons, completed);
-  const firstOpen = lessons.find((l) => l.documentId && !completed.has(l.documentId));
+  const page = await loadCourse(slug);
+  if (!page) notFound();
+  const { course, lessons, total, completed: doneCount, done, statusUnknown, firstOpen } = page;
 
   return (
     <div className="space-y-8">
@@ -102,8 +94,7 @@ export default async function CoursePage({ params }: Params) {
           {lessons.length === 0 && (
             <div className="px-4 py-6 text-sm text-muted-foreground">{t("noLessons")}</div>
           )}
-          {lessons.map((lesson, index) => {
-            const isDone = !!lesson.documentId && completed.has(lesson.documentId);
+          {lessons.map(({ lesson, done: isDone }, index) => {
             return (
               <Link
                 key={lesson.id}
