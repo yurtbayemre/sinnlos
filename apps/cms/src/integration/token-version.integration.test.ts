@@ -135,6 +135,42 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
     }
   });
 
+  it("answers each of overlapping password changes with its own version; only the last survives (3 runs)", async () => {
+    const strapi = t.strapi as unknown as TokenVersionStrapi;
+    const account = t.fixtures.users.department_head;
+    let password = account.password;
+    for (let run = 1; run <= 3; run += 1) {
+      const start = (await currentTokenVersion(strapi, account.id)) ?? 0;
+      const signedIn = await t.login(account.username, password);
+      // Four tabs of the user change the password at the same time, to the
+      // same new one: a change whose hash read came after another's write
+      // is refused (400), a request that arrives after another's bump is
+      // unauthenticated (401). Whatever the interleaving:
+      const next = `Parallel-Pass-${run}-789`;
+      const answers = await Promise.all(
+        Array.from({ length: 4 }, () => changePassword(signedIn, password, next)),
+      );
+      for (const answer of answers) expect([200, 400, 401]).toContain(answer.status);
+      const issued = answers
+        .filter((answer) => answer.status === 200)
+        .map((answer) => answer.body.jwt ?? "");
+      expect(issued.length).toBeGreaterThan(0);
+      // every successful change committed a version of its own and answered
+      // with exactly that one,
+      const versions = issued.map((jwt) => claims(jwt).tv as number).sort((a, b) => a - b);
+      expect(versions).toEqual(Array.from({ length: issued.length }, (_, i) => start + i + 1));
+      expect(await currentTokenVersion(strapi, account.id)).toBe(start + issued.length);
+      // and only the JWT of the last bump is accepted.
+      const last = start + issued.length;
+      for (const jwt of issued) {
+        expect((await me(jwt)).status).toBe(claims(jwt).tv === last ? 200 : 401);
+      }
+      expect((await me(signedIn)).status).toBe(401);
+      password = next;
+    }
+    expect((await me(await t.login(account.username, password))).status).toBe(200);
+  });
+
   it("keeps the version private: not filterable through the API", async () => {
     const admin = await t.loginAs("admin_role");
     const res = await t.api({ jwt: admin }, "/api/users?filters[tokenVersion][$eq]=1");

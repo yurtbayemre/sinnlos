@@ -772,6 +772,26 @@ describe("overlapping password changes of one user (real SQLite)", () => {
     }
     await expect(h.jwt.verify(jwtA)).resolves.toMatchObject({ id: h.userId, tv: 3 });
   }, 30_000);
+
+  it("A's answer carries the version A committed, not B's later one, and B's change revokes it", async () => {
+    const hold = pauseAt("A", "after version write");
+    const h = await raceHarness(engines, [hold]);
+    const a = h.change("A", "password-a");
+    await hold.reached;
+    // A has committed version 1; B changes the password while A waits.
+    const b = await h.change("B", "password-b");
+    hold.release();
+    const jwtA = await a;
+    expect(h.history).toEqual([1, 2]);
+    expect(claims(jwtA)).toMatchObject({ id: h.userId, tv: 1 });
+    expect(claims(b)).toMatchObject({ id: h.userId, tv: 2 });
+    await expect(h.jwt.verify(jwtA)).rejects.toThrow("Invalid token.");
+    await expect(h.jwt.verify(b)).resolves.toMatchObject({ id: h.userId, tv: 2 });
+    expect(h.logs).toEqual([
+      `[auth] password changed: user=${h.userId} tokenVersion=2`,
+      `[auth] password changed: user=${h.userId} tokenVersion=1`,
+    ]);
+  }, 30_000);
 });
 
 describe("jwtManagement 'refresh': the plugin's own session revocation applies", () => {

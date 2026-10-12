@@ -20,15 +20,18 @@
  *  - POST /api/auth/change-password (and /api/auth/reset-password, which
  *    the permission bootstrap revokes for `public`, should an operator
  *    grant it again) bumps the version after the password was saved and
- *    answers with a JWT of the new version. The web stores that JWT in the
- *    session of the tab that changed the password
+ *    answers with a JWT of exactly the version that bump committed (its
+ *    snapshot, not a later read: an overlapping change of the same user may
+ *    have raised it again meanwhile, and its JWT must not go to this tab).
+ *    The web stores that JWT in the session of the tab that changed the
+ *    password
  *    (apps/web/src/lib/profile-actions.ts); every other session of the user
  *    gets 401 on its next request and lands on /sign-in?expired=1.
  *
  * A sign-in stamps the version the user had BEFORE the plugin checked the
  * password: the wrapped `callback` (local provider) reads it first, with
  * the plugin's own identifier lookup, and issue() takes it for that user
- * (signInVersion, an AsyncLocalStorage). The plugin reads the hash, runs
+ * (knownVersion, an AsyncLocalStorage). The plugin reads the hash, runs
  * bcrypt and only then calls issue(); reading the version in issue() gave a
  * login with the OLD password, whose hash read came before a concurrent
  * change, a JWT of the NEW version that the change could not revoke. Now
@@ -136,8 +139,13 @@ export interface VersionSnapshot {
   version: number;
 }
 
-/** The version a sign-in read before its password check (patchAuthController). */
-const signInVersion = new AsyncLocalStorage<VersionSnapshot>();
+/**
+ * A version this request already holds for one user, which issue() stamps
+ * for that user instead of reading the current one: a sign-in's read
+ * before its password check, a password change's committed bump
+ * (patchAuthController).
+ */
+const knownVersion = new AsyncLocalStorage<VersionSnapshot>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -348,8 +356,9 @@ function assertStrapi(strapi: unknown): asserts strapi is TokenVersionStrapi {
 }
 
 /**
- * Patches a jwt service instance: issue() stamps the version (a sign-in's
- * snapshot for its own user, else the current one), verify() checks it.
+ * Patches a jwt service instance: issue() stamps the version (the
+ * request's known version for its own user, else the current one),
+ * verify() checks it.
  */
 export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi): JwtService {
   const originalIssue = service.issue;
@@ -362,8 +371,8 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
         ? (payload.toJSON as () => unknown)()
         : payload;
     const userId = isRecord(plain) ? userIdOf(plain.id) : null;
-    // Read now, in the caller's context: the sign-in's snapshot.
-    const snapshot = signInVersion.getStore();
+    // Read now, in the caller's context: the request's known version.
+    const snapshot = knownVersion.getStore();
     const pending = (async () => {
       const version =
         userId === null
@@ -416,15 +425,19 @@ export function patchAuthController(
 ): Record<string, unknown> {
   const jwtService = () => strapi.plugin("users-permissions").service("jwt") as JwtService;
 
-  /** After a successful password action: bump, then a JWT of the new version. */
+  /**
+   * After a successful password action: bump, then a JWT of exactly the
+   * version this bump committed (its snapshot; a read could already see
+   * an overlapping change's higher version).
+   */
   const revokeOlderTokens = async (ctx: AuthContext, userId: number | null) => {
     if (refreshMode(strapi) || userId === null) return;
     const body = ctx.body;
     // A refused change threw before; no JWT in the answer means no success.
     if (!isRecord(body) || typeof body.jwt !== "string") return;
-    const version = await bumpTokenVersion(strapi, userId);
-    body.jwt = await jwtService().issue({ id: userId });
-    strapi.log?.info?.(`[auth] password changed: user=${userId} tokenVersion=${version}`);
+    const committed: VersionSnapshot = { userId, version: await bumpTokenVersion(strapi, userId) };
+    body.jwt = await knownVersion.run(committed, () => jwtService().issue({ id: userId }));
+    strapi.log?.info?.(`[auth] password changed: user=${userId} tokenVersion=${committed.version}`);
   };
 
   for (const [name, value] of Object.entries(controller)) {
@@ -446,7 +459,7 @@ export function patchAuthController(
   ) {
     const snapshot = refreshMode(strapi) ? null : await signInTokenVersion(strapi, ctx);
     if (!snapshot) return signIn.call(this, ctx, ...rest);
-    return signInVersion.run(snapshot, () => signIn.call(this, ctx, ...rest));
+    return knownVersion.run(snapshot, () => signIn.call(this, ctx, ...rest));
   };
 
   const changePassword = controller.changePassword as Action;
