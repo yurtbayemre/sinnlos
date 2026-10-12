@@ -3,7 +3,7 @@
 # (and so deps and builder) and `runner` both start FROM this stage. A stage
 # alias rather than a build ARG, because Dependabot's docker updater reads
 # FROM lines only: a digest in an ARG default would never be bumped again.
-FROM node:24-alpine@sha256:156b55f92e98ccd5ef49578a8cea0df4679826564bad1c9d4ef04462b9f0ded6 AS node-base
+FROM node:24-alpine@sha256:ebfe2f90462722a7a4de65e91990e97fe0d401c70e0e762c5b53302f905ec1c1 AS node-base
 
 FROM node-base AS base
 RUN apk add --no-cache libc6-compat
