@@ -1611,10 +1611,12 @@ systemctl start docker
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, checks the checkout and CI, backs up, and tags the images by
-commit once the smoke checks passed ([§3.6](#36-deploy)):
+commit once the smoke checks passed ([§3.6](#36-deploy)). On the owner's
+host the checkout is `/home/bigemo/git/sinnlos` and `deploy.sh` runs as
+`bigemo`:
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos
 git pull
 infra/deploy.sh
 ```
@@ -1642,7 +1644,8 @@ instance deploys batch 8, then batch 9, then batch 10, then this; batch 11
 was the v2 authoring design and deployed nothing). The runbooks below
 explain each change in detail; **this section is the one sequence to
 follow** on the owner instance (srv-prod-01, Traefik mode, checkout
-`/home/bigemo/git/sinnlos`, compose project `infra`):
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`):
 
 - [the CMS data lifecycle leftovers](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c)
   (lane 7C): comment delete checked by a route policy (every answer byte
@@ -1698,9 +1701,9 @@ a department; the other rows stay NULL. Nobody's view changes: a linked
 row is restricted by its links already. If that transaction fails, the
 cms does not start (step 9). **The first build is
 slower:** pnpm 10 installs both images from scratch (a new pnpm store,
-nothing cached) and the cms dependency layer (about 820 MB) is written once
-next to the images kept for rollback; later code-only deploys add about
-15 MB.
+nothing cached), and the first deploy writes about 1.1 GB of new images
+(the cms dependency layer alone 823 MB) next to the images kept for
+rollback, plus the build cache; later code-only deploys add about 15 MB.
 
 Set these on the host, in the checkout, for the checks below:
 
@@ -1733,23 +1736,28 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ```bash
    grep -E '^(DEFAULT_LOCALE|DIGEST_DEFAULT_LOCALE|APP_TIME_ZONE)=' infra/.env
    timedatectl show -p Timezone --value
-   crontab -l 2>/dev/null | grep -F pg-backup.sh; sudo crontab -l 2>/dev/null | grep -F pg-backup.sh
    ```
 
    `DEFAULT_LOCALE` and `DIGEST_DEFAULT_LOCALE` are missing or `en` (the
    owner chose English; compose then passes `en`, and nothing needs
    setting). `APP_TIME_ZONE=Europe/Berlin` is the zone the new janitors and
-   step 6 use. The backup line runs at `0 3 * * *` in the host zone, and
-   the host is in `Europe/Berlin`: the 03:00 backup comes before the new
-   03:40 and 03:45 janitors ([§7.3](#73-automated-daily-backups-cron)).
-   Note which user's crontab holds the line (step 11).
+   step 6 use, and the host is in `Europe/Berlin`. The new janitors delete
+   for good at 03:40 and 03:45, so the night's backup has to finish before
+   them. On production that is the host's `backup-run` for `sinnlos`
+   (since 2026-10-07, [§7.3](#73-automated-daily-backups-cron)), whose
+   schedule lives in the `srv-prod-01-ops` repo, not in this one: check
+   there (its `docs/backup.md` and the timer or cron entry its
+   `install.sh` sets up) that the nightly run ends before 03:40. A host
+   still on `infra/backup/pg-backup.sh` has that line in a crontab at
+   `0 3 * * *`.
 
-3. **The preflight and the plan:**
+3. **The preflight, the plan and the backup permission:**
 
    ```bash
    infra/deploy.sh --check
    infra/deploy.sh --dry-run
    cat .git/sinnlos-deploy/infra.state
+   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
    ```
 
    `--check` prints `Preflight OK` and
@@ -1758,7 +1766,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    was deployed from `7d9e52b`, `LIVE_SMOKE=passed`; if it names another
    tag, use that one wherever this section says `7d9e52ba7e6a`). `--dry-run` prints `lock: free`, the clean
    checkout at the batch 12 commit, the CI result of that commit (a
-   `WARNING: CI is …` only informs), `last-known-good:
+   `WARNING: CI is …` only informs), `1. pre-deploy backup: sudo -n
+   /usr/local/sbin/backup-run --kind predeploy sinnlos (none on a first
+   install)`, `last-known-good:
    infra-{web,cms}:7d9e52ba7e6a (commit 7d9e52b…, deployed …)` and
    `-> the last-known-good deploy 7d9e52ba7e6a (…)` as the rollback
    target, `4. smoke check https://sinnlos.yurtbay.dev; live-smoke: run`,
@@ -1766,6 +1776,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    /home/bigemo/git/sinnlos/.git/sinnlos-deploy/infra.state` with
    `and prune SHA tags beyond the newest 5: none`. A listed untracked file
    under `packages/` would stop the real deploy: remove it first.
+   `sudo -n -l` prints the path of `backup-run`: the sudoers drop-in
+   `backup-run-predeploy` (installed by `srv-prod-01-ops`) lets `bigemo`
+   run exactly that command ([§3.6](#36-deploy)). If it asks for a
+   password or refuses, fix the drop-in first: the deploy would stop at
+   its backup step.
 
 4. **Permissions: no change.**
 
@@ -1881,9 +1896,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 **Deploy**
 
-8. Run `infra/deploy.sh`. It takes the lock, checks the clean checkout
-   (with `packages/`) and the CI result, takes the pre-deploy backup
-   (`done predeploy` in `backup.log`), keeps the batch 10 SHA tags
+8. As `bigemo`, run `infra/deploy.sh` in the checkout (from a root shell:
+   `sudo -u bigemo -H infra/deploy.sh`). It takes the lock, checks the
+   clean checkout (with `packages/`) and the CI result, takes the
+   pre-deploy backup through `backup-run` (a `-predeploy` generation of
+   `sinnlos` in `/srv/backup/outbox`, which the NAS pulls; a failure stops
+   the deploy before anything is touched), keeps the batch 10 SHA tags
    (`7d9e52ba7e6a`) as the rollback target, builds both images (the long
    first pnpm 10 build), runs `up -d --no-build` (cms and web recreated,
    the database kept), smoke-checks, runs live-smoke, and only then tags
@@ -1896,7 +1914,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    ```bash
    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|department-audience)\]|Strapi started'
-   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -v ' refused: '
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -vE ' refused: |\[auth\]\[error\] CredentialsSignin|Strapi 403 Forbidden|ForbiddenError'
    ```
 
    `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
@@ -1906,15 +1924,31 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    and M existing quick-link row(s) to 'departments' (they link a
    department)` with N and M the `linked` counts of step 6 (a type with
    none is left out, and there is no line when neither has one; later
-   boots print none), `Strapi started successfully`; the second command
-   prints nothing. It leaves out the web's warnings `<action> refused:
-   <status> <…Error> → <code>` (for example `[comments] add refused: 400
-   BadRequestError → notFound`): since this batch the web logs every
-   refused user action that way, a vote on a closed poll or a comment on
-   an announcement that is gone, and those are no fault. Look at every
-   line it does print: an action's `… failed → <code>` (the cms did not
-   answer, or answered 5xx or 428), a `[locale]` line, or `[auth] sign-in
-   failed`.
+   boots print none), `Strapi started successfully`. The second command
+   prints nothing right after the deploy; once people use the site, it
+   leaves out three kinds of expected lines:
+   - the web's warnings `<action> refused: <status> <…Error> → <code>`
+     (for example `[comments] add refused: 400 BadRequestError →
+     notFound`): since this batch the web logs every refused user action
+     that way, a vote on a closed poll or a comment on an announcement
+     that is gone;
+   - `[auth][error] CredentialsSignin: Read more at
+     https://errors.authjs.dev#credentialssignin`, which Auth.js logs for
+     every wrong password;
+   - a guest's page view: the web still asks the cms for sections guests
+     may not read and logs the cms's 403 as `[dashboard] fetch failed
+     Error [StrapiError]: Strapi 403 Forbidden …` (likewise
+     `[training-banner]`, `[ack-banner]`, `[announcements]`, `[kudos]`,
+     `[celebrations]`, `[acknowledgements]`), followed by the error's
+     fields on their own lines (`strapiName: 'ForbiddenError',` among
+     them). The filter drops the lines that name the 403; other lines of
+     such an error (its stack, its other fields, up to the closing `}`)
+     belong to it. A member's or editor's page view is never refused that
+     way (step 16 walks the pages as a member).
+
+   Look at every other line it prints: an action's `… failed → <code>`
+   (the cms did not answer, or answered 5xx or 428), a `[locale]` line,
+   `[auth] sign-in failed`, or a `fetch failed` with another status.
 
    **If the cms does not start** and logs `[department-audience] could
    not backfill the audience of documents and quick links (<reason>);
@@ -1954,21 +1988,24 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     Audience, and a row whose departments were removed keeps
     `departments` without counting as `linked`.)
 
-11. **An extra manual backup before the first night of the retention
-    crons:** the same day, after the deploy and before 03:00, as the user
-    whose crontab holds the backup line (step 2), with that line's
-    environment if it sets any:
+11. **The backup for the first night of the retention crons:** the
+    pre-deploy generation of step 8 already holds every row the first
+    night may delete (the janitors take only notifications read, and ads
+    expired, more than 90 days back: all of them there at the deploy).
+    Keep it until step 17 is checked; how long a `-predeploy` generation
+    stays in `/srv/backup/outbox` and on the NAS is backup-run's rotation
+    (`srv-prod-01-ops`, `docs/backup.md`). For a second, independent one
+    right before the first night (the same day, after the deploy and
+    before 03:40), as `bigemo`:
 
     ```bash
-    SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
-    tail -n 3 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
+    sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
     ```
 
-    The log ends with `done predeploy`. The pre-deploy kind is kept apart
-    from the nightly rotation; keep this backup until step 17 is checked.
-    It holds everything the first night may delete (the 03:00 nightly one
-    does too; this one does not depend on it). If the deploy ran after
-    03:45, the first night is the next one: take the backup before it.
+    It exits 0 and leaves another `-predeploy` generation of `sinnlos` in
+    `/srv/backup/outbox` (how backup-run reports a run is described in
+    its repo, not here). If the deploy ran after 03:45, the first night is
+    the next one.
 
 12. **The cron registry,** read from the running cms (its own compiled
     registry and zone rule):
@@ -2085,7 +2122,6 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
     ```bash
     "${COMPOSE[@]}" logs --since 12h cms | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]|removed [0-9]+ image\(s\) of deleted classified'
-    tail -n 20 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
     ```
 
     `[cron] notification-janitor took …ms` after 03:40 and `[cron]
@@ -2095,10 +2131,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     with the counts of step 6 (the notifications capped at 100 000), plus
     one `[uploads-janitor] removed N image(s) of deleted classified` per
     purged ad with images (logged by the ad's delete, not by the 03:30
-    task). The backup log shows the 03:00 `done nightly` before them. A
-    `[cron] … failed` line: keep the backup of step 11 and look at the
-    error before the next night. Then delete the step 11 backup whenever
-    you like (or leave it to the rotation).
+    task). The night's `backup-run` for `sinnlos` finished before 03:40
+    (check it where `srv-prod-01-ops` records its runs). A `[cron] …
+    failed` line: keep the pre-deploy generations of steps 8 and 11 and
+    look at the error before the next night. Otherwise leave them to
+    backup-run's rotation.
 
 **What users notice** (worth a short release note): expired announcements
 disappear for everyone below admin/editor, from lists, threads and
@@ -2321,8 +2358,10 @@ comments and a reaction, and tags on a wiki page. Step 6's SQL counted
 unpublished announcement; `prod-perm-diff.sql` returned no rows, and the
 census, section 9 included, ran without an error. The member probe of step
 15 showed the unpublished thread's 2 comments and the expired
-announcement. Then the batch 12 images: the cms booted in about 2 s with
-`permission drift: none (report-only check of 120 managed actions)` and no
+announcement. Then the batch 12 images: the cms booted within seconds
+(the 2026-10-12 rehearsal below measured about 6 s from the container
+start to healthy) with `permission drift: none (report-only check of 120
+managed actions)` and no
 grant line, the two `audience` columns appeared with no value, the
 registry printed the five tasks of step 12, `DIGEST_DEFAULT_LOCALE` was
 `en`, `/sign-in` answered `<html lang="en"`, and the probe printed exactly
@@ -2338,19 +2377,20 @@ bell's old notification. An `admin_role` user deleted the Finance
 department, which a document targeted alone: the cms logged `[department-delete]
 set the audience of 2 document row(s) to 'departments': they stay restricted
 (admins and editors only) until re-targeted`, the member did not see the
-document, an editor did. Rollback to the `7d9e52b` images (`up -d
---no-build web cms`): the batch 10 cms booted without an error, the
+document, an editor did. (That ran before the fix round: since then the
+write-time guard has flagged such rows when they were saved, and a delete
+that finds them flagged already logs nothing.) Rollback to the `7d9e52b`
+images (`up -d --no-build web cms`): the batch 10 cms booted without an
+error, the
 columns and the two values stayed, the rollback listing above named the
 document, the member saw it again (company-wide), and the unpublished
 thread and the expired announcement read as before the deploy. The roll
 forward restored all three. The cms image holds `COPY … /out /app` of 15.2
 MB above 823 MB and 119 kB of `node_modules`, resolves `@sinnlos/domain`
 to `packages/domain/dist/cjs`, carries no `src`, and stopped in 0.7 s;
-the probe of step 13 printed `2` on both images. Not exercised here:
-`infra/deploy.sh` end to end, Traefik, the janitors firing at 03:40 and
-03:45 (their rules and both engines are covered by
-`retention.integration.test.ts`), a large notification backlog, the pnpm
-10 cold build time, and the production host.
+the probe of step 13 printed `2` on both images. What this run left out
+(`infra/deploy.sh` end to end, Traefik, the janitors, the cold build) the
+staging rehearsal of 2026-10-12 below covers.
 
 **Fix-round rehearsal (2026-09-29, the write-time guard and the backfill
 for documents and quick links):** the rehearsal above ran before them, so
@@ -2379,8 +2419,27 @@ them again and printed no backfill line (nothing left to flag). The
 publish and "Discard changes" that read a row before a department delete
 committed are rehearsed by `department-delete.integration.test.ts` on
 Postgres 16: without the guard the recreated row came out `all` with no
-department. Still not exercised: `infra/deploy.sh` end to end, Traefik,
-live-smoke and the web checks through the edge.
+department. `infra/deploy.sh` end to end, Traefik, live-smoke and the web
+checks through the edge: the staging rehearsal below.
+
+**Staging rehearsal (2026-10-12, `edc9611`):** the whole sequence on a
+local staging copy of production (`infra/deploy.sh` with Traefik, from the
+batch 10 SHA tags to the batch 12 commit); all eight checks of the
+rehearsal passed. It ran before the second review fix round
+(acknowledgement of expired announcements, next 16.3.8, handlebars
+4.7.10), which no staging run has covered yet. `infra/deploy.sh` ended
+with exit 0 after 163 s, of which the cold pnpm 10 build took about 141 s
+on a 32-core host (production will be slower). The outage was about 10 s
+for the web and about 4.4 s for the cms, whose container went from start
+to healthy in about 6 s. Also rehearsed: the janitors, the department delete including the
+publish and "Discard changes" race, the web checks through Traefik, the
+digest of a user without a stored language, live-smoke, and the rollback
+to the `7d9e52b` SHA tags with the roll forward. The first deploy wrote
+about 1.1 GB of new images next to the rollback images (the cms dependency
+layer 823 MB), plus the build cache. What it found in this runbook is
+fixed: the backup steps through `backup-run` (2, 3, 8, 11 and 17), the
+expected lines of step 9 on a site in use, and the checkout path of the
+lane 7B runbook.
 
 #### Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)
 
@@ -2393,7 +2452,8 @@ compose, grant, route or edge change.
 **What changes**
 
 - **Retention crons (LF07).** Two new tasks in the cron registry, both
-  after the 03:00 host backup ([§7.3](#73-automated-daily-backups-cron)):
+  after the nightly host backup (on production `backup-run`, elsewhere
+  `pg-backup.sh` at 03:00; [§7.3](#73-automated-daily-backups-cron)):
   - `notification-janitor`, 03:40 `APP_TIME_ZONE`: deletes **read**
     notifications 90 days after they were read. Unread notifications never
     expire. Fan-out anchor rows (announcement and event notifications that
@@ -2518,10 +2578,14 @@ compose, grant, route or edge change.
 
 **Before the first night of the retention crons**
 
-4. Take an **extra manual backup** the same day, after the deploy and
-   before 03:00, and keep it until you have checked the next morning's
-   log. Run it as the user of the backup crontab line; the pre-deploy kind
-   is kept apart from the nightly rotation:
+4. Keep a backup from before the first night until you have checked the
+   next morning's log: the deploy's pre-deploy backup holds every row the
+   first night may delete. For a second one the same day, after the deploy
+   and before 03:40: on production, as `bigemo`,
+   `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (a
+   `-predeploy` generation, [§7.3](#73-automated-daily-backups-cron));
+   elsewhere, as the user of the backup crontab line (the pre-deploy kind
+   is kept apart from the nightly rotation):
 
    ```bash
    SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
@@ -2762,10 +2826,11 @@ changes. The first build after this release is slower: pnpm 10 runs the
 install stage of both images from scratch (a new pnpm store, nothing cached)
 and the cms dependency layer is written once, about 820 MB next to the
 images that stay for rollback; check `df -h` has a few GB free. The helpers
-of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
+of the batch 8 section (on a standalone Caddy box, drop the second `-f`;
+`/home/bigemo/git/sinnlos` is the owner's checkout, elsewhere use yours):
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos
 COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
 ```
 
