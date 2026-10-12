@@ -7,8 +7,7 @@ import { loadPeopleCount } from "@/lib/loaders/people-count";
 import { zonedHour } from "@/lib/plain-date";
 import { getSession } from "@/lib/session";
 import { getViewer } from "@/lib/viewer";
-import { Skeleton } from "@/components/ui/skeleton";
-import { StatCount, StatTile } from "@/components/ui/stat-tile";
+import { StatCount, StatTile, StatValueSkeleton } from "@/components/ui/stat-tile";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { AckBanner } from "@/components/dashboard/ack-banner";
 import { TrainingBanner } from "@/components/training/training-banner";
@@ -63,7 +62,7 @@ export default async function DashboardPage() {
       )}
 
       <section className="stagger grid gap-4 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
-        <Suspense fallback={<PeopleTile label={tNav("people")} value={<ValueSkeleton />} />}>
+        <Suspense fallback={<PeopleTile label={tNav("people")} value={<StatValueSkeleton />} />}>
           <PeopleStatTile label={tNav("people")} unknownLabel={unknown} />
         </Suspense>
         {counts.departments && (
@@ -123,11 +122,6 @@ async function PeopleStatTile({ label, unknownLabel }: { label: string; unknownL
 
 function PeopleTile({ label, value }: { label: string; value: React.ReactNode }) {
   return <StatTile icon={Contact} label={label} value={value} href="/people" />;
-}
-
-/** Placeholder for a count that is still loading. */
-function ValueSkeleton() {
-  return <Skeleton aria-hidden="true" className="mt-1 h-7 w-12 rounded-md" />;
 }
 
 /** The greeting of the wall-clock hour `h` (0-23) in APP_TIME_ZONE, not the process zone. */

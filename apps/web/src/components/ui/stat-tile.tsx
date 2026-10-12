@@ -3,6 +3,7 @@ import type { Route } from "next";
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { Count } from "@/lib/loaders/count";
 import { cn } from "@/lib/utils";
 
@@ -98,4 +99,9 @@ export function StatCount({ count, unknownLabel }: { count: Count; unknownLabel:
     );
   }
   return <>{count.truncated ? `${count.value}+` : count.value}</>;
+}
+
+/** The `value` of a tile whose count still streams in (its Suspense fallback). */
+export function StatValueSkeleton() {
+  return <Skeleton aria-hidden="true" className="mt-1 h-7 w-12 rounded-md" />;
 }

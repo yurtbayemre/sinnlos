@@ -25,8 +25,7 @@ import { AdminPageHeader } from "@/components/admin-page-header";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent } from "@/components/ui/card";
 import { SectionLabel } from "@/components/ui/section-label";
-import { Skeleton } from "@/components/ui/skeleton";
-import { StatCount, StatTile } from "@/components/ui/stat-tile";
+import { StatCount, StatTile, StatValueSkeleton } from "@/components/ui/stat-tile";
 
 export async function generateMetadata() {
   const t = await getTranslations("analytics");
@@ -91,14 +90,7 @@ export default async function AnalyticsPage() {
           {/* The user count walks the whole directory (no total on
               /api/users), so it streams in its own Suspense boundary
               instead of holding back the page (WD10). */}
-          <Suspense
-            fallback={
-              <UsersTile
-                label={t("users")}
-                value={<Skeleton aria-hidden="true" className="mt-1 h-7 w-12 rounded-md" />}
-              />
-            }
-          >
+          <Suspense fallback={<UsersTile label={t("users")} value={<StatValueSkeleton />} />}>
             <UsersStatTile label={t("users")} unknownLabel={unknown} />
           </Suspense>
           {ANALYTICS_STATS.map((stat) => {
