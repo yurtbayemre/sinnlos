@@ -50,7 +50,7 @@ export function digestDefaultLocale(
   const raw = env.DIGEST_DEFAULT_LOCALE;
   const value = raw?.trim().toLowerCase();
   if (isDigestLocale(value)) return value;
-  if (raw && raw.trim() !== "" && !invalidDefaultReported) {
+  if (value && !invalidDefaultReported) {
     invalidDefaultReported = true;
     console.warn(
       `[digest] DIGEST_DEFAULT_LOCALE="${raw}" is not one of ${DIGEST_LOCALES.join(", ")} — using "${DIGEST_FALLBACK_LOCALE}".`,
