@@ -106,8 +106,8 @@ describe("loadDashboard", () => {
     expect(view).toMatchSnapshot();
     expect(view.failed).toBe(true);
     expect(Object.values(view.counts).every((c) => c?.value === null)).toBe(true);
-    // No "no announcements yet" under the banner.
-    expect(view.latestNews).toBeNull();
+    // The heading and its link stay, no "no announcements yet" under the banner.
+    expect(view.latestNews).toEqual({ featured: null, rest: [], failed: true });
   });
 
   it("a guest reads neither org, news nor kudos and gets no tile for them", async () => {

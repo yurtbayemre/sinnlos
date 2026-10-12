@@ -181,7 +181,7 @@ describe("pickLatestNews", () => {
     expect(news.featured?.id).toBe(3);
     expect(news.rest.map((n) => n.id)).toEqual([1, 2, 4, 5]);
     expect(pickLatestNews([post(1), post(2)]).featured?.id).toBe(1);
-    expect(pickLatestNews([])).toEqual({ featured: null, rest: [] });
+    expect(pickLatestNews([])).toEqual({ featured: null, rest: [], failed: false });
   });
 });
 

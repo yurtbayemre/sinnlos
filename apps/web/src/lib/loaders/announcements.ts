@@ -135,10 +135,18 @@ export interface LatestNewsView {
   featured: AnnouncementListItem | null;
   /** Up to four more, in feed order. */
   rest: AnnouncementListItem[];
+  /**
+   * The feed read failed: the widget keeps its heading and the link to
+   * /announcements but shows neither cards nor "no announcements yet".
+   */
+  failed: boolean;
 }
 
 /** The LatestNews selection over the feed (newest first, pinned first). */
-export function pickLatestNews(items: readonly AnnouncementListItem[]): LatestNewsView {
+export function pickLatestNews(
+  items: readonly AnnouncementListItem[],
+  failed = false,
+): LatestNewsView {
   const featured = items.find((n) => n.pinned) ?? items[0] ?? null;
-  return { featured, rest: items.filter((n) => n.id !== featured?.id).slice(0, 4) };
+  return { featured, rest: items.filter((n) => n.id !== featured?.id).slice(0, 4), failed };
 }

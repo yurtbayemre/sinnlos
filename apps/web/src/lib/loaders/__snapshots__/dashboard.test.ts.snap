@@ -21,7 +21,11 @@ exports[`loadDashboard > CMS down: every count unknown, no links, no news, the b
     },
   },
   "failed": true,
-  "latestNews": null,
+  "latestNews": {
+    "failed": true,
+    "featured": null,
+    "rest": [],
+  },
   "quickLinks": [],
   "sections": {
     "acks": true,
@@ -56,6 +60,7 @@ exports[`loadDashboard > partial failure: the failed tile is unknown (null), not
   },
   "failed": true,
   "latestNews": {
+    "failed": false,
     "featured": {
       "documentId": "doc-3",
       "id": 3,
@@ -130,6 +135,7 @@ exports[`loadDashboard > success: walk counts from the rows, feed counts from th
   },
   "failed": false,
   "latestNews": {
+    "failed": false,
     "featured": {
       "documentId": "doc-3",
       "id": 3,
@@ -204,6 +210,7 @@ exports[`loadDashboard > truncated: a walk cut at its cap is a lower bound (N+) 
   },
   "failed": false,
   "latestNews": {
+    "failed": false,
     "featured": {
       "documentId": "doc-3",
       "id": 3,

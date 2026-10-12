@@ -12,7 +12,9 @@ import { relativeTime } from "@/lib/relative-time";
  * The dashboard's news widget: a featured card (the first pinned
  * announcement, else the newest) and up to four more, all linking to
  * /announcements (the selection: lib/loaders/announcements.ts
- * pickLatestNews). The cards are the shared AnnouncementCard (UI08).
+ * pickLatestNews). The cards are the shared AnnouncementCard (UI08). When
+ * the feed read failed, only the heading and its link stay: the page's
+ * CMS-down banner explains, no "no announcements yet".
  */
 export async function LatestNews({ news }: { news: LatestNewsView }) {
   const tDashboard = await getTranslations("dashboard");
@@ -45,7 +47,7 @@ export async function LatestNews({ news }: { news: LatestNewsView }) {
         </Link>
       </div>
 
-      {featured === null ? (
+      {news.failed ? null : featured === null ? (
         <EmptyState
           icon={Megaphone}
           title={tDashboard("noAnnouncementsYet")}

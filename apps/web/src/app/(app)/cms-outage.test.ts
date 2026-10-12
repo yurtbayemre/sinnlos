@@ -1,6 +1,7 @@
 import { isValidElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EmptyState } from "@/components/empty-state";
+import { LatestNews } from "@/components/dashboard/latest-news";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PollsEmptyState } from "@/components/polls/polls-empty-state";
 import { StatCount } from "@/components/ui/stat-tile";
@@ -108,6 +109,14 @@ describe("the CMS is down", () => {
       }
     },
   );
+
+  it("the dashboard's news widget keeps its heading and link, without the empty state", async () => {
+    const news = elements(await pages["/"]!()).find((el) => el.type === LatestNews);
+    expect(news?.props.news).toEqual({ featured: null, rest: [], failed: true });
+    const widget = elements(await LatestNews(news!.props as Parameters<typeof LatestNews>[0]));
+    expect(widget.some((el) => el.props.href === "/announcements")).toBe(true);
+    expect(widget.some((el) => el.type === EmptyState)).toBe(false);
+  });
 
   it("the dashboard and analytics show their tiles as unknown", async () => {
     for (const path of ["/", "/manage/analytics"]) {

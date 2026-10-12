@@ -54,10 +54,7 @@ export interface DashboardView {
     news: Count | null;
   };
   quickLinks: QuickLink[];
-  /**
-   * null without the news section, and when the feed read failed: the
-   * banner explains, not a "no announcements yet".
-   */
+  /** null without the news section (the role cannot read announcements). */
   latestNews: LatestNewsView | null;
   /** A read failed: the CMS-down banner, and "–" on its tile. */
   failed: boolean;
@@ -97,10 +94,9 @@ export async function loadDashboard(
       news: sections.news ? countOfList(announcements) : null,
     },
     quickLinks: quickLinks.data?.data ?? [],
-    latestNews:
-      sections.news && !announcements.failed
-        ? pickLatestNews(announcements.data?.data ?? [])
-        : null,
+    latestNews: sections.news
+      ? pickLatestNews(announcements.data?.data ?? [], announcements.failed)
+      : null,
     failed:
       departments.failed ||
       teams.failed ||
