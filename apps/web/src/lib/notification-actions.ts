@@ -1,6 +1,7 @@
 "use server";
 
 import { unstable_rethrow } from "next/navigation";
+import { runCmsAction, type ActionResult } from "@/lib/action-result";
 import { getSession } from "@/lib/session";
 import { strapi, type StrapiListResponse } from "@/lib/strapi";
 import type { Notification } from "@/lib/types";
@@ -69,16 +70,30 @@ export async function getNotifications(): Promise<NotificationFeed> {
   }
 }
 
-export async function markNotificationsRead(ids: number[]) {
-  await strapi("/api/notifications/mark-read", {
-    method: "POST",
-    body: JSON.stringify({ ids }),
-  });
+/**
+ * Marks the caller's notifications `ids` read. Answers an ActionResult
+ * (AC01); the cms validates the ids (a 400 is "invalid") and only ever
+ * touches the caller's own rows. No refresh(): the bell refetches itself.
+ */
+export async function markNotificationsRead(ids: number[]): Promise<ActionResult> {
+  return runCmsAction(
+    () =>
+      strapi("/api/notifications/mark-read", {
+        method: "POST",
+        body: JSON.stringify({ ids }),
+      }),
+    { label: "[notifications] mark read" },
+  );
 }
 
-export async function markAllNotificationsRead() {
-  await strapi("/api/notifications/mark-all-read", {
-    method: "POST",
-    body: JSON.stringify({}),
-  });
+/** Marks every notification of the caller read (ActionResult, AC01). */
+export async function markAllNotificationsRead(): Promise<ActionResult> {
+  return runCmsAction(
+    () =>
+      strapi("/api/notifications/mark-all-read", {
+        method: "POST",
+        body: JSON.stringify({}),
+      }),
+    { label: "[notifications] mark all read" },
+  );
 }

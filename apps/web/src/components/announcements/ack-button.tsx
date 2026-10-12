@@ -6,6 +6,7 @@ import { useTranslations } from "next-intl";
 import { CheckCircle2, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { acknowledgeAnnouncement } from "@/lib/acknowledgement-actions";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 
 /**
  * Confirm-read control for mandatory announcements. Date labels are
@@ -26,9 +27,10 @@ export function AckButton({
   deadlineLabel: string | null;
 }) {
   const t = useTranslations("announcements");
+  const tErrors = useTranslations("actionErrors");
   const router = useRouter();
   const [justAcked, setJustAcked] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const acknowledged = acknowledgedAtLabel !== null || justAcked;
@@ -36,16 +38,15 @@ export function AckButton({
   const handleAck = () => {
     if (acknowledged || isPending) return;
     setError(null);
-    startTransition(async () => {
-      try {
-        await acknowledgeAnnouncement(announcementDocumentId);
-        setJustAcked(true);
-      } catch {
-        // Rejected (already acknowledged elsewhere, target changed, …) —
+    startCmsAction(startTransition, {
+      action: () => acknowledgeAnnouncement(announcementDocumentId),
+      onSuccess: () => setJustAcked(true),
+      onFailure: (code) => {
+        // Refused (already acknowledged elsewhere, target changed, …) —
         // surface it and pull the authoritative state from the server.
-        setError(t("ackFailed"));
+        setError(code);
         router.refresh();
-      }
+      },
     });
   };
 
@@ -72,7 +73,7 @@ export function AckButton({
       )}
       {error && (
         <p role="alert" className="text-sm text-destructive">
-          {error}
+          {isSharedErrorCode(error) ? tErrors(error) : t("ackFailed")}
         </p>
       )}
     </div>

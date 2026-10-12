@@ -25,6 +25,20 @@ function formatSize(sizeInKb?: number) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+/** The document categories, each with its label in the `documents` namespace. */
+const DOCUMENT_CATEGORIES = [
+  "policy",
+  "form",
+  "template",
+  "guide",
+  "other",
+] as const satisfies readonly NonNullable<Document["category"]>[];
+
+/** A category this web has a label for (the cms may know a newer one). */
+function isDocumentCategory(value: string): value is (typeof DOCUMENT_CATEGORIES)[number] {
+  return (DOCUMENT_CATEGORIES as readonly string[]).includes(value);
+}
+
 export default async function DocumentsPage() {
   // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
   const [t, tCommon, format] = await Promise.all([
@@ -56,7 +70,7 @@ export default async function DocumentsPage() {
           <section key={category} className="space-y-3">
             <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
               <FileText className="h-3.5 w-3.5" />
-              {t.has(category) ? t(category as any) : category}
+              {isDocumentCategory(category) ? t(category) : category}
             </div>
             <div className="stagger space-y-2">
               {items.map((doc) => {

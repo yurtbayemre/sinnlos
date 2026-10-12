@@ -13,7 +13,7 @@ import { getStrapiToken } from "@/lib/session";
  * `[id]` is the event's documentId (what the events page links) or, for
  * links from before 2026-09-27, the numeric id of its published row. Any
  * other value is a 404 before anything is sent to the cms, checked with the
- * same rules as the cms handler (lib/entry-id.ts, mirrored from the cms).
+ * same rules as the cms handler (lib/entry-id.ts, from @sinnlos/domain).
  *
  * Lives under /events/[id]/ics (NOT /api/...) because the Caddy reverse
  * proxy routes /api/* straight to Strapi.

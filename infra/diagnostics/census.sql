@@ -130,4 +130,98 @@ SELECT 'announcements' AS src, count(DISTINCT document_id) AS docs, max(length(t
 UNION ALL
 SELECT 'events', count(DISTINCT document_id), max(length(title)) FROM events WHERE length(title) > 255 - 11;
 
+\echo '== 9. DA04 duplicate scan: interaction records that no unique index guards (counts only, no ids)'
+\echo '-- The owning user sits in a link table, so no index can make these unique today; the writers'
+\echo '-- check-then-insert and the readers dedupe. pairs = distinct keys, duplicate_keys = keys with'
+\echo '-- more than one row, surplus_rows = rows beyond the first per key, max_rows = the largest group.'
+\echo '-- Rows without the user link cannot collide and are counted apart (without_user), and so do'
+\echo '-- rows without the target anchor (without_target_document_id): GROUP BY would lump their NULLs'
+\echo '-- together, a unique index would not.'
+\echo '-- (poll, voter): one ballot per voter and poll row (utils/poll-ballots.ts counts the first)'
+SELECT 'poll_votes (poll, voter)' AS scan,
+       count(*)                                          AS pairs,
+       count(*) FILTER (WHERE n > 1)                     AS duplicate_keys,
+       coalesce(sum(n - 1) FILTER (WHERE n > 1), 0)      AS surplus_rows,
+       coalesce(max(n), 0)                               AS max_rows
+  FROM (SELECT pl.poll_id, vl.user_id, count(*) AS n
+          FROM poll_votes v
+          JOIN poll_votes_poll_lnk pl  ON pl.poll_vote_id = v.id
+          JOIN poll_votes_voter_lnk vl ON vl.poll_vote_id = v.id
+         GROUP BY pl.poll_id, vl.user_id) k;
+SELECT count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM poll_votes_voter_lnk l WHERE l.poll_vote_id = v.id)) AS votes_without_user,
+       count(*) FILTER (WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id))  AS votes_without_poll
+  FROM poll_votes v;
+\echo '-- (target, user) receipts: acknowledgements (targetType + targetDocumentId), RSVPs and lesson progress (targetDocumentId)'
+SELECT 'acknowledgements (target, user)' AS scan,
+       count(*) AS pairs, count(*) FILTER (WHERE n > 1) AS duplicate_keys,
+       coalesce(sum(n - 1) FILTER (WHERE n > 1), 0) AS surplus_rows, coalesce(max(n), 0) AS max_rows,
+       (SELECT count(*) FROM acknowledgements a
+         WHERE NOT EXISTS (SELECT 1 FROM acknowledgements_user_lnk l WHERE l.acknowledgement_id = a.id)) AS without_user,
+       (SELECT count(*) FROM acknowledgements WHERE target_document_id IS NULL) AS without_target_document_id
+  FROM (SELECT a.target_type, a.target_document_id, l.user_id, count(*) AS n
+          FROM acknowledgements a JOIN acknowledgements_user_lnk l ON l.acknowledgement_id = a.id
+         WHERE a.target_document_id IS NOT NULL
+         GROUP BY a.target_type, a.target_document_id, l.user_id) k
+UNION ALL
+SELECT 'event_rsvps (target, user)',
+       count(*), count(*) FILTER (WHERE n > 1),
+       coalesce(sum(n - 1) FILTER (WHERE n > 1), 0), coalesce(max(n), 0),
+       (SELECT count(*) FROM event_rsvps e
+         WHERE NOT EXISTS (SELECT 1 FROM event_rsvps_user_lnk l WHERE l.event_rsvp_id = e.id)),
+       (SELECT count(*) FROM event_rsvps WHERE target_document_id IS NULL)
+  FROM (SELECT e.target_document_id, l.user_id, count(*) AS n
+          FROM event_rsvps e JOIN event_rsvps_user_lnk l ON l.event_rsvp_id = e.id
+         WHERE e.target_document_id IS NOT NULL
+         GROUP BY e.target_document_id, l.user_id) k
+UNION ALL
+SELECT 'lesson_progresses (target, user)',
+       count(*), count(*) FILTER (WHERE n > 1),
+       coalesce(sum(n - 1) FILTER (WHERE n > 1), 0), coalesce(max(n), 0),
+       (SELECT count(*) FROM lesson_progresses p
+         WHERE NOT EXISTS (SELECT 1 FROM lesson_progresses_user_lnk l WHERE l.lesson_progress_id = p.id)),
+       (SELECT count(*) FROM lesson_progresses WHERE target_document_id IS NULL)
+  FROM (SELECT p.target_document_id, l.user_id, count(*) AS n
+          FROM lesson_progresses p JOIN lesson_progresses_user_lnk l ON l.lesson_progress_id = p.id
+         WHERE p.target_document_id IS NOT NULL
+         GROUP BY p.target_document_id, l.user_id) k;
+\echo '-- (target, emoji, author) reactions: the controller keeps the oldest row after each create'
+SELECT 'reactions (target, emoji, author)' AS scan,
+       count(*) AS pairs, count(*) FILTER (WHERE n > 1) AS duplicate_keys,
+       coalesce(sum(n - 1) FILTER (WHERE n > 1), 0) AS surplus_rows, coalesce(max(n), 0) AS max_rows,
+       (SELECT count(*) FROM reactions r
+         WHERE NOT EXISTS (SELECT 1 FROM reactions_author_lnk l WHERE l.reaction_id = r.id)) AS without_user,
+       (SELECT count(*) FROM reactions WHERE target_document_id IS NULL) AS without_target_document_id
+  FROM (SELECT r.target_type, r.target_document_id, r.emoji, l.user_id, count(*) AS n
+          FROM reactions r JOIN reactions_author_lnk l ON l.reaction_id = r.id
+         WHERE r.target_document_id IS NOT NULL
+         GROUP BY r.target_type, r.target_document_id, r.emoji, l.user_id) k;
+\echo '-- per month of the newest row of each duplicate group (does the race still happen?)'
+SELECT scan, to_char(date_trunc('month', newest), 'YYYY-MM') AS month, count(*) AS duplicate_keys
+  FROM (SELECT 'poll_votes' AS scan, max(v.created_at) AS newest
+          FROM poll_votes v
+          JOIN poll_votes_poll_lnk pl  ON pl.poll_vote_id = v.id
+          JOIN poll_votes_voter_lnk vl ON vl.poll_vote_id = v.id
+         GROUP BY pl.poll_id, vl.user_id HAVING count(*) > 1
+        UNION ALL
+        SELECT 'acknowledgements', max(a.created_at)
+          FROM acknowledgements a JOIN acknowledgements_user_lnk l ON l.acknowledgement_id = a.id
+         WHERE a.target_document_id IS NOT NULL
+         GROUP BY a.target_type, a.target_document_id, l.user_id HAVING count(*) > 1
+        UNION ALL
+        SELECT 'event_rsvps', max(e.created_at)
+          FROM event_rsvps e JOIN event_rsvps_user_lnk l ON l.event_rsvp_id = e.id
+         WHERE e.target_document_id IS NOT NULL
+         GROUP BY e.target_document_id, l.user_id HAVING count(*) > 1
+        UNION ALL
+        SELECT 'lesson_progresses', max(p.created_at)
+          FROM lesson_progresses p JOIN lesson_progresses_user_lnk l ON l.lesson_progress_id = p.id
+         WHERE p.target_document_id IS NOT NULL
+         GROUP BY p.target_document_id, l.user_id HAVING count(*) > 1
+        UNION ALL
+        SELECT 'reactions', max(r.created_at)
+          FROM reactions r JOIN reactions_author_lnk l ON l.reaction_id = r.id
+         WHERE r.target_document_id IS NOT NULL
+         GROUP BY r.target_type, r.target_document_id, r.emoji, l.user_id HAVING count(*) > 1) d
+ GROUP BY 1, 2 ORDER BY 1, 2;
+
 ROLLBACK;

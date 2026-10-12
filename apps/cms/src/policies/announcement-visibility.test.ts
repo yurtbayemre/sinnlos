@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createStrapiStub, policyContext } from "../test/strapi-stub.test.helper";
 import announcementVisibility from "./announcement-visibility";
 
 /**
@@ -198,5 +199,52 @@ describe("announcement-visibility policy", () => {
       await run(ctx, [engineer]);
       expect(ctx.request.query.filters).toEqual({ id: { $in: [1, 2] } });
     });
+  });
+});
+
+describe("announcement expiry (DA02, owner answer 2026-09-29 (b))", () => {
+  // The shared stub evaluates the where clause the policy sends, so the
+  // expiry has to be in the query: an expired row is not among the ids.
+  const NOW = new Date("2026-09-29T10:00:00.000Z");
+  const UID = "api::announcement.announcement";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function expiryStub() {
+    return createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [{ id: 2, username: "eng", department: null }],
+        [UID]: [
+          { id: 1, audience: "all", expiresAt: null },
+          { id: 2, audience: "all", expiresAt: "2026-09-29T09:59:59.000Z" },
+          // Expires exactly now: expired from this instant on.
+          { id: 3, audience: "all", expiresAt: "2026-09-29T10:00:00.000Z" },
+          { id: 4, audience: "all", expiresAt: "2026-09-29T10:00:01.000Z" },
+          { id: 5, audience: "all" },
+        ],
+      },
+    });
+  }
+
+  const idsFor = async (user: { id: number; role: { type: string } } | null) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const strapi = expiryStub();
+    const ctx = policyContext(user);
+    await expect(announcementVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
+    return ctx.request.query.filters;
+  };
+
+  it("drops announcements whose expiresAt instant has passed, for members and anonymous alike", async () => {
+    expect(await idsFor({ id: 2, role: { type: "member" } })).toEqual({ id: { $in: [1, 4, 5] } });
+    expect(await idsFor(null)).toEqual({ id: { $in: [1, 4, 5] } });
+  });
+
+  it("leaves expired announcements to admin_role and editor (bypass, query untouched)", async () => {
+    for (const type of ["admin_role", "editor"]) {
+      expect(await idsFor({ id: 2, role: { type } }), type).toBeUndefined();
+    }
   });
 });

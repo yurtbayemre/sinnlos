@@ -41,7 +41,7 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the three tasks with their rules, all in the given zone", () => {
+  it("lists the five tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
@@ -50,6 +50,8 @@ describe("cronRegistry", () => {
     expect(table).toEqual([
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Pacific/Auckland" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Pacific/Auckland" },
+      { name: "notification-janitor", rule: "40 3 * * *", tz: "Pacific/Auckland" },
+      { name: "classified-janitor", rule: "45 3 * * *", tz: "Pacific/Auckland" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Pacific/Auckland" },
     ]);
   });
@@ -241,7 +243,13 @@ describe("guardedTask", () => {
 describe("buildCronTasks", () => {
   it("keys the tasks by name, with Strapi's rule/tz options", () => {
     const tasks = buildCronTasks(cronRegistry("Europe/Berlin"));
-    expect(Object.keys(tasks)).toEqual(["uploads-janitor", "search-log-janitor", "digest-mailer"]);
+    expect(Object.keys(tasks)).toEqual([
+      "uploads-janitor",
+      "search-log-janitor",
+      "notification-janitor",
+      "classified-janitor",
+      "digest-mailer",
+    ]);
     for (const [name, { task, options }] of Object.entries(tasks)) {
       expect(typeof task, name).toBe("function");
       expect(Object.keys(options).sort(), name).toEqual(["rule", "tz"]);

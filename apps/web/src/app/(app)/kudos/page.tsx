@@ -1,4 +1,5 @@
 import { Award, PartyPopper } from "lucide-react";
+import type { Messages } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { api } from "@/lib/strapi";
@@ -7,7 +8,7 @@ import { getSession } from "@/lib/session";
 import { fetchAllUsers } from "@/lib/users";
 import { relativeTime } from "@/lib/relative-time";
 import { tryFetch } from "@/lib/safe-fetch";
-import type { Kudos, Celebration, UserLite } from "@/lib/types";
+import type { Kudos, KudosValue, Celebration, UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
@@ -29,13 +30,19 @@ const VALUE_EMOJI: Record<string, string> = {
   excellence: "\u{1F3C6}",
 };
 
-const VALUE_LABEL_KEY: Record<string, string> = {
+/** The label key (namespace `kudos`) of each kudos value, typed against the catalog. */
+const VALUE_LABEL_KEY = {
   teamwork: "teamwork",
   innovation: "innovation",
   leadership: "leadership",
   "customer-focus": "customerFocus",
   excellence: "excellence",
-};
+} as const satisfies Record<KudosValue, keyof Messages["kudos"]>;
+
+/** A value this web has a label for (the cms may know a newer one). */
+function isKudosValue(value: string): value is KudosValue {
+  return Object.hasOwn(VALUE_LABEL_KEY, value);
+}
 
 export default async function KudosPage() {
   const t = await getTranslations("kudos");
@@ -130,7 +137,7 @@ export default async function KudosPage() {
                       <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                         <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
                           {VALUE_EMOJI[k.value] ?? "\u{2B50}"}{" "}
-                          {VALUE_LABEL_KEY[k.value] ? t(VALUE_LABEL_KEY[k.value] as any) : k.value}
+                          {isKudosValue(k.value) ? t(VALUE_LABEL_KEY[k.value]) : k.value}
                         </span>
                         <span>{relative(k.createdAt)}</span>
                       </div>

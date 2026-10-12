@@ -1,17 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
-  isAnnouncementVisibleTo,
+  isAnnouncementTargetedTo,
   teamIdsByUser,
-  type AnnouncementAudience,
+  type AnnouncementTargeting,
   type AudienceScope,
-} from "./audience";
+} from "./audience.js";
 
 /**
- * The acknowledgement report runs as admin_role and therefore bypasses the
- * CMS `announcement-visibility` policy — it has to recompute the target
- * audience with exactly the rules the policy enforces. These tests mirror
- * `apps/cms/src/utils/announcement-audience.test.ts`; if one side changes,
- * the other must too.
+ * Announcement targeting, the one predicate behind the cms
+ * `announcement-visibility` policy (apps/cms/src/utils/
+ * announcement-audience.ts, whose test pins the policy's use of it) and the
+ * web acknowledgement report (apps/web/src/lib/audience.ts), which runs as
+ * admin_role, bypasses the policy and recomputes the target audience.
  */
 
 const ENGINEERING = 1;
@@ -33,12 +33,12 @@ const designer: AudienceScope = {
   teamIds: [],
 };
 
-const announcement = (targeting: AnnouncementAudience): AnnouncementAudience => targeting;
+const announcement = (targeting: AnnouncementTargeting): AnnouncementTargeting => targeting;
 
-describe("isAnnouncementVisibleTo", () => {
+describe("isAnnouncementTargetedTo", () => {
   it("targets everyone when nothing is set", () => {
-    expect(isAnnouncementVisibleTo(announcement({ audience: "all" }), designer)).toBe(true);
-    expect(isAnnouncementVisibleTo(announcement({}), designer)).toBe(true);
+    expect(isAnnouncementTargetedTo(announcement({ audience: "all" }), designer)).toBe(true);
+    expect(isAnnouncementTargetedTo(announcement({}), designer)).toBe(true);
   });
 
   describe("department", () => {
@@ -48,15 +48,15 @@ describe("isAnnouncementVisibleTo", () => {
     });
 
     it("targets that department", () => {
-      expect(isAnnouncementVisibleTo(engineeringOnly, engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(engineeringOnly, engineer)).toBe(true);
     });
 
     it("does not target another department", () => {
-      expect(isAnnouncementVisibleTo(engineeringOnly, designer)).toBe(false);
+      expect(isAnnouncementTargetedTo(engineeringOnly, designer)).toBe(false);
     });
 
     it("does not target a user without a department", () => {
-      expect(isAnnouncementVisibleTo(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] })).toBe(
+      expect(isAnnouncementTargetedTo(engineeringOnly, { roleId: MEMBER_ROLE, teamIds: [] })).toBe(
         false,
       );
     });
@@ -65,20 +65,20 @@ describe("isAnnouncementVisibleTo", () => {
       // Fail-closed and symmetric with team / audienceRoles: the SET
       // relation is the criterion, the `audience` enum is not consulted.
       const a = announcement({ audience: "all", department: { id: ENGINEERING } });
-      expect(isAnnouncementVisibleTo(a, designer)).toBe(false);
-      expect(isAnnouncementVisibleTo(a, engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(a, designer)).toBe(false);
+      expect(isAnnouncementTargetedTo(a, engineer)).toBe(true);
     });
 
     it("restricts on a department link when audience is absent entirely", () => {
       const a = announcement({ department: { id: ENGINEERING } });
-      expect(isAnnouncementVisibleTo(a, designer)).toBe(false);
-      expect(isAnnouncementVisibleTo(a, engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(a, designer)).toBe(false);
+      expect(isAnnouncementTargetedTo(a, engineer)).toBe(true);
     });
 
     it("does not restrict when audience=departments has no department linked", () => {
       // Documented edge case: there is no department to restrict TO.
       const a = announcement({ audience: "departments" });
-      expect(isAnnouncementVisibleTo(a, designer)).toBe(true);
+      expect(isAnnouncementTargetedTo(a, designer)).toBe(true);
     });
   });
 
@@ -86,17 +86,17 @@ describe("isAnnouncementVisibleTo", () => {
     const frontendOnly = announcement({ audience: "all", team: { id: FRONTEND_TEAM } });
 
     it("targets members (and leads, who are folded into teamIds)", () => {
-      expect(isAnnouncementVisibleTo(frontendOnly, engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(frontendOnly, engineer)).toBe(true);
     });
 
     it("does not target another team", () => {
-      expect(isAnnouncementVisibleTo(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] })).toBe(
+      expect(isAnnouncementTargetedTo(frontendOnly, { ...engineer, teamIds: [BACKEND_TEAM] })).toBe(
         false,
       );
     });
 
     it("does not target a user without a team", () => {
-      expect(isAnnouncementVisibleTo(frontendOnly, designer)).toBe(false);
+      expect(isAnnouncementTargetedTo(frontendOnly, designer)).toBe(false);
     });
   });
 
@@ -104,17 +104,17 @@ describe("isAnnouncementVisibleTo", () => {
     const leadsOnly = announcement({ audienceRoles: [{ id: TEAM_LEAD_ROLE }] });
 
     it("targets the listed roles", () => {
-      expect(isAnnouncementVisibleTo(leadsOnly, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
+      expect(isAnnouncementTargetedTo(leadsOnly, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
         true,
       );
     });
 
     it("does not target other roles", () => {
-      expect(isAnnouncementVisibleTo(leadsOnly, engineer)).toBe(false);
+      expect(isAnnouncementTargetedTo(leadsOnly, engineer)).toBe(false);
     });
 
     it("does not restrict on an empty list", () => {
-      expect(isAnnouncementVisibleTo(announcement({ audienceRoles: [] }), engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(announcement({ audienceRoles: [] }), engineer)).toBe(true);
     });
   });
 
@@ -127,10 +127,12 @@ describe("isAnnouncementVisibleTo", () => {
     });
 
     it("requires all of them", () => {
-      expect(isAnnouncementVisibleTo(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(true);
+      expect(isAnnouncementTargetedTo(combined, { ...engineer, roleId: TEAM_LEAD_ROLE })).toBe(
+        true,
+      );
       // right department + role, wrong team
       expect(
-        isAnnouncementVisibleTo(combined, {
+        isAnnouncementTargetedTo(combined, {
           roleId: TEAM_LEAD_ROLE,
           departmentId: ENGINEERING,
           teamIds: [BACKEND_TEAM],
@@ -138,7 +140,7 @@ describe("isAnnouncementVisibleTo", () => {
       ).toBe(false);
       // right team + role, wrong department
       expect(
-        isAnnouncementVisibleTo(combined, {
+        isAnnouncementTargetedTo(combined, {
           roleId: TEAM_LEAD_ROLE,
           departmentId: DESIGN,
           teamIds: [FRONTEND_TEAM],
@@ -149,19 +151,38 @@ describe("isAnnouncementVisibleTo", () => {
 
   describe("unknown scope (null)", () => {
     it("matches only untargeted announcements", () => {
-      expect(isAnnouncementVisibleTo(announcement({ audience: "all" }), null)).toBe(true);
+      expect(isAnnouncementTargetedTo(announcement({ audience: "all" }), null)).toBe(true);
       expect(
-        isAnnouncementVisibleTo(
+        isAnnouncementTargetedTo(
           announcement({ audience: "departments", department: { id: ENGINEERING } }),
           null,
         ),
       ).toBe(false);
-      expect(isAnnouncementVisibleTo(announcement({ team: { id: FRONTEND_TEAM } }), null)).toBe(
+      expect(isAnnouncementTargetedTo(announcement({ team: { id: FRONTEND_TEAM } }), null)).toBe(
         false,
       );
       expect(
-        isAnnouncementVisibleTo(announcement({ audienceRoles: [{ id: MEMBER_ROLE }] }), null),
+        isAnnouncementTargetedTo(announcement({ audienceRoles: [{ id: MEMBER_ROLE }] }), null),
       ).toBe(false);
+    });
+  });
+
+  describe("no admin/editor bypass", () => {
+    // The scope carries a role ID, never a role type: the predicate cannot
+    // tell an admin or an editor from anyone else. The cms decides its read
+    // bypass (hasRole(user, MODERATORS)) before it asks; the web report
+    // must count an editor from another department as NOT targeted.
+    const ADMIN_ROLE = 1;
+    const EDITOR_ROLE = 2;
+
+    it("targets an admin or editor only through the announcement's own criteria", () => {
+      const engineeringOnly = announcement({ department: { id: ENGINEERING } });
+      for (const roleId of [ADMIN_ROLE, EDITOR_ROLE]) {
+        expect(isAnnouncementTargetedTo(engineeringOnly, { ...designer, roleId })).toBe(false);
+        expect(isAnnouncementTargetedTo(engineeringOnly, { ...engineer, roleId })).toBe(true);
+      }
+      const leadsOnly = announcement({ audienceRoles: [{ id: TEAM_LEAD_ROLE }] });
+      expect(isAnnouncementTargetedTo(leadsOnly, { ...engineer, roleId: ADMIN_ROLE })).toBe(false);
     });
   });
 });

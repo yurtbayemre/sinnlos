@@ -12,6 +12,12 @@ import { defineConfig } from "vitest/config";
  *     server compilers alias it to (next/dist/build/create-compiler-aliases.js
  *     createServerOnlyClientOnlyAliases). The marker is not a dependency:
  *     Next implements it at compiler level.
+ *   - `@sinnlos/domain` resolves to the package SOURCE
+ *     (packages/domain/src/index.ts), not to its dist: a test always sees
+ *     the current rules, built or not, and the apps' re-export modules hand
+ *     out the very functions the package tests check. The builds (cms, web,
+ *     the integration suite) load dist; packages/domain/src/dist.test.ts
+ *     pins dist to src.
  *
  * next-auth and @auth/core are inlined (transformed by Vite instead of
  * loaded by Node): next-auth imports `next/server` / `next/headers` without
@@ -32,6 +38,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./apps/web/src", import.meta.url)),
+      "@sinnlos/domain": fileURLToPath(new URL("./packages/domain/src/index.ts", import.meta.url)),
       "server-only": fileURLToPath(
         new URL("./apps/web/node_modules/next/dist/compiled/server-only/empty.js", import.meta.url),
       ),
@@ -39,7 +46,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
-    include: ["apps/**/*.test.ts", "infra/**/*.test.ts"],
+    include: ["apps/**/*.test.ts", "packages/**/*.test.ts", "infra/**/*.test.ts"],
     // The Strapi-in-process suite runs on its own: pnpm test:integration
     // (vitest.integration.config.ts).
     exclude: [

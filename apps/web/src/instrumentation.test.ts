@@ -5,8 +5,8 @@ import { appTimeZone } from "./lib/app-time-zone";
 
 /**
  * The web's start check of its zones (datetime contract, phase 2):
- * APP_TIME_ZONE with the same validation as the cms (plain-date.ts is
- * mirrored). The process zone decides nothing any more (every date is
+ * APP_TIME_ZONE with the same validation as the cms (plain-date.ts, from
+ * @sinnlos/domain). The process zone decides nothing any more (every date is
  * rendered in APP_TIME_ZONE), so the container runs in UTC; another TZ only
  * warns. Run by Next.js's instrumentation hook at server start.
  */

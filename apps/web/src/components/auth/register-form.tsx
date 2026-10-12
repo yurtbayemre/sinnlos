@@ -3,6 +3,7 @@
 import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { registerLocalAccount, type RegisterFormState } from "@/lib/auth-actions";
+import { AUTH_FORM_MESSAGES, PASSWORD_MIN_LENGTH } from "@/lib/auth/form-messages";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
@@ -60,11 +61,17 @@ export function RegisterForm() {
           type="password"
           autoComplete="new-password"
           required
-          minLength={6}
+          minLength={PASSWORD_MIN_LENGTH}
           className={inputClass}
         />
       </div>
-      {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+      {state.error && (
+        <p role="alert" className="text-sm text-destructive">
+          {state.error === "passwordTooShort"
+            ? t(AUTH_FORM_MESSAGES.passwordTooShort, { min: PASSWORD_MIN_LENGTH })
+            : t(AUTH_FORM_MESSAGES[state.error])}
+        </p>
+      )}
       <button
         type="submit"
         disabled={isPending}

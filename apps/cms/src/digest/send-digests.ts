@@ -29,6 +29,12 @@
  * arrived. Mentions and kudos stay per-user queries (they filter by the
  * recipient in SQL).
  *
+ * Expired announcements (DA02, owner answer 2026-09-29 (b)): the run reads
+ * only announcements that are not expired at its `now` (expiresAt unset or
+ * later, utils/announcement-expiry.ts), for every recipient, admin_role
+ * and editor included: an announcement that ended before the morning mail
+ * is no news any more.
+ *
  * Republished announcements (FX48): Strapi publishes by delete + recreate
  * and stamps a new publishedAt, so an edited announcement re-entered the
  * next digest as news. It is dropped for a user who already holds an
@@ -56,6 +62,7 @@
 
 import { GUEST, hasRole, type RoleType } from "../bootstrap/roles";
 import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
+import { notExpiredWhere } from "../utils/announcement-expiry";
 import { instantMsOrNull } from "../utils/time";
 import {
   ANNOUNCEMENT_FIND,
@@ -303,7 +310,12 @@ async function loadAnnouncementWindow(
 
   const rows = listOf<DigestAnnouncement>(
     await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      where: { publishedAt: { $gte: widest.toISOString(), $lt: now.toISOString() } },
+      where: {
+        $and: [
+          { publishedAt: { $gte: widest.toISOString(), $lt: now.toISOString() } },
+          notExpiredWhere(now),
+        ],
+      },
       select: ["id", "documentId", "title", "audience", "publishedAt"],
       populate: {
         department: { select: ["id"] },

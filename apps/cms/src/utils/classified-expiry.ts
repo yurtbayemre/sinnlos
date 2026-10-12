@@ -13,10 +13,13 @@
  * Input is the web form's 'YYYY-MM-DD'. An instant with Z or an offset is
  * accepted too and read as its calendar day in the business zone.
  */
+import { CLASSIFIED_DEFAULT_LIFETIME_DAYS, CLASSIFIED_MAX_LIFETIME_DAYS } from "@sinnlos/domain";
+
 import { comparePlainDates, todayIn, tryParsePlainDate, zonedDateOf, type PlainDate } from "./time";
 
-export const DEFAULT_LIFETIME_DAYS = 30;
-export const MAX_LIFETIME_DAYS = 90;
+/** The marketplace lifetimes of @sinnlos/domain (SH01), shared with the web form. */
+export const DEFAULT_LIFETIME_DAYS = CLASSIFIED_DEFAULT_LIFETIME_DAYS;
+export const MAX_LIFETIME_DAYS = CLASSIFIED_MAX_LIFETIME_DAYS;
 
 function requestedDate(value: unknown, timeZone: string | undefined): PlainDate | null {
   if (typeof value !== "string" || !value.trim()) return null;

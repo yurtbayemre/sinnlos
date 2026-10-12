@@ -1,37 +1,36 @@
 /**
- * Target anchoring for comments and reactions — the single source of truth
- * for "which announcement / wiki page does this row belong to?".
+ * Target anchoring for comments and reactions: "which announcement / wiki
+ * page does this row belong to?" (GitHub issue #11).
  *
- * Why this exists (GitHub issue #11): `comment` and `reaction` are polymorph
- * (`targetType` enum + target key, no FK) and used to anchor their target by
- * its NUMERIC row id (`targetId`). Both target types — announcement and
- * wiki-page — are draftAndPublish, and Strapi 5 publishes by DELETE-then-
- * RECREATE: the published row gets a NEW numeric id on every publish. So the
- * next time an editor hits "Publish", every comment and every reaction on
- * that entry pointed at a row id that no longer existed — the whole
- * discussion silently orphaned.
+ * The pure anchor rules (the target types, anchor normalisation, the anchor
+ * `where`) live in @sinnlos/domain (SH01, packages/domain/src/
+ * comment-target.ts), shared with the web; this module re-exports them and
+ * keeps what needs Strapi: the content-type uids and the database lookups.
  *
- * The `documentId` is stable across the entire draft/publish lifecycle, so
- * the anchor is `targetType` + `targetDocumentId` (string) — exactly what
- * acknowledgement, event-rsvp and notification already do (docs/architecture
- * .md §5.17 / §5.26).
- *
- * The migration bridge (deprecated `targetId` attribute, dual-write, write
- * bridge, legacy read branches, bootstrap backfill) was removed with the
- * follow-up ticket #25. The anchor is the ONLY target key now; the DB column
- * `target_id` still exists but is orphaned — Strapi's schema sync would drop
- * it on boot by default, so `config/database.ts` sets
+ * Both target types are draftAndPublish and Strapi 5 publishes by
+ * DELETE-then-RECREATE, so the anchor is `targetType` + `targetDocumentId`
+ * (the documentId is stable across the whole draft/publish lifecycle), never
+ * the numeric row id (docs/architecture.md §5.17 / §5.26). The migration
+ * bridge (deprecated `targetId` attribute, dual-write, write bridge, legacy
+ * read branches, bootstrap backfill) was removed with the follow-up ticket
+ * #25. The DB column `target_id` still exists but is orphaned: Strapi's
+ * schema sync would drop it on boot by default, so `config/database.ts` sets
  * `settings.forceMigration: false` to keep it as the rollback anchor. See
  * docs/architecture.md §5.27 for the deliberate drop later.
  *
- * Pure decision logic, no Strapi runtime, so the anchor resolution is unit
- * testable (`comment-target.test.ts`); the runtime helpers at the bottom are
- * thin wrappers over `strapi.db.query`, following the
- * `notification-source.ts` pattern.
+ * The runtime helpers at the bottom are thin wrappers over `strapi.db.query`,
+ * following the `notification-source.ts` pattern (`comment-target.test.ts`).
  */
+import {
+  anchorFromTargetRow,
+  isCommentTargetType,
+  targetAnchor,
+  targetMatchWhere,
+  type CommentTargetType,
+} from "@sinnlos/domain";
 
-/** The polymorph targets a comment/reaction can point at. */
-export type CommentTargetType = "announcement" | "wiki-page";
+export { anchorFromTargetRow, isCommentTargetType, targetAnchor, targetMatchWhere };
+export type { CommentTargetType };
 
 /** targetType → content-type uid. Both targets are draftAndPublish. */
 export const TARGET_UIDS: Record<CommentTargetType, string> = {
@@ -39,30 +38,9 @@ export const TARGET_UIDS: Record<CommentTargetType, string> = {
   "wiki-page": "api::wiki-page.wiki-page",
 };
 
-/**
- * Own keys only (FX27): `value in TARGET_UIDS` also found inherited keys such
- * as "constructor" or "__proto__", so such a targetType passed this check and
- * failed later with a 500. hasOwnProperty.call, not Object.hasOwn: the cms
- * compiles against the ES2020 lib.
- */
-export function isCommentTargetType(value: unknown): value is CommentTargetType {
-  return typeof value === "string" && Object.prototype.hasOwnProperty.call(TARGET_UIDS, value);
-}
-
 /** Content-type uid for a targetType, or `null` for an unknown value. */
 export function targetUid(targetType: unknown): string | null {
   return isCommentTargetType(targetType) ? TARGET_UIDS[targetType] : null;
-}
-
-/**
- * Normalise a documentId to a usable anchor. Anything that is not a
- * non-empty string (null, number, whitespace) means "no anchor" — never
- * treat a blank value as a valid key, it would match unrelated rows.
- */
-export function targetAnchor(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed === "" ? null : trimmed;
 }
 
 /** Input of the target resolution: the target keys of a comment/reaction. */
@@ -70,29 +48,6 @@ export interface AnchorableRow {
   id?: number | string | null;
   targetType?: string | null;
   targetDocumentId?: string | null;
-}
-
-/**
- * The anchor of a looked-up target row, or `null` when the target is gone
- * (deleted, or its published row was replaced long ago). `null` means SKIP,
- * never "invent an id".
- */
-export function anchorFromTargetRow(
-  target: { documentId?: unknown } | null | undefined,
-): string | null {
-  return targetAnchor(target?.documentId);
-}
-
-/**
- * `where` clause matching every comment/reaction of one target — the anchor
- * pair only. A row with `targetDocumentId IS NULL` never matches (the legacy
- * `targetId` read branch was removed with #25).
- */
-export function targetMatchWhere(
-  targetType: CommentTargetType,
-  targetDocumentId: string,
-): Record<string, unknown> {
-  return { targetType, targetDocumentId };
 }
 
 /** Minimal slice of the Strapi instance the runtime helpers need. */

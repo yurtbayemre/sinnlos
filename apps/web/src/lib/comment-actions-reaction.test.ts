@@ -34,7 +34,7 @@ beforeEach(() => {
 
 describe("toggleReaction (FX28)", () => {
   it.each([true, false])("sends the desired state reacted=%s with the anchor", async (reacted) => {
-    await toggleReaction(target, "heart", reacted);
+    await expect(toggleReaction(target, "heart", reacted)).resolves.toEqual({ ok: true });
     expect(sentData()).toEqual({
       emoji: "heart",
       targetType: "announcement",
@@ -51,12 +51,16 @@ describe("toggleReaction (FX28)", () => {
   it("refuses to write without a documentId anchor", async () => {
     await expect(
       toggleReaction({ type: "announcement", documentId: null }, "heart", true),
-    ).rejects.toThrow("no documentId");
+    ).resolves.toEqual({ ok: false, code: "invalid" });
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
-  it("lets a rejected write reach the caller (the bar shows the error)", async () => {
-    strapiMock.mockRejectedValue(new Error("Strapi 500"));
-    await expect(toggleReaction(target, "heart", true)).rejects.toThrow("Strapi 500");
+  it("answers a failed write as a code (the bar shows the error)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    strapiMock.mockRejectedValue(new Error("boom"));
+    await expect(toggleReaction(target, "heart", true)).resolves.toEqual({
+      ok: false,
+      code: "failed",
+    });
   });
 });

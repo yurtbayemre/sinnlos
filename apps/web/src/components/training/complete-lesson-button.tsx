@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { completeLesson } from "@/lib/training-actions";
 
 /**
@@ -26,9 +27,10 @@ export function CompleteLessonButton({
   disabled?: boolean;
 }) {
   const t = useTranslations("training");
+  const tErrors = useTranslations("actionErrors");
   const router = useRouter();
   const [justCompleted, setJustCompleted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
   const completed = completedAtLabel !== null || justCompleted;
@@ -36,16 +38,15 @@ export function CompleteLessonButton({
   const handleComplete = () => {
     if (completed || isPending || disabled) return;
     setError(null);
-    startTransition(async () => {
-      try {
-        await completeLesson(lessonDocumentId);
-        setJustCompleted(true);
-      } catch {
-        // Rejected (already completed elsewhere, course unpublished, …) —
+    startCmsAction(startTransition, {
+      action: () => completeLesson(lessonDocumentId),
+      onSuccess: () => setJustCompleted(true),
+      onFailure: (code) => {
+        // Refused (already completed elsewhere, course unpublished, …) —
         // surface it and pull the authoritative state from the server.
-        setError(t("completeFailed"));
+        setError(code);
         router.refresh();
-      }
+      },
     });
   };
 
@@ -61,7 +62,11 @@ export function CompleteLessonButton({
           {isPending ? t("completing") : t("completeButton")}
         </Button>
       )}
-      {error && <span className="text-sm text-destructive">{error}</span>}
+      {error && (
+        <span role="alert" className="text-sm text-destructive">
+          {isSharedErrorCode(error) ? tErrors(error) : t("completeFailed")}
+        </span>
+      )}
     </div>
   );
 }

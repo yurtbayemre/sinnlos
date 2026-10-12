@@ -9,6 +9,10 @@ import { departmentScopedIds, visibleIdsPolicy } from "../utils/policy-factories
  *                                         incl. anonymous callers)
  *   - documents WITH departments set    → only authenticated users whose
  *                                         department is among them
+ *   - documents with `audience` 'departments' and no departments left (the
+ *     department delete hook flags them, FX29 residual) → nobody but
+ *     admin_role / editor, until a moderator re-targets them ("flag OR
+ *     links", departmentScopedIds)
  *
  * admin_role / editor bypass the filter entirely (and keep draft reads).
  *

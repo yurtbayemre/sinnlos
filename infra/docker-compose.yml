@@ -163,6 +163,9 @@ services:
       DIGEST_REPLY_TO: ${DIGEST_REPLY_TO:-}
       DIGESTS_DISABLED: ${DIGESTS_DISABLED:-0}
       PUBLIC_WEB_URL: ${PUBLIC_WEB_URL:-${WEB_PUBLIC_URL}}
+      # Digest language for a user whose profile has none (en or de,
+      # default en like the web's DEFAULT_LOCALE; AC04).
+      DIGEST_DEFAULT_LOCALE: ${DIGEST_DEFAULT_LOCALE:-en}
       # Shared secret guarding the raw /uploads bytes (issue #21, K1): the cms
       # uploads-auth middleware only serves /uploads to callers presenting this
       # token, i.e. the web session-gate proxy — closing the /api/../uploads
@@ -226,7 +229,9 @@ services:
       AUTH_SECRET: ${AUTH_SECRET:?AUTH_SECRET must be set - openssl rand -base64 32}
       AUTH_URL: ${WEB_PUBLIC_URL}
       AUTH_TRUST_HOST: "true"
-      # Default UI language (en or de); users can override in their profile
+      # Default UI language (en or de, default en) for a visitor who has
+      # not picked one with the language switch (which also stores the
+      # choice on the profile for the digests).
       DEFAULT_LOCALE: ${DEFAULT_LOCALE:-en}
       # Local credentials next to Microsoft (break-glass); with ENTRA_ENABLED
       # not 1, local sign-in is always on.

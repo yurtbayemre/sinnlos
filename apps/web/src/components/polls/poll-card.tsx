@@ -6,8 +6,9 @@ import { useTranslations } from "next-intl";
 import { BarChart3, Clock, Check, Eye, Users, Vote } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { isPollClosed } from "@/lib/poll-close";
-import { votePoll } from "@/lib/poll-actions";
+import { votePoll, type VoteErrorCode } from "@/lib/poll-actions";
 import { pollAudienceView, pollGuestNotes } from "@/lib/poll-audience-view";
 import { canCreatePolls, isGuest } from "@/lib/roles";
 import type { PollResults } from "@/lib/types";
@@ -37,14 +38,15 @@ export function PollCard({
 }) {
   const tPolls = useTranslations("polls");
   const tCommon = useTranslations("common");
+  const tErrors = useTranslations("actionErrors");
   const router = useRouter();
   const { poll } = results;
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<VoteErrorCode | CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
 
   // Optimistic vote (issue #34): own vote and counts flip instantly, the
   // action's refresh() delivers the authoritative results prop within the
-  // same transition, and a rejected vote rolls back automatically.
+  // same transition, and a refused vote rolls back automatically.
   const [optimistic, applyVote] = useOptimistic(results, (prev: PollResults, index: number) => ({
     ...prev,
     myVoteIndex: index,
@@ -71,18 +73,17 @@ export function PollCard({
   const handleVote = (index: number) => {
     if (showResults || isPending) return;
     setError(null);
-    startTransition(async () => {
-      applyVote(index);
-      try {
-        // The option text too: the cms refuses the vote when an edit moved
-        // the options since this card rendered (the catch below reloads).
-        await votePoll(pollRef ?? poll.id, index, poll.options[index]);
-      } catch {
-        // Vote rejected (already voted, poll closed meanwhile, …) —
-        // surface it and pull the authoritative counts from the server.
-        setError(tPolls("voteFailed"));
+    startCmsAction(startTransition, {
+      optimistic: () => applyVote(index),
+      // The option text too: the cms refuses the vote when an edit moved
+      // the options since this card rendered (pollOptionsChanged).
+      action: () => votePoll(pollRef ?? poll.id, index, poll.options[index]),
+      onFailure: (code) => {
+        // Vote refused (options changed, already voted, poll closed
+        // meanwhile, …) — say why and pull the authoritative poll.
+        setError(code);
         router.refresh();
-      }
+      },
     });
   };
 
@@ -126,7 +127,11 @@ export function PollCard({
       <CardContent className="space-y-2">
         {error && (
           <p role="alert" className="text-sm text-destructive">
-            {error}
+            {error === "pollOptionsChanged"
+              ? tPolls("pollOptionsChanged")
+              : isSharedErrorCode(error)
+                ? tErrors(error)
+                : tPolls("voteFailed")}
           </p>
         )}
         {hint && <p className="text-xs text-muted-foreground">{tPolls(hint)}</p>}

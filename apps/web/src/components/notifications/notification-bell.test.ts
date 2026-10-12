@@ -1,5 +1,6 @@
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ActionResult } from "@/lib/action-result";
 import type { Notification } from "@/lib/types";
 
 /**
@@ -57,8 +58,8 @@ vi.mock("react", async (importOriginal) => ({
   useEffect: () => {},
 }));
 
-const markReadMock = vi.fn<(ids: number[]) => Promise<void>>();
-const markAllMock = vi.fn<() => Promise<void>>();
+const markReadMock = vi.fn<(ids: number[]) => Promise<ActionResult>>();
+const markAllMock = vi.fn<() => Promise<ActionResult>>();
 const pushMock = vi.fn<(href: string) => void>();
 
 vi.mock("@/lib/notification-actions", () => ({
@@ -120,6 +121,7 @@ function render(notifications: Notification[] = [unread], unreadTotal = 1) {
     badge: badge ? String(badge.props.children) : null,
     label: bell ? String(bell.props["aria-label"]) : null,
     showsError: all.some((el) => el.props.role === "alert"),
+    alertText: all.find((el) => el.props.role === "alert")?.props.children ?? null,
     clickBell: () => click(bell),
     clickNotification: () => click(find((_, el) => el.key === String(unread.id))),
     clickMarkAll: () => click(find((p) => p.children === "markAllRead")),
@@ -170,7 +172,7 @@ beforeEach(() => {
 
 describe("NotificationBell mark-read error", () => {
   it("does not show a failed click-through's error when the panel opens again", async () => {
-    markReadMock.mockRejectedValue(new Error("cms down"));
+    markReadMock.mockResolvedValue({ ok: false, code: "unavailable" });
     render().clickBell();
     render().clickNotification();
     expect(pushMock).toHaveBeenCalledWith("/announcements");
@@ -185,7 +187,7 @@ describe("NotificationBell mark-read error", () => {
   });
 
   it("keeps the inline error of a failed Mark all read while the panel stays open", async () => {
-    markAllMock.mockRejectedValue(new Error("cms down"));
+    markAllMock.mockResolvedValue({ ok: false, code: "failed" });
     render().clickBell();
     render().clickMarkAll();
     await harness.settle();
@@ -197,5 +199,19 @@ describe("NotificationBell mark-read error", () => {
     after.clickBell();
     render().clickBell();
     expect(render().showsError).toBe(false);
+  });
+
+  it("names the failure: the shared text for an outage, the bell's own otherwise (AC01)", async () => {
+    render().clickBell();
+    markAllMock.mockResolvedValue({ ok: false, code: "failed" });
+    render().clickMarkAll();
+    await harness.settle();
+    expect(render().alertText).toBe("markReadFailed");
+
+    // A rejected call (the web server unreachable) is an outage.
+    markAllMock.mockRejectedValue(new TypeError("Failed to fetch"));
+    render().clickMarkAll();
+    await harness.settle();
+    expect(render().alertText).toBe("unavailable");
   });
 });

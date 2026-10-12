@@ -12,17 +12,21 @@ import {
   isContentChannel,
   parseLiveFrame,
   type LiveFrame,
-} from "./live-contract";
+} from "./live-contract.js";
+import { COMMENT_TARGET_TYPES } from "./comment-target.js";
 
 /**
- * The live contract (LF04). The cms mirror is byte-identical
- * (live-contract-mirror.test.ts), so these cases hold on both sides.
+ * The live contract (LF04), one module for the cms emitter and the web bus,
+ * stream, subscribe route and client provider. The cms suite
+ * (apps/cms/src/utils/live-contract.test.ts) ties the channel types to the
+ * cms's TARGET_UIDS.
  */
 const DOC = "a0000000000000000000000b";
 
 describe("channels", () => {
   it("names a content channel <targetType>:<documentId> for every comment target type", () => {
     expect(LIVE_TARGET_TYPES).toEqual(["announcement", "wiki-page"]);
+    expect([...LIVE_TARGET_TYPES]).toEqual([...COMMENT_TARGET_TYPES]);
     for (const targetType of LIVE_TARGET_TYPES) {
       expect(channelFor({ targetType, targetDocumentId: DOC })).toBe(`${targetType}:${DOC}`);
     }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
+import { startCmsAction } from "@/lib/action-result";
 import { createPoll, type CreatePollErrorCode } from "@/lib/poll-actions";
 import {
   NO_GUEST_ACCESS,
@@ -83,20 +84,21 @@ export function PollForm({
     e.preventDefault();
     if (departmentsUnavailable) return;
     setError(null);
-    startTransition(async () => {
-      const result = await createPoll({
-        question,
-        options: options.map((o) => o.text),
-        closesAt,
-        anonymous,
-        departmentIds,
-        ...guestAccess,
-      });
-      if (result.ok) {
-        router.push("/polls");
-      } else {
-        setError(result.code);
-      }
+    // startCmsAction (AC01): a rejected call (the web unreachable, a stale
+    // action ID after a deploy) shows "unavailable" instead of the error
+    // page; the expired-session redirect still reaches Next.
+    startCmsAction(startTransition, {
+      action: () =>
+        createPoll({
+          question,
+          options: options.map((o) => o.text),
+          closesAt,
+          anonymous,
+          departmentIds,
+          ...guestAccess,
+        }),
+      onSuccess: () => router.push("/polls"),
+      onFailure: (code) => setError(code),
     });
   };
 

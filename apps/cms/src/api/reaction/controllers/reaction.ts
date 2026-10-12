@@ -60,7 +60,11 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
     // #28: an existing-but-invisible target answers with the EXACT same
     // 400 as a nonexistent one (§5.17, no existence oracle). Checked
     // before the toggle lookup so an out-of-audience caller can neither
-    // add NOR remove a reaction in a hidden discussion.
+    // add NOR remove a reaction in a hidden discussion. An announcement
+    // without a published row is such a target for every caller, admin_role
+    // and editor included (owner answer 2026-09-29 (b)); an expired one for
+    // everyone below them (DA02). Removing a reaction by its id
+    // (DELETE /api/reactions/:id) stays possible, as for a missing target.
     const visible = await isTargetVisible(strapi, targetType, targetDocumentId, ctx.state.user);
     if (!visible) return ctx.badRequest(WRITE_TARGET_ERRORS["unresolved-target"]);
 
@@ -120,9 +124,16 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
 
     // DA04: a concurrent create (two tabs, two devices) can have missed the
     // lookup above as well and inserted the same reaction. Keep the oldest
-    // matching row and delete the rest. Every create checks AFTER its own
-    // insert, so the one that checks last sees every row and leaves exactly
-    // one; the oldest row is never deleted here, so at least one stays.
+    // matching row (lowest id) and delete the rest. Every create checks
+    // AFTER its own insert has committed, so the one that checks last sees
+    // every row and leaves one, and a check never deletes the oldest row it
+    // sees, so the lowest id of all stays: exactly one row remains. That is
+    // all this guarantees. Which row an ANSWER names is not: ids come from a
+    // sequence, so id order is not commit order, and a create that checks
+    // before a lower id's insert commits sees only later rows, answers one
+    // of them, and the lower id's create deletes it afterwards. Every
+    // answer still names a row created for this reaction (accepted, DA04;
+    // exact answers would need the identical creates serialised).
     const rows: Array<{ id: number; documentId: string }> = await strapi.db
       .query(REACTION_UID)
       .findMany({

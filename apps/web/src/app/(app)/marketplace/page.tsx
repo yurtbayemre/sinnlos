@@ -9,9 +9,9 @@ import { getViewer } from "@/lib/viewer";
 import { mediaUrl } from "@/lib/config";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
+import { AD_CATEGORY_LABELS } from "@/lib/classified-labels";
 import {
   AD_CATEGORIES,
-  AD_CATEGORY_KEYS,
   classifiedToday,
   formatAdExpiry,
   isClassifiedCategory,
@@ -32,7 +32,11 @@ export async function generateMetadata() {
 }
 
 /** Translated price line: giveaway → "free", otherwise EUR + optional "VB". */
-function priceLabel(ad: Classified, t: (key: string) => string, locale: string) {
+function priceLabel(
+  ad: Classified,
+  t: Awaited<ReturnType<typeof getTranslations<"marketplace">>>,
+  locale: string,
+) {
   if (ad.category === "giveaway") return t("free");
   if (ad.price == null) return t("priceOnRequest");
   const formatted = ad.price.toLocaleString(locale, { style: "currency", currency: "EUR" });
@@ -114,7 +118,7 @@ export default async function MarketplacePage({
             key={c}
             href={`/marketplace?category=${c}` as Route}
             active={category === c}
-            label={t(AD_CATEGORY_KEYS[c] as Parameters<typeof t>[0])}
+            label={t(AD_CATEGORY_LABELS[c])}
           />
         ))}
       </nav>
@@ -211,7 +215,7 @@ export default async function MarketplacePage({
                     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       {ad.category && (
                         <span className="inline-flex rounded-full bg-muted px-2 py-0.5 font-medium">
-                          {t(AD_CATEGORY_KEYS[ad.category] as Parameters<typeof t>[0])}
+                          {t(AD_CATEGORY_LABELS[ad.category])}
                         </span>
                       )}
                       {ad.location && (

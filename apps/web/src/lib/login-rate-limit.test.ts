@@ -10,10 +10,13 @@ import {
   maskIdentifier,
   MAX_TRACKED_KEYS,
   rateLimitKeyForIp,
+  type LoginAttemptOutcome,
+  type LoginAttemptTicket,
+  type LoginRateLimiter,
 } from "./login-rate-limit";
 
 /**
- * Rate limiting for the password login (GitHub issue #23).
+ * Rate limiting for the password login (GitHub issue #23, FX39).
  *
  * The login had no effective limit: the Server Action posts to the
  * un-limited web catch-all router, and POST /api/auth/callback/local calls
@@ -32,12 +35,44 @@ import {
  *      an ongoing lockout out of the store),
  *   5. IPv6 keys on the /64 prefix — one subscriber is ONE bucket, not
  *      2^64 fresh ones per interface id,
- *   6. recordFailure reports exactly the transition into the block state,
- *      so authorize() logs once per lock window instead of per attempt.
+ *   6. settle("failure") reports exactly the transition into the block
+ *      state, so authorize() logs once per lock window instead of per
+ *      attempt,
+ *   7. reserve-then-verify (FX39): tryAcquire checks and reserves in one
+ *      step, so interleaved attempts cannot pass the limit before their
+ *      failures are recorded; success and neutral outcomes give the place
+ *      back.
  */
 
 // Fixed base timestamp — the clock is injected per call, no fake timers.
 const T0 = 1_700_000_000_000;
+
+/** A reservation that must be admitted. */
+function acquire(
+  limiter: LoginRateLimiter,
+  ip: string,
+  identifier: string,
+  now: number,
+): LoginAttemptTicket {
+  const ticket = limiter.tryAcquire(ip, identifier, now);
+  if (ticket === "blocked") throw new Error(`attempt ${ip} ${identifier} was blocked`);
+  return ticket;
+}
+
+/** One attempt that must be admitted, settled at once with `outcome`. */
+function attempt(
+  limiter: LoginRateLimiter,
+  ip: string,
+  identifier: string,
+  now: number,
+  outcome: LoginAttemptOutcome,
+): boolean {
+  return limiter.settle(acquire(limiter, ip, identifier, now), outcome, now);
+}
+
+/** One failed verification (reserved and settled as a failure). */
+const fail = (limiter: LoginRateLimiter, ip: string, identifier: string, now: number) =>
+  attempt(limiter, ip, identifier, now, "failure");
 
 describe("per-IP dimension", () => {
   it("blocks an IP after IP_MAX_FAILURES failures within the window", () => {
@@ -45,9 +80,10 @@ describe("per-IP dimension", () => {
     for (let i = 0; i < IP_MAX_FAILURES; i++) {
       // Distinct identifiers: only the IP dimension may trip here.
       expect(limiter.isBlocked("10.0.0.1", `user${i}@x.de`, T0 + i)).toBe(false);
-      limiter.recordFailure("10.0.0.1", `user${i}@x.de`, T0 + i);
+      fail(limiter, "10.0.0.1", `user${i}@x.de`, T0 + i);
     }
     expect(limiter.isBlocked("10.0.0.1", "someone-else@x.de", T0 + 20)).toBe(true);
+    expect(limiter.tryAcquire("10.0.0.1", "someone-else@x.de", T0 + 20)).toBe("blocked");
     // A different IP is a different bucket.
     expect(limiter.isBlocked("10.0.0.2", "someone-else@x.de", T0 + 20)).toBe(false);
   });
@@ -55,7 +91,7 @@ describe("per-IP dimension", () => {
   it("forgets IP failures once the window slides past", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IP_MAX_FAILURES; i++) {
-      limiter.recordFailure("10.0.0.1", `user${i}@x.de`, T0);
+      fail(limiter, "10.0.0.1", `user${i}@x.de`, T0);
     }
     expect(limiter.isBlocked("10.0.0.1", "victim@x.de", T0 + IP_WINDOW_MS - 1)).toBe(true);
     expect(limiter.isBlocked("10.0.0.1", "victim@x.de", T0 + IP_WINDOW_MS)).toBe(false);
@@ -64,9 +100,9 @@ describe("per-IP dimension", () => {
   it("slides — expired failures stop counting individually", () => {
     const limiter = createLoginRateLimiter();
     const half = IP_MAX_FAILURES / 2;
-    for (let i = 0; i < half; i++) limiter.recordFailure("10.0.0.9", `a${i}@x.de`, T0);
+    for (let i = 0; i < half; i++) fail(limiter, "10.0.0.9", `a${i}@x.de`, T0);
     for (let i = 0; i < half; i++) {
-      limiter.recordFailure("10.0.0.9", `b${i}@x.de`, T0 + IP_WINDOW_MS / 2);
+      fail(limiter, "10.0.0.9", `b${i}@x.de`, T0 + IP_WINDOW_MS / 2);
     }
     // All 10 failures inside the window: blocked.
     expect(limiter.isBlocked("10.0.0.9", "x@x.de", T0 + IP_WINDOW_MS - 1)).toBe(true);
@@ -78,8 +114,18 @@ describe("per-IP dimension", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < 100; i++) {
       expect(limiter.isBlocked("10.0.0.1", `user${i}@x.de`, T0 + i)).toBe(false);
-      limiter.recordSuccess(`user${i}@x.de`);
+      attempt(limiter, "10.0.0.1", `user${i}@x.de`, T0 + i, "success");
     }
+    expect(limiter.size()).toBe(0);
+  });
+
+  it("never throttles on neutral outcomes (429, 5xx, network errors)", () => {
+    const limiter = createLoginRateLimiter();
+    for (let i = 0; i < 100; i++) {
+      attempt(limiter, "10.0.0.1", "victim@x.de", T0 + i, "neutral");
+    }
+    expect(limiter.isBlocked("10.0.0.1", "victim@x.de", T0 + 100)).toBe(false);
+    expect(limiter.size()).toBe(0);
   });
 });
 
@@ -88,7 +134,7 @@ describe("per-identifier dimension", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
       // One failure per IP: only the identifier dimension may trip.
-      limiter.recordFailure(`10.0.0.${i}`, "victim@x.de", T0 + i);
+      fail(limiter, `10.0.0.${i}`, "victim@x.de", T0 + i);
     }
     expect(limiter.isBlocked("192.168.7.7", "victim@x.de", T0 + 100)).toBe(true);
     // An unrelated account from a fresh IP is unaffected.
@@ -98,7 +144,7 @@ describe("per-identifier dimension", () => {
   it("holds the lockout beyond the IP window and releases after its own", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
-      limiter.recordFailure(`10.0.0.${i}`, "victim@x.de", T0);
+      fail(limiter, `10.0.0.${i}`, "victim@x.de", T0);
     }
     // Long after every per-IP bucket expired, the account lock still holds.
     expect(limiter.isBlocked("10.0.0.0", "victim@x.de", T0 + 2 * IP_WINDOW_MS)).toBe(true);
@@ -108,22 +154,88 @@ describe("per-identifier dimension", () => {
   it("normalises identifiers case-insensitively into ONE bucket", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
-      limiter.recordFailure(`10.1.0.${i}`, i % 2 ? "Victim@X.de" : " victim@x.de ", T0 + i);
+      fail(limiter, `10.1.0.${i}`, i % 2 ? "Victim@X.de" : " victim@x.de ", T0 + i);
     }
     expect(limiter.isBlocked("10.2.0.1", "VICTIM@x.DE", T0 + 100)).toBe(true);
   });
 
   it("resets the identifier bucket on success — the IP bucket stays", () => {
     const limiter = createLoginRateLimiter();
-    for (let i = 0; i < IP_MAX_FAILURES; i++) {
-      limiter.recordFailure("10.0.0.1", "victim@x.de", T0 + i);
+    for (let i = 0; i < IP_MAX_FAILURES - 1; i++) {
+      fail(limiter, "10.0.0.1", "victim@x.de", T0 + i);
     }
-    // Both dimensions tripped; the account lock is visible from another IP.
-    expect(limiter.isBlocked("10.0.0.2", "victim@x.de", T0 + 20)).toBe(true);
-    limiter.recordSuccess("Victim@X.de"); // normalised like the failures
+    // One place left in both buckets: the victim's own correct sign-in.
+    attempt(limiter, "10.0.0.1", "Victim@X.de", T0 + 15, "success");
     expect(limiter.isBlocked("10.0.0.2", "victim@x.de", T0 + 20)).toBe(false);
-    // The attacker's IP (or shared NAT) stays blocked.
-    expect(limiter.isBlocked("10.0.0.1", "anyone@x.de", T0 + 20)).toBe(true);
+    // The shared IP keeps its failures: one more trips it.
+    fail(limiter, "10.0.0.1", "anyone@x.de", T0 + 21);
+    expect(limiter.isBlocked("10.0.0.1", "someone@x.de", T0 + 22)).toBe(true);
+  });
+});
+
+describe("reserve, then verify (FX39)", () => {
+  it("interleaved acquires: the attempt past the limit is refused before any settles", () => {
+    const limiter = createLoginRateLimiter();
+    const tickets = Array.from({ length: IDENTIFIER_MAX_FAILURES }, (_, i) =>
+      acquire(limiter, `10.3.0.${i}`, "victim@x.de", T0),
+    );
+    // Every place is held by an attempt in flight: a burst cannot pass.
+    expect(limiter.tryAcquire("10.3.1.1", "victim@x.de", T0)).toBe("blocked");
+    expect(limiter.isBlocked("10.3.1.1", "victim@x.de", T0)).toBe(true);
+    // They all fail: exactly one reports the transition.
+    const reports = tickets.map((ticket) => limiter.settle(ticket, "failure", T0 + 1));
+    expect(reports.filter(Boolean)).toHaveLength(1);
+    expect(reports.at(-1)).toBe(true);
+    expect(limiter.tryAcquire("10.3.1.1", "victim@x.de", T0 + 2)).toBe("blocked");
+  });
+
+  it("the per-IP places are reserved the same way", () => {
+    const limiter = createLoginRateLimiter();
+    for (let i = 0; i < IP_MAX_FAILURES; i++) acquire(limiter, "10.4.0.1", `u${i}@x.de`, T0);
+    expect(limiter.tryAcquire("10.4.0.1", "fresh@x.de", T0)).toBe("blocked");
+  });
+
+  it("neutral outcomes and successes give their places back", () => {
+    const limiter = createLoginRateLimiter();
+    const [first, second, ...rest] = Array.from({ length: IDENTIFIER_MAX_FAILURES }, (_, i) =>
+      acquire(limiter, `10.5.0.${i}`, "victim@x.de", T0),
+    );
+    expect(limiter.tryAcquire("10.5.1.1", "victim@x.de", T0)).toBe("blocked");
+    // Strapi down (5xx, 429, network): the place is free again.
+    expect(limiter.settle(first!, "neutral", T0 + 1)).toBe(false);
+    const next = acquire(limiter, "10.5.1.1", "victim@x.de", T0 + 2);
+    // A success frees its place and clears the identifier's other entries,
+    // the reservations in flight included.
+    limiter.settle(second!, "success", T0 + 3);
+    expect(limiter.isBlocked("10.5.2.1", "victim@x.de", T0 + 4)).toBe(false);
+    // A reservation cleared by that success still counts when it fails.
+    for (const ticket of rest) limiter.settle(ticket, "failure", T0 + 5);
+    limiter.settle(next, "failure", T0 + 5);
+    expect(limiter.isBlocked("10.5.2.1", "victim@x.de", T0 + 6)).toBe(false);
+    expect(fail(limiter, "10.5.2.1", "victim@x.de", T0 + 7)).toBe(true);
+    expect(limiter.isBlocked("10.5.2.2", "victim@x.de", T0 + 8)).toBe(true);
+  });
+
+  it("settles a ticket once; a second settle and a foreign ticket are ignored", () => {
+    const limiter = createLoginRateLimiter();
+    const other = createLoginRateLimiter();
+    for (let i = 0; i < IP_MAX_FAILURES - 1; i++) fail(limiter, "10.6.0.1", `u${i}@x.de`, T0);
+    const ticket = acquire(limiter, "10.6.0.1", "last@x.de", T0);
+    expect(other.settle(ticket, "failure", T0)).toBe(false);
+    expect(limiter.settle(ticket, "failure", T0)).toBe(true);
+    expect(limiter.settle(ticket, "failure", T0)).toBe(false);
+    expect(limiter.settle(ticket, "success", T0)).toBe(false);
+    expect(limiter.isBlocked("10.6.0.1", "fresh@x.de", T0 + 1)).toBe(true);
+  });
+
+  it("a blocked attempt records nothing", () => {
+    const limiter = createLoginRateLimiter();
+    for (let i = 0; i < IP_MAX_FAILURES; i++) fail(limiter, "10.7.0.1", `u${i}@x.de`, T0);
+    const size = limiter.size();
+    for (let i = 0; i < 50; i++) {
+      expect(limiter.tryAcquire("10.7.0.1", `flood${i}@x.de`, T0 + 1)).toBe("blocked");
+    }
+    expect(limiter.size()).toBe(size);
   });
 });
 
@@ -131,7 +243,7 @@ describe("memory bounds", () => {
   it("holds the hard key cap under a flood of random identifiers", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < MAX_TRACKED_KEYS + 500; i++) {
-      limiter.recordFailure(`10.9.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + i);
+      fail(limiter, `10.9.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + i);
     }
     // Both dimensions together never exceed 2 * cap.
     expect(limiter.size()).toBeLessThanOrEqual(2 * MAX_TRACKED_KEYS);
@@ -140,11 +252,11 @@ describe("memory bounds", () => {
   it("an ACTIVELY BLOCKED bucket survives a flood past the key cap", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
-      limiter.recordFailure(`10.0.1.${i}`, "victim@x.de", T0);
+      fail(limiter, `10.0.1.${i}`, "victim@x.de", T0);
     }
     expect(limiter.isBlocked("10.9.9.9", "victim@x.de", T0 + 1)).toBe(true);
     for (let i = 0; i < MAX_TRACKED_KEYS; i++) {
-      limiter.recordFailure(`10.8.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 2);
+      fail(limiter, `10.8.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 2);
     }
     // The victim bucket is the oldest, but it is in the block state —
     // eviction skips it and takes the oldest NON-blocked bucket instead,
@@ -156,25 +268,26 @@ describe("memory bounds", () => {
     const limiter = createLoginRateLimiter();
     // One failure short of the identifier limit: not blocked yet.
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES - 1; i++) {
-      limiter.recordFailure(`10.0.1.${i}`, "victim@x.de", T0);
+      fail(limiter, `10.0.1.${i}`, "victim@x.de", T0);
     }
     for (let i = 0; i < MAX_TRACKED_KEYS; i++) {
-      limiter.recordFailure(`10.8.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 1);
+      fail(limiter, `10.8.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 1);
     }
     // The near-blocked bucket was evictable and gone — one more failure
     // starts a fresh count of 1 instead of reaching the limit. Accepted:
     // only ACTIVE lockouts are protected, partial counts may be washed.
-    limiter.recordFailure("10.0.1.9", "victim@x.de", T0 + 2);
+    fail(limiter, "10.0.1.9", "victim@x.de", T0 + 2);
     expect(limiter.isBlocked("10.9.9.9", "victim@x.de", T0 + 3)).toBe(false);
   });
 
   it("evicts the oldest bucket anyway when all probed buckets are blocked (hard cap)", () => {
     const limiter = createLoginRateLimiter();
     // Fill the head of the identifier map with EVICTION_SCAN_LIMIT blocked
-    // buckets — the eviction probe will see only blocked candidates.
+    // buckets — the eviction probe will see only blocked candidates. Each
+    // failure comes from its own IP, so only the identifier buckets block.
     for (let i = 0; i < EVICTION_SCAN_LIMIT; i++) {
       for (let j = 0; j < IDENTIFIER_MAX_FAILURES; j++) {
-        limiter.recordFailure(`10.${j}.0.1`, `hot${i}@x.de`, T0);
+        fail(limiter, `10.${j}.${i}.1`, `hot${i}@x.de`, T0);
       }
     }
     expect(limiter.isBlocked("10.99.99.99", "hot0@x.de", T0 + 1)).toBe(true);
@@ -182,7 +295,7 @@ describe("memory bounds", () => {
     // blocked buckets and the hard memory cap wins — the oldest blocked
     // bucket (hot0) is evicted, the younger ones survive.
     for (let i = 0; i < MAX_TRACKED_KEYS - EVICTION_SCAN_LIMIT + 1; i++) {
-      limiter.recordFailure(`10.8.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 2);
+      fail(limiter, `10.200.${i >> 8}.${i & 255}`, `rnd${i}@x.de`, T0 + 2);
     }
     expect(limiter.isBlocked("10.99.99.99", "hot0@x.de", T0 + 3)).toBe(false);
     expect(limiter.isBlocked("10.99.99.99", "hot1@x.de", T0 + 3)).toBe(true);
@@ -190,7 +303,7 @@ describe("memory bounds", () => {
 
   it("prunes an expired bucket from the store on access", () => {
     const limiter = createLoginRateLimiter();
-    limiter.recordFailure("10.0.0.1", "user@x.de", T0);
+    fail(limiter, "10.0.0.1", "user@x.de", T0);
     expect(limiter.size()).toBe(2); // one IP bucket + one identifier bucket
     limiter.isBlocked("10.0.0.1", "user@x.de", T0 + IDENTIFIER_WINDOW_MS);
     expect(limiter.size()).toBe(0);
@@ -202,7 +315,7 @@ describe("IPv6 /64 bucketing", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IP_MAX_FAILURES; i++) {
       // Distinct addresses (and identifiers) — only the /64 prefix repeats.
-      limiter.recordFailure(`2a03:4000:64:79a::${i.toString(16)}`, `u${i}@x.de`, T0 + i);
+      fail(limiter, `2a03:4000:64:79a::${i.toString(16)}`, `u${i}@x.de`, T0 + i);
     }
     // Same /64, different notation and interface id: same bucket, blocked.
     expect(limiter.isBlocked("2a03:4000:0064:079a:dead:beef:1:2", "x@x.de", T0 + 20)).toBe(true);
@@ -233,45 +346,43 @@ describe("rateLimitKeyForIp", () => {
   });
 });
 
-describe("block-transition reporting (recordFailure return value)", () => {
+describe("block-transition reporting (settle's return value)", () => {
   it("reports true exactly on the failure that tips the IP bucket", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IP_MAX_FAILURES - 1; i++) {
       // Distinct identifiers: only the IP dimension can tip here.
-      expect(limiter.recordFailure("10.0.0.1", `u${i}@x.de`, T0 + i)).toBe(false);
+      expect(fail(limiter, "10.0.0.1", `u${i}@x.de`, T0 + i)).toBe(false);
     }
-    expect(limiter.recordFailure("10.0.0.1", "u-last@x.de", T0 + 20)).toBe(true);
+    expect(fail(limiter, "10.0.0.1", "u-last@x.de", T0 + 20)).toBe(true);
   });
 
   it("reports true exactly on the failure that tips the identifier bucket", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IDENTIFIER_MAX_FAILURES - 1; i++) {
       // Distinct IPs: only the identifier dimension can tip here.
-      expect(limiter.recordFailure(`10.0.0.${i}`, "victim@x.de", T0 + i)).toBe(false);
+      expect(fail(limiter, `10.0.0.${i}`, "victim@x.de", T0 + i)).toBe(false);
     }
-    expect(limiter.recordFailure("10.0.0.99", "victim@x.de", T0 + 20)).toBe(true);
+    expect(fail(limiter, "10.0.0.99", "victim@x.de", T0 + 20)).toBe(true);
   });
 
-  it("stays false for further failures while already blocked", () => {
+  it("reports false for success and neutral outcomes", () => {
     const limiter = createLoginRateLimiter();
-    for (let i = 0; i < IP_MAX_FAILURES; i++) {
-      limiter.recordFailure("10.0.0.1", `u${i}@x.de`, T0 + i);
-    }
-    // authorize() would not even record while blocked — but if a caller
-    // does, the transition must not be reported (and logged) again.
-    expect(limiter.recordFailure("10.0.0.1", "u-more@x.de", T0 + 21)).toBe(false);
+    for (let i = 0; i < IP_MAX_FAILURES - 1; i++) fail(limiter, "10.0.0.1", `u${i}@x.de`, T0);
+    expect(attempt(limiter, "10.0.0.1", "ok@x.de", T0 + 1, "success")).toBe(false);
+    expect(attempt(limiter, "10.0.0.1", "down@x.de", T0 + 2, "neutral")).toBe(false);
+    expect(limiter.isBlocked("10.0.0.1", "next@x.de", T0 + 3)).toBe(false);
   });
 
   it("reports a NEW transition once the window slid and the bucket refills", () => {
     const limiter = createLoginRateLimiter();
     for (let i = 0; i < IP_MAX_FAILURES; i++) {
-      limiter.recordFailure("10.0.0.1", `u${i}@x.de`, T0);
+      fail(limiter, "10.0.0.1", `u${i}@x.de`, T0);
     }
     const later = T0 + IP_WINDOW_MS + 1;
     for (let i = 0; i < IP_MAX_FAILURES - 1; i++) {
-      expect(limiter.recordFailure("10.0.0.1", `v${i}@x.de`, later + i)).toBe(false);
+      expect(fail(limiter, "10.0.0.1", `v${i}@x.de`, later + i)).toBe(false);
     }
-    expect(limiter.recordFailure("10.0.0.1", "v-last@x.de", later + 20)).toBe(true);
+    expect(fail(limiter, "10.0.0.1", "v-last@x.de", later + 20)).toBe(true);
   });
 });
 

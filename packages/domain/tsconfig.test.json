@@ -1,0 +1,12 @@
+// Type-checks the package tests (the root vitest run strips types). Tests
+// may use Node (node:fs, node:module), so this program loads @types/node,
+// which declares URL itself: src/env.d.ts stays out.
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": ["node"]
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/env.d.ts"]
+}

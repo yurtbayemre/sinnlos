@@ -10,12 +10,8 @@ import { parseRowId } from "@/lib/entry-id";
 import { tryFetch } from "@/lib/safe-fetch";
 import { relativeTime } from "@/lib/relative-time";
 import { appTimeZone } from "@/lib/app-time-zone";
-import {
-  AD_CATEGORY_KEYS,
-  classifiedToday,
-  formatAdExpiry,
-  isClassifiedExpired,
-} from "@/lib/classified-shared";
+import { AD_CATEGORY_LABELS } from "@/lib/classified-labels";
+import { classifiedToday, formatAdExpiry, isClassifiedExpired } from "@/lib/classified-shared";
 import { isAdmin } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
 import { initials } from "@/lib/utils";
@@ -116,7 +112,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               {ad.category && (
                 <span className="inline-flex rounded-full bg-muted px-2 py-0.5 font-medium">
-                  {t(AD_CATEGORY_KEYS[ad.category] as Parameters<typeof t>[0])}
+                  {t(AD_CATEGORY_LABELS[ad.category])}
                 </span>
               )}
               <span>

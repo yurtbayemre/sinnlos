@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { renderDigest, totalItems } from "./render-digest";
+import {
+  DIGEST_FALLBACK_LOCALE,
+  digestDefaultLocale,
+  digestLocale,
+  renderDigest,
+  totalItems,
+} from "./render-digest";
 
 const CONTENT = {
   announcements: [{ title: "All-hands Freitag", author: "Maria" }],
@@ -72,5 +78,59 @@ describe("renderDigest", () => {
     );
     expect(evil.html).not.toContain("<script>");
     expect(evil.html).toContain("&lt;script&gt;");
+  });
+});
+
+/**
+ * AC04: a user without a profile locale, or with one that is no digest
+ * language, gets DIGEST_DEFAULT_LOCALE; unset or invalid, that is English
+ * (owner decision 2026-09-29).
+ */
+describe("the digest language fallback (DIGEST_DEFAULT_LOCALE)", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  const render = (locale: string | null | undefined, defaultLocale?: "en" | "de") =>
+    renderDigest(CONTENT, { displayName: "Casey", locale, baseUrl: "https://x", defaultLocale });
+
+  it("keeps the profile's language whatever the default", () => {
+    expect(render("de", "en").text).toContain("Hallo Casey,");
+    expect(render("en", "de").text).toContain("Hi Casey,");
+  });
+
+  it.each([null, undefined, "", "fr", "DE", "de-DE", " de"])(
+    "uses the default language for the profile locale %j",
+    (locale) => {
+      expect(render(locale, "de").text).toContain("Hallo Casey,");
+      expect(render(locale, "en").text).toContain("Hi Casey,");
+    },
+  );
+
+  it("reads DIGEST_DEFAULT_LOCALE when no default is passed", () => {
+    vi.stubEnv("DIGEST_DEFAULT_LOCALE", "de");
+    expect(render(null).subject).toContain("Neuigkeiten");
+    vi.stubEnv("DIGEST_DEFAULT_LOCALE", "en");
+    expect(render(null).subject).toContain("updates");
+    vi.stubEnv("DIGEST_DEFAULT_LOCALE", undefined);
+    expect(render(null).subject).toContain("updates");
+  });
+
+  it("falls back to English for an unset or invalid DIGEST_DEFAULT_LOCALE, warning once", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    expect(DIGEST_FALLBACK_LOCALE).toBe("en");
+    expect(digestDefaultLocale({})).toBe("en");
+    expect(digestDefaultLocale({ DIGEST_DEFAULT_LOCALE: "" })).toBe("en");
+    expect(digestDefaultLocale({ DIGEST_DEFAULT_LOCALE: " DE " })).toBe("de");
+    expect(digestDefaultLocale({ DIGEST_DEFAULT_LOCALE: "fr" })).toBe("en");
+    expect(digestDefaultLocale({ DIGEST_DEFAULT_LOCALE: "german" })).toBe("en");
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("takes only a digest language from the profile", () => {
+    expect(digestLocale("de", "en")).toBe("de");
+    expect(digestLocale("xx", "de")).toBe("de");
+    expect(digestLocale(7, "en")).toBe("en");
   });
 });

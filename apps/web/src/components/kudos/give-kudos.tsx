@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { useTranslations } from "next-intl";
 import { Award, Send, X, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { sendKudos } from "@/lib/kudos-actions";
 import type { KudosRecipient } from "@/lib/people-dto";
 import type { KudosValue } from "@/lib/types";
@@ -31,12 +32,13 @@ const VALUES: {
 export function GiveKudos({ people }: { people: KudosRecipient[] }) {
   const t = useTranslations("kudos");
   const tCommon = useTranslations("common");
+  const tErrors = useTranslations("actionErrors");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<KudosRecipient | null>(null);
   const [message, setMessage] = useState("");
   const [value, setValue] = useState<KudosValue>("teamwork");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<CommonCode | null>(null);
   const [isPending, startTransition] = useTransition();
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -78,15 +80,11 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
     e.preventDefault();
     if (!selected || !message.trim()) return;
     setError(null);
-    startTransition(async () => {
-      try {
-        await sendKudos(selected.id, message.trim(), value);
-      } catch {
-        // Keep the dialog (and its content) so the user can retry.
-        setError(t("sendFailed"));
-        return;
-      }
-      reset();
+    startCmsAction(startTransition, {
+      action: () => sendKudos(selected.id, message.trim(), value),
+      onSuccess: reset,
+      // Keep the dialog (and its content) so the user can retry.
+      onFailure: setError,
     });
   };
 
@@ -252,7 +250,7 @@ export function GiveKudos({ people }: { people: KudosRecipient[] }) {
 
                 {error && (
                   <p role="alert" className="text-sm text-destructive">
-                    {error}
+                    {isSharedErrorCode(error) ? tErrors(error) : t("sendFailed")}
                   </p>
                 )}
 

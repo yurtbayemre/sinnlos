@@ -21,8 +21,8 @@
  * notifications included (LF01).
  *
  * Event shapes and channel names come from the live contract
- * (./live-contract.ts, byte-identical to the web's lib/live-contract.ts,
- * LF04). A content event whose target has no valid channel is dropped here:
+ * (./live-contract.ts, from @sinnlos/domain like the web's
+ * lib/live-contract.ts, LF04). A content event whose target has no valid channel is dropped here:
  * no connection can subscribe to it.
  *
  * Post-commit (LF02): the DB subscriber runs inside the write's

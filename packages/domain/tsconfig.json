@@ -1,0 +1,26 @@
+// The package program: src without the tests, as both builds compile it.
+//
+// lib ES2020 and no ambient types on purpose: the package runs in the cms
+// (Node, CommonJS), in web server code and in web client components, so it
+// may use ECMAScript and the WHATWG URL parser (src/env.d.ts) and nothing
+// else. lib.dom or @types/node here would let window/document or
+// process/Buffer compile. ES2020 is also the lib the cms compiles against
+// (Strapi's server tsconfig).
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020"],
+    "types": [],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "isolatedModules": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "rootDir": "src",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["src/**/*.test.ts"]
+}

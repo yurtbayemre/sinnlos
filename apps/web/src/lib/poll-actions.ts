@@ -1,7 +1,12 @@
 "use server";
 
 import { refresh } from "next/cache";
-import { unstable_rethrow } from "next/navigation";
+import {
+  actionFailure,
+  runCmsAction,
+  type ActionResult,
+  type CommonCode,
+} from "@/lib/action-result";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { parseEntryRef } from "@/lib/entry-id";
 import { pollClosesAtForDay } from "@/lib/poll-close";
@@ -10,7 +15,11 @@ import { canCreatePolls } from "@/lib/roles";
 import { strapi } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
 
-export type CreatePollErrorCode = "missingQuestion" | "tooFewOptions" | "forbidden" | "failed";
+/** createPoll's own codes: the local checks before any request. */
+type CreatePollCode = "missingQuestion" | "tooFewOptions";
+
+/** Every code createPoll answers; the form shows polls.formError_<code>. */
+export type CreatePollErrorCode = CreatePollCode | CommonCode;
 
 export type CreatePollInput = {
   question: string;
@@ -28,28 +37,37 @@ export type CreatePollInput = {
   guestsCanVote?: boolean;
 };
 
-export type CreatePollResult = { ok: true } | { ok: false; code: CreatePollErrorCode };
+/** An ActionResult (AC01): the local checks, then the common CMS mapping. */
+export type CreatePollResult = ActionResult<CreatePollCode>;
 
 export async function createPoll(input: CreatePollInput): Promise<CreatePollResult> {
   // Poll creation is CMS-gated by global::is-admin-or-editor — mirror that
   // here so non-privileged users get a clean error instead of a 403. The
   // role is read fresh from the CMS (no render memo in a Server Action).
-  if (!canCreatePolls((await getViewer()).role)) return { ok: false, code: "forbidden" };
+  // A viewer without an id: /api/me could not be read (getViewer() answers
+  // ANONYMOUS_VIEWER during a CMS outage) or there is no session (only a
+  // crafted call, the form sits behind the sign-in). Nothing is sent either
+  // way; the outage is the case an author meets, so it answers
+  // "unavailable", not a missing permission. DEMO_VIEWER has an id, so the
+  // demo still answers "forbidden" without a request.
+  const viewer = await getViewer();
+  if (viewer.id === null) return actionFailure("unavailable");
+  if (!canCreatePolls(viewer.role)) return actionFailure("forbidden");
 
   const question = input.question.trim();
-  if (!question) return { ok: false, code: "missingQuestion" };
+  if (!question) return actionFailure("missingQuestion");
 
   // Trim, drop empties and dedupe — votes reference options by INDEX, so
   // identical entries would be indistinguishable in the results.
   const options = [...new Set(input.options.map((o) => o.trim()).filter(Boolean))];
-  if (options.length < 2) return { ok: false, code: "tooFewOptions" };
+  if (options.length < 2) return actionFailure("tooFewOptions");
 
   // "Closes on D" = D 23:59:59 in APP_TIME_ZONE (datetime contract), not in
   // the zone this process happens to run in.
   let closesAt: string | null = null;
   if (input.closesAt) {
     closesAt = pollClosesAtForDay(input.closesAt, appTimeZone());
-    if (!closesAt) return { ok: false, code: "failed" };
+    if (!closesAt) return actionFailure("invalid");
   }
 
   // Department targeting (decision 02): the flag is set explicitly, so the
@@ -65,36 +83,33 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
   // visibility. The CMS decides per guest from these two fields.
   const { visibleToGuests, guestsCanVote } = normalizeGuestAccess(input);
 
-  try {
-    // Polls use draftAndPublish — without status=published the REST create
-    // lands as an invisible draft.
-    await strapi<unknown>(`/api/polls?status=published`, {
-      method: "POST",
-      body: JSON.stringify({
-        data: {
-          question,
-          options,
-          closesAt,
-          anonymous: input.anonymous,
-          audience: departmentIds.length > 0 ? "departments" : "all",
-          departments: departmentIds,
-          visibleToGuests,
-          guestsCanVote,
-        },
-      }),
-    });
-  } catch (e) {
-    // strapi() answers an expired session with redirect() (NEXT_REDIRECT);
-    // it must reach Next.js so the author lands on /sign-in?expired=1
-    // instead of a "failed" message (FX47).
-    unstable_rethrow(e);
-    return { ok: false, code: "failed" };
-  }
-
+  // runCmsAction lets strapi()'s redirect on an expired session
+  // (NEXT_REDIRECT) reach Next.js, so the author lands on
+  // /sign-in?expired=1 instead of a failure message (FX47).
   // No refresh(): the form navigates to /polls right after this action, and
   // that page reads the list uncached (D-DC01). Refreshing the current route
   // (/polls/new) first would only re-render the form (FX20).
-  return { ok: true };
+  return runCmsAction<CreatePollCode>(
+    () =>
+      // Polls use draftAndPublish — without status=published the REST
+      // create lands as an invisible draft.
+      strapi<unknown>(`/api/polls?status=published`, {
+        method: "POST",
+        body: JSON.stringify({
+          data: {
+            question,
+            options,
+            closesAt,
+            anonymous: input.anonymous,
+            audience: departmentIds.length > 0 ? "departments" : "all",
+            departments: departmentIds,
+            visibleToGuests,
+            guestsCanVote,
+          },
+        }),
+      }),
+    { label: "[polls] create" },
+  );
 }
 
 /**
@@ -103,6 +118,17 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
  * call can make the action forward.
  */
 const MAX_OPTION_TEXT = 10_000;
+
+/** votePoll's own code: the stale-card refusal (batch 9). */
+export type VoteErrorCode = "pollOptionsChanged";
+
+/**
+ * The cms's stale-card refusal (poll-vote controller: ctx.badRequest). A
+ * bare badRequest carries no machine code — every 400 there is a
+ * BadRequestError — so the parsed envelope message is compared exactly;
+ * poll-actions.test.ts pins the text against the cms controller.
+ */
+const OPTIONS_CHANGED = "Poll options changed";
 
 /**
  * Casts the caller's vote. `pollRef` is the poll's documentId (DA01, the
@@ -114,23 +140,39 @@ const MAX_OPTION_TEXT = 10_000;
  * `option` is the answer text the card showed at `optionIndex`. The cms
  * stores the index, so after an edit that reordered or replaced the options
  * it refuses a vote whose text no longer sits there (400 "Poll options
- * changed") instead of recording a different answer; the card then shows
- * voteFailed and reloads. Without it (an older card) the cms does not
- * compare.
+ * changed") instead of recording a different answer; that refusal answers
+ * its own code, pollOptionsChanged, and the card says so and reloads.
+ * Without it (an older card) the cms does not compare.
+ *
+ * Answers an ActionResult (AC01): a bad reference or option text is
+ * "invalid" before any request; the cms's other refusals (already voted,
+ * closed, outside the audience) take the common mapping.
  */
-export async function votePoll(pollRef: string | number, optionIndex: number, option?: string) {
+export async function votePoll(
+  pollRef: string | number,
+  optionIndex: number,
+  option?: string,
+): Promise<ActionResult<VoteErrorCode>> {
   const ref = parseEntryRef(pollRef);
-  if (!ref) throw new Error("invalid poll reference");
+  if (!ref) return actionFailure("invalid");
   if (option !== undefined && (typeof option !== "string" || option.length > MAX_OPTION_TEXT)) {
-    throw new Error("invalid poll option");
+    return actionFailure("invalid");
   }
   const address = "documentId" in ref ? ref.documentId : String(ref.id);
-  const result = await strapi<unknown>(`/api/polls/${address}/vote`, {
-    method: "POST",
-    body: JSON.stringify(option === undefined ? { optionIndex } : { optionIndex, option }),
-  });
-  // Poll results are read uncached (D-DC01) — refresh so a revisit and the
-  // other polls on the page show current counts without a manual reload.
-  refresh();
-  return result;
+  return runCmsAction<VoteErrorCode>(
+    () =>
+      strapi<unknown>(`/api/polls/${address}/vote`, {
+        method: "POST",
+        body: JSON.stringify(option === undefined ? { optionIndex } : { optionIndex, option }),
+      }),
+    {
+      label: "[polls] vote",
+      mapError: (cms) =>
+        cms.status === 400 && cms.message === OPTIONS_CHANGED ? "pollOptionsChanged" : undefined,
+      // Poll results are read uncached (D-DC01) — refresh so a revisit and
+      // the other polls on the page show current counts without a manual
+      // reload.
+      after: () => refresh(),
+    },
+  );
 }

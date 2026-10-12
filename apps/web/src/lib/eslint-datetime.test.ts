@@ -5,8 +5,8 @@ import { describe, expect, it } from "vitest";
  * The web's local-Date ban (datetime contract, decision 04, C5; D-DT4 web
  * part) mirrors the cms's: every selector of the cms rule is in the web
  * config, as an error, for all files, tests included, with only
- * src/lib/plain-date.ts exempt. Text level on purpose (the mirror tests do
- * the same): no web test loads cms code or the ESLint runtime.
+ * src/lib/plain-date.ts exempt. Text level on purpose: no web test loads
+ * cms code or the ESLint runtime.
  *
  * Line endings are normalised: a Windows checkout may convert them.
  */

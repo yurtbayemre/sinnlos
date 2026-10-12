@@ -228,6 +228,9 @@ export function uniqueSlugFrom(source: string): DerivedField {
  * Wiki page content a non-privileged author may write. Not `slug`: it is a
  * globally unique uid, so the server derives it on create (uniqueSlugFrom)
  * and it stays fixed afterwards (admins and editors may still change it).
+ * `tags`, `tocEnabled` and `order` stay writable: the web renders them
+ * since DA02 (owner answer 2026-09-29 (b); apps/web/src/lib/wiki-content.ts:
+ * chips, the table of contents, the space's page order).
  */
 const WIKI_PAGE_CONTENT = {
   title: value(valueChecks.requiredString),

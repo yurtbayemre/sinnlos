@@ -5,6 +5,7 @@ import {
   isAnnouncementVisible,
   type AnnouncementTargeting,
 } from "../../../utils/announcement-audience";
+import { isAnnouncementExpired, type ExpiringRow } from "../../../utils/announcement-expiry";
 import { loadUserScope, toAudienceScope } from "../../../utils/visible-ids";
 
 /**
@@ -44,18 +45,23 @@ interface AckCaller {
  * (utils/announcement-audience.ts: admin_role/editor bypass, else department
  * AND team (member or lead) AND role over whatever is set), with the bypass
  * decided by hasRole and the scope mapped by toAudienceScope, as every
- * announcement read does (PL01). Any other target type fails closed:
- * documents have no requiresAck yet, and would need their own visibility
- * rules here once they do.
+ * announcement read does (PL01). An expired announcement (DA02) is
+ * invisible like one outside the audience, by the shared rule
+ * (utils/announcement-expiry.ts) and in the order isTargetVisible checks a
+ * comment or reaction target: the bypass first (admin_role and editor keep
+ * expired announcements), then expiry, then the audience. Any other target
+ * type fails closed: documents have no requiresAck yet, and would need
+ * their own visibility rules here once they do.
  */
-async function isInAudience(
+async function isVisibleToCaller(
   strapi: unknown,
   targetType: string,
-  target: AnnouncementTargeting,
+  target: AnnouncementTargeting & ExpiringRow,
   user: AckCaller,
 ): Promise<boolean> {
   if (targetType !== "announcement") return false;
   if (hasRole(user, MODERATORS)) return true;
+  if (isAnnouncementExpired(target, new Date())) return false;
   return isAnnouncementVisible(target, toAudienceScope(await loadUserScope(strapi, user.id)));
 }
 
@@ -91,14 +97,16 @@ export default factories.createCoreController(
         where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
         ...(targetType === "announcement" ? { populate: ANNOUNCEMENT_TARGETING } : {}),
       });
-      // Deliberately ONE identical error (message + status) for all four
-      // failure modes — "does not exist", "draft only", "requiresAck=false"
-      // and "not in the caller's audience" (FX27) — so the endpoint is no
-      // existence oracle for draft documentIds or hidden announcements.
+      // Deliberately ONE identical error (message + status) for all five
+      // failure modes — "does not exist", "draft only", "requiresAck=false",
+      // "not in the caller's audience" (FX27) and "expired" (DA02, below
+      // admin_role/editor) — so the endpoint is no existence oracle for
+      // draft documentIds or hidden announcements. Checked before the
+      // duplicate lookup, so "Already acknowledged" tells nothing either.
       if (
         !target ||
         !target.requiresAck ||
-        !(await isInAudience(strapi, targetType, target, user))
+        !(await isVisibleToCaller(strapi, targetType, target, user))
       ) {
         return ctx.badRequest("Target not available for acknowledgement");
       }

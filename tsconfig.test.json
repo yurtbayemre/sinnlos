@@ -40,6 +40,9 @@
     "apps/web/src/**/*.test.ts",
     // next-auth Session/JWT module augmentation used by auth.ts and strapi.ts.
     "apps/web/src/types/**/*.d.ts",
+    // next-intl AppConfig (AC03): the catalog keys are typed in the test
+    // program as in the app.
+    "apps/web/src/global.d.ts",
     "infra/**/*.test.ts"
   ],
   "exclude": ["**/node_modules/**"]

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createStrapiStub, type StrapiStub } from "../test/strapi-stub.test.helper";
 import {
@@ -17,6 +17,9 @@ import {
  *  - published-first: a documentId with a published AND a draft row is
  *    judged by the PUBLISHED row's targeting (a widened draft must not
  *    leak the published discussion),
+ *  - an announcement without a published row is no target at all, for
+ *    every caller on writes (owner answer 2026-09-29 (b): the answer of a
+ *    missing target),
  *  - wiki page without a space fails closed,
  *  - anonymous callers only see untargeted announcements / public spaces.
  */
@@ -95,26 +98,27 @@ const admin = { id: 99, role: { type: "admin_role" } };
 describe("visibleTargetAnchors", () => {
   it("gives an ENG member everything ENG-scoped plus untargeted", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), engMember);
-    expect(anchors.announcement.sort()).toEqual(["docA", "docB", "docC", "docD"]);
+    // docC is a draft only: no target (owner answer 2026-09-29 (b)).
+    expect(anchors.announcement.sort()).toEqual(["docA", "docB", "docD"]);
     expect(anchors["wiki-page"].sort()).toEqual(["pageP", "pageQ"]);
   });
 
   it("judges a mixed draft/published documentId by its PUBLISHED row", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), designMember);
     // docD's draft is untargeted, but the published row is ENG-only.
-    expect(anchors.announcement.sort()).toEqual(["docA", "docC"]);
+    expect(anchors.announcement.sort()).toEqual(["docA"]);
     expect(anchors["wiki-page"]).toEqual(["pageP"]);
   });
 
   it("restricts anonymous callers to untargeted / public targets", async () => {
     const anchors = await visibleTargetAnchors(stubStrapi(), null);
-    expect(anchors.announcement.sort()).toEqual(["docA", "docC"]);
+    expect(anchors.announcement.sort()).toEqual(["docA"]);
     expect(anchors["wiki-page"]).toEqual(["pageP"]);
   });
 });
 
 describe("isTargetVisible", () => {
-  it("bypasses for admin_role without resolving anything", async () => {
+  it("bypasses for admin_role without resolving anything on a wiki page", async () => {
     const bomb = {
       db: {
         query: () => ({
@@ -127,7 +131,31 @@ describe("isTargetVisible", () => {
         }),
       },
     } as any;
-    await expect(isTargetVisible(bomb, "announcement", "docB", admin)).resolves.toBe(true);
+    await expect(isTargetVisible(bomb, "wiki-page", "pageQ", admin)).resolves.toBe(true);
+  });
+
+  it("checks only that an announcement is published for admin_role and editor", async () => {
+    for (const moderator of [admin, { id: 98, role: { type: "editor" } }]) {
+      // docB is ENG-scoped: the bypass still skips the audience.
+      await expect(isTargetVisible(stubStrapi(), "announcement", "docB", moderator)).resolves.toBe(
+        true,
+      );
+    }
+  });
+
+  it("refuses an unpublished announcement to everyone, like a missing one (owner 2026-09-29 (b))", async () => {
+    for (const user of [engMember, designMember, admin, null]) {
+      const label = String(user?.role.type ?? "anonymous");
+      // docC exists as a draft only; "ghost" never existed.
+      await expect(
+        isTargetVisible(stubStrapi(), "announcement", "docC", user),
+        label,
+      ).resolves.toBe(false);
+      await expect(
+        isTargetVisible(stubStrapi(), "announcement", "ghost", user),
+        label,
+      ).resolves.toBe(false);
+    }
   });
 
   it("hides a department-scoped announcement from the wrong department", async () => {
@@ -379,5 +407,85 @@ describe("pinnedTargetAnchor (PL04 filter shapes)", () => {
     ["a pin nested two $and levels deep", { $and: [{ $and: [pinned] }] }],
   ])("takes the full path for %s", (_label, filters) => {
     expect(pinnedTargetAnchor(filters)).toBeNull();
+  });
+});
+
+/**
+ * DA02: an expired announcement is invisible like one outside the audience,
+ * so its thread goes with it, in the list and in the single check alike;
+ * the published row's expiry decides (the row the read policy serves).
+ */
+describe("expired announcements (DA02)", () => {
+  const NOW = new Date("2026-09-29T10:00:00.000Z");
+  const PAST = "2026-09-29T09:00:00.000Z";
+  const FUTURE = "2026-09-30T00:00:00.000Z";
+  const PUBLISHED = "2026-09-01T00:00:00.000Z";
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function stub(): StrapiStub {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(NOW);
+    const row = (id: number, documentId: string, published: boolean, expiresAt: string | null) => ({
+      id,
+      documentId,
+      title: documentId,
+      audience: "all",
+      publishedAt: published ? PUBLISHED : null,
+      expiresAt,
+    });
+    return createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [{ id: 1, username: "eng", department: null, teams: [] }],
+        "api::announcement.announcement": [
+          row(1, "ann-live", true, FUTURE),
+          row(2, "ann-live", false, FUTURE),
+          row(3, "ann-ended", true, PAST),
+          row(4, "ann-ended", false, PAST),
+          // The published row has ended; a draft extends it (not yet published).
+          row(5, "ann-extended-in-draft", true, PAST),
+          row(6, "ann-extended-in-draft", false, FUTURE),
+          row(7, "ann-no-end", true, null),
+          row(8, "ann-no-end", false, null),
+        ],
+      },
+    });
+  }
+
+  const member = { id: 1, role: { type: "member" } };
+
+  it("leaves expired announcements out of the visible anchors", async () => {
+    const anchors = await visibleTargetAnchors(stub(), member);
+    expect(anchors.announcement.sort()).toEqual(["ann-live", "ann-no-end"]);
+    expect((await visibleTargetAnchors(stub(), null)).announcement.sort()).toEqual([
+      "ann-live",
+      "ann-no-end",
+    ]);
+  });
+
+  it("refuses the single check for an expired announcement, like the list", async () => {
+    for (const documentId of ["ann-ended", "ann-extended-in-draft"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", documentId, member),
+        documentId,
+      ).resolves.toBe(false);
+    }
+    for (const documentId of ["ann-live", "ann-no-end"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", documentId, member),
+        documentId,
+      ).resolves.toBe(true);
+    }
+  });
+
+  it("keeps the admin_role / editor bypass for expired announcements", async () => {
+    for (const type of ["admin_role", "editor"]) {
+      await expect(
+        isTargetVisible(stub(), "announcement", "ann-ended", { id: 1, role: { type } }),
+        type,
+      ).resolves.toBe(true);
+    }
   });
 });

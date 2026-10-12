@@ -165,6 +165,7 @@ const BASE_ENV: Env = {
   AUTH_MICROSOFT_ENTRA_ID_ISSUER: undefined,
   NEXT_PHASE: undefined,
   DEMO_MODE: undefined,
+  NODE_ENV: "test",
 };
 
 /** Microsoft sign-in switched on (next to local sign-in). */
@@ -854,6 +855,22 @@ describe("getStrapiToken() reads the cookie Auth.js actually set", () => {
   });
 });
 
+describe("DEMO_MODE never runs in production (WD08/WD09)", () => {
+  it("refuses to load with DEMO_MODE=1 and NODE_ENV=production, except during next build", async () => {
+    await expect(load({ DEMO_MODE: "1", NODE_ENV: "production" })).rejects.toThrow(
+      /DEMO_MODE=1 must not be enabled in production/,
+    );
+    const build = await load({
+      DEMO_MODE: "1",
+      NODE_ENV: "production",
+      NEXT_PHASE: "phase-production-build",
+    });
+    expect(build.handlers).toBeDefined();
+    const dev = await load({ DEMO_MODE: "1", NODE_ENV: "development" });
+    expect(dev.handlers).toBeDefined();
+  });
+});
+
 describe("Strapi's auth throttle (FX11)", () => {
   it("a 429 from /api/auth/local is a distinct rate_limited sign-in error, not a failure count", async () => {
     const mod = await load();
@@ -876,5 +893,33 @@ describe("Strapi's auth throttle (FX11)", () => {
     const { res } = await signInLocal(mod, "http://localhost:3000");
     const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
     expect(location.searchParams.get("code")).toBe("credentials");
+  });
+
+  it("an attempt the web's login limiter refuses is rate_limited too, without asking Strapi", async () => {
+    const mod = await load();
+    const { IDENTIFIER_MAX_FAILURES } = await import("@/lib/login-rate-limit");
+    stub.localStatus = 400;
+    const localCalls = () =>
+      fetchMock.mock.calls.filter(
+        ([input]) =>
+          String(input instanceof Request ? input.url : input) === `${STRAPI}/api/auth/local`,
+      ).length;
+    // The block transition is logged once (console.warn); keep it quiet.
+    const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      for (let i = 0; i < IDENTIFIER_MAX_FAILURES; i++) {
+        const { res } = await signInLocal(mod, "http://localhost:3000");
+        const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+        expect(location.searchParams.get("code")).toBe("credentials");
+      }
+      const before = localCalls();
+      const { res } = await signInLocal(mod, "http://localhost:3000");
+      const location = new URL(res.headers.get("location") ?? "", "http://localhost:3000");
+      expect(location.searchParams.get("error")).toBe("CredentialsSignin");
+      expect(location.searchParams.get("code")).toBe("rate_limited");
+      expect(localCalls()).toBe(before);
+    } finally {
+      consoleWarn.mockRestore();
+    }
   });
 });

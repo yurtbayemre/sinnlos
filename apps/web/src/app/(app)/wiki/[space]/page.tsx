@@ -4,6 +4,8 @@ import { ArrowLeft, FileText } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
 import type { WikiSpace } from "@/lib/types";
+import { sortWikiPages, wikiSpaceIconName } from "@/lib/wiki-content";
+import { ICONS } from "@/components/icon-map";
 import { EmptyState } from "@/components/empty-state";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -19,7 +21,9 @@ export default async function WikiSpacePage({ params }: Props) {
   const data = await api.wiki.space(space);
   const entry = data.data?.[0] as WikiSpace | undefined;
   if (!entry) notFound();
-  const pages = entry.pages ?? [];
+  // DA02: the author-set order, ties by title (lib/wiki-content.ts).
+  const pages = sortWikiPages(entry.pages ?? []);
+  const SpaceIcon = ICONS[wikiSpaceIconName(entry.icon)];
 
   return (
     <div className="space-y-6">
@@ -31,7 +35,15 @@ export default async function WikiSpacePage({ params }: Props) {
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
           {t("title")}
         </Link>
-        <h1 className="mt-1 text-3xl font-semibold tracking-tight">{entry.name}</h1>
+        <h1 className="mt-1 flex items-center gap-3 text-3xl font-semibold tracking-tight">
+          <span
+            aria-hidden="true"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"
+          >
+            <SpaceIcon className="h-5 w-5" />
+          </span>
+          {entry.name}
+        </h1>
         {entry.description ? (
           <p className="mt-1 text-muted-foreground">{entry.description}</p>
         ) : null}

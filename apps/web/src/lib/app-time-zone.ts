@@ -5,7 +5,7 @@ import { resolveAppTimeZone } from "./plain-date";
 /**
  * APP_TIME_ZONE, the deployment's business and display zone (datetime
  * contract, deep-dive decision 04, C2/C3), default Europe/Berlin. The same
- * variable and validation as the cms (plain-date.ts is mirrored). Also
+ * variable and validation as the cms (plain-date.ts, from @sinnlos/domain). Also
  * checked at server start by src/instrumentation.ts: an invalid value makes
  * every request fail (500) instead of only the first server action that
  * needs it.

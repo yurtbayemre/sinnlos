@@ -82,6 +82,29 @@ export function sourceAnchor(
   return { sourceType, sourceDocumentId: documentId };
 }
 
+/**
+ * Whether a STORED notification is a fan-out anchor row: it carries a
+ * `sourceType` or a `sourceDocumentId` (any value, blank included). Those
+ * rows ARE the dedup ledger `resolveFanout` reads ("who already got this
+ * source?"), and the digest's republish check reads them too, so the
+ * retention janitor (cron/prune-notifications.ts, LF07) never deletes one,
+ * read or not. Deleting it would make the next re-publish notify that
+ * recipient again. Either column alone counts: a half-set anchor is kept
+ * rather than guessed about.
+ */
+export function isAnchoredNotification(row: {
+  sourceType?: unknown;
+  sourceDocumentId?: unknown;
+}): boolean {
+  return row.sourceType != null || row.sourceDocumentId != null;
+}
+
+/** The query-engine `where` for the rows isAnchoredNotification calls un-anchored. */
+export const UNANCHORED_NOTIFICATION_WHERE: Readonly<Record<string, unknown>> = Object.freeze({
+  sourceType: { $null: true },
+  sourceDocumentId: { $null: true },
+});
+
 /** `where` filter selecting every notification created for one source. */
 export function sourceFilter(anchor: SourceAnchor): {
   sourceType: NotificationSourceType;

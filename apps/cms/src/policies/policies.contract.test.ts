@@ -22,10 +22,14 @@ import {
  *      framework-contract.test.ts), so every outcome must be exactly true or
  *      false, for callers without a user, a role, a role type or an id, for
  *      lookalike role spellings and for missing, malformed and foreign
- *      target ids. The only other outcome is a 400 (a ValidationError): the
- *      write allowlist's, for the three FX07 write gates, and
+ *      target ids. The only other outcomes are a 400 (a ValidationError):
+ *      the write allowlist's, for the three FX07 write gates, and
  *      event-rsvp-own-rows' refusal of a client filter on the user
- *      relation (pinned in its own suite; the sweep below sends none).
+ *      relation (pinned in its own suite; the sweep below sends none); and
+ *      the thrown ForbiddenError("Forbidden") of a gate whose refusal must
+ *      stay byte-identical to a controller's former ctx.forbidden()
+ *      (`refusal: "forbidden"`, is-comment-author, PL03), in place of
+ *      `false` wherever a refusal is expected.
  *   2. Fail closed without a caller: a policy that is not meant for
  *      anonymous callers returns false for them; role and write gates also
  *      refuse a caller without a role, and no gate lets a caller without a
@@ -180,6 +184,11 @@ function fixture(): Fixture {
         { id: 2, documentId: "refor0000000000000000000", author: { id: STRANGER } },
         { id: 3, documentId: "renoauthor00000000000000", author: null },
       ],
+      "api::comment.comment": [
+        { id: 1, documentId: "cmown0000000000000000000", author: { id: OWNER } },
+        { id: 2, documentId: "cmfor0000000000000000000", author: { id: STRANGER } },
+        { id: 3, documentId: "cmnoauthor00000000000000", author: null },
+      ],
     },
   });
 
@@ -303,6 +312,11 @@ interface PolicyContract {
   kind: Kind;
   /** What a request without a signed-in user gets. */
   anonymous: "deny" | "filter";
+  /**
+   * How a refusal looks: `false` (the default; Strapi answers PolicyError),
+   * or a thrown ForbiddenError("Forbidden"), the body of ctx.forbidden().
+   */
+  refusal?: "false" | "forbidden";
   cases: readonly ContractCase[];
   /** A request the member (105) may make: params and body for the positive branch. */
   ownRequest?: (ids: Record<string, string>) => {
@@ -438,6 +452,17 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [{ bypass: ADMIN_ONLY, injectsFilter: false, pinsStatus: false }],
     ownRequest: () => ({ params: { id: "1" } }),
   },
+  // Comments (PL03): moderation like reactions; refusals keep the comment
+  // controller's former 403 body, and an id naming no comment passes on to
+  // its 404 (pinned in is-comment-author.test.ts and over HTTP in
+  // comment-delete.integration.test.ts).
+  "is-comment-author": {
+    kind: "ownership",
+    anonymous: "deny",
+    refusal: "forbidden",
+    cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
+    ownRequest: () => ({ params: { id: "1" } }),
+  },
   // Reactions: moderation, like comment delete.
   "is-reaction-author": {
     kind: "ownership",
@@ -523,6 +548,19 @@ async function run(
 
 const describeOutcome = (outcome: Outcome) =>
   "result" in outcome ? `returned ${String(outcome.result)}` : `threw ${String(outcome.error)}`;
+
+/** ctx.forbidden()'s error, thrown by a `refusal: "forbidden"` gate (never a PolicyError). */
+const isForbiddenThrow = (outcome: Outcome): boolean =>
+  "error" in outcome &&
+  outcome.error instanceof errors.ForbiddenError &&
+  !(outcome.error instanceof errors.PolicyError) &&
+  outcome.error.message === "Forbidden";
+
+/** The contract's refusal: `false`, or the forbidden throw for a `refusal: "forbidden"` gate. */
+const isRefusal = (contract: PolicyContract, outcome: Outcome): boolean =>
+  contract.refusal === "forbidden"
+    ? isForbiddenThrow(outcome)
+    : "result" in outcome && outcome.result === false;
 
 // ---------------------------------------------------------------------------
 // Callers and requests for the sweep
@@ -626,9 +664,12 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
             const outcome = await run(name, config, ctx, strapi);
             const ok =
               "result" in outcome
-                ? typeof outcome.result === "boolean"
-                : contract.kind === "write-allowlist" &&
-                  outcome.error instanceof errors.ValidationError;
+                ? typeof outcome.result === "boolean" &&
+                  // A `refusal: "forbidden"` gate never answers a plain false.
+                  (outcome.result || contract.refusal !== "forbidden")
+                : (contract.kind === "write-allowlist" &&
+                    outcome.error instanceof errors.ValidationError) ||
+                  (contract.refusal === "forbidden" && isForbiddenThrow(outcome));
             if (!ok) {
               failures.push(
                 `${caller.label} params=${JSON.stringify(param)} body=${JSON.stringify(body)} ` +
@@ -649,7 +690,10 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
       for (const { config } of contract.cases) {
         for (const caller of ANONYMOUS) {
           const ctx = policyContext(caller.user, { query: CLIENT_QUERY, ...own });
-          expect(await run(name, config, ctx, strapi), caller.label).toEqual({ result: false });
+          const outcome = await run(name, config, ctx, strapi);
+          expect(isRefusal(contract, outcome), `${caller.label}: ${describeOutcome(outcome)}`).toBe(
+            true,
+          );
           expect(ctx.request.query, caller.label).toEqual(CLIENT_QUERY);
         }
       }

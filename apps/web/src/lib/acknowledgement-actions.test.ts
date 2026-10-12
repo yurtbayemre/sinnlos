@@ -1,16 +1,22 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { redirect } from "next/navigation";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
- * acknowledgeAnnouncement characterisation (S09). The action has no catch:
+ * acknowledgeAnnouncement answers an ActionResult (AC01):
  *   - success: one POST naming only the target (by documentId; the cms takes
  *     the user from the JWT), then refresh() so the banner and the list
  *     update;
- *   - a 400 (e.g. the cms's identical "Target not available" answer)
- *     rejects with the StrapiError and does not refresh;
- *   - strapi()'s 401 sign-in redirect propagates as the same NEXT_REDIRECT.
+ *   - the cms's refusal of an announcement that is gone for the caller
+ *     ("Target not available for acknowledgement": unknown, unpublished,
+ *     not mandatory, outside the audience, expired) is "notFound", any
+ *     other 400 ("Already acknowledged") "invalid", without a refresh;
+ *   - strapi()'s 401 sign-in redirect propagates as the same NEXT_REDIRECT;
+ *   - a network error is "unavailable";
+ *   - an argument that is no documentId never reaches the cms.
  */
 
 const strapiMock = vi.fn();
@@ -22,6 +28,14 @@ vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 const { acknowledgeAnnouncement } = await import("./acknowledgement-actions");
 
 const DOC = "k3m9x0000000000000000000";
+const TARGET_GONE = "Target not available for acknowledgement";
+
+const cmsError = (status: number, message: string) =>
+  new StrapiError(
+    status,
+    "Bad Request",
+    JSON.stringify({ error: { name: "BadRequestError", message } }),
+  );
 
 function signInRedirect(): unknown {
   try {
@@ -36,11 +50,17 @@ beforeEach(() => {
   strapiMock.mockReset();
   strapiMock.mockResolvedValue({ data: { id: 1 } });
   refreshMock.mockReset();
+  vi.spyOn(console, "warn").mockImplementation(() => undefined);
+  vi.spyOn(console, "error").mockImplementation(() => undefined);
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("acknowledgeAnnouncement", () => {
   it("posts the announcement target by documentId, then refreshes", async () => {
-    await expect(acknowledgeAnnouncement(DOC)).resolves.toBeUndefined();
+    await expect(acknowledgeAnnouncement(DOC)).resolves.toEqual({ ok: true });
     expect(strapiMock).toHaveBeenCalledTimes(1);
     const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
     expect(path).toBe("/api/acknowledgements");
@@ -51,15 +71,31 @@ describe("acknowledgeAnnouncement", () => {
     expect(refreshMock).toHaveBeenCalledTimes(1);
   });
 
-  it("rejects with the cms's 400 and does not refresh", async () => {
-    const error = new StrapiError(
-      400,
-      "Bad Request",
-      '{"error":{"message":"Target not available for acknowledgement"}}',
-    );
-    strapiMock.mockRejectedValue(error);
-    await expect(acknowledgeAnnouncement(DOC)).rejects.toBe(error);
+  it("answers the refusal of a vanished announcement as notFound and does not refresh", async () => {
+    strapiMock.mockRejectedValue(cmsError(400, TARGET_GONE));
+    await expect(acknowledgeAnnouncement(DOC)).resolves.toEqual({ ok: false, code: "notFound" });
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("answers any other 400 as invalid, comparing the text exactly and by status", async () => {
+    for (const message of ["Already acknowledged", `${TARGET_GONE}.`]) {
+      strapiMock.mockRejectedValue(cmsError(400, message));
+      await expect(acknowledgeAnnouncement(DOC), message).resolves.toEqual({
+        ok: false,
+        code: "invalid",
+      });
+    }
+    strapiMock.mockRejectedValue(cmsError(403, TARGET_GONE));
+    await expect(acknowledgeAnnouncement(DOC)).resolves.toEqual({ ok: false, code: "forbidden" });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("pins the text the cms controller sends for an announcement that is gone", () => {
+    const controller = readFileSync(
+      join(__dirname, "../../../cms/src/api/acknowledgement/controllers/acknowledgement.ts"),
+      "utf8",
+    );
+    expect(controller).toContain(`return ctx.badRequest("${TARGET_GONE}");`);
   });
 
   it("lets strapi()'s 401 sign-in redirect propagate", async () => {
@@ -67,5 +103,22 @@ describe("acknowledgeAnnouncement", () => {
     strapiMock.mockRejectedValue(redirectError);
     await expect(acknowledgeAnnouncement(DOC)).rejects.toBe(redirectError);
     expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it("answers a network error as unavailable", async () => {
+    strapiMock.mockRejectedValue(new TypeError("fetch failed"));
+    await expect(acknowledgeAnnouncement(DOC)).resolves.toEqual({
+      ok: false,
+      code: "unavailable",
+    });
+    expect(refreshMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["", 7, null, undefined])("refuses %j before any request", async (doc) => {
+    await expect(acknowledgeAnnouncement(doc as unknown as string)).resolves.toEqual({
+      ok: false,
+      code: "invalid",
+    });
+    expect(strapiMock).not.toHaveBeenCalled();
   });
 });
