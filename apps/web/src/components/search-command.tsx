@@ -270,12 +270,12 @@ export type FocusReturnCandidate = { readonly isConnected: boolean };
  * Where focus goes when the palette closes. cmdk's Command.Dialog renders
  * no Radix Dialog.Trigger, and Radix's modal Content returns focus only to
  * that trigger, so focus used to fall to <body> after Escape, a click
- * outside, ⌘K or a selection. Now it goes back to the element that had it
- * when the palette opened (the topbar button, or wherever ⌘K was pressed),
- * or to the topbar button when that element is gone (a re-render replaced
- * it). Nothing moves when something else holds focus by then (`active` is
- * neither <body> nor null), e.g. the next page after a selection focused
- * its own element.
+ * outside or ⌘K. Now it goes back to the element that had it when the
+ * palette opened (the topbar button, or wherever ⌘K was pressed), or to
+ * the topbar button when that element is gone (a re-render replaced it).
+ * Nothing moves when something else holds focus by then (`active` is
+ * neither <body> nor null). A selection navigates and restores nothing:
+ * focus starts on the new page as after any link.
  */
 export function focusReturnTarget<T extends FocusReturnCandidate>({
   opener,
@@ -383,11 +383,14 @@ export function SearchCommand() {
   }, [open]);
 
   // Focus return (focusReturnTarget). The opener is remembered before the
-  // dialog mounts (its focus scope moves focus into the input at once), and
-  // restored after Radix's own close handling, which runs in a 0 ms timer
-  // scheduled during the unmount and leaves focus on <body>.
+  // dialog mounts (its focus scope moves focus into the input at once) and
+  // refocused in a 0 ms timer once the palette has closed; checked in
+  // headless Chrome: Escape, a click outside and ⌘K all land on the opener,
+  // nothing pulls focus back into the closing dialog. A selection clears
+  // the opener (it navigates; refocusing the old page could scroll it).
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLElement | null>(null);
+  const navigatingRef = useRef(false);
   const openRef = useRef(open);
   const rememberOpener = useCallback(() => {
     const active = document.activeElement;
@@ -397,6 +400,11 @@ export function SearchCommand() {
     const wasOpen = openRef.current;
     openRef.current = open;
     if (open || !wasOpen) return;
+    if (navigatingRef.current) {
+      navigatingRef.current = false;
+      openerRef.current = null;
+      return;
+    }
     const timer = window.setTimeout(() => {
       const active = document.activeElement;
       const target = focusReturnTarget({
@@ -405,7 +413,7 @@ export function SearchCommand() {
         activeIsBody: active === null || active === document.body,
       });
       openerRef.current = null;
-      target?.focus();
+      target?.focus({ preventScroll: true });
     }, 0);
     return () => window.clearTimeout(timer);
   }, [open]);
@@ -433,6 +441,7 @@ export function SearchCommand() {
       // A selection is the strongest "this query settled" signal.
       schedulerRef.current?.flushLog();
       schedulerRef.current?.query("");
+      navigatingRef.current = true;
       setOpen(false);
       setQuery("");
       setResults(null);
