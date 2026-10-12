@@ -413,6 +413,10 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
     await expect(migrate(OWNER_ENV, "Europe/Berlin")).rejects.toThrow(/needs a UTC process/);
   });
 
+  // 30 s like the repo's other cold loads: the first require() of
+  // @strapi/database and its migration runner passed 5 s in full test:tz
+  // runs on a loaded machine (batch 13, one zone per run); alone the
+  // test takes well under a second.
   it("runs once through Strapi's own user-migration runner, then never again", async () => {
     await seed();
     const requireFromCms = createRequire(join(__dirname, "..", "..", "package.json"));
@@ -497,5 +501,5 @@ describe.skipIf(!PG_URL)("legacy datetime repair on Postgres 16", () => {
       delete hook.__sinnlosRepairUnderTest;
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 });
