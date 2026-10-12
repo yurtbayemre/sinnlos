@@ -210,7 +210,7 @@ function StatCard({
 }) {
   return (
     <Link href={href} className="focus-card group block">
-      <Card className="card-lift cursor-pointer">
+      <Card interactive className="card-lift cursor-pointer">
         <CardContent className="flex items-center gap-4 p-6">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-transform duration-200 group-hover:scale-110">
             {icon}

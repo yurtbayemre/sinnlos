@@ -77,7 +77,10 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
         <div className="grid gap-4 lg:grid-cols-5">
           {featured && (
             <Link href="/announcements" className="focus-card block lg:col-span-3">
-              <Card className="group h-full overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.06] via-background to-background transition hover:border-primary/40 hover:shadow-md">
+              <Card
+                interactive
+                className="group h-full overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.06] via-background to-background transition hover:border-primary/40 hover:shadow-md"
+              >
                 <CardContent className="flex flex-col gap-4 p-6">
                   <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-primary">
                     {featured.pinned ? (
@@ -118,7 +121,10 @@ export async function LatestNews({ items }: { items: Announcement[] }) {
           <div className="flex flex-col gap-3 lg:col-span-2">
             {rest.map((n) => (
               <Link key={n.id} href="/announcements" className="focus-card block">
-                <Card className="group transition hover:border-primary/30 hover:shadow-sm">
+                <Card
+                  interactive
+                  className="group transition hover:border-primary/30 hover:shadow-sm"
+                >
                   <CardContent className="flex items-start gap-3 p-4">
                     {n.pinned && (
                       <div className="mt-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">

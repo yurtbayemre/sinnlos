@@ -65,7 +65,7 @@ export default async function TeamPage({ params }: Props) {
       <section className="grid gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>{t("lead")}</CardTitle>
+            <CardTitle as="h2">{t("lead")}</CardTitle>
           </CardHeader>
           <CardContent>
             {lead ? (
@@ -89,7 +89,7 @@ export default async function TeamPage({ params }: Props) {
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>{t("members")}</CardTitle>
+            <CardTitle as="h2">{t("members")}</CardTitle>
             <CardDescription>{tCommon("member", { count: members.length })}</CardDescription>
           </CardHeader>
           <CardContent className="stagger grid gap-3 sm:grid-cols-2">

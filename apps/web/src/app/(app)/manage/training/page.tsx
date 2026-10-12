@@ -136,7 +136,10 @@ export default async function TrainingReportPage() {
             return (
               <Card key={course.id}>
                 <CardHeader className="pb-2">
-                  <CardTitle className="flex flex-wrap items-center justify-between gap-3 text-base">
+                  <CardTitle
+                    as="h2"
+                    className="flex flex-wrap items-center justify-between gap-3 text-base"
+                  >
                     <Link href={`/training/${course.slug}`} className="hover:underline">
                       {course.title}
                     </Link>

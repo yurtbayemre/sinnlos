@@ -74,7 +74,7 @@ export default async function DepartmentPage({ params }: Props) {
       <section className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>{tTeams("title")}</CardTitle>
+            <CardTitle as="h2">{tTeams("title")}</CardTitle>
             <CardDescription>
               {tCommon("team", { count: teams.length })} {tCommon("inThisDepartment")}
             </CardDescription>
@@ -104,7 +104,7 @@ export default async function DepartmentPage({ params }: Props) {
 
         <Card>
           <CardHeader>
-            <CardTitle>{t("head")}</CardTitle>
+            <CardTitle as="h2">{t("head")}</CardTitle>
           </CardHeader>
           <CardContent>
             {head ? (

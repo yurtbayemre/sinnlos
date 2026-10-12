@@ -108,7 +108,7 @@ export default async function AdminPage() {
         <h2 className="text-lg font-semibold">{t("analyticsSection")}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <Link href="/manage/analytics" className="focus-card block">
-            <Card className="card-lift h-full transition hover:border-primary/40">
+            <Card interactive className="card-lift h-full transition hover:border-primary/40">
               <CardContent className="flex items-center gap-4 p-6">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <BarChart3 className="h-5 w-5" />
@@ -121,7 +121,7 @@ export default async function AdminPage() {
             </Card>
           </Link>
           <Link href="/manage/acknowledgements" className="focus-card block">
-            <Card className="card-lift h-full transition hover:border-primary/40">
+            <Card interactive className="card-lift h-full transition hover:border-primary/40">
               <CardContent className="flex items-center gap-4 p-6">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <ClipboardCheck className="h-5 w-5" />
@@ -134,7 +134,7 @@ export default async function AdminPage() {
             </Card>
           </Link>
           <Link href="/manage/training" className="focus-card block">
-            <Card className="card-lift h-full transition hover:border-primary/40">
+            <Card interactive className="card-lift h-full transition hover:border-primary/40">
               <CardContent className="flex items-center gap-4 p-6">
                 <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
                   <GraduationCap className="h-5 w-5" />
@@ -162,7 +162,7 @@ export default async function AdminPage() {
                 rel="noreferrer"
                 className="block"
               >
-                <Card className="h-full transition hover:border-primary/40 hover:shadow-md">
+                <Card interactive className="h-full transition hover:border-primary/40">
                   <CardHeader>
                     <div className="mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                       <Icon className="h-5 w-5" />

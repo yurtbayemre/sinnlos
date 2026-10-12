@@ -210,7 +210,9 @@ export default async function AcknowledgementReportPage() {
                 <CardHeader>
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div className="space-y-1">
-                      <CardTitle className="text-base">{a.title}</CardTitle>
+                      <CardTitle as="h2" className="text-base">
+                        {a.title}
+                      </CardTitle>
                       <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
                         {audienceLabels(a).map((label) => (
                           <span key={label}>{label}</span>

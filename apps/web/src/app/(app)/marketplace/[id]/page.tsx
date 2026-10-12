@@ -187,7 +187,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">{t("sellerTitle")}</CardTitle>
+              <CardTitle as="h2" className="text-base">
+                {t("sellerTitle")}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
@@ -240,7 +242,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
           {canTakeDown && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">{t("moderationTitle")}</CardTitle>
+                <CardTitle as="h2" className="text-base">
+                  {t("moderationTitle")}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">{t("moderationHint")}</p>

@@ -45,7 +45,7 @@ export default async function DepartmentsPage() {
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((d) => (
             <Link key={d.id} href={`/departments/${d.slug}`} className="focus-card group">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardHeader>
                   <div
                     aria-hidden="true"
@@ -54,7 +54,7 @@ export default async function DepartmentsPage() {
                       background: `linear-gradient(135deg, ${d.color ?? "#6366f1"}, ${d.color ?? "#818cf8"}88)`,
                     }}
                   />
-                  <CardTitle className="transition-colors group-hover:text-primary">
+                  <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                     {d.name}
                   </CardTitle>
                   <CardDescription className="line-clamp-2">

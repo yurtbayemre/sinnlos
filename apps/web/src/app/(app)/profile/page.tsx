@@ -68,7 +68,7 @@ export default async function ProfilePage() {
         {me && (
           <Card>
             <CardHeader>
-              <CardTitle>{t("profileDetails")}</CardTitle>
+              <CardTitle as="h2">{t("profileDetails")}</CardTitle>
               <CardDescription>{t("profileDetailsDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
@@ -94,7 +94,7 @@ export default async function ProfilePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>{t("passwordSection")}</CardTitle>
+            <CardTitle as="h2">{t("passwordSection")}</CardTitle>
             <CardDescription>
               {isLocal ? t("passwordDescLocal") : t("passwordDescMicrosoft")}
             </CardDescription>

@@ -82,7 +82,7 @@ function QuickLinkCard({ link, newTabLabel }: { link: QuickLink; newTabLabel: st
   const external = !link.url!.startsWith("/");
 
   const card = (
-    <Card className="card-lift h-full cursor-pointer">
+    <Card interactive className="card-lift h-full cursor-pointer">
       <CardContent className="flex items-center gap-3 p-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-transform duration-200 group-hover:scale-110">
           <Icon className="h-4 w-4" aria-hidden="true" />

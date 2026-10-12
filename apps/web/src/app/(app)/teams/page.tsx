@@ -44,7 +44,7 @@ export default async function TeamsPage() {
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((team) => (
             <Link key={team.id} href={`/teams/${team.slug}`} className="focus-card group">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardHeader>
                   <div
                     aria-hidden="true"
@@ -52,7 +52,7 @@ export default async function TeamsPage() {
                   >
                     <Users2 className="h-4 w-4" />
                   </div>
-                  <CardTitle className="transition-colors group-hover:text-primary">
+                  <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                     {team.name}
                   </CardTitle>
                   <CardDescription>

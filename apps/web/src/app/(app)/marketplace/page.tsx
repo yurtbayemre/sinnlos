@@ -202,7 +202,7 @@ export default async function MarketplacePage({
             const thumb = thumbnail(ad);
             return (
               <Link key={ad.id} href={`/marketplace/${ad.id}`} className="focus-card group">
-                <Card className="card-lift h-full overflow-hidden">
+                <Card interactive className="card-lift h-full overflow-hidden">
                   <div className="flex aspect-[4/3] items-center justify-center bg-muted/60">
                     {thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element

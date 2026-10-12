@@ -65,7 +65,7 @@ export default async function TrainingPage() {
             } = courseCompletion(course.lessons ?? [], completed);
             return (
               <Link key={course.id} href={`/training/${course.slug}`} className="focus-card">
-                <Card className="h-full transition-colors hover:border-primary/40">
+                <Card interactive className="h-full transition-colors hover:border-primary/40">
                   <CardContent className="flex h-full flex-col gap-3 p-5">
                     <div className="flex items-start justify-between gap-3">
                       <h2 className="font-medium leading-snug">{course.title}</h2>
