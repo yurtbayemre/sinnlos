@@ -943,7 +943,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(dry.status, dry.stderr).toBe(0);
     expect(dry.stdout).toContain(`-> the last-known-good deploy ${tagOf(good)}`);
     expect(dry.stdout).toMatch(/5\. tag infra-\{web,cms\}:[0-9a-f]{12} \(commit [0-9a-f]{40}\)/);
-    expect(dry.stdout).toMatch(/1\. pre-deploy backup: \S+\/backup-run --kind predeploy sinnlos \(/);
+    expect(dry.stdout).toMatch(
+      /1\. pre-deploy backup: \S+\/backup-run --kind predeploy sinnlos \(/,
+    );
     expect(called(dry, /^docker (tag|image rm)|compose .* (build|up)/)).toEqual([]);
     expect(dry.state).toEqual(good.state);
     expect(dry.images.sort()).toEqual(good.images.sort());
