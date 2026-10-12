@@ -1085,26 +1085,33 @@ const DEPENDABOT_RUNS = [
   },
 ];
 
-/** deploy.sh's ci_status with git and curl stubbed: curl answers `body`. */
-function ciStatus(body: string): string {
+/**
+ * deploy.sh's ci_status with git and curl stubbed, once per body, all in
+ * one bash process (a bash start costs seconds under a parallel run on
+ * Windows): curl answers the body of the round.
+ */
+function ciStatuses(bodies: readonly string[]): string[] {
   const script = [
     "set -euo pipefail",
     "fakegit() { echo https://github.com/example/sinnlos.git; }",
     "GIT=(fakegit)",
     "HEAD_SHA=0123456789abcdef0123456789abcdef01234567",
-    "curl() { cat > /dev/null; cat <<'BODY'",
-    body,
-    "BODY",
-    "}",
+    "BODIES=()",
+    ...bodies.flatMap((body, n) => [`BODIES+=("$(cat <<'BODY_${n}'`, body, `BODY_${n}`, ')")']),
+    `curl() { cat > /dev/null; printf '%s\\n' "\${BODIES[ROUND]}"; }`,
     functionOf("check_runs_of"),
     functionOf("ci_status"),
-    "ci_status",
+    'for ROUND in "${!BODIES[@]}"; do ci_status; done',
     "",
   ].join("\n");
   const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
   expect(res.status, res.stderr).toBe(0);
-  return res.stdout.trim();
+  const lines = res.stdout.trimEnd().split("\n");
+  expect(lines).toHaveLength(bodies.length);
+  return lines;
 }
+
+const ciStatus = (body: string): string => ciStatuses([body])[0] ?? "";
 
 /** The body of a top-level function of deploy.sh, `name() {` to `}`. */
 function functionOf(name: string): string {
@@ -1116,87 +1123,90 @@ function functionOf(name: string): string {
 const answer = (runs: object[], pretty = false) =>
   JSON.stringify({ total_count: runs.length, check_runs: runs }, null, pretty ? 2 : undefined);
 
-describe.skipIf(!HAS_BASH)("deploy.sh: the CI check reads our CI's runs only", () => {
-  const ours = (patch: object) => [OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], ...patch }];
+describe.skipIf(!HAS_BASH)(
+  "deploy.sh: the CI check reads our CI's runs only",
+  { timeout: 30_000 },
+  () => {
+    const ours = (patch: object) => [OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], ...patch }];
 
-  it("is green while Dependabot's update jobs on the commit still run", () => {
-    for (const pretty of [false, true]) {
-      expect(ciStatus(answer([...DEPENDABOT_RUNS, ...OUR_CI_GREEN], pretty))).toBe(
-        "green: 2 CI check(s) passed for 0123456789ab (2 Dependabot run(s) ignored)",
+    it("is green while Dependabot's update jobs on the commit still run", () => {
+      for (const pretty of [false, true]) {
+        expect(ciStatus(answer([...DEPENDABOT_RUNS, ...OUR_CI_GREEN], pretty))).toBe(
+          "green: 2 CI check(s) passed for 0123456789ab (2 Dependabot run(s) ignored)",
+        );
+      }
+    });
+
+    it("is pending while our CI runs, whatever Dependabot's jobs do", () => {
+      const done = DEPENDABOT_RUNS.map((run) => ({
+        ...run,
+        status: "completed",
+        conclusion: "success",
+      }));
+      expect(ciStatus(answer([...done, ...ours({ status: "queued", conclusion: null })]))).toBe(
+        "pending: CI is still running for 0123456789ab (2 Dependabot run(s) ignored)",
       );
-    }
-  });
+    });
 
-  it("is pending while our CI runs, whatever Dependabot's jobs do", () => {
-    const done = DEPENDABOT_RUNS.map((run) => ({
-      ...run,
-      status: "completed",
-      conclusion: "success",
-    }));
-    expect(ciStatus(answer([...done, ...ours({ status: "queued", conclusion: null })]))).toBe(
-      "pending: CI is still running for 0123456789ab (2 Dependabot run(s) ignored)",
-    );
-  });
+    it("is failed when our CI failed", () => {
+      expect(ciStatus(answer([...DEPENDABOT_RUNS, ...ours({ conclusion: "failure" })]))).toMatch(
+        /^failed: CI did not pass for 0123456789ab \(2 Dependabot run\(s\) ignored\) \(https:\/\/github\.com\/example\/sinnlos\/commit\//,
+      );
+      // A failed Dependabot job is not ours either.
+      const broken = DEPENDABOT_RUNS.map((run) => ({
+        ...run,
+        status: "completed",
+        conclusion: "failure",
+      }));
+      expect(ciStatus(answer([...broken, ...OUR_CI_GREEN]))).toMatch(
+        /^green: 2 CI check\(s\) passed/,
+      );
+    });
 
-  it("is failed when our CI failed", () => {
-    expect(ciStatus(answer([...DEPENDABOT_RUNS, ...ours({ conclusion: "failure" })]))).toMatch(
-      /^failed: CI did not pass for 0123456789ab \(2 Dependabot run\(s\) ignored\) \(https:\/\/github\.com\/example\/sinnlos\/commit\//,
-    );
-    // A failed Dependabot job is not ours either.
-    const broken = DEPENDABOT_RUNS.map((run) => ({
-      ...run,
-      status: "completed",
-      conclusion: "failure",
-    }));
-    expect(ciStatus(answer([...broken, ...OUR_CI_GREEN]))).toMatch(
-      /^green: 2 CI check\(s\) passed/,
-    );
-  });
+    it("reads each run's own fields, not those of its output or its app", () => {
+      const tricky = {
+        ...OUR_CI_GREEN[0],
+        output: {
+          title: 'status "in_progress"',
+          summary: '{"status":"queued","conclusion":"failure","name":"Dependabot"}',
+          text: "a \\ backslash, a } brace and a ] bracket",
+        },
+        app: { id: 1, slug: "github-actions", name: "Dependabot", owner: { login: "failure" } },
+        pull_requests: [{ id: 3, number: 7, head: { ref: "dependabot", sha: "x" } }],
+      };
+      expect(ciStatus(answer([tricky, OUR_CI_GREEN[1]], true))).toBe(
+        "green: 2 CI check(s) passed for 0123456789ab",
+      );
+    });
 
-  it("reads each run's own fields, not those of its output or its app", () => {
-    const tricky = {
-      ...OUR_CI_GREEN[0],
-      output: {
-        title: 'status "in_progress"',
-        summary: '{"status":"queued","conclusion":"failure","name":"Dependabot"}',
-        text: "a \\ backslash, a } brace and a ] bracket",
-      },
-      app: { id: 1, slug: "github-actions", name: "Dependabot", owner: { login: "failure" } },
-      pull_requests: [{ id: 3, number: 7, head: { ref: "dependabot", sha: "x" } }],
-    };
-    expect(ciStatus(answer([tricky, OUR_CI_GREEN[1]], true))).toBe(
-      "green: 2 CI check(s) passed for 0123456789ab",
-    );
-  });
+    it("is unknown with only Dependabot's runs, or none, or an answer it cannot read", () => {
+      expect(ciStatus(answer(DEPENDABOT_RUNS))).toBe(
+        "unknown: no CI run for 0123456789ab on example/sinnlos (2 Dependabot run(s) ignored) (CI has not started)",
+      );
+      expect(ciStatus(answer([]))).toMatch(
+        /^unknown: no CI run for 0123456789ab on example\/sinnlos \(not pushed/,
+      );
+      expect(ciStatus('{"total_count": 3, "check_runs": "elsewhere"}')).toBe(
+        "unknown: the GitHub answer lists 3 check run(s) for 0123456789ab, but none could be read",
+      );
+    });
 
-  it("is unknown with only Dependabot's runs, or none, or an answer it cannot read", () => {
-    expect(ciStatus(answer(DEPENDABOT_RUNS))).toBe(
-      "unknown: no CI run for 0123456789ab on example/sinnlos (2 Dependabot run(s) ignored) (CI has not started)",
-    );
-    expect(ciStatus(answer([]))).toMatch(
-      /^unknown: no CI run for 0123456789ab on example\/sinnlos \(not pushed/,
-    );
-    expect(ciStatus('{"total_count": 3, "check_runs": "elsewhere"}')).toBe(
-      "unknown: the GitHub answer lists 3 check run(s) for 0123456789ab, but none could be read",
-    );
-  });
-
-  it("counts every run of our CI and every non-success conclusion as before", () => {
-    for (const conclusion of [
-      "cancelled",
-      "timed_out",
-      "action_required",
-      "startup_failure",
-      "stale",
-    ]) {
-      expect(ciStatus(answer(ours({ conclusion }))), conclusion).toMatch(/^failed: /);
-    }
-    for (const status of ["queued", "in_progress", "waiting", "requested", "pending"]) {
-      expect(ciStatus(answer(ours({ status, conclusion: null }))), status).toMatch(/^pending: /);
-    }
-    expect(ciStatus(answer(ours({ conclusion: "skipped" })))).toMatch(/^green: 2 CI check\(s\)/);
-  });
-});
+    it("counts every run of our CI and every non-success conclusion as before", () => {
+      const conclusions = ["cancelled", "timed_out", "action_required", "startup_failure", "stale"];
+      const statuses = ["queued", "in_progress", "waiting", "requested", "pending"];
+      const results = ciStatuses([
+        ...conclusions.map((conclusion) => answer(ours({ conclusion }))),
+        ...statuses.map((status) => answer(ours({ status, conclusion: null }))),
+        answer(ours({ conclusion: "skipped" })),
+      ]);
+      conclusions.forEach((conclusion, n) => expect(results[n], conclusion).toMatch(/^failed: /));
+      statuses.forEach((status, n) =>
+        expect(results[conclusions.length + n], status).toMatch(/^pending: /),
+      );
+      expect(results.at(-1)).toMatch(/^green: 2 CI check\(s\)/);
+    });
+  },
+);
 
 describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
   it("keeps today's defaults", () => {
