@@ -1,11 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import ReactMarkdown, { type Options as MarkdownOptions } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
 import { ArrowLeft, Tag } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
+import { Markdown, type MarkdownRehypePlugins } from "@/components/markdown";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import type { WikiPage as WikiPageEntry } from "@/lib/types";
@@ -41,12 +38,11 @@ export default async function WikiPage({ params }: Props) {
   // off. Both lists are named for screen readers (wiki.tags, wiki.contents):
   // the chips' only other label is an aria-hidden icon.
   const tags = wikiTags(entry.tags);
-  const rehypePlugins: NonNullable<MarkdownOptions["rehypePlugins"]> = [
-    rehypeSlug,
-    [rehypeAutolinkHeadings, { behavior: "wrap" }],
-  ];
-  // After rehype-slug: the TOC links the ids it gave the headings.
-  if (showsToc(entry.tocEnabled)) rehypePlugins.push([rehypeWikiToc, { label: t("contents") }]);
+  // The shared renderer (UI03) runs these after its heading anchors
+  // (rehype-slug), so the TOC links the ids the headings got.
+  const tocPlugins: MarkdownRehypePlugins = showsToc(entry.tocEnabled)
+    ? [[rehypeWikiToc, { label: t("contents") }]]
+    : [];
 
   return (
     <article className="mx-auto max-w-3xl space-y-6">
@@ -92,11 +88,9 @@ export default async function WikiPage({ params }: Props) {
         ) : null}
       </header>
 
-      <div className="prose prose-slate max-w-none dark:prose-invert">
-        <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={rehypePlugins}>
-          {entry.body ?? ""}
-        </ReactMarkdown>
-      </div>
+      <Markdown headingAnchors rehypePlugins={tocPlugins}>
+        {entry.body}
+      </Markdown>
     </article>
   );
 }
