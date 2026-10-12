@@ -58,7 +58,10 @@
  *    after 2, 4 and 8 s (SUBSCRIBE_RETRY_MS), then with the next change or
  *    hello; until the set is taken the client reports unhealthy, so the
  *    comment sections poll at the short interval instead of waiting for
- *    pings that cannot come.
+ *    pings that cannot come. A set of more than 100 channels goes out in
+ *    several POSTs of one revision: it counts as taken only when every one
+ *    of them was, so one chunk that keeps failing neither resets the retry
+ *    budget nor reports healthy in between.
  *  - A web from before LF05 (its hello has no `emitFresh`: a web-only
  *    rollback while this bundle is still open in a tab) knows only the
  *    `{ connId, add, remove }` body and would take the set body as an empty
@@ -178,6 +181,15 @@ export const SUBSCRIBE_RETRY_MS = [2_000, 4_000, 8_000] as const;
 
 type Timer = ReturnType<typeof setTimeout>;
 
+/** A channel set sent to one connection, and how many of its POSTs are still unanswered. */
+interface SentSet {
+  connId: string;
+  /** The sorted, joined channels. */
+  key: string;
+  channels: ReadonlySet<ContentChannel>;
+  pending: number;
+}
+
 export class LiveClient {
   private readonly listeners = new Map<LiveChannel, Set<LiveListener>>();
   private source: EventSourceLike | null = null;
@@ -201,9 +213,8 @@ export class LiveClient {
   private catchupActive = 0;
   /** The last subscription revision sent; counts up across connections. */
   private rev = 0;
-  /** The set the current connection was sent (its sorted, joined key and channels). */
-  private sent: { connId: string; key: string; channels: ReadonlySet<ContentChannel> } | null =
-    null;
+  /** The set the current connection was sent. */
+  private sent: SentSet | null = null;
   /** The current connection is a web from before LF05 (a hello without emitFresh). */
   private legacy = false;
   /** The cms leg's freshness, from the current stream's hello or last heartbeat. */
@@ -298,7 +309,9 @@ export class LiveClient {
       this.subscribeRetries = 0;
       this.clearSubscribeRetry();
       this.reportHealth();
-      if (this.connId) this.sent = { connId: this.connId, key: "", channels: new Set() };
+      if (this.connId) {
+        this.sent = { connId: this.connId, key: "", channels: new Set(), pending: 0 };
+      }
       this.scheduleSync();
       // Catch-up covers the gap since the last stream (missed pings have
       // no replay). Skipped on the very first open — that data was just
@@ -593,11 +606,11 @@ export class LiveClient {
     const key = [...channels].sort().join("\n");
     const previous = this.sent?.connId === connId ? this.sent : null;
     if (previous?.key === key) return;
-    const sent = { connId, key, channels: new Set(channels) };
-    this.sent = sent;
     const requests = this.legacy
       ? addRemoveRequests(connId, previous?.channels ?? new Set(), channels)
       : this.setRequests(connId, channels);
+    const sent: SentSet = { connId, key, channels: new Set(channels), pending: requests.length };
+    this.sent = sent;
     for (const request of requests) {
       void this.deps
         .post(SUBSCRIBE_URL, request)
@@ -608,14 +621,18 @@ export class LiveClient {
 
   /**
    * A subscribe POST's outcome. Only one of the connection's current set
-   * counts. Taken: a failure before it is over. Not taken: the set is
-   * forgotten (the next sync sends it whole), the client reports unhealthy
-   * and retries after SUBSCRIBE_RETRY_MS; after the last retry the next
-   * change or hello sends it.
+   * counts, and the set is taken only once ALL its POSTs (the chunks of one
+   * revision) were: then a failure before it is over and the retry budget
+   * starts again. The first chunk not taken forgets the set (the next sync
+   * sends it whole, and the other chunks' answers no longer count), the
+   * client reports unhealthy and retries after SUBSCRIBE_RETRY_MS; after
+   * the last retry the next change or hello sends it.
    */
-  private onSubscribeAnswer(sent: object, taken: boolean): void {
+  private onSubscribeAnswer(sent: SentSet, taken: boolean): void {
     if (this.sent !== sent) return;
     if (taken) {
+      sent.pending -= 1;
+      if (sent.pending > 0) return;
       this.subscribeRetries = 0;
       if (this.subscribeFailed) {
         this.subscribeFailed = false;

@@ -2406,7 +2406,8 @@ changed in four places:
   are dropped and logged (`[live] subscribe of user … capped at 200
   channels: N dropped`). A request the web did not take (a network blip,
   a 5xx) is retried after 2, 4 and 8 s; until one is taken that tab polls
-  at the short intervals. The previous `{ connId, add, remove }` body is
+  at the short intervals (a set sent in several requests counts as taken
+  only once every one of them was). The previous `{ connId, add, remove }` body is
   still accepted, for tabs that run the old bundle until they are reloaded,
   and a tab on the new bundle that meets a web from before this release (a
   web-only rollback) sends that body to it.

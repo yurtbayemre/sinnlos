@@ -414,6 +414,71 @@ describe("a subscribe POST the server did not take", () => {
     h.client.stop();
   });
 
+  /** A started client with 150 content channels: two chunks (100 + 50) per revision. */
+  function chunked(post: LiveClientDeps["post"]) {
+    const h = harness();
+    h.deps.post = post;
+    for (let i = 0; i < 150; i += 1) h.client.register(`announcement:a${i}`, () => undefined);
+    h.client.start();
+    FakeEventSource.latest().emit("hello", { connId: "c1", emitFresh: true });
+    return h;
+  }
+  const lastChunk = (body: unknown) =>
+    (body as { channels: string[] }).channels.includes("announcement:a149");
+
+  it("a chunk that is never taken keeps the 2/4/8 s budget and the tab degraded, though the other chunk is taken", async () => {
+    // The first chunk (a0–a99) is taken every time, the second (a100–a149)
+    // never; the first one's answer arrives first.
+    const h = chunked(async (url, body) => {
+      h.posts.push({ url, body });
+      return !lastChunk(body);
+    });
+    await advance(h, 0);
+    expect(revs(h)).toEqual([1, 1]);
+    expect(h.posts.map((post) => (post.body as { channels: string[] }).channels.length)).toEqual([
+      100, 50,
+    ]);
+    await advance(h, 2_000);
+    expect(revs(h)).toEqual([1, 1, 2, 2]);
+    await advance(h, 3_999);
+    expect(revs(h)).toEqual([1, 1, 2, 2]);
+    await advance(h, 1);
+    expect(revs(h)).toEqual([1, 1, 2, 2, 3, 3]);
+    await advance(h, 8_000);
+    expect(revs(h)).toEqual([1, 1, 2, 2, 3, 3, 4, 4]);
+    // Then nothing until the next change or hello (within the watchdog's 65 s).
+    await advance(h, 30_000);
+    expect(revs(h)).toEqual([1, 1, 2, 2, 3, 3, 4, 4]);
+    // Degraded from the first answer on, never healthy in between.
+    expect(h.health).toEqual([true, false]);
+    h.client.stop();
+  });
+
+  it("turns healthy only once every chunk of the revision is taken", async () => {
+    let round = 0;
+    let releaseLast: ((taken: boolean) => void) | null = null;
+    const h = chunked((url, body) => {
+      h.posts.push({ url, body });
+      if (!lastChunk(body)) return Promise.resolve(true);
+      round += 1;
+      // Round 1: the second chunk fails; round 2: its answer is held.
+      if (round === 1) return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => (releaseLast = resolve));
+    });
+    await advance(h, 0);
+    expect(h.health).toEqual([true, false]);
+    await advance(h, 2_000);
+    expect(revs(h)).toEqual([1, 1, 2, 2]);
+    // The first chunk of revision 2 is taken, the second is still open.
+    expect(h.health).toEqual([true, false]);
+    releaseLast!(true);
+    await advance(h, 0);
+    expect(h.health).toEqual([true, false, true]);
+    await advance(h, 30_000);
+    expect(revs(h)).toEqual([1, 1, 2, 2]);
+    h.client.stop();
+  });
+
   it("hiding the tab or stop() drops the pending retry", async () => {
     const h = failing([false, false]);
     await advance(h, 0);
