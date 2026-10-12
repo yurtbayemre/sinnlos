@@ -22,14 +22,25 @@
  *    until they change their password) and nobody is signed out by the
  *    deploy. A mismatch fails verification like a bad signature: the
  *    request is unauthenticated (401);
- *  - a password change raises the version BEFORE the new password is
- *    saved: the plugin saves every password through its `user` service's
- *    edit(), and the wrapped edit() bumps first (one atomic statement,
- *    bumpTokenVersion) and only then lets the plugin write. Fail closed:
- *    a failed bump fails the request with the password unchanged; a
- *    failed write after the bump (or a process that dies in between)
- *    leaves the password unchanged and the user's sessions signed out,
- *    never a new password next to older JWTs that still work. That covers
+ *  - a password change raises the version and saves the new password in
+ *    ONE database transaction: the plugin saves every password through its
+ *    `user` service's edit(), and the wrapped edit() opens a transaction
+ *    (strapi.db.transaction), bumps (one atomic statement,
+ *    bumpTokenVersion) and lets the plugin write inside it; the Document
+ *    Service and the query engine join it through Strapi's transaction
+ *    context (AsyncLocalStorage), and the new password's bcrypt hash
+ *    (hashSync in the Document Service's attribute transforms) runs in it.
+ *    Nobody ever sees the new version next to the old password: a sign-in
+ *    reads the version before the hash (signInTokenVersion), so it sees
+ *    either both old (Postgres READ COMMITTED, before the commit; its JWT
+ *    carries the old version, revoked by the commit) or both new; on
+ *    SQLite every other statement waits for the transaction's connection.
+ *    Overlapping changes of one user serialise on the row (Postgres) or
+ *    the connection (SQLite), so the stored password always belongs to the
+ *    change with the highest version. Fail closed: a failed bump or a
+ *    failed write (or a process that dies in between) rolls both back,
+ *    nothing changed; a new password never stands next to older JWTs that
+ *    still work. That covers
  *    POST /api/auth/change-password, /api/auth/reset-password (which the
  *    permission bootstrap revokes for `public`, should an operator grant
  *    it again) and PUT /api/users/:id with a password (no role has
@@ -37,9 +48,9 @@
  *  - a password the admin panel sets (the Content Manager's user update,
  *    and any other Document Service update of a user whose data carries a
  *    password) is revoked the same way: the Document Service guard
- *    (createUserWriteGuard, registered in src/index.ts register()) bumps
- *    before it lets the write run, fail closed like edit(). A write that
- *    edit() itself makes after its own bump (passwordSave, an
+ *    (createUserWriteGuard, registered in src/index.ts register()) runs the
+ *    bump and the write in one transaction, like edit(). A write that
+ *    edit() itself makes inside its own transaction (passwordSave, an
  *    AsyncLocalStorage) is not bumped a second time;
  *  - the password actions answer with a JWT of exactly the version their
  *    bump committed (its snapshot, not a later read: an overlapping change
@@ -81,10 +92,10 @@
  *  - `verify` runs the plugin's own check first (signature, expiry), then
  *    the version check; getToken() calls it through `this`, so the patched
  *    instance method is the one the users-permissions strategy uses.
- *  - The user service's `edit` bumps before it writes a password. The
- *    password actions run in an AsyncLocalStorage context (passwordChange)
- *    in which edit() leaves the committed version for the issue() that
- *    the plugin calls next. Should an upgraded plugin answer a password
+ *  - The user service's `edit` bumps and writes a password in one
+ *    transaction. The password actions run in an AsyncLocalStorage context
+ *    (passwordChange) in which edit() leaves the version its transaction
+ *    committed for the issue() that the plugin calls next. Should an upgraded plugin answer a password
  *    action without going through edit(), the wrapper revokes afterwards,
  *    as before, and logs that tripwire as an error.
  *
@@ -138,9 +149,12 @@ export interface TokenVersionStrapi {
     /** knex: the version bump is one raw statement (bumpTokenVersion). */
     connection: RawRunner;
     /** Whether an ambient transaction runs (Strapi's transaction context). */
-    inTransaction?(): boolean;
-    /** Joins the ambient transaction when there is one. */
-    transaction?<T>(callback: (scope: { trx: RawRunner }) => Promise<T>): Promise<T>;
+    inTransaction(): boolean;
+    /**
+     * Runs `callback` in a transaction, or in the ambient one (Strapi 5:
+     * nested calls join, only the outermost commits or rolls back).
+     */
+    transaction<T>(callback: (scope: { trx: RawRunner }) => Promise<T>): Promise<T>;
     dialect: { client: string };
     getSchemaName(): string | undefined | null;
     metadata: {
@@ -372,10 +386,9 @@ export async function bumpTokenVersion(
   const target = tokenVersionTarget(strapi);
   const sql = tokenVersionBumpSql(target);
   const { db } = strapi;
-  const result =
-    db.inTransaction?.() && db.transaction
-      ? await db.transaction(async ({ trx }) => trx.raw(sql, [userId]))
-      : await db.connection.raw(sql, [userId]);
+  const result = db.inTransaction()
+    ? await db.transaction(async ({ trx }) => trx.raw(sql, [userId]))
+    : await db.connection.raw(sql, [userId]);
   const version = returnedVersion(result, target.versionColumn);
   if (version === null) {
     throw new Error(
@@ -434,13 +447,15 @@ function assertStrapi(strapi: unknown): asserts strapi is TokenVersionStrapi {
     typeof (db.connection as { raw?: unknown }).raw === "function" &&
     isRecord(db.dialect) &&
     typeof db.getSchemaName === "function" &&
+    typeof db.transaction === "function" &&
+    typeof db.inTransaction === "function" &&
     isRecord(db.metadata) &&
     typeof db.metadata.get === "function" &&
     typeof strapi.plugin === "function";
   if (!ok) {
     throw new Error(
       "[users-permissions-extension] a factory did not receive { strapi } with config, plugin and a db " +
-        "with query/connection/dialect/getSchemaName/metadata (FX40 tripwire).",
+        "with query/connection/dialect/getSchemaName/transaction/inTransaction/metadata (FX40 tripwire).",
     );
   }
 }
@@ -503,14 +518,15 @@ function setsPassword(params: unknown): boolean {
   return isRecord(params) && params.password !== undefined;
 }
 
-/** The user whose password is being saved after its bump (saveAfterBump). */
+/** The user whose password is being saved inside its bump's transaction (saveAfterBump). */
 const passwordSave = sharedStorage<{ userId: number }>("password-save");
 
 /**
- * Raises user `id`'s version, then runs `save` (the password write). A
- * failed bump throws before `save` runs; a failed save after the bump
- * leaves the old password with every older JWT revoked. In a password
- * action the committed version goes to the action's issue()
+ * Raises user `id`'s version and runs `save` (the password write) in ONE
+ * transaction, joining an ambient one (strapi.db.transaction): both commit
+ * together or neither does. A failed bump or save rolls both back, so the
+ * password and the user's sessions stay as they were. Only once it has
+ * committed does a password action's issue() get the version
  * (passwordChange); during `save` passwordSave names the user, so the
  * Document Service guard does not bump the same write again.
  */
@@ -519,30 +535,32 @@ async function saveAfterBump<T>(
   id: number,
   save: () => Promise<T>,
 ): Promise<T> {
-  const committed: VersionSnapshot = { userId: id, version: await bumpTokenVersion(strapi, id) };
-  const change = passwordChange.getStore();
-  if (change) change.committed = committed;
-  let result: T;
+  let outcome: { version: number; result: T };
   try {
-    result = await passwordSave.run({ userId: id }, save);
+    outcome = await strapi.db.transaction(async () => {
+      const version = await bumpTokenVersion(strapi, id);
+      const result = await passwordSave.run({ userId: id }, save);
+      return { version, result };
+    });
   } catch (error) {
     strapi.log?.warn?.(
-      `[auth] password not changed: user=${id} tokenVersion=${committed.version} ` +
-        "(saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
+      `[auth] password not changed: user=${id} ` +
+        "(the change rolled back: the password and the user's sessions are as they were)",
     );
     throw error;
   }
-  strapi.log?.info?.(`[auth] password changed: user=${id} tokenVersion=${committed.version}`);
-  return result;
+  const change = passwordChange.getStore();
+  if (change) change.committed = { userId: id, version: outcome.version };
+  strapi.log?.info?.(`[auth] password changed: user=${id} tokenVersion=${outcome.version}`);
+  return outcome.result;
 }
 
 /**
- * Patches a user service instance: an edit() that writes a password first
- * raises the user's version (bumpTokenVersion) and only then lets the
- * plugin save it. A failed bump throws before anything is saved; a failed
- * save after the bump leaves the old password with every older JWT
- * revoked. In a password action the committed version goes to the
- * action's issue() (passwordChange).
+ * Patches a user service instance: an edit() that writes a password raises
+ * the user's version (bumpTokenVersion) and lets the plugin save the
+ * password in one transaction (saveAfterBump): both or neither. In a
+ * password action the committed version goes to the action's issue()
+ * (passwordChange).
  */
 export function patchUserService(service: UserService, strapi: TokenVersionStrapi): UserService {
   const originalEdit = service.edit;
@@ -600,9 +618,10 @@ export type DocumentMiddleware = (
  *    add()), seeds. Only bumpTokenVersion, raw SQL outside the Document
  *    Service, writes it, so it never goes down;
  *  - an update whose data carries a password raises the user's version
- *    first (saveAfterBump, fail closed), unless the user service's edit()
- *    is saving that user's password after its own bump (passwordSave):
- *    that is how a password the admin panel sets revokes the older JWTs.
+ *    and runs the write in one transaction (saveAfterBump), unless the
+ *    user service's edit() is saving that user's password inside its own
+ *    (passwordSave): that is how a password the admin panel sets revokes
+ *    the older JWTs.
  * In refresh mode only the drop applies.
  */
 export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddleware {
@@ -672,7 +691,8 @@ export async function settleIssuedJwt(ctx: AuthContext): Promise<void> {
  * Patches an auth controller instance: every action settles the JWT it
  * answers with; a local sign-in reads the version before its password
  * check; the password actions run in a passwordChange context, so that
- * their answer carries the version their edit() committed before saving.
+ * their answer carries the version their edit() committed together with
+ * the new password.
  */
 export function patchAuthController(
   controller: Record<string, unknown>,
@@ -682,7 +702,8 @@ export function patchAuthController(
 
   /**
    * Runs a password action in a passwordChange context. Its edit() bumped
-   * before saving, and the JWT of its answer carries that version. A
+   * and saved in one transaction, and the JWT of its answer carries that
+   * version. A
    * successful answer without such a bump (an upgraded plugin that saves
    * the password some other way) is the tripwire: revoke now, answer with
    * that version, log it as an error.

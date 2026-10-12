@@ -2049,8 +2049,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     password: …` a password change whose tab lost its session, `capped at
     200 channels` a page with more than 200 comment sections. The fourth
     prints nothing either: `password not changed: user=<id>` is a change
-    whose save failed after the version was raised (that user keeps the
-    old password and is signed out everywhere, and signs in again),
+    that rolled back (raising the version or saving the password failed:
+    that user keeps the old password and the sessions; the user sees an
+    error and can try again),
     `tokenVersion dropped from a Document Service …` a write that tried to
     set the token version (the cms dropped it: only a password change
     raises it; find out who sent it), `FX40 tripwire` a password the plugin
@@ -2677,11 +2678,12 @@ Strapi JWT the cms issues carries the user's current version (claim
 one with 401. A JWT without the claim counts as version 0, so the JWTs of
 the running sessions stay valid: **nobody is signed out by this deploy**.
 `POST /api/auth/change-password` raises the user's version by one and
-answers with a JWT of the new version (since the review fix round: one
-atomic statement, run BEFORE the new password is saved, so a failure
-never leaves a new password next to older JWTs that still work: if
-raising fails nothing changes, if saving fails the old password stays and
-the user's sessions are signed out); the web stores it in the session of
+answers with a JWT of the new version (since the review fix rounds: one
+atomic statement in the same database transaction as the new password, so
+both commit together or neither does: a failure leaves the password and
+the sessions as they were, never a new password next to older JWTs that
+still work, and no sign-in with the old password during the change keeps
+a session); the web stores it in the session of
 the tab that changed the password, so that tab stays signed in, and every
 other session of the user (another browser or device) lands on
 `/sign-in?expired=1` with its next request. Its live updates stop too:
