@@ -1329,8 +1329,9 @@ sudo awk '/^[[:space:]]*[@#]includedir[[:space:]]/ {inc = NR; next}
   `id -nG bigemo` lists). It does not see the drop-ins themselves.
 - **The command itself** (recommended) is the only end-to-end proof: it
   takes one pre-deploy backup, the same as step 1 of a deploy, so one
-  more `-predeploy` generation of `sinnlos` lands in `/srv/backup/outbox`
-  (its rotation is `backup-run`'s). As far as this repo knows it, success
+  more `-predeploy` generation lands in `/srv/backup/outbox/sinnlos/`
+  (`backup-run` keeps the newest 7 per kind, so it never pushes a nightly
+  one out). As far as this repo knows it, success
   is `backup-run exit 0`, which is what `deploy.sh` takes as a good
   backup; a missing or losing sudoers rule stops it at once with
   `sudo: a password is required` and exit 1, and any other non-zero exit
@@ -10783,10 +10784,72 @@ docker run --rm \
 ### 7.3 Automated daily backups (cron)
 
 > **Production (since 2026-10-07):** the owner's host backs `sinnlos` up with
-> `backup-run` from the `srv-prod-01-ops` repo (nightly, and as the pre-deploy
-> backup of `infra/deploy.sh`, [§3.6](#36-deploy)); its `docs/backup.md` has the
-> layout and the restore. `pg-backup.sh` below stays for other hosts and for
-> the pre-deploy backup of another compose project (a staging copy).
+> `backup-run` from the `srv-prod-01-ops` repo (nightly at 04:00, and as the
+> pre-deploy backup of `infra/deploy.sh`, [§3.6](#36-deploy)); its
+> `docs/backup.md` has the layout and the decrypting, and
+> [Restoring a production generation](#restoring-a-production-generation)
+> below what sinnlos needs on top. `pg-backup.sh` below stays for other
+> hosts and for the pre-deploy backup of another compose project (a staging
+> copy).
+
+#### Restoring a production generation
+
+Production's backups are `backup-run` generations in
+`/srv/backup/outbox/sinnlos/<YYYYMMDD>T<HHMMSS>Z-<daily|predeploy>/` (UTC;
+the newest 7 per kind stay, and the NAS pulls the outbox daily after
+04:30). A generation holds:
+
+- `db.dump.zst.age`: `pg_dump -Fc` of `infra-db-1` (Postgres 16; the
+  `MANIFEST` names the `db_pg_dump_version`);
+- `db-globals.sql.zst.age`: `pg_dumpall --globals-only`, for a new
+  Postgres container only (the running one has its roles);
+- `uploads.tar.zst.age`: the volume `infra_cms_uploads`, paths relative to
+  its root;
+- `config.tar.zst.age`: `infra/.env`, stored as
+  `home/bigemo/git/sinnlos/infra/.env`;
+- `MANIFEST`: the sha256 of every file of the generation, and for each
+  component its plaintext size and sha256 (`plain.<component>.bytes`,
+  `plain.<component>.sha256`);
+- `COMPLETE`, written last: a generation without it must not be used.
+
+Each component is compressed with zstd, then encrypted with **age** (not
+GPG). The age private keys are never on the VPS, so decrypting happens off
+it, with the commands of `docs/backup.md` in `srv-prod-01-ops`
+(`age -d -i <identity> <file>.zst.age | zstd -d > <file>`); this document
+does not repeat them. What sinnlos needs around them:
+
+1. **Check the generation** (no key needed): `backup-verify <generation
+   dir>` passes, i.e. `COMPLETE` names the directory and every file
+   matches `MANIFEST`.
+2. **Decrypt** `db.dump` (and `uploads.tar` and `config.tar` when you need
+   them) off the VPS into an owner-only directory (`umask 077`), and
+   compare every plaintext with the generation: `sha256sum db.dump` must
+   print the `plain.db.dump.sha256` value of `MANIFEST`, and so on for the
+   others. A mismatch: stop, the file is not what was backed up.
+3. **The database:** copy `db.dump` to the host, into the owner-only
+   `infra/backups/` of the checkout, and restore it with
+   [Restoring a database dump](#restoring-a-database-dump): stop web and
+   cms, a clean database, `pg_restore --exit-on-error
+   --single-transaction`, the check, and a fresh `JWT_SECRET` before the
+   cms starts. Not with the plain `pg_restore --clean --if-exists` of
+   `docs/backup.md`: over the database that runs, that leaves a mixture
+   when the schemas differ. Delete the host's copy afterwards.
+4. **The uploads** (cms stopped): stream the plain tar into the volume,
+   `docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C
+   /uploads < uploads.tar`; it adds and overwrites but deletes nothing, so
+   empty the volume first (`find /uploads -mindepth 1 -delete` in the same
+   container) when files created after the backup must go.
+5. **The `.env`:** `config.tar` holds `home/bigemo/git/sinnlos/infra/.env`.
+   Extract it into a scratch directory and put it back (owned by `bigemo`,
+   mode 600) only if the host lost its `infra/.env`; then rotate
+   `JWT_SECRET` (step 6 of the database restore) before the cms starts,
+   because the backed-up file can hold a secret that was rotated since.
+6. Start web and cms only after steps 3 to 5, and delete every plaintext
+   copy off the VPS.
+
+The same holds for a `-predeploy` generation after a failed deploy (§7.4).
+
+#### Backups with pg-backup.sh (hosts without backup-run)
 
 The repo ships a ready-made script: **`infra/backup/pg-backup.sh`**. It is
 the backup for hosts without the owner's `backup-run` (and the pre-deploy
@@ -10884,11 +10947,11 @@ for a monitor: `last-success` (its modification time, or the time it
 starts with) younger than 26 hours; older means the nightly cron stopped
 or failed. Only nightly runs write it.
 
-**Restoring an encrypted artifact** of `pg-backup.sh` (on a machine with
-the private key, never on the VPS; production's `backup-run` generations
-in `/srv/backup/outbox` restore as its `docs/backup.md` in
-`srv-prod-01-ops` says). Take the database, uploads and `.env` artifacts
-of one run (the same `<ts>[-predeploy]` in their names):
+**Restoring an encrypted artifact** of `pg-backup.sh` (hosts without
+`backup-run`; on a machine with the private key, never on the VPS;
+production: [Restoring a production generation](#restoring-a-production-generation)).
+Take the database, uploads and `.env` artifacts of one run (the same
+`<ts>[-predeploy]` in their names):
 
 ```bash
 # Owner-only files in a private directory: the dump and the .env copy hold
@@ -10949,9 +11012,12 @@ database is a throwaway one that no cms ever uses, so it needs no new
 `JWT_SECRET`; a real restore does (§7.1, step 6).
 
 > **Planned (follow-up, not built yet):** `restore-drill.sh` support for
-> the generations of production's `backup-run`. It needs their artifact
-> layout from `docs/backup.md` in the `srv-prod-01-ops` repo, which is not
-> in this repo; until then the drill takes `pg-backup.sh` artifacts only.
+> production's `backup-run` generations (above): check `COMPLETE` and
+> `MANIFEST`, `age -d -i` and `zstd -d`, compare with the `plain.*`
+> sha256s, restore into a throwaway Postgres 16 container, list the
+> uploads; run off the VPS, where the age key is. The layout is taken
+> from `docs/backup.md` of `srv-prod-01-ops`; until then the drill takes
+> `pg-backup.sh` artifacts (GPG) only.
 
 > **No order needed:** the crontab runs in the **host's** zone, the
 > janitors (uploads, search log, and since batch 12 notifications and
@@ -11089,8 +11155,10 @@ infra/deploy.sh
 
 If the database schema changed, restore from the pre-deploy backup
 (`sinnlos-db-<ts>-predeploy.dump.gz.gpg`; decrypt it first with the off-box
-private key, [§7.3](#73-automated-daily-backups-cron); production's
-`backup-run` generation as its `docs/backup.md` says) with the steps of
+private key, [§7.3](#73-automated-daily-backups-cron); production: the
+`-predeploy` generation of `backup-run`, decrypted and checked as in
+[Restoring a production generation](#restoring-a-production-generation))
+with the steps of
 [Restoring a database dump](#restoring-a-database-dump): into a clean
 database, in one transaction, checked, and with a fresh `JWT_SECRET`
 before the cms starts.
