@@ -1282,8 +1282,10 @@ systemctl start docker
 > column, the pages, a guest walk with a clean log, an editor's takedown, a
 > two-browser password change, and an hour of 401s and live lines. Editors
 > should know that announcement bodies now render as Markdown. A rollback
-> goes to the batch 12 SHA tags with no database step; the column stays,
-> and sessions revoked on batch 13 work again until the roll-forward.
+> goes to the batch 12 SHA tags with no database step (the column stays)
+> and **always rotates `JWT_SECRET`** first (owner decision 2026-10-12),
+> so that no session revoked on batch 13 works again; that signs everyone
+> out once.
 > Follow [Deploying batch 13 (2026-10-12)](#deploying-batch-13-2026-10-12).
 >
 > **Deploying the UI primitives and Markdown rendering (batch 13, lane
@@ -1325,7 +1327,8 @@ systemctl start docker
 > without one for 45 s the browsers poll at the short intervals and
 > the header says _Live updates delayed_.
 > `infra/live-smoke.sh` now also requires `"emitFresh":true` on the stream.
-> Roll back cms and web together. Batch 13 ships it with lanes 8B and 8A
+> Roll back cms and web together, and rotate `JWT_SECRET` in that rollback
+> (mandatory, owner decision 2026-10-12). Batch 13 ships it with lanes 8B and 8A
 > (see [Deploying batch 13](#deploying-batch-13-2026-10-12)).
 > Follow [Upgrading to the live client and password-change revocation (batch 13, lane 8C)](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c).
 >
@@ -1745,7 +1748,9 @@ as `bigemo`):
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
 and starts both; the rollback below takes both back. No env, compose,
-permission, route, edge or Traefik change, and no new dependency. The
+permission, route, edge or Traefik change, and no new dependency (a
+rollback, though, rotates `JWT_SECRET` and so signs everyone out once:
+owner decision 2026-10-12, see the rollback). The
 database container is not recreated; cms and web are, so the site is down
 while the cms boots. The first cms boot adds one column,
 `up_users.token_version` (integer, no database default): the rows of
@@ -2041,47 +2046,224 @@ other people's marketplace ads. On a phone, _More_ reaches every section.
 Clicked links show a small pending dot, and every page its own loading
 skeleton. When live updates are delayed for a while, the header says _Live
 updates delayed_; comments and notifications still arrive, a few seconds
-later.
+later. Should the update have to be rolled back, everyone is signed out
+once and signs in again (Microsoft sign-ins too): the rollback replaces
+the key that signs the sessions, so that no session ended by a password
+change comes back.
 
 **Rollback: both images, to the batch 12 SHA tags (`B12_TAG` of step 1),
-no database step.** Follow the hint `infra/deploy.sh` prints when the
-deploy fails. After a recorded batch 13 deploy, by hand (the batch 12 tags
-stay: the prune keeps the newest five). If the shell of step 1 is gone,
-the batch 12 deploy is the line before the last one of
-`.git/sinnlos-deploy/infra.history` (`<tag> <commit> <date>`):
+with a new `JWT_SECRET`, no database step.** _Owner decision 2026-10-12:
+`JWT_SECRET` rotation is mandatory on rollback below batch 13._ The batch
+12 cms checks a Strapi JWT's signature and expiry only and ignores the
+token version, so under the same `JWT_SECRET` every session and JWT that a
+password change on batch 13 revoked (a stolen one too) would be accepted
+again for the whole rollback window. A new `JWT_SECRET` before the batch
+12 images serve any traffic makes every JWT signed before the rollback
+invalid, so no revoked JWT is ever accepted. The price: **every user is
+signed out once** (open tabs land on `/sign-in?expired=1` at their next
+page load) and signs in again once: local accounts and, with
+`ENTRA_ENABLED=1`, Microsoft sign-ins as well (the cms signs their Strapi
+JWT with the same secret; they sign in through Microsoft again). Strapi
+admin-panel sessions and API tokens are not affected. This holds for
+every rollback of the cms from batch 13 (or a later release) to an image
+from before batch 13, also after a failed `infra/deploy.sh`: the rollback
+commands it prints do not rotate, so do R4 before their
+`up -d --no-build web cms` line.
+
+R1. **Does a batch 13 cms run?** If the shell of step 1 is gone, set
+`B12_TAG` and `B12_SHA` again from `.git/sinnlos-deploy/infra.history`
+(`<tag> <commit> <date>`): the batch 12 deploy is its last line after a
+failed deploy, the line before the last after a recorded batch 13 deploy
+(the batch 12 tags stay: the prune keeps the newest five).
 
 ```bash
-# B12_TAG=… B12_SHA=…   (only if the shell of step 1 is gone)
 tail -n 2 .git/sinnlos-deploy/infra.history
+# B12_TAG=… B12_SHA=…   (only if the shell of step 1 is gone)
 grep -F "${B12_TAG}" .git/sinnlos-deploy/infra.history
+docker inspect --format '{{.Image}}' infra-cms-1
+docker image inspect --format '{{.Id}}' "infra-cms:${B12_TAG}"
+```
+
+Two equal ids: `deploy.sh` stopped before it recreated the containers,
+batch 12 still runs, and there is nothing to roll back (and nothing to
+rotate). Otherwise go on, by hand or along the commands a failed
+`deploy.sh` printed.
+
+R2. **Record what the rotation protects** (read-only, for the incident
+notes; it decides nothing, the rotation comes either way). Before the
+images change: the batch 13 cms's log goes with its container.
+
+```bash
+umask 077
+psql_db -X <<'SQL'
+SELECT count(*) AS token_version_columns FROM information_schema.columns
+ WHERE table_name = 'up_users' AND column_name = 'token_version';
+SELECT count(*) FILTER (WHERE token_version > 0) AS users_with_revocations, count(*) AS users
+  FROM up_users;
+SELECT id, username, token_version FROM up_users WHERE token_version > 0 ORDER BY id;
+SQL
+"${COMPOSE[@]}" logs cms | grep -E '\[auth\] password (changed|not changed)' > /tmp/b13-password-changes.log
+wc -l < /tmp/b13-password-changes.log
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' infra-cms-1 \
+  | sed -n 's/^JWT_SECRET=//p' | sha256sum > /tmp/b13-jwt-secret.sha256
+```
+
+`users_with_revocations` users (listed with their version) changed their
+password on batch 13, or were signed out by hand: each such change
+revoked that user's older JWTs, which only the rotation keeps out after
+the rollback. The log lines, `[auth] password changed: user=<id>
+tokenVersion=<n>` since the deploy started the cms, say when (the log
+rotation of 10 MB × 5 can have dropped the earliest of a long run; the
+database count is complete). `token_version_columns` 0 (and an error on
+the next query): the batch 13 cms never finished its first boot, nobody
+was revoked. The last command keeps a checksum of the running cms's
+`JWT_SECRET` (not the secret) for R6.
+
+R3. **A revoked JWT for the check in R6.** Needs the batch 13 cms to
+answer; skip it if it does not (a crash loop: then no password changed on
+it either). Use the test account of step 14 (not `alex.morgan` or
+`casey.jones`); its password travels through `docker exec -e`, never on a
+command line. The probe signs in, changes the password to a random
+temporary one and back (the account keeps its password; its version goes
+up by 2), checks that the JWT of the first sign-in now gets 401, and
+keeps that JWT:
+
+```bash
+TEST_IDENTIFIER='<the username of the test account>'
+read -rsp "Password of ${TEST_IDENTIFIER}: " TEST_PASSWORD; echo
+TEST_TEMP_PASSWORD="$(openssl rand -base64 18)"
+export TEST_IDENTIFIER TEST_PASSWORD TEST_TEMP_PASSWORD
+docker exec -i -e TEST_IDENTIFIER -e TEST_PASSWORD -e TEST_TEMP_PASSWORD infra-cms-1 \
+  node --input-type=module - > /tmp/b13-revoked.jwt <<'NODE'
+const base = "http://127.0.0.1:1337";
+const { TEST_IDENTIFIER: identifier, TEST_PASSWORD: password, TEST_TEMP_PASSWORD: temp } = process.env;
+const call = async (path, jwt, body) => {
+  const res = await fetch(`${base}${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { "content-type": "application/json", ...(jwt ? { authorization: `Bearer ${jwt}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
+const ok = (what, res) => {
+  if (res.status === 200) return res.body;
+  throw new Error(`${what}: HTTP ${res.status} ${res.body?.error?.message ?? ""}`);
+};
+const change = (from, to, jwt) =>
+  call("/api/auth/change-password", jwt, { currentPassword: from, password: to, passwordConfirmation: to });
+const { jwt: revoked } = ok("sign-in", await call("/api/auth/local", null, { identifier, password }));
+const { jwt: changed } = ok("change to the temporary password", await change(password, temp, revoked));
+ok("change back (the password is now the one in TEST_TEMP_PASSWORD)", await change(temp, password, changed));
+const { status } = await call("/api/users/me", revoked);
+if (status !== 401) {
+  throw new Error(`the JWT from before the change answered HTTP ${status}, not 401: is this the batch 13 cms?`);
+}
+console.error("batch 13: the JWT from before the password change gets 401");
+console.log(revoked);
+NODE
+```
+
+It prints `batch 13: the JWT from before the password change gets 401`,
+and `/tmp/b13-revoked.jwt` holds that JWT (one line). The cms logs two
+`[auth] password changed: user=<id>` lines for the account.
+
+R4. **Rotate `JWT_SECRET`** in `infra/.env` on the host (mode 600, owned
+by `bigemo`). Only the cms reads it; leave `AUTH_SECRET` (the web's own
+session key: changing it is not needed, the sessions end anyway because
+their Strapi JWT does), `ADMIN_JWT_SECRET` and `ENTRA_EXCHANGE_SECRET` as
+they are.
+
+```bash
+NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+awk -v s="${NEW_JWT_SECRET}" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; n++; next } { print } END { exit n == 1 ? 0 : 1 }' \
+  infra/.env > infra/.env.rotated && mv infra/.env.rotated infra/.env
+unset NEW_JWT_SECRET
+ls -l infra/.env
+grep -c '^JWT_SECRET=' infra/.env
+"${COMPOSE[@]}" config --quiet && echo "compose config OK"
+```
+
+`-rw-------` (R2's `umask 077`), `1` and `compose config OK`. If `awk`
+fails (no `JWT_SECRET=` line, or several), nothing was moved: remove
+`infra/.env.rotated` and give `infra/.env` exactly one `JWT_SECRET=` line
+with a fresh value. Keep no copy of the old value.
+
+R5. **Start the batch 12 images,** which pick up the new secret (after a
+failed deploy: the printed commands from their `up -d` line on):
+
+```bash
 docker tag "infra-web:${B12_TAG}" infra-web:latest
 docker tag "infra-cms:${B12_TAG}" infra-cms:latest
 "${COMPOSE[@]}" up -d --no-build web cms
-git show "${B12_SHA}:infra/live-smoke.sh" > /tmp/live-smoke-b12.sh
-BASE_URL=https://sinnlos.yurtbay.dev bash /tmp/live-smoke-b12.sh
 ```
 
-`infra/live-smoke.sh` belongs to its checkout: the batch 13 script fails
-against a batch 12 web (on the subscribe answer and `emitFresh`), so the
-check after a rollback runs batch 12's. None of the hint's special cases
-applies from batch 13 to batch 12 (as from batch 12 to batch 10). What
-stays in the database, and how the batch 12 images take it:
+R6. **Verify** once the cms answers: the cms runs with the new secret,
+the revoked JWT of R3 gets 401, a fresh sign-in of the test account works,
+and batch 12's own live-smoke passes.
+
+```bash
+[ "$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' infra-cms-1 \
+  | sed -n 's/^JWT_SECRET=//p' | sha256sum)" != "$(cat /tmp/b13-jwt-secret.sha256)" ] \
+  && echo "JWT_SECRET rotated" || echo "JWT_SECRET NOT ROTATED"
+REVOKED_JWT="$(cat /tmp/b13-revoked.jwt 2>/dev/null)"; export REVOKED_JWT
+docker exec -i -e TEST_IDENTIFIER -e TEST_PASSWORD -e REVOKED_JWT infra-cms-1 node --input-type=module - <<'NODE'
+const base = "http://127.0.0.1:1337";
+const { TEST_IDENTIFIER: identifier, TEST_PASSWORD: password, REVOKED_JWT: revoked } = process.env;
+const me = async (jwt) =>
+  (await fetch(`${base}/api/users/me`, { headers: { authorization: `Bearer ${jwt}` } })).status;
+let ok = true;
+if (revoked) {
+  const status = await me(revoked);
+  console.log(`the revoked JWT from batch 13: HTTP ${status} (expected 401)`);
+  ok = ok && status === 401;
+}
+const login = await fetch(`${base}/api/auth/local`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ identifier, password }),
+});
+const fresh = login.ok ? (await login.json()).jwt : null;
+const status = fresh ? await me(fresh) : 0;
+console.log(`a fresh sign-in: HTTP ${login.status}, then /api/users/me HTTP ${status} (expected 200 and 200)`);
+ok = ok && login.status === 200 && status === 200;
+process.exitCode = ok ? 0 : 1;
+NODE
+git show "${B12_SHA}:infra/live-smoke.sh" > /tmp/live-smoke-b12.sh
+BASE_URL=https://sinnlos.yurtbay.dev bash /tmp/live-smoke-b12.sh
+unset TEST_PASSWORD TEST_TEMP_PASSWORD REVOKED_JWT
+rm -f /tmp/b13-revoked.jwt /tmp/b13-jwt-secret.sha256
+```
+
+`JWT_SECRET rotated`, `the revoked JWT from batch 13: HTTP 401 (expected
+401)` (the line is missing when R3 was skipped), `a fresh sign-in: HTTP
+200, then /api/users/me HTTP 200 (expected 200 and 200)`, and the
+live-smoke passes (it signs in afresh, too). In a browser, a tab that was
+signed in before lands on `/sign-in?expired=1` at its next page load, and
+signing in works. Keep `/tmp/b13-password-changes.log` with the incident
+notes. `infra/live-smoke.sh` belongs to its checkout: the batch 13 script
+fails against a batch 12 web (on the subscribe answer and `emitFresh`),
+so the check after a rollback runs batch 12's. None of the other special
+cases of the hint applies from batch 13 to batch 12 (as from batch 12 to
+batch 10).
+
+What stays, and what follows:
 
 - **The `token_version` column stays** with its values (the schema sync
   never drops columns, `forceMigration: false`); the batch 12 cms boots on
   it and ignores it, as the batch 10 cms did with batch 12's `audience`
-  columns. It accepts the JWTs the batch 13 cms issued (signature and
-  expiry only), so nobody is signed out by the rollback either.
-- **Revocations pause:** while batch 12 runs, a password change revokes
-  nothing, and every session or JWT that a password change on batch 13
-  revoked **works again** for the whole rollback window, a stolen one too.
-  After a password change because of a compromise, keep the rollback short
-  or rotate `JWT_SECRET`, which signs everyone out (an operator decision).
-- **The roll-forward** is a normal `infra/deploy.sh`. The column's values
-  apply again: the sessions revoked before the rollback are revoked again,
-  and a user whose version is above 0 (who changed the password on batch
-  13) and signed in on batch 12 in between signs in once more, since those
-  JWTs carry no version (= 0).
+  columns.
+- **During the rollback window a password change revokes nothing** (batch
+  12 cannot). To end the sessions of one user after the roll-forward, raise
+  that user's version by hand (the `UPDATE` of the
+  [lane 8C section](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c)).
+- **The roll-forward** is a normal `infra/deploy.sh`, and **the new
+  `JWT_SECRET` stays**: never put the old value back (it would make the
+  JWTs from before the rollback valid again, as far as their version
+  matches, and sign out everyone who signed in during the rollback). No
+  second rotation. The roll-forward signs nobody out, except that the
+  JWTs the batch 12 cms issued carry no version (= 0): a user whose
+  version is above 0 (R2's list, plus R3's test account and anyone signed
+  out by hand) signs in once more.
 - Never roll back one image alone. A batch 12 web in front of the batch 13
   cms answers the keepalive with 400 (logged once), and a password change
   there also ends the tab that made it (the batch 12 web does not take the
@@ -2523,18 +2705,21 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 **Rollback:** the SHA-tag rollback `infra/deploy.sh` prints, **cms and web
 together**:
 
-- The previous cms ignores the `token_version` column (it stays), and it
-  accepts the JWTs the new cms issued (it checks signature and expiry
-  only), so nobody is signed out by the rollback either; until the next
-  roll-forward a password change revokes nothing. That includes the past:
-  every session and JWT that a password change on this release revoked
-  works again for the whole rollback window (a stolen token too), and is
-  revoked again after the roll-forward (the column keeps its values). If a
-  password was changed because of a compromise, keep the rollback short
-  or rotate `JWT_SECRET`, which signs everyone out (an operator decision).
-- Rolling forward again: the JWTs the previous cms issued in between carry
-  no version (= 0), so a user whose version is above 0 (who changed the
-  password on this release) signs in again once.
+- The previous cms ignores the `token_version` column (it stays) and
+  checks a JWT's signature and expiry only: under the same `JWT_SECRET`,
+  every session and JWT that a password change on this release revoked (a
+  stolen token too) would work again for the whole rollback window.
+  **Rotating `JWT_SECRET` is therefore mandatory in every rollback of the
+  cms to a release before this one** (owner decision 2026-10-12), before
+  the previous images serve traffic; it signs everyone out once, local and
+  Microsoft sessions. The steps and checks (a revoked JWT gets 401 after
+  the rollback, a fresh sign-in works) are R1 to R6 of the
+  [batch 13 rollback](#deploying-batch-13-2026-10-12). Until the next
+  roll-forward a password change revokes nothing.
+- Rolling forward again: keep the new `JWT_SECRET`. The JWTs the previous
+  cms issued in between carry no version (= 0), so a user whose version
+  is above 0 (who changed the password on this release) signs in again
+  once.
 - Only the web rolled back (new cms): the previous web answers the
   keepalive with 400, which the cms logs once (`[live-emit] keepalive
   status=400 …`); live pings are unaffected. Tabs still open on the new
