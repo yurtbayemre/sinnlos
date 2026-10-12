@@ -123,14 +123,14 @@ export default async function AcknowledgementReportPage() {
                     </div>
                   )}
                   {row.targetUnknown ? (
-                    <div className="flex items-start gap-1.5 text-sm text-amber-600 dark:text-amber-400">
+                    <div className="flex items-start gap-1.5 text-sm text-amber-700 dark:text-amber-400">
                       <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
                       {/* The headline already sits in the card header; this
                           line explains WHY there is no rate. */}
                       <span>{t("audienceUnknownHint")}</span>
                     </div>
                   ) : row.openUsers.length === 0 ? (
-                    <div className="inline-flex items-center gap-1.5 text-sm text-emerald-600 dark:text-emerald-400">
+                    <div className="inline-flex items-center gap-1.5 text-sm text-emerald-700 dark:text-emerald-400">
                       <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                       {t("allAcked")}
                     </div>

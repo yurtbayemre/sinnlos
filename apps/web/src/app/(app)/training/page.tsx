@@ -73,7 +73,7 @@ export default async function TrainingPage() {
                       {overview.statusUnknown ? (
                         <span className="text-muted-foreground">–</span>
                       ) : done ? (
-                        <span className="inline-flex items-center gap-1.5 font-medium text-emerald-600 dark:text-emerald-400">
+                        <span className="inline-flex items-center gap-1.5 font-medium text-emerald-700 dark:text-emerald-400">
                           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
                           {t("statusDone")}
                         </span>

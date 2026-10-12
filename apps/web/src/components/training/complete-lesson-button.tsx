@@ -53,7 +53,7 @@ export function CompleteLessonButton({
   return (
     <div className="flex flex-wrap items-center gap-3">
       {completed ? (
-        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+        <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
           <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
           {completedAtLabel ? t("completedAt", { date: completedAtLabel }) : t("completedNow")}
         </span>
