@@ -445,6 +445,53 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
       }
     });
 
+    it("two changes of one user inside ONE outer transaction: the second is refused (3 runs)", async () => {
+      // Both join the outer transaction, so its row lock orders nothing
+      // between them. Before the fix B bumped to 2 and saved while A was
+      // held after its bump 1, then A saved: A's password stood with B's
+      // JWT accepted.
+      for (let run = 0; run < 3; run += 1) {
+        const account = await newAccount();
+        const first = `Outer-First-${run}-1`;
+        const second = `Outer-Second-${run}-2`;
+        const held = holdSave(first);
+        const outcome = await t.strapi.db.transaction(async () => {
+          const a = changeAs(account.id, account.password, first);
+          a.catch(() => undefined);
+          await held;
+          const b = await changeAs(account.id, account.password, second).then(
+            (jwt) => ({ jwt }),
+            (error: Error) => ({ refused: error.message }),
+          );
+          release();
+          return { a: await a, b };
+        });
+        const stored: string[] = [];
+        for (const password of [first, second]) {
+          if (
+            await t.login(account.username, password).then(
+              () => true,
+              () => false,
+            )
+          ) {
+            stored.push(password);
+          }
+        }
+        expect(stored).toHaveLength(1);
+        const jwts: Record<string, string> = { [first]: outcome.a };
+        if ("jwt" in outcome.b) jwts[second] = outcome.b.jwt;
+        const accepted: string[] = [];
+        for (const [password, jwt] of Object.entries(jwts)) {
+          if (await accepts(jwt)) accepted.push(password);
+        }
+        expect(accepted).toEqual(stored);
+        expect(outcome.b).toEqual({
+          refused: `[users-permissions-extension] a second password change of user ${account.id} inside the same transaction, while the first is still running, is refused (FX40).`,
+        });
+        expect(stored).toEqual([first]);
+      }
+    });
+
     it("overlapping changes: the stored password belongs to the only accepted JWT (3 runs)", async () => {
       for (let run = 0; run < 3; run += 1) {
         const account = await newAccount();
