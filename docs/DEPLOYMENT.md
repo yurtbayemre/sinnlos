@@ -1325,7 +1325,7 @@ systemctl start docker
 > 7B)?** A normal deploy of cms and web with `infra/deploy.sh`: no env,
 > schema, permission, edge or Traefik change, nothing in the database. The
 > first build installs everything with pnpm 10 and writes the cms
-> dependency layer once (about 820 MB), so it is slower and needs a few GB
+> dependency layer once (about 770 MB), so it is slower and needs a few GB
 > free; later code-only deploys add about 15 MB. `deploy.sh` also refuses
 > untracked files under `packages/`. The admin panel loses its "Deploy to
 > Strapi Cloud" entry. Follow
@@ -1701,8 +1701,8 @@ a department; the other rows stay NULL. Nobody's view changes: a linked
 row is restricted by its links already. If that transaction fails, the
 cms does not start (step 9). **The first build is
 slower:** pnpm 10 installs both images from scratch (a new pnpm store,
-nothing cached), and the first deploy writes about 1.1 GB of new images
-(the cms dependency layer alone 823 MB) next to the images kept for
+nothing cached), and the first deploy writes about 1.0 GB of new images
+(the cms dependency layer alone about 770 MB) next to the images kept for
 rollback, plus the build cache; later code-only deploys add about 15 MB.
 
 Set these on the host, in the checkout, for the checks below:
@@ -1914,7 +1914,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    ```bash
    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|department-audience)\]|Strapi started'
-   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -vE ' refused: |\[auth\]\[error\] CredentialsSignin|Strapi 403 Forbidden|ForbiddenError'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -vE ' refused: |CredentialsSignin|Strapi 403 Forbidden|ForbiddenError'
    ```
 
    `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
@@ -1934,7 +1934,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      that is gone;
    - `[auth][error] CredentialsSignin: Read more at
      https://errors.authjs.dev#credentialssignin`, which Auth.js logs for
-     every wrong password;
+     every wrong password (with colour codes around `[auth][error]`, so
+     the filter matches `CredentialsSignin` alone);
    - a guest's page view: the web still asks the cms for sections guests
      may not read and logs the cms's 403 as `[dashboard] fetch failed
      Error [StrapiError]: Strapi 403 Forbidden …` (likewise
@@ -2032,7 +2033,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     ```
 
     `COPY … /out /app` of about 15 MB above the two `node_modules` copies
-    (about 820 MB and 120 kB); the probe prints `2`. `/admin` loads, and
+    (about 770 MB and 120 kB); the probe prints `2`. `/admin` loads, and
     an image uploaded in the media library gets its formats.
 
 14. **English by default, and the digest default:**
@@ -2208,8 +2209,9 @@ company-wide after the roll forward too.
 the image switch: a department delete committed after your listing would
 leave flag-only rows that neither your decision nor a saved list covers.
 So stop the cms first and keep it stopped until the rollback below starts
-the batch 10 image (the web stays up and answers with its "cannot be
-reached" messages meanwhile):
+the batch 10 image (the web stays up meanwhile: its pages show their
+"cannot be reached" messages, and `/admin` and `/api/*` answer with the
+web's redirect, because the cms routes are gone):
 
 ```bash
 "${COMPOSE[@]}" stop cms
@@ -2440,18 +2442,24 @@ checks through the edge: the staging rehearsal below.
 **Staging rehearsal (2026-10-12, `edc9611`):** the whole sequence on a
 local staging copy of production (`infra/deploy.sh` with Traefik, from the
 batch 10 SHA tags to the batch 12 commit); all eight checks of the
-rehearsal passed. It ran before the second review fix round
-(acknowledgement of expired announcements, next 16.3.8, handlebars
-4.7.10), which no staging run has covered yet. `infra/deploy.sh` ended
-with exit 0 after 163 s, of which the cold pnpm 10 build took about 141 s
-on a 32-core host (production will be slower). The outage was about 10 s
+rehearsal passed. `infra/deploy.sh` ended with exit 0 after 163 s, of
+which the cold pnpm 10 build took about 139 s on a 32-core host
+(production will be slower; a separate `--no-cache` build of both images
+took about 141 s). The outage was about 10 s
 for the web and about 4.4 s for the cms, whose container went from start
 to healthy in about 6 s. Also rehearsed: the janitors, the department delete including the
 publish and "Discard changes" race, the web checks through Traefik, the
 digest of a user without a stored language, live-smoke, and the rollback
-to the `7d9e52b` SHA tags with the roll forward. The first deploy wrote
-about 1.1 GB of new images next to the rollback images (the cms dependency
-layer 823 MB), plus the build cache. What it found in this runbook is
+to the `7d9e52b` SHA tags with the roll forward. A second staging run on
+`17bf65c`, after the second review fix round (acknowledgement of expired
+announcements, next 16.3.8, handlebars 4.7.10), rolled forward with
+`infra/deploy.sh` (exit 0 after 115 s), passed the acknowledgement,
+page, admin and media-library checks, ran the stop rule's listing, save
+and re-apply, and the rollback with the freeze and the roll forward
+exactly as written above. At `17bf65c` the first deploy writes about
+1.0 GB of new images next to the rollback images (cms 924 MB, web 64 MB
+beyond the shared base; the cms dependency layer about 770 MB), plus the
+build cache. What it found in this runbook is
 fixed: the backup steps through `backup-run` (2, 3, 8, 11 and 17), the
 expected lines of step 9 on a site in use, and the checkout path of the
 lane 7B runbook.
@@ -2815,7 +2823,7 @@ cms and the web do at runtime stays the same:
   TypeScript sources are no longer in the image; Strapi loads the compiled
   files, the schemas included, from `dist` as before. While the lockfile is
   unchanged and the build cache holds the install stage, a later code-only
-  deploy writes a ~15 MB layer instead of a new copy of about 820 MB, and the
+  deploy writes a ~15 MB layer instead of a new copy of about 770 MB, and the
   SHA-tagged images share the dependency layer on disk. Both Dockerfiles
   pull `node:24-alpine` by digest in one `FROM` line.
 - **The rollback probe for poll guest access** (the rollback hint of
@@ -2839,7 +2847,7 @@ cms and the web do at runtime stays the same:
 schema, permission, edge or Traefik change, and nothing in the database
 changes. The first build after this release is slower: pnpm 10 runs the
 install stage of both images from scratch (a new pnpm store, nothing cached)
-and the cms dependency layer is written once, about 820 MB next to the
+and the cms dependency layer is written once, about 770 MB next to the
 images that stay for rollback; check `df -h` has a few GB free. The helpers
 of the batch 8 section (on a standalone Caddy box, drop the second `-f`;
 `/home/bigemo/git/sinnlos` is the owner's checkout, elsewhere use yours):
@@ -2855,7 +2863,7 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 2. **Deploy:** `infra/deploy.sh`.
 3. **After: the layers.** `docker history infra-cms:latest | head -n 8`
    shows `COPY … /out /app` (about 15 MB) above the two `node_modules`
-   copies (about 820 MB and 120 kB).
+   copies (about 770 MB and 120 kB).
 4. **After: the probe on the new image** prints `2`:
 
    ```bash
