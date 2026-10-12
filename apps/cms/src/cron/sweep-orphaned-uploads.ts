@@ -4,8 +4,9 @@
  * The two-step web flow (upload → create) can strand files despite the
  * best-effort cleanup endpoint (web container dies between the steps,
  * cleanup POST itself fails, …). This sweep is the net under the net:
- * daily at 03:30 Europe/Berlin (wired in config/server.ts; after the
- * 03:00 pg-backup so a swept file is always in the previous backup).
+ * daily at 03:30 APP_TIME_ZONE (cron/registry.ts). A swept file is older
+ * than 24 h, so the previous nightly backup holds it whenever that backup
+ * runs.
  *
  * A file is swept ONLY when ALL three hold:
  *  - `provider_metadata.uploadedBy` is set — the stamp written exclusively

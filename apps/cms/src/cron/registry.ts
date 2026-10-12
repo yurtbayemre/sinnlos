@@ -4,10 +4,13 @@
  * load before the `strapi` global exists) and holds no schedule state of its
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
- * Order: the janitors run from 03:30 to 03:45 APP_TIME_ZONE, AFTER the 03:00
- * pg-backup of the host crontab (infra/backup/pg-backup.sh; the host runs in
- * APP_TIME_ZONE, docs/DEPLOYMENT.md §7.3), so every row or file they remove
- * is still in the previous night's backup. The digest mails at 07:30.
+ * Order: the janitors run from 03:30 to 03:45 APP_TIME_ZONE; the digest
+ * mails at 07:30. When the host's nightly backup runs (infra/backup/
+ * pg-backup.sh, or the host's backup-run; docs/DEPLOYMENT.md §7.3) does not
+ * matter for them: they remove only old rows and files (orphaned uploads
+ * after 24 hours, search logs, read notifications and expired ads after 90
+ * days), so everything they remove is already in the earlier nightly
+ * backups.
  *
  * Every task runs through `guardedTask`:
  *  - one `[cron] <name> took <n>ms` info line per run, or `[cron] <name>
