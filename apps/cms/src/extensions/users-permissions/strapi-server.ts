@@ -2,9 +2,10 @@
  * A password change revokes the user's older JWTs (FX40, owner default:
  * a token version on the legacy JWTs).
  *
- * users-permissions runs in `jwtManagement: 'legacy-support'` (the default;
- * config/plugins.ts sets no mode): its JWTs are plain signed tokens,
- * valid until `exp`, and nothing on the server could end one earlier. Now:
+ * users-permissions runs in `jwtManagement: 'legacy-support'` (the plugin's
+ * default, which config/plugins.ts pins explicitly): its JWTs are plain
+ * signed tokens, valid until `exp`, and nothing on the server could end one
+ * earlier. Now:
  *
  *  - the user has a private, non-searchable integer `tokenVersion`
  *    (content-types/user/schema.json, default 0);
