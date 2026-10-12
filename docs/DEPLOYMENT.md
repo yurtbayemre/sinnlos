@@ -1750,6 +1750,11 @@ as `bigemo`):
   password change on `/profile` revokes that user's other sessions through
   a new private `tokenVersion` on the user, while the tab that changed it
   stays signed in;
+- from the review fix rounds: a password an admin sets in the Strapi
+  panel revokes that user's sessions too, and the token version is hidden
+  there and kept out of every write; `infra/deploy.sh`'s printed rollback
+  demands the `JWT_SECRET` rotation for a target from before batch 13,
+  and its CI check ignores Dependabot's own update jobs on the commit;
 - from the integration: the header shows a small _Live updates delayed_
   note (new message keys `live.delayed` and `live.delayedHint`, en and de)
   once the live stream has been degraded for 5 s in a visible tab, and
@@ -1770,10 +1775,11 @@ without the version claim counts as version 0, so every running session,
 local or Microsoft, keeps working. From then on a user's own password
 change on `/profile` raises that user's version and ends the user's
 sessions in other browsers and on other devices (their next request lands
-on `/sign-in?expired=1`; their open live stream at its next rotation); a
-password an admin sets in the Strapi panel does not do that yet. Open
-tabs get `bye shutdown` when the web restarts and reconnect their live
-stream, spread over up to 15 s.
+on `/sign-in?expired=1`; their open live stream at its next rotation), and
+so does a password an admin sets in the Strapi panel (then all of that
+user's sessions end). The version itself is hidden in the admin panel and
+no write can set it. Open tabs get `bye shutdown` when the web restarts
+and reconnect their live stream, spread over up to 15 s.
 
 Set these on the host, in the checkout, for the checks below:
 
@@ -2018,13 +2024,21 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     password is kept somewhere, change it back the same way in A
     (`tokenVersion=2`; A again stays signed in).
 
+    Then the admin panel: as a Strapi admin, open the test account under
+    _Content Manager → User_. The edit view shows no token version field.
+    Set a new password there and save: A's next click lands on
+    `/sign-in?expired=1` (an admin-set password ends every session of the
+    user), the new password signs in, and the cms logs one more
+    `[auth] password changed: user=<id> tokenVersion=…` line, one higher.
+    Give the account its kept password back the same way.
+
 15. **The first hour:**
 
     ```bash
     "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
     "${COMPOSE[@]}" logs --since 1h cms | grep -F '[live-emit]'
     "${COMPOSE[@]}" logs --since 1h web | grep -E '\[auth\] session update refused|\[profile\] change password|\[live\] subscribe of user'
-    "${COMPOSE[@]}" logs --since 1h cms | grep -E '\[auth\] password not changed|FX40 tripwire'
+    "${COMPOSE[@]}" logs --since 1h cms | grep -E '\[auth\] (password not changed|tokenVersion dropped)|FX40 tripwire'
     ```
 
     The 401 count is of the same order as step 7's baseline (plus B's
@@ -2036,14 +2050,18 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     200 channels` a page with more than 200 comment sections. The fourth
     prints nothing either: `password not changed: user=<id>` is a change
     whose save failed after the version was raised (that user keeps the
-    old password and is signed out everywhere, and signs in again), `FX40
-    tripwire` a password the plugin saved outside its user service (the
-    extension then revoked afterwards; review it against the plugin).
+    old password and is signed out everywhere, and signs in again),
+    `tokenVersion dropped from a Document Service …` a write that tried to
+    set the token version (the cms dropped it: only a password change
+    raises it; find out who sent it), `FX40 tripwire` a password the plugin
+    saved outside its user service (the extension then revoked afterwards;
+    review it against the plugin).
 
 **What users notice** (worth a short release note): nobody is signed out
 by the update. Changing your own password now signs you out in your other
 browsers and on your other devices; the tab you changed it in stays signed
-in. Announcement bodies show formatting (bold, lists, links, images) like
+in. **For admins:** a password set for a user in the Strapi admin panel
+now signs that user out everywhere; they sign in with the new password. Announcement bodies show formatting (bold, lists, links, images) like
 wiki pages, and the dashboard's _Latest news_ shows plain text. **For
 editors:** a single line break inside a paragraph of an announcement now
 joins the two lines (an empty line starts a new paragraph), and HTML in a
@@ -2076,9 +2094,14 @@ page load) and signs in again once: local accounts and, with
 JWT with the same secret; they sign in through Microsoft again). Strapi
 admin-panel sessions and API tokens are not affected. This holds for
 every rollback of the cms from batch 13 (or a later release) to an image
-from before batch 13, also after a failed `infra/deploy.sh`: the rollback
-commands it prints do not rotate, so do R4 before their
-`up -d --no-build web cms` line.
+from before batch 13, also after a failed `infra/deploy.sh`: from batch 13
+on, the rollback commands it prints carry the step themselves, before
+their `up -d --no-build web cms` line (`MANDATORY before the start below:
+infra-cms:<tag> predates the token version of batch 13.`, found by a
+`docker run --pull never --network none` grep for `tokenVersion` in the
+target image's user schema; for an image it cannot check, the same step
+with the command that tells). They name R2 to R4 and never edit
+`infra/.env` themselves: do R2 to R4 below, then their start commands.
 
 R1. **Does a batch 13 cms run?** If the shell of step 1 is gone, set
 `B12_TAG` and `B12_SHA` again from `.git/sinnlos-deploy/infra.history`
@@ -2665,8 +2688,10 @@ session that has already ended is never revived by an update. Tabs of the
 same browser share the session cookie and stay signed in together.
 Microsoft sign-ins are unaffected: their JWT carries the version as well
 and keeps its `ENTRA_SESSION_TTL`; the password form is only shown to
-local sessions. Known limits: a password set by an admin in the Strapi panel does not
-raise the version (only the user's own change does); the `/uploads`
+local sessions. A password an admin sets in the Strapi panel raises the
+version as well (since the batch 13 review fix round: a Document Service
+guard of the user type, which also keeps the version out of every write,
+and the field is hidden in the admin panel). Known limits: the `/uploads`
 status cache (60 s, batch 7) can still serve file bytes to a revoked JWT
 for up to that minute, and an open live stream keeps its content-free
 pings until its next rotation (at most 30 minutes plus that minute). To
