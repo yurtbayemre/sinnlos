@@ -129,9 +129,14 @@ const WRAPPED = Symbol.for("sinnlos.users-permissions.token-version");
  * other.
  */
 function sharedStorage<T>(name: string): AsyncLocalStorage<T> {
+  return sharedSlot(name, () => new AsyncLocalStorage<T>());
+}
+
+/** One value per name for the whole process (see sharedStorage). */
+function sharedSlot<T>(name: string, create: () => T): T {
   const key = Symbol.for(`sinnlos.users-permissions.${name}`);
-  const slots = globalThis as unknown as Record<symbol, AsyncLocalStorage<T> | undefined>;
-  return (slots[key] ??= new AsyncLocalStorage<T>());
+  const slots = globalThis as unknown as Record<symbol, T | undefined>;
+  return (slots[key] ??= create());
 }
 
 /** What runs one raw statement: knex, or a knex transaction. */
@@ -522,6 +527,18 @@ function setsPassword(params: unknown): boolean {
 const passwordSave = sharedStorage<{ userId: number }>("password-save");
 
 /**
+ * The users with a bump-and-save running, per transaction (the trx object
+ * Strapi hands every nested call of one transaction). Two of them for the
+ * same user inside ONE transaction share its row lock, so nothing orders
+ * them: A bumps to 1, B bumps to 2 and saves, A saves; A's password would
+ * stand with B's JWT accepted. The second one is refused (saveAfterBump).
+ */
+const passwordChangesInFlight = sharedSlot(
+  "password-changes-in-flight",
+  () => new WeakMap<object, Set<number>>(),
+);
+
+/**
  * Raises user `id`'s version and runs `save` (the password write) in ONE
  * transaction, joining an ambient one (strapi.db.transaction): both commit
  * together or neither does. A failed bump or save rolls both back, so the
@@ -529,6 +546,14 @@ const passwordSave = sharedStorage<{ userId: number }>("password-save");
  * committed does a password action's issue() get the version
  * (passwordChange); during `save` passwordSave names the user, so the
  * Document Service guard does not bump the same write again.
+ *
+ * Separate transactions are ordered by the bump's row lock (Postgres) or
+ * the one connection (SQLite). Inside one shared transaction they are not:
+ * a second bump-and-save of the same user while the first still runs
+ * there is refused before it writes anything (fail closed, never a wait:
+ * the first could be waiting on the second, e.g. a save that changes the
+ * same user's password again, and that would deadlock). No request path
+ * does this today; each request has its own transaction.
  */
 async function saveAfterBump<T>(
   strapi: TokenVersionStrapi,
@@ -537,10 +562,26 @@ async function saveAfterBump<T>(
 ): Promise<T> {
   let outcome: { version: number; result: T };
   try {
-    outcome = await strapi.db.transaction(async () => {
-      const version = await bumpTokenVersion(strapi, id);
-      const result = await passwordSave.run({ userId: id }, save);
-      return { version, result };
+    outcome = await strapi.db.transaction(async ({ trx }) => {
+      let running = passwordChangesInFlight.get(trx);
+      if (!running) {
+        running = new Set();
+        passwordChangesInFlight.set(trx, running);
+      }
+      if (running.has(id)) {
+        throw new Error(
+          `[users-permissions-extension] a second password change of user ${id} inside the same ` +
+            "transaction, while the first is still running, is refused (FX40).",
+        );
+      }
+      running.add(id);
+      try {
+        const version = await bumpTokenVersion(strapi, id);
+        const result = await passwordSave.run({ userId: id }, save);
+        return { version, result };
+      } finally {
+        running.delete(id);
+      }
     });
   } catch (error) {
     strapi.log?.warn?.(

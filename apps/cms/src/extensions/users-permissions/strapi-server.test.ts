@@ -68,23 +68,25 @@ function fakeBumpDb<T extends { tokenVersion?: number | null }>(
 ) {
   // Strapi's transaction context, faked: nested calls join, the outermost
   // restores the rows when its callback throws.
-  const inside = new AsyncLocalStorage<boolean>();
+  type FakeTrx = { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> };
+  const inside = new AsyncLocalStorage<FakeTrx>();
   return {
-    inTransaction: () => inside.getStore() === true,
+    inTransaction: () => inside.getStore() !== undefined,
     async transaction<R>(
       this: { connection: { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> } },
       callback: (scope: {
         trx: { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> };
       }) => Promise<R>,
     ): Promise<R> {
-      const trx = {
+      const ambient = inside.getStore();
+      if (ambient) return callback({ trx: ambient });
+      const trx: FakeTrx = {
         raw: (sql: string, bindings: readonly unknown[]) => this.connection.raw(sql, bindings),
       };
-      if (inside.getStore()) return callback({ trx });
       const snapshot = new Map([...rows].map(([id, row]) => [id, { ...row }]));
       queries?.push("begin");
       try {
-        const result = await inside.run(true, () => callback({ trx }));
+        const result = await inside.run(trx, () => callback({ trx }));
         queries?.push("commit");
         return result;
       } catch (error) {
@@ -933,6 +935,8 @@ interface RaceHarness {
    * far another change or sign-in gets while one change is held.
    */
   doneOrWaiting(work: Promise<unknown>): Promise<"done" | "waits">;
+  /** Runs `work` inside one transaction of the engine, which every change in it joins. */
+  inOneTransaction<T>(work: () => Promise<T>): Promise<T>;
 }
 
 /**
@@ -958,6 +962,16 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
   const userId = created.id as number;
   const at = async (point: RacePoint) => {
     for (const hook of hooks) await hook.at(point);
+  };
+  /** One gated runner per transaction, so nested calls see the same trx object, as in Strapi. */
+  const gatedRunners = new WeakMap<RawRunner, RawRunner>();
+  const gatedOnce = (runner: RawRunner): RawRunner => {
+    let found = gatedRunners.get(runner);
+    if (!found) {
+      found = gated(runner);
+      gatedRunners.set(runner, found);
+    }
+    return found;
   };
   /** A raw runner whose version writes pass the hooks. */
   const gated = (runner: RawRunner): RawRunner => ({
@@ -1010,7 +1024,7 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
       // The engine's own transactions (Strapi's context: nested calls
       // join), with the version writes on the transaction gated as well.
       transaction: (callback) =>
-        db.transaction((scope) => callback({ trx: gated(scope.trx as RawRunner) })),
+        db.transaction((scope) => callback({ trx: gatedOnce(scope.trx as RawRunner) })),
       dialect: { client: "sqlite" },
       getSchemaName: () => undefined,
       metadata: db.metadata as unknown as TokenVersionStrapi["db"]["metadata"],
@@ -1071,6 +1085,7 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
     signIn,
     stored,
     doneOrWaiting,
+    inOneTransaction: (work) => db.transaction(async () => work()),
   };
 }
 
@@ -1146,6 +1161,47 @@ describe("overlapping password changes of one user (real SQLite)", () => {
       `[auth] password changed: user=${h.userId} tokenVersion=1`,
       `[auth] password changed: user=${h.userId} tokenVersion=2`,
     ]);
+  }, 30_000);
+
+  it("two changes of one user inside ONE transaction: the second is refused while the first runs", async () => {
+    // Both join the same transaction, so its row lock (here: its one
+    // connection) orders nothing between them. Before the fix B bumped to
+    // 2 and saved while A was held after its bump 1, then A saved: A's
+    // password stood with B's JWT accepted.
+    const hold = pauseAt("A", "after version write");
+    const h = await raceHarness(engines, [hold]);
+    const outcomes = await h.inOneTransaction(async () => {
+      const a = h.change("A", "password-a");
+      a.catch(() => undefined);
+      await hold.reached;
+      const b = await h.change("B", "password-b").then(
+        (jwt) => ({ jwt }),
+        (error: Error) => ({ refused: error.message }),
+      );
+      hold.release();
+      return { a: await a, b };
+    });
+    const stored = await h.stored();
+    const jwts: Record<string, string> = { "password-a": outcomes.a };
+    if ("jwt" in outcomes.b) jwts["password-b"] = outcomes.b.jwt;
+    // The invariant: only the JWT of the change whose password is stored.
+    const accepted: string[] = [];
+    for (const [password, jwt] of Object.entries(jwts)) {
+      if (
+        await h.jwt.verify(jwt).then(
+          () => true,
+          () => false,
+        )
+      )
+        accepted.push(password);
+    }
+    expect(accepted).toEqual([stored.password]);
+    // B was refused before it wrote anything; A went through alone.
+    expect(outcomes.b).toEqual({
+      refused: `[users-permissions-extension] a second password change of user ${h.userId} inside the same transaction, while the first is still running, is refused (FX40).`,
+    });
+    expect(stored).toEqual({ version: 1, password: "password-a" });
+    expect(h.history).toEqual([1]);
   }, 30_000);
 
   it("a sign-in with the old password between a change's bump and its save keeps no session", async () => {
@@ -1297,6 +1353,27 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
       `save ${JSON.stringify({ password: "through-edit" })}`,
       "commit",
     ]);
+  });
+
+  it("refuses a same-user re-entry inside its own save instead of waiting for it (no deadlock)", async () => {
+    const h = guardHarness();
+    // A save that changes the same user's password again, through edit().
+    let inner: Promise<unknown> = Promise.resolve();
+    const reentrant = patchUserService(
+      {
+        edit: async () => {
+          inner = Promise.resolve(h.userService.edit(2, { password: "inner" }));
+          await inner;
+        },
+      },
+      h.strapi,
+    );
+    await expect(reentrant.edit(2, { password: "outer" })).rejects.toThrow(
+      "a second password change of user 2 inside the same transaction",
+    );
+    await expect(inner).rejects.toThrow("is refused (FX40)");
+    expect(h.writes()).toEqual(["begin", "bump 2", "rollback"]);
+    expect(h.users.get(2)?.tokenVersion).toBe(3);
   });
 
   it("an edit() of one user does not cover a Document Service password write of another", async () => {
