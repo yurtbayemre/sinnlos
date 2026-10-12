@@ -1,5 +1,6 @@
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -12,22 +13,27 @@ import { describe, expect, it } from "vitest";
  * in the same commit.
  *
  * Each table sits between `<!-- <name>:start -->` and `<!-- <name>:end -->`
- * markers; the first row is the header, the second the delimiter row.
+ * markers; the first row is the header, the second the delimiter row. The
+ * paragraph right before the start marker is the table's legend.
  *
  *   - permission-matrix: one row per CONTENT_TYPES entry, labelled by its
  *     API name (`api::<name>.<name>`), one column per matrix role in matrix
- *     order. A cell is the grant in the order C R U D: C = create,
- *     R = find + findOne, U = update, D = delete, `—` = none. A lone find
- *     or findOne has no letter; it would be spelt out (`find`), so the
- *     table can never round it up to R.
- *   - custom-action-grants: one row per action uid (an Endpoint column next
- *     to it is prose and not compared), the same role columns, `✓` or `—`.
+ *     order. A cell is the grant in CRUD_LETTERS order (C R U D), `—` for
+ *     none; a lone find or findOne has no letter and would be spelt out
+ *     (`find`), so the table can never round it up to R. The legend is
+ *     built from the same CRUD_LETTERS, so the letters cannot change
+ *     meaning in the README alone.
+ *   - custom-action-grants: one row per action uid, its Endpoint (method and
+ *     path as a client calls it), the same role columns, `✓` or `—`. The
+ *     Endpoint is compared with the route that serves the action: the cms's
+ *     own route files for api:: actions, the installed plugin's route
+ *     definitions for plugin:: actions.
  *
  * Together the two tables must name exactly the (role, action) set the
  * boot sync converges to (computeDesiredGrants): no grant the README hides,
  * none it invents.
  *
- * The cms module is loaded at run time, typed by the facade below, like
+ * The cms modules are loaded at run time, typed by the facades below, like
  * infra/contracts.test.ts does: this file is type-checked by the strict
  * web/infra program (tsconfig.test.json), which must not pull the cms
  * import graph in.
@@ -35,6 +41,7 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = join(__dirname, "..");
 const README = readFileSync(join(ROOT, "README.md"), "utf8").replace(/\r\n/g, "\n");
+const CMS_DIR = join(ROOT, "apps", "cms");
 
 type Grants = Readonly<Record<string, Readonly<Partial<Record<string, readonly string[]>>>>>;
 
@@ -55,16 +62,33 @@ const {
   USER_UID,
   computeDesiredGrants,
 } = (await import(
-  join(ROOT, "apps", "cms", "src", "bootstrap", "permission-matrix.ts")
+  join(CMS_DIR, "src", "bootstrap", "permission-matrix.ts")
 )) as PermissionMatrixModule;
 
 const MATRIX_ROLES = Object.keys(PERMISSION_MATRIX);
 const NONE = "—";
 const GRANTED = "✓";
 
+/** The README's grant letters, in cell order, and the actions each stands for. */
+const CRUD_LETTERS: readonly { letter: string; actions: readonly string[] }[] = [
+  { letter: "C", actions: ["create"] },
+  { letter: "R", actions: ["find", "findOne"] },
+  { letter: "U", actions: ["update"] },
+  { letter: "D", actions: ["delete"] },
+];
+
+/** The legends the README must print before each table, built from the notation above. */
+const MATRIX_LEGEND =
+  "Content types: " +
+  CRUD_LETTERS.map(({ letter, actions }) => `\`${letter}\` = ${actions.join(" + ")}`).join(", ") +
+  `, \`${NONE}\` = no grant.`;
+const CUSTOM_LEGEND = `Custom actions and plugin routes (\`${GRANTED}\` = granted, \`${NONE}\` = not granted):`;
+
 interface Table {
   header: string[];
   rows: string[][];
+  /** The paragraph right before the start marker, whitespace collapsed. */
+  legend: string;
 }
 
 /** Strip the inline-code backticks a cell may carry. */
@@ -103,26 +127,40 @@ function readmeTable(name: string): Table {
       );
     }
   }
-  return { header: header.map(plain), rows };
+  const legend = (
+    README.slice(0, from)
+      .trimEnd()
+      .split(/\n\s*\n/)
+      .pop() ?? ""
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return { header: header.map(plain), rows, legend };
 }
 
 /** The README notation of one content type's actions for one role. */
 function crudCell(actions: readonly string[] | undefined): string {
   const granted = new Set(actions ?? []);
-  const letters: string[] = [];
-  if (granted.has("create")) letters.push("C");
-  if (granted.has("find") && granted.has("findOne")) letters.push("R");
-  if (granted.has("update")) letters.push("U");
-  if (granted.has("delete")) letters.push("D");
-  const known = new Set(["create", "update", "delete"]);
-  if (granted.has("find") && granted.has("findOne")) {
-    known.add("find");
-    known.add("findOne");
+  const covered = new Set<string>();
+  let letters = "";
+  for (const { letter, actions: meant } of CRUD_LETTERS) {
+    if (meant.every((action) => granted.has(action))) {
+      letters += letter;
+      for (const action of meant) covered.add(action);
+    }
   }
   // Anything the letters cannot express is spelt out, so it never matches.
-  const rest = [...granted].filter((action) => !known.has(action)).sort();
-  const cell = [letters.join(""), ...rest].filter(Boolean).join("+");
+  const rest = [...granted].filter((action) => !covered.has(action)).sort();
+  const cell = [letters, ...rest].filter(Boolean).join("+");
   return cell || NONE;
+}
+
+/** The actions a README cell states, read back through the same letters. */
+function cellActions(cell: string): string[] {
+  if (cell === NONE) return [];
+  return CRUD_LETTERS.filter(({ letter }) => cell.includes(letter)).flatMap(({ actions }) => [
+    ...actions,
+  ]);
 }
 
 /** api::<name>.<name> → <name>; anything else is not a README row label. */
@@ -132,6 +170,111 @@ function apiName(uid: string): string {
   return match[1];
 }
 
+// ---------------------------------------------------------------------------
+// Endpoints: what serves each custom action, as a client calls it.
+// ---------------------------------------------------------------------------
+
+interface RouteDef {
+  method: string;
+  path: string;
+  handler: string;
+  config?: { prefix?: string };
+}
+
+/**
+ * "<METHOD> <path>" as a client calls a content-API route: `/api`, then the
+ * route's own `config.prefix` if it has one, else its router's prefix (none
+ * for the cms's APIs, `/<plugin name>` for a plugin), then the route's path
+ * (@strapi/core 5.55.1 services/server/register-routes.js and routing.js:
+ * a route with `config.prefix` is mounted on the parent router). A trailing
+ * slash is dropped, as the router matches without it (`POST /api/upload`).
+ */
+function endpoint(route: RouteDef, routerPrefix: string): string {
+  const prefix = route.config?.prefix ?? routerPrefix;
+  const path = `/api${prefix}${route.path}`.replace(/(.)\/+$/, "$1");
+  return `${route.method.toUpperCase()} ${path}`;
+}
+
+const addEndpoint = (map: Map<string, string[]>, action: string, value: string) =>
+  map.set(action, [...(map.get(action) ?? []), value]);
+
+/**
+ * The custom routes of the cms's own APIs (apps/cms/src/api/<api>/routes),
+ * by handler, which is the action uid. Core router files
+ * (createCoreRouter) serve the CRUD actions of the matrix table and are
+ * skipped: importing them would load @strapi/strapi.
+ */
+async function apiEndpoints(): Promise<Map<string, string[]>> {
+  const endpoints = new Map<string, string[]>();
+  const apiDir = join(CMS_DIR, "src", "api");
+  for (const api of readdirSync(apiDir)) {
+    const routesDir = join(apiDir, api, "routes");
+    if (!existsSync(routesDir)) continue;
+    for (const file of readdirSync(routesDir)) {
+      if (!file.endsWith(".ts") || file.endsWith(".test.ts")) continue;
+      const source = readFileSync(join(routesDir, file), "utf8");
+      if (source.includes("createCoreRouter")) continue;
+      const mod = (await import(join(routesDir, file))) as { default: { routes: RouteDef[] } };
+      for (const route of mod.default.routes) {
+        addEndpoint(endpoints, route.handler, endpoint(route, ""));
+      }
+    }
+  }
+  return endpoints;
+}
+
+const requireFromCms = createRequire(join(CMS_DIR, "package.json"));
+const requireFromStrapi = createRequire(requireFromCms.resolve("@strapi/strapi/package.json"));
+
+/** The content-API route files of the installed plugins the README names. */
+const PLUGIN_ROUTE_FILES: Record<string, string[]> = (() => {
+  const usersPermissions = join(
+    dirname(requireFromCms.resolve("@strapi/plugin-users-permissions/package.json")),
+    "dist",
+    "server",
+    "routes",
+    "content-api",
+  );
+  const upload = dirname(requireFromStrapi.resolve("@strapi/upload/package.json"));
+  return {
+    "users-permissions": ["auth.js", "user.js", "role.js", "permissions.js"].map((file) =>
+      join(usersPermissions, file),
+    ),
+    upload: [join(upload, "dist", "server", "routes", "content-api.js")],
+  };
+})();
+
+/**
+ * A plugin route definition in the installed dist: method, path and handler
+ * in this order, and optionally a `config` block with a `prefix`. Read from
+ * the source text because the route factories need a running Strapi; a
+ * format change after an upgrade finds no routes and fails below.
+ */
+const PLUGIN_ROUTE_RE =
+  /method:\s*'([A-Z]+)',\s*path:\s*'([^']*)',\s*handler:\s*'([^']+)'(?:,\s*config:\s*\{[^{}]*?\bprefix:\s*'([^']*)')?/g;
+
+function pluginEndpoints(): Map<string, string[]> {
+  const endpoints = new Map<string, string[]>();
+  for (const [plugin, files] of Object.entries(PLUGIN_ROUTE_FILES)) {
+    let found = 0;
+    for (const file of files) {
+      for (const match of readFileSync(file, "utf8").matchAll(PLUGIN_ROUTE_RE)) {
+        const [, method, path, handler, prefix] = match;
+        const route: RouteDef = {
+          method,
+          path,
+          handler,
+          config: prefix === undefined ? undefined : { prefix },
+        };
+        addEndpoint(endpoints, `plugin::${plugin}.${handler}`, endpoint(route, `/${plugin}`));
+        found++;
+      }
+    }
+    if (found === 0) throw new Error(`no route definitions found for plugin ${plugin}: ${files}`);
+  }
+  return endpoints;
+}
+
 const matrixTable = readmeTable("permission-matrix");
 const customTable = readmeTable("custom-action-grants");
 
@@ -139,6 +282,10 @@ const customTable = readmeTable("custom-action-grants");
 const roleColumns = (table: Table, leading: number): string[] => table.header.slice(leading);
 
 describe("README permission matrix = PERMISSION_MATRIX", () => {
+  it("prints the legend of its letters", () => {
+    expect(matrixTable.legend).toBe(MATRIX_LEGEND);
+  });
+
   it("has one column per matrix role, in matrix order", () => {
     expect(matrixTable.header[0]).toBe("Content type");
     expect(roleColumns(matrixTable, 1)).toEqual(MATRIX_ROLES);
@@ -172,6 +319,10 @@ describe("README permission matrix = PERMISSION_MATRIX", () => {
 });
 
 describe("README custom actions = CUSTOM_ACTION_GRANTS + the user reads", () => {
+  it("prints the legend of its marks", () => {
+    expect(customTable.legend).toBe(CUSTOM_LEGEND);
+  });
+
   it("has the action and endpoint columns, then one column per matrix role", () => {
     expect(customTable.header.slice(0, 2)).toEqual(["Action", "Endpoint"]);
     expect(roleColumns(customTable, 2)).toEqual(MATRIX_ROLES);
@@ -204,6 +355,18 @@ describe("README custom actions = CUSTOM_ACTION_GRANTS + the user reads", () => 
 
     expect(readme).toEqual(code);
   });
+
+  it("names, for every action, the method and path of the one route that serves it", async () => {
+    const served = new Map([...(await apiEndpoints()), ...pluginEndpoints()]);
+    const readme: Record<string, string[]> = {};
+    const code: Record<string, string[]> = {};
+    for (const row of customTable.rows) {
+      const action = plain(row[0]);
+      readme[action] = [plain(row[1])];
+      code[action] = served.get(action) ?? [];
+    }
+    expect(readme).toEqual(code);
+  });
 });
 
 describe("README permission tables = what the boot sync converges to", () => {
@@ -212,15 +375,7 @@ describe("README permission tables = what the boot sync converges to", () => {
     for (const row of matrixTable.rows) {
       const uid = `api::${plain(row[0])}.${plain(row[0])}`;
       MATRIX_ROLES.forEach((role, index) => {
-        const cell = row[index + 1];
-        if (cell === NONE) return;
-        if (cell.includes("C")) pairs.add(`${role} ${uid}.create`);
-        if (cell.includes("R")) {
-          pairs.add(`${role} ${uid}.find`);
-          pairs.add(`${role} ${uid}.findOne`);
-        }
-        if (cell.includes("U")) pairs.add(`${role} ${uid}.update`);
-        if (cell.includes("D")) pairs.add(`${role} ${uid}.delete`);
+        for (const action of cellActions(row[index + 1])) pairs.add(`${role} ${uid}.${action}`);
       });
     }
     for (const row of customTable.rows) {
