@@ -39,7 +39,11 @@ export interface AnnouncementsView {
   recent: AnnouncementEntry[];
   /** documentIds of the feed: the live hint tells new posts apart from these. */
   feedDocumentIds: string[];
-  /** Nothing to show (the empty state; a failed read is `failed`, not this alone). */
+  /**
+   * The feed read answered and there is nothing to show: the empty state.
+   * Never set when the feed read failed: the banner says so instead of a
+   * "no announcements yet".
+   */
   empty: boolean;
   /** A read failed: the page shows the CMS-down banner above what it has. */
   failed: boolean;
@@ -93,7 +97,7 @@ export async function loadAnnouncements(role: Role): Promise<AnnouncementsView> 
     pinned: remaining.filter((a) => a.pinned).map(entry),
     recent: remaining.filter((a) => !a.pinned).map(entry),
     feedDocumentIds: items.map((a) => a.documentId).filter((id): id is string => !!id),
-    empty: items.length === 0 && openAck.length === 0,
+    empty: !feed.failed && items.length === 0 && openAck.length === 0,
     failed: feed.failed || mandatory.failed || receipts.failed,
     truncated: !!mandatory.data?.truncated || !!receipts.data?.truncated,
   };

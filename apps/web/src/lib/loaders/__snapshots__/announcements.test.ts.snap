@@ -1,8 +1,8 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`loadAnnouncements > CMS down: failed and empty, nothing invented 1`] = `
+exports[`loadAnnouncements > CMS down: failed, no cards and no empty state (the banner explains) 1`] = `
 {
-  "empty": true,
+  "empty": false,
   "failed": true,
   "feedDocumentIds": [],
   "openAcks": [],

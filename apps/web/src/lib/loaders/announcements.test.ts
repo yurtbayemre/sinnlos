@@ -125,13 +125,19 @@ describe("loadAnnouncements", () => {
     expect(view).toMatchSnapshot();
   });
 
-  it("CMS down: failed and empty, nothing invented", async () => {
+  it("CMS down: failed, no cards and no empty state (the banner explains)", async () => {
     feedMock.mockRejectedValue(outage());
     mandatoryMock.mockRejectedValue(outage());
     receiptsMock.mockRejectedValue(outage());
     const view = await loadAnnouncements("member");
     expect(view).toMatchSnapshot();
-    expect(view).toMatchObject({ failed: true, empty: true, openAcks: [], pinned: [], recent: [] });
+    expect(view).toMatchObject({
+      failed: true,
+      empty: false,
+      openAcks: [],
+      pinned: [],
+      recent: [],
+    });
   });
 
   it("a role without the receipts read skips them (no request)", async () => {
