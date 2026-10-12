@@ -4,16 +4,17 @@ import { ArrowRight, Megaphone } from "lucide-react";
 import { AnnouncementCard } from "@/components/announcements/announcement-card";
 import { EmptyState } from "@/components/empty-state";
 import { SectionLabel } from "@/components/ui/section-label";
-import type { AnnouncementListItem } from "@/lib/api/announcements";
 import { appTimeZone } from "@/lib/app-time-zone";
+import type { LatestNewsView } from "@/lib/loaders/announcements";
 import { relativeTime } from "@/lib/relative-time";
 
 /**
  * The dashboard's news widget: a featured card (the first pinned
  * announcement, else the newest) and up to four more, all linking to
- * /announcements. The cards are the shared AnnouncementCard (UI08).
+ * /announcements (the selection: lib/loaders/announcements.ts
+ * pickLatestNews). The cards are the shared AnnouncementCard (UI08).
  */
-export async function LatestNews({ items }: { items: AnnouncementListItem[] }) {
+export async function LatestNews({ news }: { news: LatestNewsView }) {
   const tDashboard = await getTranslations("dashboard");
   const tCommon = await getTranslations("common");
   const tRel = await getTranslations("relativeTime");
@@ -21,8 +22,7 @@ export async function LatestNews({ items }: { items: AnnouncementListItem[] }) {
   const timeZone = appTimeZone();
   const relative = (iso: string | undefined) =>
     relativeTime(iso ? new Date(iso) : null, tRel, { longDate: true, locale, timeZone });
-  const featured = items.find((n) => n.pinned) ?? items[0];
-  const rest = items.filter((n) => n.id !== featured?.id).slice(0, 4);
+  const { featured, rest } = news;
 
   return (
     <section className="space-y-4">
@@ -45,7 +45,7 @@ export async function LatestNews({ items }: { items: AnnouncementListItem[] }) {
         </Link>
       </div>
 
-      {items.length === 0 ? (
+      {featured === null ? (
         <EmptyState
           icon={Megaphone}
           title={tDashboard("noAnnouncementsYet")}
@@ -53,15 +53,13 @@ export async function LatestNews({ items }: { items: AnnouncementListItem[] }) {
         />
       ) : (
         <div className="grid gap-4 lg:grid-cols-5">
-          {featured && (
-            <AnnouncementCard
-              variant="featured"
-              item={featured}
-              badge={featured.pinned ? tDashboard("pinned") : tDashboard("featured")}
-              dateLabel={relative(featured.createdAt)}
-              unknownLabel={tCommon("unknown")}
-            />
-          )}
+          <AnnouncementCard
+            variant="featured"
+            item={featured}
+            badge={featured.pinned ? tDashboard("pinned") : tDashboard("featured")}
+            dateLabel={relative(featured.createdAt)}
+            unknownLabel={tCommon("unknown")}
+          />
 
           <div className="flex flex-col gap-3 lg:col-span-2">
             {rest.map((n) => (
