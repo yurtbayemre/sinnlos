@@ -23,7 +23,8 @@ import { countOfList, type Count } from "./count";
 /** The content overview's tiles, in display order. */
 export type AnalyticsStat = CountedCollection | "reactions" | "unreadNotifications";
 
-export const ANALYTICS_STATS: readonly AnalyticsStat[] = [
+/** The collections counted by countPage(), in display order (and request order). */
+const COUNTED_COLLECTIONS: readonly CountedCollection[] = [
   "announcements",
   "events",
   "wiki-pages",
@@ -31,6 +32,10 @@ export const ANALYTICS_STATS: readonly AnalyticsStat[] = [
   "documents",
   "polls",
   "comments",
+];
+
+export const ANALYTICS_STATS: readonly AnalyticsStat[] = [
+  ...COUNTED_COLLECTIONS,
   "reactions",
   "unreadNotifications",
 ];
@@ -81,17 +86,8 @@ export function zeroResultRate(summary: Pick<SearchSummary, "total" | "zeroResul
 }
 
 export async function loadAnalytics(): Promise<AnalyticsView> {
-  const collections: CountedCollection[] = [
-    "announcements",
-    "events",
-    "wiki-pages",
-    "wiki-spaces",
-    "documents",
-    "polls",
-    "comments",
-  ];
   const [collectionCounts, reactions, unread, comments, search] = await Promise.all([
-    Promise.all(collections.map((c) => tryFetch(() => countPage(c), "analytics"))),
+    Promise.all(COUNTED_COLLECTIONS.map((c) => tryFetch(() => countPage(c), "analytics"))),
     tryFetch(() => reactionsPage(), "analytics"),
     tryFetch(() => unreadNotificationsPage(), "analytics"),
     tryFetch(() => recentComments(), "analytics"),
@@ -99,7 +95,7 @@ export async function loadAnalytics(): Promise<AnalyticsView> {
   ]);
 
   const counts = Object.fromEntries(
-    collections.map((c, i) => [c, countOfList(collectionCounts[i]!)]),
+    COUNTED_COLLECTIONS.map((c, i) => [c, countOfList(collectionCounts[i]!)]),
   ) as Record<CountedCollection, Count>;
 
   const allCounts: Record<AnalyticsStat, Count> = {
