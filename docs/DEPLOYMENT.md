@@ -2009,6 +2009,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
     "${COMPOSE[@]}" logs --since 1h cms | grep -F '[live-emit]'
     "${COMPOSE[@]}" logs --since 1h web | grep -E '\[auth\] session update refused|\[profile\] change password|\[live\] subscribe of user'
+    "${COMPOSE[@]}" logs --since 1h cms | grep -E '\[auth\] password not changed|FX40 tripwire'
     ```
 
     The 401 count is of the same order as step 7's baseline (plus B's
@@ -2017,7 +2018,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     step 9's pair. The third command prints nothing: `session update
     refused` is a session update without the server's proof, `change
     password: …` a password change whose tab lost its session, `capped at
-    200 channels` a page with more than 200 comment sections.
+    200 channels` a page with more than 200 comment sections. The fourth
+    prints nothing either: `password not changed: user=<id>` is a change
+    whose save failed after the version was raised (that user keeps the
+    old password and is signed out everywhere, and signs in again), `FX40
+    tripwire` a password the plugin saved outside its user service (the
+    extension then revoked afterwards; review it against the plugin).
 
 **What users notice** (worth a short release note): nobody is signed out
 by the update. Changing your own password now signs you out in your other
@@ -2443,7 +2449,11 @@ Strapi JWT the cms issues carries the user's current version (claim
 one with 401. A JWT without the claim counts as version 0, so the JWTs of
 the running sessions stay valid: **nobody is signed out by this deploy**.
 `POST /api/auth/change-password` raises the user's version by one and
-answers with a JWT of the new version; the web stores it in the session of
+answers with a JWT of the new version (since the review fix round: one
+atomic statement, run BEFORE the new password is saved, so a failure
+never leaves a new password next to older JWTs that still work: if
+raising fails nothing changes, if saving fails the old password stays and
+the user's sessions are signed out); the web stores it in the session of
 the tab that changed the password, so that tab stays signed in, and every
 other session of the user (another browser or device) lands on
 `/sign-in?expired=1` with its next request. Its live updates stop too:

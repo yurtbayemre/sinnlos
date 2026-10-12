@@ -17,16 +17,26 @@
  *    until they change their password) and nobody is signed out by the
  *    deploy. A mismatch fails verification like a bad signature: the
  *    request is unauthenticated (401);
- *  - POST /api/auth/change-password (and /api/auth/reset-password, which
- *    the permission bootstrap revokes for `public`, should an operator
- *    grant it again) bumps the version after the password was saved and
- *    answers with a JWT of exactly the version that bump committed (its
- *    snapshot, not a later read: an overlapping change of the same user may
- *    have raised it again meanwhile, and its JWT must not go to this tab).
- *    The web stores that JWT in the session of the tab that changed the
- *    password
- *    (apps/web/src/lib/profile-actions.ts); every other session of the user
- *    gets 401 on its next request and lands on /sign-in?expired=1.
+ *  - a password change raises the version BEFORE the new password is
+ *    saved: the plugin saves every password through its `user` service's
+ *    edit(), and the wrapped edit() bumps first (one atomic statement,
+ *    bumpTokenVersion) and only then lets the plugin write. Fail closed:
+ *    a failed bump fails the request with the password unchanged; a
+ *    failed write after the bump (or a process that dies in between)
+ *    leaves the password unchanged and the user's sessions signed out,
+ *    never a new password next to older JWTs that still work. That covers
+ *    POST /api/auth/change-password, /api/auth/reset-password (which the
+ *    permission bootstrap revokes for `public`, should an operator grant
+ *    it again) and PUT /api/users/:id with a password (no role has
+ *    user.update);
+ *  - the password actions answer with a JWT of exactly the version their
+ *    bump committed (its snapshot, not a later read: an overlapping change
+ *    of the same user may have raised it again meanwhile, and that JWT must
+ *    not go to this tab). The web stores it in the session of the tab that
+ *    changed the password (apps/web/src/lib/profile-actions.ts); every
+ *    other session of the user gets 401 on its next request and lands on
+ *    /sign-in?expired=1. Each change logs
+ *    `[auth] password changed: user=<id> tokenVersion=<n>` once saved.
  *
  * A sign-in stamps the version the user had BEFORE the plugin checked the
  * password: the wrapped `callback` (local provider) reads it first, with
@@ -48,9 +58,9 @@
  *
  * How it hooks in: the Strapi v5 plugin extension pattern
  * (`export default (plugin) => plugin`, like extensions/upload): the
- * `jwt` service and the `auth` controller are factories, so their
- * factories are WRAPPED and the instances they return are patched; nothing
- * is assigned onto a factory (that would be inert, roadmap FX16).
+ * `jwt` and `user` services and the `auth` controller are factories, so
+ * their factories are WRAPPED and the instances they return are patched;
+ * nothing is assigned onto a factory (that would be inert, roadmap FX16).
  *  - The service's `issue` becomes asynchronous in legacy mode (it must read
  *    the version first). The plugin's own controllers put its result into
  *    `ctx.body.jwt` without awaiting it, so every action of the wrapped
@@ -59,16 +69,23 @@
  *  - `verify` runs the plugin's own check first (signature, expiry), then
  *    the version check; getToken() calls it through `this`, so the patched
  *    instance method is the one the users-permissions strategy uses.
+ *  - The user service's `edit` bumps before it writes a password. The
+ *    password actions run in an AsyncLocalStorage context (passwordChange)
+ *    in which edit() leaves the committed version for the issue() that
+ *    the plugin calls next. Should an upgraded plugin answer a password
+ *    action without going through edit(), the wrapper revokes afterwards,
+ *    as before, and logs that tripwire as an error.
  *
  * With `jwtManagement: 'refresh'` the plugin revokes sessions itself (its
  * session manager; a password change invalidates the refresh tokens), and
  * every wrapper here passes through untouched. Switching to it is a
  * separate decision (D-SESSION-01 and D-ENTRA-01 lifetimes).
  *
- * Upgrade tripwire: the factories, the service methods, the sign-in action
- * and the two password actions are asserted at plugin load and at
- * instantiation (still during boot); a Strapi upgrade that changes them
- * fails the boot instead of silently dropping the revocation.
+ * Upgrade tripwire: the factories, the service methods (jwt issue/verify,
+ * user edit), the sign-in action and the two password actions are asserted
+ * at plugin load and at instantiation (still during boot); a Strapi upgrade
+ * that changes them fails the boot instead of silently dropping the
+ * revocation.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
@@ -99,7 +116,11 @@ export interface TokenVersionStrapi {
     };
   };
   plugin(name: string): { service(name: string): unknown };
-  log?: { info?(message: string): void; warn?(message: string): void };
+  log?: {
+    info?(message: string): void;
+    warn?(message: string): void;
+    error?(message: string): void;
+  };
 }
 
 type Factory = (deps: { strapi: TokenVersionStrapi }) => unknown;
@@ -110,6 +131,13 @@ type JwtVerify = (this: unknown, token: string) => Promise<unknown>;
 export interface JwtService extends Record<string, unknown> {
   issue: JwtIssue;
   verify: JwtVerify;
+}
+
+type UserEdit = (this: unknown, userId: unknown, params?: unknown, ...rest: unknown[]) => unknown;
+
+/** The users-permissions `user` service: edit() is where the plugin saves a password. */
+export interface UserService extends Record<string, unknown> {
+  edit: UserEdit;
 }
 
 /** The slice of the Koa context the controller wrappers read and write. */
@@ -146,6 +174,14 @@ export interface VersionSnapshot {
  * (patchAuthController).
  */
 const knownVersion = new AsyncLocalStorage<VersionSnapshot>();
+
+/** A password action in progress: the version its edit() committed, once it did. */
+interface PasswordChange {
+  committed: VersionSnapshot | null;
+}
+
+/** Set around a password action (patchAuthController), filled by the user service's edit(). */
+const passwordChange = new AsyncLocalStorage<PasswordChange>();
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -319,6 +355,16 @@ function assertJwtService(service: unknown): asserts service is JwtService {
   }
 }
 
+function assertUserService(service: unknown): asserts service is UserService {
+  if (!isRecord(service) || typeof service.edit !== "function") {
+    throw new Error(
+      "[users-permissions-extension] the user service no longer exposes edit(); " +
+        "password-change revocation would be off — review extensions/users-permissions/strapi-server.ts " +
+        "against this Strapi version before booting (FX40 tripwire).",
+    );
+  }
+}
+
 function assertAuthController(controller: unknown): asserts controller is Record<string, unknown> {
   const actions = [...PASSWORD_ACTIONS, SIGN_IN_ACTION];
   const missing = isRecord(controller)
@@ -371,8 +417,9 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
         ? (payload.toJSON as () => unknown)()
         : payload;
     const userId = isRecord(plain) ? userIdOf(plain.id) : null;
-    // Read now, in the caller's context: the request's known version.
-    const snapshot = knownVersion.getStore();
+    // Read now, in the caller's context: the request's known version (a
+    // sign-in's, or the bump of the password action this issue() answers).
+    const snapshot = knownVersion.getStore() ?? passwordChange.getStore()?.committed ?? undefined;
     const pending = (async () => {
       const version =
         userId === null
@@ -407,6 +454,58 @@ export function patchJwtService(service: JwtService, strapi: TokenVersionStrapi)
   return service;
 }
 
+/** An edit() that writes a password (any value but undefined: clearing one counts too). */
+function setsPassword(params: unknown): boolean {
+  return isRecord(params) && params.password !== undefined;
+}
+
+/**
+ * Patches a user service instance: an edit() that writes a password first
+ * raises the user's version (bumpTokenVersion) and only then lets the
+ * plugin save it. A failed bump throws before anything is saved; a failed
+ * save after the bump leaves the old password with every older JWT
+ * revoked. In a password action the committed version goes to the
+ * action's issue() (passwordChange).
+ */
+export function patchUserService(service: UserService, strapi: TokenVersionStrapi): UserService {
+  const originalEdit = service.edit;
+
+  service.edit = async function edit(
+    this: unknown,
+    userId: unknown,
+    params?: unknown,
+    ...rest: unknown[]
+  ) {
+    if (refreshMode(strapi) || !setsPassword(params)) {
+      return originalEdit.call(this, userId, params, ...rest);
+    }
+    const id = userIdOf(userId);
+    if (id === null) {
+      throw new Error(
+        "[users-permissions-extension] a password change for a user without a numeric id is refused: " +
+          "its older JWTs could not be revoked (FX40).",
+      );
+    }
+    const committed: VersionSnapshot = { userId: id, version: await bumpTokenVersion(strapi, id) };
+    const change = passwordChange.getStore();
+    if (change) change.committed = committed;
+    let result: unknown;
+    try {
+      result = await originalEdit.call(this, userId, params, ...rest);
+    } catch (error) {
+      strapi.log?.warn?.(
+        `[auth] password not changed: user=${id} tokenVersion=${committed.version} ` +
+          "(saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
+      );
+      throw error;
+    }
+    strapi.log?.info?.(`[auth] password changed: user=${id} tokenVersion=${committed.version}`);
+    return result;
+  };
+
+  return service;
+}
+
 /** Replaces a pending `ctx.body.jwt` (issue() in legacy mode) by the JWT it resolves to. */
 export async function settleIssuedJwt(ctx: AuthContext): Promise<void> {
   const body = ctx.body;
@@ -416,8 +515,8 @@ export async function settleIssuedJwt(ctx: AuthContext): Promise<void> {
 /**
  * Patches an auth controller instance: every action settles the JWT it
  * answers with; a local sign-in reads the version before its password
- * check; the password actions then revoke the older JWTs and answer with
- * one of the new version.
+ * check; the password actions run in a passwordChange context, so that
+ * their answer carries the version their edit() committed before saving.
  */
 export function patchAuthController(
   controller: Record<string, unknown>,
@@ -426,18 +525,44 @@ export function patchAuthController(
   const jwtService = () => strapi.plugin("users-permissions").service("jwt") as JwtService;
 
   /**
-   * After a successful password action: bump, then a JWT of exactly the
-   * version this bump committed (its snapshot; a read could already see
-   * an overlapping change's higher version).
+   * Runs a password action in a passwordChange context. Its edit() bumped
+   * before saving, and the JWT of its answer carries that version. A
+   * successful answer without such a bump (an upgraded plugin that saves
+   * the password some other way) is the tripwire: revoke now, answer with
+   * that version, log it as an error.
    */
-  const revokeOlderTokens = async (ctx: AuthContext, userId: number | null) => {
-    if (refreshMode(strapi) || userId === null) return;
-    const body = ctx.body;
-    // A refused change threw before; no JWT in the answer means no success.
-    if (!isRecord(body) || typeof body.jwt !== "string") return;
-    const committed: VersionSnapshot = { userId, version: await bumpTokenVersion(strapi, userId) };
-    body.jwt = await knownVersion.run(committed, () => jwtService().issue({ id: userId }));
-    strapi.log?.info?.(`[auth] password changed: user=${userId} tokenVersion=${committed.version}`);
+  const passwordAction = (
+    name: string,
+    actionUserId: (ctx: AuthContext) => number | null,
+  ): void => {
+    const original = controller[name] as Action;
+    controller[name] = async function (this: unknown, ctx: AuthContext, ...rest: unknown[]) {
+      if (refreshMode(strapi)) return original.call(this, ctx, ...rest);
+      const change: PasswordChange = { committed: null };
+      const result = await passwordChange.run(change, () => original.call(this, ctx, ...rest));
+      const body = ctx.body;
+      // A refused change threw before; no JWT in the answer means no success.
+      if (change.committed || !isRecord(body) || typeof body.jwt !== "string") return result;
+      const userId = actionUserId(ctx);
+      strapi.log?.error?.(
+        `[users-permissions-extension] ${name} answered without saving the password through the user ` +
+          "service's edit(); its older JWTs are revoked only after the save (FX40 tripwire).",
+      );
+      if (userId === null) {
+        throw new Error(
+          `[users-permissions-extension] ${name} answered for no numeric user id; its older JWTs could not be revoked (FX40).`,
+        );
+      }
+      const committed: VersionSnapshot = {
+        userId,
+        version: await bumpTokenVersion(strapi, userId),
+      };
+      body.jwt = await knownVersion.run(committed, () => jwtService().issue({ id: userId }));
+      strapi.log?.info?.(
+        `[auth] password changed: user=${userId} tokenVersion=${committed.version}`,
+      );
+      return result;
+    };
   };
 
   for (const [name, value] of Object.entries(controller)) {
@@ -462,21 +587,11 @@ export function patchAuthController(
     return knownVersion.run(snapshot, () => signIn.call(this, ctx, ...rest));
   };
 
-  const changePassword = controller.changePassword as Action;
-  controller.changePassword = async function (this: unknown, ctx: AuthContext, ...rest: unknown[]) {
-    const result = await changePassword.call(this, ctx, ...rest);
-    await revokeOlderTokens(ctx, userIdOf(ctx.state?.user?.id));
-    return result;
-  };
-
-  const resetPassword = controller.resetPassword as Action;
-  controller.resetPassword = async function (this: unknown, ctx: AuthContext, ...rest: unknown[]) {
-    const result = await resetPassword.call(this, ctx, ...rest);
+  passwordAction("changePassword", (ctx) => userIdOf(ctx.state?.user?.id));
+  passwordAction("resetPassword", (ctx) => {
     const body = ctx.body;
-    const user = isRecord(body) && isRecord(body.user) ? body.user : null;
-    await revokeOlderTokens(ctx, userIdOf(user?.id));
-    return result;
-  };
+    return userIdOf(isRecord(body) && isRecord(body.user) ? body.user.id : undefined);
+  });
 
   return controller;
 }
@@ -509,6 +624,14 @@ export function createUsersPermissionsExtension() {
       assertJwtService(service);
       return patchJwtService(service, strapi);
     });
+    plugin.services.user = wrapFactory(
+      plugin?.services?.user,
+      "services.user",
+      (service, strapi) => {
+        assertUserService(service);
+        return patchUserService(service, strapi);
+      },
+    );
     plugin.controllers.auth = wrapFactory(
       plugin?.controllers?.auth,
       "controllers.auth",

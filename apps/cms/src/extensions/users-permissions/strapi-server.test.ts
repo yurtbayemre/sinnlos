@@ -7,9 +7,11 @@
  * awaiting it, and a refused password change throws. The sign-in race
  * (a password change between the hash read and issue()) runs through the
  * plugin's REAL `callback` with a stubbed store, user service and
- * sanitizer. Overlapping password changes of one user run on a real
- * SQLite database (@strapi/database 5.55.1), paused at chosen points of
- * one change while the others go through. The end-to-end run (the real
+ * sanitizer, and so do the plugin's REAL `changePassword` and
+ * `resetPassword` (the version is raised before they save the password).
+ * Overlapping password changes of one user run on a real SQLite database
+ * (@strapi/database 5.55.1), paused (or failed) at chosen points of one
+ * change while the others go through. The end-to-end run (the real
  * controller over HTTP, SQLite and Postgres) is
  * token-version.integration.test.ts.
  */
@@ -103,6 +105,8 @@ interface Harness {
   users: Map<number, { id: number; tokenVersion?: number | null; password?: string }>;
   jwt: JwtService;
   auth: Record<string, (ctx: AuthContext, ...rest: unknown[]) => Promise<unknown>>;
+  /** The (wrapped) users-permissions user service. */
+  userService: { edit(id: number, params: Record<string, unknown>): Promise<unknown> };
   queries: string[];
   logs: string[];
   /** The legacy-support issue() of the plugin itself, unwrapped. */
@@ -169,7 +173,10 @@ function fakeAuthFactory(): Factory {
   };
 }
 
-function harness(mode: "legacy-support" | "refresh" = "legacy-support"): Harness {
+function harness(
+  mode: "legacy-support" | "refresh" = "legacy-support",
+  authFactory: Factory = fakeAuthFactory(),
+): Harness {
   const users: Harness["users"] = new Map([
     [1, { id: 1, tokenVersion: 0 }],
     [2, { id: 2, tokenVersion: 3 }],
@@ -207,11 +214,15 @@ function harness(mode: "legacy-support" | "refresh" = "legacy-support"): Harness
       ...fakeBumpDb(users, queries),
     },
     plugin: () => ({ service: (name: string) => services[name] }),
-    log: { info: (message) => logs.push(message) },
+    log: {
+      info: (message) => logs.push(message),
+      warn: (message) => logs.push(`warn ${message}`),
+      error: (message) => logs.push(`error ${message}`),
+    },
   };
   const plugin: UsersPermissionsPlugin = {
     services: { jwt: realJwtFactory, user: fakeUserFactory() },
-    controllers: { auth: fakeAuthFactory() },
+    controllers: { auth: authFactory },
   };
   createUsersPermissionsExtension()(plugin);
   services.jwt = (plugin.services.jwt as Factory)({ strapi });
@@ -223,6 +234,7 @@ function harness(mode: "legacy-support" | "refresh" = "legacy-support"): Harness
     users,
     jwt: services.jwt as JwtService,
     auth,
+    userService: services.user as Harness["userService"],
     queries,
     logs,
     rawIssue: (payload) => raw.issue(payload) as string,
@@ -368,9 +380,74 @@ describe("auth controller", () => {
     await h.auth.logout(ctx);
     expect(ctx.body).toEqual({ ok: true });
   });
+
+  it("raises the version before the plugin saves the password", async () => {
+    const h = harness();
+    await h.auth.changePassword(passwordCtx(2));
+    expect(h.queries.filter((q) => !q.startsWith("findOne"))).toEqual([
+      "bump 2",
+      `update ${JSON.stringify({ where: { id: 2 }, data: { password: "new-password" } })}`,
+    ]);
+  });
 });
 
-describe("sign-in: the version is read before the password check (the plugin's real callback)", () => {
+describe("user service: every password it saves revokes the older JWTs", () => {
+  it("bumps before an edit() with a password outside the password actions (PUT /api/users/:id)", async () => {
+    const h = harness();
+    const legacy = h.rawIssue({ id: 1 });
+    await h.userService.edit(1, { password: "set-elsewhere" });
+    expect(h.queries.filter((q) => !q.startsWith("findOne"))).toEqual([
+      "bump 1",
+      `update ${JSON.stringify({ where: { id: 1 }, data: { password: "set-elsewhere" } })}`,
+    ]);
+    await expect(h.jwt.verify(legacy)).rejects.toThrow("Invalid token.");
+    expect(h.logs).toEqual(["[auth] password changed: user=1 tokenVersion=1"]);
+  });
+
+  it("leaves an edit() without a password alone", async () => {
+    const h = harness();
+    await h.userService.edit(1, { confirmationToken: "abc" });
+    expect(h.queries).toEqual([
+      `update ${JSON.stringify({ where: { id: 1 }, data: { confirmationToken: "abc" } })}`,
+    ]);
+    expect(h.users.get(1)?.tokenVersion).toBe(0);
+  });
+
+  it("refuses a password for a user id it cannot revoke, before saving anything", async () => {
+    const h = harness();
+    await expect(h.userService.edit("x" as unknown as number, { password: "p" })).rejects.toThrow(
+      "without a numeric id is refused",
+    );
+    expect(h.queries).toEqual([]);
+  });
+
+  it("an upgraded action that saves the password some other way is revoked afterwards (tripwire)", async () => {
+    // A plugin version whose changePassword no longer saves through edit().
+    const bypass: Factory = ({ strapi }) => {
+      const fake = fakeAuthFactory()({ strapi }) as Record<string, unknown>;
+      return {
+        ...fake,
+        async changePassword(ctx: AuthContext) {
+          const id = ctx.state?.user?.id as number;
+          const db = (strapi as { db: { query(uid: string): { update(a: object): unknown } } }).db;
+          await db.query(USER_UID).update({ where: { id }, data: { password: "direct" } });
+          const jwt = (strapi as TokenVersionStrapi).plugin("x").service("jwt") as JwtService;
+          ctx.body = { jwt: jwt.issue({ id }), user: { id } };
+        },
+      };
+    };
+    const h = harness("legacy-support", bypass);
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    const ctx = passwordCtx(2);
+    await h.auth.changePassword(ctx);
+    expect(claims(ctx.body?.jwt as string)).toMatchObject({ id: 2, tv: 4 });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.logs[0]).toMatch(/^error .*changePassword answered without saving the password/);
+    expect(h.logs[1]).toBe("[auth] password changed: user=2 tokenVersion=4");
+  });
+});
+
+describe("the plugin's real auth controller: sign-in reads the version before the password check, password actions bump before saving", () => {
   interface Row {
     id: number;
     username: string;
@@ -380,13 +457,17 @@ describe("sign-in: the version is read before the password check (the plugin's r
     confirmed: boolean;
     blocked: boolean;
     tokenVersion: number;
+    resetPasswordToken: string | null;
   }
   type SignInCtx = AuthContext & { send(body: unknown): void; body?: { jwt?: unknown } };
 
   /**
-   * The plugin's callback on a stubbed Strapi: `duringPasswordCheck` runs
-   * inside validatePassword, i.e. between the plugin's hash read and its
-   * issue(). getService() and sanitizeUser() read the global `strapi`.
+   * The plugin's auth controller on a stubbed Strapi: `duringPasswordCheck`
+   * runs inside validatePassword, i.e. between the plugin's hash read and
+   * its issue(). The user service is a factory the extension wraps; its
+   * edit() records the stored version at the moment the plugin saves.
+   * `faults` makes the bump or the save fail. getService() and
+   * sanitizeUser() read the global `strapi`.
    */
   function signInHarness(
     duringPasswordCheck: (strapi: TokenVersionStrapi) => Promise<void> = async () => undefined,
@@ -403,18 +484,29 @@ describe("sign-in: the version is read before the password check (the plugin's r
           confirmed: true,
           blocked: false,
           tokenVersion: 2,
+          resetPasswordToken: "reset-code",
         },
       ],
     ]);
     const lookups: unknown[] = [];
-    const services: Record<string, unknown> = {
-      user: {
-        async validatePassword(given: string, hash: string) {
-          await duringPasswordCheck(strapi as unknown as TokenVersionStrapi);
-          return given === "old-password" && hash === "hash-of-old-password";
-        },
+    const faults = { bump: false, save: false };
+    const saves: { id: number; params: Record<string, unknown>; versionAtSave: number }[] = [];
+    const logs: string[] = [];
+    const userFactory: Factory = () => ({
+      async validatePassword(given: string, hash: string) {
+        await duringPasswordCheck(strapi as unknown as TokenVersionStrapi);
+        return given === "old-password" && hash === "hash-of-old-password";
       },
-    };
+      async edit(id: number, params: Record<string, unknown>) {
+        saves.push({ id, params, versionAtSave: users.get(id)!.tokenVersion });
+        if (faults.save) throw new Error("the Document Service failed");
+        const row = { ...users.get(id)!, ...(params as Partial<Row>) };
+        users.set(id, row);
+        return row;
+      },
+    });
+    const services: Record<string, unknown> = {};
+    const bumpDb = fakeBumpDb(users);
     const config: Record<string, unknown> = {
       "plugin::users-permissions.jwtSecret": "unit-test-secret",
       "plugin::users-permissions.jwt": { expiresIn: "7d" },
@@ -438,6 +530,11 @@ describe("sign-in: the version is read before the password check (the plugin's r
                 const row = users.get(where.id);
                 return row ? { ...row } : null;
               }
+              const code = (args.where as { resetPasswordToken?: string }).resetPasswordToken;
+              if (code !== undefined) {
+                const row = [...users.values()].find((user) => user.resetPasswordToken === code);
+                return row ? { ...row } : null;
+              }
               lookups.push(args);
               const [byEmail, byName] = where.$or ?? [];
               const row = [...users.values()].find(
@@ -455,7 +552,13 @@ describe("sign-in: the version is read before the password check (the plugin's r
             },
           };
         },
-        ...fakeBumpDb(users),
+        ...bumpDb,
+        connection: {
+          async raw(sql: string, bindings: readonly unknown[]) {
+            if (faults.bump) throw new Error("connection lost");
+            return bumpDb.connection.raw(sql, bindings);
+          },
+        },
       },
       plugin: () => ({ service: (name: string) => services[name] }),
       store: () => ({
@@ -466,18 +569,43 @@ describe("sign-in: the version is read before the password check (the plugin's r
       contentAPI: {
         sanitize: { output: async (user: Row) => ({ id: user.id, username: user.username }) },
       },
-      log: { info: () => undefined },
+      log: {
+        info: (message: string) => logs.push(message),
+        warn: (message: string) => logs.push(`warn ${message}`),
+      },
     };
     const plugin: UsersPermissionsPlugin = {
-      services: { jwt: realJwtFactory },
+      services: { jwt: realJwtFactory, user: userFactory },
       controllers: { auth: realAuthFactory },
     };
     createUsersPermissionsExtension()(plugin);
     services.jwt = (plugin.services.jwt as Factory)({ strapi });
+    services.user = (plugin.services.user as Factory)({ strapi });
     const auth = (plugin.controllers.auth as Factory)({ strapi }) as Record<
       string,
       (ctx: SignInCtx) => Promise<unknown>
     >;
+    /** Runs an action of the plugin with `ctx`, the global `strapi` stubbed. */
+    const run = async (action: string, ctx: SignInCtx) => {
+      vi.stubGlobal("strapi", strapi);
+      try {
+        await auth[action]!(ctx);
+      } finally {
+        vi.unstubAllGlobals();
+      }
+      return ctx.body?.jwt as string;
+    };
+    const actionCtx = (body: Record<string, unknown>, userId?: number): SignInCtx => {
+      const ctx: SignInCtx = {
+        params: {},
+        request: { body },
+        state: userId === undefined ? {} : { user: { id: userId } },
+        send(answer) {
+          ctx.body = answer as SignInCtx["body"];
+        },
+      };
+      return ctx;
+    };
     const signIn = async (identifier: string, password = "old-password") => {
       const ctx: SignInCtx = {
         params: {},
@@ -495,12 +623,27 @@ describe("sign-in: the version is read before the password check (the plugin's r
       }
       return ctx.body?.jwt;
     };
+    const changePassword = (password: string) =>
+      run(
+        "changePassword",
+        actionCtx({ currentPassword: "old-password", password, passwordConfirmation: password }, 5),
+      );
+    const resetPassword = (password: string) =>
+      run(
+        "resetPassword",
+        actionCtx({ code: "reset-code", password, passwordConfirmation: password }),
+      );
     return {
       strapi: strapi as unknown as TokenVersionStrapi,
       users,
       lookups,
+      faults,
+      saves,
+      logs,
       jwt: services.jwt as JwtService,
       signIn,
+      changePassword,
+      resetPassword,
     };
   }
 
@@ -549,6 +692,69 @@ describe("sign-in: the version is read before the password check (the plugin's r
       "Invalid identifier or password",
     );
     await expect(h.signIn("nobody@example.test")).rejects.toThrow("Invalid identifier or password");
+  });
+
+  it("changePassword: the version is raised before the plugin saves, and the answer carries it", async () => {
+    const h = signInHarness();
+    const before = (await h.jwt.issue({ id: 5 })) as string;
+    const jwt = await h.changePassword("new-password-1");
+    expect(h.saves).toEqual([{ id: 5, params: { password: "new-password-1" }, versionAtSave: 3 }]);
+    expect(h.users.get(5)).toMatchObject({ tokenVersion: 3, password: "new-password-1" });
+    expect(claims(jwt)).toMatchObject({ id: 5, tv: 3 });
+    await expect(h.jwt.verify(jwt)).resolves.toMatchObject({ id: 5 });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.logs).toEqual(["[auth] password changed: user=5 tokenVersion=3"]);
+  });
+
+  it("changePassword: a failed bump fails the request before anything is saved", async () => {
+    const h = signInHarness();
+    const before = (await h.jwt.issue({ id: 5 })) as string;
+    h.faults.bump = true;
+    await expect(h.changePassword("new-password-1")).rejects.toThrow("connection lost");
+    expect(h.saves).toEqual([]);
+    expect(h.users.get(5)).toMatchObject({ tokenVersion: 2, password: "hash-of-old-password" });
+    // Nothing changed: the old password and its sessions stay as they were.
+    await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 5 });
+    expect(h.logs).toEqual([]);
+  });
+
+  it("changePassword: a failed save after the bump leaves the old password and every older JWT revoked", async () => {
+    const h = signInHarness();
+    const before = (await h.jwt.issue({ id: 5 })) as string;
+    h.faults.save = true;
+    await expect(h.changePassword("new-password-1")).rejects.toThrow("the Document Service failed");
+    expect(h.users.get(5)).toMatchObject({ tokenVersion: 3, password: "hash-of-old-password" });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.logs).toEqual([
+      "warn [auth] password not changed: user=5 tokenVersion=3 (saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
+    ]);
+  });
+
+  it("resetPassword: the version is raised before the plugin saves, and the answer carries it", async () => {
+    const h = signInHarness();
+    const before = (await h.jwt.issue({ id: 5 })) as string;
+    const jwt = await h.resetPassword("new-password-2");
+    expect(h.saves).toEqual([
+      {
+        id: 5,
+        params: { resetPasswordToken: null, password: "new-password-2" },
+        versionAtSave: 3,
+      },
+    ]);
+    expect(claims(jwt)).toMatchObject({ id: 5, tv: 3 });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+  });
+
+  it("resetPassword: a failed bump saves nothing, so the code still works for another try", async () => {
+    const h = signInHarness();
+    h.faults.bump = true;
+    await expect(h.resetPassword("new-password-2")).rejects.toThrow("connection lost");
+    expect(h.saves).toEqual([]);
+    expect(h.users.get(5)).toMatchObject({
+      tokenVersion: 2,
+      password: "hash-of-old-password",
+      resetPasswordToken: "reset-code",
+    });
   });
 });
 
@@ -611,6 +817,17 @@ function pauseAt(who: string, point: RacePoint) {
       held = true;
       reach();
       await released;
+    },
+  };
+}
+
+/** Makes the change `who` fail at `point`, as a lost connection would. */
+function failAt(who: string, point: RacePoint): RaceHook {
+  return {
+    async at(current) {
+      if (current === point && actor.getStore() === who) {
+        throw new Error(`connection lost at ${point}`);
+      }
     },
   };
 }
@@ -792,6 +1009,38 @@ describe("overlapping password changes of one user (real SQLite)", () => {
       `[auth] password changed: user=${h.userId} tokenVersion=1`,
     ]);
   }, 30_000);
+
+  it("a failed version write fails the change with the password unchanged", async () => {
+    const h = await raceHarness(engines, [failAt("A", "before version write")]);
+    await expect(h.change("A", "password-a")).rejects.toThrow("connection lost");
+    expect(await h.stored()).toEqual({ version: 0, password: "old-password" });
+    expect(h.logs).toEqual([]);
+    // Nothing changed, so nothing was revoked either.
+    await expect(h.jwt.verify(h.before)).resolves.toMatchObject({ id: h.userId });
+  }, 30_000);
+
+  it("a failed password write after the bump fails the change: old password, older JWTs revoked", async () => {
+    const h = await raceHarness(engines, [failAt("A", "before password write")]);
+    await expect(h.change("A", "password-a")).rejects.toThrow("connection lost");
+    expect(await h.stored()).toEqual({ version: 1, password: "old-password" });
+    await expect(h.jwt.verify(h.before)).rejects.toThrow("Invalid token.");
+    expect(h.logs).toEqual([
+      `[auth] password not changed: user=${h.userId} tokenVersion=1 (saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)`,
+    ]);
+  }, 30_000);
+
+  it("the older JWTs are revoked before the new password is saved (a crash in between fails closed)", async () => {
+    const hold = pauseAt("A", "before password write");
+    const h = await raceHarness(engines, [hold]);
+    const a = h.change("A", "password-a");
+    await hold.reached;
+    // Were the process to die here: version raised, password unchanged.
+    expect(await h.stored()).toEqual({ version: 1, password: "old-password" });
+    await expect(h.jwt.verify(h.before)).rejects.toThrow("Invalid token.");
+    hold.release();
+    expect(claims(await a)).toMatchObject({ id: h.userId, tv: 1 });
+    expect(await h.stored()).toEqual({ version: 1, password: "password-a" });
+  }, 30_000);
 });
 
 describe("jwtManagement 'refresh': the plugin's own session revocation applies", () => {
@@ -801,7 +1050,7 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
     const issue = vi.fn(() => "session-token");
     const verify = vi.fn(async () => ({ id: 2, sessionId: "s" }));
     const plugin: UsersPermissionsPlugin = {
-      services: { jwt: () => ({ issue, verify }) },
+      services: { jwt: () => ({ issue, verify }), user: fakeUserFactory() },
       controllers: { auth: fakeAuthFactory() },
     };
     createUsersPermissionsExtension()(plugin);
@@ -830,33 +1079,43 @@ describe("jwtManagement 'refresh': the plugin's own session revocation applies",
 describe("the extension itself", () => {
   it("wraps each factory once, also when the plugin module is loaded again (a second boot)", () => {
     const plugin: UsersPermissionsPlugin = {
-      services: { jwt: realJwtFactory },
+      services: { jwt: realJwtFactory, user: fakeUserFactory() },
       controllers: { auth: fakeAuthFactory() },
     };
     const extend = createUsersPermissionsExtension();
     extend(plugin);
-    const [jwt, auth] = [plugin.services.jwt, plugin.controllers.auth];
+    const [jwt, user, auth] = [plugin.services.jwt, plugin.services.user, plugin.controllers.auth];
     extend(plugin);
     expect(plugin.services.jwt).toBe(jwt);
+    expect(plugin.services.user).toBe(user);
     expect(plugin.controllers.auth).toBe(auth);
   });
 
   it("refuses to boot when the plugin no longer has the expected shape (upgrade tripwire)", () => {
     const extend = createUsersPermissionsExtension();
     expect(() =>
-      extend({ services: { jwt: {} }, controllers: { auth: fakeAuthFactory() } }),
+      extend({
+        services: { jwt: {}, user: fakeUserFactory() },
+        controllers: { auth: fakeAuthFactory() },
+      }),
     ).toThrow("services.jwt is not a factory");
-    expect(() => extend({ services: { jwt: realJwtFactory }, controllers: {} })).toThrow(
-      "controllers.auth is not a factory",
-    );
+    expect(() =>
+      extend({ services: { jwt: realJwtFactory }, controllers: { auth: fakeAuthFactory() } }),
+    ).toThrow("services.user is not a factory");
+    expect(() =>
+      extend({ services: { jwt: realJwtFactory, user: fakeUserFactory() }, controllers: {} }),
+    ).toThrow("controllers.auth is not a factory");
     const strapi = harness().strapi;
     const noVerify: UsersPermissionsPlugin = {
-      services: { jwt: () => ({ issue: () => "" }) },
+      services: { jwt: () => ({ issue: () => "" }), user: () => ({ add: () => undefined }) },
       controllers: { auth: () => ({ changePassword: async () => undefined }) },
     };
     extend(noVerify);
     expect(() => (noVerify.services.jwt as Factory)({ strapi })).toThrow(
       "no longer exposes issue() and verify()",
+    );
+    expect(() => (noVerify.services.user as Factory)({ strapi })).toThrow(
+      "no longer exposes edit()",
     );
     expect(() => (noVerify.controllers.auth as Factory)({ strapi })).toThrow(
       "no longer exposes resetPassword",

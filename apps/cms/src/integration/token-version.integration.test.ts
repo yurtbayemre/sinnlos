@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   bumpTokenVersion,
@@ -28,7 +28,10 @@ import {
  *   3. a refused change (wrong current password) revokes nothing;
  *   4. the version is private: not in any answer, not filterable;
  *   5. the bump is atomic on the real database: overlapping bumps of one
- *      user each commit their own version, none is lost.
+ *      user each commit their own version, none is lost, and overlapping
+ *      changes each answer with their own version;
+ *   6. it fails closed: a failed bump saves nothing, a failed save after
+ *      the bump leaves the old password with the older JWTs revoked.
  */
 
 /** A JWT signed like the plugin's legacy issue() did before FX40: no `tv`. */
@@ -169,6 +172,89 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
       password = next;
     }
     expect((await me(await t.login(account.username, password))).status).toBe(200);
+  });
+
+  describe("fails closed when the bump or the save fails (the real controller and Document Service)", () => {
+    // The fixture user of the one role no other test here signs in as.
+    const account = () => t.fixtures.users.authenticated;
+    let failSave = false;
+    let middlewareAdded = false;
+
+    /** A Document Service middleware that fails the save of a password while `failSave`. */
+    const ensureSaveFault = () => {
+      if (middlewareAdded) return;
+      middlewareAdded = true;
+      const documents = t.strapi.documents as unknown as {
+        use(
+          middleware: (
+            context: { uid: string; action: string; params?: { data?: object } },
+            next: () => Promise<unknown>,
+          ) => Promise<unknown>,
+        ): void;
+      };
+      documents.use(async (context, next) => {
+        const data = context.params?.data;
+        if (
+          failSave &&
+          context.uid === "plugin::users-permissions.user" &&
+          context.action === "update" &&
+          data !== undefined &&
+          "password" in data
+        ) {
+          throw new Error("the save of the password failed");
+        }
+        return next();
+      });
+    };
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+      failSave = false;
+    });
+
+    it("a failed bump answers an error and leaves the password and the sessions as they were", async () => {
+      const strapi = t.strapi as unknown as TokenVersionStrapi;
+      const connection = strapi.db.connection as { raw(sql: string, b: unknown[]): unknown };
+      const raw = connection.raw.bind(connection);
+      vi.spyOn(connection, "raw").mockImplementation((sql: string, bindings: unknown[]) => {
+        if (/^UPDATE\b/.test(sql) && sql.includes("token_version")) {
+          return Promise.reject(new Error("connection lost"));
+        }
+        return raw(sql, bindings);
+      });
+      const { username, password, id } = account();
+      const signedIn = await t.login(username, password);
+      const start = await currentTokenVersion(strapi, id);
+      const failed = await changePassword(signedIn, password, "Never-Saved-Pass-1");
+      expect(failed.status).toBe(500);
+      expect(failed.body).not.toHaveProperty("jwt");
+      vi.restoreAllMocks();
+      // Not saved: the old password signs in, the new one does not.
+      await expect(t.login(username, "Never-Saved-Pass-1")).rejects.toThrow("failed: 400");
+      const again = await t.login(username, password);
+      expect(await currentTokenVersion(strapi, id)).toBe(start);
+      for (const jwt of [signedIn, again]) expect((await me(jwt)).status).toBe(200);
+    });
+
+    it("a failed save after the bump answers an error: old password, every older JWT revoked", async () => {
+      ensureSaveFault();
+      const strapi = t.strapi as unknown as TokenVersionStrapi;
+      const { username, password, id } = account();
+      const signedIn = await t.login(username, password);
+      const start = (await currentTokenVersion(strapi, id)) ?? 0;
+      failSave = true;
+      const failed = await changePassword(signedIn, password, "Never-Saved-Pass-2");
+      failSave = false;
+      expect(failed.status).toBe(500);
+      expect(failed.body).not.toHaveProperty("jwt");
+      expect(await currentTokenVersion(strapi, id)).toBe(start + 1);
+      // The sessions are signed out; the old password signs in again.
+      expect((await me(signedIn)).status).toBe(401);
+      await expect(t.login(username, "Never-Saved-Pass-2")).rejects.toThrow("failed: 400");
+      const again = await t.login(username, password);
+      expect(claims(again).tv).toBe(start + 1);
+      expect((await me(again)).status).toBe(200);
+    });
   });
 
   it("keeps the version private: not filterable through the API", async () => {
