@@ -1264,15 +1264,39 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 13 (2026-10-12)?** The UI primitives with Markdown
+> rendering, the capabilities with the phone navigation and loading states,
+> and the live client with password-change revocation (the three notes
+> below) ship as one deploy of cms and web with `infra/deploy.sh`, **once
+> batch 12 runs** (deploy batch 12 first). No env, compose, grant, route or
+> edge change; the first cms boot adds one private column,
+> `up_users.token_version`, and **nobody is signed out**: running sessions
+> keep working, and only a user's own password change from then on signs
+> that user's other browsers and devices out (the tab that changed it stays
+> signed in). Read-only checks before it: the batch 12 state as the
+> rollback target, a clean checkout, `deploy.sh --check` and `--dry-run`
+> with the backup permission, the live pipeline's cms env (the new
+> live-smoke requires the cms keepalive), the permission diff (unchanged),
+> the accounts per role, the announcement bodies Markdown renders
+> differently, a 401 baseline. After it: the state and boot lines, the new
+> column, the pages, a guest walk with a clean log, an editor's takedown, a
+> two-browser password change, and an hour of 401s and live lines. Editors
+> should know that announcement bodies now render as Markdown. A rollback
+> goes to the batch 12 SHA tags with no database step; the column stays,
+> and sessions revoked on batch 13 work again until the roll-forward.
+> Follow [Deploying batch 13 (2026-10-12)](#deploying-batch-13-2026-10-12).
+>
 > **Deploying the UI primitives and Markdown rendering (batch 13, lane
 > 8B)?** A normal `infra/deploy.sh` run that changes the **web only**: no
-> env, schema, permission, route, edge or dependency change, and no cms
-> restart is needed. Select menus, the language menu, the notification bell
+> env, schema, permission, route, edge or dependency change (the cms image
+> is rebuilt unchanged). Select menus, the language menu, the notification bell
 > and the two dialogs (delete an ad, give kudos) behave like before for a
 > mouse user but now work fully with the keyboard; announcement bodies now
 > render as Markdown like wiki pages (single line breaks inside a paragraph
 > join); deleting an ad lands on the marketplace without a "Page not found"
-> flash; the bell keeps its list during a cms outage. Follow
+> flash; the bell keeps its list during a cms outage. Batch 13 ships it
+> with lanes 8A and 8C, so deploy and roll back cms and web together (see
+> [Deploying batch 13](#deploying-batch-13-2026-10-12)). Follow
 > [Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b).
 >
 > **Deploying the capabilities, navigation and loading states (batch 13,
@@ -1283,7 +1307,9 @@ systemctl start docker
 > phone navigation gains a _More_ sheet with every other section, editors
 > can take down other people's marketplace ads, the comment and reaction
 > controls follow the role, and navigation shows a pending dot and a
-> skeleton per page. Follow
+> skeleton per page. Batch 13 ships it with lanes 8B and 8C, so deploy and
+> roll back cms and web together (see
+> [Deploying batch 13](#deploying-batch-13-2026-10-12)). Follow
 > [Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a).
 >
 > **Deploying the live client and password-change revocation (batch 13,
@@ -1299,7 +1325,8 @@ systemctl start docker
 > without one for 45 s the browsers poll at the short intervals and
 > the header says _Live updates delayed_.
 > `infra/live-smoke.sh` now also requires `"emitFresh":true` on the stream.
-> Roll back cms and web together.
+> Roll back cms and web together. Batch 13 ships it with lanes 8B and 8A
+> (see [Deploying batch 13](#deploying-batch-13-2026-10-12)).
 > Follow [Upgrading to the live client and password-change revocation (batch 13, lane 8C)](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c).
 >
 > **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
@@ -1672,6 +1699,403 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Deploying batch 13 (2026-10-12)
+
+Batch 13 (branch `batch/13`: `batch/12` with `main` `9cf860d`, plus the
+three lanes of plan batch 8) ships in one deploy, **once batch 12 runs**:
+deploy [batch 12](#deploying-batch-12-2026-09-29) first, with its
+next-morning check green, and only then this. The runbooks below explain
+each change in detail; **this section is the one sequence to follow** on
+the owner instance (srv-prod-01, Traefik mode, checkout
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`):
+
+- [the UI primitives and Markdown rendering](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b)
+  (lane 8B, web only): the select menus, the language menu and the bell's
+  panel on one menu primitive that works fully with the keyboard; the bell
+  keeps its list during a cms outage; one Markdown renderer for wiki pages,
+  lessons and now announcement bodies (raw HTML shown as text, unsafe links
+  and images neutralised); plain-text _Latest news_ excerpts; the _Delete
+  ad_ and _Give kudos_ dialogs keep the focus inside and close with Escape;
+  a deleted ad lands on `/marketplace` without a "Page not found" flash;
+- [the capabilities, navigation and loading states](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a)
+  (lane 8A, web only; two cms files change code comments): one set of
+  role checks in the web, pinned to the cms permission matrix by a test;
+  guests get "Not available for your account" instead of 403 banners, and
+  the web asks the cms nothing they cannot read (pages, dashboard,
+  navigation, the ⌘K search); the comment form and the reaction bar follow
+  the role; editors can take down other people's ads; the phone navigation
+  gains a _More_ sheet with every other section; a pending dot on clicked
+  navigation links and a skeleton per page; the header fits beside the
+  sidebar from 768 px;
+- [the live client and password-change revocation](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c)
+  (lane 8C, cms and web): terminal `bye` frames, the full channel set with
+  a revision on `/live/subscribe`, a cms keepalive every 20 s whose
+  freshness (`emitFresh`) every hello and heartbeat carries (a stale cms leg
+  makes the browsers poll at the short intervals), shorter ping coalescing,
+  and `infra/live-smoke.sh` requires `"emitFresh":true`; a user's own
+  password change on `/profile` revokes that user's other sessions through
+  a new private `tokenVersion` on the user, while the tab that changed it
+  stays signed in;
+- from the integration: the header shows a small _Live updates delayed_
+  note (new message keys `live.delayed` and `live.delayedHint`, en and de)
+  once the live stream has been degraded for 5 s in a visible tab, and
+  removes it with the next fresh heartbeat; one test file from `main`
+  `9cf860d` is formatted (CI's `format:check`).
+
+It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
+and starts both; the rollback below takes both back. No env, compose,
+permission, route, edge or Traefik change, and no new dependency. The
+database container is not recreated; cms and web are, so the site is down
+while the cms boots. The first cms boot adds one column,
+`up_users.token_version` (integer, no database default): the rows of
+existing users stay NULL, which counts as version 0, and the cms writes 0
+for new users. **Nobody is signed out by this deploy:** a Strapi JWT
+without the version claim counts as version 0, so every running session,
+local or Microsoft, keeps working. From then on a user's own password
+change on `/profile` raises that user's version and ends the user's
+sessions in other browsers and on other devices (their next request lands
+on `/sign-in?expired=1`; their open live stream at its next rotation); a
+password an admin sets in the Strapi panel does not do that yet. Open
+tabs get `bye shutdown` when the web restarts and reconnect their live
+stream, spread over up to 15 s.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Batch 12 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B12_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   B12_SHA="$(sed -n 's/^SHA=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B12_TAG} ${B12_SHA}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B12_TAG}" "infra-web:${B12_TAG}"
+   ```
+
+   The state names the batch 12 deploy (`SHA=` the batch 12 commit on
+   `main`, `TAG=` its first 12 characters, `LIVE_SMOKE=passed`), and both
+   images exist. Keep `B12_TAG` and `B12_SHA` in this shell for the
+   rollback below. If the state still names batch 10 (`TAG=7d9e52ba7e6a`),
+   stop: deploy batch 12 first.
+
+2. **Fast-forward to the new `main`, with a clean checkout:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git pull --ff-only
+   git log -1 --oneline      # the batch 13 merge
+   git clean -n -d -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   ```
+
+   The `git clean -n` dry run removes nothing and must print nothing
+   (`deploy.sh` refuses untracked files where the images are built from).
+
+3. **The preflight, the plan and the backup permission:**
+
+   ```bash
+   infra/deploy.sh --check
+   infra/deploy.sh --dry-run
+   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
+   ```
+
+   `--check` prints `Preflight OK` and
+   `Traefik host: sinnlos.yurtbay.dev; smoke URL: https://sinnlos.yurtbay.dev`.
+   `--dry-run` prints `lock: free`, the clean checkout at the batch 13
+   commit, the CI result of that commit (a `WARNING: CI is …` only
+   informs), `1. pre-deploy backup: sudo -n /usr/local/sbin/backup-run
+   --kind predeploy sinnlos (none on a first install)`, `last-known-good:
+   infra-{web,cms}:<B12_TAG> (commit <B12_SHA>, deployed …)` and `-> the
+   last-known-good deploy <B12_TAG> (…)` as the rollback target, `4. smoke
+   check https://sinnlos.yurtbay.dev; live-smoke: run`, and `5. tag
+   infra-{web,cms}:<sha12> (commit …)` with `and prune SHA tags beyond the
+   newest 5: none`. `sudo -n -l` prints the path of `backup-run`: the
+   sudoers drop-in `backup-run-predeploy` lets `bigemo` run exactly that
+   command ([§3.6](#36-deploy)). If it asks for a password or refuses,
+   fix the drop-in first: the deploy would stop at its backup step.
+
+4. **The live pipeline's cms env** (the new live-smoke needs the cms
+   keepalive to reach the web):
+
+   ```bash
+   docker exec infra-cms-1 printenv WEB_INTERNAL_URL LIVE_EVENTS_DISABLED
+   docker exec infra-cms-1 sh -c 'test -n "$REVALIDATE_SECRET" && echo "REVALIDATE_SECRET is set"'
+   grep -E '^LIVE_EVENTS_DISABLED=' infra/.env
+   ```
+
+   `http://sinnlos-web:3000`, `0`, `REVALIDATE_SECRET is set`, and no
+   `LIVE_EVENTS_DISABLED=1` line. The new cms POSTs its keepalive to that
+   URL with that secret; without it the new live-smoke fails with "the cms
+   leg is not fresh", `deploy.sh` does not record the deploy and prints
+   the rollback, and every browser would show _Live updates delayed_.
+
+5. **Permissions: no change.**
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   The file is the same as batch 12's: no lane adds or removes an action
+   (FX40 wraps the users-permissions JWT service and auth controller; it
+   adds no route and no grant). So the output equals the one you kept
+   after the batch 12 deploy, before and after this deploy.
+
+6. **The accounts for the checks, the column, and the announcements whose
+   look changes** (one read-only transaction):
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   \echo '== the token version column (none before the first boot)'
+   SELECT count(*) AS token_version_columns FROM information_schema.columns
+    WHERE table_name = 'up_users' AND column_name = 'token_version';
+   \echo '== users per provider and per role'
+   SELECT provider, count(*) AS users, count(*) FILTER (WHERE blocked) AS blocked
+     FROM up_users GROUP BY 1 ORDER BY 1;
+   SELECT r.type AS role, count(l.user_id) AS users
+     FROM up_roles r LEFT JOIN up_users_role_lnk l ON l.role_id = r.id
+    GROUP BY r.type ORDER BY 1;
+   \echo '== published announcement bodies that Markdown renders differently'
+   SELECT count(*) AS published,
+          count(*) FILTER (WHERE body ~ '<[A-Za-z/!]') AS with_raw_html,
+          count(*) FILTER (WHERE body ~ '[^\r\n]\r?\n[^\r\n]') AS with_single_line_breaks
+     FROM announcements WHERE published_at IS NOT NULL;
+   ROLLBACK;
+   SQL
+   ```
+
+   Note for steps 10, 13 and 14:
+   - `token_version_columns` is 0, and the user total (step 10 expects
+     them all at version 0).
+   - The roles: a `guest`, an `editor` and a `member` account for steps 12
+     to 14. Without a guest account, skip the guest walk or create a test
+     guest first.
+   - `with_raw_html`: published bodies that contain HTML tags; after the
+     deploy those tags show as text. `with_single_line_breaks`: bodies
+     whose single line breaks now join into one paragraph (Markdown
+     rules). Tell the editors (see **What users notice**); an empty line
+     between two lines keeps them apart.
+
+7. **A baseline of refused requests,** for step 15:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
+   ```
+
+   The 401 answers of the last hour (ended sessions, probes). The version
+   check refuses only JWTs that a password change on the new release
+   revoked, never a running session, so the first hour after the deploy
+   shows a number of the same order.
+
+**Deploy**
+
+8. As `bigemo`, run `infra/deploy.sh` in the checkout (from a root shell:
+   `sudo -u bigemo -H infra/deploy.sh`). It takes the lock, checks the
+   clean checkout and the CI result, takes the pre-deploy backup through
+   `backup-run` (a `-predeploy` generation of `sinnlos` in
+   `/srv/backup/outbox`), keeps the batch 12 SHA tags (`B12_TAG`) as the
+   rollback target, builds both images, runs `up -d --no-build` (cms and
+   web recreated, the database kept), smoke-checks, runs the new
+   live-smoke (it prints `live-smoke: cms leg fresh (emitFresh on the
+   stream)` before the ping lines; right after the web restarts that can
+   take up to 20 s), and only then tags `infra-{web,cms}:<sha12>` of the
+   batch 13 commit and records the state. A failure prints the rollback to
+   `B12_TAG` (below).
+
+**After the deploy** (read-only)
+
+9. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|users-permissions-extension|live-emit)\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[classifieds\] delete|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} '
+   ```
+
+   The state names the batch 13 commit (`TAG=` its first 12 characters,
+   `LIVE_SMOKE=passed`). The cms logs `[datetime] process time zone UTC,
+   APP_TIME_ZONE Europe/Berlin`, `[bootstrap] permission drift: none
+   (report-only check of 120 managed actions)` (as in batch 12), no
+   `granted` or `revoked` line, and `Strapi started successfully`; no
+   `[users-permissions-extension]` line (that is the FX40 tripwire for a
+   users-permissions plugin whose shape changed, and the cms would not
+   have started); and of `[live-emit]` either nothing or exactly
+   `keepalive failed: …` followed by `keepalive reaches the web again`
+   (the new cms started before the new web answered). The second command
+   prints nothing. It leaves out the web's warnings for refused user
+   actions (`<action> refused: <status> <…Error> → <code>`, see batch 12);
+   look at every line it does print.
+
+10. **The new column:**
+
+    ```bash
+    psql_db -X <<'SQL'
+    SELECT column_name, data_type, column_default FROM information_schema.columns
+     WHERE table_name = 'up_users' AND column_name = 'token_version';
+    SELECT coalesce(token_version, 0) AS version, count(*) AS users FROM up_users GROUP BY 1 ORDER BY 1;
+    SQL
+    ```
+
+    One row `token_version | integer |` (no database default), and every
+    user at version 0 (the user total of step 6). Step 5 again prints the
+    same permission diff.
+
+11. **The pages** (in a browser, as a member): `/announcements` shows
+    formatted bodies, no raw `**` or backticks (the bodies step 6 counted
+    with HTML show their tags as text); `/` shows plain-text _Latest news_
+    excerpts; a wiki page with headings keeps its table of contents. Tab to
+    the language button, Enter, the arrow keys and Escape: the menu opens,
+    moves and closes, and the focus is back on the button; Ctrl+K logs no
+    "DialogTitle" error in the browser console. On a phone (or 360 px
+    wide), _More_ opens the sheet with the other sections, as an admin with
+    _Admin_, as a member without; at 768 px the page does not scroll
+    sideways and _Sign out_ is visible. The header shows no _Live updates
+    delayed_ note (only while the stream is degraded).
+
+12. **As a guest** (step 6's `guest` row). On the host, first note the
+    time, so that the log check covers the walk only (the web logs
+    `fetch failed` while `deploy.sh` recreates the cms):
+
+    ```bash
+    since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    ```
+
+    Then, as the guest: the navigation shows Dashboard, People, Events,
+    Wiki, Polls and Documents only; `/announcements`, `/departments`,
+    `/kudos`, `/marketplace` and `/training` by URL each show "Not
+    available for your account"; ⌘K finds a colleague. Afterwards:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since "$since" web | grep -E 'fetch failed' || echo "web: none"
+    "${COMPOSE[@]}" logs --since "$since" cms \
+      | grep -E 'GET /api/(announcements|departments|teams|kudos-entries|celebrations|classifieds|courses|lessons|lesson-progresses|acknowledgements)[?/ ].* 403$' \
+      || echo "cms: none"
+    ```
+
+    `web: none` and `cms: none`. Strapi's request log names no user, so a
+    line can be another user's request in the same minutes: repeat the
+    walk in a quiet moment with a fresh `since`.
+
+13. **As an editor** (step 6's `editor` row): on an ad posted by someone
+    else, a _Moderation_ card offers _Delete ad_, and there is no _Edit_
+    link. Take down a test ad only: the delete lands on `/marketplace`
+    without a "Page not found" flash.
+
+14. **A password change revokes the other sessions** (two browsers). Use a
+    test account that live-smoke does not sign in with (not `alex.morgan`
+    or `casey.jones`, whose passwords `deploy.sh` reads from the
+    credentials file). Sign in as it in browser A and in a private window
+    B. Change the password on `/profile` in A: A shows "Password changed"
+    and keeps working; B's next click lands on `/sign-in?expired=1`. Then:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 15m cms | grep -F '[auth] password changed'
+    ```
+
+    `[auth] password changed: user=<id> tokenVersion=1`. If the account's
+    password is kept somewhere, change it back the same way in A
+    (`tokenVersion=2`; A again stays signed in).
+
+15. **The first hour:**
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
+    "${COMPOSE[@]}" logs --since 1h cms | grep -F '[live-emit]'
+    "${COMPOSE[@]}" logs --since 1h web | grep -E '\[auth\] session update refused|\[profile\] change password|\[live\] subscribe of user'
+    ```
+
+    The 401 count is of the same order as step 7's baseline (plus B's
+    refused requests of step 14); a clear jump means running sessions are
+    refused, which calls for the rollback. No `[live-emit]` line beyond
+    step 9's pair. The third command prints nothing: `session update
+    refused` is a session update without the server's proof, `change
+    password: …` a password change whose tab lost its session, `capped at
+    200 channels` a page with more than 200 comment sections.
+
+**What users notice** (worth a short release note): nobody is signed out
+by the update. Changing your own password now signs you out in your other
+browsers and on your other devices; the tab you changed it in stays signed
+in. Announcement bodies show formatting (bold, lists, links, images) like
+wiki pages, and the dashboard's _Latest news_ shows plain text. **For
+editors:** a single line break inside a paragraph of an announcement now
+joins the two lines (an empty line starts a new paragraph), and HTML in a
+body shows as text. Menus, the language switch, the bell and the delete
+and kudos dialogs work fully with the keyboard; the bell keeps its list
+while the intranet is briefly unreachable; deleting an ad goes straight to
+the marketplace. Guests no longer see sections they cannot open (and no
+error banners), nor a comment form or reactions. Editors can take down
+other people's marketplace ads. On a phone, _More_ reaches every section.
+Clicked links show a small pending dot, and every page its own loading
+skeleton. When live updates are delayed for a while, the header says _Live
+updates delayed_; comments and notifications still arrive, a few seconds
+later.
+
+**Rollback: both images, to the batch 12 SHA tags (`B12_TAG` of step 1),
+no database step.** Follow the hint `infra/deploy.sh` prints when the
+deploy fails. After a recorded batch 13 deploy, by hand (the batch 12 tags
+stay: the prune keeps the newest five). If the shell of step 1 is gone,
+the batch 12 deploy is the line before the last one of
+`.git/sinnlos-deploy/infra.history` (`<tag> <commit> <date>`):
+
+```bash
+# B12_TAG=… B12_SHA=…   (only if the shell of step 1 is gone)
+tail -n 2 .git/sinnlos-deploy/infra.history
+grep -F "${B12_TAG}" .git/sinnlos-deploy/infra.history
+docker tag "infra-web:${B12_TAG}" infra-web:latest
+docker tag "infra-cms:${B12_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+git show "${B12_SHA}:infra/live-smoke.sh" > /tmp/live-smoke-b12.sh
+BASE_URL=https://sinnlos.yurtbay.dev bash /tmp/live-smoke-b12.sh
+```
+
+`infra/live-smoke.sh` belongs to its checkout: the batch 13 script fails
+against a batch 12 web (on the subscribe answer and `emitFresh`), so the
+check after a rollback runs batch 12's. None of the hint's special cases
+applies from batch 13 to batch 12 (as from batch 12 to batch 10). What
+stays in the database, and how the batch 12 images take it:
+
+- **The `token_version` column stays** with its values (the schema sync
+  never drops columns, `forceMigration: false`); the batch 12 cms boots on
+  it and ignores it, as the batch 10 cms did with batch 12's `audience`
+  columns. It accepts the JWTs the batch 13 cms issued (signature and
+  expiry only), so nobody is signed out by the rollback either.
+- **Revocations pause:** while batch 12 runs, a password change revokes
+  nothing, and every session or JWT that a password change on batch 13
+  revoked **works again** for the whole rollback window, a stolen one too.
+  After a password change because of a compromise, keep the rollback short
+  or rotate `JWT_SECRET`, which signs everyone out (an operator decision).
+- **The roll-forward** is a normal `infra/deploy.sh`. The column's values
+  apply again: the sessions revoked before the rollback are revoked again,
+  and a user whose version is above 0 (who changed the password on batch
+  13) and signed in on batch 12 in between signs in once more, since those
+  JWTs carry no version (= 0).
+- Never roll back one image alone. A batch 12 web in front of the batch 13
+  cms answers the keepalive with 400 (logged once), and a password change
+  there also ends the tab that made it (the batch 12 web does not take the
+  new JWT). A batch 12 cms behind the batch 13 web sends no keepalive, so
+  every browser shows _Live updates delayed_ and polls at the short
+  intervals.
+
+**Integration checks (2026-10-12, the integrated `batch/13`):** typecheck,
+lint (0 errors), `format:check`, the unit suite (5149 passed, 81 skipped;
+with Postgres 16 5207 passed, 33 skipped), the time-zone matrix with
+Postgres 16 under UTC, Europe/Berlin and Pacific/Auckland (5207 each), the
+integration suite on SQLite (166) and Postgres 16 (336, including
+`token-version.integration.test.ts`: an old JWT gets 401 after a password
+change), the `deploy-flow` sequences (36), shellcheck, the compose renders
+and the domain, cms and web builds passed (details under §6 CI in
+[architecture.md](./architecture.md)). Not exercised here: the images,
+`infra/deploy.sh` end to end, Traefik, the production host, a real phone
+and a screen-reader pass (the plan's staging rehearsal of the three
+lanes).
+
 #### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
 
 This release (branch `feat/ui-primitives`, on `batch/12` `02f288e`) changes
@@ -1720,8 +2144,9 @@ the web only. What users notice:
 
 **A normal deploy with `infra/deploy.sh`** (it rebuilds both images; only
 the web image changes). No `.env`, compose, schema, permission or Traefik
-change; no message keys were added. It can go out before or after the
-other batch 13 lanes' deploy steps; merged together they ship as one deploy.
+change; no message keys were added. Batch 13 ships it with lanes 8A and
+8C as one deploy of cms and web: follow
+[Deploying batch 13](#deploying-batch-13-2026-10-12).
 
 1. **Before (read-only):** `infra/deploy.sh --check` and `--dry-run` as
    usual.
@@ -1749,7 +2174,8 @@ other batch 13 lanes' deploy steps; merged together they ship as one deploy.
 
 **Rollback:** re-up the previous web image with the commands
 `infra/deploy.sh` prints; nothing else changed. Announcement bodies are
-shown as plain text again.
+shown as plain text again. Shipped with batch 13, both images go back
+together ([Deploying batch 13](#deploying-batch-13-2026-10-12)).
 
 **Rehearsal (2026-09-29, lane 8B):** unit suite 4730 tests (4788 with
 Postgres 16), the time-zone matrix under UTC, Europe/Berlin and
@@ -1890,7 +2316,8 @@ none of its behaviour. Only the web changes.
    real one.)
 
 **Rollback:** re-up the previous images with the commands `infra/deploy.sh`
-prints; no database step.
+prints; no database step. Shipped with batch 13, both images go back
+together ([Deploying batch 13](#deploying-batch-13-2026-10-12)).
 
 **Rehearsal (2026-09-29, lane 8A):** unit suite 4840 tests (4898 with Postgres
 16.15), including the parity test against the permission matrix (it fails
