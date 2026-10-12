@@ -277,8 +277,11 @@ server, no Docker, no Microsoft account.
    pnpm build:domain
    ```
 
-   pnpm 10 runs install scripts only for the dependencies listed in the root
-   `pnpm.onlyBuiltDependencies` (better-sqlite3, esbuild, sharp). A
+   `corepack enable` writes the `pnpm` shim next to Node.js, so it needs
+   write access there (an administrator shell for a Windows install under
+   `Program Files`). pnpm 10 runs install scripts only for the dependencies
+   listed in the root `pnpm.onlyBuiltDependencies` (better-sqlite3,
+   esbuild, sharp). A
    `node_modules` that pnpm 9 created is removed and rebuilt on the first
    pnpm 10 install; answer yes (without a terminal: `CI=true pnpm install`).
 
@@ -317,10 +320,12 @@ server, no Docker, no Microsoft account.
    pnpm web:dev    # Next.js on http://localhost:3000
    ```
 
-   `pnpm dev` starts both in one terminal (output interleaved). The first
-   cms start builds the admin panel and takes a minute or two; it is ready
-   when it logs the admin URL. It logs `[entra] disabled` while Microsoft
-   sign-in is off.
+   `pnpm dev` starts both in one terminal (output interleaved). The cms is
+   ready when it logs `Strapi started successfully` (about half a minute);
+   before that it logs `[entra] disabled` while Microsoft sign-in is off,
+   and with the demo data `[seed-demo] done — 10 users, …`. Until the web
+   is up it also logs `[live-emit] keepalive failed: fetch failed` once,
+   and `[live-emit] keepalive reaches the web again` when it is.
 
 5. Open http://localhost:3000. You are sent to `/sign-in`; sign in with
    e-mail and password (with the demo data:
@@ -850,5 +855,5 @@ Pages and UI:
       excerpts show no `**`, `#` or link targets; footnotes in two
       announcements each jump to their own card's notes
 - [ ] With `DEMO_MODE=1 pnpm web:dev` (no cms running), the dashboard
-      renders the fixtures signed in as Ada Lovelace, with three
-      notifications in the bell
+      renders the fixtures signed in as Ada Lovelace, and the other pages
+      answer from the fixtures without a `[demo] no fixture` warning
