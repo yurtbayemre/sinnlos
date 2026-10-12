@@ -1,0 +1,682 @@
+/**
+ * The browser side of the live pipeline as a plain state machine (LF05):
+ * ONE multiplexed EventSource per visible tab (issue #17/#27), fanning
+ * content-free pings out to registered channel listeners, who react by
+ * refetching through their own session (LiveCommentSection,
+ * LiveNotificationBell, …). The React provider
+ * (components/live/live-events-provider.tsx) only creates one, starts and
+ * stops it with its effect and mirrors the health flag into state.
+ *
+ * Everything the machine reads from the browser is injected (LiveClientDeps:
+ * the EventSource, the clock, the random source, the tab visibility and the
+ * subscribe POST), so live-client.test.ts drives it with fakes; timers are
+ * the global ones (fake timers in the tests).
+ *
+ * Hard-won rules encoded here — change with care:
+ *  - Native EventSource retry only covers mid-stream NETWORK drops. Any
+ *    HTTP error/redirect (deploy 404/502, expired-session 307) closes it
+ *    PERMANENTLY, so this client owns reconnection with jittered
+ *    exponential backoff. Stable streams that die (deploy, server-side
+ *    rotation) reopen with an extra 0–15s spread so a fleet of tabs
+ *    doesn't stampede a cold container (200-employee profile, plan §7).
+ *  - Heartbeat watchdog: the server sends an `hb` event every 25s; ~65s
+ *    without one means the connection is half-open → force reopen. (A
+ *    `: comment` heartbeat would be invisible to the EventSource API.)
+ *  - Two-leg health (LF05): the hello and every heartbeat say whether the
+ *    cms reached the web lately (`emitFresh`, its 20 s keepalive). Without
+ *    it the stream is up but no ping can come, so the client reports
+ *    unhealthy (degraded) and its owners poll at the short intervals; the
+ *    web pushes a heartbeat the moment the cms leg is back.
+ *  - Pings are coalesced per channel (content 150ms; notifications +
+ *    announcements get extra 0–1s/0–4s jitter — those fan out to every
+ *    user at once, so the jitter spreads the refetch herd) and refetches
+ *    are single-flight with a dirty flag. The longer windows before LF05
+ *    (400ms, 0–3s, 0–10s) also covered pings sent from inside the write
+ *    transaction; since LF02 the cms pings after the commit, so a refetch
+ *    right away reads the committed rows.
+ *  - Hidden tabs hold NO connection at all and queue no catch-up;
+ *    visibility regain reopens and runs one catch-up refetch per channel
+ *    through a small queue (concurrency 2, notifications first) — deduped
+ *    with the reopen catch-up so it's one refetch per channel, not two.
+ *    Hiding the tab again drops what is still queued (LF05).
+ *  - Repeated instant closes (5×) mean a terminal condition (kill
+ *    switch, auth) → stop retrying until the next visibility regain;
+ *    polling fallback covers from t=0.
+ *  - A stream the server ends on purpose says why in a terminal `bye`
+ *    event (live contract): `evicted` and `expired` stop the client until
+ *    the next visibility regain (no timed self-heal: reconnecting would
+ *    evict the next tab of the same user, or be refused), `shutdown`
+ *    (deploy) reconnects with the fleet spread, `rotate` after the normal
+ *    backoff. The client closes the EventSource itself, so the browser's
+ *    native 3 s retry never reopens such a stream.
+ *  - Subscriptions are synced once per tick (WD04) as the FULL desired
+ *    set with a monotonic revision (LF05): every channel registered or
+ *    dropped in the same commit (a page mounting 20 comment sections)
+ *    goes out together, at most MAX_SUBSCRIBE_LIST per POST, and a late
+ *    POST can never undo a newer set (the bus ignores a stale revision).
+ *    A POST the server did not take (a network blip, a 5xx) is retried
+ *    after 2, 4 and 8 s (SUBSCRIBE_RETRY_MS), then with the next change or
+ *    hello; until the set is taken the client reports unhealthy, so the
+ *    comment sections poll at the short interval instead of waiting for
+ *    pings that cannot come.
+ *  - A web from before LF05 (its hello has no `emitFresh`: a web-only
+ *    rollback while this bundle is still open in a tab) knows only the
+ *    `{ connId, add, remove }` body and would take the set body as an empty
+ *    change. Such a connection gets the difference to what it was sent,
+ *    in the same chunks.
+ */
+import {
+  ANNOUNCEMENTS_CHANNEL,
+  MAX_SUBSCRIBE_LIST,
+  NOTIFICATIONS_CHANNEL,
+  frameChannel,
+  isContentChannel,
+  parseByeFrame,
+  parseHeartbeatFrame,
+  parseHelloFrame,
+  parseLiveFrame,
+  type ByeReason,
+  type ContentChannel,
+  type LiveChannel,
+  type LiveSubscribeRequest,
+} from "@/lib/live-contract";
+
+/** A channel listener: a refetch; errors are its own business. */
+export type LiveListener = () => void | Promise<void>;
+
+/** The slice of the browser's EventSource the client uses. */
+export interface EventSourceLike {
+  readonly readyState: number;
+  onerror: ((event: Event) => void) | null;
+  addEventListener(type: string, listener: (event: { data?: unknown }) => void): void;
+  close(): void;
+}
+
+/** What the client reads from the browser (fakes in live-client.test.ts). */
+export interface LiveClientDeps {
+  /** Opens the stream: `new EventSource(url)` in the browser. */
+  createEventSource(url: string): EventSourceLike;
+  /** Epoch milliseconds: Date.now in the browser. */
+  now(): number;
+  /** [0, 1): Math.random in the browser; every jitter draws from it. */
+  random(): number;
+  /** The tab's visibility and its change event. */
+  visibility: {
+    visible(): boolean;
+    /** Calls `listener` on every change; returns the removal. */
+    subscribe(listener: () => void): () => void;
+  };
+  /** POSTs a JSON body (the subscribe route); true when the server took it (2xx). */
+  post(url: string, body: unknown): Promise<boolean>;
+}
+
+/**
+ * The body of POST /live/subscribe on a web from before LF05: a change of
+ * the connection's channels, not the set. The current route still takes it.
+ */
+export type AddRemoveSubscribeRequest = {
+  connId: string;
+  add: ContentChannel[];
+  remove: ContentChannel[];
+};
+
+/**
+ * The change from `previous` (what the connection was sent) to `desired`,
+ * in add/remove bodies of at most MAX_SUBSCRIBE_LIST channels each; none
+ * when nothing changes.
+ */
+export function addRemoveRequests(
+  connId: string,
+  previous: ReadonlySet<ContentChannel>,
+  desired: readonly ContentChannel[],
+): AddRemoveSubscribeRequest[] {
+  const wanted = new Set(desired);
+  const add = desired.filter((channel) => !previous.has(channel));
+  const remove = [...previous].filter((channel) => !wanted.has(channel));
+  const requests: AddRemoveSubscribeRequest[] = [];
+  for (let i = 0; i < Math.max(add.length, remove.length); i += MAX_SUBSCRIBE_LIST) {
+    requests.push({
+      connId,
+      add: add.slice(i, i + MAX_SUBSCRIBE_LIST),
+      remove: remove.slice(i, i + MAX_SUBSCRIBE_LIST),
+    });
+  }
+  return requests;
+}
+
+/** An event's data parsed as JSON, or undefined when it is none (a malformed frame). */
+function readJson(data: unknown): unknown {
+  try {
+    return JSON.parse(String(data));
+  } catch {
+    return undefined;
+  }
+}
+
+/** EventSource.CLOSED: the connection is gone and the browser will not retry. */
+const EVENT_SOURCE_CLOSED = 2;
+
+export const STREAM_URL = "/live/stream";
+export const SUBSCRIBE_URL = "/live/subscribe";
+
+export const HEARTBEAT_TIMEOUT_MS = 65_000;
+export const WATCHDOG_TICK_MS = 20_000;
+export const BACKOFF_BASE_MS = 1_500;
+export const BACKOFF_CAP_MS = 60_000;
+const BACKOFF_MAX_ATTEMPT = 8;
+export const STABLE_STREAM_MS = 60_000;
+export const REOPEN_SPREAD_MS = 15_000;
+export const INSTANT_CLOSE_MS = 2_000;
+export const TERMINAL_INSTANT_CLOSES = 5;
+export const STOPPED_RETRY_MS = 5 * 60_000;
+export const COALESCE_CONTENT_MS = 150;
+export const COALESCE_NOTIFICATIONS_JITTER_MS = 1_000;
+export const COALESCE_ANNOUNCEMENTS_JITTER_MS = 4_000;
+export const CATCHUP_CONCURRENCY = 2;
+/** Delays of the retries of a subscribe POST the server did not take. */
+export const SUBSCRIBE_RETRY_MS = [2_000, 4_000, 8_000] as const;
+
+type Timer = ReturnType<typeof setTimeout>;
+
+export class LiveClient {
+  private readonly listeners = new Map<LiveChannel, Set<LiveListener>>();
+  private source: EventSourceLike | null = null;
+  private connId: string | null = null;
+  private lastBeat = 0;
+  private openedAt = 0;
+  private attempt = 0;
+  private instantCloses = 0;
+  private stopped = false;
+  private stoppedAt = 0;
+  /** Whether the watchdog may end the stop (instant closes: yes; a bye: no). */
+  private selfHeal = true;
+  private reconnectTimer: Timer | null = null;
+  private watchdog: ReturnType<typeof setInterval> | null = null;
+  private unsubscribeVisibility: (() => void) | null = null;
+  private everOpened = false;
+  private started = false;
+  private readonly coalesceTimers = new Map<LiveChannel, Timer>();
+  private readonly inflight = new Map<LiveChannel, { dirty: boolean }>();
+  private readonly catchupQueue: LiveChannel[] = [];
+  private catchupActive = 0;
+  /** The last subscription revision sent; counts up across connections. */
+  private rev = 0;
+  /** The set the current connection was sent (its sorted, joined key and channels). */
+  private sent: { connId: string; key: string; channels: ReadonlySet<ContentChannel> } | null =
+    null;
+  /** The current connection is a web from before LF05 (a hello without emitFresh). */
+  private legacy = false;
+  /** The cms leg's freshness, from the current stream's hello or last heartbeat. */
+  private streamFresh = false;
+  /** The current set was not taken (a failed subscribe POST), until one is. */
+  private subscribeFailed = false;
+  private subscribeRetries = 0;
+  private subscribeRetryTimer: Timer | null = null;
+  private syncScheduled = false;
+
+  /** `onHealth` gets every health change (the provider's state setter). */
+  constructor(
+    private readonly deps: LiveClientDeps,
+    private readonly onHealth: (healthy: boolean) => void,
+  ) {}
+
+  /**
+   * Starts the machine: watches the tab's visibility, runs the watchdog
+   * and opens the stream when the tab is visible. The provider calls it
+   * from its effect while live events are enabled.
+   */
+  start(): void {
+    if (this.started) return;
+    this.started = true;
+    this.unsubscribeVisibility = this.deps.visibility.subscribe(() => this.onVisibilityChange());
+    this.watchdog = setInterval(() => this.watchdogTick(), WATCHDOG_TICK_MS);
+    this.connect();
+  }
+
+  /** Stops everything start() set up (the provider's effect cleanup). */
+  stop(): void {
+    if (!this.started) return;
+    this.started = false;
+    this.unsubscribeVisibility?.();
+    this.unsubscribeVisibility = null;
+    if (this.watchdog) clearInterval(this.watchdog);
+    this.watchdog = null;
+    this.clearReconnect();
+    this.clearCoalescing();
+    this.clearCatchup();
+    this.teardown();
+  }
+
+  /** Adds a listener on `channel`; returns its removal. */
+  readonly register = (channel: LiveChannel, listener: LiveListener): (() => void) => {
+    let set = this.listeners.get(channel);
+    const isNewChannel = !set || set.size === 0;
+    if (!set) {
+      set = new Set();
+      this.listeners.set(channel, set);
+    }
+    set.add(listener);
+    if (isNewChannel && isContentChannel(channel)) this.scheduleSync();
+    const listeners = set;
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) {
+        this.listeners.delete(channel);
+        if (isContentChannel(channel)) this.scheduleSync();
+      }
+    };
+  };
+
+  // --- Stream ----------------------------------------------------------------
+
+  private connect(): void {
+    if (!this.started || this.stopped) return;
+    if (!this.deps.visibility.visible()) return;
+    if (this.source) return;
+
+    const source = this.deps.createEventSource(STREAM_URL);
+    this.source = source;
+    this.openedAt = this.deps.now();
+    this.lastBeat = this.deps.now();
+
+    source.addEventListener("hello", (event) => {
+      this.attempt = 0;
+      this.instantCloses = 0;
+      this.lastBeat = this.deps.now();
+      const data = readJson(event.data);
+      const hello = parseHelloFrame(data);
+      this.connId = hello?.connId ?? null;
+      // Every hello since LF05 says emitFresh; one without it is a web from
+      // before, whose subscribe route takes only the add/remove body.
+      this.legacy = typeof data === "object" && data !== null && !("emitFresh" in data);
+      // Degraded while the cms leg is not fresh (LF05): the stream is up
+      // but no ping can come, so the owners poll at the short intervals.
+      this.streamFresh = hello?.emitFresh ?? true;
+      // A new connection starts with no channels and no failed POST: send
+      // the set if there is one.
+      this.subscribeFailed = false;
+      this.subscribeRetries = 0;
+      this.clearSubscribeRetry();
+      this.reportHealth();
+      if (this.connId) this.sent = { connId: this.connId, key: "", channels: new Set() };
+      this.scheduleSync();
+      // Catch-up covers the gap since the last stream (missed pings have
+      // no replay). Skipped on the very first open — that data was just
+      // server-rendered.
+      if (this.everOpened) this.enqueueCatchup();
+      this.everOpened = true;
+    });
+
+    source.addEventListener("hb", (event) => {
+      this.lastBeat = this.deps.now();
+      this.streamFresh = parseHeartbeatFrame(readJson(event.data)).emitFresh;
+      this.reportHealth();
+    });
+
+    source.addEventListener("bye", (event) => {
+      // An unknown or malformed reason is treated as a rotation.
+      this.onBye(parseByeFrame(readJson(event.data))?.reason ?? "rotate");
+    });
+
+    source.addEventListener("ping", (event) => {
+      this.lastBeat = this.deps.now();
+      const frame = parseLiveFrame(readJson(event.data));
+      // Malformed frame: ignore it; the poll backstop covers.
+      if (frame) this.scheduleChannel(frameChannel(frame));
+    });
+
+    source.onerror = () => {
+      // CONNECTING = native retry is handling a network drop; leave it.
+      if (source.readyState !== EVENT_SOURCE_CLOSED) {
+        this.streamFresh = false;
+        this.reportHealth();
+        return;
+      }
+      const lifetime = this.deps.now() - this.openedAt;
+      this.teardown();
+      if (lifetime < INSTANT_CLOSE_MS) {
+        this.instantCloses += 1;
+        if (this.instantCloses >= TERMINAL_INSTANT_CLOSES) {
+          // Kill switch / auth wall / long deploy window: stop burning
+          // retries. Visibility regain resets this immediately; the
+          // watchdog additionally retries after STOPPED_RETRY_MS so a
+          // tab that stays visible through a long deploy recovers on its
+          // own. Polling fallback is active throughout.
+          this.stopRetrying(true);
+          return;
+        }
+      } else {
+        this.instantCloses = 0;
+      }
+      // A previously stable stream dying usually means deploy or server
+      // rotation — spread the fleet's reopen instead of stampeding.
+      this.scheduleReconnect(lifetime > STABLE_STREAM_MS ? REOPEN_SPREAD_MS : 0);
+    };
+  }
+
+  /** The server ended the stream on purpose (a terminal `bye`). */
+  private onBye(reason: ByeReason): void {
+    this.teardown();
+    this.instantCloses = 0;
+    switch (reason) {
+      case "evicted":
+      case "expired":
+        // A newer stream of this user took the place, or the session ends:
+        // reconnecting would evict the next tab or be refused. Wait for the
+        // next visibility regain; the poll backstop covers meanwhile.
+        this.stopRetrying(false);
+        return;
+      case "shutdown":
+        // Deploy: the whole fleet reconnects to the new process, spread.
+        this.scheduleReconnect(REOPEN_SPREAD_MS);
+        return;
+      case "rotate":
+        this.scheduleReconnect(0);
+        return;
+    }
+  }
+
+  /**
+   * Stops retrying until the next visibility regain and, with `selfHeal`,
+   * the watchdog's fresh attempt STOPPED_RETRY_MS later.
+   */
+  private stopRetrying(selfHeal: boolean): void {
+    this.stopped = true;
+    this.selfHeal = selfHeal;
+    this.stoppedAt = this.deps.now();
+  }
+
+  private teardown(): void {
+    this.source?.close();
+    this.source = null;
+    this.connId = null;
+    this.streamFresh = false;
+    this.subscribeFailed = false;
+    this.clearSubscribeRetry();
+    this.reportHealth();
+  }
+
+  /**
+   * Healthy: the stream's cms leg is fresh (LF05) and its channel set was
+   * not refused. Unhealthy makes the owners poll at the short intervals.
+   */
+  private reportHealth(): void {
+    this.onHealth(this.streamFresh && !this.subscribeFailed);
+  }
+
+  private scheduleReconnect(extraSpreadMs = 0): void {
+    if (this.stopped || this.reconnectTimer) return;
+    const attempt = this.attempt;
+    this.attempt = Math.min(attempt + 1, BACKOFF_MAX_ATTEMPT);
+    const base = Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** attempt);
+    const delay = base / 2 + this.deps.random() * base + this.deps.random() * extraSpreadMs;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, delay);
+  }
+
+  private clearReconnect(): void {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  private onVisibilityChange(): void {
+    if (this.deps.visibility.visible()) {
+      this.stopped = false;
+      this.instantCloses = 0;
+      this.attempt = 0;
+      if (!this.source) {
+        this.connect();
+        // The hello handler runs the catch-up. If the stream can't open,
+        // the owners' poll backstop covers: the page-level comment
+        // provider's next tick (WD04, 10 s while degraded) and the
+        // bell's own visibility refetch.
+      }
+    } else {
+      // Zero background load: no stream, no pending reconnects, no
+      // pending dispatches and no queued catch-up while hidden (LF05: the
+      // refetches still waiting in the queue are dropped; the ones running
+      // finish). The next visibility regain's hello queues them afresh.
+      this.clearReconnect();
+      this.clearCoalescing();
+      this.clearCatchup();
+      this.teardown();
+    }
+  }
+
+  private watchdogTick(): void {
+    // Self-heal a terminal stop (deploy outlasted the retry budget while
+    // the tab stayed visible): one fresh attempt every STOPPED_RETRY_MS.
+    if (this.stopped) {
+      if (
+        this.selfHeal &&
+        this.deps.visibility.visible() &&
+        this.deps.now() - this.stoppedAt > STOPPED_RETRY_MS
+      ) {
+        this.stopped = false;
+        this.instantCloses = 0;
+        this.attempt = 0;
+        this.connect();
+      }
+      return;
+    }
+    if (!this.source) return;
+    if (this.deps.now() - this.lastBeat > HEARTBEAT_TIMEOUT_MS) {
+      // Half-open connection: TCP is up but nothing flows. Force a
+      // clean reopen (jittered — herds of frozen laptops wake together).
+      this.teardown();
+      this.scheduleReconnect(REOPEN_SPREAD_MS);
+    }
+  }
+
+  // --- Dispatch ------------------------------------------------------------
+
+  private coalesceDelay(channel: LiveChannel): number {
+    if (channel === ANNOUNCEMENTS_CHANNEL) {
+      return COALESCE_CONTENT_MS + this.deps.random() * COALESCE_ANNOUNCEMENTS_JITTER_MS;
+    }
+    if (channel === NOTIFICATIONS_CHANNEL) {
+      return COALESCE_CONTENT_MS + this.deps.random() * COALESCE_NOTIFICATIONS_JITTER_MS;
+    }
+    return COALESCE_CONTENT_MS;
+  }
+
+  private scheduleChannel(channel: LiveChannel): void {
+    const timers = this.coalesceTimers;
+    if (timers.has(channel)) return; // already coalescing — later pings fold in
+    timers.set(
+      channel,
+      setTimeout(() => {
+        timers.delete(channel);
+        void this.runChannel(channel);
+      }, this.coalesceDelay(channel)),
+    );
+  }
+
+  private clearCoalescing(): void {
+    for (const timer of this.coalesceTimers.values()) clearTimeout(timer);
+    this.coalesceTimers.clear();
+  }
+
+  /** Single-flight refetch with dirty-flag per channel. */
+  private async runChannel(channel: LiveChannel): Promise<void> {
+    const inflight = this.inflight.get(channel);
+    if (inflight) {
+      inflight.dirty = true;
+      return;
+    }
+    const state = { dirty: false };
+    this.inflight.set(channel, state);
+    try {
+      do {
+        state.dirty = false;
+        const listeners = this.listeners.get(channel);
+        if (!listeners || listeners.size === 0) break;
+        await Promise.all(
+          [...listeners].map(async (fn) => {
+            try {
+              await fn();
+            } catch {
+              // Listener refetches swallow their own errors; anything that
+              // escapes must not kill the dispatch loop.
+            }
+          }),
+        );
+      } while (state.dirty);
+    } finally {
+      this.inflight.delete(channel);
+    }
+  }
+
+  private pumpCatchup(): void {
+    while (this.catchupActive < CATCHUP_CONCURRENCY && this.catchupQueue.length > 0) {
+      const channel = this.catchupQueue.shift()!;
+      this.catchupActive += 1;
+      void this.runChannel(channel).finally(() => {
+        this.catchupActive -= 1;
+        this.pumpCatchup();
+      });
+    }
+  }
+
+  /** Drops the catch-up refetches that have not started yet. */
+  private clearCatchup(): void {
+    this.catchupQueue.length = 0;
+  }
+
+  /** One refetch per registered channel, notifications first, bounded. */
+  private enqueueCatchup(): void {
+    const channels = [...this.listeners.keys()].filter(
+      (channel) => (this.listeners.get(channel)?.size ?? 0) > 0,
+    );
+    channels.sort((a, b) =>
+      a === NOTIFICATIONS_CHANNEL ? -1 : b === NOTIFICATIONS_CHANNEL ? 1 : 0,
+    );
+    for (const channel of channels) {
+      if (!this.catchupQueue.includes(channel)) this.catchupQueue.push(channel);
+    }
+    this.pumpCatchup();
+  }
+
+  // --- Subscriptions -------------------------------------------------------
+
+  /**
+   * Schedules one full-set sync for the end of the current tick: every
+   * registration and removal of one commit (a page mounting 20 comment
+   * sections, a navigation swapping them) goes out together.
+   */
+  private scheduleSync(): void {
+    if (this.syncScheduled) return;
+    this.syncScheduled = true;
+    queueMicrotask(() => {
+      this.syncScheduled = false;
+      this.sendSubscriptions();
+    });
+  }
+
+  /**
+   * Sends the FULL desired set of content channels (LF05, the contract's
+   * LiveSubscribeRequest) under the next revision, in POSTs of at most
+   * MAX_SUBSCRIBE_LIST; only content channels are subscribed on the bus,
+   * the global ones reach every connection that may receive them. A web
+   * from before LF05 gets the change instead (addRemoveRequests). Nothing
+   * goes out without a stream (the next hello sends the set) or when the
+   * set is the one this connection already has. A POST the server did not
+   * take (network error, 5xx, 404 after an eviction) forgets that, so the
+   * next sync sends the whole set again (onSubscribeAnswer).
+   */
+  private sendSubscriptions(): void {
+    const connId = this.connId;
+    if (!connId) return;
+    const channels = [...this.listeners.keys()].filter(isContentChannel);
+    const key = [...channels].sort().join("\n");
+    const previous = this.sent?.connId === connId ? this.sent : null;
+    if (previous?.key === key) return;
+    const sent = { connId, key, channels: new Set(channels) };
+    this.sent = sent;
+    const requests = this.legacy
+      ? addRemoveRequests(connId, previous?.channels ?? new Set(), channels)
+      : this.setRequests(connId, channels);
+    for (const request of requests) {
+      void this.deps
+        .post(SUBSCRIBE_URL, request)
+        .catch(() => false)
+        .then((taken) => this.onSubscribeAnswer(sent, taken));
+    }
+  }
+
+  /**
+   * A subscribe POST's outcome. Only one of the connection's current set
+   * counts. Taken: a failure before it is over. Not taken: the set is
+   * forgotten (the next sync sends it whole), the client reports unhealthy
+   * and retries after SUBSCRIBE_RETRY_MS; after the last retry the next
+   * change or hello sends it.
+   */
+  private onSubscribeAnswer(sent: object, taken: boolean): void {
+    if (this.sent !== sent) return;
+    if (taken) {
+      this.subscribeRetries = 0;
+      if (this.subscribeFailed) {
+        this.subscribeFailed = false;
+        this.reportHealth();
+      }
+      return;
+    }
+    this.sent = null;
+    if (!this.subscribeFailed) {
+      this.subscribeFailed = true;
+      this.reportHealth();
+    }
+    this.scheduleSubscribeRetry();
+  }
+
+  private scheduleSubscribeRetry(): void {
+    if (this.subscribeRetryTimer) return;
+    const delay: number | undefined = SUBSCRIBE_RETRY_MS[this.subscribeRetries];
+    if (delay === undefined) return;
+    this.subscribeRetries += 1;
+    this.subscribeRetryTimer = setTimeout(() => {
+      this.subscribeRetryTimer = null;
+      this.sendSubscriptions();
+    }, delay);
+  }
+
+  private clearSubscribeRetry(): void {
+    if (this.subscribeRetryTimer) clearTimeout(this.subscribeRetryTimer);
+    this.subscribeRetryTimer = null;
+  }
+
+  /** The full set under the next revision, in POSTs of at most MAX_SUBSCRIBE_LIST. */
+  private setRequests(connId: string, channels: ContentChannel[]): LiveSubscribeRequest[] {
+    this.rev += 1;
+    const rev = this.rev;
+    const requests: LiveSubscribeRequest[] = [];
+    for (let i = 0; i < channels.length; i += MAX_SUBSCRIBE_LIST) {
+      requests.push({ connId, rev, channels: channels.slice(i, i + MAX_SUBSCRIBE_LIST) });
+    }
+    // The empty set is one POST with no channels.
+    if (requests.length === 0) requests.push({ connId, rev, channels: [] });
+    return requests;
+  }
+}
+
+/** The browser's implementations of LiveClientDeps, read at call time (SSR-safe). */
+export const browserLiveClientDeps: LiveClientDeps = {
+  createEventSource: (url) => new EventSource(url),
+  now: () => Date.now(),
+  random: () => Math.random(),
+  visibility: {
+    visible: () => document.visibilityState === "visible",
+    subscribe(listener) {
+      document.addEventListener("visibilitychange", listener);
+      return () => document.removeEventListener("visibilitychange", listener);
+    },
+  },
+  post: (url, body) =>
+    fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((res) => res.ok),
+};
