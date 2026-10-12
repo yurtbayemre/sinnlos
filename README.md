@@ -127,7 +127,7 @@ rules are in
 | `event`           | Calendar events with ICS export and optional RSVP                                                               |
 | `event-rsvp`      | Attendance answer (`yes`/`no`/`maybe`) per user and event                                                       |
 | `poll`            | Question with 2 to 10 options, deadline, anonymous flag, department targeting and guest access                  |
-| `poll-vote`       | One vote per user and poll, cast and counted through custom routes only                                         |
+| `poll-vote`       | One vote per user and poll; the content API casts and counts votes through custom routes only                   |
 | `document`        | File library entry, company-wide or for selected departments                                                    |
 | `classified`      | Marketplace ad: 5 categories, up to 4 photos, listed for 30 days by default (at most 90)                        |
 | `quick-link`      | Dashboard link, company-wide or for selected departments; maintained in the Strapi admin                        |
@@ -203,7 +203,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 
 <!-- permission-matrix:end -->
 
-Custom actions and plugin routes (`✓` = granted):
+Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 
 <!-- custom-action-grants:start -->
 
@@ -304,8 +304,11 @@ server, no Docker, no Microsoft account.
      second the web's `/uploads` proxy.
 
    In development the cms only warns about a placeholder and runs without
-   the two shared secrets (no live pings, no `/uploads` gate); in production
-   it refuses to start.
+   the two shared secrets (no live pings, no `/uploads` gate). With
+   `NODE_ENV=production` it refuses to start while a secret holds a
+   placeholder, but it does not check that the two shared secrets are set:
+   without them it starts, sends no live pings and answers every `/uploads`
+   request with 404 (Docker Compose refuses to start without them).
 
 3. Optional, for a first look: in `apps/cms/.env`, set `SEED_DEMO_DATA=1`
    for demo data, and `STRAPI_ADMIN_EMAIL` / `STRAPI_ADMIN_PASSWORD` for the
@@ -386,7 +389,7 @@ instance runs.
   revisions, and no `department_head`, `team_lead` or `guest` user.
 - **`DEMO_MODE=1` (web only)** is a different thing: a best-effort UI
   preview without a cms (decision DM01-lite). `DEMO_MODE=1 pnpm web:dev`
-  skips sign-in and serves every read from the in-memory fixtures in
+  skips sign-in and answers reads from the in-memory fixtures in
   `apps/web/src/lib/demo.ts`, signed in as the fixture user Ada Lovelace (a
   `member` of Engineering). List reads apply their filters, sort and paging
   to the fixtures; writes are not stored, and a path without a fixture logs
@@ -429,8 +432,9 @@ Microsoft sign-in is one codebase with the local sign-in: off unless
 `ENTRA_ENABLED=1` is set for **both** apps, and every `MS_*` / `ENTRA_*`
 value is ignored until then. Auth.js runs the OIDC code flow against one
 tenant; the cms verifies the ID token itself, finds or creates the user by
-tenant id + object id, applies the role of the user's **app role** and
-issues the intranet session (how it works:
+tenant id + object id, applies the role of the user's **app role** to the
+accounts Entra owns (an account that existed before, or whose role an admin
+changed, keeps its role) and issues the intranet session (how it works:
 [docs/security.md](./docs/security.md#microsoft-entra-id)). The full
 runbook, with a staging dry run before roles are applied, is
 [DEPLOYMENT.md, "Microsoft Entra ID sign-in"](./docs/DEPLOYMENT.md#microsoft-entra-id-sign-in).
@@ -480,17 +484,19 @@ For local development the cms reads `ENTRA_ENABLED`, `MS_TENANT_ID`,
 reads `ENTRA_ENABLED`, `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`,
 `AUTH_MICROSOFT_ENTRA_ID_ID`, `AUTH_MICROSOFT_ENTRA_ID_SECRET` and the same
 `ENTRA_EXCHANGE_SECRET` from `apps/web/.env.local` (both examples carry the
-block, commented out). With `ENTRA_ENABLED=1` an invalid value refuses the
-start of both apps and names the variable, and `infra/deploy.sh --check`
-refuses the deploy first. The remaining knobs are in the
+block, commented out). With `ENTRA_ENABLED=1` an invalid value stops the
+cms at boot and makes the web answer every request with an error, both
+naming the variable; `infra/deploy.sh --check` refuses the deploy first.
+The remaining knobs are in the
 [environment reference](#microsoft-entra-id).
 
 **3. Check it.** The cms logs `[entra] enabled tenant=… mode=dry-run` at
 boot, and the sign-in page shows _Sign in with Microsoft_ (local sign-in is
 off next to it unless `AUTH_LOCAL_ENABLED=1`). Each sign-in writes one
-`[entra] user=… result=…` line. `ENTRA_SYNC_MODE=dry-run` only logs the role
-changes Entra would make and creates new users at most as `member`; switch
-to `on` once the log looks right
+`[entra] user=… result=…` line. `ENTRA_SYNC_MODE=dry-run` changes no
+existing user (it logs the changes `on` would make) and creates new users at
+most as `member`; refusals (no assignment, `deny`) apply in both modes.
+Switch to `on` once the log looks right
 ([Staging dry-run, then on](./docs/DEPLOYMENT.md#staging-dry-run-then-on)).
 Sign-in errors and the procedure for an e-mail address that already has an
 account are in the runbook.
@@ -505,14 +511,25 @@ set some differently, as noted. `apps/cms/.env.example` lists every setting
 `apps/cms/config` reads (`infra/env-examples.test.ts` keeps it complete).
 More context on each: [docs/DEPLOYMENT.md](./docs/DEPLOYMENT.md).
 
-**Required by Docker Compose:** `docker compose` refuses to start while one
-of `DATABASE_PASSWORD`, `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`,
-`TRANSFER_TOKEN_SALT`, `JWT_SECRET`, `ENCRYPTION_KEY`, `AUTH_SECRET`,
-`REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` is empty. With
-`NODE_ENV=production` the cms refuses to start while a Strapi secret,
-`REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` still holds a template
-placeholder (`change-me…`, `toBeModified…`, `<…>`); `infra/deploy.sh --check`
-runs the same check, plus `AUTH_SECRET`, before anything is deployed.
+**Required values and placeholders.** Two different checks:
+
+- **Docker Compose** refuses to start while one of `DATABASE_PASSWORD`,
+  `APP_KEYS`, `API_TOKEN_SALT`, `ADMIN_JWT_SECRET`, `TRANSFER_TOKEN_SALT`,
+  `JWT_SECRET`, `ENCRYPTION_KEY`, `AUTH_SECRET`, `REVALIDATE_SECRET` or
+  `INTERNAL_UPLOAD_TOKEN` is empty (`${VAR:?}` in the compose file).
+- **The cms** (`apps/cms/src/utils/env-guard.ts`) checks values, not
+  presence: with `NODE_ENV=production` it refuses to start while a Strapi
+  secret, `REVALIDATE_SECRET` or `INTERNAL_UPLOAD_TOKEN` holds a template
+  placeholder (a `<…>` stand-in, or a value containing `change-me`,
+  `changeme`, `toBeModified`, `generate-with-openssl` or `placeholder`);
+  outside production it only warns. An **empty** `REVALIDATE_SECRET` or
+  `INTERNAL_UPLOAD_TOKEN` passes: a cms started that way outside Compose
+  boots, sends no live-event pings, and in production answers every
+  `/uploads` request with 404.
+
+`infra/deploy.sh --check` renders the compose file (so it fails on an empty
+required value) and runs the placeholder check, plus `AUTH_SECRET`, before
+anything is deployed.
 
 ### Shared by cms and web
 
@@ -538,7 +555,7 @@ runs the same check, plus `AUTH_SECRET`, before anything is deployed.
 | `DATABASE_CLIENT`                                                                                              | `postgres` (example: `sqlite`)                              | `sqlite` or `postgres`. Compose always uses `postgres`.                                                                                                                                                                                                                                                                  |
 | `DATABASE_FILENAME`                                                                                            | `.tmp/data.db`                                              | SQLite file, relative to `apps/cms` or absolute. Releases before batch 8 placed an absolute value under `apps/cms`; move such a file before upgrading ([note](./docs/DEPLOYMENT.md#upgrading-to-the-cms-bootstrap-split-batch-8-lane-3b)).                                                                               |
 | `DATABASE_HOST`, `DATABASE_PORT`, `DATABASE_NAME`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `DATABASE_SCHEMA` | `localhost`, `5432`, `sinnlos`, `sinnlos`, (none), `public` | Postgres connection. Compose sets host `sinnlos-db` and port 5432, and passes `DATABASE_NAME`, `DATABASE_USERNAME` and `DATABASE_PASSWORD` from `infra/.env`, where they also create the database.                                                                                                                       |
-| `DATABASE_URL`                                                                                                 | (unset)                                                     | One Postgres connection URL; its values win over the keys above. It must not carry an `options` parameter (the cms pins every session to UTC through it).                                                                                                                                                                |
+| `DATABASE_URL`                                                                                                 | (unset)                                                     | One Postgres connection URL; its values win over the keys above. An `options` parameter is refused unless it sets `-c TimeZone=UTC` itself (the cms pins every session to UTC).                                                                                                                                          |
 | `DATABASE_POOL_MIN`, `DATABASE_POOL_MAX`, `DATABASE_CONNECTION_TIMEOUT`                                        | `2`, `10`, `60000`                                          | Connection pool bounds, and how long (ms) a query waits for a free connection.                                                                                                                                                                                                                                           |
 | `DATABASE_SSL`, `DATABASE_SSL_KEY`, `DATABASE_SSL_CERT`, `DATABASE_SSL_CA`, `DATABASE_SSL_REJECT_UNAUTHORIZED` | `false`, …, `true`                                          | TLS to Postgres (on only with the exact value `true`); key, certificate and CA take the PEM text. `DATABASE_SSL_CAPATH` and `DATABASE_SSL_CIPHER` are read too but ignored by the Postgres driver.                                                                                                                       |
 | `DATABASE_FORCE_MIGRATION`                                                                                     | `false`                                                     | Destructive: `true` lets the next boot drop columns, tables and indexes that removed attributes left behind. Only for a deliberate cleanup after a backup; compose does not pass it.                                                                                                                                     |
@@ -556,14 +573,14 @@ runs the same check, plus `AUTH_SECRET`, before anything is deployed.
 The digest cron is a logged no-op until `SMTP_HOST`, `SMTP_USER` and
 `SMTP_PASS` are set.
 
-| Variable                                           | Default                            | Meaning                                                                                                                    |
-| -------------------------------------------------- | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | (empty), `587`                     | Authenticated SMTP submission; use a mailbox app password. Port 465 uses implicit TLS, any other port must offer STARTTLS. |
-| `DIGEST_FROM`                                      | (empty)                            | Sender. Required once SMTP is set: without it every run is skipped and `infra/deploy.sh` refuses to deploy.                |
-| `DIGEST_REPLY_TO`                                  | (empty)                            | Optional reply-to address.                                                                                                 |
-| `PUBLIC_WEB_URL`                                   | (empty; compose: `WEB_PUBLIC_URL`) | Base of the links in the digests; required once SMTP is set.                                                               |
-| `DIGESTS_DISABLED`                                 | `0`                                | `1` (also `true`, `yes`, `on`) switches the digests off.                                                                   |
-| `DIGEST_DEFAULT_LOCALE`                            | `en`                               | Digest language (`en` or `de`) of a user whose profile has none.                                                           |
+| Variable                                           | Default                            | Meaning                                                                                                                                   |
+| -------------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | (empty), `587`                     | Authenticated SMTP submission; use a mailbox app password. Port 465 uses implicit TLS, any other port must offer STARTTLS.                |
+| `DIGEST_FROM`                                      | (empty)                            | Sender. Required once SMTP is set: without it every run is skipped and `infra/deploy.sh` refuses to deploy (unless `DIGESTS_DISABLED=1`). |
+| `DIGEST_REPLY_TO`                                  | (empty)                            | Optional reply-to address.                                                                                                                |
+| `PUBLIC_WEB_URL`                                   | (empty; compose: `WEB_PUBLIC_URL`) | Base of the links in the digests; required once SMTP is set.                                                                              |
+| `DIGESTS_DISABLED`                                 | `0`                                | `1` (also `true`, `yes`, `on`) switches the digests off.                                                                                  |
+| `DIGEST_DEFAULT_LOCALE`                            | `en`                               | Digest language (`en` or `de`) of a user whose profile has none.                                                                          |
 
 ### web (`apps/web/.env.local`)
 
@@ -579,23 +596,24 @@ The digest cron is a logged no-op until `SMTP_HOST`, `SMTP_USER` and
 
 ### Microsoft Entra ID
 
-Read only with `ENTRA_ENABLED=1`; then an invalid value refuses the start.
+Read only with `ENTRA_ENABLED=1`; then an invalid value stops the cms at
+boot and fails every web request.
 In `infra/.env` the `MS_*` names feed both apps; locally the web uses the
 `AUTH_MICROSOFT_ENTRA_ID_*` names.
 
-| `infra/.env` / cms      | web                                 | Default   | Meaning                                                                                                                                                               |
-| ----------------------- | ----------------------------------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ENTRA_ENABLED`         | `ENTRA_ENABLED`                     | `0`       | The only switch. Anything but `1` turns Microsoft sign-in off in both apps.                                                                                           |
-| `MS_TENANT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID` | (none)    | Directory (tenant) GUID.                                                                                                                                              |
-| `MS_CLIENT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_ID`        | (none)    | Application (client) GUID; the cms checks the ID token's audience against it.                                                                                         |
-| `MS_CLIENT_SECRET`      | `AUTH_MICROSOFT_ENTRA_ID_SECRET`    | (none)    | Client secret, web only.                                                                                                                                              |
-| `ENTRA_EXCHANGE_SECRET` | `ENTRA_EXCHANGE_SECRET`             | (none)    | 32+ characters, the same for both apps (`openssl rand -hex 32`); authenticates the web's call to `POST /api/auth/entra/exchange`.                                     |
-| `ENTRA_SYNC_MODE`       | —                                   | `dry-run` | `on` applies Entra's roles and departments; `dry-run` logs them, never changes an existing user and creates new users at most as `member`.                            |
-| `ENTRA_DEFAULT_ROLE`    | —                                   | `member`  | Role of a tenant member with no recognised app role or group: `member`, `guest` or `deny`. Unassigned B2B guests are always refused.                                  |
-| `ENTRA_GROUP_ROLES`     | —                                   | (empty)   | `<roleType>:<groupObjectId>,…`, at most 20 groups, for nested groups or tenants without Entra ID P1.                                                                  |
-| `ENTRA_SYNC_DEPARTMENT` | —                                   | `0`       | `1` sets the user's department to the one department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it. |
-| `ENTRA_SYNC_MANAGER`    | `ENTRA_SYNC_MANAGER`                | `0`       | `1` syncs the manager from Graph (`User.Read.All` with admin consent).                                                                                                |
-| `ENTRA_SESSION_TTL`     | —                                   | `12h`     | Lifetime of a Microsoft sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                                                    |
+| `infra/.env` / cms      | web                                 | Default   | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| ----------------------- | ----------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ENTRA_ENABLED`         | `ENTRA_ENABLED`                     | `0`       | The only switch. Anything but `1` turns Microsoft sign-in off in both apps.                                                                                                                                                                                                                                                                                                                                                         |
+| `MS_TENANT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID` | (none)    | Directory (tenant) GUID.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `MS_CLIENT_ID`          | `AUTH_MICROSOFT_ENTRA_ID_ID`        | (none)    | Application (client) GUID; the cms checks the ID token's audience against it.                                                                                                                                                                                                                                                                                                                                                       |
+| `MS_CLIENT_SECRET`      | `AUTH_MICROSOFT_ENTRA_ID_SECRET`    | (none)    | Client secret, web only.                                                                                                                                                                                                                                                                                                                                                                                                            |
+| `ENTRA_EXCHANGE_SECRET` | `ENTRA_EXCHANGE_SECRET`             | (none)    | 32+ characters, the same for both apps (`openssl rand -hex 32`); authenticates the web's call to `POST /api/auth/entra/exchange`.                                                                                                                                                                                                                                                                                                   |
+| `ENTRA_SYNC_MODE`       | —                                   | `dry-run` | `on` applies Entra's roles (to the accounts Entra owns), the profile, department and manager; `dry-run` changes no existing user (it logs what `on` would do) and creates new users at most as `member`. Refusals apply in both modes.                                                                                                                                                                                              |
+| `ENTRA_DEFAULT_ROLE`    | —                                   | `member`  | Role of a new or Entra-owned tenant member with no recognised app role or group: `member`, `guest` or `deny`; such a B2B guest is refused. Neither applies to a **manual** account (one that existed before, was bound by an admin, or whose role an admin changed): it keeps its role and signs in, so block it in the Strapi admin to keep it out. With _Assignment required_ = Yes, Entra itself refuses unassigned users first. |
+| `ENTRA_GROUP_ROLES`     | —                                   | (empty)   | `<roleType>:<groupObjectId>,…`, at most 20 groups, for nested groups or tenants without Entra ID P1.                                                                                                                                                                                                                                                                                                                                |
+| `ENTRA_SYNC_DEPARTMENT` | —                                   | `0`       | `1` sets the user's department to the one department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it.                                                                                                                                                                                                                                                               |
+| `ENTRA_SYNC_MANAGER`    | `ENTRA_SYNC_MANAGER`                | `0`       | `1` syncs the manager from Graph (`User.Read.All` with admin consent).                                                                                                                                                                                                                                                                                                                                                              |
+| `ENTRA_SESSION_TTL`     | —                                   | `12h`     | Lifetime of a Microsoft sign-in's session, `<n>m`, `<n>h` or `<n>d`, at most `7d`.                                                                                                                                                                                                                                                                                                                                                  |
 
 ### Docker Compose only (`infra/.env`)
 

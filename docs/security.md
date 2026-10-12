@@ -7,7 +7,7 @@ role gating. The grants themselves are the two tables in the README,
 [Roles and permissions](../README.md#roles-and-permissions), which
 `infra/readme-permissions.test.ts` pins to the code.
 
-Every rule here names the code that enforces it. When this file and the
+The rules point to the code that enforces them. When this file and the
 code disagree, the code wins: fix this file in the same change. The German
 [architecture map](./architecture.md) has the history and the reasoning
 behind most rules (its §5 conventions and §7 open issues).
@@ -40,9 +40,11 @@ behind most rules (its §5 conventions and §7 open issues).
 
 - **The cms decides.** A request passes the users-permissions grant of the
   caller's role (the README tables), then the route's policies, the
-  field-level write allowlist and the global guards. The web holds no
-  authorization of its own: its role helpers only keep the UI from
-  offering, or asking for, what the cms would refuse.
+  field-level write allowlist and the global guards. The web's own checks
+  are about the session (its pages, `/live/*` and the `/uploads` proxy need
+  a signed-in user) and the shared secret of its internal
+  `/api/live/emit`; its role helpers only keep the UI from offering, or
+  asking for, what the cms would refuse.
 - **Fail closed.** Role checks compare exact role types (`hasRole` from
   `@sinnlos/domain`, re-exported by `apps/cms/src/bootstrap/roles.ts`); an
   unknown, `null` or differently-cased role never passes. Policies return
@@ -52,9 +54,10 @@ behind most rules (its §5 conventions and §7 open issues).
 - **Hidden reads like missing.** The read filters and the write allowlist
   answer a row the caller may not see like a row that does not exist (an
   empty list, a 404 or the same 400).
-- **Grants are only ever added at boot.** The bootstrap sync writes missing
-  grants and the listed revocations in one transaction; anything else it
-  finds is reported, not removed (see
+- **The boot sync removes only what it lists.** It writes the missing
+  grants and the listed revocations in one transaction; an unwanted grant
+  on an action the code manages is reported, and a grant on any other
+  action is neither removed nor reported (see
   [Permission matrix fine print](#permission-matrix-fine-print)).
 
 ## Sign-in and sessions
@@ -109,14 +112,16 @@ Optional and off unless `ENTRA_ENABLED=1` (D-ENTRA-01,
    object id**, never by e-mail, backed by a unique database index.
 3. A new user is created on the spot (username `entra-<object id>`,
    independent of `LOCAL_REGISTRATION`) with the role of their Entra app
-   role. A local account with the same e-mail is never taken over: the
+   role (`ENTRA_SYNC_MODE=dry-run`: at most `member`). A local account with the same e-mail is never taken over: the
    sign-in answers "account exists" until an admin who has confirmed the
    account is theirs binds it
    ([the 409 procedure](./DEPLOYMENT.md#an-e-mail-address-that-already-has-an-account-409)).
-4. Display name, job title, phone and office location are synced at every
-   sign-in and are read-only on `/profile`; department
-   (`ENTRA_SYNC_DEPARTMENT=1`) and manager (`ENTRA_SYNC_MANAGER=1`)
-   optionally too.
+4. With `ENTRA_SYNC_MODE=on` and a successful Graph `/me`, display name,
+   job title, phone and office location are synced at every sign-in, and
+   department (`ENTRA_SYNC_DEPARTMENT=1`) and manager
+   (`ENTRA_SYNC_MANAGER=1`) optionally too; `dry-run` changes no existing
+   user and only logs department and manager. For every account bound to
+   Entra the four profile fields are read-only on `/profile`.
 5. The cms issues a Strapi JWT for `ENTRA_SESSION_TTL` (12 hours by
    default). Each exchange writes one `[entra] user=… result=…` audit line
    without tokens.
@@ -138,6 +143,17 @@ roles come from the signed ID token; the highest privilege wins:
 | _(tenant member, no match)_                   | `ENTRA_DEFAULT_ROLE`: `member` (default), `guest` or refused (`deny`) |
 | _(B2B guest, no match)_                       | refused                                                               |
 
+The table decides for new users and for the accounts Entra owns
+(`roleSource` = `entra`). It does not touch a **manual** account (below):
+such an account keeps its role and signs in even when the table says
+refused, for example an unassigned B2B guest bound to an existing `member`
+account, or `ENTRA_DEFAULT_ROLE=deny`. The same holds for an Entra-owned
+account whose role an admin changed: the sign-in turns it manual
+(`role=manual-override`; in `dry-run` it only logs that) instead of
+refusing it. To keep such a person out, block the account in the Strapi
+admin. With _Assignment required_ = Yes on the enterprise application,
+Entra refuses unassigned users before it issues a token at all.
+
 `ENTRA_GROUP_ROLES` (optional, `<roleType>:<groupObjectId>,…`, at most 20
 groups) adds group **object ids**, checked through Graph
 `/me/checkMemberGroups`, for nested groups or tenants without Entra ID P1;
@@ -145,9 +161,25 @@ group names never count. Who owns a user's role is stored per user
 (`roleSource`): users the sign-in created are `entra` and follow Entra at
 every sign-in; every account that existed before, and every account whose
 role an admin changes in the Strapi admin, is `manual` and keeps its role.
-A Graph failure never changes a role. `ENTRA_SYNC_MODE=dry-run` (the
-default) only logs what Entra would change and creates new users as
-`member` at most; `on` applies it. More in
+
+**When Graph fails** (`resolveEntraRole` and `decideRoleWrite` in
+`apps/cms/src/entra/roles.ts`):
+
+- A configured group check (`ENTRA_GROUP_ROLES`) that fails leaves the
+  result unknown, app roles included: an existing user keeps their role, a
+  new user is refused (_unavailable_).
+- A failed Graph `/me` does not stop the signed app roles: they need no
+  Graph call, so a match still applies and moves an Entra-owned user up or
+  down (with `ENTRA_SYNC_MODE=on`). Only without any app-role or group
+  match is the result unknown, because member and B2B guest cannot be told
+  apart without `/me`: then an existing user keeps their role and a new
+  user is refused.
+- A failed `/me` also skips the profile, department and manager sync for
+  that sign-in.
+
+`ENTRA_SYNC_MODE=dry-run` (the default) changes no existing user (it logs
+what `on` would do) and creates new users as `member` at most; refusals
+apply in both modes. More in
 [What Entra owns](./DEPLOYMENT.md#what-entra-owns).
 
 ### Sessions and the role flow
@@ -198,16 +230,16 @@ sign-in page with a GET instead of posting the form to it again; a Strapi
 
 ## Roles
 
-| Role              | Who                                                                                                                                                                                                                                                                                         |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `admin_role`      | Full access, user management, the `/manage` area and reports                                                                                                                                                                                                                                |
-| `editor`          | Authors announcements, events, polls, documents, quick links and the wiki; moderates comments, reactions and ads                                                                                                                                                                            |
-| `department_head` | Edits their own department (description, colour) and its teams (description); writes wiki pages                                                                                                                                                                                             |
-| `team_lead`       | Edits their own team (description); writes wiki pages                                                                                                                                                                                                                                       |
-| `member`          | Reads, comments, reacts, gives kudos, posts ads, answers RSVPs, edits wiki pages they wrote                                                                                                                                                                                                 |
-| `guest`           | Restricted reader: no announcements (and so no read receipts), no departments or teams, no kudos, no marketplace, no RSVPs, no training; sees only the polls opened to guests                                                                                                               |
-| `authenticated`   | users-permissions' built-in role. New users never get it (local users get `member`, Entra users an intranet role); it applies only to accounts an admin put there. Reads like a `member`, but holds none of the staff-only grants (celebrations, uploads, posting ads) and deletes nothing. |
-| `public`          | Anonymous callers: no content grants at all                                                                                                                                                                                                                                                 |
+| Role              | Who                                                                                                                                                                                                                                                                                                                                    |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `admin_role`      | Full access, user management, the `/manage` area and reports                                                                                                                                                                                                                                                                           |
+| `editor`          | Authors announcements, events, polls, documents, quick links and the wiki; moderates comments, reactions and ads                                                                                                                                                                                                                       |
+| `department_head` | Edits their own department (description, colour) and its teams (description); writes wiki pages                                                                                                                                                                                                                                        |
+| `team_lead`       | Edits their own team (description); writes wiki pages                                                                                                                                                                                                                                                                                  |
+| `member`          | Reads, comments, reacts, gives kudos, posts ads, answers RSVPs, edits wiki pages they wrote                                                                                                                                                                                                                                            |
+| `guest`           | Restricted reader: no announcements (and so no read receipts), no departments or teams, no kudos, no marketplace, no RSVPs, no training; sees only the polls opened to guests                                                                                                                                                          |
+| `authenticated`   | users-permissions' built-in role. Neither local registration (`member`) nor the Entra sign-in (an intranet role) assigns it; it applies to accounts an admin put there, or that predate the `member` default. Reads like a `member`, but holds none of the staff-only grants (celebrations, uploads, posting ads) and deletes nothing. |
+| `public`          | Anonymous callers: no content grants at all                                                                                                                                                                                                                                                                                            |
 
 The six intranet roles are created at every boot
 (`apps/cms/src/bootstrap/roles.ts`). The **staff roles** are the five
@@ -243,8 +275,9 @@ letters:
   the same allowlist.
 - **Courses and lessons** have no content-API write routes at all
   (`only: ["find", "findOne"]`); authoring happens in the Strapi admin.
-- **`search-log`** is write-only telemetry: nobody lists raw rows; the
-  aggregates come from the `summary` route, granted to `admin_role` only.
+- **`search-log`** is write-only telemetry: no content-API route lists raw
+  rows; the aggregates come from the `summary` route, granted to
+  `admin_role` only.
 - **No role holds a `poll-vote` grant.** Votes are cast and counted only
   through the custom `vote` and `results` actions and the batched
   `GET /api/poll-results?ids=` (`batchResults`, up to 50 polls), which every
@@ -264,9 +297,17 @@ letters:
 - **Revocations must be listed.** The boot sync only ever adds rows, so
   removing an entry from the matrix revokes nothing on an existing
   database: obsolete pairs go into `REVOKED_PERMISSIONS`, which must stay
-  disjoint from the grants. Any other grant the code does not want (for
-  example one added in the admin panel) is only reported, in the boot's
-  `[bootstrap] permission drift` line. The boot refuses to start when a
+  disjoint from the grants. The boot's `[bootstrap] permission drift` line
+  reports, without removing it, an unwanted grant only on a **managed**
+  action, i.e. one that some role is granted or has revoked in the code
+  (`planPermissionSync` in `apps/cms/src/bootstrap/sync-permissions.ts`).
+  A grant on any other action, for example
+  `plugin::users-permissions.user.update` added to `member` in the admin
+  panel, is neither revoked nor reported, and the line still says
+  `permission drift: none`. The full audit is
+  `infra/diagnostics/prod-perm-diff.sql` (read-only, Postgres): its
+  `EXTRA_IN_DB` rows list every grant in the database the code does not
+  expect, whatever the action. The boot refuses to start when a
   granted action matches no controller action it loaded, and writes all
   missing grants and revocations in one transaction.
 - **`guest` exceptions,** on purpose: **no kudos** (celebrations leak hire
@@ -476,7 +517,10 @@ same check (`apps/web/src/lib/entry-id.ts`; both re-export it from
 
 ## Global guards
 
-These apply to **every** content-API route, not per route:
+None of these is attached per route: the relation guard, the query-key
+allowlist and the contact-field sanitizer hook into Strapi's content-API
+query and output handling, and the other three are global middlewares
+(`config/middlewares.ts`) that see every request:
 
 - **Relation guard** (`registerRestrictedRelationGuard` in
   `apps/cms/src/bootstrap/restricted-relation-guard.ts`, rules in
@@ -508,7 +552,8 @@ These apply to **every** content-API route, not per route:
   everything else gets 404, whatever the encoding of the path (`..`,
   `%2e%2e`, `%2f`, any case). Without the token configured it answers 404
   in production and is off in development. The web proxy also asks Strapi
-  whether the session's JWT is still accepted, at least every 60 seconds.
+  whether the session's JWT is still accepted, with a cache of up to 60
+  seconds, so a blocked account loses the files within a minute.
   It must stay a global middleware (`config/middlewares.ts`); the edge
   routes `/uploads` to the web, not to the cms.
 - **`global::auth-path-guard`**: any spelling of `/api/auth/*` other than
@@ -525,32 +570,32 @@ global middlewares.
 The [README content model](../README.md#content-model) lists the types;
 this is who sees and changes what, per type.
 
-| Type              | Access rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                     |
-| `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                            |
-| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. The `audience` field is not part of the decision. From its `expiresAt` instant it leaves lists, threads and digests for everyone but admins and editors.                                                                                                                                                                          |
-| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                                                                      |
-| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                           |
-| `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                |
-| `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                      |
-| `notification`    | Written by cms lifecycles only (`utils/notify.ts`), read and deleted by the recipient. Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows.                                                     |
-| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read. ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                                                                                                                                              |
-| `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                               |
-| `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                          |
-| `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                         |
-| `document`        | No departments = company-wide; with departments, only their members. `audience` = `departments` (set on every row that links a department, by each write and a boot backfill) keeps a document moderator-only once its departments are gone, until it is re-targeted or set back to `all`.                                                                                                                                                                                                   |
-| `classified`      | Staff roles post; the author edits (admin bypass) and deletes (moderator bypass). Photos only through the [hardened upload](#upload-hardening), and only images the caller uploaded. Expired ads leave the list at once and are deleted with their photos 90 days after `expiresAt` (03:45 cron).                                                                                                                                                                                            |
-| `quick-link`      | Like `document`. No editing UI in the web; maintained in the Strapi admin.                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| `course`          | Read-only content API (draft & publish; authored in the admin). Published courses only.                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `lesson`          | Read-only content API, visible only while its course is published. `videoUrl` is YouTube-only, validated in a lifecycle (admin writes bypass the content-API controllers) and render-gated in the web player; the web embed is authoritative.                                                                                                                                                                                                                                                |
-| `lesson-progress` | Own rows only (admin: the `/manage/training` report), anchored on the lesson's documentId; no update or delete. Course completion is derived at read time, so a lesson added later re-opens the course.                                                                                                                                                                                                                                                                                      |
-| `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                     |
-| `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                         |
-| `wiki-revision`   | Inherits its page's visibility; not readable by `guest`. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only.                                                                                                                                                                                                                                                                                                                  |
-| _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs. |
-| _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Type              | Access rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                         |
+| `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. The `audience` field is not part of the decision. From its `expiresAt` instant it leaves lists, threads and digests for everyone but admins and editors.                                                                                                                                                                              |
+| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                                                                          |
+| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                               |
+| `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
+| `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
+| `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows. |
+| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read. ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                                                                                                                                                  |
+| `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                                   |
+| `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                              |
+| `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                             |
+| `document`        | No departments = company-wide; with departments, only their members. `audience` = `departments` (set on every row that links a department, by each write and a boot backfill) keeps a document moderator-only once its departments are gone, until it is re-targeted or set back to `all`.                                                                                                                                                                                                       |
+| `classified`      | Staff roles post; the author edits (admin bypass) and deletes (moderator bypass). Photos only through the [hardened upload](#upload-hardening), and only images the caller uploaded (moderators excepted). Expired ads leave the list at once and are deleted with their photos 90 days after `expiresAt` (03:45 cron).                                                                                                                                                                          |
+| `quick-link`      | Like `document`. No editing UI in the web; maintained in the Strapi admin.                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `course`          | Read-only content API (draft & publish; authored in the admin). Published courses only.                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `lesson`          | Read-only content API, visible only while its course is published. `videoUrl` is YouTube-only, validated in a lifecycle (admin writes bypass the content-API controllers) and render-gated in the web player; the web embed is authoritative.                                                                                                                                                                                                                                                    |
+| `lesson-progress` | Own rows only (admin: the `/manage/training` report), anchored on the lesson's documentId; no update or delete. Course completion is derived at read time, so a lesson added later re-opens the course.                                                                                                                                                                                                                                                                                          |
+| `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                         |
+| `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                             |
+| `wiki-revision`   | Inherits its page's visibility; not readable by `guest`. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only.                                                                                                                                                                                                                                                                                                                      |
+| _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
+| _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
 
 ### Poll department targeting
 
@@ -616,13 +661,15 @@ admin or editor opens them, per poll, with two fields (owner decision
 ### Private user fields
 
 The users-permissions **User** is extended with fields that are
-schema-`private` (never in a content-API response) and read only by the
-code that needs them:
+schema-`private`: Strapi leaves them out of its content-API output. Only
+`/api/me`, which reads the caller's own row directly, returns some of them,
+to that caller (the birthday and the digest settings):
 
 - `microsoftOid` and `entraTenantId`: the identity of a Microsoft user (an
   admin sets both, lower case, to bind an existing account once its owner
-  is confirmed); `roleSource` (`entra` | `manual`), `entraAppliedRole` and
-  `entraManagerOid`, read only by the Entra exchange. These and
+  is confirmed; `/api/me` reads `entraTenantId` to mark the Entra-owned
+  profile fields); `roleSource` (`entra` | `manual`), `entraAppliedRole`
+  and `entraManagerOid`, read by the Entra exchange. These and
   `digestFrequency` are also `searchable: false`, so no `_q` finds them.
 - `birthday` / `birthdayVisible`: birthdays are strictly opt-in, maintained
   through `/api/me`, never exposed through user reads, and surface without
@@ -635,14 +682,14 @@ code that needs them:
   user may read.
 
 `manager` (with its inverse `directReports`), `department` and `teams` are
-regular relations; the contact fields `email`, `phone`, `hireDate` and
-`officeLocation` are visible to the staff roles only
-([Global guards](#global-guards)).
+regular relations. In responses about users, the contact fields `email`,
+`phone`, `hireDate` and `officeLocation` reach the staff roles only
+([Global guards](#global-guards)); `/api/me` returns the caller's own.
 
 ## Upload hardening
 
-The only content-API upload route, `POST /api/upload` (marketplace ad
-photos), is wrapped by `apps/cms/src/extensions/upload/strapi-server.ts`
+The only granted content-API upload route, `POST /api/upload`
+(marketplace ad photos), is wrapped by `apps/cms/src/extensions/upload/strapi-server.ts`
 on top of the permission grant, with the pure rules in
 `apps/cms/src/utils/upload-guard.ts`. The admin panel's media library uses
 the separate admin routes and is unaffected.
@@ -679,9 +726,11 @@ the sniffed type>` (core stores and serves by extension, so a JPEG named
 The grant itself (`plugin::upload.content-api.upload`) goes to the staff
 roles only, never `guest` or `authenticated`, and there are deliberately no
 `find`/`findOne`/`destroy` grants on the upload content API (no browsing or
-deleting the media library from outside the admin panel). The uploaded
-bytes are served only through the web's session-gated `/uploads` proxy
-(`global::uploads-auth`, [Global guards](#global-guards)).
+deleting the media library from outside the admin panel). In production
+the uploaded bytes are served only through the web's session-gated
+`/uploads` proxy (`global::uploads-auth`, [Global guards](#global-guards)).
+In development without `INTERNAL_UPLOAD_TOKEN` the cms serves them
+directly.
 
 ## Frontend role gating
 
