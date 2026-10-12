@@ -2191,7 +2191,7 @@ the flag is gone for good, and the roll forward's boot backfill (it flags
 only rows that link a department) does not bring it back: the row stays
 company-wide after the roll forward too.
 
-- **No row:** roll back (below).
+- **No row:** go on with the freeze below.
 - **Rows: do not roll back yet.** Either
   1. re-target every listed row in the admin panel of the running batch 12
      cms (link an existing department; set Audience to `all` only if it is
@@ -2199,10 +2199,25 @@ company-wide after the roll forward too.
      until it prints no row. Unpublishing alone does not take a row off
      the list: its draft keeps the flag, and a Publish in the batch 10
      admin panel would write a published row without it. Or
-  2. save the listed documentIds right before the rollback (below), keep
-     the file until the roll forward, and run the re-apply below
-     **immediately after the roll forward**. Until then the listed rows are
+  2. save the listed documentIds during the freeze below, keep the file
+     until the roll forward, and run the re-apply below **immediately
+     after the roll forward**. Until then the listed rows are
      company-wide, guests included, for as long as the batch 10 cms runs.
+
+**Freeze, then the final listing.** The batch 12 cms stays writable until
+the image switch: a department delete committed after your listing would
+leave flag-only rows that neither your decision nor a saved list covers.
+So stop the cms first and keep it stopped until the rollback below starts
+the batch 10 image (the web stays up and answers with its "cannot be
+reached" messages meanwhile):
+
+```bash
+"${COMPOSE[@]}" stop cms
+```
+
+Then run the listing above once more; this run is the decision. No row:
+roll back (below). Rows you did not re-target (case 2): save them now,
+still frozen:
 
 ```bash
 LIST=/home/bigemo/b12-flag-only-rows.txt
