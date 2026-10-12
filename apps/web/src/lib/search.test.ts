@@ -1007,3 +1007,41 @@ describe("palette: createSearchScheduler (fake timers)", () => {
     expect(requests).toHaveLength(2);
   });
 });
+
+describe("palette focus return (focusReturnTarget)", () => {
+  const el = (name: string, isConnected = true) => ({ name, isConnected });
+
+  it("returns focus to the element that opened the palette", () => {
+    const opener = el("opener");
+    const trigger = el("trigger");
+    expect(palette.focusReturnTarget({ opener, trigger, activeIsBody: true })).toBe(opener);
+  });
+
+  it("falls back to the topbar button when the opener is gone or unknown", () => {
+    const trigger = el("trigger");
+    expect(
+      palette.focusReturnTarget({ opener: el("gone", false), trigger, activeIsBody: true }),
+    ).toBe(trigger);
+    expect(palette.focusReturnTarget({ opener: null, trigger, activeIsBody: true })).toBe(trigger);
+  });
+
+  it("moves nothing when something else already holds focus", () => {
+    expect(
+      palette.focusReturnTarget({
+        opener: el("opener"),
+        trigger: el("trigger"),
+        activeIsBody: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("moves nothing when neither element is on the page", () => {
+    expect(
+      palette.focusReturnTarget({
+        opener: el("opener", false),
+        trigger: el("trigger", false),
+        activeIsBody: true,
+      }),
+    ).toBeNull();
+  });
+});
