@@ -1,0 +1,204 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadAnalytics > CMS down: every count unknown, no 0 anywhere 1`] = `
+{
+  "counts": {
+    "announcements": {
+      "truncated": false,
+      "value": null,
+    },
+    "comments": {
+      "truncated": false,
+      "value": null,
+    },
+    "documents": {
+      "truncated": false,
+      "value": null,
+    },
+    "events": {
+      "truncated": false,
+      "value": null,
+    },
+    "polls": {
+      "truncated": false,
+      "value": null,
+    },
+    "reactions": {
+      "truncated": false,
+      "value": null,
+    },
+    "unreadNotifications": {
+      "truncated": false,
+      "value": null,
+    },
+    "wiki-pages": {
+      "truncated": false,
+      "value": null,
+    },
+    "wiki-spaces": {
+      "truncated": false,
+      "value": null,
+    },
+  },
+  "countsFailed": true,
+  "failed": true,
+  "recentComments": [],
+  "search": null,
+}
+`;
+
+exports[`loadAnalytics > partial failure: a failed count is unknown and raises the banner, the rest stays 1`] = `
+{
+  "counts": {
+    "announcements": {
+      "truncated": false,
+      "value": 12,
+    },
+    "comments": {
+      "truncated": false,
+      "value": 55,
+    },
+    "documents": {
+      "truncated": false,
+      "value": 9,
+    },
+    "events": {
+      "truncated": false,
+      "value": 7,
+    },
+    "polls": {
+      "truncated": false,
+      "value": null,
+    },
+    "reactions": {
+      "truncated": false,
+      "value": null,
+    },
+    "unreadNotifications": {
+      "truncated": false,
+      "value": 6,
+    },
+    "wiki-pages": {
+      "truncated": false,
+      "value": 40,
+    },
+    "wiki-spaces": {
+      "truncated": false,
+      "value": 4,
+    },
+  },
+  "countsFailed": true,
+  "failed": true,
+  "recentComments": [
+    {
+      "authorName": "grace",
+      "body": "Great!",
+      "createdAt": "2026-09-28T09:15:00.000Z",
+      "id": 1,
+    },
+    {
+      "authorName": null,
+      "body": "Anonymous",
+      "createdAt": null,
+      "id": 2,
+    },
+  ],
+  "search": {
+    "topTerms": [
+      {
+        "avgResults": 2,
+        "count": 4,
+        "term": "vpn",
+      },
+    ],
+    "topZeroTerms": [
+      {
+        "count": 2,
+        "term": "kantine",
+      },
+    ],
+    "total": 8,
+    "windowDays": 30,
+    "zeroRate": 38,
+    "zeroResultCount": 3,
+  },
+}
+`;
+
+exports[`loadAnalytics > success: every total, the search summary with its zero rate, recent comments 1`] = `
+{
+  "counts": {
+    "announcements": {
+      "truncated": false,
+      "value": 12,
+    },
+    "comments": {
+      "truncated": false,
+      "value": 55,
+    },
+    "documents": {
+      "truncated": false,
+      "value": 9,
+    },
+    "events": {
+      "truncated": false,
+      "value": 7,
+    },
+    "polls": {
+      "truncated": false,
+      "value": 3,
+    },
+    "reactions": {
+      "truncated": false,
+      "value": 120,
+    },
+    "unreadNotifications": {
+      "truncated": false,
+      "value": 6,
+    },
+    "wiki-pages": {
+      "truncated": false,
+      "value": 40,
+    },
+    "wiki-spaces": {
+      "truncated": false,
+      "value": 4,
+    },
+  },
+  "countsFailed": false,
+  "failed": false,
+  "recentComments": [
+    {
+      "authorName": "grace",
+      "body": "Great!",
+      "createdAt": "2026-09-28T09:15:00.000Z",
+      "id": 1,
+    },
+    {
+      "authorName": null,
+      "body": "Anonymous",
+      "createdAt": null,
+      "id": 2,
+    },
+  ],
+  "search": {
+    "topTerms": [
+      {
+        "avgResults": 2,
+        "count": 4,
+        "term": "vpn",
+      },
+    ],
+    "topZeroTerms": [
+      {
+        "count": 2,
+        "term": "kantine",
+      },
+    ],
+    "total": 8,
+    "windowDays": 30,
+    "zeroRate": 38,
+    "zeroResultCount": 3,
+  },
+}
+`;
