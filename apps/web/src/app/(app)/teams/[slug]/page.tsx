@@ -9,8 +9,7 @@ import type { Team } from "@/lib/types";
 import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -34,12 +33,7 @@ export default async function TeamPage({ params }: Props) {
   // A role without team.find (guest) gets no request and an explanation
   // instead of the error page (SH02).
   if (isReadDenied((await getViewer()).role, "teams")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the

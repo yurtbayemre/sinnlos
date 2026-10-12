@@ -19,8 +19,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteClassified } from "@/components/marketplace/delete-classified";
 import { RenewButton } from "@/components/marketplace/renew-button";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -56,12 +55,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
   // explanation instead of the error page (SH02). The same GET as
   // generateMetadata's is sent once per render (Next's fetch dedupe).
   if (isReadDenied(viewer.role, "marketplace")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   const res = await api.classifieds.one(String(rowId));
 

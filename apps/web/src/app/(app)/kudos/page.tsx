@@ -14,7 +14,7 @@ import type { Kudos, KudosValue, Celebration, UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { initials } from "@/lib/utils";
@@ -58,12 +58,7 @@ export default async function KudosPage() {
   // A role without kudos.find (guest) gets no request and an explanation
   // instead of the CMS's 403 as an error banner (SH02).
   if (isReadDenied(viewer.role, "kudos")) {
-    return (
-      <div className="space-y-8">
-        <PageHeader title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   const selfId = typeof session?.user?.id === "number" ? session.user.id : null;
   const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, GraduationCap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, GraduationCap } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant, SHORT_DAY } from "@/lib/date-format";
 import { capabilitiesFor, TRAINING_ROLES } from "@/lib/roles";
@@ -17,6 +17,7 @@ import { fetchAllUsers } from "@/lib/users";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { UserLite } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
+import { AdminPageHeader } from "@/components/admin-page-header";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -46,9 +47,8 @@ export default async function TrainingReportPage() {
   }
 
   // `format` renders instants in APP_TIME_ZONE (i18n/request.ts).
-  const [t, tAdmin, tTraining, format] = await Promise.all([
+  const [t, tTraining, format] = await Promise.all([
     getTranslations("trainingReport"),
-    getTranslations("admin"),
     getTranslations("training"),
     getFormatter(),
   ]);
@@ -66,8 +66,8 @@ export default async function TrainingReportPage() {
 
   if (coursesResult.failed || usersResult.failed) {
     return (
-      <div className="space-y-6">
-        <BackLink label={tAdmin("title")} />
+      <div className="space-y-8">
+        <AdminPageHeader title={t("title")} />
         <FetchErrorBanner />
       </div>
     );
@@ -111,11 +111,7 @@ export default async function TrainingReportPage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <BackLink label={tAdmin("title")} />
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">{t("title")}</h1>
-        <p className="mt-1 text-muted-foreground">{t("description", { count: denominator })}</p>
-      </div>
+      <AdminPageHeader title={t("title")} description={t("description", { count: denominator })} />
 
       {anyTruncated && (
         <div className="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
@@ -172,17 +168,5 @@ export default async function TrainingReportPage() {
         </div>
       )}
     </div>
-  );
-}
-
-function BackLink({ label }: { label: string }) {
-  return (
-    <Link
-      href="/manage"
-      className="inline-flex items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
-    >
-      <ArrowLeft className="h-3.5 w-3.5" />
-      {label}
-    </Link>
   );
 }

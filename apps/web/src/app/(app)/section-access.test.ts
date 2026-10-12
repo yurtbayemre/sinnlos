@@ -77,7 +77,9 @@ vi.mock("next-intl/server", () => ({
   getFormatter: async () => ({ dateTime: () => "" }),
 }));
 
-const { SectionUnavailable } = await import("@/components/section-unavailable");
+const { SectionUnavailable, SectionUnavailablePage } = await import(
+  "@/components/section-unavailable"
+);
 const { AckBanner } = await import("@/components/dashboard/ack-banner");
 const { TrainingBanner } = await import("@/components/training/training-banner");
 const { LatestNews } = await import("@/components/dashboard/latest-news");
@@ -116,7 +118,7 @@ describe("section pages", () => {
     "%s: a guest gets the explanation and no CMS request",
     async (_name, page) => {
       const tree = elements(await page());
-      expect(has(tree, SectionUnavailable)).toBe(true);
+      expect(has(tree, SectionUnavailablePage)).toBe(true);
       expect(calls).toEqual([]);
     },
   );
@@ -124,7 +126,7 @@ describe("section pages", () => {
   it.each(Object.entries(pages))("%s: a member reads the section", async (_name, page) => {
     viewer.role = "member";
     const tree = elements(await page());
-    expect(has(tree, SectionUnavailable)).toBe(false);
+    expect(has(tree, SectionUnavailablePage)).toBe(false);
     expect(calls.length).toBeGreaterThan(0);
   });
 
@@ -133,7 +135,7 @@ describe("section pages", () => {
     async (_name, page) => {
       viewer.role = null;
       const tree = elements(await page());
-      expect(has(tree, SectionUnavailable)).toBe(false);
+      expect(has(tree, SectionUnavailablePage)).toBe(false);
       expect(calls.length).toBeGreaterThan(0);
     },
   );
@@ -141,7 +143,7 @@ describe("section pages", () => {
   it("kudos: the `authenticated` fallback reads kudos but not the celebrations", async () => {
     viewer.role = "authenticated";
     const tree = elements(await pages.kudos());
-    expect(has(tree, SectionUnavailable)).toBe(false);
+    expect(has(tree, SectionUnavailablePage)).toBe(false);
     expect(calls).toContain("kudos.list");
     expect(calls).not.toContain("celebrations");
     viewer.role = "member";
@@ -203,5 +205,26 @@ describe("SectionUnavailable", () => {
     expect(html).toContain(messages.errors.sectionUnavailableHint);
     expect(html).toContain(`href="/"`);
     expect(html).toContain(messages.errors.backToDashboard);
+  });
+
+  it("SectionUnavailablePage puts the page's own header above the explanation", () => {
+    const html = renderToStaticMarkup(
+      // eslint-disable-next-line react/no-children-prop -- see above
+      createElement(NextIntlClientProvider, {
+        locale: "en",
+        messages: en,
+        timeZone: "Europe/Berlin",
+        children: createElement(SectionUnavailablePage, {
+          eyebrow: "News",
+          title: "Announcements",
+          description: "What's new",
+        }),
+      }),
+    );
+    expect(html).toMatch(/<h1[^>]*>Announcements<\/h1>/);
+    expect(html).toContain("What&#x27;s new");
+    expect(html.indexOf("Announcements")).toBeLessThan(
+      html.indexOf(en.errors.sectionUnavailableTitle),
+    );
   });
 });

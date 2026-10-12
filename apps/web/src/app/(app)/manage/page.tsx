@@ -23,6 +23,7 @@ import { getViewer } from "@/lib/viewer";
 import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatTile } from "@/components/ui/stat-tile";
 
 export async function generateMetadata() {
   const t = await getTranslations("admin");
@@ -107,45 +108,24 @@ export default async function AdminPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold">{t("analyticsSection")}</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Link href="/manage/analytics" className="focus-card block">
-            <Card interactive className="card-lift h-full transition hover:border-primary/40">
-              <CardContent className="flex items-center gap-4 p-6">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <BarChart3 className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="font-medium">{t("analyticsDashboard")}</div>
-                  <div className="text-sm text-muted-foreground">{t("analyticsDesc")}</div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/manage/acknowledgements" className="focus-card block">
-            <Card interactive className="card-lift h-full transition hover:border-primary/40">
-              <CardContent className="flex items-center gap-4 p-6">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <ClipboardCheck className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="font-medium">{t("ackReportLink")}</div>
-                  <div className="text-sm text-muted-foreground">{t("ackReportLinkDesc")}</div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
-          <Link href="/manage/training" className="focus-card block">
-            <Card interactive className="card-lift h-full transition hover:border-primary/40">
-              <CardContent className="flex items-center gap-4 p-6">
-                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <GraduationCap className="h-5 w-5" />
-                </div>
-                <div>
-                  <div className="font-medium">{t("trainingReportLink")}</div>
-                  <div className="text-sm text-muted-foreground">{t("trainingReportLinkDesc")}</div>
-                </div>
-              </CardContent>
-            </Card>
-          </Link>
+          <StatTile
+            icon={BarChart3}
+            label={t("analyticsDashboard")}
+            description={t("analyticsDesc")}
+            href="/manage/analytics"
+          />
+          <StatTile
+            icon={ClipboardCheck}
+            label={t("ackReportLink")}
+            description={t("ackReportLinkDesc")}
+            href="/manage/acknowledgements"
+          />
+          <StatTile
+            icon={GraduationCap}
+            label={t("trainingReportLink")}
+            description={t("trainingReportLinkDesc")}
+            href="/manage/training"
+          />
         </div>
       </section>
 

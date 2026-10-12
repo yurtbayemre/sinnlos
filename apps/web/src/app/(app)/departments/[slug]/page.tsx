@@ -11,8 +11,7 @@ import type { Department } from "@/lib/types";
 import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -37,12 +36,7 @@ export default async function DepartmentPage({ params }: Props) {
   // A role without department.find (guest) gets no request and an
   // explanation instead of the error page (SH02).
   if (isReadDenied((await getViewer()).role, "departments")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the

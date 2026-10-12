@@ -2,7 +2,7 @@ import { isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DeleteClassified } from "@/components/marketplace/delete-classified";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
@@ -300,7 +300,7 @@ describe("a role without the section's read (guest)", () => {
     ["/marketplace/[id]", () => ad.default(params("7"))],
   ])("%s shows the explanation without a read", async (_route, page) => {
     const tree = elements(await page());
-    expect(tree.some((el) => el.type === SectionUnavailable)).toBe(true);
+    expect(tree.some((el) => el.type === SectionUnavailablePage)).toBe(true);
     for (const read of reads()) expect(read).not.toHaveBeenCalled();
   });
 

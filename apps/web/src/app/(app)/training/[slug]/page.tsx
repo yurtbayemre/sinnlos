@@ -3,8 +3,7 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowRight, CheckCircle2, Circle } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -39,12 +38,7 @@ export default async function CoursePage({ params }: Params) {
   // A role without the training reads (guest) gets no request and an
   // explanation instead of the error page (SH02).
   if (isReadDenied((await getViewer()).role, "training")) {
-    return (
-      <div className="space-y-8">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
 
   const [course, progressResult] = await Promise.all([

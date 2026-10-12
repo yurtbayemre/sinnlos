@@ -13,7 +13,7 @@ import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { Markdown } from "@/components/markdown";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   CommentSection,
@@ -38,10 +38,11 @@ export default async function AnnouncementsPage() {
   // explanation instead of the CMS's 403 as an error banner (SH02).
   if (isReadDenied(viewer.role, "announcements")) {
     return (
-      <div className="space-y-8">
-        <PageHeader eyebrow={t("eyebrow")} title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
+      <SectionUnavailablePage
+        eyebrow={t("eyebrow")}
+        title={t("title")}
+        description={t("description")}
+      />
     );
   }
   const readsAcks = !isReadDenied(viewer.role, "acknowledgements");

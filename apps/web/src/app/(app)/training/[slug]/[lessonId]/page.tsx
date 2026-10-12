@@ -8,8 +8,7 @@ import { Markdown } from "@/components/markdown";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
@@ -39,12 +38,7 @@ export default async function LessonPage({
   // A role without the training reads (guest) gets no request and an
   // explanation instead of the error banner (SH02).
   if (isReadDenied(viewer.role, "training")) {
-    return (
-      <div className="space-y-8">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
 
   const [lessonResult, courseResult, progressResult] = await Promise.all([
