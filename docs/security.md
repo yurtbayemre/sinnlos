@@ -286,6 +286,12 @@ per-user token version so that a password change can end the older ones:
   `infra/deploy.sh` prints after a failed deploy check the target image for
   the token version and demand the rotation when it lacks it
   ([batch 13 rollback](./DEPLOYMENT.md#deploying-batch-13-2026-10-12)).
+  The same holds for every **restore** of a database dump or of the
+  backed-up `infra/.env`, also with the same images: the dump brings back
+  older token versions (and the `.env` possibly an older `JWT_SECRET`), so
+  JWTs that a later password change revoked would work again; rotate
+  `JWT_SECRET` before the cms starts
+  ([Restoring a database dump](./DEPLOYMENT.md#restoring-a-database-dump)).
 - **Limits.** The web's `/uploads` proxy caches the cms's answer for up to
   60 seconds, so a revoked JWT can fetch file bytes for up to that minute;
   an open live stream keeps its content-free pings until its next rotation

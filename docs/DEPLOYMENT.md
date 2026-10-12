@@ -1352,7 +1352,11 @@ systemctl start docker
 > want back; a `docker tag infra-*:rollback` today may bring back images
 > from before batch 10. On the owner's host the checkout is
 > `/home/bigemo/git/sinnlos` and every step runs as `bigemo`, wherever a
-> runbook writes `/opt/sinnlos`.
+> runbook writes `/opt/sinnlos`. Where an older runbook restores a dump
+> into the running database (`pg_restore --clean`), use
+> [Restoring a database dump](#restoring-a-database-dump) instead: a clean
+> database, one transaction, the check, and a fresh `JWT_SECRET` before
+> the cms starts.
 
 > **Deploying batch 13 (2026-10-12)?** The UI primitives with Markdown
 > rendering, the capabilities with the phone navigation and loading states,
@@ -9605,13 +9609,26 @@ extra steps):
 > you need them. The cms-side guards and the app's login limiter apply
 > either way.
 
-**`DATABASE_FORCE_MIGRATION` needs an override file.** The compose file
-lists the cms environment explicitly and does not pass this variable, so a
-line in `infra/.env` has no effect, and `infra/deploy.sh` (which uses only
-the two live compose files) never sets it. Strapi's forced schema sync
-drops every column and link table no schema declares any more, so use it
-only deliberately, after a backup. For one boot, write an override outside
-the checkout and leave it off again afterwards:
+**`DATABASE_FORCE_MIGRATION` removes only what one tracked schema change
+removes.** The compose file lists the cms environment explicitly and does
+not pass this variable, so a line in `infra/.env` has no effect, and
+`infra/deploy.sh` (which uses only the two live compose files) never sets
+it. What it does (`@strapi/database` 5.55.1): a boot syncs the schema only
+when the schema's hash changed since the last boot or a migration ran
+(`dist/schema/index.js`, `sync`); the sync then removes only the tables,
+columns, indexes and foreign keys that the **stored previous** schema
+tracked and the new one lacks (`dist/schema/diff.js`), and only with the
+flag set (`dist/schema/builder.js`, `dropColumn`, `dropTable`, `dropIndex`).
+After a boot with the flag off, the stored schema no longer lists what that
+release dropped from its schema: those columns and tables stay in the
+database for good, untracked, and no later boot with the flag removes them,
+whether the schema changed again or not. So the flag matters only on the one
+boot that changes the schema (and must stay off when rolling back to an
+older image, [Rolling back the Strapi 5.55.1 release](#rolling-back-the-strapi-5551-release-2026-09-25)).
+Cleaning up what earlier deploys left behind is **manual work for the
+owner**, with the listing and the SQL below. To set the flag for one boot
+anyway, write an override outside the checkout and leave it off again
+afterwards:
 
 ```bash
 cat > /tmp/force-migration.yml <<'YML'
@@ -9626,6 +9643,57 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 "${COMPOSE[@]}" up -d --no-build cms
 rm /tmp/force-migration.yml
 ```
+
+**Leftovers of earlier deploys** (owner only, after a backup). The listing
+is read-only: it compares the live tables and columns with the schema the
+cms stored at its last boot (`strapi_database_schema`) and prints what the
+stored schema does not track (Strapi's own bookkeeping tables excluded):
+
+```bash
+"${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+WITH stored AS (SELECT schema::jsonb AS s FROM strapi_database_schema ORDER BY time DESC LIMIT 1),
+tracked_columns AS (
+  SELECT t->>'name' AS table_name, c->>'name' AS column_name
+  FROM stored, jsonb_array_elements(s->'tables') t, jsonb_array_elements(t->'columns') c),
+tracked_tables AS (SELECT DISTINCT table_name FROM tracked_columns)
+SELECT 'column' AS kind, col.table_name, col.column_name
+  FROM information_schema.columns col
+  JOIN tracked_tables tt USING (table_name)
+ WHERE col.table_schema = current_schema()
+   AND NOT EXISTS (SELECT 1 FROM tracked_columns tc
+                    WHERE tc.table_name = col.table_name AND tc.column_name = col.column_name)
+UNION ALL
+SELECT 'table', tab.table_name, NULL
+  FROM information_schema.tables tab
+ WHERE tab.table_schema = current_schema() AND tab.table_type = 'BASE TABLE'
+   AND tab.table_name NOT IN (SELECT table_name FROM tracked_tables)
+   AND tab.table_name NOT IN ('strapi_database_schema', 'strapi_migrations', 'strapi_migrations_internal')
+ORDER BY 1, 2, 3;
+SQL
+```
+
+Each row is a candidate, not a verdict: decide per row (a table such as
+`datetime_migration_audit` is kept on purpose until its own runbook drops
+it). For the rows you remove, write the statements yourself, preview them
+in a transaction that rolls back, and only then run them for real:
+
+```bash
+"${COMPOSE[@]}" stop web cms
+"${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+BEGIN;
+ALTER TABLE <table> DROP COLUMN <column>;   -- one line per reviewed row
+-- DROP TABLE <table>;                      -- a reviewed leftover table
+SELECT table_name, column_name FROM information_schema.columns
+ WHERE table_schema = current_schema() AND table_name = '<table>';
+ROLLBACK;                                    -- the preview; COMMIT only in the real run
+SQL
+```
+
+The preview prints the table's columns as they would be and changes
+nothing. For the real run replace `ROLLBACK` with `COMMIT`, run the listing
+again (the removed rows are gone, nothing else changed), start the cms
+(`"${COMPOSE[@]}" up -d --no-build web cms`) and check its log for errors:
+the cms never reads an untracked column, so it boots as before.
 
 ### 3.10 Datetime contract
 
@@ -10579,24 +10647,97 @@ docker compose exec -T db \
   > backups/sinnlos-$(date +%Y%m%d-%H%M%S).dump
 ```
 
-Restore: stop web and cms first, so nothing writes into a half-restored
-database (`docker compose -p infra -f docker-compose.yml -f
-docker-compose.traefik.yml stop web cms`; leave out the Traefik file on a
-Caddy box), then:
+#### Restoring a database dump
+
+Restore into a **clean** database, never over the one that runs:
+`pg_restore --clean` drops only the objects the dump holds, so a table a
+newer release added, with its foreign keys into the dump's tables (the
+RSVP, acknowledgement and author links into `up_users`, for example),
+blocks those drops, and by default `pg_restore` carries on after such
+errors and leaves a mixture of both states. The steps below stop web and
+cms, drop and recreate the database, restore in one transaction that
+stops at the first error, check the result, give the cms a fresh
+`JWT_SECRET`, and only then start the apps. Run them in the checkout, on
+the owner's host as `bigemo` in `/home/bigemo/git/sinnlos`:
 
 ```bash
-# ⚠ This drops every object the dump holds, then recreates it from the dump
-docker compose exec -T db \
-  pg_restore -U sinnlos -d sinnlos --clean --if-exists \
-  < backups/sinnlos-20260415-120000.dump
+cd /opt/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)   # Caddy box: without the second -f
+DUMP=infra/backups/sinnlos-20260415-120000.dump
+
+# 1. Stop the apps; only the database keeps running
+"${COMPOSE[@]}" stop web cms
+
+# 2. Read the dump before anything is dropped: how many tables it holds
+"${COMPOSE[@]}" exec -T db pg_restore --list < "$DUMP" | awk '$4 == "TABLE" && $5 != "DATA"' | wc -l
+
+# 3. A clean database: drop it and create it empty
+"${COMPOSE[@]}" exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'
+
+# 4. Restore in one transaction; the first error rolls everything back
+"${COMPOSE[@]}" exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' < "$DUMP"; echo "pg_restore exit $?"
+
+# 5. Check before any app starts: the tables of step 2, and the users
+"${COMPOSE[@]}" exec -T db sh -c 'psql -X -tA -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');
+SELECT count(*) FROM up_users;
+SQL
 ```
 
-Start them again with `up -d --no-build web cms`. `-U sinnlos -d sinnlos`
-are the defaults of `DATABASE_USERNAME` and `DATABASE_NAME`; with other
-values use `docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER"
--d "$POSTGRES_DB" --clean --if-exists'` instead. `--clean` drops only what
-the dump holds: tables a later release added stay (harmless for the older
-release the dump came from).
+Go on only when step 4 printed `pg_restore exit 0` and the first number of
+step 5 equals the number of step 2 (the second is the user count of the
+dump). Anything else (an error, a truncated or wrong file) left the
+database empty, because the transaction rolled back: fix the cause and
+repeat from step 3; never start web or cms on it. `--no-owner` makes the
+restoring user own everything, as the cms expects.
+
+Then give the cms a fresh `JWT_SECRET` **before** it starts, and start the
+apps:
+
+```bash
+# 6. A fresh JWT_SECRET (only the cms reads it; AUTH_SECRET stays)
+umask 077
+NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+awk -v s="${NEW_JWT_SECRET}" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; n++; next } { print } END { exit n == 1 ? 0 : 1 }' \
+  infra/.env > infra/.env.rotated && mv infra/.env.rotated infra/.env
+unset NEW_JWT_SECRET
+ls -l infra/.env
+grep -c '^JWT_SECRET=' infra/.env
+
+# 7. Start the apps
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+`-rw-------` and `1`; if `awk` fails (no `JWT_SECRET=` line, or several),
+nothing was moved: remove `infra/.env.rotated` and give `infra/.env`
+exactly one `JWT_SECRET=` line with a fresh value. Keep no copy of the old
+value. **Why step 6 is mandatory after every database or `.env` restore,
+also with the same images:** a dump holds every user's token version as it
+was when it was taken. A password change since then raised it and revoked
+that user's older JWTs; the restore lowers it again, so those JWTs, still
+unexpired and signed with the same key, would be accepted again (the cms
+compares the JWT's version with the stored one,
+`apps/cms/src/extensions/users-permissions/strapi-server.ts`). A restored
+`infra/.env` can also bring back a `JWT_SECRET` that was rotated since. A
+fresh secret makes every JWT signed before the restore invalid: **everyone
+is signed out once** and signs in again, local and Microsoft accounts
+alike; the admin panel's sessions (`ADMIN_JWT_SECRET`) and the web's own
+key (`AUTH_SECRET`) stay. This is the rule of the owner decision of
+2026-10-12 for a rollback below batch 13
+([Deploying batch 13](#deploying-batch-13-2026-10-12), R4), applied to
+restores.
+
+The cms then brings the schema up to its own release on boot (it adds what
+an older dump lacks). A dump taken before the org draft/publish migration
+needs that migration again first
+([One-time: org draft/publish off](#one-time-org-draftpublish-off)); a dump
+from before the datetime release needs its runbook
+([Upgrading an existing instance to this release](#upgrading-an-existing-instance-to-this-release)).
+This procedure was walked verbatim on 2026-10-12 on throwaway containers
+with a dump of a real cms schema, including an older dump restored where
+the running database had newer tables (the old `--clean` restore left a
+mixture there; this one ends with exactly the dump's tables, or fails
+before any app starts).
 
 ### 7.2 Backup uploads volume
 
@@ -10731,8 +10872,7 @@ or failed. Only nightly runs write it.
 the private key, never on the VPS; production's `backup-run` generations
 in `/srv/backup/outbox` restore as its `docs/backup.md` in
 `srv-prod-01-ops` says). Take the database, uploads and `.env` artifacts
-of one run (the same `<ts>[-predeploy]` in their names), and stop web and
-cms on the host before the restore (as in §7.1):
+of one run (the same `<ts>[-predeploy]` in their names):
 
 ```bash
 # Owner-only files in a private directory: the dump and the .env copy hold
@@ -10743,9 +10883,11 @@ gpg --decrypt ../sinnlos-db-<ts>.dump.gz.gpg | gunzip > sinnlos-db-<ts>.dump
 gpg --decrypt ../sinnlos-env-<ts>.env.gz.gpg | gunzip > infra.env
 ```
 
-Then restore the dump as in §7.1 (copy it to the host first, or stream it:
-`gpg --decrypt … | gunzip | ssh <host> docker exec -i infra-db-1 pg_restore
--U sinnlos -d sinnlos --clean --if-exists`). The uploads artifact is a
+Then copy the dump to the host, into the owner-only `infra/backups/` of
+the checkout, and restore it with the steps of
+[Restoring a database dump](#restoring-a-database-dump) (§7.1): a clean
+database, one transaction, the check, the fresh `JWT_SECRET`; delete the
+host's copy afterwards. The uploads artifact is a
 gzipped **plain** tar: once decrypted and gunzipped it is an uncompressed
 `.tar`, which `tar xf` reads (the `tar xzf` of §7.2 is for its own
 `.tar.gz` and fails on it). Stream it into the volume, so no plaintext
@@ -10757,11 +10899,12 @@ gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip \
 ```
 
 Put `infra.env` back as `infra/.env` of the checkout (owned by the
-checkout owner, mode 600) if the host lost it, start web and cms again
-(`up -d --no-build web cms`), and delete the plaintext afterwards
+checkout owner, mode 600) only if the host lost it, and then rotate its
+`JWT_SECRET` (step 6 of §7.1) before the cms starts: the backed-up file
+can hold a secret that was rotated since. Delete the plaintext afterwards
 (`cd .. && rm -rf restore`). This procedure was walked verbatim on
 2026-10-12 against artifacts of `pg-backup.sh` with a throwaway key and
-Postgres 16 (dump, streamed dump, uploads stream, `.env`, then
+Postgres 16 (decrypt, the §7.1 steps, the uploads stream, the `.env`, then
 `restore-drill.sh --all`).
 
 **Restore drill** (off-box, where the key is): `infra/backup/restore-drill.sh`
@@ -10785,7 +10928,9 @@ the dump (the same `<timestamp>[-predeploy]` in their names) and checks
 them (a tar listing and a key count; no value is shown); when either is
 missing, a partial run, the drill fails and names it. `--keep` leaves the
 container running for a look (`docker exec -it <name> psql -U drill -d drill`).
-Run it after changes to the backup and every few months.
+Run it after changes to the backup and every few months. The drill's
+database is a throwaway one that no cms ever uses, so it needs no new
+`JWT_SECRET`; a real restore does (§7.1, step 6).
 
 > **No order needed:** the crontab runs in the **host's** zone, the
 > janitors (uploads, search log, and since batch 12 notifications and
@@ -10923,12 +11068,11 @@ infra/deploy.sh
 
 If the database schema changed, restore from the pre-deploy backup
 (`sinnlos-db-<ts>-predeploy.dump.gz.gpg`; decrypt it first with the off-box
-private key, [§7.3](#73-automated-daily-backups-cron)):
-
-```bash
-docker exec -i infra-db-1 pg_restore -U sinnlos -d sinnlos --clean --if-exists \
-  < sinnlos-db-<timestamp>.dump
-```
+private key, [§7.3](#73-automated-daily-backups-cron); production's
+`backup-run` generation as its `docs/backup.md` says) with the steps of
+[Restoring a database dump](#restoring-a-database-dump): into a clean
+database, in one transaction, checked, and with a fresh `JWT_SECRET`
+before the cms starts.
 
 A dump taken before the org draft/publish migration, restored under a
 release from 2026-09-26 on, makes the cms refuse to boot (`[org-dp]`) until
