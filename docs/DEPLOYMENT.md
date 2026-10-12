@@ -1108,7 +1108,15 @@ infra/deploy.sh
    removing anything; other untracked files only earn a note) and the GitHub CI
    result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
-   none).
+   none). Only the CI workflow's check runs count: GitHub also attaches
+   Dependabot's own update jobs to the default branch's newest commit (runs
+   named `Dependabot` of the app `github-actions`, and the app `dependabot`'s
+   `.github/dependabot.yml`), which say nothing about the commit and may
+   still run long after CI passed; they are left out and counted
+   (`CI: 2 CI check(s) passed for <sha> (2 Dependabot run(s) ignored)`).
+   Before batch 13 they made a green commit read `CI is pending`. The
+   script reads the answer per check run with a small awk JSON scanner (no
+   `jq` or `gh` on the host).
 1. A pre-deploy Postgres + uploads + `.env` backup. Project `infra`
    (production, since 2026-10-07): the host's `backup-run` from the
    `srv-prod-01-ops` repo, as
@@ -1264,6 +1272,74 @@ systemctl start docker
 
 ### 3.8 Updates
 
+> **Deploying batch 13 (2026-10-12)?** The UI primitives with Markdown
+> rendering, the capabilities with the phone navigation and loading states,
+> and the live client with password-change revocation (the three notes
+> below) ship as one deploy of cms and web with `infra/deploy.sh`, **once
+> batch 12 runs** (deploy batch 12 first). No env, compose, grant, route or
+> edge change; the first cms boot adds one private column,
+> `up_users.token_version`, and **nobody is signed out**: running sessions
+> keep working, and only a user's own password change from then on signs
+> that user's other browsers and devices out (the tab that changed it stays
+> signed in). Read-only checks before it: the batch 12 state as the
+> rollback target, a clean checkout, `deploy.sh --check` and `--dry-run`
+> with the backup permission, the live pipeline's cms env (the new
+> live-smoke requires the cms keepalive), the permission diff (unchanged),
+> the accounts per role, the announcement bodies Markdown renders
+> differently, a 401 baseline. After it: the state and boot lines, the new
+> column, the pages, a guest walk with a clean log, an editor's takedown, a
+> two-browser password change, and an hour of 401s and live lines. Editors
+> should know that announcement bodies now render as Markdown. A rollback
+> goes to the batch 12 SHA tags with no database step (the column stays)
+> and **always rotates `JWT_SECRET`** first (owner decision 2026-10-12),
+> so that no session revoked on batch 13 works again; that signs everyone
+> out once.
+> Follow [Deploying batch 13 (2026-10-12)](#deploying-batch-13-2026-10-12).
+>
+> **Deploying the UI primitives and Markdown rendering (batch 13, lane
+> 8B)?** A normal `infra/deploy.sh` run that changes the **web only**: no
+> env, schema, permission, route, edge or dependency change (the cms image
+> is rebuilt unchanged). Select menus, the language menu, the notification bell
+> and the two dialogs (delete an ad, give kudos) behave like before for a
+> mouse user but now work fully with the keyboard; announcement bodies now
+> render as Markdown like wiki pages (single line breaks inside a paragraph
+> join); deleting an ad lands on the marketplace without a "Page not found"
+> flash; the bell keeps its list during a cms outage. Batch 13 ships it
+> with lanes 8A and 8C, so deploy and roll back cms and web together (see
+> [Deploying batch 13](#deploying-batch-13-2026-10-12)). Follow
+> [Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b).
+>
+> **Deploying the capabilities, navigation and loading states (batch 13,
+> lane 8A)?** A normal deploy with `infra/deploy.sh`; only the web
+> changes (no env, schema, grant, compose or edge change). Guests no longer
+> get 403 banners or error pages on sections their role cannot read (the
+> pages say "Not available for your account" and ask the cms nothing), the
+> phone navigation gains a _More_ sheet with every other section, editors
+> can take down other people's marketplace ads, the comment and reaction
+> controls follow the role, and navigation shows a pending dot and a
+> skeleton per page. Batch 13 ships it with lanes 8B and 8C, so deploy and
+> roll back cms and web together (see
+> [Deploying batch 13](#deploying-batch-13-2026-10-12)). Follow
+> [Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a).
+>
+> **Deploying the live client and password-change revocation (batch 13,
+> lane 8C)?** A normal deploy of cms and web **together** with
+> `infra/deploy.sh`, once batch 12 runs: no env, compose, grant or edge
+> change. The first cms boot adds the private column `up_users.token_version`
+> (empty for existing users, which counts as version 0); nobody is signed
+> out. From then on a password change on
+> /profile signs the user out of every other browser and device, and the
+> tab that changed it stays signed in. The live pipeline ends streams it
+> closes with a `bye` event, syncs each tab's full channel set with a
+> revision, and the cms proves its emit leg with a keepalive every 20 s:
+> without one for 45 s the browsers poll at the short intervals and
+> the header says _Live updates delayed_.
+> `infra/live-smoke.sh` now also requires `"emitFresh":true` on the stream.
+> Roll back cms and web together, and rotate `JWT_SECRET` in that rollback
+> (mandatory, owner decision 2026-10-12). Batch 13 ships it with lanes 8B and 8A
+> (see [Deploying batch 13](#deploying-batch-13-2026-10-12)).
+> Follow [Upgrading to the live client and password-change revocation (batch 13, lane 8C)](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c).
+>
 > **Deploying batch 12 (2026-09-29)?** The CMS data lifecycle leftovers,
 > the action results with English defaults, and the domain package with
 > the new image layers and pnpm 10 (the three notes below) ship as one
@@ -1635,6 +1711,1107 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 13 (2026-10-12)
+
+Batch 13 (branch `batch/13`: `batch/12` with `main` `9cf860d`, plus the
+three lanes of plan batch 8) ships in one deploy, **once batch 12 runs**:
+deploy [batch 12](#deploying-batch-12-2026-09-29) first, with its
+next-morning check green, and only then this. The runbooks below explain
+each change in detail; **this section is the one sequence to follow** on
+the owner instance (srv-prod-01, Traefik mode, checkout
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`):
+
+- [the UI primitives and Markdown rendering](#upgrading-to-the-ui-primitives-and-markdown-rendering-batch-13-lane-8b)
+  (lane 8B, web only): the select menus, the language menu and the bell's
+  panel on one menu primitive that works fully with the keyboard; the bell
+  keeps its list during a cms outage; one Markdown renderer for wiki pages,
+  lessons and now announcement bodies (raw HTML shown as text, unsafe links
+  and images neutralised); plain-text _Latest news_ excerpts; the _Delete
+  ad_ and _Give kudos_ dialogs keep the focus inside and close with Escape;
+  a deleted ad lands on `/marketplace` without a "Page not found" flash;
+- [the capabilities, navigation and loading states](#upgrading-to-the-capabilities-navigation-and-loading-states-batch-13-lane-8a)
+  (lane 8A, web only; two cms files change code comments): one set of
+  role checks in the web, pinned to the cms permission matrix by a test;
+  guests get "Not available for your account" instead of 403 banners, and
+  the web asks the cms nothing they cannot read (pages, dashboard,
+  navigation, the ⌘K search); the comment form and the reaction bar follow
+  the role; editors can take down other people's ads; the phone navigation
+  gains a _More_ sheet with every other section; a pending dot on clicked
+  navigation links and a skeleton per page; the header fits beside the
+  sidebar from 768 px;
+- [the live client and password-change revocation](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c)
+  (lane 8C, cms and web): terminal `bye` frames, the full channel set with
+  a revision on `/live/subscribe`, a cms keepalive every 20 s whose
+  freshness (`emitFresh`) every hello and heartbeat carries (a stale cms leg
+  makes the browsers poll at the short intervals), shorter ping coalescing,
+  and `infra/live-smoke.sh` requires `"emitFresh":true`; a user's own
+  password change on `/profile` revokes that user's other sessions through
+  a new private `tokenVersion` on the user, while the tab that changed it
+  stays signed in;
+- from the review fix rounds: a password an admin sets in the Strapi
+  panel revokes that user's sessions too, and the token version is hidden
+  there and kept out of every write; `infra/deploy.sh`'s printed rollback
+  demands the `JWT_SECRET` rotation for a target from before batch 13,
+  and its CI check ignores Dependabot's own update jobs on the commit;
+- from the integration: the header shows a small _Live updates delayed_
+  note (new message keys `live.delayed` and `live.delayedHint`, en and de)
+  once the live stream has been degraded for 5 s in a visible tab, and
+  removes it with the next fresh heartbeat; one test file from `main`
+  `9cf860d` is formatted (CI's `format:check`).
+
+It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
+and starts both; the rollback below takes both back. No env, compose,
+permission, route, edge or Traefik change, and no new dependency (a
+rollback, though, rotates `JWT_SECRET` and so signs everyone out once:
+owner decision 2026-10-12, see the rollback). The
+database container is not recreated; cms and web are, so the site is down
+while the cms boots. The first cms boot adds one column,
+`up_users.token_version` (integer, no database default): the rows of
+existing users stay NULL, which counts as version 0, and the cms writes 0
+for new users. **Nobody is signed out by this deploy:** a Strapi JWT
+without the version claim counts as version 0, so every running session,
+local or Microsoft, keeps working. From then on a user's own password
+change on `/profile` raises that user's version and ends the user's
+sessions in other browsers and on other devices (their next request lands
+on `/sign-in?expired=1`; their open live stream at its next rotation), and
+so does a password an admin sets in the Strapi panel (then all of that
+user's sessions end). The version itself is hidden in the admin panel and
+no write can set it. Open tabs get `bye shutdown` when the web restarts
+and reconnect their live stream, spread over up to 15 s.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Batch 12 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B12_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   B12_SHA="$(sed -n 's/^SHA=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B12_TAG} ${B12_SHA}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B12_TAG}" "infra-web:${B12_TAG}"
+   ```
+
+   The state names the batch 12 deploy (`SHA=` the batch 12 commit on
+   `main`, `TAG=` its first 12 characters, `LIVE_SMOKE=passed`), and both
+   images exist. Keep `B12_TAG` and `B12_SHA` in this shell for the
+   rollback below. If the state still names batch 10 (`TAG=7d9e52ba7e6a`),
+   stop: deploy batch 12 first.
+
+2. **Fast-forward to the new `main`, with a clean checkout:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git pull --ff-only
+   git log -1 --oneline      # the batch 13 merge
+   git clean -n -d -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   ```
+
+   The `git clean -n` dry run removes nothing and must print nothing
+   (`deploy.sh` refuses untracked files where the images are built from).
+
+3. **The preflight, the plan and the backup permission:**
+
+   ```bash
+   infra/deploy.sh --check
+   infra/deploy.sh --dry-run
+   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
+   ```
+
+   `--check` prints `Preflight OK` and
+   `Traefik host: sinnlos.yurtbay.dev; smoke URL: https://sinnlos.yurtbay.dev`.
+   `--dry-run` prints `lock: free`, the clean checkout at the batch 13
+   commit, the CI result of that commit (a `WARNING: CI is …` only
+   informs), `1. pre-deploy backup: sudo -n /usr/local/sbin/backup-run
+   --kind predeploy sinnlos (none on a first install)`, `last-known-good:
+   infra-{web,cms}:<B12_TAG> (commit <B12_SHA>, deployed …)` and `-> the
+   last-known-good deploy <B12_TAG> (…)` as the rollback target, `4. smoke
+   check https://sinnlos.yurtbay.dev; live-smoke: run`, and `5. tag
+   infra-{web,cms}:<sha12> (commit …)` with `and prune SHA tags beyond the
+   newest 5: none`. `sudo -n -l` prints the path of `backup-run`: the
+   sudoers drop-in `backup-run-predeploy` lets `bigemo` run exactly that
+   command ([§3.6](#36-deploy)). If it asks for a password or refuses,
+   fix the drop-in first: the deploy would stop at its backup step.
+
+4. **The live pipeline's cms env** (the new live-smoke needs the cms
+   keepalive to reach the web):
+
+   ```bash
+   docker exec infra-cms-1 printenv WEB_INTERNAL_URL LIVE_EVENTS_DISABLED
+   docker exec infra-cms-1 sh -c 'test -n "$REVALIDATE_SECRET" && echo "REVALIDATE_SECRET is set"'
+   grep -E '^LIVE_EVENTS_DISABLED=' infra/.env
+   ```
+
+   `http://sinnlos-web:3000`, `0`, `REVALIDATE_SECRET is set`, and no
+   `LIVE_EVENTS_DISABLED=1` line. The new cms POSTs its keepalive to that
+   URL with that secret; without it the new live-smoke fails with "the cms
+   leg is not fresh", `deploy.sh` does not record the deploy and prints
+   the rollback, and every browser would show _Live updates delayed_.
+
+5. **Permissions: no change.**
+
+   ```bash
+   psql_db -X < infra/diagnostics/prod-perm-diff.sql
+   ```
+
+   The file is the same as batch 12's: no lane adds or removes an action
+   (FX40 wraps the users-permissions JWT service and auth controller; it
+   adds no route and no grant). So the output equals the one you kept
+   after the batch 12 deploy, before and after this deploy.
+
+6. **The accounts for the checks, the column, and the announcements whose
+   look changes** (one read-only transaction):
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN TRANSACTION READ ONLY;
+   \echo '== the token version column (none before the first boot)'
+   SELECT count(*) AS token_version_columns FROM information_schema.columns
+    WHERE table_name = 'up_users' AND column_name = 'token_version';
+   \echo '== users per provider and per role'
+   SELECT provider, count(*) AS users, count(*) FILTER (WHERE blocked) AS blocked
+     FROM up_users GROUP BY 1 ORDER BY 1;
+   SELECT r.type AS role, count(l.user_id) AS users
+     FROM up_roles r LEFT JOIN up_users_role_lnk l ON l.role_id = r.id
+    GROUP BY r.type ORDER BY 1;
+   \echo '== published announcement bodies that Markdown renders differently'
+   SELECT count(*) AS published,
+          count(*) FILTER (WHERE body ~ '<[A-Za-z/!]') AS with_raw_html,
+          count(*) FILTER (WHERE body ~ '[^\r\n]\r?\n[^\r\n]') AS with_single_line_breaks
+     FROM announcements WHERE published_at IS NOT NULL;
+   ROLLBACK;
+   SQL
+   ```
+
+   Note for steps 10, 13 and 14:
+   - `token_version_columns` is 0, and the user total (step 10 expects
+     them all at version 0).
+   - The roles: a `guest`, an `editor` and a `member` account for steps 12
+     to 14. Without a guest account, skip the guest walk or create a test
+     guest first.
+   - `with_raw_html`: published bodies that contain HTML tags; after the
+     deploy those tags show as text. `with_single_line_breaks`: bodies
+     whose single line breaks now join into one paragraph (Markdown
+     rules). Tell the editors (see **What users notice**); an empty line
+     between two lines keeps them apart.
+
+7. **A baseline of refused requests,** for step 15:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
+   ```
+
+   The 401 answers of the last hour (ended sessions, probes). The version
+   check refuses only JWTs that a password change on the new release
+   revoked, never a running session, so the first hour after the deploy
+   shows a number of the same order.
+
+**Deploy**
+
+8. As `bigemo`, run `infra/deploy.sh` in the checkout (from a root shell:
+   `sudo -u bigemo -H infra/deploy.sh`). It takes the lock, checks the
+   clean checkout and the CI result, takes the pre-deploy backup through
+   `backup-run` (a `-predeploy` generation of `sinnlos` in
+   `/srv/backup/outbox`), keeps the batch 12 SHA tags (`B12_TAG`) as the
+   rollback target, builds both images, runs `up -d --no-build` (cms and
+   web recreated, the database kept), smoke-checks, runs the new
+   live-smoke (it prints `live-smoke: cms leg fresh (emitFresh on the
+   stream)` before the ping lines; right after the web restarts that can
+   take up to 20 s), and only then tags `infra-{web,cms}:<sha12>` of the
+   batch 13 commit and records the state. A failure prints the rollback to
+   `B12_TAG` (below).
+
+**After the deploy** (read-only)
+
+9. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|users-permissions-extension|live-emit)\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[classifieds\] delete|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
+   ```
+
+   The state names the batch 13 commit (`TAG=` its first 12 characters,
+   `LIVE_SMOKE=passed`). The cms logs `[datetime] process time zone UTC,
+   APP_TIME_ZONE Europe/Berlin`, `[bootstrap] permission drift: none
+   (report-only check of 120 managed actions)` (as in batch 12), no
+   `granted` or `revoked` line, and `Strapi started successfully`; no
+   `[users-permissions-extension]` line (that is the FX40 tripwire for a
+   users-permissions plugin whose shape changed, and the cms would not
+   have started); and of `[live-emit]` the line every cms boot logs,
+   `info: [live-emit] DB lifecycle subscriber registered`, plus either
+   nothing more or exactly `keepalive failed: …` followed by `keepalive
+   reaches the web again` (the new cms started before the new web
+   answered). The third command prints nothing. It leaves out the web's
+   warnings for refused user actions (`<action> refused: <status> <…Error>
+   → <code>`, see batch 12) and Auth.js's `[auth][error] CredentialsSignin:
+   …` line for a wrong password (a typo, or a live-smoke sign-in that
+   failed; the raw line has colour codes between `[auth][error]` and the
+   message, so the filter matches `CredentialsSignin` alone, as batch 12's
+   step 9 does); look at every line it does print.
+
+10. **The new column:**
+
+    ```bash
+    psql_db -X <<'SQL'
+    SELECT column_name, data_type, column_default FROM information_schema.columns
+     WHERE table_name = 'up_users' AND column_name = 'token_version';
+    SELECT coalesce(token_version, 0) AS version, count(*) AS users FROM up_users GROUP BY 1 ORDER BY 1;
+    SQL
+    ```
+
+    One row `token_version | integer |` (no database default), and every
+    user at version 0 (the user total of step 6). Step 5 again prints the
+    same permission diff.
+
+11. **The pages** (in a browser, as a member): `/announcements` shows
+    formatted bodies, no raw `**` or backticks (the bodies step 6 counted
+    with HTML show their tags as text); `/` shows plain-text _Latest news_
+    excerpts; a wiki page with headings keeps its table of contents. Tab to
+    the language button, Enter, the arrow keys and Escape: the menu opens,
+    moves and closes, and the focus is back on the button; Ctrl+K logs no
+    "DialogTitle" error in the browser console. On a phone (or 360 px
+    wide), _More_ opens the sheet with the other sections, as an admin with
+    _Admin_, as a member without; at 768 px the page does not scroll
+    sideways and _Sign out_ is visible. The header shows no _Live updates
+    delayed_ note (only while the stream is degraded).
+
+12. **As a guest** (step 6's `guest` row). On the host, first note the
+    time, so that the log check covers the walk only (the web logs
+    `fetch failed` while `deploy.sh` recreates the cms):
+
+    ```bash
+    since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    ```
+
+    Then, as the guest: the navigation shows Dashboard, People, Events,
+    Wiki, Polls and Documents only; `/announcements`, `/departments`,
+    `/kudos`, `/marketplace` and `/training` by URL each show "Not
+    available for your account"; ⌘K finds a colleague. Afterwards:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since "$since" web | grep -E 'fetch failed' || echo "web: none"
+    "${COMPOSE[@]}" logs --since "$since" cms \
+      | grep -E 'GET /api/(announcements|departments|teams|kudos-entries|celebrations|classifieds|courses|lessons|lesson-progresses|acknowledgements)[?/ ].* 403$' \
+      || echo "cms: none"
+    ```
+
+    `web: none` and `cms: none`. Strapi's request log names no user, so a
+    line can be another user's request in the same minutes: repeat the
+    walk in a quiet moment with a fresh `since`.
+
+13. **As an editor** (step 6's `editor` row): on an ad posted by someone
+    else, a _Moderation_ card offers _Delete ad_, and there is no _Edit_
+    link. Take down a test ad only: the delete lands on `/marketplace`
+    without a "Page not found" flash.
+
+14. **A password change revokes the other sessions** (two browsers). Use a
+    test account that live-smoke does not sign in with: not `alex.morgan`
+    or `casey.jones` (its stream user, the first of the two with a line in
+    the credentials file) and not `sam.chen` (its comment author,
+    `SMOKE_AUTHOR_EMAIL`), whose passwords `deploy.sh` reads from the
+    credentials file; a changed password there breaks the next deploy's
+    live-smoke. Sign in as it in browser A and in a private window
+    B. Change the password on `/profile` in A: A shows "Password changed"
+    and keeps working; B's next click lands on `/sign-in?expired=1`. Then:
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 15m cms | grep -F '[auth] password changed'
+    ```
+
+    `[auth] password changed: user=<id> tokenVersion=1`. If the account's
+    password is kept somewhere, change it back the same way in A
+    (`tokenVersion=2`; A again stays signed in).
+
+    Then the admin panel: as a Strapi admin, open the test account under
+    _Content Manager → User_. The edit view shows no token version field.
+    Set a new password there and save: A's next click lands on
+    `/sign-in?expired=1` (an admin-set password ends every session of the
+    user), the new password signs in, and the cms logs one more
+    `[auth] password changed: user=<id> tokenVersion=…` line, one higher.
+    Give the account its kept password back the same way.
+
+15. **The first hour:**
+
+    ```bash
+    "${COMPOSE[@]}" logs --since 1h cms | grep -cE ' 401$'
+    "${COMPOSE[@]}" logs --since 1h cms | grep -F '[live-emit]'
+    "${COMPOSE[@]}" logs --since 1h web | grep -E '\[auth\] session update refused|\[profile\] change password|\[live\] subscribe of user'
+    "${COMPOSE[@]}" logs --since 1h cms | grep -E '\[auth\] (password not changed|tokenVersion dropped)|FX40 tripwire'
+    ```
+
+    The 401 count is of the same order as step 7's baseline (plus B's
+    refused requests of step 14); a clear jump means running sessions are
+    refused, which calls for the rollback. No `[live-emit]` line beyond
+    step 9's (the boot's `DB lifecycle subscriber registered` and, at
+    most, the keepalive pair). The third command prints nothing: `session update
+    refused` is a session update without the server's proof, `change
+    password: …` a password change whose tab lost its session, `capped at
+    200 channels` a page with more than 200 comment sections. The fourth
+    prints nothing either: `password not changed: user=<id>` is a change
+    that rolled back (raising the version or saving the password failed:
+    that user keeps the old password and the sessions; the user sees an
+    error and can try again),
+    `tokenVersion dropped from a Document Service …` a write that tried to
+    set the token version (the cms dropped it: only a password change
+    raises it; find out who sent it), `FX40 tripwire` a password the plugin
+    saved outside its user service (the extension then revoked afterwards;
+    review it against the plugin).
+
+**What users notice** (worth a short release note): nobody is signed out
+by the update. Changing your own password now signs you out in your other
+browsers and on your other devices; the tab you changed it in stays signed
+in. **For admins:** a password set for a user in the Strapi admin panel
+now signs that user out everywhere; they sign in with the new password. Announcement bodies show formatting (bold, lists, links, images) like
+wiki pages, and the dashboard's _Latest news_ shows plain text. **For
+editors:** a single line break inside a paragraph of an announcement now
+joins the two lines (an empty line starts a new paragraph), and HTML in a
+body shows as text. Menus, the language switch, the bell and the delete
+and kudos dialogs work fully with the keyboard; the bell keeps its list
+while the intranet is briefly unreachable; deleting an ad goes straight to
+the marketplace. Guests no longer see sections they cannot open (and no
+error banners), nor a comment form or reactions. Editors can take down
+other people's marketplace ads. On a phone, _More_ reaches every section.
+Clicked links show a small pending dot, and every page its own loading
+skeleton. When live updates are delayed for a while, the header says _Live
+updates delayed_; comments and notifications still arrive, a few seconds
+later. Should the update have to be rolled back, everyone is signed out
+once and signs in again (Microsoft sign-ins too): the rollback replaces
+the key that signs the sessions, so that no session ended by a password
+change comes back.
+
+**Rollback: both images, to the batch 12 SHA tags (`B12_TAG` of step 1),
+with a new `JWT_SECRET`, no database step.** _Owner decision 2026-10-12:
+`JWT_SECRET` rotation is mandatory on rollback below batch 13._ The batch
+12 cms checks a Strapi JWT's signature and expiry only and ignores the
+token version, so under the same `JWT_SECRET` every session and JWT that a
+password change on batch 13 revoked (a stolen one too) would be accepted
+again for the whole rollback window. A new `JWT_SECRET` before the batch
+12 images serve any traffic makes every JWT signed before the rollback
+invalid, so no revoked JWT is ever accepted. The price: **every user is
+signed out once** (open tabs land on `/sign-in?expired=1` at their next
+page load) and signs in again once: local accounts and, with
+`ENTRA_ENABLED=1`, Microsoft sign-ins as well (the cms signs their Strapi
+JWT with the same secret; they sign in through Microsoft again). Strapi
+admin-panel sessions and API tokens are not affected. This holds for
+every rollback of the cms from batch 13 (or a later release) to an image
+from before batch 13, also after a failed `infra/deploy.sh`: from batch 13
+on, the rollback commands it prints carry the step themselves, before
+their `up -d --no-build web cms` line (`MANDATORY before the start below:
+infra-cms:<tag> predates the token version of batch 13.`, found by a
+`docker run --pull never --network none` grep for `tokenVersion` in the
+target image's user schema; for an image it cannot check, the same step
+with the command that tells). They name R2 to R4 and never edit
+`infra/.env` themselves: do R2 to R4 below, then their start commands.
+
+R1. **Does a batch 13 cms run?** If the shell of step 1 is gone, set
+`B12_TAG` and `B12_SHA` again from `.git/sinnlos-deploy/infra.history`
+(`<tag> <commit> <date>`): the batch 12 deploy is its last line after a
+failed deploy, the line before the last after a recorded batch 13 deploy
+(the batch 12 tags stay: the prune keeps the newest five).
+
+```bash
+tail -n 2 .git/sinnlos-deploy/infra.history
+# B12_TAG=… B12_SHA=…   (only if the shell of step 1 is gone)
+grep -F "${B12_TAG}" .git/sinnlos-deploy/infra.history
+docker inspect --format '{{.Image}}' infra-cms-1
+docker image inspect --format '{{.Id}}' "infra-cms:${B12_TAG}"
+```
+
+Two equal ids: `deploy.sh` stopped before it recreated the containers,
+batch 12 still runs, and there is nothing to roll back (and nothing to
+rotate). Otherwise go on, by hand or along the commands a failed
+`deploy.sh` printed.
+
+R2. **Record what the rotation protects** (read-only, for the incident
+notes; it decides nothing, the rotation comes either way). Before the
+images change: the batch 13 cms's log goes with its container.
+
+```bash
+umask 077
+psql_db -X <<'SQL'
+SELECT count(*) AS token_version_columns FROM information_schema.columns
+ WHERE table_name = 'up_users' AND column_name = 'token_version';
+SELECT count(*) FILTER (WHERE token_version > 0) AS users_with_revocations, count(*) AS users
+  FROM up_users;
+SELECT id, username, token_version FROM up_users WHERE token_version > 0 ORDER BY id;
+SQL
+"${COMPOSE[@]}" logs cms | grep -E '\[auth\] password (changed|not changed)' > /tmp/b13-password-changes.log
+wc -l < /tmp/b13-password-changes.log
+docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' infra-cms-1 \
+  | sed -n 's/^JWT_SECRET=//p' | sha256sum > /tmp/b13-jwt-secret.sha256
+```
+
+`users_with_revocations` users (listed with their version) changed their
+password on batch 13, or were signed out by hand: each such change
+revoked that user's older JWTs, which only the rotation keeps out after
+the rollback. The log lines, `[auth] password changed: user=<id>
+tokenVersion=<n>` since the deploy started the cms, say when (the log
+rotation of 10 MB × 5 can have dropped the earliest of a long run; the
+database count is complete). `token_version_columns` 0 (and an error on
+the next query): the batch 13 cms never finished its first boot, nobody
+was revoked. The last command keeps a checksum of the running cms's
+`JWT_SECRET` (not the secret) for R6.
+
+R3. **A revoked JWT for the check in R6.** Needs the batch 13 cms to
+answer; skip it if it does not (a crash loop: then no password changed on
+it either). Use the test account of step 14 (not `alex.morgan`,
+`casey.jones` or `sam.chen`, the accounts live-smoke signs in with); its
+password travels through `docker exec -e`, never on a command line. The probe signs in, changes the password to a random
+temporary one and back (the account keeps its password; its version goes
+up by 2), checks that the JWT of the first sign-in now gets 401, and
+keeps that JWT:
+
+```bash
+TEST_IDENTIFIER='<the username of the test account>'
+read -rsp "Password of ${TEST_IDENTIFIER}: " TEST_PASSWORD; echo
+TEST_TEMP_PASSWORD="$(openssl rand -base64 18)"
+export TEST_IDENTIFIER TEST_PASSWORD TEST_TEMP_PASSWORD
+docker exec -i -e TEST_IDENTIFIER -e TEST_PASSWORD -e TEST_TEMP_PASSWORD infra-cms-1 \
+  node --input-type=module - > /tmp/b13-revoked.jwt <<'NODE'
+const base = "http://127.0.0.1:1337";
+const { TEST_IDENTIFIER: identifier, TEST_PASSWORD: password, TEST_TEMP_PASSWORD: temp } = process.env;
+const call = async (path, jwt, body) => {
+  const res = await fetch(`${base}${path}`, {
+    method: body ? "POST" : "GET",
+    headers: { "content-type": "application/json", ...(jwt ? { authorization: `Bearer ${jwt}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+};
+const ok = (what, res) => {
+  if (res.status === 200) return res.body;
+  throw new Error(`${what}: HTTP ${res.status} ${res.body?.error?.message ?? ""}`);
+};
+const change = (from, to, jwt) =>
+  call("/api/auth/change-password", jwt, { currentPassword: from, password: to, passwordConfirmation: to });
+const { jwt: revoked } = ok("sign-in", await call("/api/auth/local", null, { identifier, password }));
+const { jwt: changed } = ok("change to the temporary password", await change(password, temp, revoked));
+ok("change back (the password is now the one in TEST_TEMP_PASSWORD)", await change(temp, password, changed));
+const { status } = await call("/api/users/me", revoked);
+if (status !== 401) {
+  throw new Error(`the JWT from before the change answered HTTP ${status}, not 401: is this the batch 13 cms?`);
+}
+console.error("batch 13: the JWT from before the password change gets 401");
+console.log(revoked);
+NODE
+```
+
+It prints `batch 13: the JWT from before the password change gets 401`,
+and `/tmp/b13-revoked.jwt` holds that JWT (one line). The cms logs two
+`[auth] password changed: user=<id>` lines for the account.
+
+R4. **Rotate `JWT_SECRET`** in `infra/.env` on the host (mode 600, owned
+by `bigemo`). Only the cms reads it; leave `AUTH_SECRET` (the web's own
+session key: changing it is not needed, the sessions end anyway because
+their Strapi JWT does), `ADMIN_JWT_SECRET` and `ENTRA_EXCHANGE_SECRET` as
+they are.
+
+```bash
+NEW_JWT_SECRET="$(openssl rand -base64 48 | tr -d '\n')"
+awk -v s="${NEW_JWT_SECRET}" '/^JWT_SECRET=/ { print "JWT_SECRET=" s; n++; next } { print } END { exit n == 1 ? 0 : 1 }' \
+  infra/.env > infra/.env.rotated && mv infra/.env.rotated infra/.env
+unset NEW_JWT_SECRET
+ls -l infra/.env
+grep -c '^JWT_SECRET=' infra/.env
+"${COMPOSE[@]}" config --quiet && echo "compose config OK"
+```
+
+`-rw-------` (R2's `umask 077`), `1` and `compose config OK`. If `awk`
+fails (no `JWT_SECRET=` line, or several), nothing was moved: remove
+`infra/.env.rotated` and give `infra/.env` exactly one `JWT_SECRET=` line
+with a fresh value. Keep no copy of the old value.
+
+R5. **Start the batch 12 images,** which pick up the new secret (after a
+failed deploy: the printed commands from their `up -d` line on):
+
+```bash
+docker tag "infra-web:${B12_TAG}" infra-web:latest
+docker tag "infra-cms:${B12_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+R6. **Verify** once the cms answers: the cms runs with the new secret,
+the revoked JWT of R3 gets 401, a fresh sign-in of the test account works,
+and batch 12's own live-smoke passes.
+
+```bash
+[ "$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' infra-cms-1 \
+  | sed -n 's/^JWT_SECRET=//p' | sha256sum)" != "$(cat /tmp/b13-jwt-secret.sha256)" ] \
+  && echo "JWT_SECRET rotated" || echo "JWT_SECRET NOT ROTATED"
+REVOKED_JWT="$(cat /tmp/b13-revoked.jwt 2>/dev/null)"; export REVOKED_JWT
+docker exec -i -e TEST_IDENTIFIER -e TEST_PASSWORD -e REVOKED_JWT infra-cms-1 node --input-type=module - <<'NODE'
+const base = "http://127.0.0.1:1337";
+const { TEST_IDENTIFIER: identifier, TEST_PASSWORD: password, REVOKED_JWT: revoked } = process.env;
+const me = async (jwt) =>
+  (await fetch(`${base}/api/users/me`, { headers: { authorization: `Bearer ${jwt}` } })).status;
+let ok = true;
+if (revoked) {
+  const status = await me(revoked);
+  console.log(`the revoked JWT from batch 13: HTTP ${status} (expected 401)`);
+  ok = ok && status === 401;
+}
+const login = await fetch(`${base}/api/auth/local`, {
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({ identifier, password }),
+});
+const fresh = login.ok ? (await login.json()).jwt : null;
+const status = fresh ? await me(fresh) : 0;
+console.log(`a fresh sign-in: HTTP ${login.status}, then /api/users/me HTTP ${status} (expected 200 and 200)`);
+ok = ok && login.status === 200 && status === 200;
+process.exitCode = ok ? 0 : 1;
+NODE
+git show "${B12_SHA}:infra/live-smoke.sh" > /tmp/live-smoke-b12.sh
+BASE_URL=https://sinnlos.yurtbay.dev bash /tmp/live-smoke-b12.sh
+unset TEST_PASSWORD TEST_TEMP_PASSWORD REVOKED_JWT
+rm -f /tmp/b13-revoked.jwt /tmp/b13-jwt-secret.sha256
+```
+
+`JWT_SECRET rotated`, `the revoked JWT from batch 13: HTTP 401 (expected
+401)` (the line is missing when R3 was skipped), `a fresh sign-in: HTTP
+200, then /api/users/me HTTP 200 (expected 200 and 200)`, and the
+live-smoke passes (it signs in afresh, too). In a browser, a tab that was
+signed in before lands on `/sign-in?expired=1` at its next page load, and
+signing in works. Keep `/tmp/b13-password-changes.log` with the incident
+notes. `infra/live-smoke.sh` belongs to its checkout: the batch 13 script
+fails against a batch 12 web (on the subscribe answer and `emitFresh`),
+so the check after a rollback runs batch 12's. None of the other special
+cases of the hint applies from batch 13 to batch 12 (as from batch 12 to
+batch 10).
+
+What stays, and what follows:
+
+- **The `token_version` column stays** with its values (the schema sync
+  never drops columns, `forceMigration: false`); the batch 12 cms boots on
+  it and ignores it, as the batch 10 cms did with batch 12's `audience`
+  columns.
+- **During the rollback window a password change revokes nothing** (batch
+  12 cannot). To end the sessions of one user after the roll-forward, raise
+  that user's version by hand (the `UPDATE` of the
+  [lane 8C section](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c)).
+- **The roll-forward** is a normal `infra/deploy.sh`, and **the new
+  `JWT_SECRET` stays**: never put the old value back (it would make the
+  JWTs from before the rollback valid again, as far as their version
+  matches, and sign out everyone who signed in during the rollback). No
+  second rotation. The roll-forward signs nobody out, except that the
+  JWTs the batch 12 cms issued carry no version (= 0): a user whose
+  version is above 0 (R2's list, plus R3's test account and anyone signed
+  out by hand) signs in once more.
+- Never roll back one image alone. A batch 12 web in front of the batch 13
+  cms answers the keepalive with 400 (logged once), and a password change
+  there also ends the tab that made it (the batch 12 web does not take the
+  new JWT). A batch 12 cms behind the batch 13 web sends no keepalive, so
+  every browser shows _Live updates delayed_ and polls at the short
+  intervals.
+
+**Staging rehearsal (2026-10-12, `4d5696c`): passed.** `infra/deploy.sh`
+exit 0, the build about 111 s on the new node 24.21 base, the outage about
+9 s for the web and 4 s for the cms; the two-browser revocation (step 14),
+the admin-panel revocation, a `tokenVersion` in a write dropped, the
+_Live updates delayed_ note after about 50 s with the cms stopped, the
+failure hint with the MANDATORY rotation step, R1 to R6 of the rollback
+including the rotation and the revoked JWT's 401, and the roll-forward.
+The batch 13 images take 926 MB (cms) and 64 MB (web) of their own on
+disk; the node 24.21 base layer (241.5 MB) is new as well. The rehearsal
+found only runbook text, fixed here: the boot's `[live-emit] DB lifecycle
+subscriber registered` line in steps 9 and 15, the `CredentialsSignin`
+filter and the command count of step 9, `sam.chen` among the accounts
+live-smoke uses, and the production checkout of the lane 8C section.
+
+**Integration checks (2026-10-12, the integrated `batch/13`):** typecheck,
+lint (0 errors), `format:check`, the unit suite (5149 passed, 81 skipped;
+with Postgres 16 5207 passed, 33 skipped), the time-zone matrix with
+Postgres 16 under UTC, Europe/Berlin and Pacific/Auckland (5207 each), the
+integration suite on SQLite (166) and Postgres 16 (336, including
+`token-version.integration.test.ts`: an old JWT gets 401 after a password
+change), the `deploy-flow` sequences (36), shellcheck, the compose renders
+and the domain, cms and web builds passed (details under §6 CI in
+[architecture.md](./architecture.md)). Not exercised here: the images,
+`infra/deploy.sh` end to end, Traefik, the production host, a real phone
+and a screen-reader pass (the plan's staging rehearsal of the three
+lanes). **After the review fix round (2026-10-12):** the unit suite 5170
+passed, 81 skipped (with Postgres 16 5228 passed, 33 skipped), the
+time-zone matrix 5228 each, the integration suite on SQLite 170 and on
+SQLite plus Postgres 16 344, typecheck, lint, `format:check` and the web
+build passed; the rollback's R3 and R6 probes ran against the harness cms
+across a `JWT_SECRET` change. **After the second round (2026-10-12, on
+`main` `adc7277`: batch 12, next 16.3.8, vitest 5):** the unit suite 5202
+passed, 82 skipped (with Postgres 16 5260 passed, 34 skipped), the
+time-zone matrix 5260 each, the integration suite on SQLite 178 and on
+SQLite plus Postgres 16 360, the `deploy-flow` sequences (43, with
+`SINNLOS_SLOW_SHELL_TESTS=1`), shellcheck 0.11.0, typecheck, lint,
+`format:check`, the web build and `pnpm audit --prod
+--audit-level=critical` passed. **After the third round (one transaction per
+password change):** the unit suite 5202 passed, 82 skipped (with Postgres
+16 5260 passed, 34 skipped), the time-zone matrix 5260 each, the
+integration suite on SQLite 180 and on SQLite plus Postgres 16 364
+(`token-version.integration.test.ts` three more times on both engines),
+the `deploy-flow` sequences 43, shellcheck, typecheck, lint,
+`format:check`, the web build and the critical audit passed.
+
+#### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
+
+This release (branch `feat/ui-primitives`, on `batch/12` `02f288e`) changes
+the web only. What users notice:
+
+- **Menus (UI02).** The marketplace category and duration selects, the
+  department filter on `/people`, the language menu in the top bar and the
+  notification bell's panel open with Enter or a click, move with the arrow
+  keys, jump to an entry by typing its first letter, close with Escape or a
+  click beside them, and give focus back to their button. Screen readers
+  hear the current value on a select's button ("Category For sale"). On a
+  phone the bell's panel keeps 12 px to each screen edge. After a language
+  is picked, the language button shows the switch as busy (dimmed) until
+  the page is back in the new language and keeps the keyboard focus;
+  picking again meanwhile does nothing. A switch that cannot reach the web
+  server keeps the current language instead of showing the error page.
+  The search palette (Ctrl+K / ⌘K) no longer logs "DialogContent requires a
+  DialogTitle" in the browser console. The marketplace form still posts
+  `category` and `days` as before.
+- **The bell during a cms outage.** A refetch that cannot reach the cms
+  keeps the last list and badge instead of emptying them, and the open
+  panel says "The intranet cannot be reached right now…". The next
+  successful refetch clears it (the bell polls every 2 minutes, every 30
+  seconds while the live stream is degraded, and on a live ping). If the
+  cms was already down when the page loaded, the panel shows only that
+  note.
+- **Markdown (UI03).** Announcement bodies (a Strapi rich-text field, i.e.
+  Markdown) now render like wiki pages and lessons: bold, lists, links and
+  images show as written. **Editors should know:** a single line break
+  inside a paragraph now joins the lines (Markdown rules); an empty line
+  starts a new paragraph. Raw HTML in any body (wiki, lesson, announcement)
+  is shown as text, never run; a link to `javascript:`, `data:` or another
+  unsafe scheme renders as plain text and such an image as its alt text.
+  Links to other intranet pages stay in the tab, links to other sites open
+  in a new tab. Footnotes (`[^1]`) in several announcements on one page
+  each jump to their own notes. The dashboard's _Latest news_ cards show
+  plain-text excerpts (no `**`, `#` or link targets).
+- **Dialogs (UI07).** _Delete ad_ and _Give kudos_ keep the keyboard inside
+  the dialog, close with Escape or a click beside it and give focus back to
+  their button; _Cancel_ is focused first when deleting. Confirming a
+  delete now goes straight to `/marketplace`: before, the edit page of the
+  deleted ad flashed "Page not found" first. A delete the cms refuses or
+  cannot answer shows the matching message ("You are not allowed to do
+  this.", "This item no longer exists…", "The intranet cannot be reached
+  right now…" or "Deleting failed…") and the dialog stays open.
+
+**A normal deploy with `infra/deploy.sh`** (it rebuilds both images; only
+the web image changes). No `.env`, compose, schema, permission or Traefik
+change; no message keys were added. Batch 13 ships it with lanes 8A and
+8C as one deploy of cms and web: follow
+[Deploying batch 13](#deploying-batch-13-2026-10-12).
+
+1. **Before (read-only):** `infra/deploy.sh --check` and `--dry-run` as
+   usual.
+2. **Deploy:** `infra/deploy.sh`.
+3. **After: the pages.** Signed in, open `/announcements` (the bodies show
+   formatting instead of raw `**` or backticks), `/` (the _Latest news_
+   excerpts are plain text), a wiki page with headings (the table of
+   contents and heading links work as before) and a lesson.
+4. **After: keyboard.** Tab to the language button in the top bar, press
+   Enter, then the arrow keys and Escape: the menu opens, moves, closes, and
+   the focus is back on the button. Press Enter, ArrowUp to _Deutsch_ and
+   Enter: once the page is German, the focus is still on the language
+   button (Enter opens the menu again; switch back to English the same
+   way). Press Ctrl+K and look at the browser console: no "DialogTitle"
+   error.
+5. **After: delete (optional, with a test ad).** Post a test ad, open
+   _Edit_, _Delete ad_, _Delete_: the browser lands on `/marketplace`
+   without a "Page not found" flash.
+6. **After: logs.** This prints only lines for deletes or language
+   switches that failed on purpose:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m web | grep -E '\[classifieds\] delete|\[locale\]'
+   ```
+
+**Rollback:** re-up the previous web image with the commands
+`infra/deploy.sh` prints; nothing else changed. Announcement bodies are
+shown as plain text again. Shipped with batch 13, both images go back
+together ([Deploying batch 13](#deploying-batch-13-2026-10-12)).
+
+**Rehearsal (2026-09-29, lane 8B):** unit suite 4730 tests (4788 with
+Postgres 16), the time-zone matrix under UTC, Europe/Berlin and
+Pacific/Auckland with Postgres 16, the integration suite on SQLite (163)
+and Postgres 16 (330), and the web production build passed. In the plain
+Postgres run one `infra/live-smoke.test.ts` case (a different one each
+run) hit its 30 s limit on the loaded host; the file passed alone (19/19).
+In a browser (headless Chrome against the demo web, `next dev` with
+`DEMO_MODE=1`), 48 checks passed with no console message from the app: the
+palette's dialog name and description; the language menu by keyboard and
+mouse, switching to German and back; the bell by click, arrow keys and
+Escape, at 1280 px and 360 px; both dialogs trapping Tab and closing on
+Escape with focus back on their button (the kudos dialog also on a backdrop
+click); the delete landing
+on `/marketplace` with the action answering `x-action-redirect:
+/marketplace` and no "Page not found" rendered on the way; the category
+select changing the form's `category`; and an announcement containing a
+`<script>`, an `onerror` image and `javascript:` and `data:` targets
+rendered harmlessly. Not exercised: a screen-reader pass (NVDA or
+VoiceOver).
+
+**Fix round (2026-09-30, lane 8B):** unit suite 4763 tests (4821 with
+Postgres 16), the time-zone matrix with Postgres 16, the integration suite
+on SQLite (163) and Postgres 16 (330), and the builds of the domain
+package, cms and web passed; on the loaded host single cases of the shell
+tests (`infra/live-smoke.test.ts`, `deploy-preflight.test.ts`) and two
+timing checks in cms tests hit their limits in some full runs and passed
+alone. In a browser (headless Chrome against the built web with
+`next start` and Strapi on Postgres 16 with the demo seed), 30 checks
+passed: the keyboard language switch of step 4 keeps the focus on the
+language button (the same run against the previous language menu left the
+focus on the page body); a delete call with a tampered ad id is refused
+before any cms request while the real one still deletes; two
+announcements with footnotes have no duplicate ids and each footnote link
+stays in its card; and during a real cms stop the bell keeps its list
+and badge, a page loaded during the stop shows only the note, and
+everything is back after the restart.
+
+#### Upgrading to the capabilities, navigation and loading states (batch 13, lane 8A)
+
+This release (branch `feat/web-capabilities-and-nav`, on `batch/12`
+`02f288e`) changes only what the web shows and asks for; the cms keeps its
+grants, policies and schema.
+
+- **One set of role rules in the web (SH02).** Every role set and check the
+  web uses lives in `apps/web/src/lib/roles.ts`, in the capability shape of
+  decision 06 (§L2, including `authorScope`), and
+  `apps/web/src/lib/roles-matrix-parity.test.ts` fails CI when the cms
+  permission matrix changes without it. The acknowledgement and training
+  reports and the profile's digest options use these sets; what they show
+  is unchanged.
+- **No more 403 banners for guests.** A guest opening Announcements,
+  Departments, Teams, Kudos, Marketplace or Training (lists, detail pages
+  and lessons) saw "Some content couldn't be loaded" or the error page,
+  because the web asked the cms for sections the guest role cannot read;
+  each such request also logged a 403. The web now asks nothing there and
+  shows "Not available for your account" with a link to the dashboard. The
+  guest's dashboard leaves those sections out, and so does the navigation,
+  and the guest's ⌘K search no longer asks for announcements, departments
+  and teams (it found none of them anyway). The `authenticated` fallback
+  role no longer asks for the birthday and anniversary tiles on `/kudos`,
+  which it cannot read. A user whose role the web could not read (the cms
+  briefly down) still gets the old error banner, since the cms decides.
+- **Controls follow the role.** The comment form and the reaction bar show
+  only for roles that may comment and react (never guest), and the delete
+  button on one's own comments only for roles that may delete them (not
+  the `authenticated` fallback). On someone else's marketplace ad, an
+  editor (and an admin) now sees a _Moderation_ card with _Delete ad_: the
+  cms always allowed editors to take ads down, the web had no button.
+  Editors still cannot edit other people's ads; the edit page sends them
+  back to the ad.
+- **Every section reachable on a phone (FX30).** The bottom bar keeps its
+  five tabs (Home, People, Events, Wiki, News; a guest has no News tab) and
+  adds _More_: a sheet with Training, Departments, Teams, Kudos,
+  Marketplace, Polls, Documents and, for admins only, _Admin_. Before,
+  those sections could not be reached on a phone at all. The sidebar and
+  the phone nav use one list (`apps/web/src/lib/nav-config.ts`), and the
+  current-section highlight no longer confuses sections that share a
+  prefix.
+- **Loading feedback (UI05).** A clicked navigation link shows a small
+  pulsing dot until the new page can render, and every page has its own
+  loading skeleton with the progress bar (the training pages had none and
+  overflowed on phones; `/manage`, `/manage/training` and `/polls/new`
+  showed the dashboard's).
+- **The header fits beside the sidebar.** From 768 px up the header has
+  512 px next to the sidebar, but the search box and the name and e-mail
+  kept their full text width: the page scrolled sideways and _Sign out_
+  sat off-screen at 768 px, and with a long e-mail also at 1024 px (older
+  than this batch). The search box now shrinks, and the name and e-mail
+  show from 1024 px on, capped and cut with an ellipsis.
+
+**A normal deploy with `infra/deploy.sh`.** No env, schema, permission,
+compose, edge or Traefik change, nothing in the database. The cms image is
+rebuilt as in every deploy and its container recreated; this lane changes
+code comments in it (the classified routes and the permission matrix) and
+none of its behaviour. Only the web changes.
+
+1. **Deploy:** `infra/deploy.sh`.
+2. **After: as a guest** (any guest account; on a phone or a narrow
+   window). First, on the host, in the checkout, note the time, so that
+   the log check below covers this walk only and not the deploy (the web
+   logs `[…] fetch failed` while `deploy.sh` recreates the cms):
+
+   ```bash
+   cd /home/bigemo/git/sinnlos
+   COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+   since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+   ```
+
+   Then, as the guest: the navigation shows Dashboard, People, Events,
+   Wiki, Polls and Documents only; open `/announcements`, `/departments`,
+   `/kudos`, `/marketplace` and `/training` by URL: each shows "Not
+   available for your account"; press ⌘K and search for a colleague.
+   Afterwards, on the host, neither log names a failed read or a refused
+   section read since then:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since "$since" web | grep -E 'fetch failed' || echo "web: none"
+   "${COMPOSE[@]}" logs --since "$since" cms \
+     | grep -E 'GET /api/(announcements|departments|teams|kudos-entries|celebrations|classifieds|courses|lessons|lesson-progresses|acknowledgements)[?/ ].* 403$' \
+     || echo "cms: none"
+   ```
+
+   Strapi's request log names no user, so everyone's traffic in that
+   window shows up: a request to `/api/…` from outside without a session
+   (the public role answers 403) or another user's request in the same
+   minutes is not the guest's. If a line appears, repeat the walk in a
+   quiet moment with a fresh `since`.
+
+3. **After: on a phone** (or 360 px wide): _More_ opens the sheet with the
+   other sections; as an admin it lists _Admin_, as a member not. With the
+   sheet open, rotate the phone to landscape (or widen the window past
+   768 px): the sheet closes, and the page scrolls and answers the first
+   tap. At exactly 768 px the page does not scroll sideways and _Sign out_
+   is visible.
+4. **After: as an editor:** on an ad posted by someone else, _Moderation_ →
+   _Delete ad_ is offered and no _Edit_ link. (Take a test ad down, not a
+   real one.)
+
+**Rollback:** re-up the previous images with the commands `infra/deploy.sh`
+prints; no database step. Shipped with batch 13, both images go back
+together ([Deploying batch 13](#deploying-batch-13-2026-10-12)).
+
+**Rehearsal (2026-09-29, lane 8A):** unit suite 4840 tests (4898 with Postgres
+16.15), including the parity test against the permission matrix (it fails
+as intended when a grant changes: a guest with comment create turns
+`canComment` red), every section page and the dashboard per role without a
+request, the phone nav and its sheet, and a loading file on the shared
+skeletons for every page. The time-zone matrix passed under UTC,
+Europe/Berlin and Pacific/Auckland; the integration suite on SQLite (163
+tests) and Postgres 16 (330 tests); the domain, cms and web builds.
+
+On a throwaway stack (the cms and web production builds, SQLite with the
+demo seed, one account each for `admin_role`, `editor`, `department_head`,
+`member`, `authenticated` and `guest`), 21 pages per role over HTTP:
+
+- the cms log showed no 401, 403 or 500 in any of the six runs and the web
+  log no `fetch failed` (a direct guest request for announcements, made as
+  a control, logged its 403 as expected);
+- the guest got "Not available for your account" on all section pages and
+  their detail pages, and a navigation without those sections; every other
+  role saw every section, and `/manage` only as `admin_role`;
+- an editor saw _Moderation_ / _Delete ad_ on the member's ad and no _Edit_
+  link, an admin both, the owner the _Edit_ link.
+
+In headless Chrome at 360 px, Enter on _More_ opened the sheet (the admin's
+with _Admin_, the guest's with Polls and Documents only), Tab stayed inside,
+Escape closed it and put focus back on _More_, choosing an entry navigated
+and closed it, and Back did not reopen it; no React or Radix warning was
+logged. With the network throttled, a link clicked before its prefetch
+arrived showed its pending dot for 2.4 s, then the page skeleton with the
+progress bar. Not exercised: `infra/deploy.sh`, Traefik, a real phone and
+a screen reader pass.
+
+**Fix round (2026-09-30, lane 8A):** the review and rehearsal findings are
+fixed: the sheet closes at 768 px, the _More_ tab exposes the current
+section, a guest's ⌘K search asks for no section the guest cannot read,
+the log check in step 2 covers the guest walk only, and the header fits
+beside the sidebar. Unit suite 4862 tests (4920 with Postgres 16.15), the
+time-zone matrix, the integration suite on SQLite (163 tests) and Postgres
+16 (330 tests) and the domain, cms and web builds passed. On the throwaway
+stack again, in headless Chrome:
+
+- with the sheet open at 744 px, widening the viewport to 1133 px closed
+  it (no scroll lock, no `pointer-events: none` on the body, nothing
+  `aria-hidden`), narrowing it again did not reopen it, and after widening
+  from 600 to 1024 px the first click on a sidebar link navigated;
+- on `/training` the _More_ tab carries `aria-current="true"` and Chrome
+  names it "More: Training"; on `/events` it is plain "More";
+- a guest's ⌘K search for "eng" logged no cms request for announcements,
+  departments or teams and no 403, and the guest's preloads of those kinds
+  answered no items; a member's and an `authenticated` user's search read
+  all three (200);
+- for the admin and the guest at 360, 768, 1024 and 1280 px the page did
+  not scroll sideways and _Sign out_ was visible; the name and e-mail show
+  from 1024 px on.
+
+#### Upgrading to the live client and password-change revocation (batch 13, lane 8C)
+
+This release (branch `feat/live-client-and-session-revocation`, on
+`batch/12` `02f288e`) changes two things.
+
+**Live updates (LF05).** The browser side of the SSE pipeline is a tested
+state machine now (`apps/web/src/lib/live-client.ts`), and the pipeline
+changed in four places:
+
+- **Terminal `bye` frames.** Every stream the web closes on purpose ends
+  with `event: bye` and a reason, and the browser closes it itself instead
+  of the EventSource's 3 s retry reopening it: `evicted` (a sixth stream of
+  the same user, or the 500-stream cap, took its place; that tab waits
+  until it is shown again, so tabs no longer evict each other in turn),
+  `shutdown` (the web's SIGTERM during a deploy; the tabs reconnect spread
+  over up to 15 s instead of hitting the stopping container), `rotate` (the
+  15–30 minute rotation) and `expired` (the session ends first: its Strapi
+  JWT expires within the rotation). The per-minute `[live]` line counts
+  evictions as `evicted=N`.
+- **Full channel sets.** Each tab sends its whole set of comment channels
+  with a revision number (`POST /live/subscribe`
+  `{ connId, rev, channels }`, at most 100 channels per request, a bigger
+  set in several requests of the same revision); a late request can no
+  longer undo a newer one. A connection holds at most 200 channels; more
+  are dropped and logged (`[live] subscribe of user … capped at 200
+  channels: N dropped`). A request the web did not take (a network blip,
+  a 5xx) is retried after 2, 4 and 8 s; until one is taken that tab polls
+  at the short intervals (a set sent in several requests counts as taken
+  only once every one of them was). The previous `{ connId, add, remove }` body is
+  still accepted, for tabs that run the old bundle until they are reloaded,
+  and a tab on the new bundle that meets a web from before this release (a
+  web-only rollback) sends that body to it.
+- **Two-leg health.** The cms POSTs a `keepalive` event to
+  `/api/live/emit` as soon as it starts and then every 20 s (only while
+  `WEB_INTERNAL_URL`, `REVALIDATE_SECRET` are set and
+  `LIVE_EVENTS_DISABLED` is not `1`). The web's hello and every heartbeat
+  say whether it heard from the cms within the last 45 s (`emitFresh`). While it did not, the browsers count as
+  degraded and poll at the short intervals (comments 10 s, bell 30 s)
+  instead of trusting a stream that cannot ping; when the cms is back the
+  web tells every stream at once. A web that has just started is degraded
+  until the first keepalive arrives (at most 20 s); after a cms restart
+  the browsers are fresh again as soon as the cms is up. A failing
+  keepalive is logged once, `[live-emit] keepalive status=… — the web's
+  live streams show degraded until it gets through …` (or `keepalive
+  failed: …`), and its recovery once, `[live-emit] keepalive reaches the
+  web again`; a cms that starts before the web logs exactly that pair.
+  Since the batch 13 integration the header says so, too: after 5 s of
+  a degraded stream in a visible tab it shows a small amber _Live updates
+  delayed_ note (the text from 1280 px on, an icon below that; screen
+  readers hear it), and a fresh heartbeat removes it at once. With the
+  cms stopped it appears within 45 s plus one heartbeat plus those 5 s
+  (at most 75 s).
+- **Shorter ping coalescing.** Since batch 7 (LF02) the cms pings after
+  the commit, so the browsers wait less: comment pings 150 ms (was 400 ms),
+  notification pings plus 0–1 s (was 0–3 s), announcement pings plus
+  0–4 s (was 0–10 s; that jitter only spreads the refetch herd).
+
+`infra/live-smoke.sh` subscribes with the new body (and checks
+`"applied":true`), and before its comment it requires `"emitFresh":true`
+on the stream within `FRESH_SECONDS` (default 35 s): a stream whose cms
+leg is not fresh fails with "the cms leg is not fresh".
+
+**A password change revokes the user's older JWTs (FX40).** The user has a
+new private integer `tokenVersion` (column `up_users.token_version`; the
+cms writes 0 for a new user, the rows of existing users stay NULL, and
+NULL counts as 0; not in any API answer, not filterable, not searchable). Every
+Strapi JWT the cms issues carries the user's current version (claim
+`tv`), and the cms refuses a JWT whose version is not the user's current
+one with 401. A JWT without the claim counts as version 0, so the JWTs of
+the running sessions stay valid: **nobody is signed out by this deploy**.
+`POST /api/auth/change-password` raises the user's version by one and
+answers with a JWT of the new version (since the review fix rounds: one
+atomic statement in the same database transaction as the new password, so
+both commit together or neither does: a failure leaves the password and
+the sessions as they were, never a new password next to older JWTs that
+still work, and no sign-in with the old password during the change keeps
+a session); the web stores it in the session of
+the tab that changed the password, so that tab stays signed in, and every
+other session of the user (another browser or device) lands on
+`/sign-in?expired=1` with its next request. Its live updates stop too:
+`/live/stream` now asks the cms whether the session's JWT is still
+accepted (the same cached check as `/uploads`, 60 s per JWT) and answers a
+revoked one with 401, and a stream that is already open ends at the latest
+with its 15–30 minute rotation. Only the server can hand a new JWT to a
+session: the update carries an HMAC of the JWT under `AUTH_SECRET`, so the
+browser's own `POST /api/auth/session` cannot store a JWT it made up, and a
+session that has already ended is never revived by an update. Tabs of the
+same browser share the session cookie and stay signed in together.
+Microsoft sign-ins are unaffected: their JWT carries the version as well
+and keeps its `ENTRA_SESSION_TTL`; the password form is only shown to
+local sessions. A password an admin sets in the Strapi panel raises the
+version as well (since the batch 13 review fix round: a Document Service
+guard of the user type, which also keeps the version out of every write,
+and the field is hidden in the admin panel). Known limits: the `/uploads`
+status cache (60 s, batch 7) can still serve file bytes to a revoked JWT
+for up to that minute, and an open live stream keeps its content-free
+pings until its next rotation (at most 30 minutes plus that minute). To
+sign one user out everywhere by hand, raise the version:
+
+```bash
+docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+UPDATE up_users SET token_version = coalesce(token_version, 0) + 1 WHERE email = 'user@example.com';
+SQL
+```
+
+**A normal deploy of cms and web together with `infra/deploy.sh`.** No env,
+compose, grant, route or edge change. The helpers of the batch 8 section,
+in the production checkout (on a standalone Caddy box: your checkout, and
+drop the second `-f`):
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+```
+
+1. **Before (read-only):** `infra/deploy.sh --check` and
+   `infra/deploy.sh --dry-run`.
+2. **Deploy:** `infra/deploy.sh`. Its live-smoke step now prints
+   `live-smoke: cms leg fresh (emitFresh on the stream)` before the ping
+   lines; right after the web restarts that can take up to 20 s.
+3. **After: the column.**
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' <<'SQL'
+   SELECT column_name, data_type, column_default FROM information_schema.columns
+    WHERE table_name = 'up_users' AND column_name = 'token_version';
+   SELECT coalesce(token_version, 0) AS version, count(*) FROM up_users GROUP BY 1;
+   SQL
+   ```
+
+   One row `token_version | integer |` (no database default: the cms
+   writes 0 when it creates a user, and reads NULL as 0), and every user
+   at version 0.
+4. **After: the logs.** `"${COMPOSE[@]}" logs --since 30m cms web` shows no
+   error lines and no `[live-emit] keepalive` warning, except at most one
+   `keepalive failed: …` directly followed by `keepalive reaches the web
+   again` (the new cms started before the new web answered); the web's
+   minute line `[live] conns=…` goes on as before.
+5. **After: the password change (two browsers).** Sign in as a test
+   account in browser A and in a private window B. Change the password on
+   /profile in A: A shows "Password changed" and keeps working; B's next
+   click lands on `/sign-in?expired=1`. `"${COMPOSE[@]}" logs cms | grep
+   'password changed'` shows `[auth] password changed: user=<id>
+   tokenVersion=1`.
+
+**Rollback:** the SHA-tag rollback `infra/deploy.sh` prints, **cms and web
+together**:
+
+- The previous cms ignores the `token_version` column (it stays) and
+  checks a JWT's signature and expiry only: under the same `JWT_SECRET`,
+  every session and JWT that a password change on this release revoked (a
+  stolen token too) would work again for the whole rollback window.
+  **Rotating `JWT_SECRET` is therefore mandatory in every rollback of the
+  cms to a release before this one** (owner decision 2026-10-12), before
+  the previous images serve traffic; it signs everyone out once, local and
+  Microsoft sessions. The steps and checks (a revoked JWT gets 401 after
+  the rollback, a fresh sign-in works) are R1 to R6 of the
+  [batch 13 rollback](#deploying-batch-13-2026-10-12). Until the next
+  roll-forward a password change revokes nothing.
+- Rolling forward again: keep the new `JWT_SECRET`. The JWTs the previous
+  cms issued in between carry no version (= 0), so a user whose version
+  is above 0 (who changed the password on this release) signs in again
+  once.
+- Only the web rolled back (new cms): the previous web answers the
+  keepalive with 400, which the cms logs once (`[live-emit] keepalive
+  status=400 …`); live pings are unaffected. Tabs still open on the new
+  bundle recognise the previous web by its hello (no `emitFresh`) and
+  subscribe with its `{ connId, add, remove }` body; they count as healthy,
+  as the previous web cannot say otherwise.
+- Only the cms rolled back (new web): no keepalive reaches the web, so
+  every browser shows degraded (the header's _Live updates delayed_
+  note) and polls at the short intervals until the cms is new again.
+- `infra/live-smoke.sh` belongs to its checkout: against a rolled-back web
+  run the script of the deployed SHA
+  (`git show <sha>:infra/live-smoke.sh > /tmp/live-smoke.sh`), the new
+  one fails there on the subscribe answer and `emitFresh`.
 
 #### Deploying batch 12 (2026-09-29)
 
@@ -9204,7 +10381,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh is running for compose project infra` | A deploy of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
-| `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed |
+| `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed. Dependabot's own update jobs on the commit do not count (since batch 13; before, they could make a green commit read `pending`) |
 | `infra/deploy.sh` stops with `failed during '<step>'` | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow |
 | `backup.log` has a `FAIL <kind> <step>` line, or `pg-backup: FAILED at …` | The backup stopped at that step (its plaintext is removed); a pre-deploy one also stops the deploy. Fix the cause (usually the db container is down or the key is missing) and re-run |
 

@@ -14,7 +14,10 @@
 #      and casey.jones@sinnlos.local with a line in PASSWORDS_FILE, see
 #      below) and hold an open `curl -N --compressed` on
 #      /live/stream: the stream must be text/event-stream WITHOUT a
-#      Content-Encoding (a compressing edge buffers the pings).
+#      Content-Encoding (a compressing edge buffers the pings). Its hello
+#      or a heartbeat must say "emitFresh":true within FRESH_SECONDS: the
+#      cms keepalive (every 20 s) reaches the web bus, so the browsers do
+#      not show degraded (LF05).
 #   2. Pick the target announcement with GETs only, as a SECOND demo user
 #      (SMOKE_AUTHOR_EMAIL) inside the cms container (the edge routes
 #      /api/auth/* to Next, so the Strapi JWT is only obtainable
@@ -70,7 +73,9 @@
 # DOMAIN from the environment or else from infra/.env next to this script,
 # the host every Traefik router matches; deploy.sh passes its SMOKE_URL),
 # CMS_CONTAINER, WEB_CONTAINER, DB_CONTAINER (infra-{cms,web,db}-1),
-# DB_SCHEMA (public), ASSERT_SECONDS (5).
+# DB_SCHEMA (public), ASSERT_SECONDS (5), FRESH_SECONDS (35: the cms
+# keepalive runs every 20 s, and a web that has just started has not heard
+# one yet).
 #
 # Notes:
 #   - Watch the Strapi sign-in rate limit (10 per 60 s for one e-mail and
@@ -89,6 +94,7 @@ WEB_CONTAINER="${WEB_CONTAINER:-infra-web-1}"
 DB_CONTAINER="${DB_CONTAINER:-infra-db-1}"
 DB_SCHEMA="${DB_SCHEMA:-public}"
 ASSERT_SECONDS="${ASSERT_SECONDS:-5}"
+FRESH_SECONDS="${FRESH_SECONDS:-35}"
 PASSWORDS_FILE="${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}"
 
 SMOKE_EMAIL="${SMOKE_EMAIL:-}"
@@ -404,6 +410,22 @@ done
 [[ -n "${CONN_ID}" ]] || fail "subscribe: no hello/connId on /live/stream within 10 s"
 echo "live-smoke: stream open (text/event-stream, uncompressed)"
 
+# The cms leg (LF05): the hello, or a heartbeat, says "emitFresh":true once
+# the cms keepalive has reached the web bus within the last 45 s; the bus
+# sends a heartbeat the moment a stale leg recovers. Checked before the
+# comment, whose own emit would make the leg fresh as well.
+fresh=0
+for _ in $(seq 1 $((FRESH_SECONDS * 4))); do
+  if grep -q '"emitFresh":true' "${STREAM_LOG}"; then
+    fresh=1
+    break
+  fi
+  sleep 0.25
+done
+((fresh)) ||
+  fail "the cms leg is not fresh: no \"emitFresh\":true on /live/stream within ${FRESH_SECONDS} s, so every browser shows degraded. The cms keepalive does not reach the web bus: check WEB_INTERNAL_URL, REVALIDATE_SECRET and LIVE_EVENTS_DISABLED on the cms, and 'docker logs ${CMS_CONTAINER} | grep live-emit'"
+echo "live-smoke: cms leg fresh (emitFresh on the stream)"
+
 # --- 3. Target (GETs only), subscription, one comment -----------------------
 DISCOVERED="$(cms_probe discover)" || fail "could not pick an announcement (see the line above)"
 # The author's JWT, for the comment and the cleanup (one sign-in per run);
@@ -414,13 +436,16 @@ TARGET_DOC_ID="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^TARGET=//p')"
 TARGET_KIND="$(printf '%s\n' "${DISCOVERED}" | sed -n 's/^KIND=//p')"
 [[ -n "${TARGET_DOC_ID}" ]] || fail "could not pick an announcement: ${DISCOVERED}"
 
+# The full desired channel set at revision 1 (LF05): the connection's first.
 SUBSCRIBE_STATUS="$(curl -sS -o "${WORKDIR}/subscribe.json" -w '%{http_code}' --max-time 15 -b "${COOKIES}" \
   -X POST "${BASE_URL}/live/subscribe" \
   -H 'content-type: application/json' \
-  --data "{\"connId\":\"${CONN_ID}\",\"add\":[\"announcement:${TARGET_DOC_ID}\"]}")" ||
+  --data "{\"connId\":\"${CONN_ID}\",\"rev\":1,\"channels\":[\"announcement:${TARGET_DOC_ID}\"]}")" ||
   fail "subscribe: POST ${BASE_URL}/live/subscribe did not answer"
 [[ "${SUBSCRIBE_STATUS}" == "200" ]] ||
   fail "subscribe: POST ${BASE_URL}/live/subscribe answered HTTP ${SUBSCRIBE_STATUS}: $(head -c 200 "${WORKDIR}/subscribe.json")"
+grep -q '"applied":true' "${WORKDIR}/subscribe.json" ||
+  fail "subscribe: POST ${BASE_URL}/live/subscribe did not apply the channel set: $(head -c 200 "${WORKDIR}/subscribe.json")"
 
 # From here on the cleanup removes the comment notifications of this run.
 RUN_STARTED="$(db_psql -c 'SELECT clock_timestamp()' < /dev/null)" ||

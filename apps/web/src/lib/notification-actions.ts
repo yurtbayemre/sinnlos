@@ -15,9 +15,17 @@ export interface NotificationFeed {
    * of a readAt=null query, not the unread among the 20 loaded ones.
    */
   unreadTotal: number;
+  /**
+   * Set when the list request failed (the cms unreachable or refusing):
+   * the items and the total are then empty and mean nothing. The bell keeps
+   * its last feed and says so (NotificationBell's nextFeed) instead of
+   * emptying itself.
+   */
+  unavailable?: true;
 }
 
 const EMPTY_FEED: NotificationFeed = { items: [], unreadTotal: 0 };
+const UNAVAILABLE_FEED: NotificationFeed = { items: [], unreadTotal: 0, unavailable: true };
 
 /**
  * The bell's data, for the topbar's first render and every refetch. The
@@ -28,8 +36,9 @@ const EMPTY_FEED: NotificationFeed = { items: [], unreadTotal: 0 };
  * serialised into every page's payload as the bell's props. The unread
  * count is one extra request that returns a single row (pageSize 1). No
  * session user = the empty feed without a request. A failed list = the
- * empty feed (the bell polls on); a failed count alone keeps the loaded
- * list and counts the unread among it. strapi()'s 401 sign-in redirect from
+ * empty feed flagged `unavailable` (the bell keeps what it shows and polls
+ * on); a failed count alone keeps the loaded list and counts the unread
+ * among it. strapi()'s 401 sign-in redirect from
  * EITHER request propagates (otherwise the bell would poll an expired
  * session forever).
  */
@@ -47,7 +56,8 @@ export async function getNotifications(): Promise<NotificationFeed> {
       ),
     ]);
     // The redirect of either request wins; a failed count alone must not
-    // cost the loaded list, a failed list is the empty feed (catch below).
+    // cost the loaded list, a failed list is the unavailable feed (catch
+    // below).
     if (unread.status === "rejected") unstable_rethrow(unread.reason);
     if (list.status === "rejected") throw list.reason;
     const items = Array.isArray(list.value?.data) ? list.value.data : [];
@@ -66,7 +76,7 @@ export async function getNotifications(): Promise<NotificationFeed> {
     // let that control-flow error escape instead of swallowing it and
     // polling the bell forever with an empty list.
     unstable_rethrow(e);
-    return EMPTY_FEED;
+    return UNAVAILABLE_FEED;
   }
 }
 

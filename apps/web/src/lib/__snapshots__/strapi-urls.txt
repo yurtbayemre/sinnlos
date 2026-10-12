@@ -145,7 +145,6 @@ GET http://cms.test/api/users?filters[$or][0][displayName][$containsi]=Ab%26c&fi
 GET http://cms.test/api/wiki-pages?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&fields[1]=slug&fields[2]=summary&populate[space][fields][0]=name&populate[space][fields][1]=slug&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 
 ## search.searchLive(guest)
-GET http://cms.test/api/announcements?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][body][$containsi]=Ab%26c&fields[0]=title&populate[author][fields][0]=displayName&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/documents?filters[$or][0][title][$containsi]=Ab%26c&filters[$or][1][description][$containsi]=Ab%26c&fields[0]=title&fields[1]=description&fields[2]=category&sort[0]=title:asc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/events?filters[title][$containsi]=Ab%26c&fields[0]=title&fields[1]=start&sort[0]=start:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]
 GET http://cms.test/api/polls?filters[question][$containsi]=Ab%26c&fields[0]=question&fields[1]=closesAt&sort[0]=createdAt:desc&pagination[pageSize]=5 cache=no-store headers[authorization=Bearer jwt-test,content-type=application/json]

@@ -2,11 +2,14 @@ import Link from "next/link";
 import { Users2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
+import { getViewer } from "@/lib/viewer";
 import type { Team } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -17,6 +20,15 @@ export async function generateMetadata() {
 export default async function TeamsPage() {
   const t = await getTranslations("teams");
   const tCommon = await getTranslations("common");
+  // A role without team.find (guest) gets no request (SH02).
+  if (isReadDenied((await getViewer()).role, "teams")) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title={t("title")} description={t("description")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   const { data, failed } = await tryFetch(() => api.teams.list(), "teams");
   const items = (data?.data ?? []) as Team[];
 

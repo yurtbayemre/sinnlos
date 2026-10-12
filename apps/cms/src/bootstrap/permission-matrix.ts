@@ -119,8 +119,10 @@ export const PERMISSION_MATRIX: Record<
     // only admin_role may correct them.
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
     "api::announcement.announcement": ALL_ACTIONS,
-    // Full CRUD = moderation: editors may take down any employee ad
-    // (is-classified-author passes admin_role/editor unconditionally).
+    // Full CRUD = moderation: editors may take down any employee ad (the
+    // delete bypass of is-classified-author is admin_role and editor;
+    // editing someone else's ad stays admin_role only, see
+    // api/classified/routes/classified.ts).
     "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": READ_ACTIONS,
@@ -253,8 +255,9 @@ export const PERMISSION_MATRIX: Record<
     // REVOKED_PERMISSIONS for databases bootstrapped by older versions.
     // NO classified grants either: the flea market is internal and ads
     // populate author.email/jobTitle — employee contact data a restricted
-    // guest must not read. The marketplace nav entry stays visible (kudos
-    // precedent) and the page degrades to the FetchErrorBanner for guests.
+    // guest must not read. The web hides the marketplace entry and its pages
+    // show "Not available for your account" without a request
+    // (apps/web/src/lib/roles.ts isReadDenied, SH02).
     // Revoked below for databases bootstrapped by earlier versions.
     "api::comment.comment": READ_ACTIONS,
     "api::document.document": READ_ACTIONS,

@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import {
   isPreloadKind,
+  isRoleGatedKind,
   loadPreload,
   logSearch,
   parseSearchLog,
+  searchKindDenied,
   searchLive,
 } from "@/lib/search-action";
 import { getSession } from "@/lib/session";
@@ -21,6 +23,9 @@ import { getViewer } from "@/lib/viewer";
  *   POST /search {term, count}        a settled search term (telemetry), 204
  *
  * Every answer is per user (Strapi policies filter each read): no-store.
+ * A kind the viewer's role cannot read answers no items without a request
+ * (searchKindDenied, SH02); only for those kinds does the preload read the
+ * viewer (one /api/me read: a route handler has no render memo).
  */
 
 const NO_STORE = { "cache-control": "no-store" };
@@ -40,6 +45,9 @@ export async function GET(req: NextRequest) {
   const kind = params.get("kind");
   if (kind !== null) {
     if (!isPreloadKind(kind)) return json({ error: "Unknown kind" }, 400);
+    if (isRoleGatedKind(kind) && searchKindDenied(kind, (await getViewer()).role)) {
+      return json({ items: [] });
+    }
     return json({ items: await loadPreload(kind) });
   }
 

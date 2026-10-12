@@ -469,6 +469,40 @@ image_has_poll_guest_access() {
     -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
 }
 
+# Whether a cms image knows the token version of batch 13 (FX40; its user
+# schema has tokenVersion): exit 0 yes, 1 no, anything else unknown (no such
+# image here, another layout, docker failed or timed out, no `timeout`).
+# Never pulls, no network; the compiled schema, as for poll guest access.
+USER_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/extensions/users-permissions/content-types/user/schema.json"
+image_has_token_version() {
+  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
+    -q tokenVersion "${USER_SCHEMA_IN_IMAGE}" 2>/dev/null
+}
+
+# A cms from before batch 13 checks a Strapi JWT's signature and expiry
+# only: under the same JWT_SECRET every JWT that a password change on batch
+# 13 (or later) revoked works again there. So every rollback to such a cms,
+# or to one that cannot be checked, rotates JWT_SECRET before it starts
+# (owner decision 2026-10-12; docs/DEPLOYMENT.md, "Deploying batch 13",
+# Rollback R2 to R4). Printed before the start commands, never done here:
+# the edit of infra/.env stays the operator's. $1 is the exit code of
+# image_has_token_version for the target cms image $2 (not 0).
+print_jwt_secret_rotation_hint() {
+  local image="$2"
+  if [[ "$1" == "1" ]]; then
+    echo "       MANDATORY before the start below: ${image} predates the token version of batch 13." >&2
+  else
+    echo "       MANDATORY before the start below, unless ${image} knows the token version of batch 13" >&2
+    echo "       (it could not be checked here: skip this step only if this prints 1 or more):" >&2
+    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c tokenVersion ${USER_SCHEMA_IN_IMAGE}" >&2
+  fi
+  echo "       That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET" >&2
+  echo "       stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, \"Deploying batch 13\"," >&2
+  echo "       Rollback R2 and R3 while the new cms still runs, then R4: a new value from" >&2
+  echo "       openssl rand -base64 48 on the one JWT_SECRET= line of ${INFRA_DIR}/.env (AUTH_SECRET stays)." >&2
+  echo "       This script does not edit it. Every user is signed out once and signs in again." >&2
+}
+
 # Poll guest access: the first boot of that release grants the guest role
 # api::poll-vote.poll-vote.vote. A cms from before it (on the owner
 # instance the :rollback image of that deploy) ignores the per-poll guest
@@ -538,7 +572,9 @@ ROLLBACK_ORIGIN=""
 # checked, gets the web legacy-zone override: that web must run in
 # APP_TIME_ZONE (in UTC it refuses to start, or, before the datetime
 # release, quietly shows UTC times), and the override is harmless for a
-# newer one (it only warns).
+# newer one (it only warns). A target cms from before the token version of
+# batch 13, or one that cannot be checked, gets the mandatory JWT_SECRET
+# rotation before the start commands (print_jwt_secret_rotation_hint).
 # Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
 # prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
@@ -547,12 +583,13 @@ print_rollback_hint() {
     echo "       no containers ran before this deploy): fix the cause and re-run." >&2
     return 0
   fi
-  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0
+  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0 token_version=0
   local web_image="${PROJECT}-web:${ROLLBACK_REF}" cms_image="${PROJECT}-cms:${ROLLBACK_REF}"
   naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
   cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${cms_image}" 2>/dev/null || true)"
   image_has_poll_guest_access "${cms_image}" || guest_access=$?
   image_web_zone_explicit "${web_image}" || web_zone=$?
+  image_has_token_version "${cms_image}" || token_version=$?
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_revoke_hint "${guest_access}" "${cms_image}"
   fi
@@ -579,6 +616,9 @@ print_rollback_hint() {
       echo "       warns. Check: docker image inspect -f '{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}' ${web_image}" >&2
       echo "       prints ${WEB_DATETIME_VALUE} for a web that needs no override)" >&2
     fi
+  fi
+  if [[ "${token_version}" != "0" ]]; then
+    print_jwt_secret_rotation_hint "${token_version}" "${cms_image}"
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
@@ -921,10 +961,77 @@ prune_sha_tags() {
 }
 
 # --- CI status of the commit (FX35) ------------------------------------------
+# The check runs of a GitHub check-runs answer (stdin), one line each:
+# name, status, conclusion and the app's slug, separated by \037 (a null is
+# empty). A small JSON scanner in POSIX awk (no jq): it follows strings,
+# escapes and nesting, so a value anywhere else in a run (its output text,
+# its app's name) never counts as the run's own.
+check_runs_of() {
+  awk '
+    function flush() {
+      if (tok != "") { put(tok == "null" ? "" : tok); tok = "" }
+    }
+    function put(v) {
+      if (!run) return
+      if (depth == 3) {
+        if (key[3] == "name") rname = v
+        else if (key[3] == "status") rstatus = v
+        else if (key[3] == "conclusion") rconclusion = v
+      } else if (depth == 4 && within[4] == "app" && key[4] == "slug") rslug = v
+    }
+    { body = body $0 "\n" }
+    END {
+      n = length(body)
+      for (i = 1; i <= n; i++) {
+        c = substr(body, i, 1)
+        if (instr) {
+          if (esc) { s = s c; esc = 0 }
+          else if (c == "\\") esc = 1
+          else if (c == "\"") {
+            instr = 0
+            if (wantkey) { key[depth] = s; wantkey = 0 } else put(s)
+          } else s = s c
+          continue
+        }
+        if (c == "\"") { instr = 1; s = ""; continue }
+        if (c == "{" || c == "[") {
+          depth++
+          kind[depth] = c
+          within[depth] = (kind[depth - 1] == "{") ? key[depth - 1] : ""
+          key[depth] = ""
+          wantkey = (c == "{")
+          if (depth == 3 && c == "{" && kind[2] == "[" && within[2] == "check_runs") {
+            run = 1; rname = ""; rstatus = ""; rconclusion = ""; rslug = ""
+          }
+          continue
+        }
+        if (c == "}" || c == "]") {
+          flush()
+          if (depth == 3 && run) {
+            printf "%s\037%s\037%s\037%s\n", rname, rstatus, rconclusion, rslug
+            run = 0
+          }
+          depth--
+          wantkey = 0
+          continue
+        }
+        if (c == ",") { flush(); if (kind[depth] == "{") wantkey = 1; continue }
+        if (c == ":" || c == " " || c == "\t" || c == "\r" || c == "\n") { flush(); continue }
+        tok = tok c
+      }
+    }
+  '
+}
+
 # GitHub's check runs for HEAD, read without gh or jq. Prints one of: green,
-# pending, failed, unknown — followed by a reason. Never fails.
+# pending, failed, unknown — followed by a reason. Never fails. Only our CI
+# counts: GitHub also attaches Dependabot's own update jobs to the default
+# branch's HEAD (runs named "Dependabot" of the app github-actions, and the
+# app dependabot's ".github/dependabot.yml"), which say nothing about this
+# commit and may still run long after CI passed.
 ci_status() {
-  local remote slug body total
+  local remote slug body total runs name status conclusion app note=""
+  local ours=0 ignored=0 unfinished=0 failing=0
   remote="$("${GIT[@]}" remote get-url origin 2>/dev/null || true)"
   if ! [[ "${remote}" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
     echo "unknown: the origin remote is not on github.com"
@@ -944,12 +1051,34 @@ ci_status() {
   total="$(grep -oE '"total_count": *[0-9]+' <<<"${body}" | grep -oE '[0-9]+$' | head -n 1)"
   if [[ -z "${total}" || "${total}" == "0" ]]; then
     echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug} (not pushed yet, or CI has not started)"
-  elif grep -qE '"status": *"(queued|in_progress|waiting|requested|pending)"' <<<"${body}"; then
-    echo "pending: CI is still running for ${HEAD_SHA:0:12}"
-  elif grep -qE '"conclusion": *"(failure|cancelled|timed_out|action_required|startup_failure|stale)"' <<<"${body}"; then
-    echo "failed: CI did not pass for ${HEAD_SHA:0:12} (https://github.com/${slug}/commit/${HEAD_SHA}/checks)"
+    return 0
+  fi
+  runs="$(check_runs_of <<<"${body}")"
+  while IFS=$'\037' read -r name status conclusion app; do
+    [[ -n "${name}${status}${conclusion}${app}" ]] || continue
+    if [[ "${name}" == "Dependabot" || "${app}" == "dependabot" ]]; then
+      ignored=$((ignored + 1))
+      continue
+    fi
+    ours=$((ours + 1))
+    case "${status}" in
+      queued | in_progress | waiting | requested | pending) unfinished=$((unfinished + 1)) ;;
+    esac
+    case "${conclusion}" in
+      failure | cancelled | timed_out | action_required | startup_failure | stale) failing=$((failing + 1)) ;;
+    esac
+  done <<<"${runs}"
+  if ((ignored)); then note=" (${ignored} Dependabot run(s) ignored)"; fi
+  if ((ours == 0 && ignored == 0)); then
+    echo "unknown: the GitHub answer lists ${total} check run(s) for ${HEAD_SHA:0:12}, but none could be read"
+  elif ((ours == 0)); then
+    echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug}${note} (CI has not started)"
+  elif ((unfinished)); then
+    echo "pending: CI is still running for ${HEAD_SHA:0:12}${note}"
+  elif ((failing)); then
+    echo "failed: CI did not pass for ${HEAD_SHA:0:12}${note} (https://github.com/${slug}/commit/${HEAD_SHA}/checks)"
   else
-    echo "green: ${total} CI check(s) passed for ${HEAD_SHA:0:12}"
+    echo "green: ${ours} CI check(s) passed for ${HEAD_SHA:0:12}${note}"
   fi
 }
 

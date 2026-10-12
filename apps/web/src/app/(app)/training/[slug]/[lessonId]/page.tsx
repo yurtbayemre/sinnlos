@@ -3,25 +3,27 @@ import type { Route } from "next";
 import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import rehypeSlug from "rehype-slug";
-import rehypeAutolinkHeadings from "rehype-autolink-headings";
 
+import { Markdown } from "@/components/markdown";
 import { LessonCompletion } from "@/components/training/lesson-completion";
 import { LessonVideo } from "@/components/training/lesson-video";
 import { FetchErrorBanner } from "@/components/fetch-error";
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { fetchCourseBySlug, fetchLessonByDocumentId, fetchMyProgress } from "@/lib/training";
 import { parseQuiz, sortLessons, type CompletionMode } from "@/lib/training-shared";
+import { getViewer } from "@/lib/viewer";
 
 /**
- * Lesson player (issue #29): markdown body (same pipeline as the wiki —
- * react-markdown + gfm, NO rehype-raw ⇒ no raw HTML/XSS), the YouTube
- * render gate, the client-only self-check quiz and the completion
- * button. PDFs/documents are linked inside the markdown (documents
- * module decision) — no attachment UI.
+ * Lesson player (issue #29): markdown body (the shared renderer of the
+ * wiki, components/markdown.tsx — react-markdown + gfm, NO rehype-raw ⇒ no
+ * raw HTML/XSS, unsafe URL schemes dropped), the YouTube render gate, the
+ * client-only self-check quiz and the completion button. PDFs/documents
+ * are linked inside the markdown (documents module decision) — no
+ * attachment UI.
  */
 export default async function LessonPage({
   params,
@@ -29,7 +31,21 @@ export default async function LessonPage({
   params: Promise<{ slug: string; lessonId: string }>;
 }) {
   const { slug, lessonId } = await params;
-  const [t, format] = await Promise.all([getTranslations("training"), getFormatter()]);
+  const [t, format, viewer] = await Promise.all([
+    getTranslations("training"),
+    getFormatter(),
+    getViewer(),
+  ]);
+  // A role without the training reads (guest) gets no request and an
+  // explanation instead of the error banner (SH02).
+  if (isReadDenied(viewer.role, "training")) {
+    return (
+      <div className="space-y-8">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
 
   const [lessonResult, courseResult, progressResult] = await Promise.all([
     tryFetch(() => fetchLessonByDocumentId(lessonId), "training"),
@@ -80,16 +96,7 @@ export default async function LessonPage({
 
       <LessonVideo videoUrl={lesson.videoUrl} />
 
-      {lesson.body && (
-        <div className="prose prose-slate max-w-none dark:prose-invert">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[rehypeSlug, [rehypeAutolinkHeadings, { behavior: "wrap" }]]}
-          >
-            {lesson.body}
-          </ReactMarkdown>
-        </div>
-      )}
+      {lesson.body && <Markdown headingAnchors>{lesson.body}</Markdown>}
 
       <LessonCompletion
         quiz={quiz}

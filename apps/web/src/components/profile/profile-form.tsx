@@ -4,6 +4,7 @@ import { useActionState } from "react";
 import { useTranslations } from "next-intl";
 import { updateProfile, type ProfileFormState } from "@/lib/profile-actions";
 import { PROFILE_FORM_MESSAGES, PROFILE_TEXT_MAX } from "@/lib/auth/form-messages";
+import { canReceiveDigests } from "@/lib/roles";
 
 const inputClass =
   "h-10 w-full rounded-xl border bg-muted/40 px-4 text-sm outline-none placeholder:text-muted-foreground focus:bg-background focus:ring-2 focus:ring-ring";
@@ -20,24 +21,6 @@ export type ProfileInitial = {
   digestKudos?: boolean | null;
   digestFrequency?: string | null;
 };
-
-/**
- * Roles that get e-mail digests: the holders of announcement.find in the
- * cms matrix (apps/cms/src/index.ts PERMISSION_MATRIX). The cms decides
- * (send-digests skips guests, PUT /api/me ignores their opt-ins, FX19); this
- * only keeps the form from offering what the cms ignores. Fail-closed like
- * lib/roles.ts: an unknown or missing role sees no digest options. A
- * component-local copy like the report pages' ANNOUNCEMENT_READER_ROLES
- * until SH02 moves the role sets into one place.
- */
-export const DIGEST_ROLES: ReadonlySet<string> = new Set([
-  "admin_role",
-  "editor",
-  "department_head",
-  "team_lead",
-  "member",
-  "authenticated",
-]);
 
 /** The digest checkboxes (the frequency is the fourth digest field). */
 const DIGEST_OPT_INS = ["digestAnnouncements", "digestMentions", "digestKudos"] as const;
@@ -65,7 +48,12 @@ export function ProfileForm({
    */
   managedFields?: readonly string[];
 }) {
-  const showDigest = typeof viewerRole === "string" && DIGEST_ROLES.has(viewerRole);
+  // The digest options only for the roles that get digests (lib/roles.ts
+  // DIGEST_ROLES, the announcement readers, pinned to the cms matrix). The
+  // cms decides (send-digests skips guests, PUT /api/me ignores their
+  // opt-ins, FX19); this only keeps the form from offering what the cms
+  // ignores. Fail-closed: an unknown or missing role sees no digest options.
+  const showDigest = canReceiveDigests(viewerRole);
   const managed = new Set(managedFields);
   const tProfile = useTranslations("profile");
   const tCommon = useTranslations("common");
@@ -136,8 +124,8 @@ export function ProfileForm({
       {!showDigest && (
         // Not offered, but submitted as stored: updateProfile maps an absent
         // checkbox to false, so without these a save would clear the opt-ins
-        // of a reader whose role could not be read (or a role this copy does
-        // not know yet). The cms ignores them for guests.
+        // of a reader whose role could not be read (or a role lib/roles.ts
+        // does not know yet). The cms ignores them for guests.
         <>
           {DIGEST_OPT_INS.map((name) =>
             (v ? v[name] : initial[name]) === true ? (

@@ -9,8 +9,9 @@ import { StrapiError } from "@/lib/strapi-error";
  *     the session user, no relation populated) and, since WD10, the caller's
  *     unread total (meta.pagination.total of a readAt=null query with
  *     pageSize 1) as { items, unreadTotal }; no session user = the empty
- *     feed without a request; a failed list = the empty feed (the bell
- *     polls on), a failed count alone keeps the list and counts the unread
+ *     feed without a request; a failed list = the empty feed flagged
+ *     `unavailable` (the bell keeps its last feed and polls on, batch-12
+ *     deferral), a failed count alone keeps the list and counts the unread
  *     among it; strapi()'s 401 sign-in redirect from either request
  *     propagates (otherwise the bell would poll an expired session forever);
  *   - markNotificationsRead / markAllNotificationsRead answer ActionResults
@@ -49,6 +50,7 @@ const LIST_PATH =
 const UNREAD_PATH =
   "/api/notifications?filters[recipient][id][$eq]=7&filters[readAt][$null]=true&fields[0]=id&pagination[pageSize]=1";
 const EMPTY = { items: [], unreadTotal: 0 };
+const UNAVAILABLE = { items: [], unreadTotal: 0, unavailable: true };
 
 /** Answers the list and the unread count (25 without an argument) like the cms does. */
 function cms(...total: [unknown?]) {
@@ -121,9 +123,9 @@ describe("getNotifications", () => {
     ["a 400", cmsError(400)],
     ["a 500", cmsError(500)],
     ["a network error", new TypeError("fetch failed")],
-  ])("answers the empty feed for %s", async (_label, error) => {
+  ])("answers the unavailable feed for %s", async (_label, error) => {
     strapiMock.mockRejectedValue(error);
-    await expect(getNotifications()).resolves.toEqual(EMPTY);
+    await expect(getNotifications()).resolves.toEqual(UNAVAILABLE);
   });
 
   it.each([
@@ -139,14 +141,14 @@ describe("getNotifications", () => {
     await expect(getNotifications()).resolves.toEqual({ items: ROWS, unreadTotal: 1 });
   });
 
-  it("answers the empty feed when only the list fails", async () => {
+  it("answers the unavailable feed when only the list fails", async () => {
     strapiMock.mockImplementation(async (path: string) => {
       if (path === UNREAD_PATH) {
         return { data: [{ id: 2 }], meta: { pagination: { total: 25 } } };
       }
       throw cmsError(500);
     });
-    await expect(getNotifications()).resolves.toEqual(EMPTY);
+    await expect(getNotifications()).resolves.toEqual(UNAVAILABLE);
   });
 
   it("lets strapi()'s 401 sign-in redirect propagate, from either request", async () => {

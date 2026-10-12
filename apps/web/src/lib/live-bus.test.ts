@@ -1,13 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getLiveBus, parseLiveEvents, type LiveFrame } from "./live-bus";
-import { MAX_EVENTS_PER_EMIT, channelFor } from "./live-contract";
+import { EMIT_FRESH_MS, MAX_EVENTS_PER_EMIT, channelFor, type ByeReason } from "./live-contract";
 
 type TestConn = {
   id: string;
   userId: number;
   frames: LiveFrame[];
   closed: boolean;
+  /** The reason the bus closed it with (the stream's terminal bye), if any. */
+  bye: ByeReason | undefined;
 };
 
 function connect(
@@ -24,6 +26,7 @@ function connect(
     userId: overrides.userId ?? 1,
     frames: [],
     closed: false,
+    bye: undefined,
   };
   getLiveBus().register({
     id: conn.id,
@@ -35,8 +38,9 @@ function connect(
       conn.frames.push(frame);
       return true;
     },
-    close: () => {
+    close: (reason) => {
       conn.closed = true;
+      conn.bye = reason;
     },
   });
   return conn;
@@ -148,6 +152,146 @@ describe("subscription ownership", () => {
   });
 });
 
+describe("the cms leg's freshness (LF05)", () => {
+  it("is not fresh before the cms sent anything, fresh for 45 s after any POST, then stale", () => {
+    vi.useFakeTimers();
+    try {
+      expect(getLiveBus().emitFresh()).toBe(false);
+      getLiveBus().publish([{ kind: "keepalive" }]);
+      expect(getLiveBus().emitFresh()).toBe(true);
+      vi.advanceTimersByTime(EMIT_FRESH_MS);
+      expect(getLiveBus().emitFresh()).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(getLiveBus().emitFresh()).toBe(false);
+      // Real events count as much as a keepalive.
+      getLiveBus().publish([{ kind: "announcements" }]);
+      expect(getLiveBus().emitFresh()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("delivers no frame for a keepalive", () => {
+    const conn = connect({ userId: 1, channels: ["announcement:a"] });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(conn.frames).toEqual([]);
+  });
+
+  it("beats every stream at once when a stale leg recovers, and only then", () => {
+    const beats: boolean[] = [];
+    getLiveBus().register({
+      id: "c1",
+      userId: 1,
+      channels: new Set(),
+      openedAt: Date.now(),
+      enqueue: () => true,
+      beat: (fresh) => {
+        beats.push(fresh);
+        return true;
+      },
+      close: () => undefined,
+    });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    getLiveBus().publish([{ kind: "announcements" }]);
+    expect(beats).toEqual([true]);
+  });
+
+  it("drops a stream whose recovery beat fails", () => {
+    getLiveBus().register({
+      id: "dead",
+      userId: 1,
+      channels: new Set(),
+      openedAt: Date.now(),
+      enqueue: () => true,
+      beat: () => false,
+      close: () => undefined,
+    });
+    getLiveBus().publish([{ kind: "keepalive" }]);
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
+});
+
+describe("full-set sync with a revision (LF05)", () => {
+  const ping = (documentId: string) =>
+    getLiveBus().publish([
+      { kind: "content", targetType: "announcement", targetDocumentId: documentId },
+    ]);
+  const channels = (conn: TestConn) => {
+    conn.frames = [];
+    for (const doc of ["a", "b", "c", "d"]) ping(doc);
+    return conn.frames.map((frame) => (frame.type === "content" ? frame.channel : frame.type));
+  };
+
+  it("replaces the set with a newer revision", () => {
+    const conn = connect({ userId: 1 });
+    expect(getLiveBus().sync(conn.id, 1, 1, ["announcement:a", "announcement:b"])).toEqual({
+      status: "applied",
+      rev: 1,
+      channels: 2,
+      dropped: 0,
+    });
+    expect(channels(conn)).toEqual(["announcement:a", "announcement:b"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:c"]);
+    expect(channels(conn)).toEqual(["announcement:c"]);
+    getLiveBus().sync(conn.id, 1, 3, []);
+    expect(channels(conn)).toEqual([]);
+  });
+
+  it("ignores a stale revision: a late POST cannot undo a newer set", () => {
+    const conn = connect({ userId: 1 });
+    getLiveBus().sync(conn.id, 1, 5, ["announcement:c"]);
+    expect(getLiveBus().sync(conn.id, 1, 4, ["announcement:a"])).toEqual({
+      status: "stale",
+      rev: 5,
+    });
+    expect(channels(conn)).toEqual(["announcement:c"]);
+  });
+
+  it("adds the parts of one revision, whichever arrives first", () => {
+    const conn = connect({ userId: 1 });
+    getLiveBus().sync(conn.id, 1, 1, ["announcement:d"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:b"]);
+    getLiveBus().sync(conn.id, 1, 2, ["announcement:a"]);
+    expect(channels(conn)).toEqual(["announcement:a", "announcement:b"]);
+  });
+
+  it("caps a connection at 200 channels and reports what it dropped", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const conn = connect({ userId: 7 });
+    const set = (from: number, n: number) =>
+      Array.from({ length: n }, (_, i) => `announcement:d${from + i}`);
+    expect(getLiveBus().sync(conn.id, 7, 1, set(0, 100))).toMatchObject({ dropped: 0 });
+    expect(getLiveBus().sync(conn.id, 7, 1, set(100, 100))).toMatchObject({
+      channels: 200,
+      dropped: 0,
+    });
+    expect(warn).not.toHaveBeenCalled();
+    expect(getLiveBus().sync(conn.id, 7, 1, [...set(150, 60)])).toEqual({
+      status: "applied",
+      rev: 1,
+      channels: 200,
+      dropped: 10,
+    });
+    expect(warn).toHaveBeenCalledWith(
+      "[live] subscribe of user 7 capped at 200 channels: 10 dropped (rev 1)",
+    );
+    // A new revision starts from an empty set again.
+    expect(getLiveBus().sync(conn.id, 7, 2, set(0, 1))).toMatchObject({
+      channels: 1,
+      dropped: 0,
+    });
+    warn.mockRestore();
+  });
+
+  it("refuses an unknown or foreign connection", () => {
+    const conn = connect({ userId: 1 });
+    expect(getLiveBus().sync("nope", 1, 1, ["announcement:a"])).toEqual({ status: "unknown" });
+    expect(getLiveBus().sync(conn.id, 2, 1, ["announcement:a"])).toEqual({ status: "unknown" });
+    expect(channels(conn)).toEqual([]);
+  });
+});
+
 describe("connection caps", () => {
   it("evicts the user's OLDEST connection at the per-user cap", () => {
     const conns = Array.from({ length: 5 }, (_, i) => connect({ userId: 1, openedAt: 1000 + i }));
@@ -158,19 +302,60 @@ describe("connection caps", () => {
     expect(sixth.closed).toBe(false);
     expect(getLiveBus().connectionCount()).toBe(5);
   });
+
+  it("tells the evicted stream why (bye evicted), so its tab does not evict the next one (LF05)", () => {
+    const first = connect({ userId: 1, openedAt: 1 });
+    for (let i = 0; i < 5; i += 1) connect({ userId: 1, openedAt: 2 + i });
+    expect(first.bye).toBe("evicted");
+  });
+
+  it("evicts the oldest connection of anyone at the total cap, with bye evicted", () => {
+    const oldest = connect({ userId: 1, openedAt: 1 });
+    for (let i = 0; i < 499; i += 1) connect({ userId: 100 + i, openedAt: 2 + i });
+    expect(getLiveBus().connectionCount()).toBe(500);
+    const newcomer = connect({ userId: 9999, openedAt: 10_000 });
+    expect(oldest.bye).toBe("evicted");
+    expect(newcomer.closed).toBe(false);
+    expect(getLiveBus().connectionCount()).toBe(500);
+  });
+});
+
+describe("shutdown", () => {
+  it("registers its SIGTERM/SIGINT hook once per process, not once per bus", () => {
+    connect({ userId: 1 });
+    const hooks = [process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")];
+    getLiveBus().closeAll();
+    delete globalThis.__sinnlosLiveBus;
+    connect({ userId: 1 });
+    expect([process.listenerCount("SIGTERM"), process.listenerCount("SIGINT")]).toEqual(hooks);
+  });
+
+  it("closes every stream with bye shutdown (the deploy's SIGTERM)", () => {
+    const a = connect({ userId: 1 });
+    const b = connect({ userId: 2 });
+    getLiveBus().closeAll();
+    expect([a.bye, b.bye]).toEqual(["shutdown", "shutdown"]);
+    expect(getLiveBus().connectionCount()).toBe(0);
+  });
 });
 
 describe("parseLiveEvents", () => {
-  it("accepts the three event shapes", () => {
+  it("accepts the four event shapes, the cms keepalive included (LF05)", () => {
     expect(
       parseLiveEvents({
         events: [
           { kind: "content", targetType: "announcement", targetDocumentId: "abc" },
           { kind: "notification", recipientId: 5 },
           { kind: "announcements" },
+          { kind: "keepalive", extra: 1 },
         ],
       }),
-    ).toHaveLength(3);
+    ).toEqual([
+      { kind: "content", targetType: "announcement", targetDocumentId: "abc" },
+      { kind: "notification", recipientId: 5 },
+      { kind: "announcements" },
+      { kind: "keepalive" },
+    ]);
   });
 
   it("accepts up to MAX_EVENTS_PER_EMIT events and refuses one more (the cms chunks, LF01)", () => {

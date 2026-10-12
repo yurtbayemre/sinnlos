@@ -42,7 +42,9 @@
     "home": "Start",
     "news": "News",
     "marketplace": "Kleinanzeigen",
-    "training": "Schulungen"
+    "training": "Schulungen",
+    "more": "Mehr",
+    "moreSections": "Weitere Bereiche"
   },
   "auth": {
     "signIn": "Anmelden",
@@ -281,6 +283,8 @@
     "deleteConfirmBody": "Die Anzeige „{title}“ wird dauerhaft entfernt.",
     "deleting": "Löscht…",
     "deleteFailed": "Löschen fehlgeschlagen – bitte erneut versuchen.",
+    "moderationTitle": "Moderation",
+    "moderationHint": "Sie können diese Anzeige als Moderator:in entfernen.",
     "backToList": "Zurück zu den Kleinanzeigen",
     "backToAd": "Zurück zur Anzeige",
     "formTitleNew": "Neue Anzeige",
@@ -511,6 +515,10 @@
     "noNotificationsYet": "Noch keine Benachrichtigungen",
     "unread": "ungelesen"
   },
+  "live": {
+    "delayed": "Live-Updates verzögert",
+    "delayedHint": "Die Live-Verbindung zum Intranet ist unterbrochen. Neue Kommentare und Benachrichtigungen kommen trotzdem an, einige Sekunden später."
+  },
   "search": {
     "label": "Suche (Strg+K)",
     "placeholder": "Wiki, Personen, Teams suchen…",
@@ -531,7 +539,9 @@
     "reference": "Referenz: {digest}",
     "notFoundTitle": "Seite nicht gefunden",
     "notFoundHint": "Die aufgerufene Seite existiert nicht oder wurde verschoben.",
-    "backToDashboard": "Zurück zum Dashboard"
+    "backToDashboard": "Zurück zum Dashboard",
+    "sectionUnavailableTitle": "Für Ihr Konto nicht verfügbar",
+    "sectionUnavailableHint": "Dieser Bereich gehört nicht zu Ihrer Rolle. Wenn Sie ihn brauchen, wenden Sie sich an die Administration."
   },
   "actionErrors": {
     "forbidden": "Dazu sind Sie nicht berechtigt.",

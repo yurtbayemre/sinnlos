@@ -420,7 +420,8 @@ describe("org draft guard in register() (decision 05)", () => {
  * register() hangs two Document Service middlewares onto
  * `strapi.documents`, one for polls and one for documents and quick links,
  * before any plugin bootstrap or our own bootstrap writes a row, and
- * refuses to boot without the registry.
+ * refuses to boot without the registry. A third one guards user writes
+ * (FX40, extensions/users-permissions/strapi-server.ts createUserWriteGuard).
  */
 describe("audience guards in register() (decision 02, FX29 residual)", () => {
   function guardHost(documents: unknown) {
@@ -447,12 +448,28 @@ describe("audience guards in register() (decision 02, FX29 residual)", () => {
     next: () => Promise<unknown>,
   ) => Promise<unknown>;
 
-  it("registers one middleware for polls and one for documents and quick links", async () => {
+  it("registers one middleware for polls, one for documents and quick links, one for users (FX40)", async () => {
     const use = vi.fn();
     const strapi = guardHost({ use });
     await lifecycle.register({ strapi });
-    expect(use).toHaveBeenCalledTimes(2);
-    const [polls, departmentScoped] = use.mock.calls.map((call) => call[0] as Middleware);
+    expect(use).toHaveBeenCalledTimes(3);
+    const [polls, departmentScoped, users] = use.mock.calls.map((call) => call[0] as Middleware);
+    // The user guard: tokenVersion never reaches a user write; other types
+    // pass untouched.
+    const reached: unknown[] = [];
+    const write = (uid: string) => ({
+      uid,
+      action: "update",
+      params: { documentId: "u1", data: { displayName: "Ada", tokenVersion: 0 } },
+    });
+    for (const uid of ["plugin::users-permissions.user", "api::poll.poll"]) {
+      const context = write(uid);
+      await users(context, async () => reached.push(context.params));
+    }
+    expect(reached).toEqual([
+      { documentId: "u1", data: { displayName: "Ada" } },
+      { documentId: "u1", data: { displayName: "Ada", tokenVersion: 0 } },
+    ]);
     // Which uids each one guards: a guarded write runs in its transaction.
     const guards = async (middleware: Middleware, uid: string) => {
       strapi.transaction.mockClear();

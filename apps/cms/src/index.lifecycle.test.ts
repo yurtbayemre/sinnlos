@@ -42,6 +42,9 @@ vi.mock("./utils/poll-audience-guard", () => ({
 vi.mock("./utils/department-audience-guard", () => ({
   registerDepartmentAudienceGuard: syncStep("registerDepartmentAudienceGuard"),
 }));
+vi.mock("./extensions/users-permissions/strapi-server", () => ({
+  registerUserWriteGuard: syncStep("registerUserWriteGuard"),
+}));
 vi.mock("./utils/live-events", () => ({
   registerLiveEventSubscriber: step("registerLiveEventSubscriber"),
 }));
@@ -79,7 +82,7 @@ beforeEach(() => {
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
-  it("register(): the org draft guard first, the audience guards last", async () => {
+  it("register(): the org draft guard first, the Document Service guards last", async () => {
     await lifecycle.register({ strapi });
     expect(calls).toEqual([
       "assertNoOrgDrafts",
@@ -91,6 +94,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerRestrictedRelationGuard",
       "registerPollAudienceGuard",
       "registerDepartmentAudienceGuard",
+      "registerUserWriteGuard",
     ]);
   });
 

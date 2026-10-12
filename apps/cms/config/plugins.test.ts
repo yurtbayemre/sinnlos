@@ -22,6 +22,17 @@ const transportFor = (store: EnvStore) =>
   pluginsConfig({ env: makeEnv({ SMTP_HOST: "mail.example.com", ...store }) }).email.config
     .providerOptions;
 
+describe("config/plugins.ts users-permissions JWTs", () => {
+  it("pins legacy JWTs of 7 days: the token version (FX40) and the web session rely on them", () => {
+    const config = pluginsConfig({ env: makeEnv({ JWT_SECRET: "s" }) })["users-permissions"].config;
+    expect(config).toMatchObject({
+      jwt: { expiresIn: "7d" },
+      jwtManagement: "legacy-support",
+      jwtSecret: "s",
+    });
+  });
+});
+
 describe("config/plugins.ts SMTP transport (B05)", () => {
   it("uses STARTTLS (requireTLS) on the default port 587", () => {
     expect(transportFor({})).toMatchObject({ port: 587, secure: false, requireTLS: true });

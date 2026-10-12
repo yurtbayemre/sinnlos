@@ -11,6 +11,7 @@ import {
 } from "./database/ensure-timestamptz";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
+import { registerUserWriteGuard } from "./extensions/users-permissions/strapi-server";
 import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
 import { registerDepartmentAudienceGuard } from "./utils/department-audience-guard";
@@ -92,6 +93,12 @@ export default {
     // admin form that copied the row before the delete. Same place, same
     // refusal to boot.
     registerDepartmentAudienceGuard(strapi);
+    // FX40: a password the admin panel (or any Document Service update)
+    // sets raises the user's token version in the write's own transaction,
+    // and no write may carry tokenVersion itself
+    // (extensions/users-permissions/strapi-server.ts createUserWriteGuard).
+    // Same refusal to boot without strapi.documents.use.
+    registerUserWriteGuard(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {

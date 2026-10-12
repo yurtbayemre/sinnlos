@@ -15,7 +15,8 @@
  *      state alone;
  *   4. flock, the clean-tree check and the CI check (warning by default,
  *      refusal with --require-green-ci; a token never on curl's command
- *      line) stop a deploy before anything is touched;
+ *      line; Dependabot's own update jobs on the commit do not count) stop
+ *      a deploy before anything is touched;
  *   5. --dry-run changes nothing; --check stays the env preflight; SHA tags
  *      beyond DEPLOY_KEEP_TAGS go, images and history;
  *   6. the pre-deploy backup runs as `sudo -n /usr/local/sbin/backup-run
@@ -767,6 +768,10 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     '"in_progress",\n      "conclusion": null',
   );
   const quoted = (json: string) => `'${json.replace(/'/g, `'\\''`)}'`;
+  // CI as GitHub answers on the default branch: our two CI runs plus
+  // Dependabot's own update jobs, still running.
+  const withDependabot = (ours: object[]) =>
+    JSON.stringify({ total_count: ours.length + 2, check_runs: [...ours, ...DEPENDABOT_RUNS] });
   const STAGING = {
     COMPOSE_PROJECT: "b10-5b-staging",
     SMOKE_URL: "http://localhost:8511/",
@@ -827,8 +832,21 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
         ].join("; "),
         args: ["--dry-run"],
       },
-      // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
+      // CI with Dependabot's update jobs on the commit: they do not count.
       /* 18 */ {
+        before: `rm -r "$REPO/packages"; ci ${quoted(withDependabot(OUR_CI_GREEN))}`,
+        args: ["--dry-run", "--require-green-ci"],
+      },
+      /* 19 */ {
+        before: `ci ${quoted(withDependabot([OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], status: "in_progress", conclusion: null }]))}`,
+        args: ["--dry-run", "--require-green-ci"],
+      },
+      /* 20 */ {
+        before: `ci ${quoted(withDependabot([OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], conclusion: "failure" }]))}`,
+        args: ["--dry-run", "--require-green-ci"],
+      },
+      // The example DOMAIN of infra/.env.example (5A-T1): --check refuses it.
+      /* 21 */ {
         before: 'cp "$T/compose-example.json" "$T/compose.json"',
         args: ["--check"],
       },
@@ -842,8 +860,21 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(r[0].stateDir).toBe(false);
   });
 
+  it("ignores Dependabot's update jobs on the commit: green, pending and failed are our CI's", () => {
+    expect(r[18].status, r[18].stderr).toBe(0);
+    expect(r[18].stdout).toMatch(
+      /CI: 2 CI check\(s\) passed for [0-9a-f]{12} \(2 Dependabot run\(s\) ignored\)/,
+    );
+    expect(r[19].status).toBe(1);
+    expect(r[19].stderr).toContain(
+      "ERROR: --require-green-ci, and CI is pending: CI is still running",
+    );
+    expect(r[20].status).toBe(1);
+    expect(r[20].stderr).toContain("ERROR: --require-green-ci, and CI is failed: CI did not pass");
+  });
+
   it("refuses the example DOMAIN in --check, before anything is touched (5A-T1)", () => {
-    const run = r[18];
+    const run = r[21];
     expect(run.status).toBe(1);
     expect(run.stderr).toContain("ERROR: DOMAIN in infra/.env does not fit this instance:");
     expect(run.stderr).toContain(
@@ -1012,6 +1043,170 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
     expect(run.state.TAG).toBe(tagOf(r[7]));
   });
 });
+
+/** Our CI's runs on a commit, as the GitHub API lists them (abridged). */
+const OUR_CI_GREEN = [
+  {
+    id: 11,
+    name: "typecheck · lint · test · build",
+    status: "completed",
+    conclusion: "success",
+    output: { title: null, summary: null, text: null },
+    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
+  },
+  {
+    id: 12,
+    name: "integration · SQLite + Postgres 16",
+    status: "completed",
+    conclusion: "success",
+    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
+  },
+];
+
+/**
+ * Dependabot's own update jobs, which GitHub attaches to the default
+ * branch's HEAD: a run named "Dependabot" of the app github-actions, and the
+ * app dependabot's check of .github/dependabot.yml. Still running.
+ */
+const DEPENDABOT_RUNS = [
+  {
+    id: 21,
+    name: "Dependabot",
+    status: "in_progress",
+    conclusion: null,
+    app: { id: 15368, slug: "github-actions", name: "GitHub Actions" },
+  },
+  {
+    id: 22,
+    name: ".github/dependabot.yml",
+    status: "queued",
+    conclusion: null,
+    app: { id: 29110, slug: "dependabot", name: "Dependabot" },
+  },
+];
+
+/**
+ * deploy.sh's ci_status with git and curl stubbed, once per body, all in
+ * one bash process (a bash start costs seconds under a parallel run on
+ * Windows): curl answers the body of the round.
+ */
+function ciStatuses(bodies: readonly string[]): string[] {
+  const script = [
+    "set -euo pipefail",
+    "fakegit() { echo https://github.com/example/sinnlos.git; }",
+    "GIT=(fakegit)",
+    "HEAD_SHA=0123456789abcdef0123456789abcdef01234567",
+    "BODIES=()",
+    ...bodies.flatMap((body, n) => [`BODIES+=("$(cat <<'BODY_${n}'`, body, `BODY_${n}`, ')")']),
+    `curl() { cat > /dev/null; printf '%s\\n' "\${BODIES[ROUND]}"; }`,
+    functionOf("check_runs_of"),
+    functionOf("ci_status"),
+    'for ROUND in "${!BODIES[@]}"; do ci_status; done',
+    "",
+  ].join("\n");
+  const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+  expect(res.status, res.stderr).toBe(0);
+  const lines = res.stdout.trimEnd().split("\n");
+  expect(lines).toHaveLength(bodies.length);
+  return lines;
+}
+
+const ciStatus = (body: string): string => ciStatuses([body])[0] ?? "";
+
+/** The body of a top-level function of deploy.sh, `name() {` to `}`. */
+function functionOf(name: string): string {
+  const start = DEPLOY.indexOf(`\n${name}() {\n`);
+  if (start < 0) throw new Error(`${name}() not found in infra/deploy.sh`);
+  return DEPLOY.slice(start + 1, DEPLOY.indexOf("\n}\n", start + 1) + 2);
+}
+
+const answer = (runs: object[], pretty = false) =>
+  JSON.stringify({ total_count: runs.length, check_runs: runs }, null, pretty ? 2 : undefined);
+
+describe.skipIf(!HAS_BASH)(
+  "deploy.sh: the CI check reads our CI's runs only",
+  { timeout: 30_000 },
+  () => {
+    const ours = (patch: object) => [OUR_CI_GREEN[0], { ...OUR_CI_GREEN[1], ...patch }];
+
+    it("is green while Dependabot's update jobs on the commit still run", () => {
+      for (const pretty of [false, true]) {
+        expect(ciStatus(answer([...DEPENDABOT_RUNS, ...OUR_CI_GREEN], pretty))).toBe(
+          "green: 2 CI check(s) passed for 0123456789ab (2 Dependabot run(s) ignored)",
+        );
+      }
+    });
+
+    it("is pending while our CI runs, whatever Dependabot's jobs do", () => {
+      const done = DEPENDABOT_RUNS.map((run) => ({
+        ...run,
+        status: "completed",
+        conclusion: "success",
+      }));
+      expect(ciStatus(answer([...done, ...ours({ status: "queued", conclusion: null })]))).toBe(
+        "pending: CI is still running for 0123456789ab (2 Dependabot run(s) ignored)",
+      );
+    });
+
+    it("is failed when our CI failed", () => {
+      expect(ciStatus(answer([...DEPENDABOT_RUNS, ...ours({ conclusion: "failure" })]))).toMatch(
+        /^failed: CI did not pass for 0123456789ab \(2 Dependabot run\(s\) ignored\) \(https:\/\/github\.com\/example\/sinnlos\/commit\//,
+      );
+      // A failed Dependabot job is not ours either.
+      const broken = DEPENDABOT_RUNS.map((run) => ({
+        ...run,
+        status: "completed",
+        conclusion: "failure",
+      }));
+      expect(ciStatus(answer([...broken, ...OUR_CI_GREEN]))).toMatch(
+        /^green: 2 CI check\(s\) passed/,
+      );
+    });
+
+    it("reads each run's own fields, not those of its output or its app", () => {
+      const tricky = {
+        ...OUR_CI_GREEN[0],
+        output: {
+          title: 'status "in_progress"',
+          summary: '{"status":"queued","conclusion":"failure","name":"Dependabot"}',
+          text: "a \\ backslash, a } brace and a ] bracket",
+        },
+        app: { id: 1, slug: "github-actions", name: "Dependabot", owner: { login: "failure" } },
+        pull_requests: [{ id: 3, number: 7, head: { ref: "dependabot", sha: "x" } }],
+      };
+      expect(ciStatus(answer([tricky, OUR_CI_GREEN[1]], true))).toBe(
+        "green: 2 CI check(s) passed for 0123456789ab",
+      );
+    });
+
+    it("is unknown with only Dependabot's runs, or none, or an answer it cannot read", () => {
+      expect(ciStatus(answer(DEPENDABOT_RUNS))).toBe(
+        "unknown: no CI run for 0123456789ab on example/sinnlos (2 Dependabot run(s) ignored) (CI has not started)",
+      );
+      expect(ciStatus(answer([]))).toMatch(
+        /^unknown: no CI run for 0123456789ab on example\/sinnlos \(not pushed/,
+      );
+      expect(ciStatus('{"total_count": 3, "check_runs": "elsewhere"}')).toBe(
+        "unknown: the GitHub answer lists 3 check run(s) for 0123456789ab, but none could be read",
+      );
+    });
+
+    it("counts every run of our CI and every non-success conclusion as before", () => {
+      const conclusions = ["cancelled", "timed_out", "action_required", "startup_failure", "stale"];
+      const statuses = ["queued", "in_progress", "waiting", "requested", "pending"];
+      const results = ciStatuses([
+        ...conclusions.map((conclusion) => answer(ours({ conclusion }))),
+        ...statuses.map((status) => answer(ours({ status, conclusion: null }))),
+        answer(ours({ conclusion: "skipped" })),
+      ]);
+      conclusions.forEach((conclusion, n) => expect(results[n], conclusion).toMatch(/^failed: /));
+      statuses.forEach((status, n) =>
+        expect(results[conclusions.length + n], status).toMatch(/^pending: /),
+      );
+      expect(results.at(-1)).toMatch(/^green: 2 CI check\(s\)/);
+    });
+  },
+);
 
 describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
   it("keeps today's defaults", () => {

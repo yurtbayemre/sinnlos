@@ -180,7 +180,11 @@ self-registration when `LOCAL_REGISTRATION=1` is set in **both**
 `member` role; users manage their own display name, job title and phone
 on **/profile**; password resets are done by an admin in the Strapi
 panel (no SMTP required; the anonymous forgot/reset-password endpoints are
-revoked).
+revoked). Changing one's own password on **/profile** signs the user out
+of every other browser and device (their next request lands on the
+sign-in page) while the tab that changed it stays signed in: the cms keeps
+a token version per user and refuses older JWTs. A password an admin sets
+in the Strapi panel does not do that yet.
 
 Quick start:
 
@@ -796,7 +800,7 @@ Strapi admin applies on the user's next page load, without a new sign-in:
                            ▼ viewer.role (string | null)
 ┌─────────────────────────────────────────────────────────────────┐
 │  3. Frontend UI gating (web/src/lib/roles.ts, fail-closed)      │
-│     isAdmin / canCreatePolls / canRsvp / canPostAds             │
+│     can* predicates, read sections, capabilitiesFor (SH02)      │
 └──────────────────────────┬──────────────────────────────────────┘
                            ▼ Server Action / fetch with the caller's JWT
 ┌─────────────────────────────────────────────────────────────────┐
@@ -982,15 +986,28 @@ deleting the media library from outside the admin panel).
 request with `getViewer()` (`apps/web/src/lib/viewer.ts`, `GET /api/me`) and
 gates the UI with the fail-closed allowlist helpers in
 `apps/web/src/lib/roles.ts` — `null`, unknown or differently-cased roles
-never pass, and exclusion checks such as `role !== "guest"` are not allowed:
+never pass, and exclusion checks such as `role !== "guest"` are not allowed.
+Every helper and role set is pinned to the cms permission matrix by
+`apps/web/src/lib/roles-matrix-parity.test.ts`: a grant change in
+`apps/cms/src/bootstrap/permission-matrix.ts` that the web does not mirror
+fails CI.
 
-| Helper           | Roles                                  | Used for                                                                                                                                                                                  |
-| ---------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `isAdmin`        | `admin_role`                           | sidebar _Admin_ link; `/manage`, `/manage/acknowledgements`, `/manage/analytics`, `/manage/training` (redirect non-admins to `/`); marketplace detail/edit controls for someone else's ad |
-| `canCreatePolls` | `admin_role`, `editor`                 | _New poll_ button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards                                                                  |
-| `canRsvp`        | the five staff roles + `authenticated` | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant)                                                                                           |
-| `canPostAds`     | the five staff roles                   | _New ad_ button, `/marketplace/new`                                                                                                                                                       |
-| `isGuest`        | `guest`                                | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint                                                                              |
+| Helper                 | Roles                                   | Used for                                                                                                                                                                                                          |
+| ---------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isAdmin`              | `admin_role`                            | `/manage` and `/manage/analytics` (redirect non-admins to `/`)                                                                                                                                                    |
+| `capabilitiesFor`      | per role (decision 06 §L2)              | `manage` (the _Admin_ nav entry, `admin_role` only), `reports` (the acknowledgement and training reports), and the authoring, wiki and org capabilities the later authoring pages use                             |
+| `canCreatePolls`       | `admin_role`, `editor`                  | _New poll_ button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards                                                                                          |
+| `canRsvp`              | the five staff roles + `authenticated`  | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant)                                                                                                                   |
+| `canPostAds`           | the five staff roles                    | _New ad_ button, `/marketplace/new`                                                                                                                                                                               |
+| `canEditAnyAd`         | `admin_role`                            | editing someone else's ad (the _Edit_ link and `/marketplace/[id]/edit`)                                                                                                                                          |
+| `canDeleteAnyAd`       | `admin_role`, `editor`                  | the _Moderation_ card with _Delete ad_ on someone else's ad                                                                                                                                                       |
+| `canComment`           | the five staff roles + `authenticated`  | the comment form                                                                                                                                                                                                  |
+| `canReact`             | the five staff roles + `authenticated`  | the reaction bar                                                                                                                                                                                                  |
+| `canDeleteOwnComments` | the five staff roles                    | the delete button on one's own comments                                                                                                                                                                           |
+| `canTrain`             | the five staff roles + `authenticated`  | no caller yet (the SH02 predicate, pinned by the parity test); the training report counts the same set (`TRAINING_ROLES`), and the training pages gate with `isReadDenied(role, "training")`                      |
+| `canReceiveDigests`    | the five staff roles + `authenticated`  | the digest options on `/profile` (the announcement readers)                                                                                                                                                       |
+| `isReadDenied`         | a known role without the section's read | pages skip the request and show _Not available for your account_; the nav hides the entry (guest: announcements, departments, teams, kudos, marketplace, training; `authenticated`: the celebrations on `/kudos`) |
+| `isGuest`              | `guest`                                 | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint                                                                                                      |
 
 Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
@@ -1003,13 +1020,21 @@ answer text it showed, and when a reorder or replacement moved that text
 the cms refuses the vote ("Poll options changed") and the card reloads,
 instead of recording whatever answer now sits at that position.
 
-The marketplace detail/edit pages show the edit/delete controls to the ad's
-owner and to `admin_role` (editors can still delete through the API, but the
-web shows them no controls). Note the admin area lives under **`/manage`** —
-`/admin` is reserved for the Strapi admin panel by the reverse proxy. Every
-authorization decision is still made server-side by Strapi's permission
-matrix + route policies; the helpers only keep the UI from offering what
-Strapi would refuse.
+The ad detail page shows the _Edit_ link to the ad's owner and to
+`admin_role`; the owner deletes on the edit page. On someone else's ad, a
+moderator (`admin_role`, `editor`) gets a _Moderation_ card with _Delete ad_
+(the takedown the cms always allowed editors); editors cannot edit other
+people's ads. A role that cannot read a section (guest: announcements,
+departments, teams, kudos, marketplace, training) sends no request for it:
+its pages show _Not available for your account_, the dashboard leaves those
+sections out, the navigation hides them, and the ⌘K search skips them
+(guest: announcements, departments, teams). The sidebar (desktop) and the
+phone tab bar with its _More_ sheet map the same entries
+(`apps/web/src/lib/nav-config.ts`). Note the admin area lives under
+**`/manage`** — `/admin` is reserved for the Strapi admin panel by the
+reverse proxy. Every authorization decision is still made server-side by
+Strapi's permission matrix + route policies; the helpers only keep the UI
+from offering what Strapi would refuse, or asking what it would refuse.
 
 ## Internationalization (i18n)
 
@@ -1273,12 +1298,16 @@ Safety nets for refactors (roadmap S03–S06, S09):
   `apps/cms/config/middlewares.ts`: it fails when the list loses one of the
   global guards (`sensitive-query-guard`, `uploads-auth`, `auth-path-guard`)
   or names a `global::` middleware without its file in `src/middlewares`.
-- `infra/contracts.test.ts` pins what the cms and the web both state: the
-  announcement audience rule, the YouTube parser, comment anchors, schema
+- `infra/contracts.test.ts` pins what the cms and the web both state, or
+  where they meet: the web acknowledgement report counts exactly the users
+  the cms notifies, the cms saves exactly the lesson videos the web embeds,
+  a comment the web posts lands under the anchor its section reads, schema
   enums against the web unions and constants (the live channel pattern from
-  `apps/web/src/lib/live-contract.ts`), relation pairs, and the web
-  role sets against the permission matrix. The live contract itself (event,
-  frame and channel shapes of the SSE pipeline), like the audience rule, the
+  `apps/web/src/lib/live-contract.ts`), relation pairs, and the search's
+  contact-field roles. The web role helpers are pinned against the
+  permission matrix by `apps/web/src/lib/roles-matrix-parity.test.ts`.
+  The live contract itself (event, frame and channel shapes of the SSE
+  pipeline), like the audience rule, the
   YouTube parser and the anchors, now lives once in `@sinnlos/domain`
   (`packages/domain`, see [Shared domain package](#shared-domain-package));
   both apps re-export it. Known gaps are listed in the file
@@ -1339,6 +1368,17 @@ Safety nets for refactors (roadmap S03–S06, S09):
       or department
 - [ ] An admin sees the _Admin_ link and `/manage`; an editor sees
       _New poll_; a guest sees no RSVP controls and no _New ad_ button
+- [ ] A guest's navigation has no Announcements, Departments, Teams, Kudos,
+      Marketplace or Training; opening one of them by URL shows _Not
+      available for your account_, and neither the web nor the cms logs a
+      403 for it
+- [ ] At 360 px every section is reachable: five tabs plus _More_, whose
+      sheet opens with Enter, keeps Tab inside, closes with Escape and lists
+      _Admin_ for admins only
+- [ ] An editor sees _Moderation_ / _Delete ad_ on someone else's ad and no
+      _Edit_ link; `/marketplace/<id>/edit` sends them back to the ad
+- [ ] With network throttling, a clicked nav link shows its pending dot
+      until the route's skeleton (with the progress bar) appears
 - [ ] Poll targeting: a poll restricted to one department is listed for
       its members only; an editor outside it sees _Only for: …_, the
       results and disabled buttons
@@ -1349,9 +1389,16 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] `docker compose up -d` brings the full stack up behind the reverse proxy
       (Caddy locally / Traefik on srv-prod-01)
 - [ ] A comment posted in session A appears in session B in under two
-      seconds without a reload (SSE) — or run `infra/live-smoke.sh`; on
-      `/announcements` the network panel shows one `POST /live/subscribe`
-      for all cards, and a comment on one card refreshes that card only
+      seconds without a reload (SSE) — or run `infra/live-smoke.sh` (it
+      also requires the stream to report `"emitFresh":true`, i.e. the cms
+      keepalive reaches the web); on `/announcements` the network panel
+      shows one `POST /live/subscribe` with the page's full channel set for
+      all cards, and a comment on one card refreshes that card only
+- [ ] Changing the password on `/profile` in browser A keeps A signed in;
+      the same account in browser B lands on `/sign-in?expired=1` with its
+      next click
+- [ ] With the cms stopped, the header shows _Live updates delayed_
+      within about 75 s, and the note goes away once the cms is back
 - [ ] `/training` lists published courses; on a `quizGate` course the
       completion button stays locked until every quiz answer is correct;
       `/manage/training` shows the completion report (admin)
@@ -1402,3 +1449,22 @@ APP_TIME_ZONE …` and no column is left as `timestamp without time zone`
 - [ ] The first Tab on an app page shows _Skip to content_; the theme
       toggle switches on the first click also for a user whose system theme
       is dark
+- [ ] The language menu, the marketplace category and duration selects,
+      the _/people_ department filter and the notification bell open with
+      Enter, move with the arrow keys, jump by typing a letter, close with
+      Escape and give focus back to their button; picking _Deutsch_
+      with the keyboard (Enter, ArrowUp, Enter) leaves the focus on the
+      language button once the page is German; ⌘K logs no "DialogTitle"
+      error in the browser console
+- [ ] _Delete ad_ and _Give kudos_ keep Tab inside the dialog, close with
+      Escape or a click beside it and give focus back to their button;
+      confirming a delete lands on `/marketplace` without a _Page not found_
+      flash
+- [ ] An announcement renders its Markdown (bold, lists, links, images);
+      `<script>` or an `onerror` attribute in a body shows as text, a
+      `javascript:` link as plain text; the dashboard's _Latest news_
+      excerpts show no `**`, `#` or link targets; footnotes in two
+      announcements each jump to their own card's notes
+- [ ] With the cms stopped after a page loaded, the bell keeps its badge
+      and list and the open panel says the intranet cannot be reached; a
+      page loaded during the stop shows only that note

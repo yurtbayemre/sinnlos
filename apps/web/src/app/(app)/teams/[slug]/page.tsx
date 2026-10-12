@@ -2,11 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getTranslations } from "next-intl/server";
 import { api } from "@/lib/strapi";
+import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
+import { getViewer } from "@/lib/viewer";
 import type { Team } from "@/lib/types";
 import { initials, stripHtml } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/page-header";
+import { SectionUnavailable } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -14,11 +18,11 @@ interface Props {
 
 export async function generateMetadata({ params }: Props) {
   const { slug } = await params;
+  const t = await getTranslations("teams");
+  // No read for a role that cannot read teams (SH02).
+  if (isReadDenied((await getViewer()).role, "teams")) return { title: t("title") };
   // Same GET as the page's, sent once per render (Next's fetch dedupe).
-  const [t, { data }] = await Promise.all([
-    getTranslations("teams"),
-    tryFetch(() => api.teams.one(slug), "team-meta"),
-  ]);
+  const { data } = await tryFetch(() => api.teams.one(slug), "team-meta");
   const entry = data?.data?.[0] as Team | undefined;
   return { title: entry?.name ?? t("title") };
 }
@@ -27,6 +31,16 @@ export default async function TeamPage({ params }: Props) {
   const { slug } = await params;
   const t = await getTranslations("teams");
   const tCommon = await getTranslations("common");
+  // A role without team.find (guest) gets no request and an explanation
+  // instead of the error page (SH02).
+  if (isReadDenied((await getViewer()).role, "teams")) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title={t("title")} />
+        <SectionUnavailable />
+      </div>
+    );
+  }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the
   // page again, instead of a misleading 404; an unknown slug is a 404.

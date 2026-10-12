@@ -6,7 +6,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent } from "@/components/ui/card";
 import { EmptyState } from "@/components/empty-state";
 import { relativeTime } from "@/lib/relative-time";
-import { initials } from "@/lib/utils";
+import { initials, stripMarkdown } from "@/lib/utils";
 
 type Announcement = {
   id: number;
@@ -27,7 +27,9 @@ function normalise(a: Announcement) {
   return {
     id: a.id,
     title: a.title as string,
-    body: (a.body as string) ?? "",
+    // The body is Markdown (UI03); the cards show a clamped plain-text
+    // excerpt, without "**", "#" or link targets.
+    body: stripMarkdown(a.body),
     pinned: Boolean(a.pinned),
     createdAt: a.createdAt ? new Date(a.createdAt) : null,
     authorName: author?.displayName ?? author?.username ?? author?.email ?? null,
