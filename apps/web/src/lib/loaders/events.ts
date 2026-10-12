@@ -6,7 +6,7 @@ import { canRsvp as roleCanRsvp } from "@/lib/roles";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { api } from "@/lib/strapi";
 import type { EventRsvpSummary } from "@/lib/types";
-import { listTotal, type CountedList } from "./count";
+import { listIsCut } from "./count";
 
 /**
  * The /events page (WD03). Time-window reads (lib/api/events.ts): a global
@@ -52,11 +52,6 @@ export type EventsView =
       empty: boolean;
     });
 
-/** More rows exist than the capped read returned. */
-function cut(list: (CountedList & { data?: unknown[] | null }) | null): boolean {
-  return !!list && listTotal(list) > (list.data?.length ?? 0);
-}
-
 /**
  * Everything /events renders. `viewer` gates the RSVP summaries: guests
  * hold no event-rsvp grant (the read would answer 403), and the gate is
@@ -83,7 +78,7 @@ export async function loadEvents(
       events: res.data?.data ?? [],
       today,
       failed: res.failed,
-      truncated: cut(res.data),
+      truncated: listIsCut(res.data),
     };
   }
 
@@ -122,6 +117,6 @@ export async function loadEvents(
     empty: !upcomingRes.failed && !pastRes.failed && upcoming.length === 0 && past.length === 0,
     today,
     failed: upcomingRes.failed || pastRes.failed || rsvpRes.failed,
-    truncated: cut(upcomingRes.data),
+    truncated: listIsCut(upcomingRes.data),
   };
 }

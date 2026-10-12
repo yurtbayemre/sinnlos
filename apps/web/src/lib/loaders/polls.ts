@@ -2,7 +2,7 @@ import { isPollClosed } from "@/lib/poll-close";
 import { SKIPPED_READ, tryFetch } from "@/lib/safe-fetch";
 import { api, findPollResults, pollRef, type PollRef } from "@/lib/strapi";
 import type { PollResults } from "@/lib/types";
-import { listTotal } from "./count";
+import { listIsCut } from "./count";
 
 /** One poll card: its address and the caller's results. */
 export interface PollEntry {
@@ -57,6 +57,6 @@ export async function loadPolls(now: Date): Promise<PollsView> {
     closed,
     empty: !list.failed && !results.failed && cards.length === 0,
     failed: list.failed || results.failed,
-    truncated: !!list.data && listTotal(list.data) > polls.length,
+    truncated: listIsCut(list.data),
   };
 }

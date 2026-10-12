@@ -35,6 +35,11 @@ export function listTotal(list: CountedList | null | undefined): number {
   return list?.meta?.pagination?.total ?? list?.data?.length ?? 0;
 }
 
+/** A capped list holds fewer rows than its total: more exist than the read returned. */
+export function listIsCut(list: CountedList | null | undefined): boolean {
+  return !!list && listTotal(list) > (list.data?.length ?? 0);
+}
+
 /** A tryFetch() result of a capped list as a count. */
 export function countOfList(result: { data: CountedList | null; failed: boolean }): Count {
   return result.failed ? FAILED_COUNT : { value: listTotal(result.data), truncated: false };
