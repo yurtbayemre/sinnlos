@@ -1291,9 +1291,9 @@ failures, checks, dry run).
 `deploy.sh` takes the pre-deploy backup of project `infra` with
 `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (step 1). The
 drop-in `/etc/sudoers.d/backup-run-predeploy` comes from `srv-prod-01-ops`
-(expected rule: `bigemo ALL=(root) NOPASSWD: /usr/local/sbin/backup-run
---kind predeploy sinnlos`; that repo owns it, this one cannot check it). It
-works only while it is the **last** sudoers rule that matches the command
+and holds the rule `bigemo ALL=(root) NOPASSWD: /usr/local/sbin/backup-run
+--kind predeploy sinnlos` (production's nightly `backup-run` timer fires at
+04:00). It works only while it is the **last** sudoers rule that matches the command
 for `bigemo`: sudo applies the last match. A general rule for the user or
 one of their groups (`bigemo ALL=(ALL:ALL) ALL`, `%sudo ALL=(ALL:ALL) ALL`)
 that `/etc/sudoers` lists **after** its `@includedir /etc/sudoers.d` line,
@@ -1305,14 +1305,16 @@ above the include.
 
 `sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos` proves
 **nothing**: it prints the command and exits 0 whenever any rule permits
-it, the one that asks for a password included. As `bigemo` (checked with
-sudo 1.9.17 for both orders and for a group rule):
+it, the one that asks for a password included. **The recommended check
+before a deploy** (owner decision 2026-10-12) is the command itself, as
+`bigemo`, next to the read-only listing (checked with sudo 1.9.17 for both
+orders and for a group rule):
 
 ```bash
+sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
 sudo -n -l
 sudo awk '/^[[:space:]]*[@#]includedir[[:space:]]/ {inc = NR; next}
   inc && /^[[:space:]]*(bigemo|%)/ {print NR": "$0}' /etc/sudoers
-sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "exit $?"
 ```
 
 - **`sudo -n -l`** (no command; read-only, and no password while one of
@@ -1325,10 +1327,15 @@ sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "exit $?"
   group rule below the `@includedir` line of `/etc/sudoers` and must print
   nothing (it asks for the password; a group rule matters for the groups
   `id -nG bigemo` lists). It does not see the drop-ins themselves.
-- **The command itself** is the only end-to-end proof: it takes one
-  pre-deploy backup (one more `-predeploy` generation, the same as step 1
-  of a deploy) and ends with `exit 0`, or stops at once with
-  `sudo: a password is required` and `exit 1`.
+- **The command itself** (recommended) is the only end-to-end proof: it
+  takes one pre-deploy backup, the same as step 1 of a deploy, so one
+  more `-predeploy` generation of `sinnlos` lands in `/srv/backup/outbox`
+  (its rotation is `backup-run`'s). As far as this repo knows it, success
+  is `backup-run exit 0`, which is what `deploy.sh` takes as a good
+  backup; a missing or losing sudoers rule stops it at once with
+  `sudo: a password is required` and exit 1, and any other non-zero exit
+  is `backup-run`'s own failure (its output and `docs/backup.md` in
+  `srv-prod-01-ops` say why).
 
 ### 3.7 Enable auto-restart on reboot
 
@@ -1911,6 +1918,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    infra/deploy.sh --check
    infra/deploy.sh --dry-run
    sudo -n -l
+   sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
    ```
 
    `--check` prints `Preflight OK` and
@@ -1932,8 +1940,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ([Checking the backup permission](#checking-the-backup-permission-production)).
    `sudo -n -l <the command>` proves nothing here: it lists the command also
    when a later rule asks for a password, which is how the first batch 12
-   deploy stopped at its backup on 2026-10-12. If the order is wrong, fix
-   the sudoers file first: the deploy would stop at its backup step.
+   deploy stopped at its backup on 2026-10-12. The last command is the
+   recommended end-to-end check (owner decision 2026-10-12): it takes one
+   pre-deploy backup and must print `backup-run exit 0`; `sudo: a password
+   is required` means a later rule wins. If either check fails, fix the
+   sudoers file first: the deploy would stop at its backup step.
 
 4. **The live pipeline's cms env** (the new live-smoke needs the cms
    keepalive to reach the web):
@@ -3030,6 +3041,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    infra/deploy.sh --dry-run
    cat .git/sinnlos-deploy/infra.state
    sudo -n -l
+   sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
    ```
 
    `--check` prints `Preflight OK` and
@@ -3056,8 +3068,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ([Checking the backup permission](#checking-the-backup-permission-production)).
    `sudo -n -l <the command>` proves nothing here: it lists the command also
    when a later rule asks for a password, which is how the first batch 12
-   deploy stopped at its backup on 2026-10-12. If the order is wrong, fix
-   the sudoers file first: the deploy would stop at its backup step.
+   deploy stopped at its backup on 2026-10-12. The last command is the
+   recommended end-to-end check (owner decision 2026-10-12): it takes one
+   pre-deploy backup and must print `backup-run exit 0`; `sudo: a password
+   is required` means a later rule wins. If either check fails, fix the
+   sudoers file first: the deploy would stop at its backup step.
 
 4. **Permissions: no change.**
 
@@ -10018,10 +10033,11 @@ az vm auto-shutdown \
 
 ## 5. Azure Container Apps (Advanced)
 
-> **Unverified.** The owner has not run or confirmed this path, and
-> nothing in the repo tests it: `infra/deploy.sh`, `infra/live-smoke.sh`,
-> the backup scripts and CI cover Docker Compose only. Treat this section
-> as a starting point and check it on your own subscription.
+> **Unverified.** Nobody has run this path for Sinnlos yet, and nothing in
+> the repo tests it: `infra/deploy.sh`, `infra/live-smoke.sh`, the backup
+> scripts and CI cover Docker Compose only. It will be tested after
+> v1.0.0 (owner decision 2026-10-12). Until then treat this section as a
+> starting point and check it on your own subscription.
 
 Container Apps runs the two images without a VM to patch. Sinnlos does not
 scale out on it: both apps keep state in their process (the cms runs the
@@ -10931,6 +10947,11 @@ container running for a look (`docker exec -it <name> psql -U drill -d drill`).
 Run it after changes to the backup and every few months. The drill's
 database is a throwaway one that no cms ever uses, so it needs no new
 `JWT_SECRET`; a real restore does (§7.1, step 6).
+
+> **Planned (follow-up, not built yet):** `restore-drill.sh` support for
+> the generations of production's `backup-run`. It needs their artifact
+> layout from `docs/backup.md` in the `srv-prod-01-ops` repo, which is not
+> in this repo; until then the drill takes `pg-backup.sh` artifacts only.
 
 > **No order needed:** the crontab runs in the **host's** zone, the
 > janitors (uploads, search log, and since batch 12 notifications and
