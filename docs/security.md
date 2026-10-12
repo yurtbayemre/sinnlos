@@ -248,22 +248,30 @@ per-user token version so that a password change can end the older ones:
   signature: the request is unauthenticated (401), and the web sends the
   session to `/sign-in?expired=1`. That costs one primary-key read per
   authenticated request.
-- **The bump.** A password change raises the version by one in a single
-  atomic statement, **before** the new password is saved. Fail closed: a
-  failed bump refuses the change with the password unchanged; a failed save
-  after the bump leaves the old password with the older JWTs already
-  revoked, never a new password next to older JWTs that still work. It
+- **The bump.** A password change raises the version by one (a single
+  atomic statement) and saves the new password in **one database
+  transaction**. Nobody sees the new version next to the old password, and
+  overlapping changes of one user wait for each other, so the stored
+  password always belongs to the change with the highest version. Fail
+  closed: when the bump or the save fails, the transaction rolls both back
+  and nothing changed (the old password and every session stay, the user
+  sees an error, the cms logs `[auth] password not changed: user=<id>`);
+  a new password never stands next to older JWTs that still work. It
   covers `POST /api/auth/change-password`, `reset-password` (revoked for
   `public`, should an operator grant it again), `PUT /api/users/:id` with a
   password, and every Document Service update of a user that carries a
   password, the Content Manager in the admin panel included (a guard
-  registered in `register()` of `apps/cms/src/index.ts`; the cms refuses to
-  boot without it). The password actions answer with a JWT of exactly the
-  version their bump committed, which the web stores in the session of the
-  tab that changed it (`apps/web/src/lib/profile-actions.ts`).
-- **Sign-in races.** A local sign-in stamps the version the user had
-  before the password check, so a sign-in with the old password that
-  overlaps a change gets a JWT the change has revoked.
+  registered in `register()` of `apps/cms/src/index.ts`, which runs the
+  bump and the write in one transaction the same way; the cms refuses to
+  boot without it). The password actions answer, once the transaction
+  committed, with a JWT of exactly the version their bump set, which the
+  web stores in the session of the tab that changed it
+  (`apps/web/src/lib/profile-actions.ts`).
+- **Sign-in races.** A local sign-in reads the version before the
+  password hash and stamps that version, so it sees either both old (its
+  JWT carries the old version, which the change's commit revokes) or both
+  new; a sign-in with the old password that overlaps a change never gets a
+  JWT that outlives the change.
 - **No input sets it.** The field is private, not searchable and hidden in
   the admin panel (`visible: false`: no field in the edit view, no field
   permission). The same Document Service guard drops `tokenVersion` from
@@ -872,8 +880,8 @@ reverse proxy.
 - `apps/cms/src/poll-exposure.test.ts`: no module reads polls past the
   poll rules.
 - `apps/cms/src/extensions/users-permissions/strapi-server.test.ts`: the
-  token versions: the claim, the bump before the save and its failures,
-  the admin-panel guard and the dropped `tokenVersion`;
+  token versions: the claim, the bump and the save in one transaction and
+  its rollback, the admin-panel guard and the dropped `tokenVersion`;
   `apps/cms/src/utils/deploy-preflight.test.ts` covers the rollback hint's
   rotation step.
 - `pnpm test:integration` (`apps/cms/src/integration/`): the real cms per
