@@ -182,7 +182,8 @@
       "min": 0,
       "configurable": false,
       "private": true,
-      "searchable": false
+      "searchable": false,
+      "visible": false
     }
   }
 }

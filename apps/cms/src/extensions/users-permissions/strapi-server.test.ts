@@ -28,7 +28,10 @@ import {
   TOKEN_VERSION_CLAIM,
   USER_UID,
   bumpTokenVersion,
+  createUserWriteGuard,
   createUsersPermissionsExtension,
+  patchUserService,
+  registerUserWriteGuard,
   tokenVersionBumpSql,
   type AuthContext,
   type JwtService,
@@ -102,7 +105,10 @@ const claims = (jwt: string) =>
 
 interface Harness {
   strapi: TokenVersionStrapi;
-  users: Map<number, { id: number; tokenVersion?: number | null; password?: string }>;
+  users: Map<
+    number,
+    { id: number; tokenVersion?: number | null; password?: string; documentId?: string }
+  >;
   jwt: JwtService;
   auth: Record<string, (ctx: AuthContext, ...rest: unknown[]) => Promise<unknown>>;
   /** The (wrapped) users-permissions user service. */
@@ -198,8 +204,11 @@ function harness(
         return {
           async findOne(args) {
             queries.push(`findOne ${JSON.stringify(args)}`);
-            const id = (args.where as { id: number }).id;
-            const row = users.get(id);
+            const where = args.where as { id?: number; documentId?: string };
+            const row =
+              where.documentId !== undefined
+                ? [...users.values()].find((user) => user.documentId === where.documentId)
+                : users.get(where.id as number);
             return row ? { ...row } : null;
           },
           async update(args) {
@@ -1041,6 +1050,247 @@ describe("overlapping password changes of one user (real SQLite)", () => {
     expect(claims(await a)).toMatchObject({ id: h.userId, tv: 1 });
     expect(await h.stored()).toEqual({ version: 1, password: "password-a" });
   }, 30_000);
+});
+
+describe("the Document Service guard of the user type (admin-panel passwords, tokenVersion input)", () => {
+  /**
+   * The Map harness with a fake Document Service for the user type: every
+   * update runs through the guard, then writes the (possibly rewritten)
+   * data into the row, as the repository would. `userService` is the
+   * plugin's edit() as it really is: the user's documentId, then a
+   * Document Service update.
+   */
+  function guardHarness(
+    mode: "legacy-support" | "refresh" = "legacy-support",
+    createGuard: typeof createUserWriteGuard = createUserWriteGuard,
+  ) {
+    const h = harness(mode);
+    for (const [id, row] of h.users) h.users.set(id, { ...row, documentId: `doc-${id}` });
+    const guard = createGuard(h.strapi);
+    let failWrite = false;
+    const run = async (action: string, params: Record<string, unknown>) => {
+      const context = { uid: USER_UID, action, params };
+      return guard(context, async () => {
+        const final = context.params as { documentId?: string; data: Record<string, unknown> };
+        if (failWrite) throw new Error("the Document Service failed");
+        h.queries.push(`save ${JSON.stringify(final.data)}`);
+        const row = [...h.users.values()].find((user) => user.documentId === final.documentId);
+        if (row) h.users.set(row.id, { ...row, ...final.data });
+        return final.data;
+      });
+    };
+    const documents = {
+      update: (params: { documentId: string; data: Record<string, unknown> }) =>
+        run("update", params),
+    };
+    const userService = patchUserService(
+      {
+        async edit(id: unknown, params?: unknown) {
+          return documents.update({
+            documentId: `doc-${String(id)}`,
+            data: params as Record<string, unknown>,
+          });
+        },
+      },
+      h.strapi,
+    );
+    const writes = () => h.queries.filter((q) => !q.startsWith("findOne"));
+    return {
+      ...h,
+      guard,
+      run,
+      documents,
+      userService,
+      writes,
+      failWrites: () => (failWrite = true),
+    };
+  }
+
+  it("a Content Manager update with a new password raises the version before the write", async () => {
+    const h = guardHarness();
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    await h.documents.update({ documentId: "doc-2", data: { password: "set-by-an-admin" } });
+    expect(h.writes()).toEqual([
+      "bump 2",
+      `save ${JSON.stringify({ password: "set-by-an-admin" })}`,
+    ]);
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 4, password: "set-by-an-admin" });
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.logs).toEqual(["[auth] password changed: user=2 tokenVersion=4"]);
+  });
+
+  it("an update without a password raises nothing", async () => {
+    const h = guardHarness();
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    await h.documents.update({ documentId: "doc-2", data: { displayName: "Renamed" } });
+    expect(h.writes()).toEqual([`save ${JSON.stringify({ displayName: "Renamed" })}`]);
+    expect(h.users.get(2)?.tokenVersion).toBe(3);
+    await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 2 });
+    expect(h.logs).toEqual([]);
+  });
+
+  it("the user service's edit() path is raised exactly once", async () => {
+    const h = guardHarness();
+    await h.userService.edit(2, { password: "through-edit" });
+    expect(h.writes()).toEqual(["bump 2", `save ${JSON.stringify({ password: "through-edit" })}`]);
+    expect(h.users.get(2)?.tokenVersion).toBe(4);
+    expect(h.logs).toEqual(["[auth] password changed: user=2 tokenVersion=4"]);
+  });
+
+  it("is raised once even when the guard comes from a second instance of this module", async () => {
+    // Strapi loads the extension by its own path, src/index.ts imports it
+    // for register(): two paths to one file can be two module instances.
+    vi.resetModules();
+    const other = await import("./strapi-server");
+    expect(other.createUserWriteGuard).not.toBe(createUserWriteGuard);
+    const h = guardHarness("legacy-support", other.createUserWriteGuard);
+    await h.userService.edit(2, { password: "through-edit" });
+    expect(h.writes()).toEqual(["bump 2", `save ${JSON.stringify({ password: "through-edit" })}`]);
+  });
+
+  it("an edit() of one user does not cover a Document Service password write of another", async () => {
+    const h = guardHarness();
+    // A save inside user 2's edit() that writes user 1's password.
+    const nested = patchUserService(
+      {
+        edit: async () => h.documents.update({ documentId: "doc-1", data: { password: "other" } }),
+      },
+      h.strapi,
+    );
+    await nested.edit(2, { password: "own" });
+    expect(h.writes()).toEqual([
+      "bump 2",
+      "bump 1",
+      `save ${JSON.stringify({ password: "other" })}`,
+    ]);
+  });
+
+  it("tokenVersion never reaches a write: create, update and clone, with or without a password", async () => {
+    const h = guardHarness();
+    for (const action of ["create", "update", "clone"]) {
+      await h.run(action, { documentId: "doc-1", data: { username: "x", tokenVersion: 0 } });
+    }
+    expect(h.writes()).toEqual(
+      Array.from({ length: 3 }, () => `save ${JSON.stringify({ username: "x" })}`),
+    );
+    // A password write that tries to set the version back: raised, not reset.
+    await h.documents.update({
+      documentId: "doc-2",
+      data: { password: "p", tokenVersion: 0 },
+    });
+    expect(h.users.get(2)?.tokenVersion).toBe(4);
+    expect(h.logs.filter((line) => line.includes("tokenVersion dropped"))).toHaveLength(4);
+  });
+
+  it("leaves other content types and the reading actions alone", async () => {
+    const h = guardHarness();
+    const seen: unknown[] = [];
+    const params = { documentId: "a", data: { password: "p", tokenVersion: 9 } };
+    await h.guard({ uid: "api::poll.poll", action: "update", params }, async () =>
+      seen.push(params),
+    );
+    await h.guard({ uid: USER_UID, action: "findOne", params }, async () => seen.push(params));
+    expect(seen).toEqual([params, params]);
+    expect(h.writes()).toEqual([]);
+  });
+
+  it("a failed bump stops the write", async () => {
+    const h = guardHarness();
+    (h.strapi.db.connection as { raw: unknown }).raw = async () => {
+      throw new Error("connection lost");
+    };
+    await expect(
+      h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
+    ).rejects.toThrow("connection lost");
+    expect(h.writes()).toEqual([]);
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
+  });
+
+  it("a failed write after the bump keeps the old password, the older JWTs revoked", async () => {
+    const h = guardHarness();
+    const before = (await h.jwt.issue({ id: 2 })) as string;
+    h.failWrites();
+    await expect(
+      h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
+    ).rejects.toThrow("the Document Service failed");
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 4 });
+    expect(h.users.get(2)?.password).toBeUndefined();
+    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.logs[0]).toMatch(/^warn \[auth\] password not changed: user=2 tokenVersion=4/);
+  });
+
+  it("refuses a password write for a user it cannot find, before writing", async () => {
+    const h = guardHarness();
+    await expect(
+      h.documents.update({ documentId: "doc-99", data: { password: "p" } }),
+    ).rejects.toThrow("cannot be found is refused");
+    expect(h.writes()).toEqual([]);
+  });
+
+  it("in refresh mode only keeps tokenVersion out", async () => {
+    const h = guardHarness("refresh");
+    await h.documents.update({ documentId: "doc-2", data: { password: "p", tokenVersion: 0 } });
+    expect(h.writes()).toEqual([`save ${JSON.stringify({ password: "p" })}`]);
+  });
+
+  it("registerUserWriteGuard hangs it onto the Document Service, or refuses to boot", () => {
+    const h = harness();
+    const use = vi.fn();
+    registerUserWriteGuard({ ...h.strapi, documents: { use } });
+    expect(use).toHaveBeenCalledTimes(1);
+    expect(() => registerUserWriteGuard({ ...h.strapi, documents: {} })).toThrow(
+      "strapi.documents.use not found",
+    );
+  });
+});
+
+describe("the bump inside an ambient transaction (real SQLite)", () => {
+  const engines: SqliteEngine[] = [];
+
+  afterEach(async () => {
+    for (const engine of engines.splice(0)) await engine.close();
+  });
+
+  /** The extension's db slice on a real SQLite engine, with its transaction context. */
+  async function sqliteStrapi() {
+    const engine = await openSqliteEngine([raceUserModel()], { schema: "sync" });
+    engines.push(engine);
+    const db = engine.db as typeof engine.db & { inTransaction(): boolean };
+    const created = await db.query(USER_UID).create({
+      data: { username: "casey", password: "old-password", tokenVersion: 0 },
+    });
+    const strapi = {
+      config: { get: (_path: string, fallback?: unknown) => fallback },
+      db: {
+        query: (uid: string) => db.query(uid),
+        connection: db.connection,
+        inTransaction: () => db.inTransaction(),
+        transaction: db.transaction.bind(db),
+        dialect: { client: "sqlite" },
+        getSchemaName: () => undefined,
+        metadata: db.metadata as unknown as TokenVersionStrapi["db"]["metadata"],
+      },
+      plugin: () => ({ service: () => undefined }),
+    } as unknown as TokenVersionStrapi;
+    const stored = async () =>
+      Number((await db.query(USER_UID).findOne({ where: { id: created.id } }))?.tokenVersion);
+    return { db, strapi, id: created.id as number, stored };
+  }
+
+  it("joins the transaction (no wait for SQLite's only connection) and goes with its rollback", async () => {
+    const { db, strapi, id, stored } = await sqliteStrapi();
+    let inside = 0;
+    await expect(
+      db.transaction(async () => {
+        inside = await bumpTokenVersion(strapi, id);
+        throw new Error("the write after the bump failed");
+      }),
+    ).rejects.toThrow("the write after the bump failed");
+    expect(inside).toBe(1);
+    expect(await stored()).toBe(0);
+    await db.transaction(async () => bumpTokenVersion(strapi, id));
+    expect(await stored()).toBe(1);
+  }, 10_000);
 });
 
 describe("jwtManagement 'refresh': the plugin's own session revocation applies", () => {

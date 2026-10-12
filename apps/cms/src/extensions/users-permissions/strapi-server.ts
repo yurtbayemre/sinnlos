@@ -8,7 +8,12 @@
  * earlier. Now:
  *
  *  - the user has a private, non-searchable integer `tokenVersion`
- *    (content-types/user/schema.json, default 0);
+ *    (content-types/user/schema.json, default 0), hidden from the admin
+ *    panel (`visible: false`: no field in the edit view, none in the admin
+ *    roles' field permissions). No input can write it: the Document
+ *    Service guard below drops it from every create/update/clone of a
+ *    user (the Content Manager, PUT /api/users/:id, register, seeds), so
+ *    only the atomic bump changes it and it never goes down;
  *  - every JWT the plugin issues carries the user's current version in the
  *    claim `tv` (TOKEN_VERSION_CLAIM);
  *  - every JWT the plugin verifies must carry the user's current version: a
@@ -29,6 +34,13 @@
  *    permission bootstrap revokes for `public`, should an operator grant
  *    it again) and PUT /api/users/:id with a password (no role has
  *    user.update);
+ *  - a password the admin panel sets (the Content Manager's user update,
+ *    and any other Document Service update of a user whose data carries a
+ *    password) is revoked the same way: the Document Service guard
+ *    (createUserWriteGuard, registered in src/index.ts register()) bumps
+ *    before it lets the write run, fail closed like edit(). A write that
+ *    edit() itself makes after its own bump (passwordSave, an
+ *    AsyncLocalStorage) is not bumped a second time;
  *  - the password actions answer with a JWT of exactly the version their
  *    bump committed (its snapshot, not a later read: an overlapping change
  *    of the same user may have raised it again meanwhile, and that JWT must
@@ -97,6 +109,25 @@ export const TOKEN_VERSION_CLAIM = "tv";
 /** Marks a wrapped factory, so a second load of the same plugin module does not wrap twice. */
 const WRAPPED = Symbol.for("sinnlos.users-permissions.token-version");
 
+/**
+ * One AsyncLocalStorage per name for the whole process. Strapi loads this
+ * file as the plugin extension, and src/index.ts imports it for the
+ * Document Service guard; when the two resolve to different paths (the
+ * integration harness's build dir under a Windows 8.3 short name) they are
+ * two module instances, and a context set by one must still be seen by the
+ * other.
+ */
+function sharedStorage<T>(name: string): AsyncLocalStorage<T> {
+  const key = Symbol.for(`sinnlos.users-permissions.${name}`);
+  const slots = globalThis as unknown as Record<symbol, AsyncLocalStorage<T> | undefined>;
+  return (slots[key] ??= new AsyncLocalStorage<T>());
+}
+
+/** What runs one raw statement: knex, or a knex transaction. */
+export interface RawRunner {
+  raw(sql: string, bindings: readonly unknown[]): PromiseLike<unknown>;
+}
+
 /** The slice of the Strapi instance the wrappers use. */
 export interface TokenVersionStrapi {
   config: { get(path: string, fallback?: unknown): unknown };
@@ -105,7 +136,11 @@ export interface TokenVersionStrapi {
       findOne(args: Record<string, unknown>): Promise<unknown>;
     };
     /** knex: the version bump is one raw statement (bumpTokenVersion). */
-    connection: { raw(sql: string, bindings: readonly unknown[]): PromiseLike<unknown> };
+    connection: RawRunner;
+    /** Whether an ambient transaction runs (Strapi's transaction context). */
+    inTransaction?(): boolean;
+    /** Joins the ambient transaction when there is one. */
+    transaction?<T>(callback: (scope: { trx: RawRunner }) => Promise<T>): Promise<T>;
     dialect: { client: string };
     getSchemaName(): string | undefined | null;
     metadata: {
@@ -173,7 +208,7 @@ export interface VersionSnapshot {
  * before its password check, a password change's committed bump
  * (patchAuthController).
  */
-const knownVersion = new AsyncLocalStorage<VersionSnapshot>();
+const knownVersion = sharedStorage<VersionSnapshot>("known-version");
 
 /** A password action in progress: the version its edit() committed, once it did. */
 interface PasswordChange {
@@ -181,7 +216,7 @@ interface PasswordChange {
 }
 
 /** Set around a password action (patchAuthController), filled by the user service's edit(). */
-const passwordChange = new AsyncLocalStorage<PasswordChange>();
+const passwordChange = sharedStorage<PasswordChange>("password-change");
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -324,14 +359,23 @@ function returnedVersion(result: unknown, column: string): number | null {
  * Raises the user's version by one, atomically (tokenVersionBumpSql), and
  * returns the version this call committed. Throws when the database
  * returned no row (no such user), so a caller never goes on as if the
- * older JWTs were revoked.
+ * older JWTs were revoked. Inside an ambient transaction (a write that
+ * already holds one) the statement joins it: on SQLite the base
+ * connection is the transaction's only connection, and a statement next
+ * to it would wait for it forever; joined, the bump commits or rolls back
+ * with the password write.
  */
 export async function bumpTokenVersion(
   strapi: TokenVersionStrapi,
   userId: number,
 ): Promise<number> {
   const target = tokenVersionTarget(strapi);
-  const result = await strapi.db.connection.raw(tokenVersionBumpSql(target), [userId]);
+  const sql = tokenVersionBumpSql(target);
+  const { db } = strapi;
+  const result =
+    db.inTransaction?.() && db.transaction
+      ? await db.transaction(async ({ trx }) => trx.raw(sql, [userId]))
+      : await db.connection.raw(sql, [userId]);
   const version = returnedVersion(result, target.versionColumn);
   if (version === null) {
     throw new Error(
@@ -459,6 +503,39 @@ function setsPassword(params: unknown): boolean {
   return isRecord(params) && params.password !== undefined;
 }
 
+/** The user whose password is being saved after its bump (saveAfterBump). */
+const passwordSave = sharedStorage<{ userId: number }>("password-save");
+
+/**
+ * Raises user `id`'s version, then runs `save` (the password write). A
+ * failed bump throws before `save` runs; a failed save after the bump
+ * leaves the old password with every older JWT revoked. In a password
+ * action the committed version goes to the action's issue()
+ * (passwordChange); during `save` passwordSave names the user, so the
+ * Document Service guard does not bump the same write again.
+ */
+async function saveAfterBump<T>(
+  strapi: TokenVersionStrapi,
+  id: number,
+  save: () => Promise<T>,
+): Promise<T> {
+  const committed: VersionSnapshot = { userId: id, version: await bumpTokenVersion(strapi, id) };
+  const change = passwordChange.getStore();
+  if (change) change.committed = committed;
+  let result: T;
+  try {
+    result = await passwordSave.run({ userId: id }, save);
+  } catch (error) {
+    strapi.log?.warn?.(
+      `[auth] password not changed: user=${id} tokenVersion=${committed.version} ` +
+        "(saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
+    );
+    throw error;
+  }
+  strapi.log?.info?.(`[auth] password changed: user=${id} tokenVersion=${committed.version}`);
+  return result;
+}
+
 /**
  * Patches a user service instance: an edit() that writes a password first
  * raises the user's version (bumpTokenVersion) and only then lets the
@@ -486,24 +563,103 @@ export function patchUserService(service: UserService, strapi: TokenVersionStrap
           "its older JWTs could not be revoked (FX40).",
       );
     }
-    const committed: VersionSnapshot = { userId: id, version: await bumpTokenVersion(strapi, id) };
-    const change = passwordChange.getStore();
-    if (change) change.committed = committed;
-    let result: unknown;
-    try {
-      result = await originalEdit.call(this, userId, params, ...rest);
-    } catch (error) {
-      strapi.log?.warn?.(
-        `[auth] password not changed: user=${id} tokenVersion=${committed.version} ` +
-          "(saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
-      );
-      throw error;
-    }
-    strapi.log?.info?.(`[auth] password changed: user=${id} tokenVersion=${committed.version}`);
-    return result;
+    return saveAfterBump(strapi, id, async () => originalEdit.call(this, userId, params, ...rest));
   };
 
   return service;
+}
+
+/** The attribute the guard keeps out of every write: only the bump sets it. */
+export const TOKEN_VERSION_ATTRIBUTE = "tokenVersion";
+
+/** Document Service actions that write a user's attributes from `params.data`. */
+const USER_WRITE_ACTIONS: readonly string[] = ["create", "update", "clone"];
+
+/**
+ * What @strapi/core 5.55.1 hands a Document Service middleware
+ * (services/document-service/middlewares/middleware-manager.js wrapObject:
+ * the action runs with `ctx.params` as it is after the middlewares).
+ */
+export interface DocumentMiddlewareContext {
+  uid?: string;
+  action?: string;
+  params?: unknown;
+}
+
+export type DocumentMiddleware = (
+  context: DocumentMiddlewareContext,
+  next: () => Promise<unknown>,
+) => Promise<unknown>;
+
+/**
+ * The Document Service guard of the user type:
+ *  - drops `tokenVersion` from the data of every create, update and clone
+ *    (and logs it): the Content Manager (where the field is hidden
+ *    anyway), PUT /api/users/:id (the user service's edit() passes the
+ *    body through), register and POST /api/users (the user service's
+ *    add()), seeds. Only bumpTokenVersion, raw SQL outside the Document
+ *    Service, writes it, so it never goes down;
+ *  - an update whose data carries a password raises the user's version
+ *    first (saveAfterBump, fail closed), unless the user service's edit()
+ *    is saving that user's password after its own bump (passwordSave):
+ *    that is how a password the admin panel sets revokes the older JWTs.
+ * In refresh mode only the drop applies.
+ */
+export function createUserWriteGuard(strapi: TokenVersionStrapi): DocumentMiddleware {
+  return async (context, next) => {
+    if (context.uid !== USER_UID || !USER_WRITE_ACTIONS.includes(context.action ?? "")) {
+      return next();
+    }
+    const params = isRecord(context.params) ? context.params : {};
+    let data = isRecord(params.data) ? params.data : undefined;
+    if (data && Object.prototype.hasOwnProperty.call(data, TOKEN_VERSION_ATTRIBUTE)) {
+      data = Object.fromEntries(
+        Object.entries(data).filter(([key]) => key !== TOKEN_VERSION_ATTRIBUTE),
+      );
+      context.params = { ...params, data };
+      strapi.log?.warn?.(
+        `[auth] tokenVersion dropped from a Document Service ${context.action} of a user: ` +
+          "only a password change raises it (FX40)",
+      );
+    }
+    if (context.action !== "update" || !setsPassword(data) || refreshMode(strapi)) return next();
+    const documentId = params.documentId;
+    const row =
+      typeof documentId === "string" && documentId !== ""
+        ? await strapi.db.query(USER_UID).findOne({ where: { documentId }, select: ["id"] })
+        : null;
+    const id = isRecord(row) ? userIdOf(row.id) : null;
+    if (id === null) {
+      throw new Error(
+        "[users-permissions-extension] a password update of a user that cannot be found is refused: " +
+          "its older JWTs could not be revoked (FX40).",
+      );
+    }
+    // The user service's edit() bumped for this very save already.
+    if (passwordSave.getStore()?.userId === id) return next();
+    return saveAfterBump(strapi, id, next);
+  };
+}
+
+/** register() needs `strapi.documents.use` as well. */
+export interface UserWriteGuardHost extends TokenVersionStrapi {
+  documents?: { use?(middleware: DocumentMiddleware): unknown };
+}
+
+/**
+ * Hangs the guard onto the Document Service (src/index.ts register()).
+ * Throws when the Document Service has no `use` (a Strapi upgrade moved
+ * it): the cms must not run with admin-set passwords that revoke nothing.
+ */
+export function registerUserWriteGuard(strapi: UserWriteGuardHost): void {
+  const documents = strapi.documents;
+  if (!documents || typeof documents.use !== "function") {
+    throw new Error(
+      "[users-permissions-extension] strapi.documents.use not found — refusing to boot without the " +
+        "user write guard (admin-panel password revocation, tokenVersion kept out of writes; FX40 tripwire).",
+    );
+  }
+  documents.use(createUserWriteGuard(strapi));
 }
 
 /** Replaces a pending `ctx.body.jwt` (issue() in legacy mode) by the JWT it resolves to. */

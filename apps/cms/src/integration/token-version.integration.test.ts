@@ -31,7 +31,11 @@ import {
  *      user each commit their own version, none is lost, and overlapping
  *      changes each answer with their own version;
  *   6. it fails closed: a failed bump saves nothing, a failed save after
- *      the bump leaves the old password with the older JWTs revoked.
+ *      the bump leaves the old password with the older JWTs revoked;
+ *   7. a password an admin sets in the Content Manager revokes too (the
+ *      Document Service guard), and no write sets the version: not the
+ *      Content Manager, PUT /api/users/:id, PUT /api/me or the user
+ *      service's add() (register, POST /api/users).
  */
 
 /** A JWT signed like the plugin's legacy issue() did before FX40: no `tv`. */
@@ -42,6 +46,9 @@ function legacyJwt(secret: string, id: number): string {
   const signature = createHmac("sha256", secret).update(unsigned).digest("base64url");
   return `${unsigned}.${signature}`;
 }
+
+const ADMIN_EMAIL = "it-admin@integration.test";
+const ADMIN_PASSWORD = "It-Admin-Pass-123";
 
 const claims = (jwt: string) =>
   JSON.parse(Buffer.from(jwt.split(".")[1] ?? "", "base64url").toString("utf8")) as Record<
@@ -55,7 +62,11 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
   let secret: string;
 
   beforeAll(async () => {
-    t = await createTestStrapi({ engine });
+    // The seeded super admin signs in to the Content Manager below.
+    t = await createTestStrapi({
+      engine,
+      env: { STRAPI_ADMIN_EMAIL: ADMIN_EMAIL, STRAPI_ADMIN_PASSWORD: ADMIN_PASSWORD },
+    });
     user = t.fixtures.users.team_lead;
     secret = String(t.strapi.config.get("plugin::users-permissions.jwtSecret"));
   });
@@ -254,6 +265,168 @@ describe.each(testEngines())("password change revokes older JWTs (FX40) on %s", 
       const again = await t.login(username, password);
       expect(claims(again).tv).toBe(start + 1);
       expect((await me(again)).status).toBe(200);
+    });
+  });
+
+  describe("admin-panel passwords revoke too; no write can set the version", () => {
+    const adminPath = (documentId: string) =>
+      `/content-manager/collection-types/plugin::users-permissions.user/${documentId}`;
+    let adminJwt = "";
+    let apiToken = "";
+    let seq = 0;
+
+    /** The seeded super admin's JWT (POST /admin/login), once. */
+    const admin = async () => {
+      if (!adminJwt) {
+        const res = await t.api<{ data?: { token?: string } }>(null, "/admin/login", {
+          json: { email: ADMIN_EMAIL, password: ADMIN_PASSWORD },
+        });
+        expect(res.status).toBe(200);
+        adminJwt = res.body.data?.token ?? "";
+      }
+      return adminJwt;
+    };
+
+    /** A full-access API token: the one kind of caller that reaches PUT /api/users/:id. */
+    const fullAccess = async () => {
+      if (!apiToken) {
+        const tokens = t.strapi as unknown as {
+          service(uid: string): { create(input: object): Promise<{ accessKey: string }> };
+        };
+        apiToken = (
+          await tokens.service("admin::api-token").create({
+            name: `it-full-access-${engine}`,
+            type: "full-access",
+            lifespan: null,
+            description: "",
+          })
+        ).accessKey;
+      }
+      return apiToken;
+    };
+
+    /**
+     * A new local user through the users-permissions user service's add(),
+     * the path of POST /api/auth/local/register and POST /api/users, with a
+     * tokenVersion in its data that the write must not keep.
+     */
+    const newUser = async () => {
+      seq += 1;
+      const role = await t.strapi.db
+        .query("plugin::users-permissions.role")
+        .findOne({ where: { type: "authenticated" } });
+      const users = t.strapi.plugin("users-permissions").service("user") as {
+        add(values: object): Promise<{ id: number; documentId: string }>;
+      };
+      const account = {
+        username: `it-guard-${engine}-${seq}`,
+        email: `it-guard-${engine}-${seq}@integration.test`,
+        password: `Guard-Pass-${seq}-123`,
+      };
+      const created = await users.add({
+        ...account,
+        provider: "local",
+        confirmed: true,
+        role: role?.id,
+        tokenVersion: 7,
+      });
+      return { ...account, id: created.id, documentId: created.documentId };
+    };
+
+    const version = (id: number) =>
+      currentTokenVersion(t.strapi as unknown as TokenVersionStrapi, id);
+
+    it("a new user starts at version 0 whatever its data says (register, POST /api/users)", async () => {
+      const account = await newUser();
+      expect(await version(account.id)).toBe(0);
+      expect(claims(await t.login(account.username, account.password)).tv).toBe(0);
+    });
+
+    it("a password set in the Content Manager revokes the user's older JWTs", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const res = await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { password: "Admin-Set-Pass-1" },
+      });
+      expect(res.status).toBe(200);
+      expect(await version(account.id)).toBe(1);
+      expect((await me(signedIn)).status).toBe(401);
+      await expect(t.login(account.username, account.password)).rejects.toThrow("failed: 400");
+      const again = await t.login(account.username, "Admin-Set-Pass-1");
+      expect(claims(again).tv).toBe(1);
+      expect((await me(again)).status).toBe(200);
+    });
+
+    it("a Content Manager update without a password revokes nothing", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const res = await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { displayName: "Renamed by an admin" },
+      });
+      expect(res.status).toBe(200);
+      expect(await version(account.id)).toBe(0);
+      expect((await me(signedIn)).status).toBe(200);
+    });
+
+    it("the Content Manager cannot set the version back", async () => {
+      const account = await newUser();
+      await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { password: "Admin-Set-Pass-2" },
+      });
+      const revoked = legacyJwt(secret, account.id); // version 0, refused at version 1
+      expect((await me(revoked)).status).toBe(401);
+      const res = await t.api({ jwt: await admin() }, adminPath(account.documentId), {
+        method: "PUT",
+        json: { tokenVersion: 0 },
+      });
+      expect(res.status).toBe(200);
+      expect(await version(account.id)).toBe(1);
+      expect((await me(revoked)).status).toBe(401);
+    });
+
+    it("PUT /api/users/:id cannot set it back, and with a password raises it exactly once", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const token = await fullAccess();
+      const lowered = await t.api({ jwt: token }, `/api/users/${account.id}`, {
+        method: "PUT",
+        json: { jobTitle: "Tester", tokenVersion: 5 },
+      });
+      expect(lowered.status).toBe(200);
+      expect(await version(account.id)).toBe(0);
+      const changed = await t.api({ jwt: token }, `/api/users/${account.id}`, {
+        method: "PUT",
+        json: { password: "Api-Set-Pass-3", tokenVersion: 0 },
+      });
+      expect(changed.status).toBe(200);
+      // edit() bumped, the Document Service guard did not bump again.
+      expect(await version(account.id)).toBe(1);
+      expect((await me(signedIn)).status).toBe(401);
+    });
+
+    it("PUT /api/me cannot set it (the profile allowlist)", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const res = await t.api({ jwt: signedIn }, "/api/me", {
+        method: "PUT",
+        json: { jobTitle: "Self", tokenVersion: 3 },
+      });
+      expect(res.status).toBe(200);
+      expect(await version(account.id)).toBe(0);
+      expect((await me(signedIn)).status).toBe(200);
+    });
+
+    it("change-password raises it exactly once (edit() and the Document Service guard)", async () => {
+      const account = await newUser();
+      const signedIn = await t.login(account.username, account.password);
+      const res = await changePassword(signedIn, account.password, "Changed-Pass-4");
+      expect(res.status).toBe(200);
+      expect(await version(account.id)).toBe(1);
+      expect(claims(res.body.jwt ?? "").tv).toBe(1);
+      expect((await me(res.body.jwt ?? "")).status).toBe(200);
     });
   });
 
