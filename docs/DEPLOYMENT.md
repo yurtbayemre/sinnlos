@@ -9,7 +9,7 @@ This guide walks through every supported deployment method for **Sinnlos Intrane
 | [Docker local](#2-docker-local-full-stack) | Full-stack smoke tests before deploying |
 | [VPS (any provider)](#3-vps-deployment) | Self-hosted production on any Linux VM |
 | [Azure (VM)](#4-azure-vm-deployment) | Production on Azure using the same Docker Compose approach |
-| [Azure (Container Apps)](#5-azure-container-apps-advanced) | Cloud-native, autoscaling, no VM management |
+| [Azure (Container Apps)](#5-azure-container-apps-advanced) | Managed containers, no VM to patch; one replica per app; **unverified** |
 
 > **Reverse proxy:** the base compose stack bundles **Caddy** (auto-TLS) so a
 > stock VPS works with one command. The live production host (srv-prod-01)
@@ -148,11 +148,14 @@ tenant's signing keys, reads Graph `/me`, finds the user by **tenant id +
 object id** (backed by a unique index, never by e-mail), creates new users on
 the spot with the role of their **app role**, syncs the Entra-owned profile,
 and answers with a Strapi JWT that lasts `ENTRA_SESSION_TTL` (12 hours by
-default). The web session ends with that JWT, and every sign-in re-syncs
-roles and profile. The cms therefore needs outbound HTTPS to
-`login.microsoftonline.com` (signing keys) and `graph.microsoft.com`;
-without it Microsoft sign-ins fail with *entra_unavailable* and local
-sign-in is unaffected.
+default). The web session ends with that JWT, and with
+`ENTRA_SYNC_MODE=on` every sign-in re-syncs roles and profile. The cms
+therefore needs outbound HTTPS to `login.microsoftonline.com` (signing
+keys) and `graph.microsoft.com`. Without the signing keys every Microsoft
+sign-in fails with *entra_unavailable*; without Graph, existing users
+still sign in (their role as under [What Entra owns](#what-entra-owns), no
+profile sync) and a new user only with an app role. Local sign-in is
+unaffected.
 
 ### Step 1 — Create the app registration
 
@@ -251,7 +254,7 @@ bare-metal development put the cms keys into `apps/cms/.env` and the web keys
 | `MS_CLIENT_SECRET` | (unset) | Web only (`AUTH_MICROSOFT_ENTRA_ID_SECRET`, required). |
 | `ENTRA_EXCHANGE_SECRET` | (unset) | At least 32 characters, the same for web and cms (`openssl rand -hex 32`); distinct from every other secret. |
 | `ENTRA_SYNC_MODE` | dry-run | cms. `on` applies Entra's roles and departments. `dry-run` logs them, never changes an existing user, and creates new users at most as `member`. |
-| `ENTRA_DEFAULT_ROLE` | member | cms. Role of tenant members with no recognised app role or group: `member`, `guest` or `deny`. Unassigned B2B guests are always refused. |
+| `ENTRA_DEFAULT_ROLE` | member | cms. Role of tenant members with no recognised app role or group: `member`, `guest` or `deny`. Unassigned B2B guests are refused, unless their account is manual (it existed before, an admin bound it, or an admin changed its role); block such an account to keep it out. |
 | `ENTRA_GROUP_ROLES` | (empty) | cms, optional. `<roleType>:<groupObjectId>,…`, at most 20 groups (see step 5). |
 | `ENTRA_SYNC_DEPARTMENT` | 0 | cms. `1` sets the user's department to the one published department whose name equals Entra's `department` (case-insensitive); an empty value, no match or several matches clear it, so access does not survive a move. Only admins and editors can rename departments. |
 | `ENTRA_SYNC_MANAGER` | 0 | cms and web. `1` requests `User.Read.All` (admin consent) and syncs the manager from `/me/manager`; a manager who has not signed in yet is linked on their first sign-in. |
@@ -267,19 +270,31 @@ syncDepartment=<0|1> syncManager=<0|1> ttl=<ttl> local=<0|1>`.
 
 - **Identity**: tenant id + object id, stored in the private user fields
   `entraTenantId` and `microsoftOid`. A new user's username is
-  `entra-<object id>`, the e-mail is `mail` (else the UPN), and `provider` is
-  `microsoft`; such accounts have no password.
+  `entra-<object id>`, the e-mail is Graph's `mail`, else the ID token's
+  `email`, else the UPN, else `preferred_username` (lower case; without any
+  the sign-in answers *entra_unavailable*), and `provider` is `microsoft`;
+  such accounts have no password.
 - **Role**, per user (`roleSource`, private): users the sign-in created are
   `entra` and follow Entra at every sign-in (also downwards). Every account
   that existed before is `manual`, and so is every account whose role an
   admin changes in the admin panel (detected at the next sign-in): the
   sign-in never touches a manual role, and a manual user is not refused for
-  a missing assignment. A Graph failure never changes any role. To hand a
-  user back to Entra, set *Role source* = `entra` and clear *Entra applied
+  a missing assignment. The app roles come in the signed ID token and need
+  no Graph call: when Graph `/me` fails, a matching app role (or a group
+  of a successful `ENTRA_GROUP_ROLES` check) still applies and, with
+  `ENTRA_SYNC_MODE=on`, can move an Entra-owned user up or down. Without
+  such a match the result is unknown: an existing user keeps their role
+  and a new user is refused (*entra_unavailable*). When a configured
+  `ENTRA_GROUP_ROLES` check fails, the result is unknown even with an
+  app-role match (same rules in
+  [security.md](./security.md#microsoft-entra-id), "When Graph fails").
+  To hand a user back to Entra, set *Role source* = `entra` and clear *Entra applied
   role* on the user; the next sign-in applies Entra's role.
 - **Profile**: display name (only overwritten with a non-empty value), job
   title, phone (first business phone) and office location are copied from
-  Entra at every sign-in (an empty value clears them; a value over 255
+  Entra at every sign-in with `ENTRA_SYNC_MODE=on` and a successful Graph
+  `/me` (in `dry-run` only a new account gets them, when it is created; a
+  failed `/me` skips them for that sign-in; an empty value clears them; a value over 255
   characters is cut to 255, the column size, e.g. Entra's 256-character
   display names) and are read-only on
   `/profile` (`PUT /api/me` ignores them). Accounts the sign-in created also
@@ -427,10 +442,11 @@ stays **manual** until an admin sets *Role source* = `entra`, and the
 Entra-owned profile fields are synced from then on (and read-only on
 `/profile`). The binding ends nothing that existed before it: the kept
 password still signs in while `AUTH_LOCAL_ENABLED=1`, and sessions issued
-earlier stay valid until they expire (7 days; a password change does not
-end them either). So when anyone else might know the password, set a new
-one on the user in the same Content Manager form (or have the owner change
-it on `/profile` after a local sign-in). A row with a `microsoftOid` but
+earlier stay valid until they expire (7 days) or the password changes. So
+when anyone else might know the password, set a new one on the user in the
+same Content Manager form (or have the owner change it on `/profile` after
+a local sign-in): since batch 13 either change also ends every older
+session of the user ([security.md](./security.md#token-versions)). A row with a `microsoftOid` but
 no `entraTenantId` (from an old release or a self-registration) is never
 trusted.
 
@@ -440,10 +456,10 @@ trusted.
 |---|---|
 | *belongs to another organisation* (`entra_tenant`) | An account of another tenant; Auth.js' own issuer check usually refuses it earlier |
 | *already exists* (`entra_account_exists`) | See the 409 procedure above |
-| *has no access* (`entra_not_assigned`) | No app role and `ENTRA_DEFAULT_ROLE=deny`, or a B2B guest without `Intranet.Guest` |
+| *has no access* (`entra_not_assigned`) | No app role and `ENTRA_DEFAULT_ROLE=deny`, or a B2B guest without `Intranet.Guest` (new or Entra-owned accounts only; a manual account is never refused for this) |
 | *is blocked* (`entra_blocked`) | The account is blocked in the admin panel |
-| *could not be verified* (`entra_invalid`) | The ID token was refused (clock skew over 5 minutes, another app's token) or Graph `/me` is another user |
-| *unavailable right now* (`entra_unavailable`) | The cms is unreachable or cannot reach Microsoft, the two `ENTRA_EXCHANGE_SECRET` values differ (the web logs it), `ENTRA_ENABLED` is not `1` for the cms, or a new user's role could not be decided because the Graph group check failed |
+| *could not be verified* (`entra_invalid`) | The ID token was refused (clock skew over 5 minutes, issued more than about 15 minutes before the exchange, another app's token) or Graph `/me` is another user |
+| *unavailable right now* (`entra_unavailable`) | The cms is unreachable or cannot reach Microsoft, the two `ENTRA_EXCHANGE_SECRET` values differ (the web logs it), `ENTRA_ENABLED` is not `1` for the cms, a new user's role could not be decided (the Graph group check failed, or Graph `/me` failed and no app role or group matched), or a new identity has no e-mail address |
 
 A failed database write shows in the cms log as `[entra] exchange failed (<code>)`
 (the sign-in answered *unavailable*) or `[entra] user=<id>: <step> failed (<code>)`
@@ -1092,6 +1108,13 @@ In practice you don't run that by hand — use the wrapper:
 infra/deploy.sh
 ```
 
+On the owner's host the checkout is `/home/bigemo/git/sinnlos` (this guide
+writes `/opt/sinnlos` for a generic install), and every deploy runs as the
+checkout owner `bigemo`, from a root shell as `sudo -u bigemo -H
+infra/deploy.sh`; `bigemo` needs docker access and the sudoers rule for
+the pre-deploy backup (step 1,
+[Checking the backup permission](#checking-the-backup-permission-production)).
+
 `deploy.sh` does, in order:
 
 0. An env preflight that stops before anything is touched
@@ -1125,7 +1148,10 @@ infra/deploy.sh
    which the NAS pulls; it waits for a running nightly backup). The
    sudoers drop-in `/etc/sudoers.d/backup-run-predeploy`, installed by that
    repo's `install.sh`, allows the deploying user exactly this command;
-   without it `sudo -n` refuses and the deploy stops here. `BACKUP_RUN`
+   without it `sudo -n` refuses and the deploy stops here. sudo applies
+   the **last** matching rule, so the drop-in must be the last rule that
+   matches this command for that user
+   ([Checking the backup permission](#checking-the-backup-permission-production)). `BACKUP_RUN`
    names another command, which then runs without `sudo` (the tests use
    it). Any other compose project (a staging copy) keeps
    `infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy` into its
@@ -1260,6 +1286,50 @@ boot. `infra/deploy-flow.test.ts` runs the whole script against a throwaway
 checkout with docker, curl and flock stubbed (tags, state, rollback target,
 failures, checks, dry run).
 
+#### Checking the backup permission (production)
+
+`deploy.sh` takes the pre-deploy backup of project `infra` with
+`sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (step 1). The
+drop-in `/etc/sudoers.d/backup-run-predeploy` comes from `srv-prod-01-ops`
+(expected rule: `bigemo ALL=(root) NOPASSWD: /usr/local/sbin/backup-run
+--kind predeploy sinnlos`; that repo owns it, this one cannot check it). It
+works only while it is the **last** sudoers rule that matches the command
+for `bigemo`: sudo applies the last match. A general rule for the user or
+one of their groups (`bigemo ALL=(ALL:ALL) ALL`, `%sudo ALL=(ALL:ALL) ALL`)
+that `/etc/sudoers` lists **after** its `@includedir /etc/sudoers.d` line,
+or a drop-in whose name sorts after `backup-run-predeploy`, wins and asks
+for a password; `sudo -n` then stops with `sudo: a password is required`,
+and so does the deploy at its backup step. That is how the first batch 12
+deploy stopped on 2026-10-12, until the owner moved the `bigemo` line
+above the include.
+
+`sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos` proves
+**nothing**: it prints the command and exits 0 whenever any rule permits
+it, the one that asks for a password included. As `bigemo` (checked with
+sudo 1.9.17 for both orders and for a group rule):
+
+```bash
+sudo -n -l
+sudo awk '/^[[:space:]]*[@#]includedir[[:space:]]/ {inc = NR; next}
+  inc && /^[[:space:]]*(bigemo|%)/ {print NR": "$0}' /etc/sudoers
+sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "exit $?"
+```
+
+- **`sudo -n -l`** (no command; read-only, and no password while one of
+  the user's rules is NOPASSWD) lists the user's rules in the order sudo
+  checks them. The `(root) NOPASSWD: /usr/local/sbin/backup-run --kind
+  predeploy sinnlos` line must come **after** every line that also allows
+  it, such as `(ALL : ALL) ALL`. This order check is reliable for the
+  rules of `/etc/sudoers` and its includes.
+- **The `awk` line** shows the cause in the file: it prints every user or
+  group rule below the `@includedir` line of `/etc/sudoers` and must print
+  nothing (it asks for the password; a group rule matters for the groups
+  `id -nG bigemo` lists). It does not see the drop-ins themselves.
+- **The command itself** is the only end-to-end proof: it takes one
+  pre-deploy backup (one more `-predeploy` generation, the same as step 1
+  of a deploy) and ends with `exit 0`, or stops at once with
+  `sudo: a password is required` and `exit 1`.
+
 ### 3.7 Enable auto-restart on reboot
 
 Docker containers already have `restart: unless-stopped`. If Docker itself isn't
@@ -1271,6 +1341,18 @@ systemctl start docker
 ```
 
 ### 3.8 Updates
+
+> **Reading the older runbooks below:** the ones written before batch 10
+> roll back to `infra-{web,cms}:rollback`. Since batch 10 `deploy.sh`
+> records the images of every good deploy as `infra-{web,cms}:<sha12>` in
+> `.git/sinnlos-deploy/infra.state` (history in `infra.history`), prints
+> the rollback to that target after a failure, and tags `:rollback` only
+> when it has no usable state ([§7.4](#74-update-procedure-production-safe)).
+> Where an older runbook says `:rollback`, use the SHA tag of the deploy you
+> want back; a `docker tag infra-*:rollback` today may bring back images
+> from before batch 10. On the owner's host the checkout is
+> `/home/bigemo/git/sinnlos` and every step runs as `bigemo`, wherever a
+> runbook writes `/opt/sinnlos`.
 
 > **Deploying batch 13 (2026-10-12)?** The UI primitives with Markdown
 > rendering, the capabilities with the phone navigation and loading states,
@@ -1604,7 +1686,7 @@ systemctl start docker
 >   (step 6);
 > - a lesson video plays on production (no player "Error 153");
 > - the web items of the README's
->   [verification checklist](../README.md#8-verification-checklist):
+>   [verification checklist](../README.md#verification-checklist):
 >   `/people/abc` shows the *Page not found* card, the first Tab shows
 >   *Skip to content*, the theme toggle switches on the first click.
 >
@@ -1824,7 +1906,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ```bash
    infra/deploy.sh --check
    infra/deploy.sh --dry-run
-   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
+   sudo -n -l
    ```
 
    `--check` prints `Preflight OK` and
@@ -1837,10 +1919,17 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    last-known-good deploy <B12_TAG> (…)` as the rollback target, `4. smoke
    check https://sinnlos.yurtbay.dev; live-smoke: run`, and `5. tag
    infra-{web,cms}:<sha12> (commit …)` with `and prune SHA tags beyond the
-   newest 5: none`. `sudo -n -l` prints the path of `backup-run`: the
-   sudoers drop-in `backup-run-predeploy` lets `bigemo` run exactly that
-   command ([§3.6](#36-deploy)). If it asks for a password or refuses,
-   fix the drop-in first: the deploy would stop at its backup step.
+   newest 5: none`.
+   `sudo -n -l` lists `bigemo`'s sudo rules in the order sudo checks them:
+   the `(root) NOPASSWD: /usr/local/sbin/backup-run --kind predeploy
+   sinnlos` line of the drop-in `backup-run-predeploy` (installed by
+   `srv-prod-01-ops`) must come after every rule that also allows it, such
+   as `(ALL : ALL) ALL`, because sudo applies the last match
+   ([Checking the backup permission](#checking-the-backup-permission-production)).
+   `sudo -n -l <the command>` proves nothing here: it lists the command also
+   when a later rule asks for a password, which is how the first batch 12
+   deploy stopped at its backup on 2026-10-12. If the order is wrong, fix
+   the sudoers file first: the deploy would stop at its backup step.
 
 4. **The live pipeline's cms env** (the new live-smoke needs the cms
    keepalive to reach the web):
@@ -2796,7 +2885,7 @@ as `bigemo`):
   (lane 7C): comment delete checked by a route policy (every answer byte
   for byte as before); two nightly retention crons (read notifications 90
   days after reading at 03:40, ads 90 days after their last day with their
-  images at 03:45, `APP_TIME_ZONE`, after the 03:00 backup); a department
+  images at 03:45, `APP_TIME_ZONE`); a department
   delete keeps its documents and quick links restricted to admins and
   editors (a new `audience` column on both, set on every row that links a
   department); expired announcements leave lists, threads,
@@ -2876,7 +2965,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    refuses untracked files and directories there as in `apps/`. `df -h`
    shows a few GB free for the first build.
 
-2. **The language lines, the zone and the backup order:**
+2. **The language lines and the zone:**
 
    ```bash
    grep -E '^(DEFAULT_LOCALE|DIGEST_DEFAULT_LOCALE|APP_TIME_ZONE)=' infra/.env
@@ -2884,17 +2973,19 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ```
 
    `DEFAULT_LOCALE` and `DIGEST_DEFAULT_LOCALE` are missing or `en` (the
-   owner chose English; compose then passes `en`, and nothing needs
-   setting). `APP_TIME_ZONE=Europe/Berlin` is the zone the new janitors and
-   step 6 use, and the host is in `Europe/Berlin`. The new janitors delete
-   for good at 03:40 and 03:45, so the night's backup has to finish before
-   them. On production that is the host's `backup-run` for `sinnlos`
-   (since 2026-10-07, [§7.3](#73-automated-daily-backups-cron)), whose
-   schedule lives in the `srv-prod-01-ops` repo, not in this one: check
-   there (its `docs/backup.md` and the timer or cron entry its
-   `install.sh` sets up) that the nightly run ends before 03:40. A host
-   still on `infra/backup/pg-backup.sh` has that line in a crontab at
-   `0 3 * * *`.
+   owner chose English as the default; compose then passes `en`, and
+   nothing needs setting; a value kept on purpose stays, as
+   `DEFAULT_LOCALE=de` did on production on 2026-10-12).
+   `APP_TIME_ZONE=Europe/Berlin` is the zone the new janitors and step 6
+   use, and the host is in `Europe/Berlin`. When the night's backup runs
+   does not matter for the new janitors: at 03:40 and 03:45 they delete
+   only rows 90 days past their date (read notifications 90 days after
+   reading, ads 90 days after their last listed day, with their images),
+   so every row they delete is in every nightly backup of the 90 days
+   before. Production's `backup-run` for `sinnlos` (since 2026-10-07,
+   [§7.3](#73-automated-daily-backups-cron); its schedule lives in the
+   `srv-prod-01-ops` repo) runs at 04:00, after them, and that is fine.
+   Check only that last night's backup ran.
 
 3. **The preflight, the plan and the backup permission:**
 
@@ -2902,7 +2993,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    infra/deploy.sh --check
    infra/deploy.sh --dry-run
    cat .git/sinnlos-deploy/infra.state
-   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
+   sudo -n -l
    ```
 
    `--check` prints `Preflight OK` and
@@ -2921,11 +3012,16 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    /home/bigemo/git/sinnlos/.git/sinnlos-deploy/infra.state` with
    `and prune SHA tags beyond the newest 5: none`. A listed untracked file
    under `packages/` would stop the real deploy: remove it first.
-   `sudo -n -l` prints the path of `backup-run`: the sudoers drop-in
-   `backup-run-predeploy` (installed by `srv-prod-01-ops`) lets `bigemo`
-   run exactly that command ([§3.6](#36-deploy)). If it asks for a
-   password or refuses, fix the drop-in first: the deploy would stop at
-   its backup step.
+   `sudo -n -l` lists `bigemo`'s sudo rules in the order sudo checks them:
+   the `(root) NOPASSWD: /usr/local/sbin/backup-run --kind predeploy
+   sinnlos` line of the drop-in `backup-run-predeploy` (installed by
+   `srv-prod-01-ops`) must come after every rule that also allows it, such
+   as `(ALL : ALL) ALL`, because sudo applies the last match
+   ([Checking the backup permission](#checking-the-backup-permission-production)).
+   `sudo -n -l <the command>` proves nothing here: it lists the command also
+   when a later rule asks for a password, which is how the first batch 12
+   deploy stopped at its backup on 2026-10-12. If the order is wrong, fix
+   the sudoers file first: the deploy would stop at its backup step.
 
 4. **Permissions: no change.**
 
@@ -3141,8 +3237,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     Keep it until step 17 is checked; how long a `-predeploy` generation
     stays in `/srv/backup/outbox` and on the NAS is backup-run's rotation
     (`srv-prod-01-ops`, `docs/backup.md`). For a second, independent one
-    right before the first night (the same day, after the deploy and
-    before 03:40), as `bigemo`:
+    right before the first night (the same day, after the deploy), as
+    `bigemo`:
 
     ```bash
     sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
@@ -3277,8 +3373,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     with the counts of step 6 (the notifications capped at 100 000), plus
     one `[uploads-janitor] removed N image(s) of deleted classified` per
     purged ad with images (logged by the ad's delete, not by the 03:30
-    task). The night's `backup-run` for `sinnlos` finished before 03:40
-    (check it where `srv-prod-01-ops` records its runs). A `[cron] …
+    task). The night's `backup-run` for `sinnlos` ran (check it where
+    `srv-prod-01-ops` records its runs). A `[cron] …
     failed` line: keep the pre-deploy generations of steps 8 and 11 and
     look at the error before the next night. Otherwise leave them to
     backup-run's rotation.
@@ -3748,8 +3844,8 @@ compose, grant, route or edge change.
 
 4. Keep a backup from before the first night until you have checked the
    next morning's log: the deploy's pre-deploy backup holds every row the
-   first night may delete. For a second one the same day, after the deploy
-   and before 03:40: on production, as `bigemo`,
+   first night may delete. For a second one the same day, after the
+   deploy: on production, as `bigemo`,
    `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (a
    `-predeploy` generation, [§7.3](#73-automated-daily-backups-cron));
    elsewhere, as the user of the backup crontab line (the pre-deploy kind
@@ -4612,7 +4708,7 @@ and CI. The app code does not change.
   Nothing of this runs on the host.
 
 **Owner steps (mode B).** In the checkout (`/opt/sinnlos` in this guide;
-the owner instance uses its own path):
+the owner instance uses `/home/bigemo/git/sinnlos`, as `bigemo`):
 
 1. **Before (read-only, mandatory):** fast-forward and check `DOMAIN`:
 
@@ -9477,6 +9573,28 @@ extra steps):
 > you need them. The cms-side guards and the app's login limiter apply
 > either way.
 
+**`DATABASE_FORCE_MIGRATION` needs an override file.** The compose file
+lists the cms environment explicitly and does not pass this variable, so a
+line in `infra/.env` has no effect, and `infra/deploy.sh` (which uses only
+the two live compose files) never sets it. Strapi's forced schema sync
+drops every column and link table no schema declares any more, so use it
+only deliberately, after a backup. For one boot, write an override outside
+the checkout and leave it off again afterwards:
+
+```bash
+cat > /tmp/force-migration.yml <<'YML'
+services:
+  cms:
+    environment:
+      DATABASE_FORCE_MIGRATION: "true"
+YML
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+"${COMPOSE[@]}" -f /tmp/force-migration.yml up -d --no-build cms
+# once the cms is up: the same without the override, then remove it
+"${COMPOSE[@]}" up -d --no-build cms
+rm /tmp/force-migration.yml
+```
+
 ### 3.10 Datetime contract
 
 How times are stored and computed (deep-dive decision 04; phase 1 covers
@@ -9595,9 +9713,11 @@ the cms and the database, phase 2 the web):
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
 - **Cron and backups.** The janitors run at 03:30 / 03:35 (since batch 12
-  also 03:40 / 03:45) and the digest at 07:30 `APP_TIME_ZONE`; the host crontab's 03:00 backup runs in the host's
-  zone and must come first (keep the host in `APP_TIME_ZONE`, or shift the
-  crontab line).
+  also 03:40 / 03:45) and the digest at 07:30 `APP_TIME_ZONE`. The
+  nightly backup may run before or after them: they delete only orphaned
+  uploads older than 24 hours and rows 90 days past their date, which
+  every earlier nightly backup holds (production's `backup-run` runs at
+  04:00).
 - **Local development.** SQLite needs nothing. With a local Postgres, set
   `TZ=UTC` in `apps/cms/.env` (a boot that creates or changes the schema
   refuses any other zone).
@@ -9721,6 +9841,11 @@ az network public-ip update \
 
 ### 4.7 Add a custom domain (optional)
 
+Caddy gets a Let's Encrypt certificate only for a real host name in
+`DOMAIN`; without one it serves only `localhost`, with its internal CA
+([§3.6 A](#a-bundled-caddy-standalone-vps)), so public HTTPS needs this
+step.
+
 You can use Azure DNS or any registrar. In Azure DNS:
 
 ```bash
@@ -9793,8 +9918,16 @@ az vm auto-shutdown \
 
 ## 5. Azure Container Apps (Advanced)
 
-Container Apps is a managed serverless platform — no VM to patch, scales to
-zero when idle, pay-per-request. More setup but no server management.
+> **Unverified.** The owner has not run or confirmed this path, and
+> nothing in the repo tests it: `infra/deploy.sh`, `infra/live-smoke.sh`,
+> the backup scripts and CI cover Docker Compose only. Treat this section
+> as a starting point and check it on your own subscription.
+
+Container Apps runs the two images without a VM to patch. Sinnlos does not
+scale out on it: both apps keep state in their process (the cms runs the
+cron tasks, the web holds the live-event bus and the login limiter), so
+each runs as exactly **one replica that is always on** (`--min-replicas 1
+--max-replicas 1`). More setup than a VM, but no server management.
 
 > **Prerequisites:** Azure CLI, Docker, a private Azure Container Registry (ACR).
 
@@ -9924,6 +10057,13 @@ az containerapp env storage set \
 
 ### 5.6 Deploy the CMS container
 
+> **One cms replica.** Every cms process runs the cron tasks (the
+> janitors from 03:30, the digest at 07:30, `apps/cms/src/cron/registry.ts`);
+> their overlap guard works per process, it is not a cluster lock. A second
+> replica would mail every digest twice and run each janitor twice at
+> once. A second cms on the same database (a copy, a drill) needs
+> `CRON_ENABLED=false`.
+
 ```bash
 az containerapp create \
   --name cms-sinnlos \
@@ -9936,7 +10076,7 @@ az containerapp create \
   --target-port 1337 \
   --ingress internal \
   --min-replicas 1 \
-  --max-replicas 2 \
+  --max-replicas 1 \
   --env-vars \
       NODE_ENV=production \
       HOST=0.0.0.0 \
@@ -10016,6 +10156,12 @@ az containerapp update \
 
 ### 5.7 Deploy the Web container
 
+> **One web replica.** The web keeps the live-event bus
+> (`apps/web/src/lib/live-bus.ts`) and the login rate limiter
+> (`apps/web/src/lib/login-rate-limit.ts`) in process memory. With several
+> replicas a cms ping reaches only the replica behind `WEB_INTERNAL_URL`,
+> and each replica counts failed sign-ins on its own.
+
 The web container needs `AUTH_URL` to match its own public FQDN — but the FQDN
 only exists *after* creation. We deploy once with a placeholder, then update
 the env vars with the real FQDN.
@@ -10039,7 +10185,7 @@ az containerapp create \
   --target-port 3000 \
   --ingress external \
   --min-replicas 1 \
-  --max-replicas 5 \
+  --max-replicas 1 \
   --env-vars \
       NODE_ENV=production \
       "STRAPI_URL=https://$CMS_URL" \
@@ -10072,10 +10218,10 @@ az containerapp update \
       "AUTH_URL=https://$WEB_FQDN"
 
 # Back-fill WEB_INTERNAL_URL on the CMS so its live-event pings can
-# reach the Next.js /api/live/emit ingest. Traffic between the two
-# Container Apps stays inside the environment's virtual network even
-# though we're using the public FQDN. PUBLIC_WEB_URL is the link base
-# of the digest e-mails (no default outside compose).
+# reach the Next.js /api/live/emit ingest. Whether this traffic stays
+# inside the environment while it uses the public FQDN is unverified.
+# PUBLIC_WEB_URL is the link base of the digest e-mails (no default
+# outside compose).
 az containerapp update \
   --name cms-sinnlos --resource-group rg-sinnlos \
   --set-env-vars "WEB_INTERNAL_URL=https://$WEB_FQDN" "PUBLIC_WEB_URL=https://$WEB_FQDN"
@@ -10092,8 +10238,25 @@ register `https://<web-fqdn>/api/auth/callback/microsoft-entra-id` and
 `AUTH_MICROSOFT_ENTRA_ID_TENANT_ID`, `AUTH_MICROSOFT_ENTRA_ID_ID`,
 `AUTH_MICROSOFT_ENTRA_ID_SECRET` and the same `ENTRA_EXCHANGE_SECRET`
 (`az containerapp update --set-env-vars …`, secrets as Container Apps
-secrets). The cms needs outbound HTTPS to `login.microsoftonline.com` and
-`graph.microsoft.com`.
+secrets), plus `AUTH_LOCAL_ENABLED=1` on both to keep local sign-in next
+to Microsoft and `ENTRA_SYNC_MANAGER=1` on both for the manager sync. The
+cms needs outbound HTTPS to `login.microsoftonline.com` and
+`graph.microsoft.com`, the web to `login.microsoftonline.com`.
+
+**What this section leaves out (unverified).** The cms has internal
+ingress only, so the Strapi admin panel has no browser route here, and the
+`/manage` admin links point at the internal address unless
+`STRAPI_PUBLIC_URL` is set on the web; create the first admin with
+`STRAPI_ADMIN_EMAIL`/`STRAPI_ADMIN_PASSWORD` on the cms. The web's
+`/api/live/emit` is public on its FQDN, guarded only by
+`REVALIDATE_SECRET` (under compose the edge sends `/api/*` to the cms).
+Compose also passes, among others, the cms `TZ=UTC`, `PUBLIC_URL`,
+`CORS_ORIGIN`, `DATETIME_LEGACY_*`, `LOCAL_REGISTRATION`, `CRON_ENABLED`,
+`STRAPI_TELEMETRY_DISABLED=true`, `DIGEST_REPLY_TO`, `DIGESTS_DISABLED`,
+`DIGEST_DEFAULT_LOCALE` and the other `ENTRA_*` keys, and the web
+`HOSTNAME=0.0.0.0`, `STRAPI_PUBLIC_URL` and `DEFAULT_LOCALE`
+(`infra/docker-compose.yml`, [§3.5](#35-clone-the-repo-and-configure)): set
+the ones you use.
 
 The web app gets a public FQDN (`*.azurecontainerapps.io`). Add a custom domain
 via **Container Apps → Custom domains** and Azure will provision a managed TLS
@@ -10153,7 +10316,8 @@ deploy; run `infra/live-smoke.sh` afterwards as usual.
 
 After any deployment, run through this smoke test to confirm everything works
 end-to-end. Replace `<URL>` with your deployment's base URL
-(`http://localhost:3000`, `http://localhost`, or `https://intranet.example.com`).
+(`http://localhost:3000`, `https://localhost` (Caddy's default without
+`DOMAIN`), `http://localhost`, or `https://intranet.example.com`).
 
 ### 6.1 Health checks
 
@@ -10363,17 +10527,19 @@ responsible for backing up two things:
 1. **Postgres database** — all content, users, revisions, announcements
 2. **Uploads volume** — images, avatars, file attachments
 
-> For Azure Container Apps, use **Azure Database for PostgreSQL automated
-> backups** (7–35 days, enabled by default) and **Azure Files snapshots**
-> for the uploads share. No manual setup needed beyond confirming backup
-> retention in the Azure portal.
+> For Azure Container Apps (unverified, [§5](#5-azure-container-apps-advanced)),
+> use **Azure Database for PostgreSQL automated backups** (7–35 days,
+> enabled by default) for the database. Azure Files takes no snapshots by
+> itself: set up share snapshots or Azure Backup for the uploads share.
 
 ### 7.1 Manual Postgres backup
 
-From the Docker Compose host:
+From the Docker Compose host (on the owner's host the checkout is
+`/home/bigemo/git/sinnlos`):
 
 ```bash
 cd /opt/sinnlos/infra
+umask 077 && mkdir -p backups   # the dump holds every user and password hash
 
 # Dump to a timestamped file
 docker compose exec -T db \
@@ -10381,14 +10547,24 @@ docker compose exec -T db \
   > backups/sinnlos-$(date +%Y%m%d-%H%M%S).dump
 ```
 
-Restore:
+Restore: stop web and cms first, so nothing writes into a half-restored
+database (`docker compose -p infra -f docker-compose.yml -f
+docker-compose.traefik.yml stop web cms`; leave out the Traefik file on a
+Caddy box), then:
 
 ```bash
-# ⚠ This drops the existing database first
+# ⚠ This drops every object the dump holds, then recreates it from the dump
 docker compose exec -T db \
   pg_restore -U sinnlos -d sinnlos --clean --if-exists \
   < backups/sinnlos-20260415-120000.dump
 ```
+
+Start them again with `up -d --no-build web cms`. `-U sinnlos -d sinnlos`
+are the defaults of `DATABASE_USERNAME` and `DATABASE_NAME`; with other
+values use `docker compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER"
+-d "$POSTGRES_DB" --clean --if-exists'` instead. `--clean` drops only what
+the dump holds: tables a later release added stay (harmless for the older
+release the dump came from).
 
 ### 7.2 Backup uploads volume
 
@@ -10403,7 +10579,10 @@ docker run --rm \
   alpine tar czf /backup/uploads-$(date +%Y%m%d-%H%M%S).tar.gz -C /uploads .
 ```
 
-Restore:
+Restore (with the cms stopped; extracting into the volume adds and
+overwrites files but deletes none, so empty it first, `find /uploads
+-mindepth 1 -delete` in the same container, when files created after the
+backup must go):
 
 ```bash
 docker run --rm \
@@ -10420,9 +10599,10 @@ docker run --rm \
 > layout and the restore. `pg-backup.sh` below stays for other hosts and for
 > the pre-deploy backup of another compose project (a staging copy).
 
-The live host ships a ready-made script: **`infra/backup/pg-backup.sh`**. It is
-the canonical backup for the `infra` project and does more than the manual
-snippets above:
+The repo ships a ready-made script: **`infra/backup/pg-backup.sh`**. It is
+the backup for hosts without the owner's `backup-run` (and the pre-deploy
+backup of a compose project other than `infra`) and does more than the
+manual snippets above:
 
 - dumps Postgres from `infra-db-1` (`pg_dump -Fc --no-owner`) and **verifies**
   the dump with `pg_restore --list` before keeping it;
@@ -10456,8 +10636,11 @@ snippets above:
 - **retention**, per series (database, uploads, `.env`; each once for the
   nightly and once for the pre-deploy artifacts): an artifact is removed
   only when it is **older than 7 days** (by the timestamp in its name)
-  **and** not among the **newest 7** of its series, and only after the new
-  artifact of that series is encrypted. `deploy.sh` runs the script (for a
+  **and** not among the **newest 7** of its series. Pruning runs after
+  each new artifact of a kind (database, uploads, `.env`) is encrypted, and
+  then checks both series of that kind, nightly and pre-deploy, each by
+  itself (a nightly run also prunes old pre-deploy artifacts and the
+  reverse); `backup.log` keeps its last 500 lines. `deploy.sh` runs the script (for a
   compose project other than `infra`) with
   `SINNLOS_BACKUP_KIND=predeploy`: those artifacts are named
   `sinnlos-db-<YYYYmmdd-HHMMSS>-predeploy.dump.gz.gpg` (uploads and `.env`
@@ -10482,8 +10665,9 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 **pre-deploy** snapshot of a compose project other than `infra`; register it nightly with cron:
 
 ```bash
+# in the crontab of the backup root's owner; set your own backup root and env file
 ( crontab -l 2>/dev/null ; \
-  echo "0 3 * * * /opt/sinnlos/infra/backup/pg-backup.sh >> /var/log/sinnlos-backup.log 2>&1" ) \
+  echo '0 3 * * * SINNLOS_BACKUP_DIR=/path/to/backup-root SINNLOS_ENV_FILE=/opt/sinnlos/infra/.env /opt/sinnlos/infra/backup/pg-backup.sh >> "$HOME/sinnlos-backup.log" 2>&1' ) \
   | crontab -
 ```
 
@@ -10493,8 +10677,14 @@ It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 
 The paths come from `SINNLOS_BACKUP_DIR`, `SINNLOS_GNUPGHOME`,
 `SINNLOS_BACKUP_KEYID`, `SINNLOS_ENV_FILE`, `SINNLOS_DB_CONTAINER`
-(`infra-db-1`) and `SINNLOS_UPLOADS_VOLUME` (`infra_cms_uploads`); the
-defaults are the owner's host, which the cron line relies on.
+(`infra-db-1`) and `SINNLOS_UPLOADS_VOLUME` (`infra_cms_uploads`), plus
+`SINNLOS_LOCAL_ENV_BACKUP` (a plaintext quick-access copy, refreshed only
+when it exists). The other defaults (`/home/bigemo/backups/momsbest`,
+`/home/bigemo/git/sinnlos/infra/.env`,
+`/home/bigemo/.sinnlos-env-backup/.env`) fit only the owner's host, which
+no longer runs this script for project `infra`: set `SINNLOS_BACKUP_DIR`
+and `SINNLOS_ENV_FILE` everywhere else (without the env file every run is
+partial; without the backup root it stops).
 
 **Is it running?** `tail -n 5 <offsite>/backup.log` ends with `done nightly`
 after 03:00, and `cat <offsite>/last-success` names last night. A `FAIL`
@@ -10505,8 +10695,12 @@ for a monitor: `last-success` (its modification time, or the time it
 starts with) younger than 26 hours; older means the nightly cron stopped
 or failed. Only nightly runs write it.
 
-**Restoring an encrypted artifact** (on a machine with the private key,
-never on the VPS):
+**Restoring an encrypted artifact** of `pg-backup.sh` (on a machine with
+the private key, never on the VPS; production's `backup-run` generations
+in `/srv/backup/outbox` restore as its `docs/backup.md` in
+`srv-prod-01-ops` says). Take the database, uploads and `.env` artifacts
+of one run (the same `<ts>[-predeploy]` in their names), and stop web and
+cms on the host before the restore (as in §7.1):
 
 ```bash
 # Owner-only files in a private directory: the dump and the .env copy hold
@@ -10530,7 +10724,13 @@ gpg --decrypt ../sinnlos-uploads-<ts>.tar.gz.gpg | gunzip \
   | ssh <host> docker run --rm -i -v infra_cms_uploads:/uploads alpine tar xf - -C /uploads
 ```
 
-Delete the plaintext afterwards (`cd .. && rm -rf restore`).
+Put `infra.env` back as `infra/.env` of the checkout (owned by the
+checkout owner, mode 600) if the host lost it, start web and cms again
+(`up -d --no-build web cms`), and delete the plaintext afterwards
+(`cd .. && rm -rf restore`). This procedure was walked verbatim on
+2026-10-12 against artifacts of `pg-backup.sh` with a throwaway key and
+Postgres 16 (dump, streamed dump, uploads stream, `.env`, then
+`restore-drill.sh --all`).
 
 **Restore drill** (off-box, where the key is): `infra/backup/restore-drill.sh`
 proves the newest database backup restores. It picks the newest
@@ -10555,29 +10755,34 @@ missing, a partial run, the drill fails and names it. `--keep` leaves the
 container running for a look (`docker exec -it <name> psql -U drill -d drill`).
 Run it after changes to the backup and every few months.
 
-> **Order matters:** the crontab runs in the **host's** zone, while the
+> **No order needed:** the crontab runs in the **host's** zone, the
 > janitors (uploads, search log, and since batch 12 notifications and
-> expired ads) run from 03:30 to 03:45 **`APP_TIME_ZONE`**
-> ([datetime contract](#310-datetime-contract)). The backup must come first,
-> so every swept file is still in the previous backup. With the host in
-> `APP_TIME_ZONE` the line above is right; on a UTC host with
-> `APP_TIME_ZONE=Europe/Berlin` use `0 1 * * *`.
+> expired ads) from 03:30 to 03:45 **`APP_TIME_ZONE`**
+> ([datetime contract](#310-datetime-contract)). Either may run first: the
+> janitors delete only orphaned uploads older than 24 hours and rows 90
+> days past their date, which every earlier nightly backup already holds.
 
 ### 7.4 Update procedure (production-safe)
 
 On the live Traefik host the wrapper handles the checks, backup, build,
 smoke checks and the SHA tags of the last-known-good deploy in one shot
-([§3.6](#36-deploy)):
+([§3.6](#36-deploy)). On the owner's host the checkout is
+`/home/bigemo/git/sinnlos` and every step runs as its owner `bigemo`
+(from a root shell `sudo -iu bigemo`):
 
 ```bash
-cd /opt/sinnlos && git pull
+cd /opt/sinnlos && git pull --ff-only    # owner's host: /home/bigemo/git/sinnlos
 infra/deploy.sh
 ```
 
 The manual equivalent (e.g. on a standalone Caddy box):
 
 ```bash
-# 1. Always back up first
+# 0. Keep the running images as a rollback target (the wrapper does this with SHA tags)
+docker tag "$(docker inspect -f '{{.Image}}' infra-web-1)" infra-web:manual-prev
+docker tag "$(docker inspect -f '{{.Image}}' infra-cms-1)" infra-cms:manual-prev
+
+# 1. Always back up first (pg-backup.sh needs SINNLOS_BACKUP_DIR and SINNLOS_ENV_FILE, §7.3)
 /opt/sinnlos/infra/backup/pg-backup.sh
 
 # 2. Pull latest code and validate infra/.env (deploys nothing)
@@ -10595,11 +10800,14 @@ docker compose -p infra logs -f --tail=50 cms web
 deploy: after the smoke check and live-smoke pass it tags what web and cms
 run as `infra-web:<sha>` / `infra-cms:<sha>` (the first 12 characters of
 the commit) and records them as **last-known-good** in
-`.git/sinnlos-deploy/infra.state` of the checkout (`history` next to it;
+`.git/sinnlos-deploy/infra.state` of the checkout (`infra.history` next to it;
 the newest five SHA tags stay, `DEPLOY_KEEP_TAGS`). A failed deploy never
 moves that state. When a deploy fails, the script prints the rollback to
 it, with every override and extra step the target needs; run it as
-printed. By hand:
+printed. A target cms from before batch 13 needs the `JWT_SECRET`
+rotation **before** it starts (the printed commands say so; by hand see
+[Deploying batch 13](#deploying-batch-13-2026-10-12), Rollback R2 to R4),
+or every JWT a password change revoked works again. By hand:
 
 ```bash
 grep '^TAG=' .git/sinnlos-deploy/infra.state      # TAG=<sha>
@@ -10638,7 +10846,7 @@ A web image from before it renders dates in its process zone and must run
 in `APP_TIME_ZONE`; check the image before the re-up:
 
 ```bash
-docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:rollback
+docker image inspect -f '{{ index .Config.Labels "org.sinnlos.datetime" }}' infra-web:<TAG>   # the rollback target's tag
 ```
 
 `zone-explicit` means no override (the command above). An empty line or
@@ -10712,7 +10920,7 @@ the database or the admin panel shows none. Then retag and start, and
 once the previous cms is up, run the removal again: it must remove
 nothing. When a deploy fails, `deploy.sh` prints the stop and the removal
 before its retag commands and the second removal after them whenever
-`infra-cms:rollback` predates guest access or cannot be checked. The
+the target cms image predates guest access or cannot be checked. The
 steps, the check and a query for guest votes cast in a late-removal
 window are under **Rollback** in
 [Upgrading to poll department targeting](#upgrading-to-poll-department-targeting).
@@ -10762,8 +10970,9 @@ docker compose -p infra \
 ```
 
 (Standalone Caddy box: leave out the Traefik file. Without the step 7 tags,
-`:rollback` is only right if `deploy.sh` ran once for this release: every
-run tags whatever is running then.) `docker logs infra-cms-1` must not show
+use the SHA tag of the deploy before this release from
+`.git/sinnlos-deploy/infra.history`; since batch 10 a run no longer moves
+`:rollback` to whatever runs then.) `docker logs infra-cms-1` must not show
 `[datetime]` lines (those come from the new image only), and
 `docker exec infra-web-1 sh -c 'echo "$TZ"'` must print your
 `APP_TIME_ZONE` (`Europe/Berlin` by default).
@@ -10840,7 +11049,10 @@ tokens and uploads work in both directions. Use the retag commands above;
 `pg_restore` of the pre-deploy dump stays the fallback.
 
 - Do **not** boot the old image with `DATABASE_FORCE_MIGRATION=true`. It
-  would drop the two new columns: harmless, but not intended.
+  would drop the two new columns: harmless, but not intended. Compose does
+  not pass that variable at all (`infra/docker-compose.yml` lists the cms
+  environment explicitly), so a line in `infra/.env` has no effect; only
+  an override file sets it ([§3.9](#39-production-hardening)).
 - JWTs stay valid across the rollback in both directions, so nobody is signed
   out.
 - Until the new images are deployed again, the old cms runs sharp 0.33.5
@@ -10900,8 +11112,8 @@ images are deployed again:
 | | Bare-metal local | Docker local | VPS | Azure VM | Container Apps |
 |---|---|---|---|---|---|
 | TLS | none | none (`DOMAIN=http://localhost`) or Caddy's internal CA | Auto (Let's Encrypt, needs `DOMAIN`) | Auto (Let's Encrypt, needs `DOMAIN`) | Managed by Azure |
-| Scaling | single process | single host | single host | single VM | auto-scales |
-| Cost | free | free | €5–30/mo | €30–60/mo | pay-per-use |
+| Scaling | single process | single host | single host | single VM | one replica per app (unverified) |
+| Cost | free | free | €5–30/mo | €30–60/mo | pay-per-use, two always-on replicas |
 | Setup effort | low | low | medium | medium | high |
 | Managed Postgres | SQLite | Docker volume | Docker volume | Docker volume or managed | Azure Database |
 | Best for | development | full-stack testing | production, small team | production, Azure tenant | production, Azure-native |
