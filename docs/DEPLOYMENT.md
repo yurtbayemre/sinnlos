@@ -1108,7 +1108,15 @@ infra/deploy.sh
    removing anything; other untracked files only earn a note) and the GitHub CI
    result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
-   none).
+   none). Only the CI workflow's check runs count: GitHub also attaches
+   Dependabot's own update jobs to the default branch's newest commit (runs
+   named `Dependabot` of the app `github-actions`, and the app `dependabot`'s
+   `.github/dependabot.yml`), which say nothing about the commit and may
+   still run long after CI passed; they are left out and counted
+   (`CI: 2 CI check(s) passed for <sha> (2 Dependabot run(s) ignored)`).
+   Before batch 13 they made a green commit read `CI is pending`. The
+   script reads the answer per check run with a small awk JSON scanner (no
+   `jq` or `gh` on the host).
 1. A pre-deploy Postgres + uploads + `.env` backup. Project `infra`
    (production, since 2026-10-07): the host's `backup-run` from the
    `srv-prod-01-ops` repo, as
@@ -10309,7 +10317,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh is running for compose project infra` | A deploy of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
-| `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed |
+| `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed. Dependabot's own update jobs on the commit do not count (since batch 13; before, they could make a green commit read `pending`) |
 | `infra/deploy.sh` stops with `failed during '<step>'` | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow |
 | `backup.log` has a `FAIL <kind> <step>` line, or `pg-backup: FAILED at …` | The backup stopped at that step (its plaintext is removed); a pre-deploy one also stops the deploy. Fix the cause (usually the db container is down or the key is missing) and re-run |
 

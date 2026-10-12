@@ -961,10 +961,77 @@ prune_sha_tags() {
 }
 
 # --- CI status of the commit (FX35) ------------------------------------------
+# The check runs of a GitHub check-runs answer (stdin), one line each:
+# name, status, conclusion and the app's slug, separated by \037 (a null is
+# empty). A small JSON scanner in POSIX awk (no jq): it follows strings,
+# escapes and nesting, so a value anywhere else in a run (its output text,
+# its app's name) never counts as the run's own.
+check_runs_of() {
+  awk '
+    function flush() {
+      if (tok != "") { put(tok == "null" ? "" : tok); tok = "" }
+    }
+    function put(v) {
+      if (!run) return
+      if (depth == 3) {
+        if (key[3] == "name") rname = v
+        else if (key[3] == "status") rstatus = v
+        else if (key[3] == "conclusion") rconclusion = v
+      } else if (depth == 4 && within[4] == "app" && key[4] == "slug") rslug = v
+    }
+    { body = body $0 "\n" }
+    END {
+      n = length(body)
+      for (i = 1; i <= n; i++) {
+        c = substr(body, i, 1)
+        if (instr) {
+          if (esc) { s = s c; esc = 0 }
+          else if (c == "\\") esc = 1
+          else if (c == "\"") {
+            instr = 0
+            if (wantkey) { key[depth] = s; wantkey = 0 } else put(s)
+          } else s = s c
+          continue
+        }
+        if (c == "\"") { instr = 1; s = ""; continue }
+        if (c == "{" || c == "[") {
+          depth++
+          kind[depth] = c
+          within[depth] = (kind[depth - 1] == "{") ? key[depth - 1] : ""
+          key[depth] = ""
+          wantkey = (c == "{")
+          if (depth == 3 && c == "{" && kind[2] == "[" && within[2] == "check_runs") {
+            run = 1; rname = ""; rstatus = ""; rconclusion = ""; rslug = ""
+          }
+          continue
+        }
+        if (c == "}" || c == "]") {
+          flush()
+          if (depth == 3 && run) {
+            printf "%s\037%s\037%s\037%s\n", rname, rstatus, rconclusion, rslug
+            run = 0
+          }
+          depth--
+          wantkey = 0
+          continue
+        }
+        if (c == ",") { flush(); if (kind[depth] == "{") wantkey = 1; continue }
+        if (c == ":" || c == " " || c == "\t" || c == "\r" || c == "\n") { flush(); continue }
+        tok = tok c
+      }
+    }
+  '
+}
+
 # GitHub's check runs for HEAD, read without gh or jq. Prints one of: green,
-# pending, failed, unknown — followed by a reason. Never fails.
+# pending, failed, unknown — followed by a reason. Never fails. Only our CI
+# counts: GitHub also attaches Dependabot's own update jobs to the default
+# branch's HEAD (runs named "Dependabot" of the app github-actions, and the
+# app dependabot's ".github/dependabot.yml"), which say nothing about this
+# commit and may still run long after CI passed.
 ci_status() {
-  local remote slug body total
+  local remote slug body total runs name status conclusion app note=""
+  local ours=0 ignored=0 unfinished=0 failing=0
   remote="$("${GIT[@]}" remote get-url origin 2>/dev/null || true)"
   if ! [[ "${remote}" =~ github\.com[:/]([^/]+/[^/]+)$ ]]; then
     echo "unknown: the origin remote is not on github.com"
@@ -984,12 +1051,34 @@ ci_status() {
   total="$(grep -oE '"total_count": *[0-9]+' <<<"${body}" | grep -oE '[0-9]+$' | head -n 1)"
   if [[ -z "${total}" || "${total}" == "0" ]]; then
     echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug} (not pushed yet, or CI has not started)"
-  elif grep -qE '"status": *"(queued|in_progress|waiting|requested|pending)"' <<<"${body}"; then
-    echo "pending: CI is still running for ${HEAD_SHA:0:12}"
-  elif grep -qE '"conclusion": *"(failure|cancelled|timed_out|action_required|startup_failure|stale)"' <<<"${body}"; then
-    echo "failed: CI did not pass for ${HEAD_SHA:0:12} (https://github.com/${slug}/commit/${HEAD_SHA}/checks)"
+    return 0
+  fi
+  runs="$(check_runs_of <<<"${body}")"
+  while IFS=$'\037' read -r name status conclusion app; do
+    [[ -n "${name}${status}${conclusion}${app}" ]] || continue
+    if [[ "${name}" == "Dependabot" || "${app}" == "dependabot" ]]; then
+      ignored=$((ignored + 1))
+      continue
+    fi
+    ours=$((ours + 1))
+    case "${status}" in
+      queued | in_progress | waiting | requested | pending) unfinished=$((unfinished + 1)) ;;
+    esac
+    case "${conclusion}" in
+      failure | cancelled | timed_out | action_required | startup_failure | stale) failing=$((failing + 1)) ;;
+    esac
+  done <<<"${runs}"
+  if ((ignored)); then note=" (${ignored} Dependabot run(s) ignored)"; fi
+  if ((ours == 0 && ignored == 0)); then
+    echo "unknown: the GitHub answer lists ${total} check run(s) for ${HEAD_SHA:0:12}, but none could be read"
+  elif ((ours == 0)); then
+    echo "unknown: no CI run for ${HEAD_SHA:0:12} on ${slug}${note} (CI has not started)"
+  elif ((unfinished)); then
+    echo "pending: CI is still running for ${HEAD_SHA:0:12}${note}"
+  elif ((failing)); then
+    echo "failed: CI did not pass for ${HEAD_SHA:0:12}${note} (https://github.com/${slug}/commit/${HEAD_SHA}/checks)"
   else
-    echo "green: ${total} CI check(s) passed for ${HEAD_SHA:0:12}"
+    echo "green: ${ours} CI check(s) passed for ${HEAD_SHA:0:12}${note}"
   fi
 }
 
