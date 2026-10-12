@@ -20,3 +20,13 @@ export async function tryFetch<T>(
     return { data: null, failed: true };
   }
 }
+
+/**
+ * A read the page did not send: the viewer's role cannot read the section
+ * (lib/roles.ts isReadDenied, SH02), so nothing was asked and nothing
+ * failed. Same shape as a tryFetch() result, so loaders treat both alike.
+ */
+export const SKIPPED_READ: { data: null; failed: false } = Object.freeze({
+  data: null,
+  failed: false,
+});

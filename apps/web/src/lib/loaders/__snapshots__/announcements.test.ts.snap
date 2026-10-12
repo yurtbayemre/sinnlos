@@ -1,0 +1,355 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadAnnouncements > CMS down: failed and empty, nothing invented 1`] = `
+{
+  "empty": true,
+  "failed": true,
+  "feedDocumentIds": [],
+  "openAcks": [],
+  "pinned": [],
+  "recent": [],
+  "truncated": false,
+}
+`;
+
+exports[`loadAnnouncements > partial failure: no receipts means every mandatory post is open, with the banner 1`] = `
+{
+  "empty": false,
+  "failed": true,
+  "feedDocumentIds": [
+    "ann-5",
+    "ann-4",
+    "ann-3",
+    "ann-2",
+  ],
+  "openAcks": [
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "ackDeadline": "2026-10-20",
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 4",
+        "createdAt": "2026-10-04T08:00:00.000Z",
+        "documentId": "ann-4",
+        "id": 4,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 4",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 2",
+        "createdAt": "2026-10-02T08:00:00.000Z",
+        "documentId": "ann-2",
+        "id": 2,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 2",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 1",
+        "createdAt": "2026-10-01T08:00:00.000Z",
+        "documentId": "ann-1",
+        "id": 1,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Old but open",
+      },
+    },
+  ],
+  "pinned": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 5",
+        "createdAt": "2026-10-05T08:00:00.000Z",
+        "documentId": "ann-5",
+        "id": 5,
+        "pinned": true,
+        "title": "Post 5",
+      },
+    },
+  ],
+  "recent": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 3",
+        "createdAt": "2026-10-03T08:00:00.000Z",
+        "documentId": "ann-3",
+        "id": 3,
+        "pinned": false,
+        "title": "Post 3",
+      },
+    },
+  ],
+  "truncated": false,
+}
+`;
+
+exports[`loadAnnouncements > success: open confirmations on top, then pinned and recent, receipts per card 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "feedDocumentIds": [
+    "ann-5",
+    "ann-4",
+    "ann-3",
+    "ann-2",
+  ],
+  "openAcks": [
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "ackDeadline": "2026-10-20",
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 4",
+        "createdAt": "2026-10-04T08:00:00.000Z",
+        "documentId": "ann-4",
+        "id": 4,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 4",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 1",
+        "createdAt": "2026-10-01T08:00:00.000Z",
+        "documentId": "ann-1",
+        "id": 1,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Old but open",
+      },
+    },
+  ],
+  "pinned": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 5",
+        "createdAt": "2026-10-05T08:00:00.000Z",
+        "documentId": "ann-5",
+        "id": 5,
+        "pinned": true,
+        "title": "Post 5",
+      },
+    },
+  ],
+  "recent": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 3",
+        "createdAt": "2026-10-03T08:00:00.000Z",
+        "documentId": "ann-3",
+        "id": 3,
+        "pinned": false,
+        "title": "Post 3",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": "2026-10-06T10:00:00.000Z",
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 2",
+        "createdAt": "2026-10-02T08:00:00.000Z",
+        "documentId": "ann-2",
+        "id": 2,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 2",
+      },
+    },
+  ],
+  "truncated": false,
+}
+`;
+
+exports[`loadAnnouncements > truncated: a walk cut at its cap is flagged 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "feedDocumentIds": [
+    "ann-5",
+    "ann-4",
+    "ann-3",
+    "ann-2",
+  ],
+  "openAcks": [
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "ackDeadline": "2026-10-20",
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 4",
+        "createdAt": "2026-10-04T08:00:00.000Z",
+        "documentId": "ann-4",
+        "id": 4,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 4",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 1",
+        "createdAt": "2026-10-01T08:00:00.000Z",
+        "documentId": "ann-1",
+        "id": 1,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Old but open",
+      },
+    },
+  ],
+  "pinned": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 5",
+        "createdAt": "2026-10-05T08:00:00.000Z",
+        "documentId": "ann-5",
+        "id": 5,
+        "pinned": true,
+        "title": "Post 5",
+      },
+    },
+  ],
+  "recent": [
+    {
+      "ackRequired": false,
+      "acknowledgedAt": null,
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 3",
+        "createdAt": "2026-10-03T08:00:00.000Z",
+        "documentId": "ann-3",
+        "id": 3,
+        "pinned": false,
+        "title": "Post 3",
+      },
+    },
+    {
+      "ackRequired": true,
+      "acknowledgedAt": "2026-10-06T10:00:00.000Z",
+      "item": {
+        "author": {
+          "displayName": "Grace Hopper",
+          "id": 9,
+          "jobTitle": "CTO",
+          "username": "grace",
+        },
+        "body": "Body 2",
+        "createdAt": "2026-10-02T08:00:00.000Z",
+        "documentId": "ann-2",
+        "id": 2,
+        "pinned": false,
+        "requiresAck": true,
+        "title": "Post 2",
+      },
+    },
+  ],
+  "truncated": true,
+}
+`;
