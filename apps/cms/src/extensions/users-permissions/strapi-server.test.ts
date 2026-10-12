@@ -35,6 +35,7 @@ import {
   tokenVersionBumpSql,
   type AuthContext,
   type JwtService,
+  type RawRunner,
   type TokenVersionStrapi,
   type UsersPermissionsPlugin,
 } from "./strapi-server";
@@ -65,7 +66,34 @@ function fakeBumpDb<T extends { tokenVersion?: number | null }>(
   rows: Map<number, T>,
   queries?: string[],
 ) {
+  // Strapi's transaction context, faked: nested calls join, the outermost
+  // restores the rows when its callback throws.
+  const inside = new AsyncLocalStorage<boolean>();
   return {
+    inTransaction: () => inside.getStore() === true,
+    async transaction<R>(
+      this: { connection: { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> } },
+      callback: (scope: {
+        trx: { raw(sql: string, bindings: readonly unknown[]): Promise<unknown> };
+      }) => Promise<R>,
+    ): Promise<R> {
+      const trx = {
+        raw: (sql: string, bindings: readonly unknown[]) => this.connection.raw(sql, bindings),
+      };
+      if (inside.getStore()) return callback({ trx });
+      const snapshot = new Map([...rows].map(([id, row]) => [id, { ...row }]));
+      queries?.push("begin");
+      try {
+        const result = await inside.run(true, () => callback({ trx }));
+        queries?.push("commit");
+        return result;
+      } catch (error) {
+        rows.clear();
+        for (const [id, row] of snapshot) rows.set(id, row);
+        queries?.push("rollback");
+        throw error;
+      }
+    },
     connection: {
       async raw(sql: string, bindings: readonly unknown[]) {
         expect(sql).toBe(BUMP_SQL);
@@ -153,8 +181,24 @@ function fakeAuthFactory(): Factory {
       ctx.body = { jwt: jwt().issue({ id: id }), user: { id, username: `u${id}` } };
     };
     return {
-      async callback(ctx: AuthContext & { request: { body: { id: number } } }) {
-        answer(ctx, ctx.request.body.id);
+      async callback(
+        ctx: AuthContext & {
+          request: { body: { id?: number; identifier?: string; password?: string } };
+        },
+      ) {
+        const body = ctx.request.body;
+        if (body.identifier === undefined) return answer(ctx, body.id as number);
+        // The plugin's local sign-in: the user, then its password.
+        const row = (await (strapi as TokenVersionStrapi).db.query(USER_UID).findOne({
+          where: {
+            provider: "local",
+            $or: [{ email: body.identifier.toLowerCase() }, { username: body.identifier }],
+          },
+        })) as { id: number; password?: string } | null;
+        if (!row || row.password !== body.password) {
+          throw new Error("Invalid identifier or password");
+        }
+        answer(ctx, row.id);
       },
       async changePassword(ctx: AuthContext & { request: { body: PasswordBody } }) {
         if (ctx.request.body.currentPassword !== "right") {
@@ -393,9 +437,12 @@ describe("auth controller", () => {
   it("raises the version before the plugin saves the password", async () => {
     const h = harness();
     await h.auth.changePassword(passwordCtx(2));
+    // In one transaction: the version and the password commit together.
     expect(h.queries.filter((q) => !q.startsWith("findOne"))).toEqual([
+      "begin",
       "bump 2",
       `update ${JSON.stringify({ where: { id: 2 }, data: { password: "new-password" } })}`,
+      "commit",
     ]);
   });
 });
@@ -406,8 +453,10 @@ describe("user service: every password it saves revokes the older JWTs", () => {
     const legacy = h.rawIssue({ id: 1 });
     await h.userService.edit(1, { password: "set-elsewhere" });
     expect(h.queries.filter((q) => !q.startsWith("findOne"))).toEqual([
+      "begin",
       "bump 1",
       `update ${JSON.stringify({ where: { id: 1 }, data: { password: "set-elsewhere" } })}`,
+      "commit",
     ]);
     await expect(h.jwt.verify(legacy)).rejects.toThrow("Invalid token.");
     expect(h.logs).toEqual(["[auth] password changed: user=1 tokenVersion=1"]);
@@ -724,18 +773,21 @@ describe("the plugin's real auth controller: sign-in reads the version before th
     expect(h.users.get(5)).toMatchObject({ tokenVersion: 2, password: "hash-of-old-password" });
     // Nothing changed: the old password and its sessions stay as they were.
     await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 5 });
-    expect(h.logs).toEqual([]);
+    expect(h.logs).toEqual([
+      "warn [auth] password not changed: user=5 (the change rolled back: the password and the user's sessions are as they were)",
+    ]);
   });
 
-  it("changePassword: a failed save after the bump leaves the old password and every older JWT revoked", async () => {
+  it("changePassword: a failed save rolls the bump back: old password, sessions as they were", async () => {
     const h = signInHarness();
     const before = (await h.jwt.issue({ id: 5 })) as string;
     h.faults.save = true;
     await expect(h.changePassword("new-password-1")).rejects.toThrow("the Document Service failed");
-    expect(h.users.get(5)).toMatchObject({ tokenVersion: 3, password: "hash-of-old-password" });
-    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
+    expect(h.saves).toEqual([{ id: 5, params: { password: "new-password-1" }, versionAtSave: 3 }]);
+    expect(h.users.get(5)).toMatchObject({ tokenVersion: 2, password: "hash-of-old-password" });
+    await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 5 });
     expect(h.logs).toEqual([
-      "warn [auth] password not changed: user=5 tokenVersion=3 (saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)",
+      "warn [auth] password not changed: user=5 (the change rolled back: the password and the user's sessions are as they were)",
     ]);
   });
 
@@ -854,6 +906,8 @@ function raceUserModel() {
       id: { type: "increments" },
       documentId: { type: "string" },
       username: { type: "string" },
+      email: { type: "string" },
+      provider: { type: "string" },
       password: { type: "string" },
       tokenVersion: { type: "integer" },
     },
@@ -870,7 +924,15 @@ interface RaceHarness {
   before: string;
   /** The change-password request of `who` (current password right); its answer's JWT. */
   change(who: string, password: string): Promise<string>;
+  /** A local sign-in of the user with `password` (actor "S"); its JWT. */
+  signIn(password: string): Promise<string>;
   stored(): Promise<{ version: number; password: string }>;
+  /**
+   * Resolves "done" once `work` has settled, or "waits" once a database
+   * call waits for SQLite's only connection (held by a transaction): how
+   * far another change or sign-in gets while one change is held.
+   */
+  doneOrWaiting(work: Promise<unknown>): Promise<"done" | "waits">;
 }
 
 /**
@@ -885,12 +947,28 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
   engines.push(engine);
   const db = engine.db;
   const created = await db.query(USER_UID).create({
-    data: { username: "casey", password: "old-password", tokenVersion: 0 },
+    data: {
+      username: "casey",
+      email: "casey@example.test",
+      provider: "local",
+      password: "old-password",
+      tokenVersion: 0,
+    },
   });
   const userId = created.id as number;
   const at = async (point: RacePoint) => {
     for (const hook of hooks) await hook.at(point);
   };
+  /** A raw runner whose version writes pass the hooks. */
+  const gated = (runner: RawRunner): RawRunner => ({
+    async raw(sql, bindings) {
+      const writesVersion = /^UPDATE\b/.test(sql) && sql.includes('"token_version"');
+      if (writesVersion) await at("before version write");
+      const result = await runner.raw(sql, bindings);
+      if (writesVersion) await afterVersionWrite();
+      return result;
+    },
+  });
   const stored = async () => {
     const row = await db.query(USER_UID).findOne({ where: { id: userId } });
     return { version: Number(row?.tokenVersion ?? 0), password: String(row?.password) };
@@ -927,15 +1005,12 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
           },
         };
       },
-      connection: {
-        async raw(sql, bindings) {
-          const writesVersion = /^UPDATE\b/.test(sql) && sql.includes('"token_version"');
-          if (writesVersion) await at("before version write");
-          const result = await db.connection.raw(sql, bindings);
-          if (writesVersion) await afterVersionWrite();
-          return result;
-        },
-      },
+      connection: gated(db.connection),
+      inTransaction: () => (db as typeof db & { inTransaction(): boolean }).inTransaction(),
+      // The engine's own transactions (Strapi's context: nested calls
+      // join), with the version writes on the transaction gated as well.
+      transaction: (callback) =>
+        db.transaction((scope) => callback({ trx: gated(scope.trx as RawRunner) })),
       dialect: { client: "sqlite" },
       getSchemaName: () => undefined,
       metadata: db.metadata as unknown as TokenVersionStrapi["db"]["metadata"],
@@ -961,6 +1036,31 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
       await auth.changePassword(ctx);
       return ctx.body?.jwt as string;
     });
+  const signIn = (password: string) =>
+    actor.run("S", async () => {
+      const ctx = {
+        params: {},
+        request: { body: { identifier: "casey", password } },
+      } as AuthContext & { body?: { jwt?: unknown } };
+      await auth.callback(ctx);
+      return ctx.body?.jwt as string;
+    });
+  const pool = (db.connection as unknown as { client: { pool: { numPendingAcquires(): number } } })
+    .client.pool;
+  const doneOrWaiting = async (work: Promise<unknown>) => {
+    let settled = false;
+    work.then(
+      () => (settled = true),
+      () => (settled = true),
+    );
+    // Condition-driven, no timers: each turn lets the work run on.
+    for (let turn = 0; turn < 100_000; turn += 1) {
+      if (settled) return "done" as const;
+      if (pool.numPendingAcquires() > 0) return "waits" as const;
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    throw new Error("the work neither finished nor waited for the connection");
+  };
   return {
     userId,
     jwt,
@@ -968,7 +1068,9 @@ async function raceHarness(engines: SqliteEngine[], hooks: RaceHook[]): Promise<
     history,
     before: (await jwt.issue({ id: userId })) as string,
     change,
+    signIn,
     stored,
+    doneOrWaiting,
   };
 }
 
@@ -979,76 +1081,113 @@ describe("overlapping password changes of one user (real SQLite)", () => {
     for (const engine of engines.splice(0)) await engine.close();
   });
 
+  /**
+   * Every change here runs as far as it can while change A is held: a
+   * change or sign-in either finishes (no transaction holds anything, the
+   * code before the one-transaction fix) or waits for SQLite's only
+   * connection, which A's transaction holds (doneOrWaiting); then A goes
+   * on. No timers.
+   */
+
   it("the version never moves backwards: A held between reading and writing it while B and C change", async () => {
     const hold = pauseAt("A", "before version write");
     const h = await raceHarness(engines, [hold]);
     const a = h.change("A", "password-a");
     await hold.reached;
-    const b = await h.change("B", "password-b");
-    const c = await h.change("C", "password-c");
-    // C revoked B's JWT.
-    await expect(h.jwt.verify(b)).rejects.toThrow("Invalid token.");
+    const b = h.change("B", "password-b");
+    await h.doneOrWaiting(b);
+    const c = h.change("C", "password-c");
+    await h.doneOrWaiting(c);
     hold.release();
-    const jwtA = await a;
+    const [jwtA, jwtB, jwtC] = await Promise.all([a, b, c]);
     expect(h.history).toEqual([1, 2, 3]);
-    expect((await h.stored()).version).toBe(3);
-    // What C revoked stays revoked once A is through; A's own JWT is current.
-    for (const revoked of [h.before, b, c]) {
+    expect(await h.stored()).toEqual({ version: 3, password: "password-c" });
+    // Only the last change's JWT is current.
+    for (const revoked of [h.before, jwtA, jwtB]) {
       await expect(h.jwt.verify(revoked)).rejects.toThrow("Invalid token.");
     }
-    await expect(h.jwt.verify(jwtA)).resolves.toMatchObject({ id: h.userId, tv: 3 });
+    await expect(h.jwt.verify(jwtC)).resolves.toMatchObject({ id: h.userId, tv: 3 });
   }, 30_000);
 
-  it("A's answer carries the version A committed, not B's later one, and B's change revokes it", async () => {
+  it("overlapping changes cannot finish in reverse order: the stored password is the accepted JWT's change's", async () => {
+    // A bumps and is held before its save; B tries to change meanwhile.
+    // Before the fix B bumped higher and saved first, then A saved: A's
+    // password stood with B's JWT accepted.
     const hold = pauseAt("A", "after version write");
     const h = await raceHarness(engines, [hold]);
     const a = h.change("A", "password-a");
     await hold.reached;
-    // A has committed version 1; B changes the password while A waits.
-    const b = await h.change("B", "password-b");
+    const b = h.change("B", "password-b");
+    await h.doneOrWaiting(b);
     hold.release();
-    const jwtA = await a;
+    const jwts: Record<string, string> = { "password-a": await a, "password-b": await b };
+    const stored = await h.stored();
+    // The invariant: exactly one answer's JWT is accepted, the one of the
+    // change whose password is stored; every other JWT is refused.
+    const accepted: string[] = [];
+    for (const [password, jwt] of Object.entries(jwts)) {
+      if (
+        await h.jwt.verify(jwt).then(
+          () => true,
+          () => false,
+        )
+      )
+        accepted.push(password);
+    }
+    expect(accepted).toEqual([stored.password]);
+    await expect(h.jwt.verify(h.before)).rejects.toThrow("Invalid token.");
+    // With one transaction per change they ran in order: A, then B (B
+    // waited for SQLite's connection), each answer with its own version.
+    expect(stored).toEqual({ version: 2, password: "password-b" });
     expect(h.history).toEqual([1, 2]);
-    expect(claims(jwtA)).toMatchObject({ id: h.userId, tv: 1 });
-    expect(claims(b)).toMatchObject({ id: h.userId, tv: 2 });
-    await expect(h.jwt.verify(jwtA)).rejects.toThrow("Invalid token.");
-    await expect(h.jwt.verify(b)).resolves.toMatchObject({ id: h.userId, tv: 2 });
+    expect(claims(jwts["password-a"] ?? "")).toMatchObject({ id: h.userId, tv: 1 });
+    expect(claims(jwts["password-b"] ?? "")).toMatchObject({ id: h.userId, tv: 2 });
     expect(h.logs).toEqual([
-      `[auth] password changed: user=${h.userId} tokenVersion=2`,
       `[auth] password changed: user=${h.userId} tokenVersion=1`,
+      `[auth] password changed: user=${h.userId} tokenVersion=2`,
     ]);
   }, 30_000);
 
-  it("a failed version write fails the change with the password unchanged", async () => {
+  it("a sign-in with the old password between a change's bump and its save keeps no session", async () => {
+    const hold = pauseAt("A", "after version write");
+    const h = await raceHarness(engines, [hold]);
+    const a = h.change("A", "password-a");
+    await hold.reached;
+    // Before the fix the bump was committed here: the sign-in read the new
+    // version next to the old password, and its JWT outlived the change.
+    const signIn = h.signIn("old-password");
+    signIn.catch(() => undefined);
+    await h.doneOrWaiting(signIn);
+    hold.release();
+    await a;
+    const outcome = await signIn.then(
+      (jwt) => ({ jwt }),
+      (error: Error) => ({ refused: error.message }),
+    );
+    if ("jwt" in outcome) {
+      await expect(h.jwt.verify(outcome.jwt)).rejects.toThrow("Invalid token.");
+    } else {
+      expect(outcome.refused).toBe("Invalid identifier or password");
+    }
+    expect(await h.stored()).toEqual({ version: 1, password: "password-a" });
+  }, 30_000);
+
+  it("a failed version write fails the change with nothing changed", async () => {
     const h = await raceHarness(engines, [failAt("A", "before version write")]);
     await expect(h.change("A", "password-a")).rejects.toThrow("connection lost");
     expect(await h.stored()).toEqual({ version: 0, password: "old-password" });
-    expect(h.logs).toEqual([]);
     // Nothing changed, so nothing was revoked either.
     await expect(h.jwt.verify(h.before)).resolves.toMatchObject({ id: h.userId });
   }, 30_000);
 
-  it("a failed password write after the bump fails the change: old password, older JWTs revoked", async () => {
+  it("a failed password write after the bump rolls both back: old password, sessions as they were", async () => {
     const h = await raceHarness(engines, [failAt("A", "before password write")]);
     await expect(h.change("A", "password-a")).rejects.toThrow("connection lost");
-    expect(await h.stored()).toEqual({ version: 1, password: "old-password" });
-    await expect(h.jwt.verify(h.before)).rejects.toThrow("Invalid token.");
+    expect(await h.stored()).toEqual({ version: 0, password: "old-password" });
+    await expect(h.jwt.verify(h.before)).resolves.toMatchObject({ id: h.userId });
     expect(h.logs).toEqual([
-      `[auth] password not changed: user=${h.userId} tokenVersion=1 (saving it failed after the version was raised: the password is unchanged, the user's sessions are signed out)`,
+      `[auth] password not changed: user=${h.userId} (the change rolled back: the password and the user's sessions are as they were)`,
     ]);
-  }, 30_000);
-
-  it("the older JWTs are revoked before the new password is saved (a crash in between fails closed)", async () => {
-    const hold = pauseAt("A", "before password write");
-    const h = await raceHarness(engines, [hold]);
-    const a = h.change("A", "password-a");
-    await hold.reached;
-    // Were the process to die here: version raised, password unchanged.
-    expect(await h.stored()).toEqual({ version: 1, password: "old-password" });
-    await expect(h.jwt.verify(h.before)).rejects.toThrow("Invalid token.");
-    hold.release();
-    expect(claims(await a)).toMatchObject({ id: h.userId, tv: 1 });
-    expect(await h.stored()).toEqual({ version: 1, password: "password-a" });
   }, 30_000);
 });
 
@@ -1111,8 +1250,10 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     const before = (await h.jwt.issue({ id: 2 })) as string;
     await h.documents.update({ documentId: "doc-2", data: { password: "set-by-an-admin" } });
     expect(h.writes()).toEqual([
+      "begin",
       "bump 2",
       `save ${JSON.stringify({ password: "set-by-an-admin" })}`,
+      "commit",
     ]);
     expect(h.users.get(2)).toMatchObject({ tokenVersion: 4, password: "set-by-an-admin" });
     await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
@@ -1132,7 +1273,12 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
   it("the user service's edit() path is raised exactly once", async () => {
     const h = guardHarness();
     await h.userService.edit(2, { password: "through-edit" });
-    expect(h.writes()).toEqual(["bump 2", `save ${JSON.stringify({ password: "through-edit" })}`]);
+    expect(h.writes()).toEqual([
+      "begin",
+      "bump 2",
+      `save ${JSON.stringify({ password: "through-edit" })}`,
+      "commit",
+    ]);
     expect(h.users.get(2)?.tokenVersion).toBe(4);
     expect(h.logs).toEqual(["[auth] password changed: user=2 tokenVersion=4"]);
   });
@@ -1145,7 +1291,12 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     expect(other.createUserWriteGuard).not.toBe(createUserWriteGuard);
     const h = guardHarness("legacy-support", other.createUserWriteGuard);
     await h.userService.edit(2, { password: "through-edit" });
-    expect(h.writes()).toEqual(["bump 2", `save ${JSON.stringify({ password: "through-edit" })}`]);
+    expect(h.writes()).toEqual([
+      "begin",
+      "bump 2",
+      `save ${JSON.stringify({ password: "through-edit" })}`,
+      "commit",
+    ]);
   });
 
   it("an edit() of one user does not cover a Document Service password write of another", async () => {
@@ -1158,10 +1309,13 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
       h.strapi,
     );
     await nested.edit(2, { password: "own" });
+    // The nested write joins the outer transaction and still bumps user 1.
     expect(h.writes()).toEqual([
+      "begin",
       "bump 2",
       "bump 1",
       `save ${JSON.stringify({ password: "other" })}`,
+      "commit",
     ]);
   });
 
@@ -1173,6 +1327,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     expect(h.writes()).toEqual(
       Array.from({ length: 3 }, () => `save ${JSON.stringify({ username: "x" })}`),
     );
+    h.queries.length = 0;
     // A password write that tries to set the version back: raised, not reset.
     await h.documents.update({
       documentId: "doc-2",
@@ -1194,7 +1349,7 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     expect(h.writes()).toEqual([]);
   });
 
-  it("a failed bump stops the write", async () => {
+  it("a failed bump stops the write and rolls back", async () => {
     const h = guardHarness();
     (h.strapi.db.connection as { raw: unknown }).raw = async () => {
       throw new Error("connection lost");
@@ -1202,21 +1357,24 @@ describe("the Document Service guard of the user type (admin-panel passwords, to
     await expect(
       h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
     ).rejects.toThrow("connection lost");
-    expect(h.writes()).toEqual([]);
+    expect(h.writes()).toEqual(["begin", "rollback"]);
     expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
   });
 
-  it("a failed write after the bump keeps the old password, the older JWTs revoked", async () => {
+  it("a failed write after the bump rolls both back: old password, sessions as they were", async () => {
     const h = guardHarness();
     const before = (await h.jwt.issue({ id: 2 })) as string;
     h.failWrites();
     await expect(
       h.documents.update({ documentId: "doc-2", data: { password: "p" } }),
     ).rejects.toThrow("the Document Service failed");
-    expect(h.users.get(2)).toMatchObject({ tokenVersion: 4 });
+    expect(h.writes()).toEqual(["begin", "bump 2", "rollback"]);
+    expect(h.users.get(2)).toMatchObject({ tokenVersion: 3 });
     expect(h.users.get(2)?.password).toBeUndefined();
-    await expect(h.jwt.verify(before)).rejects.toThrow("Invalid token.");
-    expect(h.logs[0]).toMatch(/^warn \[auth\] password not changed: user=2 tokenVersion=4/);
+    await expect(h.jwt.verify(before)).resolves.toMatchObject({ id: 2 });
+    expect(h.logs).toEqual([
+      "warn [auth] password not changed: user=2 (the change rolled back: the password and the user's sessions are as they were)",
+    ]);
   });
 
   it("refuses a password write for a user it cannot find, before writing", async () => {

@@ -94,8 +94,8 @@ export default {
     // refusal to boot.
     registerDepartmentAudienceGuard(strapi);
     // FX40: a password the admin panel (or any Document Service update)
-    // sets raises the user's token version before it is written, and no
-    // write may carry tokenVersion itself
+    // sets raises the user's token version in the write's own transaction,
+    // and no write may carry tokenVersion itself
     // (extensions/users-permissions/strapi-server.ts createUserWriteGuard).
     // Same refusal to boot without strapi.documents.use.
     registerUserWriteGuard(strapi);
