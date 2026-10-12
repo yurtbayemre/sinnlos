@@ -1393,7 +1393,7 @@ systemctl start docker
 > 7B)?** A normal deploy of cms and web with `infra/deploy.sh`: no env,
 > schema, permission, edge or Traefik change, nothing in the database. The
 > first build installs everything with pnpm 10 and writes the cms
-> dependency layer once (about 820 MB), so it is slower and needs a few GB
+> dependency layer once (about 770 MB), so it is slower and needs a few GB
 > free; later code-only deploys add about 15 MB. `deploy.sh` also refuses
 > untracked files under `packages/`. The admin panel loses its "Deploy to
 > Strapi Cloud" entry. Follow
@@ -1679,10 +1679,12 @@ systemctl start docker
 
 On the Traefik host (mode B), pull and re-run the wrapper — it validates
 `infra/.env`, checks the checkout and CI, backs up, and tags the images by
-commit once the smoke checks passed ([§3.6](#36-deploy)):
+commit once the smoke checks passed ([§3.6](#36-deploy)). On the owner's
+host the checkout is `/home/bigemo/git/sinnlos` and `deploy.sh` runs as
+`bigemo`:
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos
 git pull
 infra/deploy.sh
 ```
@@ -2747,7 +2749,8 @@ instance deploys batch 8, then batch 9, then batch 10, then this; batch 11
 was the v2 authoring design and deployed nothing). The runbooks below
 explain each change in detail; **this section is the one sequence to
 follow** on the owner instance (srv-prod-01, Traefik mode, checkout
-`/home/bigemo/git/sinnlos`, compose project `infra`):
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`):
 
 - [the CMS data lifecycle leftovers](#upgrading-to-the-cms-data-lifecycle-leftovers-batch-12-lane-7c)
   (lane 7C): comment delete checked by a route policy (every answer byte
@@ -2756,10 +2759,10 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   images at 03:45, `APP_TIME_ZONE`, after the 03:00 backup); a department
   delete keeps its documents and quick links restricted to admins and
   editors (a new `audience` column on both, set on every row that links a
-  department); expired announcements leave
-  lists, threads and digests; an unpublished announcement's thread answers
-  like a missing one; the wiki shows page order, tags, a table of contents
-  and space icons; the census gains a duplicate scan (section 9);
+  department); expired announcements leave lists, threads,
+  acknowledgements and digests; an unpublished announcement's thread
+  answers like a missing one; the wiki shows page order, tags, a table of
+  contents and space icons; the census gains a duplicate scan (section 9);
 - [the action results, auth codes and English defaults](#upgrading-to-the-action-results-auth-codes-and-english-defaults-batch-12-lane-7a)
   (lane 7A): buttons answer with an inline message instead of an error
   page, translated sign-in, registration and profile messages, a login
@@ -2785,6 +2788,12 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   when an editor had it open, or published it, at that moment. Removing
   every department in the admin panel no longer makes it company-wide by
   itself: the editor also sets Audience to `all` (the poll rule).
+- from the review's second fix round: an expired announcement can no
+  longer be acknowledged through the API either (the answer of an
+  announcement that does not exist; admins and editors still can), and the
+  confirm button of an announcement that vanished while the page was open
+  says "This item no longer exists — reload the page." instead of asking to
+  try again.
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
 and starts both; the rollback below takes both back. No env change is
@@ -2797,9 +2806,9 @@ a department; the other rows stay NULL. Nobody's view changes: a linked
 row is restricted by its links already. If that transaction fails, the
 cms does not start (step 9). **The first build is
 slower:** pnpm 10 installs both images from scratch (a new pnpm store,
-nothing cached) and the cms dependency layer (about 820 MB) is written once
-next to the images kept for rollback; later code-only deploys add about
-15 MB.
+nothing cached), and the first deploy writes about 1.0 GB of new images
+(the cms dependency layer alone about 770 MB) next to the images kept for
+rollback, plus the build cache; later code-only deploys add about 15 MB.
 
 Set these on the host, in the checkout, for the checks below:
 
@@ -2832,23 +2841,28 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ```bash
    grep -E '^(DEFAULT_LOCALE|DIGEST_DEFAULT_LOCALE|APP_TIME_ZONE)=' infra/.env
    timedatectl show -p Timezone --value
-   crontab -l 2>/dev/null | grep -F pg-backup.sh; sudo crontab -l 2>/dev/null | grep -F pg-backup.sh
    ```
 
    `DEFAULT_LOCALE` and `DIGEST_DEFAULT_LOCALE` are missing or `en` (the
    owner chose English; compose then passes `en`, and nothing needs
    setting). `APP_TIME_ZONE=Europe/Berlin` is the zone the new janitors and
-   step 6 use. The backup line runs at `0 3 * * *` in the host zone, and
-   the host is in `Europe/Berlin`: the 03:00 backup comes before the new
-   03:40 and 03:45 janitors ([§7.3](#73-automated-daily-backups-cron)).
-   Note which user's crontab holds the line (step 11).
+   step 6 use, and the host is in `Europe/Berlin`. The new janitors delete
+   for good at 03:40 and 03:45, so the night's backup has to finish before
+   them. On production that is the host's `backup-run` for `sinnlos`
+   (since 2026-10-07, [§7.3](#73-automated-daily-backups-cron)), whose
+   schedule lives in the `srv-prod-01-ops` repo, not in this one: check
+   there (its `docs/backup.md` and the timer or cron entry its
+   `install.sh` sets up) that the nightly run ends before 03:40. A host
+   still on `infra/backup/pg-backup.sh` has that line in a crontab at
+   `0 3 * * *`.
 
-3. **The preflight and the plan:**
+3. **The preflight, the plan and the backup permission:**
 
    ```bash
    infra/deploy.sh --check
    infra/deploy.sh --dry-run
    cat .git/sinnlos-deploy/infra.state
+   sudo -n -l /usr/local/sbin/backup-run --kind predeploy sinnlos
    ```
 
    `--check` prints `Preflight OK` and
@@ -2857,7 +2871,9 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    was deployed from `7d9e52b`, `LIVE_SMOKE=passed`; if it names another
    tag, use that one wherever this section says `7d9e52ba7e6a`). `--dry-run` prints `lock: free`, the clean
    checkout at the batch 12 commit, the CI result of that commit (a
-   `WARNING: CI is …` only informs), `last-known-good:
+   `WARNING: CI is …` only informs), `1. pre-deploy backup: sudo -n
+   /usr/local/sbin/backup-run --kind predeploy sinnlos (none on a first
+   install)`, `last-known-good:
    infra-{web,cms}:7d9e52ba7e6a (commit 7d9e52b…, deployed …)` and
    `-> the last-known-good deploy 7d9e52ba7e6a (…)` as the rollback
    target, `4. smoke check https://sinnlos.yurtbay.dev; live-smoke: run`,
@@ -2865,6 +2881,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    /home/bigemo/git/sinnlos/.git/sinnlos-deploy/infra.state` with
    `and prune SHA tags beyond the newest 5: none`. A listed untracked file
    under `packages/` would stop the real deploy: remove it first.
+   `sudo -n -l` prints the path of `backup-run`: the sudoers drop-in
+   `backup-run-predeploy` (installed by `srv-prod-01-ops`) lets `bigemo`
+   run exactly that command ([§3.6](#36-deploy)). If it asks for a
+   password or refuses, fix the drop-in first: the deploy would stop at
+   its backup step.
 
 4. **Permissions: no change.**
 
@@ -2980,9 +3001,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
 **Deploy**
 
-8. Run `infra/deploy.sh`. It takes the lock, checks the clean checkout
-   (with `packages/`) and the CI result, takes the pre-deploy backup
-   (`done predeploy` in `backup.log`), keeps the batch 10 SHA tags
+8. As `bigemo`, run `infra/deploy.sh` in the checkout (from a root shell:
+   `sudo -u bigemo -H infra/deploy.sh`). It takes the lock, checks the
+   clean checkout (with `packages/`) and the CI result, takes the
+   pre-deploy backup through `backup-run` (a `-predeploy` generation of
+   `sinnlos` in `/srv/backup/outbox`, which the NAS pulls; a failure stops
+   the deploy before anything is touched), keeps the batch 10 SHA tags
    (`7d9e52ba7e6a`) as the rollback target, builds both images (the long
    first pnpm 10 build), runs `up -d --no-build` (cms and web recreated,
    the database kept), smoke-checks, runs live-smoke, and only then tags
@@ -2995,7 +3019,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
    ```bash
    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|department-audience)\]|Strapi started'
-   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -v ' refused: '
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] sign-in failed' | grep -vE ' refused: |CredentialsSignin|Strapi 403 Forbidden|ForbiddenError'
    ```
 
    `[datetime] process time zone UTC, APP_TIME_ZONE Europe/Berlin`,
@@ -3005,15 +3029,32 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    and M existing quick-link row(s) to 'departments' (they link a
    department)` with N and M the `linked` counts of step 6 (a type with
    none is left out, and there is no line when neither has one; later
-   boots print none), `Strapi started successfully`; the second command
-   prints nothing. It leaves out the web's warnings `<action> refused:
-   <status> <…Error> → <code>` (for example `[comments] add refused: 400
-   BadRequestError → notFound`): since this batch the web logs every
-   refused user action that way, a vote on a closed poll or a comment on
-   an announcement that is gone, and those are no fault. Look at every
-   line it does print: an action's `… failed → <code>` (the cms did not
-   answer, or answered 5xx or 428), a `[locale]` line, or `[auth] sign-in
-   failed`.
+   boots print none), `Strapi started successfully`. The second command
+   prints nothing right after the deploy; once people use the site, it
+   leaves out three kinds of expected lines:
+   - the web's warnings `<action> refused: <status> <…Error> → <code>`
+     (for example `[comments] add refused: 400 BadRequestError →
+     notFound`): since this batch the web logs every refused user action
+     that way, a vote on a closed poll or a comment on an announcement
+     that is gone;
+   - `[auth][error] CredentialsSignin: Read more at
+     https://errors.authjs.dev#credentialssignin`, which Auth.js logs for
+     every wrong password (with colour codes around `[auth][error]`, so
+     the filter matches `CredentialsSignin` alone);
+   - a guest's page view: the web still asks the cms for sections guests
+     may not read and logs the cms's 403 as `[dashboard] fetch failed
+     Error [StrapiError]: Strapi 403 Forbidden …` (likewise
+     `[training-banner]`, `[ack-banner]`, `[announcements]`, `[kudos]`,
+     `[celebrations]`, `[acknowledgements]`), followed by the error's
+     fields on their own lines (`strapiName: 'ForbiddenError',` among
+     them). The filter drops the lines that name the 403; other lines of
+     such an error (its stack, its other fields, up to the closing `}`)
+     belong to it. A member's or editor's page view is never refused that
+     way (step 16 walks the pages as a member).
+
+   Look at every other line it prints: an action's `… failed → <code>`
+   (the cms did not answer, or answered 5xx or 428), a `[locale]` line,
+   `[auth] sign-in failed`, or a `fetch failed` with another status.
 
    **If the cms does not start** and logs `[department-audience] could
    not backfill the audience of documents and quick links (<reason>);
@@ -3053,21 +3094,24 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     Audience, and a row whose departments were removed keeps
     `departments` without counting as `linked`.)
 
-11. **An extra manual backup before the first night of the retention
-    crons:** the same day, after the deploy and before 03:00, as the user
-    whose crontab holds the backup line (step 2), with that line's
-    environment if it sets any:
+11. **The backup for the first night of the retention crons:** the
+    pre-deploy generation of step 8 already holds every row the first
+    night may delete (the janitors take only notifications read, and ads
+    expired, more than 90 days back: all of them there at the deploy).
+    Keep it until step 17 is checked; how long a `-predeploy` generation
+    stays in `/srv/backup/outbox` and on the NAS is backup-run's rotation
+    (`srv-prod-01-ops`, `docs/backup.md`). For a second, independent one
+    right before the first night (the same day, after the deploy and
+    before 03:40), as `bigemo`:
 
     ```bash
-    SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
-    tail -n 3 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
+    sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos; echo "backup-run exit $?"
     ```
 
-    The log ends with `done predeploy`. The pre-deploy kind is kept apart
-    from the nightly rotation; keep this backup until step 17 is checked.
-    It holds everything the first night may delete (the 03:00 nightly one
-    does too; this one does not depend on it). If the deploy ran after
-    03:45, the first night is the next one: take the backup before it.
+    It exits 0 and leaves another `-predeploy` generation of `sinnlos` in
+    `/srv/backup/outbox` (how backup-run reports a run is described in
+    its repo, not here). If the deploy ran after 03:45, the first night is
+    the next one.
 
 12. **The cron registry,** read from the running cms (its own compiled
     registry and zone rule):
@@ -3094,7 +3138,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     ```
 
     `COPY … /out /app` of about 15 MB above the two `node_modules` copies
-    (about 820 MB and 120 kB); the probe prints `2`. `/admin` loads, and
+    (about 770 MB and 120 kB); the probe prints `2`. `/admin` loads, and
     an image uploaded in the media library gets its formats.
 
 14. **English by default, and the digest default:**
@@ -3184,7 +3228,6 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
 
     ```bash
     "${COMPOSE[@]}" logs --since 12h cms | grep -E '\[cron\] (notification|classified)-janitor|\[(notification|classified)-janitor\]|removed [0-9]+ image\(s\) of deleted classified'
-    tail -n 20 /home/bigemo/backups/momsbest/offsite/sinnlos/backup.log
     ```
 
     `[cron] notification-janitor took …ms` after 03:40 and `[cron]
@@ -3194,10 +3237,11 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     with the counts of step 6 (the notifications capped at 100 000), plus
     one `[uploads-janitor] removed N image(s) of deleted classified` per
     purged ad with images (logged by the ad's delete, not by the 03:30
-    task). The backup log shows the 03:00 `done nightly` before them. A
-    `[cron] … failed` line: keep the backup of step 11 and look at the
-    error before the next night. Then delete the step 11 backup whenever
-    you like (or leave it to the rotation).
+    task). The night's `backup-run` for `sinnlos` finished before 03:40
+    (check it where `srv-prod-01-ops` records its runs). A `[cron] …
+    failed` line: keep the pre-deploy generations of steps 8 and 11 and
+    look at the error before the next night. Otherwise leave them to
+    backup-run's rotation.
 
 **What users notice** (worth a short release note): expired announcements
 disappear for everyone below admin/editor, from lists, threads and
@@ -3206,8 +3250,8 @@ are hidden and closed; read notifications older than 90 days and ads
 expired more than 90 days ago are removed; the wiki shows page order,
 tags, a table of contents and space icons; buttons show a short message
 instead of an error page when the intranet cannot be reached, and a
-comment on something that vanished says so; sign-in, registration and
-profile messages are translated; more than ten sign-ins at the same moment
+comment or confirmation on something that vanished says so; sign-in,
+registration and profile messages are translated; more than ten sign-ins at the same moment
 from one office network can be refused with "Too many sign-in attempts"
 (a retry a moment later works); the language switch remembers the choice
 for the e-mail digests; deleting a department keeps its documents and
@@ -3217,8 +3261,97 @@ admin panel keeps it for admins and editors; to make it company-wide, also
 set Audience to `all`. The admin panel no longer shows "Deploy to Strapi
 Cloud".
 
-**Rollback: both images, to the batch 10 SHA tags, no database step.**
-Follow the hint `infra/deploy.sh` prints when the deploy fails. After a
+**Rollback: both images, to the batch 10 SHA tags, after the stop rule.**
+
+**Stop rule, before any rollback of the cms to an image below batch 12**
+(this one, the hint of a deploy that failed after the batch 12 cms ran,
+or any older SHA tag): list the documents and quick links restricted by
+the Audience flag alone (read-only):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN TRANSACTION READ ONLY;
+SELECT 'document' AS type, d.document_id, max(d.title) AS title,
+       bool_or(d.published_at IS NOT NULL) AS published
+  FROM documents d
+ WHERE d.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
+ GROUP BY d.document_id
+UNION ALL
+SELECT 'quick link', q.document_id, max(q.label), bool_or(q.published_at IS NOT NULL)
+  FROM quick_links q
+ WHERE q.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+ GROUP BY q.document_id
+ ORDER BY 1, 2;
+ROLLBACK;
+SQL
+```
+
+Such a row has `audience = 'departments'` and no department: a department
+delete left it so, or an editor removed its departments without setting
+Audience to `all`. The batch 10 cms ignores the flag, so the row reads as
+company-wide there, guests included; worse, a Publish or "Discard changes"
+of it in the batch 10 admin panel re-creates the row without the column,
+the flag is gone for good, and the roll forward's boot backfill (it flags
+only rows that link a department) does not bring it back: the row stays
+company-wide after the roll forward too.
+
+- **No row:** go on with the freeze below.
+- **Rows: do not roll back yet.** Either
+  1. re-target every listed row in the admin panel of the running batch 12
+     cms (link an existing department; set Audience to `all` only if it is
+     meant to be company-wide; or delete it) and run the listing again
+     until it prints no row. Unpublishing alone does not take a row off
+     the list: its draft keeps the flag, and a Publish in the batch 10
+     admin panel would write a published row without it. Or
+  2. save the listed documentIds during the freeze below, keep the file
+     until the roll forward, and run the re-apply below **immediately
+     after the roll forward**. Until then the listed rows are
+     company-wide, guests included, for as long as the batch 10 cms runs.
+
+**Freeze, then the final listing.** The batch 12 cms stays writable until
+the image switch: a department delete committed after your listing would
+leave flag-only rows that neither your decision nor a saved list covers.
+So stop the cms first and keep it stopped until the rollback below starts
+the batch 10 image (the web stays up meanwhile: its pages show their
+"cannot be reached" messages, and `/admin` and `/api/*` answer with the
+web's redirect, because the cms routes are gone):
+
+```bash
+"${COMPOSE[@]}" stop cms
+```
+
+Then run the listing above once more; this run is the decision. No row:
+roll back (below). Rows you did not re-target (case 2): save them now,
+still frozen:
+
+```bash
+LIST=/home/bigemo/b12-flag-only-rows.txt
+psql_db -X -q -A -t -F ' ' > "$LIST" <<'SQL'
+SELECT DISTINCT 'documents', d.document_id
+  FROM documents d
+ WHERE d.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
+UNION
+SELECT DISTINCT 'quick_links', q.document_id
+  FROM quick_links q
+ WHERE q.audience = 'departments'
+   AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+ ORDER BY 1, 2;
+SQL
+wc -l < "$LIST"
+```
+
+It prints the number of saved documentIds (the listing's row count); the
+file holds one `documents <documentId>` or `quick_links <documentId>` per
+line.
+
+Avoid deleting a department while the batch 10 cms runs: a document or
+quick link the batch 10 cms wrote for that department alone carries no
+flag, loses its only link and comes back company-wide; no list names it.
+
+Then follow the hint `infra/deploy.sh` prints when the deploy fails. After a
 recorded batch 12 deploy, by hand (the batch 10 tags stay: the prune keeps
 the newest five):
 
@@ -3238,32 +3371,10 @@ database, and how the batch 10 images take it (rehearsed):
 
 - **The `audience` columns stay** (the schema sync never drops columns,
   `forceMigration: false`); the batch 10 cms boots on them and ignores
-  them. A document or quick link flagged and left without any department
-  after this deploy (by a department delete, or by an editor who removed
-  its departments without setting Audience to `all`) reads as
-  **company-wide** there, for guests too. List them first and re-target
-  them (link a department in the admin panel) before rolling back, or
-  accept it:
-
-  ```bash
-  psql_db -X <<'SQL'
-  BEGIN TRANSACTION READ ONLY;
-  SELECT 'document' AS type, d.document_id, max(d.title) AS title, bool_or(d.published_at IS NOT NULL) AS published
-    FROM documents d
-   WHERE d.audience = 'departments'
-     AND NOT EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id)
-   GROUP BY d.document_id
-  UNION ALL
-  SELECT 'quick link', q.document_id, max(q.label), bool_or(q.published_at IS NOT NULL)
-    FROM quick_links q
-   WHERE q.audience = 'departments'
-     AND NOT EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
-   GROUP BY q.document_id
-   ORDER BY 1, 2;
-  ROLLBACK;
-  SQL
-  ```
-
+  them. A document or quick link restricted by the flag alone reads as
+  **company-wide** there, for guests too, and the batch 10 admin panel can
+  erase its flag for good: hence the stop rule above, whose listing names
+  them, and the re-apply after the roll forward.
 - **Rows the janitors deleted do not come back** with the images:
   notifications and ads (with their image files) exist only in the
   backups (step 11, the nightly ones). Restoring a dump rolls back
@@ -3279,7 +3390,81 @@ database, and how the batch 10 images take it (rehearsed):
 A roll-forward is a normal `infra/deploy.sh` (it notes that the containers
 do not run the last-known-good images); the flags written before the
 rollback take effect again, and the boot backfill flags any row the batch
-10 cms linked to a department in between.
+10 cms linked to a department in between. A row restricted by the flag
+alone that the batch 10 admin panel published or discarded lost its flag
+for good; the listing above no longer names it once both of its rows lost
+it.
+
+**Right after the roll forward, with a saved list** (stop rule, case 2),
+before anyone works in the admin panel: re-apply the flag. The first run
+is a dry run: it prints the number of saved documentIds, every row of them
+as it is now (a row the batch 10 admin panel re-created shows an empty
+`audience`), the saved documentIds that no longer exist, and how many rows
+it would change (`UPDATE n`, documents, then quick links), and rolls back:
+
+```bash
+LIST=/home/bigemo/b12-flag-only-rows.txt
+wc -l < "$LIST"
+psql_db -X -v doc_ids="$(awk '$1 == "documents" { print $2 }' "$LIST" | paste -sd, -)" \
+  -v link_ids="$(awk '$1 == "quick_links" { print $2 }' "$LIST" | paste -sd, -)" <<'SQL'
+BEGIN;
+CREATE TEMP TABLE b12_saved (rows_of text, document_id text) ON COMMIT DROP;
+INSERT INTO b12_saved
+SELECT 'documents', unnest(string_to_array(:'doc_ids', ','))
+UNION
+SELECT 'quick_links', unnest(string_to_array(:'link_ids', ','));
+\echo '== preview: every row of the saved documentIds, as it is now'
+SELECT 'documents' AS rows_of, d.document_id, d.id, d.title AS name,
+       d.published_at IS NOT NULL AS published, d.audience,
+       EXISTS (SELECT 1 FROM documents_departments_lnk l WHERE l.document_id = d.id) AS linked
+  FROM documents d JOIN b12_saved s ON s.rows_of = 'documents' AND s.document_id = d.document_id
+UNION ALL
+SELECT 'quick_links', q.document_id, q.id, q.label, q.published_at IS NOT NULL, q.audience,
+       EXISTS (SELECT 1 FROM quick_links_departments_lnk l WHERE l.quick_link_id = q.id)
+  FROM quick_links q JOIN b12_saved s ON s.rows_of = 'quick_links' AND s.document_id = q.document_id
+ ORDER BY 1, 2, 3;
+\echo '== saved documentIds with no row any more (deleted meanwhile, nothing to do)'
+SELECT s.rows_of, s.document_id
+  FROM b12_saved s
+ WHERE NOT EXISTS (SELECT 1 FROM documents d
+                    WHERE s.rows_of = 'documents' AND d.document_id = s.document_id)
+   AND NOT EXISTS (SELECT 1 FROM quick_links q
+                    WHERE s.rows_of = 'quick_links' AND q.document_id = s.document_id);
+UPDATE documents d SET audience = 'departments'
+  FROM b12_saved s
+ WHERE s.rows_of = 'documents' AND s.document_id = d.document_id
+   AND d.audience IS DISTINCT FROM 'departments';
+UPDATE quick_links q SET audience = 'departments'
+  FROM b12_saved s
+ WHERE s.rows_of = 'quick_links' AND s.document_id = q.document_id
+   AND q.audience IS DISTINCT FROM 'departments';
+\if :{?commit}
+COMMIT;
+\else
+ROLLBACK;
+\echo 'Dry run: nothing changed. If the preview is right, run it again with -v commit=1.'
+\endif
+SQL
+```
+
+If the preview is right, run the same command again with `-v commit=1`
+after `psql_db -X`; it ends with `COMMIT`. It sets
+`audience = 'departments'` on every row, draft and published, of every
+saved documentId and changes nothing else (`updated_at` stays); a second run
+changes 0 rows. A row an editor re-targeted during the rollback keeps its
+department and gets the flag the backfill would give it anyway; one that is
+meant to be company-wide gets Audience `all` in the admin panel afterwards.
+Then delete the file. (Rehearsed on a throwaway Postgres 16 with the batch
+12 cms: after a department delete the listing named three documents, one
+of them a draft only, and a quick link, and the save wrote the four lines;
+what the batch 10 admin panel does was replayed in SQL, re-creating rows
+without the column (a Publish of one document, a Publish of the draft-only
+one, a Publish and a "Discard changes" of another, a "Discard changes" of
+the quick link). After the roll forward, a member read all three documents,
+and the listing no longer named the document that had lost the flag on both
+rows. The dry run printed `UPDATE 4` and `UPDATE 1` and changed nothing,
+the commit run the same; then the member read none of the three, an editor
+all three, and a second run printed `UPDATE 0` twice.)
 
 **Rehearsal (2026-09-29, the integrated `batch/12`):** both images built
 from the tree through compose (`docker compose -p b12i-staging … build`,
@@ -3295,8 +3480,10 @@ comments and a reaction, and tags on a wiki page. Step 6's SQL counted
 unpublished announcement; `prod-perm-diff.sql` returned no rows, and the
 census, section 9 included, ran without an error. The member probe of step
 15 showed the unpublished thread's 2 comments and the expired
-announcement. Then the batch 12 images: the cms booted in about 2 s with
-`permission drift: none (report-only check of 120 managed actions)` and no
+announcement. Then the batch 12 images: the cms booted within seconds
+(the 2026-10-12 rehearsal below measured about 6 s from the container
+start to healthy) with `permission drift: none (report-only check of 120
+managed actions)` and no
 grant line, the two `audience` columns appeared with no value, the
 registry printed the five tasks of step 12, `DIGEST_DEFAULT_LOCALE` was
 `en`, `/sign-in` answered `<html lang="en"`, and the probe printed exactly
@@ -3312,19 +3499,20 @@ bell's old notification. An `admin_role` user deleted the Finance
 department, which a document targeted alone: the cms logged `[department-delete]
 set the audience of 2 document row(s) to 'departments': they stay restricted
 (admins and editors only) until re-targeted`, the member did not see the
-document, an editor did. Rollback to the `7d9e52b` images (`up -d
---no-build web cms`): the batch 10 cms booted without an error, the
+document, an editor did. (That ran before the fix round: since then the
+write-time guard has flagged such rows when they were saved, and a delete
+that finds them flagged already logs nothing.) Rollback to the `7d9e52b`
+images (`up -d --no-build web cms`): the batch 10 cms booted without an
+error, the
 columns and the two values stayed, the rollback listing above named the
 document, the member saw it again (company-wide), and the unpublished
 thread and the expired announcement read as before the deploy. The roll
 forward restored all three. The cms image holds `COPY … /out /app` of 15.2
 MB above 823 MB and 119 kB of `node_modules`, resolves `@sinnlos/domain`
 to `packages/domain/dist/cjs`, carries no `src`, and stopped in 0.7 s;
-the probe of step 13 printed `2` on both images. Not exercised here:
-`infra/deploy.sh` end to end, Traefik, the janitors firing at 03:40 and
-03:45 (their rules and both engines are covered by
-`retention.integration.test.ts`), a large notification backlog, the pnpm
-10 cold build time, and the production host.
+the probe of step 13 printed `2` on both images. What this run left out
+(`infra/deploy.sh` end to end, Traefik, the janitors, the cold build) the
+staging rehearsal of 2026-10-12 below covers.
 
 **Fix-round rehearsal (2026-09-29, the write-time guard and the backfill
 for documents and quick links):** the rehearsal above ran before them, so
@@ -3353,8 +3541,33 @@ them again and printed no backfill line (nothing left to flag). The
 publish and "Discard changes" that read a row before a department delete
 committed are rehearsed by `department-delete.integration.test.ts` on
 Postgres 16: without the guard the recreated row came out `all` with no
-department. Still not exercised: `infra/deploy.sh` end to end, Traefik,
-live-smoke and the web checks through the edge.
+department. `infra/deploy.sh` end to end, Traefik, live-smoke and the web
+checks through the edge: the staging rehearsal below.
+
+**Staging rehearsal (2026-10-12, `edc9611`):** the whole sequence on a
+local staging copy of production (`infra/deploy.sh` with Traefik, from the
+batch 10 SHA tags to the batch 12 commit); all eight checks of the
+rehearsal passed. `infra/deploy.sh` ended with exit 0 after 163 s, of
+which the cold pnpm 10 build took about 139 s on a 32-core host
+(production will be slower; a separate `--no-cache` build of both images
+took about 141 s). The outage was about 10 s
+for the web and about 4.4 s for the cms, whose container went from start
+to healthy in about 6 s. Also rehearsed: the janitors, the department delete including the
+publish and "Discard changes" race, the web checks through Traefik, the
+digest of a user without a stored language, live-smoke, and the rollback
+to the `7d9e52b` SHA tags with the roll forward. A second staging run on
+`17bf65c`, after the second review fix round (acknowledgement of expired
+announcements, next 16.3.8, handlebars 4.7.10), rolled forward with
+`infra/deploy.sh` (exit 0 after 115 s), passed the acknowledgement,
+page, admin and media-library checks, ran the stop rule's listing, save
+and re-apply, and the rollback with the freeze and the roll forward
+exactly as written above. At `17bf65c` the first deploy writes about
+1.0 GB of new images next to the rollback images (cms 924 MB, web 64 MB
+beyond the shared base; the cms dependency layer about 770 MB), plus the
+build cache. What it found in this runbook is
+fixed: the backup steps through `backup-run` (2, 3, 8, 11 and 17), the
+expected lines of step 9 on a site in use, and the checkout path of the
+lane 7B runbook.
 
 #### Upgrading to the CMS data lifecycle leftovers (batch 12, lane 7C)
 
@@ -3367,7 +3580,8 @@ compose, grant, route or edge change.
 **What changes**
 
 - **Retention crons (LF07).** Two new tasks in the cron registry, both
-  after the 03:00 host backup ([§7.3](#73-automated-daily-backups-cron)):
+  after the nightly host backup (on production `backup-run`, elsewhere
+  `pg-backup.sh` at 03:00; [§7.3](#73-automated-daily-backups-cron)):
   - `notification-janitor`, 03:40 `APP_TIME_ZONE`: deletes **read**
     notifications 90 days after they were read. Unread notifications never
     expire. Fan-out anchor rows (announcement and event notifications that
@@ -3423,7 +3637,9 @@ compose, grant, route or edge change.
   in the admin panel) now takes effect: from that moment the announcement
   disappears for everyone below admin/editor from the list, its detail
   read, the acknowledgement banner, search and its comment thread, and no
-  digest mentions it. Admins and editors still see it.
+  digest mentions it; a new acknowledgement of it answers exactly as for an
+  announcement that does not exist. Admins and editors still see (and may
+  acknowledge) it.
 - **Unpublished announcements.** While an announcement is unpublished,
   reading or writing its comments and reactions answers exactly as for an
   announcement that never existed (admins and editors cannot add comments
@@ -3490,10 +3706,14 @@ compose, grant, route or edge change.
 
 **Before the first night of the retention crons**
 
-4. Take an **extra manual backup** the same day, after the deploy and
-   before 03:00, and keep it until you have checked the next morning's
-   log. Run it as the user of the backup crontab line; the pre-deploy kind
-   is kept apart from the nightly rotation:
+4. Keep a backup from before the first night until you have checked the
+   next morning's log: the deploy's pre-deploy backup holds every row the
+   first night may delete. For a second one the same day, after the deploy
+   and before 03:40: on production, as `bigemo`,
+   `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (a
+   `-predeploy` generation, [§7.3](#73-automated-daily-backups-cron));
+   elsewhere, as the user of the backup crontab line (the pre-deploy kind
+   is kept apart from the nightly rotation):
 
    ```bash
    SINNLOS_BACKUP_KIND=predeploy infra/backup/pg-backup.sh
@@ -3528,13 +3748,18 @@ compose, grant, route or edge change.
 **Rollback**
 
 Re-up the previous images of cms **and** web (the SHA tags,
-[§3.6](#36-deploy)); no database step. The `audience` columns stay (the
+[§3.6](#36-deploy)), **after the stop rule** of the [batch 12
+rollback](#deploying-batch-12-2026-09-29). The `audience` columns stay (the
 schema sync never drops columns here, `forceMigration: false`) and the
-previous cms ignores them: a document or quick link flagged by a department
-delete after this deploy and left without departments would read as
-company-wide there again. Re-target such rows (link a department) before
-rolling back, or accept it. Notifications and ads the janitors deleted come
-back only from the backup of step 4.
+previous cms ignores them: a document or quick link restricted by the flag
+alone (a department delete left it without departments) reads as
+company-wide there, guests included, and a Publish or "Discard changes" of
+it in the previous admin panel erases the flag for good (the roll forward's
+backfill flags only rows that link a department). So before rolling the cms
+back, run that section's read-only listing; if it prints rows, do not roll
+back until each is re-targeted (the listing prints none), or save the list
+there and run its re-apply right after the roll forward. Notifications and
+ads the janitors deleted come back only from the backup of step 4.
 
 #### Upgrading to the action results, auth codes and English defaults (batch 12, lane 7A)
 
@@ -3703,7 +3928,7 @@ cms and the web do at runtime stays the same:
   TypeScript sources are no longer in the image; Strapi loads the compiled
   files, the schemas included, from `dist` as before. While the lockfile is
   unchanged and the build cache holds the install stage, a later code-only
-  deploy writes a ~15 MB layer instead of a new copy of about 820 MB, and the
+  deploy writes a ~15 MB layer instead of a new copy of about 770 MB, and the
   SHA-tagged images share the dependency layer on disk. Both Dockerfiles
   pull `node:24-alpine` by digest in one `FROM` line.
 - **The rollback probe for poll guest access** (the rollback hint of
@@ -3727,12 +3952,13 @@ cms and the web do at runtime stays the same:
 schema, permission, edge or Traefik change, and nothing in the database
 changes. The first build after this release is slower: pnpm 10 runs the
 install stage of both images from scratch (a new pnpm store, nothing cached)
-and the cms dependency layer is written once, about 820 MB next to the
+and the cms dependency layer is written once, about 770 MB next to the
 images that stay for rollback; check `df -h` has a few GB free. The helpers
-of the batch 8 section (on a standalone Caddy box, drop the second `-f`):
+of the batch 8 section (on a standalone Caddy box, drop the second `-f`;
+`/home/bigemo/git/sinnlos` is the owner's checkout, elsewhere use yours):
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos
 COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
 ```
 
@@ -3742,7 +3968,7 @@ COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-com
 2. **Deploy:** `infra/deploy.sh`.
 3. **After: the layers.** `docker history infra-cms:latest | head -n 8`
    shows `COPY … /out /app` (about 15 MB) above the two `node_modules`
-   copies (about 820 MB and 120 kB).
+   copies (about 770 MB and 120 kB).
 4. **After: the probe on the new image** prints `2`:
 
    ```bash

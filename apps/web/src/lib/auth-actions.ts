@@ -17,7 +17,7 @@ import { signIn, signOut } from "@/auth";
 import { ENTRA, REGISTRATION_ENABLED, entraLogoutUrl } from "@/lib/auth-config";
 import { isRateLimitedSignIn } from "@/lib/auth-errors";
 import { STRAPI_URL } from "@/lib/config";
-import { countsAsFailure } from "@/lib/auth/credentials";
+import { LOCAL_SIGN_IN_TIMEOUT_MS, countsAsFailure } from "@/lib/auth/credentials";
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth/form-messages";
 import {
   clientIpFrom,
@@ -163,8 +163,8 @@ export async function registerLocalAccount(
       },
       body: JSON.stringify({ username, email, password, displayName: username }),
       cache: "no-store",
-      // Timeout parity with the login/exchange fetches (lib/auth).
-      signal: AbortSignal.timeout(5000),
+      // The local sign-in's timeout (lib/auth/credentials.ts).
+      signal: AbortSignal.timeout(LOCAL_SIGN_IN_TIMEOUT_MS),
     });
     if (!res.ok && countsAsFailure(res.status)) outcome = "failure";
   } catch {

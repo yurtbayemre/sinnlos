@@ -16,6 +16,8 @@
  *     visibility.ts), and with them the ack banner, search and the
  *     dashboard;
  *   - its comment and reaction thread (utils/target-visibility.ts);
+ *   - a new acknowledgement of it (api/acknowledgement/controllers/
+ *     acknowledgement.ts), refused like one of a missing announcement;
  *   - the e-mail digest (digest/send-digests.ts; the digest also skips it
  *     for admin_role and editor, whose digest is strictly their audience).
  * admin_role and editor keep reading it (they author it, and v2 authoring

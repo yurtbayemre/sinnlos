@@ -11,7 +11,10 @@ import acknowledgementController from "./acknowledgement";
  *      'Target not available for acknowledgement' (no existence oracle),
  *   4. one acknowledgement per user and target,
  *   5. FX27: an announcement outside the caller's audience answers that same
- *      400 (utils/announcement-audience.ts rules, admin_role/editor bypass).
+ *      400 (utils/announcement-audience.ts rules, admin_role/editor bypass);
+ *   6. DA02: so does an expired announcement (utils/announcement-expiry.ts),
+ *      before the duplicate lookup, with the same admin_role/editor bypass
+ *      as every other read of it.
  *
  * The db stub evaluates the `where` of each query against its tables and
  * resolves the populated targeting relations the way db.query does.
@@ -338,5 +341,63 @@ describe("acknowledgement create: audience (FX27)", () => {
       guest,
     );
     expect(ctx.badRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe("acknowledgement create: expiry (DA02)", () => {
+  const body = { data: { targetType: "announcement", targetDocumentId: TARGETED_DOC } };
+  const missing = {
+    data: { targetType: "announcement", targetDocumentId: "zzzzzzzzzzzzzzzzzzzzzzzz" },
+  };
+  const created = (calls: { op: string }[]) => calls.some((c) => c.op === "create");
+  const PAST = "2020-01-01T00:00:00.000Z";
+  const FUTURE = "2099-01-01T00:00:00.000Z";
+  /** The targeted announcement, in the member's department, ending at `expiresAt`. */
+  const ending = (expiresAt: string | null) =>
+    withTargeting({ department: { id: DEPT_SALES }, expiresAt });
+
+  it("answers an expired announcement with the SAME 400 as a missing target, before the duplicate lookup", async () => {
+    const expired = await create(body, ending(PAST));
+    const gone = await create(missing);
+    expect(expired.ctx.badRequest).toHaveBeenCalledWith(NOT_AVAILABLE);
+    expect(expired.ctx.badRequest.mock.calls).toEqual(gone.ctx.badRequest.mock.calls);
+    expect(created(expired.calls)).toBe(false);
+    expect(expired.calls.some((c) => c.uid === "api::acknowledgement.acknowledgement")).toBe(false);
+    // Expiry is decided before the caller's scope is loaded.
+    expect(expired.calls.some((c) => c.uid === "plugin::users-permissions.user")).toBe(false);
+  });
+
+  it("answers the generic 400, not 'Already acknowledged', once an acknowledged announcement expired", async () => {
+    const tables = ending(PAST);
+    tables["api::acknowledgement.acknowledgement"].push({
+      id: 50,
+      user: MEMBER.id,
+      targetType: "announcement",
+      targetDocumentId: TARGETED_DOC,
+    });
+    const { ctx } = await create(body, tables);
+    expect(ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
+  });
+
+  it("acknowledges an announcement that has not expired or never expires", async () => {
+    for (const expiresAt of [FUTURE, null]) {
+      const { ctx, calls } = await create(body, ending(expiresAt));
+      expect(ctx.badRequest, String(expiresAt)).not.toHaveBeenCalled();
+      expect(created(calls), String(expiresAt)).toBe(true);
+    }
+  });
+
+  it("lets admin_role and editor acknowledge an expired announcement, as they still read it", async () => {
+    for (const user of [EDITOR, ADMIN]) {
+      const { ctx, calls } = await create(body, ending(PAST), user);
+      expect(ctx.badRequest, user.role.type).not.toHaveBeenCalled();
+      expect(created(calls), user.role.type).toBe(true);
+    }
+  });
+
+  it("refuses an expired announcement outside the audience the same way", async () => {
+    const tables = withTargeting({ department: { id: DEPT_OPS }, expiresAt: PAST });
+    const { ctx } = await create(body, tables);
+    expect(ctx.badRequest.mock.calls).toEqual([[NOT_AVAILABLE]]);
   });
 });
