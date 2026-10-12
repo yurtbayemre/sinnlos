@@ -124,9 +124,16 @@ export default factories.createCoreController(REACTION_UID, ({ strapi }) => ({
 
     // DA04: a concurrent create (two tabs, two devices) can have missed the
     // lookup above as well and inserted the same reaction. Keep the oldest
-    // matching row and delete the rest. Every create checks AFTER its own
-    // insert, so the one that checks last sees every row and leaves exactly
-    // one; the oldest row is never deleted here, so at least one stays.
+    // matching row (lowest id) and delete the rest. Every create checks
+    // AFTER its own insert has committed, so the one that checks last sees
+    // every row and leaves one, and a check never deletes the oldest row it
+    // sees, so the lowest id of all stays: exactly one row remains. That is
+    // all this guarantees. Which row an ANSWER names is not: ids come from a
+    // sequence, so id order is not commit order, and a create that checks
+    // before a lower id's insert commits sees only later rows, answers one
+    // of them, and the lower id's create deletes it afterwards. Every
+    // answer still names a row created for this reaction (accepted, DA04;
+    // exact answers would need the identical creates serialised).
     const rows: Array<{ id: number; documentId: string }> = await strapi.db
       .query(REACTION_UID)
       .findMany({

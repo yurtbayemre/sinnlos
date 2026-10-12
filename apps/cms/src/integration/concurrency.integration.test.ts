@@ -31,7 +31,10 @@ import {
  *     N - 1; afterwards the gate holds;
  * and the one race the code closes:
  *   - reaction create (FX28): parallel identical creates collapse to ONE
- *     row, and every answer names that row.
+ *     row. Every answer names a row this race created; not necessarily the
+ *     one that stays: on Postgres a create can check before the insert of a
+ *     lower id commits (ids come from a sequence, not in commit order) and
+ *     answer a row the lower id's create deletes afterwards (reaction.ts).
  *
  * Observed in the lane rehearsal (2026-09-28, 8 parallel requests): SQLite
  * serialises the requests and showed no race at all (1 stored vote, 1 RSVP
@@ -263,14 +266,21 @@ describe.each(testEngines())("concurrent writes on %s", (engine) => {
     expect(late.status).toBe(400);
   });
 
-  it("parallel identical reaction creates collapse to one row that every answer names", async () => {
+  it("parallel identical reaction creates collapse to one row; every answer names a row of the race", async () => {
     const announcement = await t.strapi.documents("api::announcement.announcement").create({
       data: { title: "IT race: reactions", audience: "all" },
       status: "published",
     });
+    // Reaction ids above this one are rows the race below created.
+    const [newest] = await t.strapi.db.query("api::reaction.reaction").findMany({
+      select: ["id"],
+      orderBy: { id: "desc" },
+      limit: 1,
+    });
+    const floor = newest?.id ?? 0;
     const responses = await Promise.all(
       Array.from({ length: PARALLEL }, () =>
-        t.api<{ data?: { id?: number } }>("member", "/api/reactions", {
+        t.api<{ data?: Record<string, unknown> }>("member", "/api/reactions", {
           json: {
             data: {
               emoji: "heart",
@@ -289,6 +299,16 @@ describe.each(testEngines())("concurrent writes on %s", (engine) => {
       select: ["id"],
     });
     expect(rows).toHaveLength(1);
-    expect(new Set(responses.map((res) => res.body.data?.id))).toEqual(new Set([rows[0].id]));
+    // What the collapse guarantees: each answer names this reaction, created
+    // by the race, though possibly a row a later check deleted (see the
+    // header); not that every answer names the row that stays.
+    for (const res of responses) {
+      expect(res.body.data).toMatchObject({
+        emoji: "heart",
+        targetType: "announcement",
+        targetDocumentId: announcement.documentId,
+      });
+      expect(res.body.data?.id).toBeGreaterThan(floor);
+    }
   });
 });
