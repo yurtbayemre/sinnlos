@@ -533,6 +533,7 @@
   "errors": {
     "contentLoadFailed": "Einige Inhalte konnten nicht geladen werden",
     "cmsUnreachable": "Das CMS ist nicht erreichbar oder hat einen Fehler zurückgegeben. Inhalte können unvollständig sein – aktualisieren Sie die Seite, sobald Strapi wieder verfügbar ist.",
+    "countsUnavailable": "Mit – markierte Zahlen konnten nicht geladen werden. Aktualisieren Sie die Seite, sobald das CMS wieder erreichbar ist.",
     "somethingWrong": "Da ist etwas schiefgelaufen",
     "somethingWrongHint": "Ein unerwarteter Fehler ist aufgetreten. Bitte versuche es erneut.",
     "tryAgain": "Erneut versuchen",

@@ -3,7 +3,7 @@ import { getSession } from "@/lib/session";
 import { strapi } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
-import { initials } from "@/lib/utils";
+import { displayNameOf, initials } from "@/lib/utils";
 import { avatarThumbUrl } from "@/lib/config";
 import type { UserLite } from "@/lib/types";
 import { PageHeader } from "@/components/page-header";
@@ -43,7 +43,7 @@ export default async function ProfilePage() {
   // card only.
   const me = data?.data ?? null;
 
-  const name = me?.displayName ?? me?.username ?? session?.user?.name ?? tCommon("unknown");
+  const name = displayNameOf(me, null) ?? session?.user?.name ?? tCommon("unknown");
   const email = me?.email ?? session?.user?.email ?? "";
   const avatarUrl = avatarThumbUrl(me?.avatar) ?? session?.user?.image ?? null;
 
@@ -68,7 +68,7 @@ export default async function ProfilePage() {
         {me && (
           <Card>
             <CardHeader>
-              <CardTitle>{t("profileDetails")}</CardTitle>
+              <CardTitle as="h2">{t("profileDetails")}</CardTitle>
               <CardDescription>{t("profileDetailsDesc")}</CardDescription>
             </CardHeader>
             <CardContent>
@@ -94,7 +94,7 @@ export default async function ProfilePage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>{t("passwordSection")}</CardTitle>
+            <CardTitle as="h2">{t("passwordSection")}</CardTitle>
             <CardDescription>
               {isLocal ? t("passwordDescLocal") : t("passwordDescMicrosoft")}
             </CardDescription>

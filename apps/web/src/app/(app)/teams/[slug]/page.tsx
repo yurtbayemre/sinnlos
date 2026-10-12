@@ -6,11 +6,10 @@ import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 import type { Team } from "@/lib/types";
-import { initials, stripHtml } from "@/lib/utils";
+import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -34,12 +33,7 @@ export default async function TeamPage({ params }: Props) {
   // A role without team.find (guest) gets no request and an explanation
   // instead of the error page (SH02).
   if (isReadDenied((await getViewer()).role, "teams")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the
@@ -65,7 +59,7 @@ export default async function TeamPage({ params }: Props) {
       <section className="grid gap-6 lg:grid-cols-3">
         <Card>
           <CardHeader>
-            <CardTitle>{t("lead")}</CardTitle>
+            <CardTitle as="h2">{t("lead")}</CardTitle>
           </CardHeader>
           <CardContent>
             {lead ? (
@@ -74,10 +68,10 @@ export default async function TeamPage({ params }: Props) {
                 className="focus-card -m-2 flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-accent/50"
               >
                 <Avatar>
-                  <AvatarFallback>{initials(lead.displayName ?? lead.username)}</AvatarFallback>
+                  <AvatarFallback>{initials(displayNameOf(lead, null))}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <div className="font-medium">{lead.displayName ?? lead.username}</div>
+                  <div className="font-medium">{displayNameOf(lead, null)}</div>
                   <div className="text-xs text-muted-foreground">{lead.jobTitle ?? lead.email}</div>
                 </div>
               </Link>
@@ -89,7 +83,7 @@ export default async function TeamPage({ params }: Props) {
 
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>{t("members")}</CardTitle>
+            <CardTitle as="h2">{t("members")}</CardTitle>
             <CardDescription>{tCommon("member", { count: members.length })}</CardDescription>
           </CardHeader>
           <CardContent className="stagger grid gap-3 sm:grid-cols-2">
@@ -103,10 +97,10 @@ export default async function TeamPage({ params }: Props) {
                   className="focus-card flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
                 >
                   <Avatar>
-                    <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
+                    <AvatarFallback>{initials(displayNameOf(m, null))}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{m.displayName ?? m.username}</div>
+                    <div className="truncate font-medium">{displayNameOf(m, null)}</div>
                     <div className="truncate text-xs text-muted-foreground">
                       {m.jobTitle ?? m.email}
                     </div>

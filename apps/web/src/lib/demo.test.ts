@@ -38,6 +38,7 @@ const { fetchAllTeams } = await import("./teams");
 const { fetchAllUsers } = await import("./users");
 const { fetchAnnouncementAckIndex, fetchMyAnnouncementAcks } = await import("./acknowledgements");
 const training = await import("./training");
+const analytics = await import("./api/analytics");
 const { DEMO_VIEWER, toViewer } = await import("./viewer");
 const { getNotifications } = await import("./notification-actions");
 const { PEOPLE_QUERY, ORG_CHART_QUERY, kudosRecipientQuery } = await import("./people-dto");
@@ -100,6 +101,11 @@ const DIRECT_READS: Record<string, () => Promise<unknown>> = {
   fetchCourseProgress: () => training.fetchCourseProgress(["demo-lesson-1"], "demo"),
   fetchMyProgress: () => training.fetchMyProgress(),
   getNotifications: () => getNotifications(),
+  "analytics countPage": () => analytics.countPage("wiki-spaces"),
+  "analytics reactionsPage": () => analytics.reactionsPage(),
+  "analytics unreadNotificationsPage": () => analytics.unreadNotificationsPage(),
+  "analytics recentComments": () => analytics.recentComments(),
+  "analytics searchSummary": () => analytics.searchSummary(),
   "me (/api/me)": () => strapi("/api/me"),
   "person (/api/users/:id)": () => strapi("/api/users/2?populate[department]=true"),
 };

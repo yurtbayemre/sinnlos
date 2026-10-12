@@ -1,0 +1,151 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadKudos > CMS down: the banner, no wall and no empty state 1`] = `
+{
+  "celebrations": [],
+  "empty": false,
+  "failed": true,
+  "kudos": [],
+  "recipients": [],
+  "recipientsFailed": true,
+  "truncated": false,
+}
+`;
+
+exports[`loadKudos > partial failure: celebrations down show the banner and keep the wall 1`] = `
+{
+  "celebrations": [],
+  "empty": false,
+  "failed": true,
+  "kudos": [
+    {
+      "createdAt": "2026-09-27T09:00:00.000Z",
+      "fromName": "Grace Hopper",
+      "id": 1,
+      "message": "Thanks for the release!",
+      "toName": "user3",
+      "value": "teamwork",
+    },
+    {
+      "createdAt": null,
+      "fromName": null,
+      "id": 2,
+      "message": "New value",
+      "toName": "Alan Turing",
+      "value": "kindness",
+    },
+  ],
+  "recipients": [
+    {
+      "avatarUrl": null,
+      "displayName": "Grace Hopper",
+      "id": 2,
+      "jobTitle": "CTO",
+    },
+  ],
+  "recipientsFailed": false,
+  "truncated": false,
+}
+`;
+
+exports[`loadKudos > success: the wall with resolved names, celebrations, the picker without self or blocked 1`] = `
+{
+  "celebrations": [
+    {
+      "daysUntil": 1,
+      "key": "5-birthday",
+      "name": "Ada Lovelace",
+      "type": "birthday",
+      "years": null,
+    },
+    {
+      "daysUntil": 0,
+      "key": "6-work-anniversary",
+      "name": "user6",
+      "type": "work-anniversary",
+      "years": 5,
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "kudos": [
+    {
+      "createdAt": "2026-09-27T09:00:00.000Z",
+      "fromName": "Grace Hopper",
+      "id": 1,
+      "message": "Thanks for the release!",
+      "toName": "user3",
+      "value": "teamwork",
+    },
+    {
+      "createdAt": null,
+      "fromName": null,
+      "id": 2,
+      "message": "New value",
+      "toName": "Alan Turing",
+      "value": "kindness",
+    },
+  ],
+  "recipients": [
+    {
+      "avatarUrl": null,
+      "displayName": "Grace Hopper",
+      "id": 2,
+      "jobTitle": "CTO",
+    },
+  ],
+  "recipientsFailed": false,
+  "truncated": false,
+}
+`;
+
+exports[`loadKudos > truncated: a directory cut at its cap is flagged 1`] = `
+{
+  "celebrations": [
+    {
+      "daysUntil": 1,
+      "key": "5-birthday",
+      "name": "Ada Lovelace",
+      "type": "birthday",
+      "years": null,
+    },
+    {
+      "daysUntil": 0,
+      "key": "6-work-anniversary",
+      "name": "user6",
+      "type": "work-anniversary",
+      "years": 5,
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "kudos": [
+    {
+      "createdAt": "2026-09-27T09:00:00.000Z",
+      "fromName": "Grace Hopper",
+      "id": 1,
+      "message": "Thanks for the release!",
+      "toName": "user3",
+      "value": "teamwork",
+    },
+    {
+      "createdAt": null,
+      "fromName": null,
+      "id": 2,
+      "message": "New value",
+      "toName": "Alan Turing",
+      "value": "kindness",
+    },
+  ],
+  "recipients": [
+    {
+      "avatarUrl": null,
+      "displayName": "Grace Hopper",
+      "id": 2,
+      "jobTitle": "CTO",
+    },
+  ],
+  "recipientsFailed": false,
+  "truncated": true,
+}
+`;

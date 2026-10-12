@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardContent } from "@/components/ui/card";
 import { RenewButton } from "@/components/marketplace/renew-button";
 
@@ -80,12 +80,7 @@ export default async function MarketplacePage({
   // (SH02). The reads wait for the role for that; getViewer() is the
   // render's one /api/me read, which the layout has already started.
   if (isReadDenied(viewer.role, "marketplace")) {
-    return (
-      <div className="space-y-8">
-        <PageHeader title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   const relative = (d: string | undefined) => relativeTime(d, tRel, { locale, timeZone });
 
@@ -202,7 +197,7 @@ export default async function MarketplacePage({
             const thumb = thumbnail(ad);
             return (
               <Link key={ad.id} href={`/marketplace/${ad.id}`} className="focus-card group">
-                <Card className="card-lift h-full overflow-hidden">
+                <Card interactive className="card-lift h-full overflow-hidden">
                   <div className="flex aspect-[4/3] items-center justify-center bg-muted/60">
                     {thumb ? (
                       // eslint-disable-next-line @next/next/no-img-element

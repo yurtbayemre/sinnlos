@@ -22,8 +22,8 @@ export type AnnouncementAuthor = Pick<
   "id" | "username" | "email" | "displayName" | "jobTitle"
 >;
 
-/** An announcement card: own fields and the field-limited author. */
-export type AnnouncementCard = Omit<Announcement, "author"> & {
+/** An announcement of a list (the cards): own fields and the field-limited author. */
+export type AnnouncementListItem = Omit<Announcement, "author"> & {
   author?: AnnouncementAuthor | null;
 };
 
@@ -40,8 +40,8 @@ const withAuthor = (query: StrapiQuery) =>
  * correct per user because the visibility policy filters the query before
  * the count. No department populate (WD05): no card renders it.
  */
-export function listAnnouncements(): Promise<StrapiListResponse<AnnouncementCard>> {
-  return strapi<StrapiListResponse<AnnouncementCard>>(
+export function listAnnouncements(): Promise<StrapiListResponse<AnnouncementListItem>> {
+  return strapi<StrapiListResponse<AnnouncementListItem>>(
     withQuery(
       "/api/announcements",
       withAuthor(strapiQuery()).sortBy("pinned:desc,createdAt:desc").pageSize(20),
@@ -63,10 +63,10 @@ export function listAnnouncements(): Promise<StrapiListResponse<AnnouncementCard
  * Secondary sort on id keeps the page walk stable when many rows share the
  * same createdAt. Hard cap: 50 pages x 100 = 5000 mandatory posts.
  */
-export function listRequiringAck(): Promise<WalkResult<AnnouncementCard>> {
-  return walkAllPages<AnnouncementCard>(
+export function listRequiringAck(): Promise<WalkResult<AnnouncementListItem>> {
+  return walkAllPages<AnnouncementListItem>(
     (page) =>
-      strapi<StrapiListResponse<AnnouncementCard>>(
+      strapi<StrapiListResponse<AnnouncementListItem>>(
         withQuery(
           "/api/announcements",
           withAuthor(strapiQuery().filter("requiresAck", "$eq", true))

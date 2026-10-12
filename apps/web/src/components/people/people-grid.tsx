@@ -97,7 +97,7 @@ export function PeopleGrid({ people }: { people: PersonCard[] }) {
           const name = p.name ?? tCommon("unknown");
           return (
             <Link key={p.id} href={`/people/${p.id}`} className="focus-card group block">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardContent className="flex flex-col items-center gap-3 p-6 text-center">
                   <Avatar className="h-16 w-16">
                     {p.avatarUrl ? (

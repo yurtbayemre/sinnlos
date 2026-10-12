@@ -10,8 +10,9 @@ import { describe, expect, it } from "vitest";
  *
  * The pairs mirror how the UI combines the tokens: `text-primary` and
  * `text-destructive` read the *-text tokens (tailwind.config.ts textColor),
- * fills carry their *-foreground, and the error line of the fetch-error
- * banner is `text-destructive/80` on `bg-destructive/5`. The tokens are
+ * fills carry their *-foreground, the error line of the fetch-error
+ * banner is `text-destructive/80` on `bg-destructive/5`, and secondary
+ * text also sits on the accent/muted fills and the bell's unread tint. The tokens are
  * parsed from the stylesheet itself, so a changed value is checked as it
  * ships.
  */
@@ -107,7 +108,9 @@ describe.each(Object.entries(themes))("%s theme tokens (FX31)", (_name, t) => {
       "foreground",
       "card",
       "card-foreground",
+      "muted",
       "muted-foreground",
+      "accent",
       "primary",
       "primary-foreground",
       "primary-text",
@@ -124,6 +127,10 @@ describe.each(Object.entries(themes))("%s theme tokens (FX31)", (_name, t) => {
     ["card-foreground", "card"],
     ["muted-foreground", "background"],
     ["muted-foreground", "card"],
+    // The selected search result (aria-selected:bg-accent) and chips on
+    // bg-muted carry secondary text (batch 13 review: 4.34:1 before).
+    ["muted-foreground", "accent"],
+    ["muted-foreground", "muted"],
   ])("%s on %s reaches 4.5:1", (text, surface) => {
     expect(contrast(c(text), c(surface))).toBeGreaterThanOrEqual(AA_TEXT);
   });
@@ -152,6 +159,14 @@ describe.each(Object.entries(themes))("%s theme tokens (FX31)", (_name, t) => {
     for (const surface of ["background", "card"]) {
       const tint = over(c(fill), alpha, c(surface));
       expect(contrast(c(text), tint), surface).toBeGreaterThanOrEqual(AA_TEXT);
+    }
+  });
+
+  it("muted text on the bell's unread row (bg-primary/[0.04]) reaches 4.5:1", () => {
+    // Was 4.49:1 in light mode (batch 13 review).
+    for (const surface of ["background", "card"]) {
+      const tint = over(c("primary"), 0.04, c(surface));
+      expect(contrast(c("muted-foreground"), tint), surface).toBeGreaterThanOrEqual(AA_TEXT);
     }
   });
 

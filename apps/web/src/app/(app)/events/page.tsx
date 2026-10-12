@@ -1,24 +1,21 @@
 import Link from "next/link";
 import { Calendar, CalendarDays, Clock, Download, List, MapPin } from "lucide-react";
 import { getFormatter, getTranslations } from "next-intl/server";
+import type { EventListItem } from "@/lib/api/events";
 import { appTimeZone } from "@/lib/app-time-zone";
 import type { DateTimeFormatter } from "@/lib/date-format";
 import { eventBadge, eventTimeLabel } from "@/lib/event-dates";
 import { icsHref } from "@/lib/event-ics";
-import { EMPTY_RSVP_SUMMARY, rsvpSummaryMap } from "@/lib/event-rsvp";
-import { buildMonthGrid, type MonthGrid } from "@/lib/month-grid";
-import { zonedDateKey, zonedDayStart } from "@/lib/plain-date";
-import { canRsvp as roleCanRsvp } from "@/lib/roles";
+import { loadEvents } from "@/lib/loaders/events";
 import { getSession } from "@/lib/session";
-import { api } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
-import { tryFetch } from "@/lib/safe-fetch";
-import type { Event, EventRsvpSummary } from "@/lib/types";
+import type { EventRsvpSummary } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent } from "@/components/ui/card";
+import { SectionLabel } from "@/components/ui/section-label";
 import { EventRsvpPanel } from "@/components/events/event-rsvp-panel";
 import { EventsMonthView } from "@/components/events/events-month-view";
 
@@ -32,8 +29,7 @@ export default async function EventsPage({
 }: {
   searchParams: Promise<{ view?: string; month?: string }>;
 }) {
-  const { view, month } = await searchParams;
-  const isMonthView = view === "month";
+  const query = await searchParams;
 
   const [t, format, session, viewer] = await Promise.all([
     getTranslations("events"),
@@ -41,69 +37,18 @@ export default async function EventsPage({
     getSession(),
     getViewer(),
   ]);
-
-  // Time-window fetches (see api.events): a global "first 50 by start asc"
-  // list would show the 50 OLDEST events forever. The list view gets the
-  // upcoming events (start >= the start of today, or still running; soonest
-  // first) plus a short tail of the most recent past ones; the month view
-  // fetches exactly the visible grid window including overlapping multi-day
-  // events. "Today" and every window are APP_TIME_ZONE days (datetime
-  // contract, phase 2), never the process zone's.
+  // The reads, the month grid and the RSVP gate: lib/loaders/events.ts
+  // (WD03). Every window is an APP_TIME_ZONE day.
   const timeZone = appTimeZone();
-  const now = new Date();
-  const today = zonedDateKey(now, timeZone);
-  const startOfToday = zonedDayStart(today, timeZone).toISOString();
-
-  let upcoming: Event[] = [];
-  let past: Event[] = [];
-  let monthEvents: Event[] = [];
-  let grid: MonthGrid | null = null;
-  let failed = false;
-  if (isMonthView) {
-    const range = buildMonthGrid(month, today, timeZone);
-    grid = range;
-    const res = await tryFetch(
-      () => api.events.window(range.from.toISOString(), range.until.toISOString()),
-      "events",
-    );
-    monthEvents = (res.data?.data ?? []) as Event[];
-    failed = res.failed;
-  } else {
-    const nowIso = now.toISOString();
-    const [upcomingRes, pastRes] = await Promise.all([
-      tryFetch(() => api.events.upcoming(startOfToday, nowIso), "events"),
-      tryFetch(() => api.events.past(startOfToday, nowIso), "events-past"),
-    ]);
-    upcoming = (upcomingRes.data?.data ?? []) as Event[];
-    past = (pastRes.data?.data ?? []) as Event[];
-    failed = upcomingRes.failed || pastRes.failed;
-  }
-
   const userId = typeof session?.user?.id === "number" ? session.user.id : null;
-  // Guests hold no event-rsvp grants — skip the fetch instead of running
-  // into a 403 error banner (marketplace canCreate pattern). Fail-closed
-  // allowlist (lib/roles.ts): an unreadable role gets no RSVP UI either.
-  const canRsvp = userId != null && roleCanRsvp(viewer.role);
+  const view = await loadEvents(
+    { view: query.view, month: query.month },
+    { userId, role: viewer.role },
+    new Date(),
+    timeZone,
+  );
+  const isMonthView = view.mode === "month";
   const selfName = session?.user?.name ?? null;
-
-  // RSVPs are only rendered in the list view and only on UPCOMING cards;
-  // the month view shows compact chips without attendance. The CMS
-  // aggregates them per event (FX21): counts, "yes" names and my answer.
-  const rsvpDocIds = isMonthView
-    ? []
-    : [
-        ...new Set(
-          upcoming
-            .filter((e) => e.rsvpEnabled && typeof e.documentId === "string")
-            .map((e) => e.documentId as string),
-        ),
-      ];
-  const rsvpResult =
-    canRsvp && rsvpDocIds.length > 0
-      ? await tryFetch(() => api.events.rsvpSummaries(rsvpDocIds), "event-rsvps")
-      : { data: null, failed: false };
-  const summaries = rsvpSummaryMap(rsvpResult.data?.data ?? []);
-  const anyFailed = failed || rsvpResult.failed;
 
   const switchLinkClass = (active: boolean) =>
     cn(
@@ -139,47 +84,42 @@ export default async function EventsPage({
         </div>
       </PageHeader>
 
-      {anyFailed && <FetchErrorBanner />}
+      {view.failed && <FetchErrorBanner />}
 
-      {grid ? (
-        <EventsMonthView events={monthEvents} grid={grid} today={today} timeZone={timeZone} />
-      ) : upcoming.length === 0 && past.length === 0 ? (
+      {view.mode === "month" ? (
+        <EventsMonthView
+          events={view.events}
+          grid={view.grid}
+          today={view.today}
+          timeZone={timeZone}
+        />
+      ) : view.empty ? (
         <EmptyState icon={Calendar} title={t("emptyTitle")} hint={t("emptyHint")} />
       ) : (
         <>
-          {upcoming.length > 0 && (
+          {view.upcoming.length > 0 && (
             <section className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Calendar className="h-3.5 w-3.5" />
-                {t("upcoming")}
-              </div>
+              <SectionLabel icon={Calendar}>{t("upcoming")}</SectionLabel>
               <div className="stagger space-y-3">
-                {upcoming.map((e) => (
+                {view.upcoming.map(({ event, rsvp }) => (
                   <EventCard
-                    key={e.id}
-                    event={e}
+                    key={event.id}
+                    event={event}
                     t={t}
                     format={format}
                     timeZone={timeZone}
-                    rsvp={
-                      canRsvp && e.rsvpEnabled && typeof e.documentId === "string"
-                        ? {
-                            summary: summaries.get(e.documentId) ?? EMPTY_RSVP_SUMMARY,
-                            selfName,
-                          }
-                        : null
-                    }
+                    rsvp={rsvp ? { summary: rsvp, selfName } : null}
                   />
                 ))}
               </div>
             </section>
           )}
 
-          {past.length > 0 && (
+          {view.past.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">{t("past")}</div>
+              <SectionLabel>{t("past")}</SectionLabel>
               <div className="stagger space-y-3">
-                {past.map((e) => (
+                {view.past.map((e) => (
                   <EventCard
                     key={e.id}
                     event={e}
@@ -207,7 +147,7 @@ function EventCard({
   timeZone,
   rsvp,
 }: {
-  event: Event;
+  event: EventListItem;
   muted?: boolean;
   /** The page's `events` translator (typed keys and arguments, AC03). */
   t: Awaited<ReturnType<typeof getTranslations<"events">>>;

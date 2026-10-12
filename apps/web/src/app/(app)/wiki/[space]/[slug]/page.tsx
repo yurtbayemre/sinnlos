@@ -6,6 +6,7 @@ import { Markdown, type MarkdownRehypePlugins } from "@/components/markdown";
 import { formatInstant, LONG_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import type { WikiPage as WikiPageEntry } from "@/lib/types";
+import { displayNameOf } from "@/lib/utils";
 import { rehypeWikiToc, showsToc, wikiTags } from "@/lib/wiki-content";
 
 interface Props {
@@ -61,13 +62,11 @@ export default async function WikiPage({ params }: Props) {
         <div className="mt-4 flex items-center gap-3 text-xs text-muted-foreground">
           {author ? (
             <span>
-              {tCommon("by")} {author.displayName ?? author.username}
+              {tCommon("by")} {displayNameOf(author, "")}
             </span>
           ) : null}
           {showLastEditor ? (
-            <span>
-              · {t("lastEditedBy", { name: lastEditor.displayName ?? lastEditor.username ?? "" })}
-            </span>
+            <span>· {t("lastEditedBy", { name: displayNameOf(lastEditor, "") })}</span>
           ) : null}
           {updated ? <span>· {updated}</span> : null}
         </div>

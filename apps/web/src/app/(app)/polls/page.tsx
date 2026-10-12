@@ -1,15 +1,12 @@
 import Link from "next/link";
-import { unstable_rethrow } from "next/navigation";
 import { BarChart3, Plus } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import { loadPolls, type PollEntry } from "@/lib/loaders/polls";
 import { canCreatePolls } from "@/lib/roles";
-import { api, findPollResults, pollRef } from "@/lib/strapi";
 import { getViewer } from "@/lib/viewer";
-import { isPollClosed } from "@/lib/poll-close";
-import { tryFetch } from "@/lib/safe-fetch";
-import type { Poll, PollResults } from "@/lib/types";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
+import { SectionLabel } from "@/components/ui/section-label";
 import { PollCard } from "@/components/polls/poll-card";
 import { PollsEmptyState } from "@/components/polls/polls-empty-state";
 
@@ -20,54 +17,24 @@ export async function generateMetadata() {
 
 export default async function PollsPage() {
   // Every role may read the list and canCreate only toggles a button, so the
-  // list fetch runs alongside getViewer()'s /api/me read instead of behind
-  // it. Pages that gate their content (/polls/new, /manage/*) stay gate-first.
-  const [t, viewer, { data, failed }] = await Promise.all([
+  // reads run alongside getViewer()'s /api/me read instead of behind it.
+  // Pages that gate their content (/polls/new, /manage/*) stay gate-first.
+  // The list, the results and the active/closed split: lib/loaders/polls.ts
+  // (WD03).
+  const [t, viewer, view] = await Promise.all([
     getTranslations("polls"),
     getViewer(),
-    tryFetch(() => api.polls.list(), "polls"),
+    loadPolls(new Date()),
   ]);
   const canCreate = canCreatePolls(viewer.role);
-  const polls = (data?.data ?? []) as Poll[];
 
-  // All cards' results in ONE request (WD04: GET /api/poll-results; it used
-  // to be one request per poll). Each poll is addressed by its documentId
-  // (DA01), which a republish between the list read and this request does
-  // not change; the cms decides visibility, canVote, the audience and the
-  // guest flags per poll and caller, and leaves out a poll the caller may
-  // no longer see (deleted, unpublished or retargeted after the list read,
-  // decision 02): that card is just dropped. FX47: an expired session's
-  // redirect (NEXT_REDIRECT) must reach Next.js; any other failure shows
-  // the error banner (and no card, the counts being unknown).
-  let resultsFailed = false;
-  let results: PollResults[] = [];
-  if (polls.length > 0) {
-    try {
-      results = await api.polls.resultsMany(polls.map(pollRef));
-    } catch (e) {
-      unstable_rethrow(e);
-      console.error("[polls] results fetch failed", e);
-      resultsFailed = true;
-    }
-  }
-
-  // Closed iff now >= closesAt: the rule the cms vote handler and the card use.
-  const now = new Date();
-  const active = polls.filter((p) => !isPollClosed(p.closesAt, now));
-  const closed = polls.filter((p) => isPollClosed(p.closesAt, now));
-
-  // A poll without results (left out by the cms, or a failed read) renders
-  // no card. Keyed by the poll's address (its documentId), which a
-  // republish keeps: a card whose vote was refused because the options
-  // changed keeps its voteFailed message through the refresh that shows
-  // the new options, instead of remounting under the new published row id.
-  const card = (p: Poll) => {
-    const ref = pollRef(p);
-    const pollResults = findPollResults(results, ref);
-    return pollResults ? (
-      <PollCard key={ref} results={pollResults} pollRef={ref} viewerRole={viewer.role} />
-    ) : null;
-  };
+  // Keyed by the poll's address (its documentId), which a republish keeps:
+  // a card whose vote was refused because the options changed keeps its
+  // voteFailed message through the refresh that shows the new options,
+  // instead of remounting under the new published row id.
+  const card = ({ ref, results }: PollEntry) => (
+    <PollCard key={ref} results={results} pollRef={ref} viewerRole={viewer.role} />
+  );
 
   return (
     <div className="space-y-8">
@@ -83,26 +50,23 @@ export default async function PollsPage() {
         )}
       </PageHeader>
 
-      {(failed || resultsFailed) && <FetchErrorBanner />}
+      {view.failed && <FetchErrorBanner />}
 
-      {polls.length === 0 ? (
+      {view.empty ? (
         <PollsEmptyState viewerRole={viewer.role} />
       ) : (
         <>
-          {active.length > 0 && (
+          {view.active.length > 0 && (
             <section className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <BarChart3 className="h-3.5 w-3.5" />
-                {t("active")}
-              </div>
-              <div className="stagger grid gap-4 md:grid-cols-2">{active.map(card)}</div>
+              <SectionLabel icon={BarChart3}>{t("active")}</SectionLabel>
+              <div className="stagger grid gap-4 md:grid-cols-2">{view.active.map(card)}</div>
             </section>
           )}
 
-          {closed.length > 0 && (
+          {view.closed.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">{t("closed")}</div>
-              <div className="stagger grid gap-4 md:grid-cols-2">{closed.map(card)}</div>
+              <SectionLabel>{t("closed")}</SectionLabel>
+              <div className="stagger grid gap-4 md:grid-cols-2">{view.closed.map(card)}</div>
             </section>
           )}
         </>

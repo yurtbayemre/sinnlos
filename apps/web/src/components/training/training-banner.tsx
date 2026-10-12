@@ -2,32 +2,19 @@ import Link from "next/link";
 import { GraduationCap } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
-import { tryFetch } from "@/lib/safe-fetch";
-import { fetchCourses, fetchMyProgress } from "@/lib/training";
-import { courseCompletion } from "@/lib/training-shared";
+import { loadTrainingOverview } from "@/lib/loaders/training";
 
 /**
  * Dashboard banner counting the mandatory courses the current user has
- * not completed yet (ack-banner clone, issue #29). Server Component,
- * both fetches per-user (uncached, D-DC01). Renders nothing when everything is
- * done, nothing is assigned, or a fetch fails/truncates — fail-closed
- * means no banner rather than a wrong count.
+ * not completed yet (ack-banner clone, issue #29), from the same overview
+ * as /training (lib/loaders/training.ts). Server Component, per-user reads
+ * (uncached, D-DC01). Renders nothing when everything is done, nothing is
+ * assigned, or a read failed or was cut short — fail-closed means no
+ * banner rather than a wrong count.
  */
 export async function TrainingBanner() {
-  const [coursesResult, progressResult] = await Promise.all([
-    tryFetch(() => fetchCourses(), "training-banner"),
-    tryFetch(() => fetchMyProgress(), "training-banner"),
-  ]);
-  if (coursesResult.failed || progressResult.failed) return null;
-  if (coursesResult.data!.truncated || progressResult.data!.truncated) return null;
-
-  const completed = new Set(progressResult.data!.completed.keys());
-  const openCount = coursesResult.data!.courses.filter((course) => {
-    if (!course.mandatory) return false;
-    const { total, done } = courseCompletion(course.lessons ?? [], completed);
-    return total > 0 && !done;
-  }).length;
-  if (openCount === 0) return null;
+  const { openMandatory: openCount } = await loadTrainingOverview("training-banner");
+  if (!openCount) return null;
 
   const t = await getTranslations("dashboard");
 

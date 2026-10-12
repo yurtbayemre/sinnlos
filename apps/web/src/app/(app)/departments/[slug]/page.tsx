@@ -8,11 +8,10 @@ import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 import type { Department } from "@/lib/types";
-import { initials, stripHtml } from "@/lib/utils";
+import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 interface Props {
   params: Promise<{ slug: string }>;
@@ -37,12 +36,7 @@ export default async function DepartmentPage({ params }: Props) {
   // A role without department.find (guest) gets no request and an
   // explanation instead of the error page (SH02).
   if (isReadDenied((await getViewer()).role, "departments")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   // Detail-page error strategy (WD07, same on all detail pages): fetch
   // errors propagate to app/(app)/error.tsx, whose "Try again" fetches the
@@ -74,7 +68,7 @@ export default async function DepartmentPage({ params }: Props) {
       <section className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle>{tTeams("title")}</CardTitle>
+            <CardTitle as="h2">{tTeams("title")}</CardTitle>
             <CardDescription>
               {tCommon("team", { count: teams.length })} {tCommon("inThisDepartment")}
             </CardDescription>
@@ -104,7 +98,7 @@ export default async function DepartmentPage({ params }: Props) {
 
         <Card>
           <CardHeader>
-            <CardTitle>{t("head")}</CardTitle>
+            <CardTitle as="h2">{t("head")}</CardTitle>
           </CardHeader>
           <CardContent>
             {head ? (
@@ -114,15 +108,12 @@ export default async function DepartmentPage({ params }: Props) {
               >
                 <Avatar>
                   {headAvatarUrl ? (
-                    <AvatarImage
-                      src={headAvatarUrl}
-                      alt={head.displayName ?? head.username ?? "Department head"}
-                    />
+                    <AvatarImage src={headAvatarUrl} alt={displayNameOf(head, "Department head")} />
                   ) : null}
-                  <AvatarFallback>{initials(head.displayName ?? head.username)}</AvatarFallback>
+                  <AvatarFallback>{initials(displayNameOf(head, null))}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <div className="font-medium">{head.displayName ?? head.username}</div>
+                  <div className="font-medium">{displayNameOf(head, null)}</div>
                   <div className="text-xs text-muted-foreground">{head.jobTitle ?? head.email}</div>
                 </div>
               </Link>
@@ -146,10 +137,10 @@ export default async function DepartmentPage({ params }: Props) {
                 className="focus-card flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
               >
                 <Avatar>
-                  <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
+                  <AvatarFallback>{initials(displayNameOf(m, null))}</AvatarFallback>
                 </Avatar>
                 <div className="min-w-0">
-                  <div className="truncate font-medium">{m.displayName ?? m.username}</div>
+                  <div className="truncate font-medium">{displayNameOf(m, null)}</div>
                   <div className="truncate text-xs text-muted-foreground">
                     {m.jobTitle ?? m.email}
                   </div>

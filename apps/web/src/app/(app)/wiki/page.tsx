@@ -36,7 +36,7 @@ export default async function WikiHomePage() {
             const Icon = ICONS[wikiSpaceIconName(s.icon)];
             return (
               <Link key={s.id} href={`/wiki/${s.slug}`} className="focus-card group">
-                <Card className="card-lift h-full">
+                <Card interactive className="card-lift h-full">
                   <CardHeader>
                     <div
                       aria-hidden="true"
@@ -44,7 +44,7 @@ export default async function WikiHomePage() {
                     >
                       <Icon className="h-4 w-4" />
                     </div>
-                    <CardTitle className="transition-colors group-hover:text-primary">
+                    <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                       {s.name}
                     </CardTitle>
                     <CardDescription className="flex items-center gap-1.5">

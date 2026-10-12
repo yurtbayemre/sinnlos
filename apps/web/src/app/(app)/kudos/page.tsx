@@ -2,22 +2,20 @@ import { Award, PartyPopper } from "lucide-react";
 import type { Messages } from "next-intl";
 import { getLocale, getTranslations } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
-import { api } from "@/lib/strapi";
-import { kudosRecipientQuery, toKudosRecipients } from "@/lib/people-dto";
+import { loadKudos } from "@/lib/loaders/kudos";
 import { isReadDenied } from "@/lib/roles";
 import { getSession } from "@/lib/session";
 import { getViewer } from "@/lib/viewer";
-import { fetchAllUsers } from "@/lib/users";
 import { relativeTime } from "@/lib/relative-time";
-import { tryFetch } from "@/lib/safe-fetch";
-import type { Kudos, KudosValue, Celebration, UserLite } from "@/lib/types";
+import type { KudosValue } from "@/lib/types";
+import { initials } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
-import { Card, CardContent } from "@/components/ui/card";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { initials } from "@/lib/utils";
+import { Card, CardContent } from "@/components/ui/card";
+import { SectionLabel } from "@/components/ui/section-label";
 import { GiveKudos } from "@/components/kudos/give-kudos";
 
 export async function generateMetadata() {
@@ -58,51 +56,29 @@ export default async function KudosPage() {
   // A role without kudos.find (guest) gets no request and an explanation
   // instead of the CMS's 403 as an error banner (SH02).
   if (isReadDenied(viewer.role, "kudos")) {
-    return (
-      <div className="space-y-8">
-        <PageHeader title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   const selfId = typeof session?.user?.id === "number" ? session.user.id : null;
-  const [kudosResult, celebrationsResult, peopleResult] = await Promise.all([
-    tryFetch(() => api.kudos.list(), "kudos"),
-    // The celebrations are the staff roles' only: the `authenticated`
-    // fallback reads kudos but not birthdays and anniversaries.
-    isReadDenied(viewer.role, "celebrations")
-      ? { data: null, failed: false }
-      : tryFetch(() => api.celebrations(), "celebrations"),
-    // The picker gets a lean DTO (WD05): name, job title, avatar thumbnail
-    // of every active colleague but the caller.
-    tryFetch(() => fetchAllUsers<UserLite>(kudosRecipientQuery(selfId)), "people"),
-  ]);
-
-  const kudosList = (kudosResult.data?.data ?? []) as Kudos[];
-  const celebrations = (celebrationsResult.data?.data ?? []) as Celebration[];
-  const people = toKudosRecipients(peopleResult.data?.users ?? [], selfId);
-  const anyFailed = kudosResult.failed || celebrationsResult.failed;
+  // The reads and the picker's DTO: lib/loaders/kudos.ts (WD03).
+  const view = await loadKudos(viewer.role, selfId);
 
   return (
     <div className="space-y-8">
       <PageHeader title={t("title")} description={t("description")}>
-        <GiveKudos people={people} />
+        <GiveKudos people={view.recipients} />
       </PageHeader>
 
-      {anyFailed && <FetchErrorBanner />}
+      {view.failed && <FetchErrorBanner />}
 
-      {celebrations.length > 0 && (
+      {view.celebrations.length > 0 && (
         <section className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <PartyPopper className="h-3.5 w-3.5" />
-            {t("celebrations")}
-          </div>
+          <SectionLabel icon={PartyPopper}>{t("celebrations")}</SectionLabel>
           <div className="stagger grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {celebrations.map((c) => {
-              const name = c.user.displayName ?? c.user.username ?? tCommon("unknown");
+            {view.celebrations.map((c) => {
+              const name = c.name ?? tCommon("unknown");
               const isBirthday = c.type === "birthday";
               return (
-                <Card key={`${c.user.id}-${c.type}`}>
+                <Card key={c.key}>
                   <CardContent className="flex items-center gap-3 p-4">
                     <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500/10 text-lg">
                       {isBirthday ? "\u{1F382}" : "\u{1F389}"}
@@ -126,18 +102,15 @@ export default async function KudosPage() {
         </section>
       )}
 
-      {kudosList.length === 0 ? (
+      {view.empty ? (
         <EmptyState icon={Award} title={t("emptyTitle")} hint={t("emptyHint")} />
-      ) : (
+      ) : view.kudos.length > 0 ? (
         <section className="space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-            <Award className="h-3.5 w-3.5" />
-            {t("recentKudos")}
-          </div>
+          <SectionLabel icon={Award}>{t("recentKudos")}</SectionLabel>
           <div className="stagger space-y-3">
-            {kudosList.map((k) => {
-              const fromName = k.from?.displayName ?? k.from?.username ?? tCommon("unknown");
-              const toName = k.to?.displayName ?? k.to?.username ?? tCommon("unknown");
+            {view.kudos.map((k) => {
+              const fromName = k.fromName ?? tCommon("unknown");
+              const toName = k.toName ?? tCommon("unknown");
               return (
                 <Card key={k.id}>
                   <CardContent className="flex items-start gap-4 p-4">
@@ -156,7 +129,7 @@ export default async function KudosPage() {
                           {VALUE_EMOJI[k.value] ?? "\u{2B50}"}{" "}
                           {isKudosValue(k.value) ? t(VALUE_LABEL_KEY[k.value]) : k.value}
                         </span>
-                        <span>{relative(k.createdAt)}</span>
+                        <span>{relative(k.createdAt ?? undefined)}</span>
                       </div>
                     </div>
                   </CardContent>
@@ -165,7 +138,7 @@ export default async function KudosPage() {
             })}
           </div>
         </section>
-      )}
+      ) : null}
     </div>
   );
 }

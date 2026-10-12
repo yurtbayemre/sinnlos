@@ -1,7 +1,9 @@
+import type { ComponentProps } from "react";
 import Link from "next/link";
 import { Lock } from "lucide-react";
 import { useTranslations } from "next-intl";
 import { EmptyState } from "@/components/empty-state";
+import { PageHeader } from "@/components/page-header";
 
 /**
  * What a page shows instead of a section the viewer's role cannot read
@@ -21,5 +23,21 @@ export function SectionUnavailable() {
         {t("backToDashboard")}
       </Link>
     </EmptyState>
+  );
+}
+
+/**
+ * The whole page for a section the viewer's role cannot read: the page's
+ * own header, then SectionUnavailable. One place for what the section
+ * pages used to repeat (SH02); the page still returns it BEFORE any read.
+ */
+export function SectionUnavailablePage(
+  header: Omit<ComponentProps<typeof PageHeader>, "children">,
+) {
+  return (
+    <div className="space-y-8">
+      <PageHeader {...header} />
+      <SectionUnavailable />
+    </div>
   );
 }

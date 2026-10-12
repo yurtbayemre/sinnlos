@@ -55,9 +55,12 @@ export default async function WikiSpacePage({ params }: Props) {
         <div className="stagger grid gap-4 md:grid-cols-2">
           {pages.map((p) => (
             <Link key={p.id} href={`/wiki/${space}/${p.slug}`} className="focus-card group">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base transition-colors group-hover:text-primary">
+                  <CardTitle
+                    as="h2"
+                    className="flex items-center gap-2 text-base transition-colors group-hover:text-primary"
+                  >
                     <FileText
                       className="h-4 w-4 shrink-0 text-muted-foreground"
                       aria-hidden="true"

@@ -15,6 +15,37 @@ export function initials(name: string | undefined | null): string {
     .join("");
 }
 
+/** The user fields a display name is taken from (any populate shape). */
+export interface NamedUser {
+  displayName?: string | null;
+  username?: string | null;
+  email?: string | null;
+}
+
+/** A name field that holds something to show: not missing, empty or blank. */
+function present(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+/**
+ * The name to show for a user (UI08, one rule for every page): the display
+ * name, else the username, else the e-mail address (the CMS sanitizer
+ * strips it for non-staff callers, so it is only there where the viewer may
+ * see it), else `fallback`. An empty or blank value counts as missing: a
+ * profile saved with an empty display name used to show a blank name,
+ * because `displayName ?? username` stops at "".
+ */
+export function displayNameOf<F = string>(
+  user: NamedUser | null | undefined,
+  fallback: F,
+): string | F {
+  if (!user) return fallback;
+  if (present(user.displayName)) return user.displayName;
+  if (present(user.username)) return user.username;
+  if (present(user.email)) return user.email;
+  return fallback;
+}
+
 /** Strip HTML tags from Strapi richtext for plain-text previews. */
 export function stripHtml(s?: string | null): string {
   if (!s) return "";
