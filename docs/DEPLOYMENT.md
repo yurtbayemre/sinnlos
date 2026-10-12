@@ -1296,7 +1296,8 @@ systemctl start docker
 > tab that changed it stays signed in. The live pipeline ends streams it
 > closes with a `bye` event, syncs each tab's full channel set with a
 > revision, and the cms proves its emit leg with a keepalive every 20 s:
-> without one for 45 s the browsers poll at the short intervals.
+> without one for 45 s the browsers poll at the short intervals and
+> the header says _Live updates delayed_.
 > `infra/live-smoke.sh` now also requires `"emitFresh":true` on the stream.
 > Roll back cms and web together.
 > Follow [Upgrading to the live client and password-change revocation (batch 13, lane 8C)](#upgrading-to-the-live-client-and-password-change-revocation-batch-13-lane-8c).
@@ -1990,9 +1991,12 @@ changed in four places:
   live streams show degraded until it gets through …` (or `keepalive
   failed: …`), and its recovery once, `[live-emit] keepalive reaches the
   web again`; a cms that starts before the web logs exactly that pair.
-  The browsers show no degraded note in the page yet: until the header
-  indicator of this batch's merge lands (lane 8A's layout), "degraded"
-  means the short polling intervals only.
+  Since the batch 13 integration the header says so, too: after 5 s of
+  a degraded stream in a visible tab it shows a small amber _Live updates
+  delayed_ note (the text from 1280 px on, an icon below that; screen
+  readers hear it), and a fresh heartbeat removes it at once. With the
+  cms stopped it appears within 45 s plus one heartbeat plus those 5 s
+  (at most 75 s).
 - **Shorter ping coalescing.** Since batch 7 (LF02) the cms pings after
   the commit, so the browsers wait less: comment pings 150 ms (was 400 ms),
   notification pings plus 0–1 s (was 0–3 s), announcement pings plus
@@ -2100,8 +2104,8 @@ together**:
   subscribe with its `{ connId, add, remove }` body; they count as healthy,
   as the previous web cannot say otherwise.
 - Only the cms rolled back (new web): no keepalive reaches the web, so
-  every browser shows degraded and polls at the short intervals until the
-  cms is new again.
+  every browser shows degraded (the header's _Live updates delayed_
+  note) and polls at the short intervals until the cms is new again.
 - `infra/live-smoke.sh` belongs to its checkout: against a rolled-back web
   run the script of the deployed SHA
   (`git show <sha>:infra/live-smoke.sh > /tmp/live-smoke.sh`), the new

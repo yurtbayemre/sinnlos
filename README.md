@@ -1397,6 +1397,8 @@ Safety nets for refactors (roadmap S03–S06, S09):
 - [ ] Changing the password on `/profile` in browser A keeps A signed in;
       the same account in browser B lands on `/sign-in?expired=1` with its
       next click
+- [ ] With the cms stopped, the header shows _Live updates delayed_
+      within about 75 s, and the note goes away once the cms is back
 - [ ] `/training` lists published courses; on a `quizGate` course the
       completion button stays locked until every quiz answer is correct;
       `/manage/training` shows the completion report (admin)
