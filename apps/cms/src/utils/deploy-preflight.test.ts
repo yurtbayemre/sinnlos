@@ -55,7 +55,11 @@ import {
  *  10. B05: the preflight reads DIGESTS_DISABLED like the cms
  *      (parseEnvFlag: 1/true/yes/on, trimmed, any case), and live-smoke's
  *      switches come from the env compose hands the apps
- *      (LIVE_EVENTS_DISABLED, the Entra-only case), not from the shell.
+ *      (LIVE_EVENTS_DISABLED, the Entra-only case), not from the shell;
+ *  11. FX40 (owner decision 2026-10-12): for a target cms from before the
+ *      token version of batch 13, or one it cannot check, the hint prints
+ *      the mandatory JWT_SECRET rotation before its start commands, and
+ *      never edits infra/.env itself.
  * The state, tag and lock logic of FX35 (and a full stubbed deploy) is
  * pinned in infra/deploy-flow.test.ts.
  *
@@ -621,6 +625,12 @@ interface HintProbes {
    */
   imageCheck?: number;
   /**
+   * Exit code of the `docker run … grep tokenVersion` image check: 0 the
+   * target cms knows the token version of batch 13 (default), 1 it predates
+   * it, anything else unknown.
+   */
+  tokenVersionCheck?: number;
+  /**
    * docker subcommands ("exec", "image", "run") that hang: the `timeout`
    * stub ends them with 124, as the real one does at the deadline.
    */
@@ -677,10 +687,12 @@ function rollbackHintRun(
     shellLine("WEB_DATETIME_LABEL="),
     shellLine("WEB_DATETIME_VALUE="),
     `POLL_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("POLL_SCHEMA_IN_IMAGE"))}`,
+    `USER_SCHEMA_IN_IMAGE=${shellQuote(shellAssignment("USER_SCHEMA_IN_IMAGE"))}`,
     shellLine("REVOKE_GUEST_VOTE_PSQL="),
     `STUB_CMD=${shellQuote(cmd ?? "")}`,
     `STUB_NAIVE=${shellQuote(probes.naive ?? "0")}`,
     `STUB_IMAGE_CHECK=${probes.imageCheck ?? 0}`,
+    `STUB_TOKEN_VERSION_CHECK=${probes.tokenVersionCheck ?? 0}`,
     `STUB_HANG=${shellQuote(` ${(probes.hang ?? []).join(" ")} `)}`,
     `STUB_WEB_LABEL=${shellQuote(probes.webLabel === undefined ? "zone-explicit" : (probes.webLabel ?? ""))}`,
     "BOUNDED=0",
@@ -697,7 +709,9 @@ function rollbackHintRun(
     '        [[ -n "${STUB_WEB_LABEL}" ]] || return 1; printf \'%s\\n\' "${STUB_WEB_LABEL}"; return 0',
     "      fi",
     '      [[ -n "${STUB_CMD}" ]] || return 1; printf \'%s\\n\' "${STUB_CMD}" ;;',
-    '    "run "*) return "${STUB_IMAGE_CHECK}" ;;',
+    '    "run "*)',
+    '      if [[ "$*" == *" tokenVersion "* ]]; then return "${STUB_TOKEN_VERSION_CHECK}"; fi',
+    '      return "${STUB_IMAGE_CHECK}" ;;',
     '    "exec "*)',
     '      if [[ "$(cat)" == *up_permissions* ]]; then echo "permission probe" >&3; fi',
     '      [[ -n "${STUB_NAIVE}" ]] || return 1; printf \'%s\\n\' "${STUB_NAIVE}" ;;',
@@ -706,6 +720,8 @@ function rollbackHintRun(
     "}",
     shellFunction("naive_app_columns"),
     shellFunction("image_has_poll_guest_access"),
+    shellFunction("image_has_token_version"),
+    shellFunction("print_jwt_secret_rotation_hint"),
     shellFunction("image_web_zone_explicit"),
     shellFunction("print_guest_vote_revoke_hint"),
     shellFunction("print_guest_vote_recheck_hint"),
@@ -1001,6 +1017,7 @@ describe(
           "bounded docker image",
           "bounded docker image",
           "bounded docker run",
+          "bounded docker run",
         ]);
         expect(stdout).toContain(
           `bounded docker image inspect -f {{ index .Config.Labels "org.sinnlos.datetime" }} infra-web:rollback`,
@@ -1021,6 +1038,8 @@ describe(
           "(the database could not be asked whether the datetime repair has run",
           "add -f /srv/infra/docker-compose.cms-legacy-tz.yml before up",
           "(infra-web:rollback could not be checked for the web's datetime port, so the web",
+          "MANDATORY before the start below, unless infra-cms:rollback knows the token version of batch 13",
+          "-c tokenVersion /app/apps/cms/dist/src/extensions/users-permissions/content-types/user/schema.json",
           `${COMPOSE_LINE} -f /srv/infra/docker-compose.web-legacy-tz.yml up -d --no-build web cms`,
           "(--no-build is essential",
           "Check the rollback image:",
@@ -1477,6 +1496,92 @@ describe("Traefik host preflight: DOMAIN fits the instance (5A-T1)", BASH_BUDGET
     );
   });
 });
+
+describe(
+  "rollback hint: JWT_SECRET rotation below batch 13 (FX40, owner decision 2026-10-12)",
+  BASH_BUDGET,
+  () => {
+    const COMPOSE_LINE =
+      "docker compose -p infra -f /srv/infra/docker-compose.yml -f /srv/infra/docker-compose.traefik.yml";
+    const SHA = "17bf65cd0c9c";
+    const STRAPI_CMD = '["node_modules/.bin/strapi","start"]';
+    const SCHEMA =
+      "/app/apps/cms/dist/src/extensions/users-permissions/content-types/user/schema.json";
+
+    it("checks the in-image path of the user schema that carries tokenVersion", () => {
+      const path = shellAssignment("USER_SCHEMA_IN_IMAGE");
+      expect(path).toBe(SCHEMA);
+      // The compiled copy of the extension's schema, which has the attribute.
+      const source = path.replace(/^\/app\//, "").replace("/dist/src/", "/src/");
+      expect(read(...source.split("/"))).toContain('"tokenVersion"');
+      expect(shellFunction("image_has_token_version")).toContain(
+        'docker run --rm --pull never --network none --entrypoint grep "$1" \\\n    -q tokenVersion "${USER_SCHEMA_IN_IMAGE}"',
+      );
+    });
+
+    it("only prints the rotation, never edits infra/.env", () => {
+      const hint = shellFunction("print_jwt_secret_rotation_hint");
+      const code = hint.split("\n").filter((line) => !line.trim().startsWith("#"));
+      for (const line of code.slice(1, -1)) {
+        expect(line.trim(), line).toMatch(/^(local |if |else|fi|echo )/);
+      }
+      expect(shellFunction("print_rollback_hint")).toContain(
+        'image_has_token_version "${cms_image}" || token_version=$?',
+      );
+    });
+
+    it.skipIf(!HAS_BASH)(
+      "prints the mandatory rotation before the start for a target cms from before batch 13",
+      () => {
+        const { stdout, stderr } = rollbackHintRun(STRAPI_CMD, { ref: SHA, tokenVersionCheck: 1 });
+        expect(stdout).toContain(
+          `bounded docker run --rm --pull never --network none --entrypoint grep infra-cms:${SHA} -q tokenVersion ${SCHEMA}`,
+        );
+        expectInOrder(stderr, [
+          `docker tag infra-cms:${SHA} infra-cms:latest`,
+          `MANDATORY before the start below: infra-cms:${SHA} predates the token version of batch 13.`,
+          "That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET",
+          'stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, "Deploying batch 13",',
+          "Rollback R2 and R3 while the new cms still runs, then R4: a new value from",
+          "openssl rand -base64 48 on the one JWT_SECRET= line of /srv/infra/.env (AUTH_SECRET stays).",
+          "This script does not edit it. Every user is signed out once and signs in again.",
+          `${COMPOSE_LINE} up -d --no-build web cms`,
+        ]);
+        expect(stderr).not.toContain("skip this step only if");
+      },
+    );
+
+    it.skipIf(!HAS_BASH)("comes before every start command, the direct start included", () => {
+      const hint = rollbackHint('["pnpm","start"]', "0", { ref: SHA, tokenVersionCheck: 1 });
+      expectInOrder(hint, [
+        "MANDATORY before the start below",
+        `${COMPOSE_LINE} up -d --no-build web cms`,
+        `${COMPOSE_LINE} -f /tmp/cms-direct-start.yml up -d --no-build web cms`,
+      ]);
+      expect(hint.indexOf("MANDATORY")).toBeLessThan(hint.indexOf(" up -d "));
+    });
+
+    it.skipIf(!HAS_BASH)("prints it with the check when the target cannot be checked", () => {
+      for (const tokenVersionCheck of [2, 124, 125]) {
+        const hint = rollbackHint(STRAPI_CMD, "0", { ref: SHA, tokenVersionCheck });
+        expectInOrder(hint, [
+          `MANDATORY before the start below, unless infra-cms:${SHA} knows the token version of batch 13`,
+          "(it could not be checked here: skip this step only if this prints 1 or more):",
+          `docker run --rm --pull never --network none --entrypoint grep infra-cms:${SHA} -c tokenVersion ${SCHEMA}`,
+          "openssl rand -base64 48",
+          `${COMPOSE_LINE} up -d --no-build web cms`,
+        ]);
+      }
+    });
+
+    it.skipIf(!HAS_BASH)("says nothing about JWT_SECRET for a target from batch 13 on", () => {
+      const hint = rollbackHint(STRAPI_CMD, "0", { ref: SHA, tokenVersionCheck: 0 });
+      expect(hint).not.toContain("JWT_SECRET");
+      expect(hint).not.toContain("MANDATORY");
+      expect(hint).toContain(`${COMPOSE_LINE} up -d --no-build web cms`);
+    });
+  },
+);
 
 describe("rollback hint: the target of the last-known-good state (FX35)", BASH_BUDGET, () => {
   const COMPOSE_LINE =

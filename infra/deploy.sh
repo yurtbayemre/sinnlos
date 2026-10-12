@@ -469,6 +469,40 @@ image_has_poll_guest_access() {
     -q visibleToGuests "${POLL_SCHEMA_IN_IMAGE}" 2>/dev/null
 }
 
+# Whether a cms image knows the token version of batch 13 (FX40; its user
+# schema has tokenVersion): exit 0 yes, 1 no, anything else unknown (no such
+# image here, another layout, docker failed or timed out, no `timeout`).
+# Never pulls, no network; the compiled schema, as for poll guest access.
+USER_SCHEMA_IN_IMAGE="/app/apps/cms/dist/src/extensions/users-permissions/content-types/user/schema.json"
+image_has_token_version() {
+  "${PROBE_TIMEOUT[@]}" docker run --rm --pull never --network none --entrypoint grep "$1" \
+    -q tokenVersion "${USER_SCHEMA_IN_IMAGE}" 2>/dev/null
+}
+
+# A cms from before batch 13 checks a Strapi JWT's signature and expiry
+# only: under the same JWT_SECRET every JWT that a password change on batch
+# 13 (or later) revoked works again there. So every rollback to such a cms,
+# or to one that cannot be checked, rotates JWT_SECRET before it starts
+# (owner decision 2026-10-12; docs/DEPLOYMENT.md, "Deploying batch 13",
+# Rollback R2 to R4). Printed before the start commands, never done here:
+# the edit of infra/.env stays the operator's. $1 is the exit code of
+# image_has_token_version for the target cms image $2 (not 0).
+print_jwt_secret_rotation_hint() {
+  local image="$2"
+  if [[ "$1" == "1" ]]; then
+    echo "       MANDATORY before the start below: ${image} predates the token version of batch 13." >&2
+  else
+    echo "       MANDATORY before the start below, unless ${image} knows the token version of batch 13" >&2
+    echo "       (it could not be checked here: skip this step only if this prints 1 or more):" >&2
+    echo "                      docker run --rm --pull never --network none --entrypoint grep ${image} -c tokenVersion ${USER_SCHEMA_IN_IMAGE}" >&2
+  fi
+  echo "       That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET" >&2
+  echo "       stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, \"Deploying batch 13\"," >&2
+  echo "       Rollback R2 and R3 while the new cms still runs, then R4: a new value from" >&2
+  echo "       openssl rand -base64 48 on the one JWT_SECRET= line of ${INFRA_DIR}/.env (AUTH_SECRET stays)." >&2
+  echo "       This script does not edit it. Every user is signed out once and signs in again." >&2
+}
+
 # Poll guest access: the first boot of that release grants the guest role
 # api::poll-vote.poll-vote.vote. A cms from before it (on the owner
 # instance the :rollback image of that deploy) ignores the per-poll guest
@@ -538,7 +572,9 @@ ROLLBACK_ORIGIN=""
 # checked, gets the web legacy-zone override: that web must run in
 # APP_TIME_ZONE (in UTC it refuses to start, or, before the datetime
 # release, quietly shows UTC times), and the override is harmless for a
-# newer one (it only warns).
+# newer one (it only warns). A target cms from before the token version of
+# batch 13, or one that cannot be checked, gets the mandatory JWT_SECRET
+# rotation before the start commands (print_jwt_secret_rotation_hint).
 # Every probe is bounded (PROBE_TIMEOUT); one that fails or times out
 # prints the variant for the unknown case, never fewer lines.
 print_rollback_hint() {
@@ -547,12 +583,13 @@ print_rollback_hint() {
     echo "       no containers ran before this deploy): fix the cause and re-run." >&2
     return 0
   fi
-  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0
+  local rollback=("${COMPOSE[@]}") naive cms_cmd guest_access=0 web_zone=0 token_version=0
   local web_image="${PROJECT}-web:${ROLLBACK_REF}" cms_image="${PROJECT}-cms:${ROLLBACK_REF}"
   naive="$(naive_app_columns "${PROBE_TIMEOUT[@]}" || true)"
   cms_cmd="$("${PROBE_TIMEOUT[@]}" docker image inspect -f '{{json .Config.Cmd}}' "${cms_image}" 2>/dev/null || true)"
   image_has_poll_guest_access "${cms_image}" || guest_access=$?
   image_web_zone_explicit "${web_image}" || web_zone=$?
+  image_has_token_version "${cms_image}" || token_version=$?
   if [[ "${guest_access}" != "0" ]]; then
     print_guest_vote_revoke_hint "${guest_access}" "${cms_image}"
   fi
@@ -579,6 +616,9 @@ print_rollback_hint() {
       echo "       warns. Check: docker image inspect -f '{{ index .Config.Labels \"${WEB_DATETIME_LABEL}\" }}' ${web_image}" >&2
       echo "       prints ${WEB_DATETIME_VALUE} for a web that needs no override)" >&2
     fi
+  fi
+  if [[ "${token_version}" != "0" ]]; then
+    print_jwt_secret_rotation_hint "${token_version}" "${cms_image}"
   fi
   echo "                      ${rollback[*]} up -d --no-build web cms" >&2
   echo "       (--no-build is essential — --build would rebuild the broken image)" >&2
