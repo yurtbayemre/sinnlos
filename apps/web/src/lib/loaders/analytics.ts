@@ -55,6 +55,26 @@ export interface AnalyticsView {
   countsFailed: boolean;
 }
 
+const isCount = (value: unknown): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0;
+
+/**
+ * A search summary as the page renders it; anything else (an older cms, a
+ * proxy error page, a fixture without the route) counts as a failed read
+ * instead of crashing the page on `topTerms.length`.
+ */
+export function isSearchSummary(value: unknown): value is SearchSummary {
+  if (value === null || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    isCount(v.windowDays) &&
+    isCount(v.total) &&
+    isCount(v.zeroResultCount) &&
+    Array.isArray(v.topTerms) &&
+    Array.isArray(v.topZeroTerms)
+  );
+}
+
 /** Share of zero-result searches in whole percent (0 without searches). */
 export function zeroResultRate(summary: Pick<SearchSummary, "total" | "zeroResultCount">): number {
   return summary.total > 0 ? Math.round((summary.zeroResultCount / summary.total) * 100) : 0;
@@ -88,17 +108,18 @@ export async function loadAnalytics(): Promise<AnalyticsView> {
     unreadNotifications: countOfList(unread),
   };
   const countsFailed = Object.values(allCounts).some((c) => c.value === null);
+  const summary = isSearchSummary(search.data) ? search.data : null;
 
   return {
     counts: allCounts,
-    search: search.data ? { ...search.data, zeroRate: zeroResultRate(search.data) } : null,
+    search: summary ? { ...summary, zeroRate: zeroResultRate(summary) } : null,
     recentComments: (comments.data?.data ?? []).map((c) => ({
       id: c.id,
       authorName: displayNameOf(c.author, null),
       body: c.body,
       createdAt: c.createdAt ?? null,
     })),
-    failed: countsFailed || comments.failed || search.failed,
+    failed: countsFailed || comments.failed || summary === null,
     countsFailed,
   };
 }

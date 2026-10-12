@@ -101,6 +101,12 @@ describe("loadAnalytics", () => {
     expect(view).toMatchObject({ search: null, failed: true, countsFailed: false });
   });
 
+  it("a summary of another shape counts as failed instead of crashing the page", async () => {
+    searchMock.mockResolvedValue({ data: [], meta: { pagination: { total: 0 } } });
+    const view = await loadAnalytics();
+    expect(view).toMatchObject({ search: null, failed: true, countsFailed: false });
+  });
+
   it("CMS down: every count unknown, no 0 anywhere", async () => {
     countMock.mockRejectedValue(outage());
     for (const mock of [reactionsMock, unreadMock, commentsMock, searchMock]) {
