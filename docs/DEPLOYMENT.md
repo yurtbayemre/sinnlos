@@ -1651,10 +1651,10 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   images at 03:45, `APP_TIME_ZONE`, after the 03:00 backup); a department
   delete keeps its documents and quick links restricted to admins and
   editors (a new `audience` column on both, set on every row that links a
-  department); expired announcements leave
-  lists, threads and digests; an unpublished announcement's thread answers
-  like a missing one; the wiki shows page order, tags, a table of contents
-  and space icons; the census gains a duplicate scan (section 9);
+  department); expired announcements leave lists, threads,
+  acknowledgements and digests; an unpublished announcement's thread
+  answers like a missing one; the wiki shows page order, tags, a table of
+  contents and space icons; the census gains a duplicate scan (section 9);
 - [the action results, auth codes and English defaults](#upgrading-to-the-action-results-auth-codes-and-english-defaults-batch-12-lane-7a)
   (lane 7A): buttons answer with an inline message instead of an error
   page, translated sign-in, registration and profile messages, a login
@@ -1680,6 +1680,9 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   when an editor had it open, or published it, at that moment. Removing
   every department in the admin panel no longer makes it company-wide by
   itself: the editor also sets Audience to `all` (the poll rule).
+- from the review's second fix round: an expired announcement can no
+  longer be acknowledged through the API either (the answer of an
+  announcement that does not exist; admins and editors still can).
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
 and starts both; the rollback below takes both back. No env change is
@@ -2318,7 +2321,9 @@ compose, grant, route or edge change.
   in the admin panel) now takes effect: from that moment the announcement
   disappears for everyone below admin/editor from the list, its detail
   read, the acknowledgement banner, search and its comment thread, and no
-  digest mentions it. Admins and editors still see it.
+  digest mentions it; a new acknowledgement of it answers exactly as for an
+  announcement that does not exist. Admins and editors still see (and may
+  acknowledge) it.
 - **Unpublished announcements.** While an announcement is unpublished,
   reading or writing its comments and reactions answers exactly as for an
   announcement that never existed (admins and editors cannot add comments
