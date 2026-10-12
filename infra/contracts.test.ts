@@ -89,8 +89,8 @@ import type {
  * Constants a module does not export are read from the source file; a
  * declaration that moves fails loudly, and the move updates this file.
  * A KNOWN gap is asserted as it is today, so closing it fails here too and
- * the closing change removes the entry. The README permission table is
- * DO03's.
+ * the closing change removes the entry. The README permission tables are
+ * pinned by infra/readme-permissions.test.ts (DO03).
  *
  * The cms modules are loaded at run time through `cms()`, typed by the
  * facades below: this file is type-checked by the STRICT web/infra program
