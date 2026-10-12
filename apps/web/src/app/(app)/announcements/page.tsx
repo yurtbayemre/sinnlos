@@ -8,13 +8,11 @@ import { isReadDenied } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
 import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
 import type { Acknowledgement, Announcement } from "@/lib/types";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
-import { Markdown } from "@/components/markdown";
 import { PageHeader } from "@/components/page-header";
 import { SectionUnavailablePage } from "@/components/section-unavailable";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { SectionLabel } from "@/components/ui/section-label";
 import {
   CommentSection,
   CommentSectionFallback,
@@ -22,8 +20,8 @@ import {
 } from "@/components/comments/comment-section";
 import { CommentSectionsProvider } from "@/components/comments/live-comment-section";
 import { AckButton } from "@/components/announcements/ack-button";
+import { AnnouncementCard } from "@/components/announcements/announcement-card";
 import { AnnouncementsLiveHint } from "@/components/announcements/announcements-live-hint";
-import { initials } from "@/lib/utils";
 
 export async function generateMetadata() {
   const t = await getTranslations("announcements");
@@ -134,17 +132,15 @@ export default async function AnnouncementsPage() {
         <CommentSectionsProvider>
           {openAck.length > 0 && (
             <section className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                {t("openAcks")}
-              </div>
+              <SectionLabel icon={CheckCircle2}>{t("openAcks")}</SectionLabel>
               <div className="stagger grid gap-4 md:grid-cols-2">
                 {openAck.map((a) => (
                   <AnnouncementCard
                     key={a.documentId ?? a.id}
+                    variant="full"
                     item={a}
-                    pinned
-                    createdAtLabel={formatDay(a.createdAt)}
+                    highlighted
+                    dateLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -157,10 +153,7 @@ export default async function AnnouncementsPage() {
 
           {pinned.length > 0 && (
             <section className="space-y-3">
-              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                <Pin className="h-3.5 w-3.5" />
-                {t("pinned")}
-              </div>
+              <SectionLabel icon={Pin}>{t("pinned")}</SectionLabel>
               <div
                 className={
                   pinned.length > 1 ? "stagger grid gap-4 md:grid-cols-2" : "stagger grid gap-4"
@@ -169,9 +162,10 @@ export default async function AnnouncementsPage() {
                 {pinned.map((a) => (
                   <AnnouncementCard
                     key={a.id}
+                    variant="full"
                     item={a}
-                    pinned
-                    createdAtLabel={formatDay(a.createdAt)}
+                    highlighted
+                    dateLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -184,13 +178,14 @@ export default async function AnnouncementsPage() {
 
           {rest.length > 0 && (
             <section className="space-y-3">
-              <div className="text-sm font-medium text-muted-foreground">{t("recent")}</div>
+              <SectionLabel>{t("recent")}</SectionLabel>
               <div className="stagger space-y-4">
                 {rest.map((a) => (
                   <AnnouncementCard
                     key={a.id}
+                    variant="full"
                     item={a}
-                    createdAtLabel={formatDay(a.createdAt)}
+                    dateLabel={formatDay(a.createdAt)}
                     unknownLabel={tCommon("unknown")}
                     ack={renderAck(a)}
                   >
@@ -203,63 +198,5 @@ export default async function AnnouncementsPage() {
         </CommentSectionsProvider>
       )}
     </div>
-  );
-}
-
-function AnnouncementCard({
-  item,
-  pinned = false,
-  createdAtLabel,
-  unknownLabel,
-  ack,
-  children,
-}: {
-  item: Announcement;
-  pinned?: boolean;
-  /** createdAt, formatted in APP_TIME_ZONE by the page (null: none). */
-  createdAtLabel: string | null;
-  unknownLabel: string;
-  ack?: React.ReactNode;
-  children?: React.ReactNode;
-}) {
-  const author = item.author ?? null;
-  const authorName = author?.displayName ?? author?.username ?? author?.email ?? unknownLabel;
-
-  return (
-    <Card className={pinned ? "border-primary/30 bg-primary/[0.02]" : undefined}>
-      <CardHeader>
-        <div className="flex items-start justify-between gap-4">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2 text-lg">
-              {pinned && <Pin className="h-4 w-4 text-primary" />}
-              {item.title}
-            </CardTitle>
-            <CardDescription>{createdAtLabel}</CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="hidden text-right text-xs text-muted-foreground sm:block">
-              <div className="font-medium text-foreground">{authorName}</div>
-              {author?.jobTitle && <div>{author.jobTitle}</div>}
-            </div>
-            <Avatar className="h-9 w-9">
-              <AvatarFallback>{initials(authorName)}</AvatarFallback>
-            </Avatar>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent>
-        {/* The body is a Strapi richtext field, i.e. Markdown (UI03): the
-            shared renderer, without heading ids and with footnote ids of
-            its own (several cards per page). */}
-        <Markdown
-          className="prose prose-sm prose-slate max-w-none text-muted-foreground dark:prose-invert"
-          idPrefix={`announcement-${item.id}-`}
-        >
-          {item.body}
-        </Markdown>
-        {ack && <div className="mt-4">{ack}</div>}
-        {children && <div className="mt-4 border-t pt-4">{children}</div>}
-      </CardContent>
-    </Card>
   );
 }
