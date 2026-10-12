@@ -2282,7 +2282,12 @@ and the domain, cms and web builds passed (details under §6 CI in
 [architecture.md](./architecture.md)). Not exercised here: the images,
 `infra/deploy.sh` end to end, Traefik, the production host, a real phone
 and a screen-reader pass (the plan's staging rehearsal of the three
-lanes).
+lanes). **After the review fix round (2026-10-12):** the unit suite 5170
+passed, 81 skipped (with Postgres 16 5228 passed, 33 skipped), the
+time-zone matrix 5228 each, the integration suite on SQLite 170 and on
+SQLite plus Postgres 16 344, typecheck, lint, `format:check` and the web
+build passed; the rollback's R3 and R6 probes ran against the harness cms
+across a `JWT_SECRET` change.
 
 #### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
 
