@@ -4,6 +4,7 @@ Next.js 16 (App Router/RSC) + Strapi 5.55.1 (bis Batch 2: 5.49) + Postgres 16 ·
 
 > Lebendes Dokument: bei Struktur- oder Datenmodell-Änderungen mitpflegen.
 > Alle Angaben sind zum genannten Stand am Code verifiziert (Datei:Zeile-Verweise).
+> Das Sicherheitsmodell (Rollen, Kleingedrucktes der Berechtigungsmatrix, Policy-Liste, globale Guards, Upload-Härtung, Rollen-Gating im Web) steht kanonisch und auf Englisch in [security.md](./security.md); die Rechtetabelle der README pinnt `infra/readme-permissions.test.ts` gegen `PERMISSION_MATRIX`/`CUSTOM_ACTION_GRANTS`.
 
 ---
 
