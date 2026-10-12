@@ -515,6 +515,10 @@
     "noNotificationsYet": "No notifications yet",
     "unread": "unread"
   },
+  "live": {
+    "delayed": "Live updates delayed",
+    "delayedHint": "The live connection to the intranet is interrupted. New comments and notifications still arrive, a few seconds later."
+  },
   "search": {
     "label": "Search (Ctrl+K)",
     "placeholder": "Search wiki, people, teams…",

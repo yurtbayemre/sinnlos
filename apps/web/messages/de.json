@@ -515,6 +515,10 @@
     "noNotificationsYet": "Noch keine Benachrichtigungen",
     "unread": "ungelesen"
   },
+  "live": {
+    "delayed": "Live-Updates verzögert",
+    "delayedHint": "Die Live-Verbindung zum Intranet ist unterbrochen. Neue Kommentare und Benachrichtigungen kommen trotzdem an, einige Sekunden später."
+  },
   "search": {
     "label": "Suche (Strg+K)",
     "placeholder": "Wiki, Personen, Teams suchen…",

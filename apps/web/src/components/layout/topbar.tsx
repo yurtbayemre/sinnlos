@@ -10,6 +10,7 @@ import { initials } from "@/lib/utils";
 import { getNotifications } from "@/lib/notification-actions";
 import { getSession } from "@/lib/session";
 import { LiveNotificationBell } from "@/components/notifications/live-notification-bell";
+import { LiveStatus } from "@/components/live/live-status";
 import { getTranslations } from "next-intl/server";
 
 export async function Topbar() {
@@ -43,6 +44,9 @@ export async function Topbar() {
       </div>
 
       <div className="flex flex-1 items-center justify-end gap-2 sm:gap-3">
+        {/* The live stream's delayed note (LF05 degraded, 8C-T01): empty
+            while the stream is healthy. */}
+        {session?.user && <LiveStatus />}
         {session?.user && <LiveNotificationBell initial={notifications} />}
         <ThemeToggle />
         <LocaleSwitcher />
