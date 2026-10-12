@@ -1937,7 +1937,7 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    ```bash
    cat .git/sinnlos-deploy/infra.state
    "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|users-permissions-extension|live-emit)\]|Strapi started'
-   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[classifieds\] delete|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} '
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[classifieds\] delete|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
    ```
 
    The state names the batch 13 commit (`TAG=` its first 12 characters,
@@ -1947,12 +1947,17 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
    `granted` or `revoked` line, and `Strapi started successfully`; no
    `[users-permissions-extension]` line (that is the FX40 tripwire for a
    users-permissions plugin whose shape changed, and the cms would not
-   have started); and of `[live-emit]` either nothing or exactly
-   `keepalive failed: …` followed by `keepalive reaches the web again`
-   (the new cms started before the new web answered). The second command
-   prints nothing. It leaves out the web's warnings for refused user
-   actions (`<action> refused: <status> <…Error> → <code>`, see batch 12);
-   look at every line it does print.
+   have started); and of `[live-emit]` the line every cms boot logs,
+   `info: [live-emit] DB lifecycle subscriber registered`, plus either
+   nothing more or exactly `keepalive failed: …` followed by `keepalive
+   reaches the web again` (the new cms started before the new web
+   answered). The third command prints nothing. It leaves out the web's
+   warnings for refused user actions (`<action> refused: <status> <…Error>
+   → <code>`, see batch 12) and Auth.js's `[auth][error] CredentialsSignin:
+   …` line for a wrong password (a typo, or a live-smoke sign-in that
+   failed; the raw line has colour codes between `[auth][error]` and the
+   message, so the filter matches `CredentialsSignin` alone, as batch 12's
+   step 9 does); look at every line it does print.
 
 10. **The new column:**
 
@@ -2010,9 +2015,12 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     without a "Page not found" flash.
 
 14. **A password change revokes the other sessions** (two browsers). Use a
-    test account that live-smoke does not sign in with (not `alex.morgan`
-    or `casey.jones`, whose passwords `deploy.sh` reads from the
-    credentials file). Sign in as it in browser A and in a private window
+    test account that live-smoke does not sign in with: not `alex.morgan`
+    or `casey.jones` (its stream user, the first of the two with a line in
+    the credentials file) and not `sam.chen` (its comment author,
+    `SMOKE_AUTHOR_EMAIL`), whose passwords `deploy.sh` reads from the
+    credentials file; a changed password there breaks the next deploy's
+    live-smoke. Sign in as it in browser A and in a private window
     B. Change the password on `/profile` in A: A shows "Password changed"
     and keeps working; B's next click lands on `/sign-in?expired=1`. Then:
 
@@ -2044,7 +2052,8 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
     The 401 count is of the same order as step 7's baseline (plus B's
     refused requests of step 14); a clear jump means running sessions are
     refused, which calls for the rollback. No `[live-emit]` line beyond
-    step 9's pair. The third command prints nothing: `session update
+    step 9's (the boot's `DB lifecycle subscriber registered` and, at
+    most, the keepalive pair). The third command prints nothing: `session update
     refused` is a session update without the server's proof, `change
     password: …` a password change whose tab lost its session, `capped at
     200 channels` a page with more than 200 comment sections. The fourth
@@ -2155,9 +2164,9 @@ was revoked. The last command keeps a checksum of the running cms's
 
 R3. **A revoked JWT for the check in R6.** Needs the batch 13 cms to
 answer; skip it if it does not (a crash loop: then no password changed on
-it either). Use the test account of step 14 (not `alex.morgan` or
-`casey.jones`); its password travels through `docker exec -e`, never on a
-command line. The probe signs in, changes the password to a random
+it either). Use the test account of step 14 (not `alex.morgan`,
+`casey.jones` or `sam.chen`, the accounts live-smoke signs in with); its
+password travels through `docker exec -e`, never on a command line. The probe signs in, changes the password to a random
 temporary one and back (the account keeps its password; its version goes
 up by 2), checks that the JWT of the first sign-in now gets 401, and
 keeps that JWT:
@@ -2305,6 +2314,20 @@ What stays, and what follows:
   every browser shows _Live updates delayed_ and polls at the short
   intervals.
 
+**Staging rehearsal (2026-10-12, `4d5696c`): passed.** `infra/deploy.sh`
+exit 0, the build about 111 s on the new node 24.21 base, the outage about
+9 s for the web and 4 s for the cms; the two-browser revocation (step 14),
+the admin-panel revocation, a `tokenVersion` in a write dropped, the
+_Live updates delayed_ note after about 50 s with the cms stopped, the
+failure hint with the MANDATORY rotation step, R1 to R6 of the rollback
+including the rotation and the revoked JWT's 401, and the roll-forward.
+The batch 13 images take 926 MB (cms) and 64 MB (web) of their own on
+disk; the node 24.21 base layer (241.5 MB) is new as well. The rehearsal
+found only runbook text, fixed here: the boot's `[live-emit] DB lifecycle
+subscriber registered` line in steps 9 and 15, the `CredentialsSignin`
+filter and the command count of step 9, `sam.chen` among the accounts
+live-smoke uses, and the production checkout of the lane 8C section.
+
 **Integration checks (2026-10-12, the integrated `batch/13`):** typecheck,
 lint (0 errors), `format:check`, the unit suite (5149 passed, 81 skipped;
 with Postgres 16 5207 passed, 33 skipped), the time-zone matrix with
@@ -2328,7 +2351,13 @@ time-zone matrix 5260 each, the integration suite on SQLite 178 and on
 SQLite plus Postgres 16 360, the `deploy-flow` sequences (43, with
 `SINNLOS_SLOW_SHELL_TESTS=1`), shellcheck 0.11.0, typecheck, lint,
 `format:check`, the web build and `pnpm audit --prod
---audit-level=critical` passed.
+--audit-level=critical` passed. **After the third round (one transaction per
+password change):** the unit suite 5202 passed, 82 skipped (with Postgres
+16 5260 passed, 34 skipped), the time-zone matrix 5260 each, the
+integration suite on SQLite 180 and on SQLite plus Postgres 16 364
+(`token-version.integration.test.ts` three more times on both engines),
+the `deploy-flow` sequences 43, shellcheck, typecheck, lint,
+`format:check`, the web build and the critical audit passed.
 
 #### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
 
@@ -2713,11 +2742,12 @@ SQL
 ```
 
 **A normal deploy of cms and web together with `infra/deploy.sh`.** No env,
-compose, grant, route or edge change. The helpers of the batch 8 section
-(on a standalone Caddy box, drop the second `-f`):
+compose, grant, route or edge change. The helpers of the batch 8 section,
+in the production checkout (on a standalone Caddy box: your checkout, and
+drop the second `-f`):
 
 ```bash
-cd /opt/sinnlos
+cd /home/bigemo/git/sinnlos
 COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
 ```
 
