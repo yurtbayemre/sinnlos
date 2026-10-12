@@ -19,7 +19,8 @@ export async function Topbar() {
   // same getNotifications() the bell refetches with (WD10): the newest 20
   // plus the true unread total, or the empty feed without a session user.
   // A cms failure never breaks the topbar (notifications are non-critical):
-  // a failed list gives the empty feed, a failed unread count alone the
+  // a failed list gives the empty feed flagged `unavailable` (the panel
+  // then shows only the outage note), a failed unread count alone the
   // unread among the loaded items. Only strapi()'s NEXT_REDIRECT to /sign-in
   // escapes, so an expired session navigates the whole page. DEMO_MODE gets
   // DEMO_SESSION and the fixture notifications (lib/demo.ts).
