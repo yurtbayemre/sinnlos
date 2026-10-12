@@ -1682,7 +1682,10 @@ follow** on the owner instance (srv-prod-01, Traefik mode, checkout
   itself: the editor also sets Audience to `all` (the poll rule).
 - from the review's second fix round: an expired announcement can no
   longer be acknowledged through the API either (the answer of an
-  announcement that does not exist; admins and editors still can).
+  announcement that does not exist; admins and editors still can), and the
+  confirm button of an announcement that vanished while the page was open
+  says "This item no longer exists — reload the page." instead of asking to
+  try again.
 
 It is **one deploy of cms and web** with `infra/deploy.sh`, which builds
 and starts both; the rollback below takes both back. No env change is
@@ -2104,8 +2107,8 @@ are hidden and closed; read notifications older than 90 days and ads
 expired more than 90 days ago are removed; the wiki shows page order,
 tags, a table of contents and space icons; buttons show a short message
 instead of an error page when the intranet cannot be reached, and a
-comment on something that vanished says so; sign-in, registration and
-profile messages are translated; more than ten sign-ins at the same moment
+comment or confirmation on something that vanished says so; sign-in,
+registration and profile messages are translated; more than ten sign-ins at the same moment
 from one office network can be refused with "Too many sign-in attempts"
 (a retry a moment later works); the language switch remembers the choice
 for the e-mail digests; deleting a department keeps its documents and
