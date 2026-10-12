@@ -1,6 +1,7 @@
 import { createElement, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { CommentControls } from "@/components/comments/live-comment-section";
 import type { CommentTarget } from "@/lib/comment-target";
 import type { CommentSectionData } from "@/lib/reaction-summary";
 import type { ReactionSummary } from "@/lib/types";
@@ -54,11 +55,15 @@ const data = (count: number): CommentSectionData => ({
   reactions: [{ emoji: "heart", count, reacted: false }],
 });
 
+/** A member's controls (SH02): the stubbed reaction bar must render. */
+const controls: CommentControls = { comment: true, react: true, deleteOwn: true };
+
 function section(documentId: string, key: string) {
   return createElement(LiveCommentSection, {
     key,
     target: target(documentId),
     initial: data(0),
+    controls,
   });
 }
 
