@@ -2320,7 +2320,14 @@ passed, 81 skipped (with Postgres 16 5228 passed, 33 skipped), the
 time-zone matrix 5228 each, the integration suite on SQLite 170 and on
 SQLite plus Postgres 16 344, typecheck, lint, `format:check` and the web
 build passed; the rollback's R3 and R6 probes ran against the harness cms
-across a `JWT_SECRET` change.
+across a `JWT_SECRET` change. **After the second round (2026-10-12, on
+`main` `adc7277`: batch 12, next 16.3.8, vitest 5):** the unit suite 5202
+passed, 82 skipped (with Postgres 16 5260 passed, 34 skipped), the
+time-zone matrix 5260 each, the integration suite on SQLite 178 and on
+SQLite plus Postgres 16 360, the `deploy-flow` sequences (43, with
+`SINNLOS_SLOW_SHELL_TESTS=1`), shellcheck 0.11.0, typecheck, lint,
+`format:check`, the web build and `pnpm audit --prod
+--audit-level=critical` passed.
 
 #### Upgrading to the UI primitives and Markdown rendering (batch 13, lane 8B)
 
