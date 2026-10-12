@@ -17,8 +17,12 @@
 #      untracked file where the images are built from), and the
 #      GitHub CI result of the commit (a warning, or a refusal with
 #      --require-green-ci). Fails before anything is touched.
-#   1. Pre-deploy backup (infra/backup/pg-backup.sh; its artifacts are named
-#      -predeploy and kept apart from the nightly ones). Skipped only on a
+#   1. Pre-deploy backup. Project infra (production): the host's backup-run
+#      (srv-prod-01-ops), `sudo -n /usr/local/sbin/backup-run --kind
+#      predeploy sinnlos`, a generation of its own kind in /srv/backup/outbox
+#      that the NAS pulls (the sudoers drop-in backup-run-predeploy allows
+#      exactly that command). Another project: infra/backup/pg-backup.sh into
+#      its SINNLOS_BACKUP_DIR (artifacts named -predeploy). Skipped only on a
 #      first install (no db container and no database volume yet).
 #   2. The rollback target: the images of the last-known-good deploy,
 #      <project>-{web,cms}:<sha> from the state file (below). Without a usable
@@ -67,6 +71,8 @@
 #                     lock; shared by its worktrees; a second clone deploying the
 #                     same project must point it at the same directory)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
+#   BACKUP_RUN        /usr/local/sbin/backup-run, run through `sudo -n`; when
+#                     set, the given command runs without sudo (tests)
 #   GITHUB_TOKEN      optional, for the CI check (public repos need none)
 #
 set -Eeuo pipefail
@@ -103,6 +109,16 @@ COMPOSE_LEGACY_TZ="${INFRA_DIR}/docker-compose.cms-legacy-tz.yml"
 # (phase 2) in APP_TIME_ZONE again.
 COMPOSE_WEB_LEGACY_TZ="${INFRA_DIR}/docker-compose.web-legacy-tz.yml"
 BACKUP_SCRIPT="${INFRA_DIR}/backup/pg-backup.sh"
+# Project infra's pre-deploy backup: the host's backup-run, as root through
+# `sudo -n` (never a password prompt; the sudoers drop-in allows exactly
+# these arguments). A BACKUP_RUN given by the caller runs as is, without sudo.
+BACKUP_RUN_GIVEN="${BACKUP_RUN:+1}"
+BACKUP_RUN="${BACKUP_RUN:-/usr/local/sbin/backup-run}"
+if [[ -n "${BACKUP_RUN_GIVEN}" ]]; then
+  BACKUP_RUN_CMD=("${BACKUP_RUN}" --kind predeploy sinnlos)
+else
+  BACKUP_RUN_CMD=(sudo -n "${BACKUP_RUN}" --kind predeploy sinnlos)
+fi
 LIVE_SMOKE_SCRIPT="${INFRA_DIR}/live-smoke.sh"
 
 # Compose project name — 'infra' on the owner's host, so container/image
@@ -1237,7 +1253,11 @@ fi
 
 if ((DRY_RUN)); then
   log "Dry run: the plan (nothing is changed)"
-  echo "  1. pre-deploy backup: SINNLOS_BACKUP_KIND=predeploy ${BACKUP_SCRIPT} (none on a first install)"
+  if [[ "${PROJECT}" == "infra" ]]; then
+    echo "  1. pre-deploy backup: ${BACKUP_RUN_CMD[*]} (none on a first install)"
+  else
+    echo "  1. pre-deploy backup: SINNLOS_BACKUP_KIND=predeploy ${BACKUP_SCRIPT} (none on a first install)"
+  fi
   echo "  2. rollback target:"
   keep_running_images
   resolve_rollback_target
@@ -1280,6 +1300,14 @@ fi
 # still fails the backup (and the deploy), as it should.
 if ! docker inspect "${PROJECT}-db-1" >/dev/null 2>&1 && ! docker volume inspect "${PROJECT}_pgdata" >/dev/null 2>&1; then
   echo "  first install: neither ${PROJECT}-db-1 nor the volume ${PROJECT}_pgdata exists, nothing to back up"
+elif [[ "${PROJECT}" == "infra" ]]; then
+  # Production: backup-run's service sinnlos (infra-db-1, infra_cms_uploads,
+  # infra/.env; the SINNLOS_* overrides above do not apply). It waits for a
+  # running nightly backup (its lock). Any failure, a missing sudoers
+  # drop-in included (sudo -n then refuses), stops the deploy here through
+  # the ERR trap, before the containers are touched.
+  echo "  ${BACKUP_RUN_CMD[*]}"
+  "${BACKUP_RUN_CMD[@]}"
 elif [[ -x "${BACKUP_SCRIPT}" ]]; then
   env "${BACKUP_ENV[@]}" "${BACKUP_SCRIPT}"
 elif [[ -f "${BACKUP_SCRIPT}" ]]; then

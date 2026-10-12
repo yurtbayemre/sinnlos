@@ -1109,11 +1109,23 @@ infra/deploy.sh
    result of the commit (a warning by default; `--require-green-ci` refuses a commit
    without green CI; `GITHUB_TOKEN` is optional, public repositories need
    none).
-1. A pre-deploy Postgres + uploads + `.env` backup
-   (`infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy`: its
-   artifacts are named `…-predeploy…` and kept apart from the nightly
-   ones, [§7.3](#73-automated-daily-backups-cron)). A first install, with
-   neither the db container nor its volume, has nothing to back up.
+1. A pre-deploy Postgres + uploads + `.env` backup. Project `infra`
+   (production, since 2026-10-07): the host's `backup-run` from the
+   `srv-prod-01-ops` repo, as
+   `sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos` (a
+   `-predeploy` generation of service `sinnlos` in `/srv/backup/outbox`,
+   which the NAS pulls; it waits for a running nightly backup). The
+   sudoers drop-in `/etc/sudoers.d/backup-run-predeploy`, installed by that
+   repo's `install.sh`, allows the deploying user exactly this command;
+   without it `sudo -n` refuses and the deploy stops here. `BACKUP_RUN`
+   names another command, which then runs without `sudo` (the tests use
+   it). Any other compose project (a staging copy) keeps
+   `infra/backup/pg-backup.sh` with `SINNLOS_BACKUP_KIND=predeploy` into its
+   own `SINNLOS_BACKUP_DIR`: its artifacts are named `…-predeploy…` and kept
+   apart from the nightly ones, [§7.3](#73-automated-daily-backups-cron).
+   A failed backup stops the deploy before anything is touched. A first
+   install, with neither the db container nor its volume, has nothing to
+   back up.
 2. The rollback target: the images of the **last-known-good** deploy,
    `infra-{web,cms}:<sha>` (the first 12 characters of its commit), from
    the state file `.git/sinnlos-deploy/infra.state` of the checkout.
@@ -1181,7 +1193,8 @@ defaults are the owner's host): `SMOKE_URL` (`https://$DOMAIN`), `PASSWORDS_FILE
 `sinnlos-deploy` in the clone's `.git`, which its linked worktrees share: a
 second clone that deploys the same project must point `DEPLOY_STATE_DIR`
 at that same directory, or the two deploys neither share the lock nor the
-rollback target) and `DEPLOY_KEEP_TAGS`. A second compose project (a
+rollback target), `DEPLOY_KEEP_TAGS` and `BACKUP_RUN`
+(`/usr/local/sbin/backup-run`, through `sudo -n`). A second compose project (a
 staging copy) needs its own backup dir, smoke URL and edge: `deploy.sh`
 refuses a project other than `infra` without `SMOKE_URL` and
 `SINNLOS_BACKUP_DIR` (passed on to the pre-deploy backup, whose
@@ -9030,6 +9043,12 @@ docker run --rm \
 
 ### 7.3 Automated daily backups (cron)
 
+> **Production (since 2026-10-07):** the owner's host backs `sinnlos` up with
+> `backup-run` from the `srv-prod-01-ops` repo (nightly, and as the pre-deploy
+> backup of `infra/deploy.sh`, [§3.6](#36-deploy)); its `docs/backup.md` has the
+> layout and the restore. `pg-backup.sh` below stays for other hosts and for
+> the pre-deploy backup of another compose project (a staging copy).
+
 The live host ships a ready-made script: **`infra/backup/pg-backup.sh`**. It is
 the canonical backup for the `infra` project and does more than the manual
 snippets above:
@@ -9067,7 +9086,8 @@ snippets above:
   nightly and once for the pre-deploy artifacts): an artifact is removed
   only when it is **older than 7 days** (by the timestamp in its name)
   **and** not among the **newest 7** of its series, and only after the new
-  artifact of that series is encrypted. `deploy.sh` runs the script with
+  artifact of that series is encrypted. `deploy.sh` runs the script (for a
+  compose project other than `infra`) with
   `SINNLOS_BACKUP_KIND=predeploy`: those artifacts are named
   `sinnlos-db-<YYYYmmdd-HHMMSS>-predeploy.dump.gz.gpg` (uploads and `.env`
   alike) and never push a nightly one out. Files of any other name are
@@ -9088,7 +9108,7 @@ snippets above:
 It reads its paths from the backup keyring env (`SINNLOS_BACKUP_DIR`,
 `SINNLOS_GNUPGHOME`, `SINNLOS_BACKUP_KEYID`), defaulting to the shared
 `/home/bigemo/backups/momsbest` keyring. `infra/deploy.sh` runs it once as a
-**pre-deploy** snapshot; register it nightly with cron:
+**pre-deploy** snapshot of a compose project other than `infra`; register it nightly with cron:
 
 ```bash
 ( crontab -l 2>/dev/null ; \
