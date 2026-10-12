@@ -19,6 +19,7 @@ behind most rules (its §5 conventions and §7 open issues).
   - [Local sign-in](#local-sign-in)
   - [Microsoft Entra ID](#microsoft-entra-id)
   - [Sessions and the role flow](#sessions-and-the-role-flow)
+  - [Token versions](#token-versions)
 - [Roles](#roles)
 - [Permission matrix fine print](#permission-matrix-fine-print)
 - [Route policies](#route-policies)
@@ -87,8 +88,10 @@ refuses password sign-ins in the cms as well, not only in the web form.
 - **Password change** (`POST /api/auth/change-password`, the `/profile`
   form): the cms keeps a token version per user and refuses older JWTs, so
   the change signs the account out of every other browser and device; the
-  tab that changed it stays signed in. A password an admin sets in the
-  Strapi admin does not end existing sessions.
+  tab that changed it stays signed in (it gets a JWT of the new version). A
+  password an admin sets in the Strapi admin raises the version as well and
+  signs that user out everywhere. How the version works is under
+  [Token versions](#token-versions).
 - **Blocking** a user in the Strapi admin takes effect on their next request
   (Strapi refuses a blocked user's JWT), and they lose the uploaded files
   within 60 seconds (the web's `/uploads` proxy re-checks the JWT).
@@ -219,14 +222,70 @@ Strapi admin applies on the user's next page load, without a new sign-in:
 ```
 
 JWTs last 7 days for local sign-ins and `ENTRA_SESSION_TTL` for Microsoft
-sign-ins; rotating `JWT_SECRET` signs everyone out once. When the session
-has ended (its JWT expired, or the cms rejects it), every path ends on the
-sign-in page with the "session expired" notice: `web/src/proxy.ts` sends a
-page load to `/sign-in?expired=1&from=…` and answers a Server Action with
-the redirect Next's action client follows, instead of a 307 it cannot use;
-a form posted without JavaScript gets a 303, so the browser loads the
-sign-in page with a GET instead of posting the form to it again; a Strapi
-401 inside a render or an action redirects the same way.
+sign-ins, unless a password change revokes them earlier
+([Token versions](#token-versions)); rotating `JWT_SECRET` signs everyone
+out once. When the session has ended (its JWT expired, or the cms rejects
+it), every path ends on the sign-in page with the "session expired" notice:
+`web/src/proxy.ts` sends a page load to `/sign-in?expired=1&from=…` and
+answers a Server Action with the redirect Next's action client follows,
+instead of a 307 it cannot use; a form posted without JavaScript gets a
+303, so the browser loads the sign-in page with a GET instead of posting
+the form to it again; a Strapi 401 inside a render or an action redirects
+the same way.
+
+### Token versions
+
+users-permissions runs its legacy JWT mode (`jwtManagement:
+'legacy-support'`, pinned in `apps/cms/config/plugins.ts`): a Strapi JWT is
+a signed token, valid until it expires. The cms extension
+`apps/cms/src/extensions/users-permissions/strapi-server.ts` (FX40) adds a
+per-user token version so that a password change can end the older ones:
+
+- **The claim.** Every JWT the cms issues carries the user's current
+  `tokenVersion` in the claim `tv`, for local and Microsoft sign-ins alike.
+  Every JWT it verifies must carry exactly the user's current version; a
+  JWT without the claim counts as version 0. A mismatch fails like a bad
+  signature: the request is unauthenticated (401), and the web sends the
+  session to `/sign-in?expired=1`. That costs one primary-key read per
+  authenticated request.
+- **The bump.** A password change raises the version by one in a single
+  atomic statement, **before** the new password is saved. Fail closed: a
+  failed bump refuses the change with the password unchanged; a failed save
+  after the bump leaves the old password with the older JWTs already
+  revoked, never a new password next to older JWTs that still work. It
+  covers `POST /api/auth/change-password`, `reset-password` (revoked for
+  `public`, should an operator grant it again), `PUT /api/users/:id` with a
+  password, and every Document Service update of a user that carries a
+  password, the Content Manager in the admin panel included (a guard
+  registered in `register()` of `apps/cms/src/index.ts`; the cms refuses to
+  boot without it). The password actions answer with a JWT of exactly the
+  version their bump committed, which the web stores in the session of the
+  tab that changed it (`apps/web/src/lib/profile-actions.ts`).
+- **Sign-in races.** A local sign-in stamps the version the user had
+  before the password check, so a sign-in with the old password that
+  overlaps a change gets a JWT the change has revoked.
+- **No input sets it.** The field is private, not searchable and hidden in
+  the admin panel (`visible: false`: no field in the edit view, no field
+  permission). The same Document Service guard drops `tokenVersion` from
+  the data of every create, update and clone of a user (Content Manager,
+  `PUT /api/users/:id`, registration, `POST /api/users`, seeds) and logs
+  `[auth] tokenVersion dropped …`. Only the atomic bump writes it, so it
+  never goes down and a revoked JWT never becomes valid again.
+- **Rollback.** A cms from before batch 13 ignores the claim and would
+  accept every revoked JWT again under the same `JWT_SECRET`. A rollback of
+  the cms to such an image therefore rotates `JWT_SECRET` first (owner
+  decision 2026-10-12; everyone signs in again once). The rollback commands
+  `infra/deploy.sh` prints after a failed deploy check the target image for
+  the token version and demand the rotation when it lacks it
+  ([batch 13 rollback](./DEPLOYMENT.md#deploying-batch-13-2026-10-12)).
+- **Limits.** The web's `/uploads` proxy caches the cms's answer for up to
+  60 seconds, so a revoked JWT can fetch file bytes for up to that minute;
+  an open live stream keeps its content-free pings until its next rotation
+  (at most 30 minutes, plus that minute). Each change logs
+  `[auth] password changed: user=<id> tokenVersion=<n>`. With
+  `jwtManagement: 'refresh'` the plugin's own session manager would revoke
+  sessions, and the extension steps aside; switching modes is a separate
+  decision.
 
 ## Roles
 
@@ -575,7 +634,7 @@ this is who sees and changes what, per type.
 | `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                         |
 | `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. The `audience` field is not part of the decision. From its `expiresAt` instant it leaves lists, threads and digests for everyone but admins and editors.                                                                                                                                                                              |
-| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it; anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                                                                          |
+| `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                 |
 | `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                               |
 | `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
 | `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
@@ -671,6 +730,8 @@ to that caller (the birthday and the digest settings):
   profile fields); `roleSource` (`entra` | `manual`), `entraAppliedRole`
   and `entraManagerOid`, read by the Entra exchange. These and
   `digestFrequency` are also `searchable: false`, so no `_q` finds them.
+- `tokenVersion`: private, `searchable: false` and hidden in the admin
+  panel; no write can set it ([Token versions](#token-versions)).
 - `birthday` / `birthdayVisible`: birthdays are strictly opt-in, maintained
   through `/api/me`, never exposed through user reads, and surface without
   the year of birth in the celebrations feed only when `birthdayVisible` is
@@ -810,8 +871,14 @@ reverse proxy.
   against the cms grants.
 - `apps/cms/src/poll-exposure.test.ts`: no module reads polls past the
   poll rules.
+- `apps/cms/src/extensions/users-permissions/strapi-server.test.ts`: the
+  token versions: the claim, the bump before the save and its failures,
+  the admin-panel guard and the dropped `tokenVersion`;
+  `apps/cms/src/utils/deploy-preflight.test.ts` covers the rollback hint's
+  rotation step.
 - `pnpm test:integration` (`apps/cms/src/integration/`): the real cms per
   role over HTTP: removed routes, `?status=draft` on every draft & publish
   type, relation side channels, contact-field filters, guest polls, RSVP
-  privacy, publish cycles, the role read snapshot, token versions and the
-  Entra provisioning.
+  privacy, publish cycles, the role read snapshot, token versions
+  (including a password set through the Content Manager, on SQLite and
+  Postgres) and the Entra provisioning.
