@@ -32,6 +32,15 @@ updates:
       # The type definitions follow the Node line of the images (Node 24).
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # tailwind-merge 3 supports Tailwind CSS v4 only; apps/web is on
+      # Tailwind 3 (v3 merges `bg-gradient-to-br` as a background colour).
+      # Moves together with a Tailwind 4 migration.
+      - dependency-name: tailwind-merge
+        update-types: ["version-update:semver-major"]
+      # Only in apps/cms for the Strapi admin's peer dependency, which is
+      # ^6 in Strapi 5.
+      - dependency-name: react-router-dom
+        update-types: ["version-update:semver-major"]
 
   # The base image of both Dockerfiles (node:24-alpine, pinned by digest):
   # new digests of the same tag. Moving to another Node major is a planned
@@ -48,6 +57,12 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    # Both images in one pull request: infra/build-pins.test.ts requires the
+    # same digest in both Dockerfiles, so a bump of one alone fails CI.
+    groups:
+      node-image:
+        group-by: dependency-name
+        patterns: ["node"]
     ignore:
       - dependency-name: node
         update-types: ["version-update:semver-major"]
