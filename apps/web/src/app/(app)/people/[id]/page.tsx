@@ -8,7 +8,7 @@ import { avatarThumbUrl } from "@/lib/config";
 import { parseRowId } from "@/lib/entry-id";
 import { tryFetch } from "@/lib/safe-fetch";
 import type { Team, UserLite } from "@/lib/types";
-import { initials } from "@/lib/utils";
+import { displayNameOf, initials } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -41,7 +41,7 @@ export async function generateMetadata({ params }: Params) {
     getTranslations("nav"),
     tryFetch(() => fetchPerson(rowId), "person-meta"),
   ]);
-  return { title: data?.displayName ?? data?.username ?? tNav("people") };
+  return { title: displayNameOf(data, tNav("people")) };
 }
 
 /**
@@ -59,7 +59,7 @@ export default async function PersonPage({ params }: Params) {
   ]);
   if (!person) notFound();
 
-  const name = person.displayName ?? person.username ?? person.email ?? "Unknown";
+  const name = displayNameOf(person, "Unknown");
   const avatarUrl = avatarThumbUrl(person.avatar);
 
   return (
@@ -197,7 +197,7 @@ export default async function PersonPage({ params }: Params) {
 }
 
 function PersonMini({ user }: { user: UserLite }) {
-  const name = user.displayName ?? user.username ?? user.email ?? "Unknown";
+  const name = displayNameOf(user, "Unknown");
   const avatarUrl = avatarThumbUrl(user.avatar);
   return (
     <Link

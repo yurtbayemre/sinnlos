@@ -6,7 +6,7 @@ import { isReadDenied } from "@/lib/roles";
 import { tryFetch } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 import type { Team } from "@/lib/types";
-import { initials, stripHtml } from "@/lib/utils";
+import { displayNameOf, initials, stripHtml } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/page-header";
@@ -74,10 +74,10 @@ export default async function TeamPage({ params }: Props) {
                 className="focus-card -m-2 flex items-center gap-3 rounded-xl p-2 transition-colors hover:bg-accent/50"
               >
                 <Avatar>
-                  <AvatarFallback>{initials(lead.displayName ?? lead.username)}</AvatarFallback>
+                  <AvatarFallback>{initials(displayNameOf(lead, null))}</AvatarFallback>
                 </Avatar>
                 <div>
-                  <div className="font-medium">{lead.displayName ?? lead.username}</div>
+                  <div className="font-medium">{displayNameOf(lead, null)}</div>
                   <div className="text-xs text-muted-foreground">{lead.jobTitle ?? lead.email}</div>
                 </div>
               </Link>
@@ -103,10 +103,10 @@ export default async function TeamPage({ params }: Props) {
                   className="focus-card flex items-center gap-3 rounded-xl border p-3 transition-colors hover:bg-accent/50"
                 >
                   <Avatar>
-                    <AvatarFallback>{initials(m.displayName ?? m.username)}</AvatarFallback>
+                    <AvatarFallback>{initials(displayNameOf(m, null))}</AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
-                    <div className="truncate font-medium">{m.displayName ?? m.username}</div>
+                    <div className="truncate font-medium">{displayNameOf(m, null)}</div>
                     <div className="truncate text-xs text-muted-foreground">
                       {m.jobTitle ?? m.email}
                     </div>
