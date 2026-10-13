@@ -12,6 +12,11 @@ import type { AuthoringArea, AuthoringScope, AuthoringVerb, Capabilities } from 
  * SCHEDULER_ROLES; `manage` for moderators and department authors. The
  * rest is lib/roles.ts's own capabilitiesFor.
  *
+ * Since 15A's merge lib/roles.ts carries the same author and authorScope
+ * values (access.test.ts pins the two against each other); the helper
+ * still differs in `manage`, which opens to editors and department heads
+ * with this lane's last commit (the K8 hand-over).
+ *
  * Takes the roles module as an argument (runtime imports would loop through
  * a vi.mock of "@/lib/roles"): `vi.mock("@/lib/roles", async (original) =>
  * { const roles = await original(); return { ...roles, capabilitiesFor:

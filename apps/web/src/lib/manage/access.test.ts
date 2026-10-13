@@ -79,8 +79,24 @@ describe("areaAccess with batch 15's capabilities (K8)", () => {
   });
 });
 
-describe("areaAccess with this branch's capabilities (before 15A's values)", () => {
-  it("follows lib/roles.ts: moderators' current verbs, nobody else", () => {
+describe("the K8 helper and lib/roles.ts (15A's values)", () => {
+  it.each([...roles.KNOWN_ROLES, null, "Editor"])(
+    "%s: the same authoring verbs and scopes as capabilitiesFor",
+    (role) => {
+      const helper = k8Capabilities(roles, role);
+      const real = roles.capabilitiesFor(role);
+      for (const area of roles.AUTHORING_AREAS) {
+        expect([...helper.author[area]].sort(), `${role} ${area}`).toEqual(
+          [...real.author[area]].sort(),
+        );
+        expect(helper.authorScope[area], `${role} ${area}`).toBe(real.authorScope[area]);
+      }
+    },
+  );
+});
+
+describe("areaAccess with lib/roles.ts's own values", () => {
+  it("follows lib/roles.ts: moderators' verbs, nobody else", () => {
     const editor = roles.capabilitiesFor("editor");
     expect(manageAreasFor(editor)).toEqual(["announcements", "events", "polls", "quickLinks"]);
     expect(areaAccess(editor, "announcements")?.verbs).toEqual(
