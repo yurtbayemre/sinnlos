@@ -65,6 +65,13 @@ export const SCHEDULE_BATCH = 50;
 /** Transient failures per (uid, documentId, revision) and process before retryExhausted. */
 export const SCHEDULE_TRANSIENT_ATTEMPTS = 5;
 
+/**
+ * Minutes a failed withdrawal waits before its next attempt, by the number
+ * of failed episodes so far (the last value repeats): a withdrawal is
+ * never given up, only spaced out.
+ */
+export const WITHDRAWAL_BACKOFF_MINUTES: readonly number[] = [5, 15, 60];
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -221,6 +228,58 @@ export class TransientAttempts {
 
   get size(): number {
     return this.counts.size;
+  }
+
+  // -------------------------------------------------------------------------
+  // Failed withdrawals: never given up, retried with a bounded backoff.
+
+  private readonly withdrawals = new Map<
+    string,
+    { failures: number; at: number; revision: number }
+  >();
+
+  private static documentKey(uid: string, documentId: string): string {
+    return `${uid}\u0000${documentId}`;
+  }
+
+  /** How many failed episodes a withdrawal has had (0: none, or it succeeded since). */
+  withdrawalFailures(uid: string, documentId: string): number {
+    return this.withdrawals.get(TransientAttempts.documentKey(uid, documentId))?.failures ?? 0;
+  }
+
+  /**
+   * Defers a failed withdrawal by the next WITHDRAWAL_BACKOFF_MINUTES step,
+   * remembering the revision it failed at; returns when it is due again.
+   */
+  deferWithdrawal(uid: string, documentId: string, now: Date, revision: number): Date {
+    const key = TransientAttempts.documentKey(uid, documentId);
+    const failures = (this.withdrawals.get(key)?.failures ?? 0) + 1;
+    const steps = WITHDRAWAL_BACKOFF_MINUTES;
+    const minutes = steps[Math.min(failures, steps.length) - 1];
+    const at = now.getTime() + minutes * 60_000;
+    this.withdrawals.delete(key);
+    this.withdrawals.set(key, { failures, at, revision });
+    while (this.withdrawals.size > this.limit) {
+      const oldest = this.withdrawals.keys().next().value;
+      if (oldest === undefined) break;
+      this.withdrawals.delete(oldest);
+    }
+    return new Date(at);
+  }
+
+  /**
+   * Whether a withdrawal may be attempted now: never deferred, its backoff
+   * over, or the document changed since (a save or another runner moved
+   * the revision: the author may have re-planned it).
+   */
+  withdrawalReady(uid: string, documentId: string, now: Date, revision: number): boolean {
+    const record = this.withdrawals.get(TransientAttempts.documentKey(uid, documentId));
+    return !record || record.revision !== revision || now.getTime() >= record.at;
+  }
+
+  /** Forgets a withdrawal's failures (it succeeded, or the deadline was cleared). */
+  clearWithdrawal(uid: string, documentId: string): void {
+    this.withdrawals.delete(TransientAttempts.documentKey(uid, documentId));
   }
 }
 

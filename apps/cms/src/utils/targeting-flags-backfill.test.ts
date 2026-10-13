@@ -8,6 +8,7 @@ import {
 import {
   TARGETING_FLAGS_CHUNK,
   backfillTargetingFlags,
+  idOf,
   linkTableOf,
   type TargetingFlagsBackfillHost,
 } from "./targeting-flags-backfill";
@@ -273,6 +274,77 @@ describe("backfillTargetingFlags", () => {
   it("refuses to run without a link table it needs", () => {
     expect(() => linkTableOf(host, ANNOUNCEMENT, "nothing")).toThrow(
       /the link table of api::announcement.announcement.nothing is unknown/,
+    );
+  });
+});
+
+describe("row ids as a driver hands them back", () => {
+  it("reads integers and numeric strings (a bigint column), nothing else", () => {
+    expect(idOf(7)).toBe(7);
+    expect(idOf("7")).toBe(7);
+    expect(idOf("9007199254740991")).toBe(9_007_199_254_740_991);
+    for (const value of [
+      0,
+      -1,
+      1.5,
+      "0",
+      "07",
+      "7a",
+      "",
+      null,
+      undefined,
+      {},
+      "99999999999999999",
+    ]) {
+      expect(idOf(value), JSON.stringify(value)).toBeNull();
+    }
+  });
+
+  /** A host whose link table answers its ids as strings, like a bigint column on pg. */
+  function stringIdHost(linkRows: Record<string, unknown>[]) {
+    const updates: Array<{ uid: string; params: Record<string, unknown> }> = [];
+    const joinTable = (name: string, column: string) => ({
+      joinTable: { name, joinColumn: { name: column } },
+    });
+    const metadata: Record<string, unknown> = {
+      [ANNOUNCEMENT]: {
+        attributes: {
+          department: joinTable("ann_department", "announcement_id"),
+          team: joinTable("ann_team", "announcement_id"),
+        },
+      },
+      [EVENT]: { attributes: { departments: joinTable("ev_departments", "event_id") } },
+    };
+    const host = {
+      db: {
+        metadata: { get: (uid: string) => metadata[uid] },
+        transaction: async <T>(callback: () => Promise<T>) => callback(),
+        query: (uid: string) => ({
+          findMany: async () => (uid === "ann_department" ? linkRows : []),
+          updateMany: async (params: Record<string, unknown>) => {
+            updates.push({ uid, params });
+            return { count: 1 };
+          },
+        }),
+      },
+      log: { info: vi.fn() },
+    } as unknown as TargetingFlagsBackfillHost;
+    return { host, updates };
+  }
+
+  it("raises the rows a string-id link table names", async () => {
+    const { host, updates } = stringIdHost([{ id: "1", announcement_id: "7" }]);
+    await backfillTargetingFlags(host);
+    const raise = updates.find(
+      (update) => update.uid === ANNOUNCEMENT && "audience" in (update.params.data as object),
+    );
+    expect(raise?.params.where).toMatchObject({ id: { $in: [7] } });
+  });
+
+  it("refuses a row without a usable id instead of skipping its flag", async () => {
+    const { host } = stringIdHost([{ id: "1", announcement_id: "seven" }]);
+    await expect(backfillTargetingFlags(host)).rejects.toThrow(
+      /^\[targeting-flags\] could not backfill .*ann_department returned a row without a numeric announcement_id/,
     );
   });
 });

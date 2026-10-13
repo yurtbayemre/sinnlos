@@ -34,13 +34,18 @@ interface RunResult {
 }
 
 interface Scheduler {
-  runScheduledPublishing(strapi: unknown, now?: Date): Promise<RunResult>;
+  runScheduledPublishing(
+    strapi: unknown,
+    now?: Date,
+    attempts?: unknown,
+    clock?: () => Date,
+  ): Promise<RunResult>;
   runScheduledDocument(
     strapi: unknown,
     uid: string,
     documentId: string,
     pass: "publish" | "unpublish",
-    now: Date,
+    time: Date | (() => Date),
     attempts: unknown,
     result: RunResult,
     r: number,
@@ -405,5 +410,110 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     expect((await draftOf(ANNOUNCEMENT, documentId))?.scheduleError).toBeNull();
     // The next run, with the current revision, publishes it.
     expect((await run()).published).toContain(key(ANNOUNCEMENT, documentId));
+  });
+
+  /** The document whose withdrawal the Document Service refuses, as a deadlock would. */
+  let failWithdrawalOf: string | null = null;
+  let withdrawalFaultAdded = false;
+  const failWithdrawal = (documentId: string) => {
+    failWithdrawalOf = documentId;
+    if (withdrawalFaultAdded) return;
+    withdrawalFaultAdded = true;
+    const documents = t.strapi.documents as unknown as {
+      use(
+        middleware: (
+          context: { uid: string; action: string; params?: { documentId?: string } },
+          next: () => Promise<unknown>,
+        ) => Promise<unknown>,
+      ): void;
+    };
+    documents.use(async (context, next) => {
+      if (
+        context.uid === QUICK_LINK &&
+        context.action === "unpublish" &&
+        failWithdrawalOf !== null &&
+        context.params?.documentId === failWithdrawalOf
+      ) {
+        throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+      }
+      return next();
+    });
+  };
+
+  it("a withdrawal that keeps failing stays pending: five failures keep unpublishAt; after the backoff it succeeds", async () => {
+    const link = await t.strapi.documents(QUICK_LINK).create({
+      data: { label: "Stubborn", url: "https://example.org/stubborn" },
+      status: "published",
+    });
+    const documentId = link.documentId;
+    await t.strapi.documents(QUICK_LINK).update({
+      documentId,
+      data: { unpublishAt: ahead(1_000) },
+    });
+    const { TransientAttempts } = t.requireBuilt<Schedule>("src/utils/schedule");
+    const attempts = new TransientAttempts();
+    const due = Date.now() + 5_000;
+    const at = (ms: number) => new Date(due + ms);
+    const isLive = async () =>
+      (await rows(QUICK_LINK, documentId)).some((row) => row.publishedAt != null);
+    failWithdrawal(documentId);
+    try {
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        const result = await scheduler.runScheduledPublishing(t.strapi, at(0), attempts);
+        expect(result.retrying, `attempt ${attempt}`).toContain(key(QUICK_LINK, documentId));
+      }
+      const fifth = await scheduler.runScheduledPublishing(t.strapi, at(0), attempts);
+      expect(fifth.failed).toContain(key(QUICK_LINK, documentId));
+      // Failed for good, but not given up: the deadline and the marker stay.
+      const failed = await draftOf(QUICK_LINK, documentId);
+      expect(failed?.scheduleError).toBe("retryExhausted");
+      expect(failed?.unpublishAt).not.toBeNull();
+      expect(await isLive()).toBe(true);
+      // Inside the 5-minute backoff the withdrawal is not attempted, not
+      // even after the fault is gone.
+      failWithdrawalOf = null;
+      const waiting = await scheduler.runScheduledPublishing(t.strapi, at(60_000), attempts);
+      expect([...waiting.unpublished, ...waiting.failed, ...waiting.retrying]).not.toContain(
+        key(QUICK_LINK, documentId),
+      );
+      expect(await isLive()).toBe(true);
+    } finally {
+      failWithdrawalOf = null;
+    }
+    const recovered = await scheduler.runScheduledPublishing(t.strapi, at(6 * 60_000), attempts);
+    expect(recovered.unpublished).toContain(key(QUICK_LINK, documentId));
+    expect(await rows(QUICK_LINK, documentId)).toEqual([
+      expect.objectContaining({ publishedAt: null, unpublishAt: null, scheduleError: null }),
+    ]);
+  });
+
+  it("the clock is read after the lock: a run that reaches a quick link after its unpublishAt does not publish it", async () => {
+    const start = Date.now();
+    const link = await t.strapi.documents(QUICK_LINK).create({
+      data: {
+        label: "Late run",
+        url: "https://example.org/late-run",
+        publishAt: new Date(start - 1_000).toISOString(),
+        unpublishAt: new Date(start + 30_000).toISOString(),
+      },
+    });
+    // Selected at the start (publishAt due, window open); by the time the
+    // run holds the document's lock a minute has passed.
+    const result = await scheduler.runScheduledPublishing(
+      t.strapi,
+      new Date(start),
+      new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)(),
+      () => new Date(start + 60_000),
+    );
+    expect(result.expired).toContain(key(QUICK_LINK, link.documentId));
+    expect(result.published).not.toContain(key(QUICK_LINK, link.documentId));
+    expect(await rows(QUICK_LINK, link.documentId)).toEqual([
+      expect.objectContaining({
+        publishedAt: null,
+        publishAt: null,
+        unpublishAt: null,
+        scheduleError: "windowExpired",
+      }),
+    ]);
   });
 });

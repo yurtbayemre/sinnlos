@@ -5,6 +5,7 @@ import {
   appContentType,
   openDocumentService,
   type OpenDocumentService,
+  type TestRow,
 } from "../test/document-service.test.helper";
 import { createStrapiStub } from "../test/strapi-stub.test.helper";
 import {
@@ -168,7 +169,7 @@ describe("the middleware on the real document service (C23)", () => {
       where: { documentId },
       orderBy: { id: "asc" },
       populate: { course: { select: ["documentId"] } },
-    })) as Array<Record<string, any>>;
+    })) as TestRow[];
 
   it("refuses to publish a lesson of a draft-only course; publishes once the course is live", async () => {
     const { lessons, courses } = await training();

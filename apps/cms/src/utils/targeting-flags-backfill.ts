@@ -119,8 +119,33 @@ export function linkTableOf(
   return { table, rowColumn };
 }
 
-const numbersOf = (rows: unknown[], key: string): number[] =>
-  rows.map((row) => field(row, key)).filter((value): value is number => typeof value === "number");
+/**
+ * A row id as a number: drivers hand back an integer column as a number,
+ * a bigint one as a numeric string; anything else is no id (null).
+ */
+export function idOf(value: unknown): number | null {
+  if (typeof value === "number") return Number.isSafeInteger(value) && value > 0 ? value : null;
+  if (typeof value === "string" && /^[1-9]\d{0,15}$/.test(value)) {
+    const id = Number(value);
+    return Number.isSafeInteger(id) ? id : null;
+  }
+  return null;
+}
+
+/**
+ * The ids under `key` of `rows`. A row without a usable id fails the
+ * backfill (fail closed): skipping it would leave its flag unraised in
+ * silence.
+ */
+function numbersOf(rows: unknown[], key: string, source: string): number[] {
+  return rows.map((row) => {
+    const id = idOf(field(row, key));
+    if (id === null) {
+      throw new Error(`${source} returned a row without a numeric ${key}`);
+    }
+    return id;
+  });
+}
 
 /** Every row id that has a link in `link`, read in id pages of the link table. */
 async function linkedRowIds(
@@ -137,8 +162,8 @@ async function linkedRowIds(
       orderBy: { id: "asc" },
       limit: TARGETING_FLAGS_CHUNK,
     });
-    for (const id of numbersOf(page, link.rowColumn)) ids.add(id);
-    const linkIds = numbersOf(page, "id");
+    for (const id of numbersOf(page, link.rowColumn, link.table)) ids.add(id);
+    const linkIds = numbersOf(page, "id", link.table);
     if (linkIds.length < TARGETING_FLAGS_CHUNK) return ids;
     const last = linkIds[linkIds.length - 1];
     if (last <= afterId)
@@ -168,10 +193,11 @@ async function rowsWhere(
       orderBy: { id: "asc" },
       limit: TARGETING_FLAGS_CHUNK,
     });
-    const refs = page
-      .map((row) => ({ id: field(row, "id"), documentId: field(row, "documentId") }))
-      .filter((row): row is { id: number; documentId: unknown } => typeof row.id === "number")
-      .map((row) => ({ id: row.id, documentId: isName(row.documentId) ? row.documentId : null }));
+    const ids = numbersOf(page, "id", uid);
+    const refs = page.map((row, index) => {
+      const documentId = field(row, "documentId");
+      return { id: ids[index], documentId: isName(documentId) ? documentId : null };
+    });
     rows.push(...refs);
     if (page.length < TARGETING_FLAGS_CHUNK) return rows;
     const last = refs.length > 0 ? refs[refs.length - 1].id : afterId;
@@ -180,6 +206,11 @@ async function rowsWhere(
     afterId = last;
   }
 }
+
+/** The distinct documentIds of `rows`. */
+const documentIdsOf = (rows: readonly RowRef[]): string[] => [
+  ...new Set(rows.map((row) => row.documentId).filter(isName)),
+];
 
 /** The documentIds among `documentIds` with a row matching `where` (read in chunks). */
 async function documentsWhere(
@@ -244,14 +275,12 @@ async function classifyAndUpdate(
   const restrictedEventDocuments = await documentsWhere(
     strapi,
     EVENT_UID,
-    [...new Set(unlinkedNullEvents.map((row) => row.documentId).filter(isName))],
+    documentIdsOf(unlinkedNullEvents),
     { notifyAudience: DEPARTMENTS },
   );
 
   const markedAnnouncements = await rowsWhere(strapi, ANNOUNCEMENT_UID, { retargetRequired: true });
-  const markedDocuments = [
-    ...new Set(markedAnnouncements.map((row) => row.documentId).filter(isName)),
-  ];
+  const markedDocuments = documentIdsOf(markedAnnouncements);
   const unmarkedTwins: number[] = [];
   for (let start = 0; start < markedDocuments.length; start += TARGETING_FLAGS_CHUNK) {
     const chunk = markedDocuments.slice(start, start + TARGETING_FLAGS_CHUNK);

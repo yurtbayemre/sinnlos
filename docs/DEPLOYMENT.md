@@ -2029,13 +2029,28 @@ required env, no grant, no route, no edge change.
     lifecycle, e.g. the lesson checks), clears Publish at and logs
     `[scheduler] <type> <documentId> failed: <code>`; a passing failure
     (a lock timeout, a lost connection) is retried every minute and
-    becomes `retryExhausted` after the fifth. A withdrawal that fails for
-    good clears Unpublish at and also a pending Publish at (an update is
-    never published over a withdrawal that did not happen); while a
-    withdrawal is retried, a pending update of that item waits. The error
-    details in the log and the audit trail name the error class, a database
-    code and field names, never a message. The next save of the draft
-    clears the error. After a publish the panel shows **Published**, not
+    becomes `retryExhausted` after the fifth.
+  - A withdrawal is never given up. One that fails for good sets Schedule
+    error and logs `[scheduler] <type> <documentId> failed: <code>; the
+    withdrawal stays pending, next attempt after <time>`, but keeps
+    Unpublish at, and a pending Publish at waits with it (an update is
+    never published over a withdrawal that did not happen). It is tried
+    again after 5, 15, then every 60 minutes (at once when the item is
+    saved in between), until it succeeds, which clears the error, or an
+    editor changes or clears Unpublish at. A repeat of the same failure
+    writes no new audit row; a cms restart starts the backoff over. Until
+    then the item stays visible: the site does not hide an item whose
+    Unpublish at passed (the time is a setting of the draft). If it must
+    go now, unpublish it in the panel.
+  - Every check of a time (due, an ended window) is made when the run
+    holds the item's lock, not when the run started: a run that reaches an
+    item late, behind a lock or a long batch, does not publish one whose
+    Unpublish at or Expires at passed in between (`windowExpired`).
+  - The error details in the log and the audit trail name the error class,
+    a database code and field names, never a message; a passing failure's
+    retry line says whether its code is a known lock or connection code
+    (`transient`) or not (`unexpected`). The next save of the draft clears
+    the error. After a publish the panel shows **Published**, not
     Modified.
   - `CRON_ENABLED=0` stops it with the other tasks; nothing scheduled
     publishes then, and the first run after the crons are back catches
