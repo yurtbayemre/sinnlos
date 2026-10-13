@@ -1040,12 +1040,15 @@ routes: its uploads are bound only by `deniedTypes` (below).
   whole file):
   - images by magic bytes; no SVG (stored XSS), no GIF (decompression
     bombs);
-  - a PDF by `%PDF-` at offset 0 **and no zip end record a zip reader could
-    take**: a PDF that is also a zip is refused;
+  - a PDF by `%PDF-` at offset 0 **and no zip archive anywhere in the
+    file**: the whole PDF is scanned in 64 KiB reads for an end record whose
+    central directory stands where it says (also behind padding, which some
+    zip readers skip), so a PDF that is also a zip is refused;
   - DOCX, XLSX and PPTX by the **Office Open XML rule**: a zip in exactly
     one layout (no prefix, no gap, no trailing data, one end record at the
     end, every local header equal to its directory record, methods 0 and
-    8, strict ASCII names, no duplicates under case folding; ZIP64,
+    8, strict ASCII names, no duplicates under case folding, no Info-ZIP
+    Unicode Path field that would give some readers another name; ZIP64,
     multi-disk and encrypted entries refused; at most 5 000 entries and
     1 MiB of directory), `[Content_Types].xml` read by a bounded tokenizer
     for a fixed XML subset (no DTD, so no entity is ever expanded; no
@@ -1082,7 +1085,8 @@ the sniffed format>` and the mime the table's (core stores and serves by
   (the classified lifecycle); the media
   claims (registered from batch 16, lane 16B) accept a document file only
   when it is the caller's own upload, of an allowed mime, linked by nothing
-  else, checked under the file row's lock.
+  else, checked under the file row's lock, and no publish, clone or discard
+  copies a file that is being removed.
 - **Removal:** every delete, the app's and the Media Library's, first
   takes one reservation (`reserveRemoval`, `utils/upload-orphans.ts`): it
   locks the file row, re-reads it (a file that is gone or already being

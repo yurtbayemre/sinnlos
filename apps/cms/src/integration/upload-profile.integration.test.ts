@@ -140,6 +140,10 @@ describe.each(testEngines())("the upload profile on %s", (engine) => {
       ["a fake zip", Buffer.from("PK\u0003\u0004 this is no zip")],
       ["a PDF with an appended zip", Buffer.concat([minimalPdf(), minimalDocx()])],
       [
+        "a PDF with an appended zip behind 70 000 bytes of padding",
+        Buffer.concat([minimalPdf(), minimalDocx(), Buffer.alloc(70_000, 0x20)]),
+      ],
+      [
         "an MZ executable",
         Buffer.from("MZ\u0090\u0000\u0003\u0000\u0000\u0000executable", "latin1"),
       ],
@@ -172,6 +176,16 @@ describe.each(testEngines())("the upload profile on %s", (engine) => {
       ["trailing data", buildZip(clean, { trailing: Buffer.from("junk") })],
       ["an encrypted entry", buildZip(clean.map((e) => ({ ...e, flags: 1 })))],
     ];
+    const alias = Buffer.from("xl/vbaProject.bin", "utf8");
+    const unicodePath = Buffer.alloc(9 + alias.length);
+    unicodePath.writeUInt16LE(0x7075, 0);
+    unicodePath.writeUInt16LE(5 + alias.length, 2);
+    unicodePath.writeUInt8(1, 4);
+    alias.copy(unicodePath, 9);
+    cases.push([
+      "a Unicode Path alias of a VBA part",
+      buildZip([...clean, { name: "xl/harmless.bin", data: "x", extra: unicodePath }]),
+    ]);
     const { bytes, offsets } = buildZipWithOffsets(clean);
     const zip64 = Buffer.from(bytes);
     zip64.writeUInt16LE(0xffff, offsets.end + 10);

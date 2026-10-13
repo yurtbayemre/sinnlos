@@ -286,6 +286,30 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     expect(ok.status, ok.text).toBe(201);
   });
 
+  it("publish and clone do not copy a tombstoned file (a removal that failed after its reservation)", async () => {
+    const file = await upload();
+    const doc = await create({ file });
+    await t.strapi.db.query(FILE).update({
+      where: { id: file },
+      data: {
+        provider_metadata: {
+          uploadedBy: t.fixtures.users.editor.id,
+          removing: new Date().toISOString(),
+        },
+      },
+    });
+    await expect(docs().publish({ documentId: doc.documentId })).rejects.toMatchObject({
+      details: { keys: ["file"] },
+    });
+    const panel = await contentManager(t, await admin());
+    const clone = await panel.clone(D, doc.documentId, { title: "Copy" });
+    expect(clone.status, clone.text).toBe(400);
+    // Replacing the file is how the document gets out of it.
+    const fresh = await upload();
+    await docs().update({ documentId: doc.documentId, data: { file: fresh } });
+    await docs().publish({ documentId: doc.documentId });
+  });
+
   it("attaches by the file's documentId too; a tombstoned one is refused before any link", async () => {
     const res = await uploadFiles(t, await t.loginAs("editor"), [
       { name: "a.pdf", bytes: minimalPdf() },
