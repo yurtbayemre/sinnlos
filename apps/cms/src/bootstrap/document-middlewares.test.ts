@@ -61,6 +61,7 @@ describe("Document Service middleware slots (K6)", () => {
     );
     expect(slots).toEqual([
       "offsetless-datetime-guard",
+      "document-lock",
       "poll-audience-guard",
       "department-audience-guard",
       "user-write-guard",

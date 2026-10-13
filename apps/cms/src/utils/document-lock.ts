@@ -249,6 +249,7 @@ export interface DocumentLockHost {
     metadata: { get(uid: string): ModelMeta };
     query(uid: string): {
       findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+      count(params: Record<string, unknown>): Promise<number>;
     };
   };
 }
@@ -476,26 +477,105 @@ export function lockedActionOf(context: object): LockedAction | undefined {
   return lockedActions.get(context);
 }
 
-/** The Strapi slice the middleware needs on top of the revision API. */
-export interface DocumentLockMiddlewareHost extends DocumentLockHost {
-  db: DocumentLockHost["db"] & {
-    query(uid: string): {
-      findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
-      count(params: Record<string, unknown>): Promise<number>;
-    };
-  };
+/** The Strapi slice the middleware needs (the revision API's). */
+export type DocumentLockMiddlewareHost = DocumentLockHost;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/** Tokens without a named document are a wiring bug: refuse rather than compare nothing. */
+function assertScope(scope: AuthoringScope | undefined): void {
+  if (!scope) return;
+  const hasToken = scope.expectedRevision !== undefined || scope.observedRevision !== undefined;
+  if (hasToken && (typeof scope.uid !== "string" || !isDocumentId(scope.documentId))) {
+    throw new Error(
+      `${DOCUMENT_LOCK_LOG} an authoring scope with a revision must name its document (uid and documentId)`,
+    );
+  }
 }
 
+const isTarget = (scope: AuthoringScope | undefined, uid: string, documentId: string): boolean =>
+  scope !== undefined && scope.uid === uid && scope.documentId === documentId;
+
 /**
- * The document-lock middleware (see the module comment). Implemented in the
- * lane's lock commit; registered by bootstrap/document-middlewares.ts.
+ * Accepts when the locked revision equals every token the scope carries;
+ * otherwise re-classifies under the lock (§G mechanism step 3).
+ */
+async function compare(scope: AuthoringScope, locked: number, target: DocumentRef): Promise<void> {
+  const expectedOk = scope.expectedRevision === undefined || scope.expectedRevision === locked;
+  const observedOk = scope.observedRevision === undefined || scope.observedRevision === locked;
+  if (expectedOk && observedOk) return;
+  if (scope.classify) {
+    const roleClass = await scope.classify(target);
+    if (roleClass === null || roleClass === undefined) {
+      throw new ClassLost(scope.missingClass ?? 404);
+    }
+  }
+  throw new RevisionStale(locked);
+}
+
+/** The document a create or clone produced (`{ documentId }` or `{ documentId, entries }`). */
+const createdDocumentId = (result: unknown): string | null =>
+  isRecord(result) && isDocumentId(result.documentId) ? result.documentId : null;
+
+/**
+ * The document-lock middleware (see the module comment), second in the
+ * chain (bootstrap/document-middlewares.ts).
  */
 export function createDocumentLock(strapi: DocumentLockMiddlewareHost): DocumentActionMiddleware {
-  void strapi;
-  void isGuardedUid;
-  void DOCUMENT_ACTIONS;
-  void lockedActions;
-  return async () => {
-    throw new Error(`${DOCUMENT_LOCK_LOG} not implemented yet`);
+  return async (context, next) => {
+    const uid = context.uid;
+    const action = context.action ?? "";
+    if (!isGuardedUid(uid) || !MUTATING_ACTIONS.includes(action)) return next();
+    const scope = getAuthoringScope();
+    assertScope(scope);
+
+    if (!DOCUMENT_ACTIONS.includes(action)) {
+      // create and clone: no document yet, nothing to lock or compare.
+      return strapi.db.transaction(async () => {
+        const frame: LockedAction = { uid, revision: 1 };
+        lockedActions.set(context, frame);
+        const result = await next();
+        const documentId = createdDocumentId(result);
+        if (documentId === null) return result;
+        frame.documentId = documentId;
+        frame.revision = await advanceRevision(strapi, uid, documentId);
+        if (scope && scope.uid === uid && scope.documentId === undefined) {
+          scope.documentId = documentId;
+          scope.committedRevision = frame.revision;
+        }
+        return result;
+      });
+    }
+
+    const params = isRecord(context.params) ? context.params : {};
+    const documentId = params.documentId;
+    if (!isDocumentId(documentId)) {
+      throw new Error(
+        `${DOCUMENT_LOCK_LOG} a ${action} of ${uid} without a documentId is refused (no revision to lock)`,
+      );
+    }
+    return strapi.db.transaction(async () => {
+      const locked = await lockDocument(strapi, uid, documentId);
+      const target = isTarget(scope, uid, documentId);
+      if (target) await compare(scope as AuthoringScope, locked, { uid, documentId });
+      const frame: LockedAction = { uid, documentId, revision: locked + 1 };
+      lockedActions.set(context, frame);
+      const result = await next();
+      // A delete, or a discard of a document without a published row (C20),
+      // leaves no row: the version row goes with the document.
+      const remaining = await strapi.db.query(uid).count({ where: { documentId } });
+      if (remaining === 0) {
+        await removeRevision(strapi, uid, documentId);
+      } else {
+        frame.revision = await advanceRevision(strapi, uid, documentId);
+      }
+      if (target && scope) {
+        scope.committedRevision = frame.revision;
+        if (scope.expectedRevision !== undefined) scope.expectedRevision = frame.revision;
+        if (scope.observedRevision !== undefined) scope.observedRevision = frame.revision;
+      }
+      return result;
+    });
   };
 }

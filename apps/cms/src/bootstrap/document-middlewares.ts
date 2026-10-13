@@ -3,6 +3,7 @@ import {
   type TokenVersionStrapi,
 } from "../extensions/users-permissions/strapi-server";
 import { createDepartmentAudienceGuard } from "../utils/department-audience-guard";
+import { createDocumentLock, type DocumentLockMiddlewareHost } from "../utils/document-lock";
 import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
 import {
   createPollAudienceGuard,
@@ -67,7 +68,9 @@ export const DOCUMENT_MIDDLEWARE_SLOTS = [
 export type DocumentMiddlewareSlot = (typeof DOCUMENT_MIDDLEWARE_SLOTS)[number];
 
 /** The slice of the Strapi instance the middlewares use. */
-export type DocumentMiddlewaresHost = PollAudienceGuardHost & TokenVersionStrapi;
+export type DocumentMiddlewaresHost = PollAudienceGuardHost &
+  TokenVersionStrapi &
+  DocumentLockMiddlewareHost;
 
 /** register() also needs `strapi.documents.use`. */
 export type DocumentMiddlewaresRegistrationHost = DocumentMiddlewaresHost & {
@@ -87,6 +90,7 @@ export interface SlottedMiddleware {
 export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMiddleware[] {
   const slotted: SlottedMiddleware[] = [
     { slot: "offsetless-datetime-guard", middleware: createOffsetlessDatetimeGuard() },
+    { slot: "document-lock", middleware: createDocumentLock(strapi) },
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
