@@ -21,7 +21,13 @@
  *     implicitly", §N9). Then all of the type's targeting keys go together;
  *   - a department author's targeting is pinned (§N4): announcement
  *     `department` = their department, event `departments` = [it]. A
- *     create always sends it.
+ *     create always sends it;
+ *   - an item that needs re-targeting (`needsRetarget`) is never made
+ *     company-wide by accident: targeting that would reach everyone (an
+ *     announcement without department and team, an empty `departments`)
+ *     is refused with `confirmAudience` unless the author confirmed the
+ *     audience (`retarget`). The save path asks the cms whether the item
+ *     needs re-targeting before such a write (lib/manage/save.ts).
  * Pure: `now` and the zone come from the caller.
  */
 import {
@@ -73,6 +79,11 @@ export interface PayloadContext {
   ownDepartment: string | null;
   /** Send the targeting keys although they did not change (an explicit re-target). */
   retarget?: boolean;
+  /**
+   * The item needs re-targeting (the cms's `needsRetarget`): targeting that
+   * would reach everyone is refused unless `retarget` confirms it.
+   */
+  needsRetarget?: boolean;
 }
 
 export type BuiltPayload =
@@ -138,7 +149,23 @@ function buildFields<V extends object>(
     if ("code" in converted) fields[rule.key] = converted.code;
     else data[rule.key] = converted.value;
   }
+  if (ctx.needsRetarget === true && ctx.retarget !== true && widensToEveryone(type, data)) {
+    fields[TARGETING_KEYS[type][0]] = "confirmAudience";
+  }
   return { data, fields };
+}
+
+/**
+ * Whether `data` sets the targeting of `type` to "everyone": an
+ * announcement without department and team (roles alone reach a role
+ * across the company), an empty `departments` list. A payload without the
+ * targeting keys changes nothing and widens nothing.
+ */
+export function widensToEveryone(type: AuthoringType, data: Record<string, unknown>): boolean {
+  if (type === "announcement") {
+    return "department" in data && data.department == null && data.team == null;
+  }
+  return Array.isArray(data.departments) && data.departments.length === 0;
 }
 
 const done = (

@@ -45,6 +45,12 @@ type SelectMenuProps = {
    * them with the trigger, also when a refused field moves the focus there.
    */
   ariaDescribedBy?: string;
+  /**
+   * Shown in the closed trigger (and read with its name) while `value` is
+   * none of the options: a state the menu cannot select, such as "needs a
+   * new audience". Choosing an option replaces it.
+   */
+  placeholder?: string;
   /** The trigger button (React 19: a plain prop, no forwardRef). */
   ref?: Ref<HTMLButtonElement>;
 };
@@ -86,6 +92,7 @@ export function SelectMenu({
   disabled,
   busy = false,
   ariaDescribedBy,
+  placeholder,
   ref,
 }: SelectMenuProps) {
   const id = useId();
@@ -104,7 +111,7 @@ export function SelectMenu({
         {ariaLabel}
       </span>
       <span id={valueId} hidden>
-        {active?.label}
+        {active?.label ?? placeholder}
       </span>
       <DropdownMenu.Trigger asChild disabled={disabled}>
         <button
@@ -119,7 +126,7 @@ export function SelectMenu({
           )}
         >
           {icon}
-          <span className="truncate">{active?.short ?? active?.label}</span>
+          <span className="truncate">{active?.short ?? active?.label ?? placeholder}</span>
           <ChevronDown
             aria-hidden="true"
             className="h-4 w-4 shrink-0 opacity-60 transition-transform group-data-[state=open]:rotate-180"

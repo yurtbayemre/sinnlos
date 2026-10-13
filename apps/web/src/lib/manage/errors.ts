@@ -21,9 +21,11 @@ import { AUTHORING_CODES, FORM_KEY, STATUS_KEY, type AuthoringCode } from "@sinn
 
 /**
  * Codes the web's own checks add (no cms code): a typed wall time that a
- * clock change repeats or skips (reject mode, plain-date.ts WallTimeError).
+ * clock change repeats or skips (reject mode, plain-date.ts WallTimeError),
+ * and targeting that would make an item that needs re-targeting reach
+ * everyone without the author's confirmation (payload.ts).
  */
-export const WEB_FIELD_CODES = ["timeRepeated", "timeSkipped"] as const;
+export const WEB_FIELD_CODES = ["timeRepeated", "timeSkipped", "confirmAudience"] as const;
 
 export type WebFieldCode = (typeof WEB_FIELD_CODES)[number];
 

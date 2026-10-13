@@ -160,6 +160,7 @@
     "failed": "Das hat nicht geklappt. Laden Sie die Seite neu und versuchen Sie es erneut."
   },
   "errors": {
+    "confirmAudience": "Damit sähen alle den Eintrag. Setzen Sie dazu das Häkchen bei „Diese Zielgruppe beim Speichern bestätigen“, oder wählen Sie eine Abteilung oder ein Team.",
     "invalid": "Dieser Wert wird nicht akzeptiert.",
     "required": "Bitte füllen Sie dieses Feld aus.",
     "tooLong": "Das ist zu lang.",
@@ -208,6 +209,7 @@
     "retargetConfirm": "Diese Zielgruppe beim Speichern bestätigen",
     "retargetNoTarget": "Zielgruppe neu festlegen: Es ist keine Abteilung und kein Team gewählt (nie gewählt, oder die gewählte wurde gelöscht). Nur Redaktion und Admins sehen den Eintrag, und er benachrichtigt niemanden. Wählen Sie eine aus, oder geben Sie ihn für alle frei, indem Sie die Zielgruppe unten bestätigen.",
     "restricted": "Eingeschränkt: braucht eine neue Zielgruppe",
+    "everyoneNeedsConfirm": "„Alle“ macht den Eintrag firmenweit sichtbar: Setzen Sie oben das Häkchen bei „Diese Zielgruppe beim Speichern bestätigen“, oder wählen Sie eine Abteilung oder ein Team.",
     "restrictedHint": "Wählen Sie eine Abteilung, oder setzen Sie oben das Häkchen bei „Diese Zielgruppe beim Speichern bestätigen“, um die angezeigte Zielgruppe zu behalten.",
     "roles": {
       "admin_role": "Admins",

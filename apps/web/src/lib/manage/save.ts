@@ -1,6 +1,9 @@
 import "server-only";
 
+import { unstable_rethrow } from "next/navigation";
+import type { EditableBase } from "@sinnlos/domain";
 import { actionFailure } from "@/lib/action-result";
+import { fetchEditable } from "@/lib/api/manage/authoring";
 import {
   authorContext,
   authoringWrite,
@@ -11,7 +14,12 @@ import {
   type AuthoringActionResult,
 } from "./authoring-action";
 import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type ManageArea } from "./areas";
-import { buildSchedulePayload, type BuiltPayload, type PayloadContext } from "./payload";
+import {
+  buildSchedulePayload,
+  widensToEveryone,
+  type BuiltPayload,
+  type PayloadContext,
+} from "./payload";
 import { coerceScheduleValues } from "./values";
 
 /**
@@ -24,7 +32,11 @@ import { coerceScheduleValues } from "./values";
  *   2. the reference (update): a documentId and the version the form saw;
  *   3. the values, read through the area's coercion (untrusted arguments);
  *   4. the payload: the domain checks and the reject-mode dates, refused
- *      locally with `fields` before any request when a check fails;
+ *      locally with `fields` before any request when a check fails. An
+ *      update whose targeting would reach everyone without the author's
+ *      confirmation asks the cms first whether the item needs
+ *      re-targeting; if so it is refused (`confirmAudience`), whatever
+ *      the form claimed;
  *   5. the request: an explicit `status` (draft or published; polls none),
  *      `If-Match` on an update.
  */
@@ -86,8 +98,27 @@ export async function saveItem<V extends object>(
       : null;
   const ctx = payloadContext(gate.context, mode, input.retarget === true);
 
-  const built = spec.build(values, initial, ctx);
+  let built = spec.build(values, initial, ctx);
   if (!built.ok) return actionFailure("invalid", { fields: built.fields });
+  if (mode === "update" && !ctx.retarget && widensToEveryone(AREA_TYPE[area], built.data)) {
+    // Never widen a restricted item by accident: the cms decides whether it
+    // needs re-targeting, not the form.
+    let needsRetarget: boolean;
+    try {
+      const answer = await fetchEditable<EditableBase & { needsRetarget?: boolean }>(
+        AREA_TYPE[area],
+        input.documentId as string,
+      );
+      needsRetarget = answer?.data?.needsRetarget === true;
+    } catch (error) {
+      unstable_rethrow(error);
+      return actionFailure("unavailable");
+    }
+    if (needsRetarget) {
+      built = spec.build(values, initial, { ...ctx, needsRetarget: true });
+      if (!built.ok) return actionFailure("invalid", { fields: built.fields });
+    }
+  }
   let data = built.data;
 
   if (schedules) {

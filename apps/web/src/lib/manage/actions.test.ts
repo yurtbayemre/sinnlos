@@ -287,6 +287,62 @@ describe("saves (create and update)", () => {
   });
 });
 
+describe("a widening re-target needs the confirmation, checked against the cms (Codex review)", () => {
+  // The form after choosing "Everyone" on an item with a surviving
+  // department and a deleted team: department, team and roles empty.
+  const initial = announcement({ department: ENG.documentId });
+  const everyone = announcement({ department: "", team: "", audienceRoles: [] });
+  const editableAnswer = (needsRetarget: boolean) => ({
+    data: { documentId: DOC, version: "5", status: "published", needsRetarget },
+  });
+
+  it("refuses the save when the cms says the item needs re-targeting: no write is sent", async () => {
+    strapiMock.mockReset().mockResolvedValueOnce(editableAnswer(true));
+    const result = await announcements.saveAnnouncement({
+      documentId: DOC,
+      version: "5",
+      status: "published",
+      values: everyone,
+      initial,
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      code: "invalid",
+      fields: { department: "confirmAudience" },
+    });
+    expect(strapiMock).toHaveBeenCalledTimes(1);
+    expect(call(0).path).toBe(`/api/announcements/${DOC}/editable`);
+  });
+
+  it("sends it with the confirmation (no extra read), and when the cms says nothing is restricted", async () => {
+    strapiMock.mockReset().mockResolvedValue(dto());
+    await announcements.saveAnnouncement({
+      documentId: DOC,
+      version: "5",
+      status: "published",
+      values: everyone,
+      initial,
+      retarget: true,
+    });
+    expect(strapiMock).toHaveBeenCalledTimes(1);
+    expect(call(0).method).toBe("PUT");
+    expect(call(0).body).toMatchObject({
+      data: { department: null, team: null, audienceRoles: [] },
+    });
+
+    strapiMock.mockReset().mockResolvedValueOnce(editableAnswer(false)).mockResolvedValue(dto());
+    await announcements.saveAnnouncement({
+      documentId: DOC,
+      version: "5",
+      status: "published",
+      values: everyone,
+      initial,
+    });
+    expect(call(0).path).toBe(`/api/announcements/${DOC}/editable`);
+    expect(call(1).method).toBe("PUT");
+  });
+});
+
 describe("state transitions", () => {
   it.each([
     ["publish", announcements.publishAnnouncement, `/api/announcements/${DOC}/publish`, "POST"],

@@ -160,6 +160,71 @@ describe("announcement payloads", () => {
     });
   });
 
+  describe("an item that needs re-targeting is never made company-wide by accident (Codex review)", () => {
+    // A surviving department, a deleted team, no roles: choosing the empty
+    // department used to send department, team and roles empty, which the
+    // cms reads as "everyone".
+    const initial = announcement({ department: ENG });
+    const everyone = announcement({ department: "", team: "", audienceRoles: [] });
+
+    it("refuses targeting that reaches everyone without the confirmation", () => {
+      expect(
+        buildAnnouncementPayload(
+          everyone,
+          initial,
+          moderator({ mode: "update", needsRetarget: true }),
+        ),
+      ).toEqual({ ok: false, fields: { department: "confirmAudience" } });
+      // Roles alone still reach a role across the company.
+      expect(
+        buildAnnouncementPayload(
+          announcement({ department: "", audienceRoles: ["member"] }),
+          initial,
+          moderator({ mode: "update", needsRetarget: true }),
+        ),
+      ).toEqual({ ok: false, fields: { department: "confirmAudience" } });
+      expect(
+        buildEventPayload(
+          event({ departments: [] }),
+          event({ departments: [ENG] }),
+          moderator({ mode: "update", needsRetarget: true }),
+        ),
+      ).toMatchObject({ ok: false, fields: { departments: "confirmAudience" } });
+    });
+
+    it("sends it with the confirmation, and for an item that does not need re-targeting", () => {
+      for (const ctx of [
+        moderator({ mode: "update", needsRetarget: true, retarget: true }),
+        moderator({ mode: "update" }),
+      ]) {
+        expect(buildAnnouncementPayload(everyone, initial, ctx)).toEqual({
+          ok: true,
+          data: { department: null, team: null, audienceRoles: [] },
+        });
+      }
+    });
+
+    it("lets a narrowing re-target through: another department, or a team", () => {
+      const ctx = moderator({ mode: "update", needsRetarget: true });
+      expect(buildAnnouncementPayload(announcement({ department: SALES }), initial, ctx)).toEqual({
+        ok: true,
+        data: { department: SALES, team: null, audienceRoles: [] },
+      });
+      expect(
+        buildAnnouncementPayload(
+          announcement({ department: "", team: "teamplatform000000000000" }),
+          initial,
+          ctx,
+        ),
+      ).toEqual({
+        ok: true,
+        data: { department: null, team: "teamplatform000000000000", audienceRoles: [] },
+      });
+      // No targeting change: nothing is sent, nothing widens.
+      expect(buildAnnouncementPayload(initial, initial, ctx)).toEqual({ ok: true, data: {} });
+    });
+  });
+
   it("refuses a missing title, an overlong body and a deadline without the confirmation", () => {
     const built = buildAnnouncementPayload(
       announcement({

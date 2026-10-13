@@ -160,6 +160,7 @@
     "failed": "That did not work. Reload the page and try again."
   },
   "errors": {
+    "confirmAudience": "This would show the item to everyone. Tick “Confirm this audience when saving” to do that, or choose a department or team.",
     "invalid": "This value is not accepted.",
     "required": "Please fill in this field.",
     "tooLong": "This is too long.",
@@ -209,6 +210,7 @@
     "retargetNoTarget": "Needs re-targeting: no department or team is selected (none was chosen, or the one it had was deleted). Only editors and admins see it, and it notifies nobody. Choose one, or set the audience to everyone by confirming it below.",
     "restricted": "Restricted: needs a new audience",
     "restrictedHint": "Choose a department, or tick “Confirm this audience when saving” above to keep the audience as shown.",
+    "everyoneNeedsConfirm": "“Everyone” makes this item company-wide: tick “Confirm this audience when saving” above, or choose a department or team.",
     "roles": {
       "admin_role": "Admins",
       "editor": "Editors",

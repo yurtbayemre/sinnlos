@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { STAFF_ROLES, type AnnouncementEditable } from "@sinnlos/domain";
 import type { AreaAccess } from "@/lib/manage/access";
@@ -19,6 +19,7 @@ import {
   type AnnouncementValues,
 } from "@/lib/manage/values";
 import type { DepartmentOption, TeamOption } from "@/lib/loaders/manage/options";
+import { departmentPicker } from "@/lib/manage/department-picker";
 import { CheckboxField, CheckboxList, Field, inputClass } from "./form-controls";
 import { DateTimeField, DayField } from "./date-fields";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
@@ -112,15 +113,21 @@ export function AnnouncementEditor({
   const disabled = editor.pending;
   const targetingLocked = disabled || optionsFailed;
 
-  // Needs re-targeting and not confirmed: "no department" is not
-  // "everyone" until the author confirms it (§N9, D-PT01).
-  const restricted = editable?.needsRetarget === true && !item.retarget;
+  // Needs re-targeting (§N9, D-PT01): the picker's state, see departmentPicker.
+  const [pickedDepartment, setPickedDepartment] = useState(false);
+  const picker = departmentPicker({
+    needsRetarget: editable?.needsRetarget === true,
+    confirmed: item.retarget,
+    picked: pickedDepartment,
+    department: values.department,
+    team: values.team,
+  });
   const departmentOptions = useMemo(
     () => [
-      { value: "", label: tc(restricted ? "targeting.restricted" : "targeting.everyone") },
+      { value: "", label: tc("targeting.everyone") },
       ...departments.map((d) => ({ value: d.documentId, label: d.name })),
     ],
-    [departments, tc, restricted],
+    [departments, tc],
   );
   // AND: a team outside the chosen department would reach nobody, so the
   // picker offers the chosen department's teams (and the current one).
@@ -223,14 +230,16 @@ export function AnnouncementEditor({
             <SinglePicker
               id={id("department")}
               label={t("fields.department.label")}
-              hint={
-                restricted && values.department === "" ? tc("targeting.restrictedHint") : undefined
-              }
+              hint={picker.hint ? tc(`targeting.${picker.hint}`) : undefined}
               error={error("department")}
-              value={values.department}
+              value={picker.value}
+              placeholder={picker.placeholder ? tc("targeting.restricted") : undefined}
               options={departmentOptions}
               disabled={targetingLocked}
-              onChange={(department) => setValue("department", department)}
+              onChange={(department) => {
+                setPickedDepartment(true);
+                setValue("department", department);
+              }}
             />
           )}
           <SinglePicker

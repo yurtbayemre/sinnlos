@@ -24,6 +24,7 @@ export function SinglePicker({
   options,
   disabled = false,
   className,
+  placeholder,
   onChange,
 }: {
   id: string;
@@ -35,6 +36,8 @@ export function SinglePicker({
   options: SelectMenuOption[];
   disabled?: boolean;
   className?: string;
+  /** The trigger's text while `value` is none of the options (SelectMenu). */
+  placeholder?: string;
   onChange: (value: string) => void;
 }) {
   const labelId = `${id}-label`;
@@ -55,6 +58,7 @@ export function SinglePicker({
           ariaLabel={label}
           disabled={disabled}
           ariaDescribedBy={describedBy}
+          placeholder={placeholder}
           buttonClassName={cn("w-full sm:w-80", error && "border-destructive")}
           panelClassName="max-w-[calc(100vw-1.5rem)]"
         />
