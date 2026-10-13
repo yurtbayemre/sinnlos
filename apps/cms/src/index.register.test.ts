@@ -318,7 +318,7 @@ describe("relation side-channel guard registration (FX05)", () => {
   });
 
   describe("grants inside populate (batch 15.2)", () => {
-    /** A filter through department, and one through author.role, nested in a populate. */
+    /** A filter through department, and a sort through author.role, nested in a populate. */
     const throughDepartment = () => ({
       populate: { children: { filters: { department: { name: { $eq: "Eng" } } } } },
     });
@@ -332,13 +332,14 @@ describe("relation side-channel guard registration (FX05)", () => {
       async (role) => {
         const { strapi } = host(role);
         registerRestrictedRelationGuard(strapi);
+        const readsOnly = authWith(...READS);
         const without = strapi.contentAPI.sanitize.query(throughDepartment(), wikiPage, {
-          auth: authWith(...READS),
+          auth: readsOnly,
         });
         await expect(without).rejects.toBeInstanceOf(errors.ValidationError);
         await expect(without).rejects.toThrow("Invalid key department at children.department");
         await expect(
-          strapi.contentAPI.sanitize.query(throughRole(), wikiPage, { auth: authWith(...READS) }),
+          strapi.contentAPI.sanitize.query(throughRole(), wikiPage, { auth: readsOnly }),
         ).rejects.toThrow("Invalid key role at children.author.role");
 
         const granted = authWith(...READS, `${DEPARTMENT}.find`, `${ROLE}.find`);

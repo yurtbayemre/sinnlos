@@ -260,14 +260,12 @@ export async function assertPopulateQueryGrants(
   relations: readonly PopulateQueryRelation[],
   canFind: (target: string) => Promise<boolean>,
 ): Promise<void> {
-  const decisions = new Map<string, boolean>();
+  // The first refusal throws, so every target seen so far was granted.
+  const granted = new Set<string>();
   for (const { target, key, path } of relations) {
-    let allowed = decisions.get(target);
-    if (allowed === undefined) {
-      allowed = await canFind(target);
-      decisions.set(target, allowed);
-    }
-    if (!allowed) throwInvalidKey(key, path);
+    if (granted.has(target)) continue;
+    if (!(await canFind(target))) throwInvalidKey(key, path);
+    granted.add(target);
   }
 }
 
@@ -328,7 +326,7 @@ function expandWildcard(model: RelationModel | undefined, options: RestrictedRel
 // ---------------------------------------------------------------------------
 
 /** Receives the relations a populate's filters and sort follow; absent at the root. */
-type RelationVisit = ((relation: PopulateQueryRelation) => void) | undefined;
+type RelationVisit = RestrictedRelationOptions["onPopulateQueryRelation"];
 
 /**
  * Rejects `attr` under the rules, else reports it to `visit` when it is a

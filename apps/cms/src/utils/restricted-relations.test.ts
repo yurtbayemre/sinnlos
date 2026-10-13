@@ -692,19 +692,24 @@ describe("closed targets bind every caller (CLOSED_RELATION_TARGETS)", () => {
  * the grants are the matrix's own.
  */
 describe("relations followed inside populate (batch 15.2)", () => {
-  /** The relations the walk reports for `query` on `uid`, as `path → target`. */
-  function reported(
+  /** The relations the walk reports for `query` on `uid`, under `rules`. */
+  function collect(
     uid: string,
     query: Record<string, unknown>,
     rules: RestrictedRelationRules = NON_BYPASS_RELATION_TARGETS,
-  ): string[] {
+  ): PopulateQueryRelation[] {
     const relations: PopulateQueryRelation[] = [];
     guardRestrictedRelations(query, MODELS[uid], {
       getModel: OPTIONS.getModel,
       rules,
       onPopulateQueryRelation: (relation) => relations.push(relation),
     });
-    return relations.map(({ path, target }) => `${path} → ${target}`);
+    return relations;
+  }
+
+  /** The same, as `path → target`. */
+  function reported(uid: string, query: Record<string, unknown>): string[] {
+    return collect(uid, query).map(({ path, target }) => `${path} → ${target}`);
   }
 
   it("reports every relation a populate's filters follow, through $and/$or/$not and at depth", () => {
@@ -794,13 +799,7 @@ describe("relations followed inside populate (batch 15.2)", () => {
   });
 
   it("carries the key and the path the core's message names", () => {
-    const relations: PopulateQueryRelation[] = [];
-    guardRestrictedRelations(
-      { populate: { pages: { sort: "author.role.type" } } },
-      MODELS[WIKI_SPACE],
-      { ...OPTIONS, onPopulateQueryRelation: (relation) => relations.push(relation) },
-    );
-    expect(relations).toEqual([
+    expect(collect(WIKI_SPACE, { populate: { pages: { sort: "author.role.type" } } })).toEqual([
       { target: USER, key: "author", path: "pages.author" },
       { target: ROLE, key: "role", path: "pages.author.role" },
     ]);
@@ -878,14 +877,9 @@ describe("relations followed inside populate (batch 15.2)", () => {
     /** The guard for `role`: its rules, then its grants inside populate. */
     async function answer(role: string, uid: string, query: Record<string, unknown>) {
       const moderator = role === "admin_role" || role === "editor";
-      const relations: PopulateQueryRelation[] = [];
+      const rules = moderator ? CLOSED_RELATION_TARGETS : NON_BYPASS_RELATION_TARGETS;
       try {
-        guardRestrictedRelations(query, MODELS[uid], {
-          getModel: OPTIONS.getModel,
-          rules: moderator ? CLOSED_RELATION_TARGETS : NON_BYPASS_RELATION_TARGETS,
-          onPopulateQueryRelation: (found) => relations.push(found),
-        });
-        await assertPopulateQueryGrants(relations, async (target) =>
+        await assertPopulateQueryGrants(collect(uid, query, rules), async (target) =>
           Boolean(FINDS.get(role)?.has(target)),
         );
         return "ok";

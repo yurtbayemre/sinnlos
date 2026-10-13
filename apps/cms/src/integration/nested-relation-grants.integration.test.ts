@@ -61,10 +61,12 @@ const ROLE_BLIND: readonly TestRole[] = TEST_ROLES.filter((role) => role !== "ad
 const AD_READERS: readonly TestRole[] = ORG_READERS;
 
 const q = (value: string) => encodeURIComponent(value);
+/** `path` with its `{v}` replaced by `value`, encoded. */
+const withValue = (path: string, value: string) => path.replace("{v}", q(value));
 
 interface Probe {
   label: string;
-  /** `{v}` is replaced by the probed value (encoded). */
+  /** `{v}` is replaced by the probed value (withValue). */
   path: string;
   /** A value that matches the fixture; sorts have none. */
   hit?: string;
@@ -336,15 +338,13 @@ describe.each(testEngines())("relations in populate filters and sort need find o
     [["admin_role"], ADMIN_PROBES],
   ];
 
-  const at = (probe: Probe, value: string) => probe.path.replace("{v}", q(value));
-
   it("answers 400 for every relation a role may not find, whatever the value", async () => {
     let checked = 0;
     for (const [roles, probes] of DENIED) {
       for (const probe of probes) {
         for (const role of roles) {
-          const hit = await t.api(role, at(probe, probe.hit ?? ""));
-          const miss = await t.api(role, at(probe, NO_MATCH));
+          const hit = await t.api(role, withValue(probe.path, probe.hit ?? ""));
+          const miss = await t.api(role, withValue(probe.path, NO_MATCH));
           const { label } = probe;
           expect({ label, role, status: hit.status }).toEqual({ label, role, status: 400 });
           expect({
@@ -368,7 +368,7 @@ describe.each(testEngines())("relations in populate filters and sort need find o
   it("anonymous callers reach no root: 403 for every probe", async () => {
     for (const [, probes] of DENIED) {
       for (const probe of probes) {
-        const res = await t.api(null, at(probe, probe.hit ?? ""));
+        const res = await t.api(null, withValue(probe.path, probe.hit ?? ""));
         expect({ label: probe.label, status: res.status }).toEqual({
           label: probe.label,
           status: 403,
@@ -406,8 +406,8 @@ describe.each(testEngines())("relations in populate filters and sort need find o
       ],
     ];
     for (const [role, path, hitValue, marker] of controls) {
-      const hit = await t.api(role, path.replace("{v}", q(hitValue)));
-      const miss = await t.api(role, path.replace("{v}", NO_MATCH));
+      const hit = await t.api(role, withValue(path, hitValue));
+      const miss = await t.api(role, withValue(path, NO_MATCH));
       expect({ path, role, status: hit.status }).toEqual({ path, role, status: 200 });
       expect({
         path,
@@ -579,8 +579,8 @@ describe.each(testEngines())("relations in populate filters and sort need find o
           ["parent", `/api/comments?populate[author][filters][id][$gt]=0&sort[0]=parent.body:desc`],
         ];
         for (const [key, path] of probes) {
-          const hit = await t.api(role, path.replace("{v}", SECRET));
-          const miss = await t.api(role, path.replace("{v}", NO_MATCH));
+          const hit = await t.api(role, withValue(path, SECRET));
+          const miss = await t.api(role, withValue(path, NO_MATCH));
           expect({ role, path, status: hit.status }).toEqual({ role, path, status: 400 });
           expect({ role, path, blind: hit.text === miss.text }).toEqual({
             role,
@@ -611,8 +611,8 @@ describe.each(testEngines())("relations in populate filters and sort need find o
     it("department.pages and team.pages inside a populate: 400 below the bypass (FX05)", async () => {
       const path = `/api/teams?populate[department][filters][pages][title][$startsWith]={v}`;
       for (const role of ORG_READERS) {
-        const hit = await t.api(role, path.replace("{v}", SECRET));
-        const miss = await t.api(role, path.replace("{v}", NO_MATCH));
+        const hit = await t.api(role, withValue(path, SECRET));
+        const miss = await t.api(role, withValue(path, NO_MATCH));
         const moderator = MODERATOR_ROLES.includes(role);
         expect({ role, status: hit.status }).toEqual({ role, status: moderator ? 200 : 400 });
         if (!moderator) {
@@ -629,7 +629,7 @@ describe.each(testEngines())("relations in populate filters and sort need find o
     });
 
     it("the wiki domain's own relations stay inside what the root shows", async () => {
-      for (const role of TEST_ROLES.filter((r) => !MODERATOR_ROLES.includes(r))) {
+      for (const role of BELOW_BYPASS) {
         const res = await t.api<{ data: { slug: string }[] }>(
           role,
           `/api/wiki-spaces?populate[pages][filters][title][$startsWith]=${SECRET}` +
@@ -637,12 +637,8 @@ describe.each(testEngines())("relations in populate filters and sort need find o
         );
         expect({ role, status: res.status }).toEqual({ role, status: 200 });
         expect({ role, leaks: res.text.includes(SECRET) }).toEqual({ role, leaks: false });
-        expect({ role, hidden: res.body.data.some((row) => row.slug === "it-nrg-hidden") }).toEqual(
-          {
-            role,
-            hidden: false,
-          },
-        );
+        const hidden = res.body.data.some((row) => row.slug === "it-nrg-hidden");
+        expect({ role, hidden }).toEqual({ role, hidden: false });
       }
       // Control: the moderators see the hidden space's page through it.
       const editor = await t.api(
