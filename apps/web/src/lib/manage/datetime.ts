@@ -48,8 +48,8 @@ export function wallTimeInstant(
   timeZone: string,
   { fallbackDate }: { fallbackDate?: string } = {},
 ): Converted<string | null> {
-  const day = date.trim() || (time.trim() ? (fallbackDate?.trim() ?? "") : "");
   const clock = time.trim();
+  const day = date.trim() || (clock ? (fallbackDate?.trim() ?? "") : "");
   if (day === "" && clock === "") return { value: null };
   if (day === "" || clock === "") return { code: "required" };
   if (!isPlainDate(day)) return { code: "invalidDate" };

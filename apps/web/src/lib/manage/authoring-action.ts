@@ -14,7 +14,7 @@ import { capabilitiesFor, type AuthoringVerb } from "@/lib/roles";
 import { getViewer, type Viewer } from "@/lib/viewer";
 import { areaAccess, canDo, lacksDepartment, type AreaAccess } from "./access";
 import { AREA_TYPE, type ManageArea } from "./areas";
-import type { BuiltPayload, PayloadContext } from "./payload";
+import type { PayloadContext } from "./payload";
 
 /**
  * The shared steps of every /manage Server Action (deep-dive decision 06
@@ -92,11 +92,6 @@ export function payloadContext(
         : null,
     retarget,
   };
-}
-
-/** A local refusal of a built payload (field → code), or null. */
-export function payloadFailure(built: BuiltPayload): AuthoringActionResult | null {
-  return built.ok ? null : actionFailure("invalid", { fields: built.fields });
 }
 
 /** Whether the document reference and version of a mutation are well-formed. */

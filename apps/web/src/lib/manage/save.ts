@@ -6,7 +6,6 @@ import {
   authoringWrite,
   isWriteStatus,
   payloadContext,
-  payloadFailure,
   saveVerbs,
   validReference,
   type AuthoringActionResult,
@@ -88,8 +87,7 @@ export async function saveItem<V extends object>(
   const ctx = payloadContext(gate.context, mode, input.retarget === true);
 
   const built = spec.build(values, initial, ctx);
-  const refused = payloadFailure(built);
-  if (refused || !built.ok) return refused ?? actionFailure("invalid");
+  if (!built.ok) return actionFailure("invalid", { fields: built.fields });
   let data = built.data;
 
   if (schedules) {
@@ -99,8 +97,7 @@ export async function saveItem<V extends object>(
       ctx,
       { expiresAt: spec.expiresAt?.(values, ctx) ?? null },
     );
-    const scheduleRefused = payloadFailure(schedule);
-    if (scheduleRefused || !schedule.ok) return scheduleRefused ?? actionFailure("invalid");
+    if (!schedule.ok) return actionFailure("invalid", { fields: schedule.fields });
     data = { ...data, ...schedule.data };
   }
 

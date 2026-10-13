@@ -28,10 +28,7 @@ import { coercePollValues } from "./values";
 export async function savePoll(
   input: SaveInput & { hasVotes?: unknown },
 ): Promise<AuthoringActionResult> {
-  const hasVotes =
-    typeof input === "object" &&
-    input !== null &&
-    (input as { hasVotes?: unknown }).hasVotes === true;
+  const hasVotes = typeof input === "object" && input !== null && input.hasVotes === true;
   return saveItem("polls", input, {
     coerce: coercePollValues,
     build: (values, initial, ctx) => buildPollPayload(values, initial, { ...ctx, hasVotes }),
