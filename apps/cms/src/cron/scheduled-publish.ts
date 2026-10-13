@@ -1,4 +1,10 @@
-import { SCHEDULED_UIDS, isUnpublishScheduledUid } from "../utils/authoring-uids";
+import {
+  COURSE_UID,
+  LESSON_UID,
+  SCHEDULED_UIDS,
+  WIKI_PAGE_UID,
+  isUnpublishScheduledUid,
+} from "../utils/authoring-uids";
 import { recordAuditEvent, type AuditHost } from "../utils/audit";
 import {
   advanceRevision,
@@ -7,10 +13,12 @@ import {
   runInAuthoringScope,
   type DocumentLockHost,
 } from "../utils/document-lock";
+import { NotPublishableError } from "../utils/publish-readiness";
 import {
   SCHEDULE_BATCH,
   TransientAttempts,
   classifyScheduleFailure,
+  describeFailure,
   instantOf,
   windowExpired,
   type ScheduleErrorCode,
@@ -48,7 +56,12 @@ import {
  * only clears the field (advance + audit `scheduleUnpublish`, "nothing was
  * published"), and only when no publish is pending; a pending publish
  * keeps `unpublishAt`, so the publish pass sees the ended window (rule 4).
- * An unpublish also cancels a pending publish (schedule-clear).
+ * Such waiting drafts are passed over when the selection is read, so they
+ * never fill the batch in front of due withdrawals. An unpublish also
+ * cancels a pending publish (schedule-clear), and so does a withdrawal
+ * that failed for good. The publish pass never publishes a published
+ * document whose withdrawal is due: that is the unpublish pass's, also
+ * while it is being retried.
  *
  * EXPIRED WINDOW (rule 5): a due publish whose announcement `expiresAt` or
  * document/quick-link `unpublishAt` already passed is not published: the
@@ -64,11 +77,16 @@ import {
  *     sets `scheduleError` and clears the schedule field raw, advances the
  *     revision and writes `scheduleFailed`;
  *   - transient (lock or serialisation failures, a lost connection,
- *     SQLITE_BUSY, anything unknown): the schedule stays and the next
- *     minute retries; the SCHEDULE_TRANSIENT_ATTEMPTS-th failure for the
- *     same (uid, documentId, r) in this process is recorded as
- *     `retryExhausted`. A restart forgets the count (only adds retries).
+ *     SQLITE_BUSY, anything unknown), and a readiness refusal whose course
+ *     or parent is itself due this minute (a child page sorted before its
+ *     parent): the schedule stays and the next minute retries; the
+ *     SCHEDULE_TRANSIENT_ATTEMPTS-th failure for the same (uid, documentId,
+ *     r, pass) in this process is recorded as `retryExhausted`. A restart
+ *     forgets the count (only adds retries).
  * Each recorded failure logs `[scheduler] <uid> <documentId> failed: <code>`.
+ * Details (in the audit row and the logs) name the error class, a driver
+ * code and field names, never an error message: a database error's message
+ * carries the SQL's values (utils/schedule.ts describeFailure).
  *
  * NOTIFICATIONS run after the commit through the unchanged lifecycles
  * (rule 8); the dedup is per recipient. Two cms processes publishing the
@@ -131,20 +149,68 @@ const label = (uid: string, documentId: string) => `${uid} ${documentId}`;
 const isDocumentId = (value: unknown): value is string =>
   typeof value === "string" && value.length > 0;
 
-/** The due draft rows of one pass, ordered and bounded (rule 4). */
-async function dueDrafts(
+/** Rows per page of the unpublish selection, and pages per run. */
+const UNPUBLISH_PAGE = 200;
+const UNPUBLISH_MAX_PAGES = 10;
+
+/** The due publishes: draft rows with publishAt passed, ordered and bounded (rule 4). */
+async function duePublishes(
   strapi: ScheduledPublishStrapi,
   uid: string,
-  field: "publishAt" | "unpublishAt",
   now: Date,
 ): Promise<string[]> {
   const rows = await strapi.db.query(uid).findMany({
-    where: { publishedAt: null, [field]: { $notNull: true, $lte: now } },
-    select: ["id", "documentId", field],
-    orderBy: [{ [field]: "asc" }, { id: "asc" }],
+    where: { publishedAt: null, publishAt: { $notNull: true, $lte: now } },
+    select: ["id", "documentId", "publishAt"],
+    orderBy: [{ publishAt: "asc" }, { id: "asc" }],
     limit: SCHEDULE_BATCH,
   });
   return rows.map((row) => row.documentId).filter(isDocumentId);
+}
+
+/**
+ * The due unpublishes (rule 4): draft rows with unpublishAt passed whose
+ * document is published, or that have no pending publish (the claim then
+ * only clears the field). A draft with a pending publish and no published
+ * row is the publish pass's (its window ended), so it is passed over here
+ * and never fills the page: up to UNPUBLISH_MAX_PAGES pages are read until
+ * SCHEDULE_BATCH actionable documents are found.
+ */
+async function dueUnpublishes(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  now: Date,
+): Promise<string[]> {
+  const query = strapi.db.query(uid);
+  const actionable: string[] = [];
+  for (let page = 0; page < UNPUBLISH_MAX_PAGES && actionable.length < SCHEDULE_BATCH; page += 1) {
+    const rows = await query.findMany({
+      where: { publishedAt: null, unpublishAt: { $notNull: true, $lte: now } },
+      select: ["id", "documentId", "unpublishAt", "publishAt"],
+      orderBy: [{ unpublishAt: "asc" }, { id: "asc" }],
+      offset: page * UNPUBLISH_PAGE,
+      limit: UNPUBLISH_PAGE,
+    });
+    const documentIds = rows.map((row) => row.documentId).filter(isDocumentId);
+    const published = new Set(
+      documentIds.length === 0
+        ? []
+        : (
+            await query.findMany({
+              where: { documentId: { $in: documentIds }, publishedAt: { $notNull: true } },
+              select: ["documentId"],
+            })
+          ).map((row) => row.documentId),
+    );
+    for (const row of rows) {
+      if (!isDocumentId(row.documentId)) continue;
+      const pendingPublish = row.publishAt !== null && row.publishAt !== undefined;
+      if (published.has(row.documentId) || !pendingPublish) actionable.push(row.documentId);
+      if (actionable.length >= SCHEDULE_BATCH) break;
+    }
+    if (rows.length < UNPUBLISH_PAGE) break;
+  }
+  return actionable;
 }
 
 const draftOf = (strapi: ScheduledPublishStrapi, uid: string, documentId: string) =>
@@ -228,6 +294,15 @@ async function publishOne(
     if ((await lockDocument(strapi, uid, documentId)) !== r) return "skipped";
     const draft = await draftOf(strapi, uid, documentId);
     if (!draft || !isDue(draft.publishAt, now)) return "skipped";
+    if (isUnpublishScheduledUid(uid) && isDue(draft.unpublishAt, now)) {
+      const published = await strapi.db.query(uid).count({
+        where: { documentId, publishedAt: { $notNull: true } },
+      });
+      // A published document whose withdrawal is due: the unpublish pass
+      // withdraws it (and that cancels this pending publish, rule 6); never
+      // publish over it, never drop the withdrawal here.
+      if (published > 0) return "skipped";
+    }
     if (windowExpired(uid, draft, now)) {
       await strapi.db.query(uid).updateMany({
         where: { documentId, publishedAt: null },
@@ -269,9 +344,12 @@ export async function recordScheduleFailure(
     if ((await lockDocument(strapi, uid, documentId)) !== r) return false;
     await strapi.db.query(uid).updateMany({
       where: { documentId, publishedAt: null },
+      // A failed withdrawal also cancels a pending publish (rule 6): an
+      // update must not be published over a withdrawal that did not happen.
       data: {
         scheduleError: code,
-        ...(pass === "publish" ? { publishAt: null } : { unpublishAt: null }),
+        publishAt: null,
+        ...(pass === "unpublish" ? { unpublishAt: null } : {}),
       },
     });
     const revision = await advanceRevision(strapi, uid, documentId);
@@ -279,6 +357,41 @@ export async function recordScheduleFailure(
     await auditScheduleFailed(strapi, uid, documentId, revision, `${prefix}${code}: ${detail}`);
     return true;
   });
+}
+
+/** The readiness targets of a type (lesson → course, wiki page → parent page). */
+const READINESS_TARGETS: Readonly<Record<string, { key: string; target: string }>> = {
+  [LESSON_UID]: { key: "course", target: COURSE_UID },
+  [WIKI_PAGE_UID]: { key: "parent", target: WIKI_PAGE_UID },
+};
+
+/**
+ * Whether a readiness refusal names a target that is itself due in this
+ * minute (a child page sorted before its parent, a lesson beyond the
+ * course's batch): then it is retried like a transient failure instead of
+ * dropping the schedule.
+ */
+async function blockedByDueTarget(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  documentId: string,
+  error: unknown,
+  now: Date,
+): Promise<boolean> {
+  const readiness = READINESS_TARGETS[uid];
+  if (!readiness || !(error instanceof NotPublishableError)) return false;
+  if (!error.keys.includes(readiness.key)) return false;
+  const draft = await strapi.db.query(uid).findOne({
+    where: { documentId, publishedAt: null },
+    populate: { [readiness.key]: { select: ["documentId"] } },
+  });
+  const linked = draft?.[readiness.key] as { documentId?: unknown } | null | undefined;
+  if (!linked || !isDocumentId(linked.documentId)) return false;
+  const target = await strapi.db.query(readiness.target).findOne({
+    where: { documentId: linked.documentId, publishedAt: null },
+    select: ["id", "publishAt"],
+  });
+  return target !== null && isDue(target.publishAt, now);
 }
 
 /**
@@ -303,24 +416,27 @@ export async function runScheduledDocument(
         ? await publishOne(strapi, uid, documentId, r, now)
         : await unpublishOne(strapi, uid, documentId, r, now);
     result[outcome].push(key);
-    if (outcome !== "skipped") attempts.clear(uid, documentId, r);
+    if (outcome !== "skipped") attempts.clear(uid, documentId, r, pass);
     return;
   } catch (error) {
     const failure = classifyScheduleFailure(error);
+    const retry =
+      failure.kind === "transient" ||
+      (pass === "publish" && (await blockedByDueTarget(strapi, uid, documentId, error, now)));
     let code: ScheduleErrorCode;
-    if (failure.kind === "transient") {
-      if (!attempts.fail(uid, documentId, r)) {
+    if (retry) {
+      if (!attempts.fail(uid, documentId, r, pass)) {
         strapi.log.warn(`${SCHEDULER_LOG} ${key} ${pass} will be retried: ${failure.detail}`);
         result.retrying.push(key);
         return;
       }
       code = "retryExhausted";
     } else {
-      code = failure.code;
+      code = failure.kind === "permanent" ? failure.code : "retryExhausted";
     }
     try {
       if (await recordScheduleFailure(strapi, uid, documentId, r, pass, code, failure.detail)) {
-        attempts.clear(uid, documentId, r);
+        attempts.clear(uid, documentId, r, pass);
         strapi.log.error(`${SCHEDULER_LOG} ${key} failed: ${code}`);
         result.failed.push(key);
       } else {
@@ -330,7 +446,7 @@ export async function runScheduledDocument(
       // The next run retries the document (its schedule is untouched).
       strapi.log.error(
         `${SCHEDULER_LOG} ${key} failed: ${code}, and recording it failed too: ` +
-          (recordError instanceof Error ? recordError.message : String(recordError)),
+          describeFailure(recordError),
       );
       result.retrying.push(key);
     }
@@ -350,7 +466,7 @@ export async function runScheduledPublishing(
   await runInAuthoringScope({ source: "cron" }, async () => {
     for (const uid of SCHEDULED_UIDS) {
       if (isUnpublishScheduledUid(uid)) {
-        for (const documentId of await dueDrafts(strapi, uid, "unpublishAt", now)) {
+        for (const documentId of await dueUnpublishes(strapi, uid, now)) {
           const r = await readRevision(strapi, uid, documentId);
           await runScheduledDocument(
             strapi,
@@ -364,7 +480,7 @@ export async function runScheduledPublishing(
           );
         }
       }
-      for (const documentId of await dueDrafts(strapi, uid, "publishAt", now)) {
+      for (const documentId of await duePublishes(strapi, uid, now)) {
         const r = await readRevision(strapi, uid, documentId);
         await runScheduledDocument(strapi, uid, documentId, "publish", now, attempts, result, r);
       }

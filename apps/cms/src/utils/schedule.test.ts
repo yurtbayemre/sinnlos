@@ -9,6 +9,7 @@ import {
   TransientAttempts,
   classifyScheduleFailure,
   createScheduleClear,
+  describeFailure,
   instantOf,
   windowEnd,
   windowExpired,
@@ -84,7 +85,8 @@ describe("failure classification (rule 7)", () => {
     expect(classifyScheduleFailure(new errors.ApplicationError("Kurs fehlt"))).toMatchObject({
       kind: "permanent",
       code: "rejected",
-      detail: "Kurs fehlt",
+      // Never the message (a lifecycle may quote a value): the class only.
+      detail: "ApplicationError",
     });
   });
 
@@ -103,12 +105,34 @@ describe("failure classification (rule 7)", () => {
       expect(classifyScheduleFailure(coded(code)), code).toMatchObject({ kind: "transient" });
     }
     expect(classifyScheduleFailure(new TypeError("boom"))).toMatchObject({ kind: "transient" });
-    expect(classifyScheduleFailure("a string")).toEqual({ kind: "transient", detail: "a string" });
+    expect(classifyScheduleFailure("a string")).toEqual({ kind: "transient", detail: "string" });
   });
 
-  it("keeps the detail short (it goes into the audit row)", () => {
-    const failure = classifyScheduleFailure(new errors.ValidationError("x".repeat(500)));
-    expect(failure.detail.length).toBe(200);
+  it("names no content in the detail: class, driver code and field names only", () => {
+    // knex builds a database error's message from the SQL with its bound values.
+    const leaky = Object.assign(
+      new Error(
+        `insert into "announcements" ("title","body") values ('Secret title', 'Secret body') - value too long`,
+      ),
+      { code: "22001" },
+    );
+    expect(classifyScheduleFailure(leaky)).toEqual({ kind: "transient", detail: "Error 22001" });
+    expect(describeFailure(leaky)).not.toMatch(/Secret/);
+    const yup = new errors.ValidationError(
+      'title must be a `string` type, but the final value was: `"Secret"`',
+      {
+        errors: [{ path: ["title"], message: "Secret" }],
+      },
+    );
+    expect(classifyScheduleFailure(yup)).toEqual({
+      kind: "permanent",
+      code: "invalid",
+      detail: "ValidationError: title",
+    });
+    expect(classifyScheduleFailure(new NotPublishableError(["course", "title"])).detail).toBe(
+      "keys: course, title",
+    );
+    expect(describeFailure("a string with Secret")).toBe("string");
   });
 });
 
@@ -123,6 +147,13 @@ describe("transient attempts (rule 7)", () => {
     expect(attempts.fail(ANNOUNCEMENT, "a", 4)).toBe(true);
     attempts.clear(ANNOUNCEMENT, "a", 4);
     expect(attempts.fail(ANNOUNCEMENT, "a", 4)).toBe(false);
+  });
+
+  it("counts the publish and the unpublish pass apart", () => {
+    const attempts = new TransientAttempts(2);
+    expect(attempts.fail(DOCUMENT, "d", 1, "unpublish")).toBe(false);
+    expect(attempts.fail(DOCUMENT, "d", 1, "publish")).toBe(false);
+    expect(attempts.fail(DOCUMENT, "d", 1, "unpublish")).toBe(true);
   });
 
   it("stays bounded in memory", () => {

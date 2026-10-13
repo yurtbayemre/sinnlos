@@ -483,13 +483,26 @@ export type DocumentLockMiddlewareHost = DocumentLockHost;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Tokens without a named document are a wiring bug: refuse rather than compare nothing. */
+/**
+ * Wiring bugs are refused rather than compared loosely:
+ *   - tokens without a named document;
+ *   - an observedRevision without the classifier (a mismatch would answer
+ *     412 with the revision to a caller who may have lost the class), or a
+ *     classifier without the observedRevision (a predicted If-Match would
+ *     ride on the gate's older decision: amendment row A2). The gate puts
+ *     both into the scope or neither (a route without a gate, like delete).
+ */
 function assertScope(scope: AuthoringScope | undefined): void {
   if (!scope) return;
   const hasToken = scope.expectedRevision !== undefined || scope.observedRevision !== undefined;
   if (hasToken && (typeof scope.uid !== "string" || !isDocumentId(scope.documentId))) {
     throw new Error(
       `${DOCUMENT_LOCK_LOG} an authoring scope with a revision must name its document (uid and documentId)`,
+    );
+  }
+  if ((scope.observedRevision !== undefined) !== (scope.classify !== undefined)) {
+    throw new Error(
+      `${DOCUMENT_LOCK_LOG} an authoring scope carries observedRevision and classify together or neither`,
     );
   }
 }

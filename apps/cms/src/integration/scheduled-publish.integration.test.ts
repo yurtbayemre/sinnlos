@@ -376,7 +376,10 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     });
   });
 
-  it("a stale failure records nothing: a save after the selection supersedes the run", async () => {
+  // The failure record's own generation check (a failed attempt superseded
+  // by a newer revision records nothing) is pinned in
+  // cron/scheduled-publish.test.ts (recordScheduleFailure with a stale r).
+  it("the generation check: a save between the selection and the run supersedes the run", async () => {
     const documentId = await scheduledAnnouncement("", { publishAt: ago() });
     const lock = t.requireBuilt<{
       readRevision(s: unknown, u: string, d: string): Promise<number>;

@@ -295,6 +295,7 @@ describe("the middleware: the authoring scope (§G step 3, amendment row A2)", (
       documentId,
       expectedRevision: 2,
       observedRevision: 2,
+      classify: async () => "moderator",
       roleClass: "moderator",
     };
     await scoped(scope, async () => {
@@ -400,6 +401,22 @@ describe("the middleware: the authoring scope (§G step 3, amendment row A2)", (
     await expect(
       scoped({ expectedRevision: 2 }, () => docs.update({ documentId, data: { title: "x" } })),
     ).rejects.toThrow(/must name its document/);
+  });
+
+  it("observedRevision and classify come together or not at all (a half-wired gate is refused)", async () => {
+    const { docs, documentId } = await seeded();
+    const base = { uid: ANNOUNCEMENT, documentId, expectedRevision: 2 };
+    await expect(
+      scoped({ ...base, observedRevision: 1 }, () =>
+        docs.update({ documentId, data: { title: "x" } }),
+      ),
+    ).rejects.toThrow(/observedRevision and classify together or neither/);
+    await expect(
+      scoped({ ...base, classify: async () => "moderator" }, () =>
+        docs.update({ documentId, data: { title: "x" } }),
+      ),
+    ).rejects.toThrow(/observedRevision and classify together or neither/);
+    expect((await docs.findOne({ documentId }))?.title).toBe("v2");
   });
 
   it("without a scope (admin panel, scheduler, generic routes) nothing is compared", async () => {

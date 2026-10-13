@@ -122,32 +122,69 @@ const TRANSIENT_CODES: ReadonlySet<string> = new Set([
   "SQLITE_LOCKED",
 ]);
 
-const messageOf = (error: unknown): string =>
-  error instanceof Error ? error.message : String(error);
+const nameOf = (error: unknown): string =>
+  error instanceof Error && error.name ? error.name : typeof error;
+
+const codeOf = (error: unknown): string =>
+  isRecord(error) && typeof error.code === "string" ? error.code : "";
+
+/** The field paths a Strapi ValidationError names (yup `details.errors`, or `details.keys`). */
+function validationPaths(error: { details?: unknown }): string[] {
+  const details = isRecord(error.details) ? error.details : {};
+  const fromErrors = Array.isArray(details.errors)
+    ? details.errors
+        .map((entry) => (isRecord(entry) && Array.isArray(entry.path) ? entry.path.join(".") : ""))
+        .filter((path) => path !== "")
+    : [];
+  const fromKeys = Array.isArray(details.keys)
+    ? details.keys.filter((key): key is string => typeof key === "string")
+    : [];
+  return [...new Set([...fromErrors, ...fromKeys])].sort();
+}
+
+/**
+ * A description of a failure that names no content: the error class, a
+ * driver code (SQLSTATE) and field NAMES, never an error message. A
+ * database error's message is the SQL with its bound values (knex), and a
+ * lifecycle's message may quote a value, so neither reaches the audit row
+ * (§H: names, never values) or the log.
+ */
+export function describeFailure(error: unknown): string {
+  if (error instanceof NotPublishableError) return `keys: ${error.keys.join(", ")}`;
+  if (error instanceof errors.ValidationError) {
+    const paths = validationPaths(error);
+    return paths.length > 0 ? `${error.name}: ${paths.join(", ")}` : error.name;
+  }
+  const code = codeOf(error);
+  return code ? `${nameOf(error)} ${code}` : nameOf(error);
+}
 
 /**
  * Permanent (rule 7): the readiness refusal, a ValidationError, a
  * lifecycle ApplicationError. Transient: lock and serialisation failures,
  * lost connections, SQLITE_BUSY, a pool timeout, and anything unknown (it
- * is retried, and SCHEDULE_TRANSIENT_ATTEMPTS bounds it).
+ * is retried, and SCHEDULE_TRANSIENT_ATTEMPTS bounds it). The detail is
+ * `describeFailure`: never a message.
  */
 export function classifyScheduleFailure(error: unknown): ScheduleFailure {
-  const detail = messageOf(error).slice(0, 200);
+  const detail = describeFailure(error).slice(0, 200);
   if (error instanceof NotPublishableError) {
     return { kind: "permanent", code: "notPublishable", detail };
   }
-  if (error instanceof errors.ValidationError)
+  if (error instanceof errors.ValidationError) {
     return { kind: "permanent", code: "invalid", detail };
+  }
   if (error instanceof errors.ApplicationError) {
     return { kind: "permanent", code: "rejected", detail };
   }
-  const code = isRecord(error) && typeof error.code === "string" ? error.code : "";
-  if (TRANSIENT_CODES.has(code)) return { kind: "transient", detail: `${code} ${detail}` };
   return { kind: "transient", detail };
 }
 
+/** Whether `error` is one of the driver codes a later attempt survives (for the log). */
+export const isKnownTransient = (error: unknown): boolean => TRANSIENT_CODES.has(codeOf(error));
+
 /**
- * Transient failures per (uid, documentId, revision) in this process
+ * Transient failures per (uid, documentId, revision, pass) in this process
  * (rule 7). A restart forgets them, which only adds retries. Bounded: the
  * oldest entries go first past `limit` keys.
  */
@@ -159,13 +196,13 @@ export class TransientAttempts {
     private readonly limit = 10_000,
   ) {}
 
-  private static key(uid: string, documentId: string, revision: number): string {
-    return `${uid}\u0000${documentId}\u0000${revision}`;
+  private static key(uid: string, documentId: string, revision: number, pass: string): string {
+    return `${uid}\u0000${documentId}\u0000${revision}\u0000${pass}`;
   }
 
   /** Counts one more failure; true when the bound is reached (record retryExhausted). */
-  fail(uid: string, documentId: string, revision: number): boolean {
-    const key = TransientAttempts.key(uid, documentId, revision);
+  fail(uid: string, documentId: string, revision: number, pass = "publish"): boolean {
+    const key = TransientAttempts.key(uid, documentId, revision, pass);
     const count = (this.counts.get(key) ?? 0) + 1;
     this.counts.delete(key);
     this.counts.set(key, count);
@@ -178,8 +215,8 @@ export class TransientAttempts {
   }
 
   /** Forgets a document's failures at a revision (it published, or was recorded). */
-  clear(uid: string, documentId: string, revision: number): void {
-    this.counts.delete(TransientAttempts.key(uid, documentId, revision));
+  clear(uid: string, documentId: string, revision: number, pass = "publish"): void {
+    this.counts.delete(TransientAttempts.key(uid, documentId, revision, pass));
   }
 
   get size(): number {

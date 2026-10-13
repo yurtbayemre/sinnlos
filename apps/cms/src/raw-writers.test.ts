@@ -2,6 +2,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import * as authoringUids from "./utils/authoring-uids";
 import { GUARDED_UIDS } from "./utils/authoring-uids";
 
 /**
@@ -146,7 +147,55 @@ function sourceFiles(dir: string): string[] {
 
 /** Reaches the query layer: the query engine, the query builder or knex. */
 const QUERY_LAYER =
-  /db\s*\.\s*query\(|queryBuilder\(|getConnection\(|connection\.raw\(|\.connection\(/;
+  /db\s*\.\s*query\(|strapi\s*\.\s*query\(|queryBuilder\(|getConnection\(|connection\.raw\(|\.connection\(/;
+
+/** The uid constants of utils/authoring-uids.ts, by exported name. */
+const UID_CONSTANTS: ReadonlyMap<string, string> = new Map(
+  (Object.entries(authoringUids) as Array<[string, unknown]>).filter(
+    (entry): entry is [string, string] =>
+      typeof entry[1] === "string" && entry[1].startsWith("api::"),
+  ),
+);
+
+const WRITE_METHODS = "create|createMany|update|updateMany|delete|deleteMany";
+const QUERY_CALL = String.raw`(?:db\s*\.\s*query|strapi\s*\.\s*query)\(\s*([^()]+?)\s*\)`;
+
+/**
+ * The uids a module writes raw through the query engine: `db.query(<uid>)`
+ * or `strapi.query(<uid>)` followed by a write method, directly or through a
+ * `const` that holds the query. `<uid>` is a string literal, a `const` of
+ * the module, or a uid constant of utils/authoring-uids.ts.
+ */
+function rawWrittenUids(source: string): string[] {
+  const constants = new Map<string, string>(UID_CONSTANTS);
+  for (const match of source.matchAll(
+    /\bconst\s+([A-Za-z_$][\w$]*)\s*(?::[^=;]+)?=\s*["']([^"']+)["']/g,
+  )) {
+    constants.set(match[1], match[2]);
+  }
+  const resolve = (argument: string): string | null => {
+    const trimmed = argument.trim();
+    const literal = /^["']([^"']+)["']$/.exec(trimmed);
+    if (literal) return literal[1];
+    return constants.get(trimmed) ?? null;
+  };
+  const written = new Set<string>();
+  const direct = new RegExp(String.raw`${QUERY_CALL}\s*\.\s*(?:${WRITE_METHODS})\(`, "g");
+  for (const match of source.matchAll(direct)) {
+    const uid = resolve(match[1]);
+    if (uid) written.add(uid);
+  }
+  const held = new RegExp(
+    String.raw`\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:[A-Za-z_$][\w$]*\s*\.\s*)*${QUERY_CALL}`,
+    "g",
+  );
+  for (const match of source.matchAll(held)) {
+    const uid = resolve(match[2]);
+    const writes = new RegExp(String.raw`\b${match[1]}\s*\.\s*(?:${WRITE_METHODS})\(`);
+    if (uid && writes.test(source)) written.add(uid);
+  }
+  return [...written].sort();
+}
 
 /** A write call of the query engine or knex (also caught in comments: listed, reviewed). */
 const WRITE_CALL =
@@ -195,15 +244,27 @@ describe("raw writers (inventory, decision 06 §G Rule)", () => {
     }
   });
 
-  it("a module listed as writing other types names no guarded uid in a raw write", () => {
+  it("finds raw writes through literals and constants (the check below is not vacuous)", () => {
+    expect(
+      rawWrittenUids(readFileSync(join(SRC, "seed-demo.ts"), "utf8")).filter((uid) =>
+        GUARDED_UIDS.includes(uid),
+      ),
+    ).toEqual(["api::department.department", "api::team.team"]);
+    expect(
+      rawWrittenUids(
+        'const T = "api::team.team";\nconst q = strapi.db.query(T);\nawait q.updateMany({});\n' +
+          "await strapi.query(ANNOUNCEMENT_UID).delete({});",
+      ),
+    ).toEqual(["api::announcement.announcement", "api::team.team"]);
+  });
+
+  it("a module listed as writing other types writes no guarded uid raw", () => {
     for (const file of Object.keys(OTHER_RAW_WRITERS)) {
-      const source = readFileSync(join(SRC, file), "utf8");
-      for (const uid of GUARDED_UIDS) {
-        const rawWrite = new RegExp(
-          `db\\s*\\.\\s*query\\(\\s*["']${uid.replace(/[.:-]/g, (c) => `\\${c}`)}["']\\s*\\)\\s*\\.\\s*(create|update|updateMany|delete|deleteMany)\\(`,
-        );
-        expect(rawWrite.test(source), `${file} writes ${uid} raw`).toBe(false);
-      }
+      const written = rawWrittenUids(readFileSync(join(SRC, file), "utf8"));
+      expect(
+        written.filter((uid) => GUARDED_UIDS.includes(uid)),
+        `${file} writes a guarded type raw: list it with its §G rule`,
+      ).toEqual([]);
     }
   });
 });
