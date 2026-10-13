@@ -540,8 +540,9 @@ export async function seedDemoData(strapi: SeedDemoHost) {
     },
   ];
 
-  // Creates only (no page update), so the revision snapshot
-  // (wiki-page/lifecycles.ts beforeUpdate) stays out of the seed, as before.
+  // Creates only (no page update): each page's history starts with the
+  // after-image of its draft create (wiki-page/lifecycles.ts afterCreate,
+  // batch 16), unattributed; the publish records nothing.
   for (const p of wikiPages) {
     await createPublished(strapi, WIKI_PAGE_UID, p);
   }
