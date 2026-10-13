@@ -9,8 +9,8 @@
  * (api/wiki-page/content-types/wiki-page/lifecycles.ts), reads the store
  * through `wikiEditContext.getStore()`:
  *   - `editorId`: the users-permissions user who saves (the history's
- *     editor); panel saves carry none and are attributed through the
- *     admin user in `data.updatedBy` instead;
+ *     editor); panel saves carry none and are attributed to the admin user
+ *     of the request instead (`adminEditorId`, never `data.updatedBy`);
  *   - `revisionSummary`: the optional edit note, stored as the revision's
  *     `summary` (the API calls it `changeSummary`);
  *   - `restoredFrom`: the id of the revision a restore brings back. A save

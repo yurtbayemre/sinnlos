@@ -75,6 +75,8 @@ const isRecord = (value: unknown): value is Row =>
 
 const plain = (value: unknown): string => (typeof value === "string" ? value : "");
 
+const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
 /** A page row's content; a revision's (`pageSummary`) with `fromRevision`. */
 const contentOf = (row: Row, fromRevision = false): Content => ({
   title: plain(row.title),
@@ -115,7 +117,6 @@ async function record(row: Row, restoredFrom: number | null): Promise<void> {
   const editorId =
     positiveId(context?.editorId) ?? (actor.actorKind === "user" ? actor.actorUserId : null);
   const adminEditorId = actor.actorKind === "admin" ? actor.actorAdminId : null;
-  const text = (value: unknown) => (typeof value === "string" ? value : null);
   await strapi.db.query(WIKI_REVISION_UID).create({
     data: {
       page: row.id,
@@ -133,7 +134,21 @@ async function record(row: Row, restoredFrom: number | null): Promise<void> {
   });
 }
 
-const restoredFromOf = (): number | null => positiveId(wikiEditContext.getStore()?.restoredFrom);
+/**
+ * Records the after-image of the draft row `result` names, unless the save
+ * is no restore and the row's content equals `stored` (the row before an
+ * update) or, without it, the page's latest snapshot.
+ */
+async function recordAfterImage(result: unknown, stored: Content | undefined): Promise<void> {
+  const row = await reread(result);
+  if (!row || !isDraft(row)) return;
+  const restoredFrom = positiveId(wikiEditContext.getStore()?.restoredFrom);
+  if (restoredFrom === null) {
+    const before = stored ?? (await latestSnapshot(row.documentId as string));
+    if (before && sameContent(before, contentOf(row))) return;
+  }
+  await record(row, restoredFrom);
+}
 
 export default {
   async beforeUpdate(event: LifecycleEvent) {
@@ -144,25 +159,10 @@ export default {
   },
 
   async afterUpdate(event: LifecycleEvent) {
-    const row = await reread(event.result);
-    if (!row || !isDraft(row)) return;
-    const restoredFrom = restoredFromOf();
-    if (restoredFrom === null) {
-      const stored = event.state?.[STORED] as Content | undefined;
-      const before = stored ?? (await latestSnapshot(row.documentId as string));
-      if (before && sameContent(before, contentOf(row))) return;
-    }
-    await record(row, restoredFrom);
+    await recordAfterImage(event.result, event.state?.[STORED] as Content | undefined);
   },
 
   async afterCreate(event: LifecycleEvent) {
-    const row = await reread(event.result);
-    if (!row || !isDraft(row)) return;
-    const restoredFrom = restoredFromOf();
-    if (restoredFrom === null) {
-      const latest = await latestSnapshot(row.documentId as string);
-      if (latest && sameContent(latest, contentOf(row))) return;
-    }
-    await record(row, restoredFrom);
+    await recordAfterImage(event.result, undefined);
   },
 };

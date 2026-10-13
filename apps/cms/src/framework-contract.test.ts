@@ -1090,10 +1090,11 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
       return next();
     });
     // The rows a draft & publish OFF model wrote: published, one per document.
-    for (const [documentId, title] of [
+    const sources = [
       ["rev1", "first"],
       ["rev2", "second"],
-    ]) {
+    ] as const;
+    for (const [documentId, title] of sources) {
       await db.query(NOTE).create({ data: { documentId, title, publishedAt: new Date() } });
     }
     // A row without published_at (what the batch-16 guard refuses) is not cloned.
@@ -1111,10 +1112,7 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
       contentTypes: { [NOTE]: NOTE_TYPE },
     });
     expect(actions.sort()).toEqual(["discardDraft rev1", "discardDraft rev2"]);
-    for (const [documentId, title] of [
-      ["rev1", "first"],
-      ["rev2", "second"],
-    ]) {
+    for (const [documentId, title] of sources) {
       const rows = await rowsOf(db, NOTE, documentId);
       expect(rows.map((row) => [row.title, row.publishedAt === null])).toEqual([
         [title, false],

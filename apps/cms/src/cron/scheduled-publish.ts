@@ -493,14 +493,11 @@ async function retryWithdrawals(
       if (picked.length >= WITHDRAWAL_RETRY_QUOTA) break;
     }
     if (picked.length >= WITHDRAWAL_RETRY_QUOTA || rows.length === limit) continue;
-    // The end of the rows: wrap once to the start, or, after a full circle,
-    // start the next run at the beginning.
-    if (wrapped || start === 0) {
-      cursor = 0;
-      break;
-    }
-    wrapped = true;
+    // The end of the rows: back to the start, to wrap once now or, after a
+    // full circle, for the next run.
     cursor = 0;
+    if (wrapped || start === 0) break;
+    wrapped = true;
   }
   attempts.setWithdrawalCursor(uid, cursor);
   return picked;
@@ -508,8 +505,8 @@ async function retryWithdrawals(
 
 /**
  * The due unpublishes (rule 4; issue #73): the failing withdrawals' reserved
- * quota first, then the healthy ones in the rest of SCHEDULE_BATCH.
- * Healthy ones run first.
+ * quota is selected first, the healthy ones fill the rest of SCHEDULE_BATCH
+ * and run first.
  */
 async function dueUnpublishes(
   strapi: ScheduledPublishStrapi,

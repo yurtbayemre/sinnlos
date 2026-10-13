@@ -26,14 +26,20 @@ const TABLES: Record<string, string> = {
   "api::wiki-revision.wiki-revision": "wiki_revisions",
 };
 
+/** The wiki revision anchor index (batch 16, DA03). */
+const ANCHOR = {
+  name: "wiki_revisions_page_document_id_idx",
+  table: "wiki_revisions",
+  columns: ["page_document_id"],
+  unique: false,
+};
+
 function host(client: "postgres" | "sqlite", existing: string[] = []) {
-  const raw = vi.fn(async (sql: string) =>
-    sql.includes("pg_indexes") || sql.includes("sqlite_master")
-      ? client === "postgres"
-        ? { rows: existing.map((name) => ({ name })) }
-        : existing.map((name) => ({ name }))
-      : [],
-  );
+  const raw = vi.fn(async (sql: string) => {
+    if (!sql.includes("pg_indexes") && !sql.includes("sqlite_master")) return [];
+    const rows = existing.map((name) => ({ name }));
+    return client === "postgres" ? { rows } : rows;
+  });
   const info = vi.fn();
   const strapi: DocumentIndexHost = {
     db: {
@@ -53,12 +59,7 @@ describe("documentIndexSpecs", () => {
   it("names the version index, the schedule indexes and the wiki revision anchor", () => {
     const specs = documentIndexSpecs(host("sqlite").strapi);
     expect(specs.map((spec) => spec.name)).toContain(CONTENT_VERSION_INDEX);
-    expect(specs.find((spec) => spec.name === "wiki_revisions_page_document_id_idx")).toEqual({
-      name: "wiki_revisions_page_document_id_idx",
-      table: "wiki_revisions",
-      columns: ["page_document_id"],
-      unique: false,
-    });
+    expect(specs.find((spec) => spec.name === ANCHOR.name)).toEqual(ANCHOR);
   });
 
   it("refuses when the wiki revision model is not loaded", () => {
@@ -73,18 +74,11 @@ describe("documentIndexSpecs", () => {
 });
 
 describe("indexSql", () => {
-  const anchor = {
-    name: "wiki_revisions_page_document_id_idx",
-    table: "wiki_revisions",
-    columns: ["page_document_id"],
-    unique: false,
-  };
-
   it("is a plain IF NOT EXISTS index on both engines", () => {
-    expect(indexSql("postgres", "public", anchor)).toBe(
+    expect(indexSql("postgres", "public", ANCHOR)).toBe(
       'CREATE INDEX IF NOT EXISTS "wiki_revisions_page_document_id_idx" ON "public"."wiki_revisions" ("page_document_id")',
     );
-    expect(indexSql("sqlite", "public", anchor)).toBe(
+    expect(indexSql("sqlite", "public", ANCHOR)).toBe(
       'CREATE INDEX IF NOT EXISTS "wiki_revisions_page_document_id_idx" ON "wiki_revisions" ("page_document_id")',
     );
   });
@@ -95,9 +89,9 @@ describe("ensureDocumentIndexes", () => {
     const all = documentIndexSpecs(host("postgres").strapi).map((spec) => spec.name);
     const { strapi, raw, info } = host(
       "postgres",
-      all.filter((name) => name !== "wiki_revisions_page_document_id_idx"),
+      all.filter((name) => name !== ANCHOR.name),
     );
-    expect(await ensureDocumentIndexes(strapi)).toEqual(["wiki_revisions_page_document_id_idx"]);
+    expect(await ensureDocumentIndexes(strapi)).toEqual([ANCHOR.name]);
     expect(raw).toHaveBeenLastCalledWith(
       'CREATE INDEX IF NOT EXISTS "wiki_revisions_page_document_id_idx" ON "public"."wiki_revisions" ("page_document_id")',
     );

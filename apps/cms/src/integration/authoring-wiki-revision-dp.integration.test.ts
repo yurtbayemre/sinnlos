@@ -65,7 +65,6 @@ const SQL_DIR = join(REPO_ROOT, "infra", "migrations", "wiki-revision-dp");
 const PREFLIGHT = readFileSync(join(SQL_DIR, "preflight.sql"), "utf8");
 const MIGRATE = readFileSync(join(SQL_DIR, "migrate.sql"), "utf8");
 
-/** The probe query infra/deploy.sh runs before the backup (revision_draft_rows). */
 /** One fenced SQL statement group of the README, from its `-- Choice n` comment to its COMMIT. */
 function readmeBlock(marker: string): string {
   const readme = readFileSync(join(SQL_DIR, "README.md"), "utf8").replace(/\r\n/g, "\n");
@@ -75,6 +74,7 @@ function readmeBlock(marker: string): string {
   return `${readme.slice(start, end)}\n`;
 }
 
+/** The probe query infra/deploy.sh runs before the backup (revision_draft_rows). */
 const DEPLOY_PROBE = (() => {
   const deploy = readFileSync(join(REPO_ROOT, "infra", "deploy.sh"), "utf8").replace(/\r\n/g, "\n");
   const start = deploy.indexOf("\nrevision_draft_rows() {\n");
@@ -450,7 +450,7 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
         expect(await count("WHERE kind <> 'baseline'")).toBe(before);
         expect(await count("WHERE page_document_id IS NULL")).toBe(0);
         expect(await count("WHERE kind IS NULL")).toBe(0);
-        expect(await count(`WHERE kind = 'before'`)).toBe(before);
+        expect(await count("WHERE kind = 'before'")).toBe(before);
         // One baseline per page state no after/baseline row holds: One's
         // draft and published bodies differ, Two's are equal.
         const baselines = await sql<{ page_document_id: string; body: string }>(

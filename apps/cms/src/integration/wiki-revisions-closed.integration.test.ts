@@ -17,10 +17,10 @@ import {
  * decision 06 §J3 "Generic routes", plan 16-0). The wiki-page lifecycle
  * records the page's draft after every save (before every edit up to batch
  * 15.1); whenever the draft differs from the published version that is
- * unpublished draft text, and up to
- * batch 15 every staff role and `authenticated` could read it through
- * /api/wiki-revisions, `populate=revisions` and filters through the
- * relation. Every caller is checked, admin_role and editor included:
+ * unpublished draft text, and up to batch 15 every staff role and
+ * `authenticated` could read it through /api/wiki-revisions,
+ * `populate=revisions` and filters through the relation. Every caller is
+ * checked, admin_role and editor included:
  *   - the generic routes are gone (404, or 405 where the path serves other
  *     methods), never a 401/403 that would mean "only the grant is missing";
  *   - a populate of `revisions`, in every shape and from every root that

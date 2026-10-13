@@ -141,7 +141,7 @@ describe("wiki-page after-images: what is recorded", () => {
     const strapi = setup();
     await save(strapi, { order: 3 });
     await save(strapi, { tags: ["x"], body: "Old body" });
-    await save(strapi, { summary: null }, { id: DRAFT_ID });
+    await save(strapi, { summary: null });
     expect(revisions(strapi)).toHaveLength(1);
     // Empty and missing values compare equal.
     await save(strapi, { summary: "" });

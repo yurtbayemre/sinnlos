@@ -110,13 +110,8 @@ const text = (value: unknown): string | null => (typeof value === "string" ? val
 
 /** A positive safe integer, from a number or a numeric string (a bigint column on pg). */
 export function positiveId(value: unknown): number | null {
-  const id =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && /^[1-9]\d{0,15}$/.test(value)
-        ? Number(value)
-        : Number.NaN;
-  return Number.isSafeInteger(id) && id > 0 ? id : null;
+  const id = typeof value === "string" && /^[1-9]\d{0,15}$/.test(value) ? Number(value) : value;
+  return typeof id === "number" && Number.isSafeInteger(id) && id > 0 ? id : null;
 }
 
 const isoOf = (value: unknown): string | null => {
@@ -177,17 +172,18 @@ export async function listRevisions(
 ): Promise<RevisionList> {
   const pageSize = wholeNumber(options.pageSize, REVISION_PAGE_SIZE, REVISION_MAX_PAGE_SIZE);
   const page = wholeNumber(options.page, 1, Number.MAX_SAFE_INTEGER);
+  const offset = (page - 1) * pageSize;
   const query = strapi.db.query(WIKI_REVISION_UID);
   const where = { pageDocumentId };
   const total = await query.count({ where });
   const rows =
-    total > (page - 1) * pageSize
+    total > offset
       ? await query.findMany({
           where,
           select: [...LIST_FIELDS],
           populate: EDITOR,
           orderBy: { id: "desc" },
-          offset: (page - 1) * pageSize,
+          offset,
           limit: pageSize,
         })
       : [];

@@ -90,6 +90,12 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   const boot = async (fixtures: boolean) => {
     t = await createTestStrapi({ database, env: ADMIN_ENV, fixtures });
   };
+  /** Stops the cms once its pool is idle and boots it again on the same database. */
+  const restart = async () => {
+    await untilPoolIdle(t);
+    await t.stop();
+    await boot(false);
+  };
 
   beforeAll(async () => {
     database = await createTestDatabase(engine);
@@ -322,9 +328,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   it(
     "a restart after writes: the guard passes, and no revision lacks published_at",
     async () => {
-      await untilPoolIdle(t);
-      await t.stop();
-      await boot(false);
+      await restart();
       const [row] = await database.sql<{ n: number | string }>(
         "SELECT count(*) AS n FROM wiki_revisions WHERE published_at IS NULL",
       );
@@ -362,9 +366,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
       await database.sql("UPDATE wiki_pages SET body = 'B' WHERE id = ?", [draft.id]);
 
       // The upgrade: the boot records B (the draft) and A (published, in no snapshot).
-      await untilPoolIdle(t);
-      await t.stop();
-      await boot(false);
+      await restart();
       const afterUpgrade = await revisionsOf(documentId);
       expect(afterUpgrade.map((row) => [row.kind, row.body])).toEqual([
         ["before", "A"],
@@ -388,9 +390,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
       // A rollback window on 15.1: C → D, with the before-image of C.
       await legacyBeforeImage("C");
       await database.sql("UPDATE wiki_pages SET body = 'D' WHERE id = ?", [draft.id]);
-      await untilPoolIdle(t);
-      await t.stop();
-      await boot(false);
+      await restart();
       // Back on batch 16: D is recorded, and a save back to C (which an older
       // snapshot holds) is recorded too, because it changes the stored row.
       await docs(PAGE).update({ documentId, data: { body: "C" } });
