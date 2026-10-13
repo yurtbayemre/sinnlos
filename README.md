@@ -67,6 +67,12 @@ Further reading:
   comprehension quizzes with an optional completion gate, and a per-user
   completion report.
 - **Notifications** and opt-in **e-mail digests** (daily or weekly).
+- **Authoring in the web** at `/manage`: editors and admins write
+  announcements, events, polls and quick links with drafts, a preview,
+  scheduled publishing and a check for concurrent changes; department heads
+  write announcements and events for their own department. Every change
+  advances a per-document revision and lands in an append-only activity
+  trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
 
 ### Repository layout

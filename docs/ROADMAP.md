@@ -53,6 +53,23 @@ Workvivo, Sociabble, Simpplr, MangoApps feature guides, June 2026).
 > extension and the group-name role map are deleted; `GroupMember.Read.All`
 > is no longer needed (GitHub issue #20). The test against a real tenant
 > waits for the owner.
+>
+> **Status update (2026-10-13, batch 15, not deployed yet):** v2 frontend
+> authoring, phase 1 (D-V2-AUTHORING). Editors and admins write
+> announcements, events, polls and quick links in the web at `/manage`;
+> department heads write announcements and events for their own
+> department. Scheduled publishing (Publish at, and Unpublish at on quick
+> links and documents) runs on Strapi CE through a task every minute. Every
+> change advances a per-document revision (web saves send `If-Match`) and
+> writes an append-only activity trail, which the `audit-janitor` trims
+> after 365 days at 03:50 (LF07). Datetimes without an offset answer 400 in
+> every writer (DT-OFFSETLESS). Announcement targeting fails closed: an
+> audience of "departments" without a department or team, or a deleted
+> department or team, restricts an announcement to admins and editors
+> (D-PT01). The FX07 field allowlists now check admin and editor payloads
+> too: the bypass ends on announcements, events, quick links, documents and
+> polls. Documents with uploads and the wiki editor follow in phase 2
+> (batch 16).
 
 ## Why this is cheaper than it looks
 
