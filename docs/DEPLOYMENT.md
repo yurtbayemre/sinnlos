@@ -1893,8 +1893,10 @@ required env, no grant, no route, no edge change.
   (an intranet user, an admin-panel user, or the system for boot writes
   and the scheduler) and from where, and the names of the fields the write
   carried, never their values. The admin panel lists it under **Audit
-  event**; creating, editing or deleting an entry there is refused ("Audit
-  events are append-only"). The new `audit-janitor` deletes rows older than
+  event** (super admins; another admin-panel role only once it is granted
+  under Settings → Administration panel → Roles); creating, editing or
+  deleting an entry there is refused ("Audit events are append-only"),
+  whatever the role. The new `audit-janitor` deletes rows older than
   `AUDIT_RETENTION_DAYS` (default 365) at 03:50 `APP_TIME_ZONE`.
 - **New targeting fields, no visible effect yet.** Announcements get
   **Retarget required** and an **Owner department**, events **Notify
