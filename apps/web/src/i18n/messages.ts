@@ -55,10 +55,10 @@ const MANAGE: Readonly<Record<Locale, Readonly<Record<ManageMessageArea, () => J
  * `base` with the area catalogs under `manage.<area>`. Throws when the base
  * already has a `manage` key (the merge would hide it).
  */
-export function withManageMessages<T extends Record<string, unknown>>(
-  base: T,
-  areas: Readonly<Record<ManageMessageArea, Record<string, unknown>>>,
-): T & { manage: Record<ManageMessageArea, Record<string, unknown>> } {
+export function withManageMessages<
+  T extends Record<string, unknown>,
+  A extends Readonly<Record<ManageMessageArea, Record<string, unknown>>>,
+>(base: T, areas: A): T & { manage: A } {
   if (Object.hasOwn(base, "manage")) {
     throw new Error("[i18n] the base catalog must not define `manage` (messages/manage/*)");
   }

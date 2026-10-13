@@ -194,7 +194,7 @@
     "mode": "Editoransicht",
     "write": "Schreiben",
     "preview": "Vorschau",
-    "counter": "{count} von {max} Zeichen",
+    "counter": "{count, number} von {max, number} Zeichen",
     "emptyPreview": "Noch nichts für die Vorschau.",
     "hint": "Markdown: **fett**, _kursiv_, [Link](https://…), Listen mit „-“. HTML wird als Text angezeigt."
   },

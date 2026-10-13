@@ -194,7 +194,7 @@
     "mode": "Editor view",
     "write": "Write",
     "preview": "Preview",
-    "counter": "{count} of {max} characters",
+    "counter": "{count, number} of {max, number} characters",
     "emptyPreview": "Nothing to preview yet.",
     "hint": "Markdown: **bold**, _italic_, [link](https://…), lists with “-”. HTML is shown as text."
   },
