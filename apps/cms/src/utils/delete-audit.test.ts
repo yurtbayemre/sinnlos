@@ -37,9 +37,14 @@ const userCtx = (role: string) => ({
 });
 
 describe("recordDelete: who deleted which ad", () => {
-  it("records the author's own delete through the API, with role and title", async () => {
+  it("records the author's own delete through the API: class author, role in detail", async () => {
     const { strapi, rows } = makeStrapi(userCtx("member"));
-    await recordDelete(strapi, { kind: "classified", documentId: "ad1", title: "Bike" });
+    await recordDelete(strapi, {
+      kind: "classified",
+      documentId: "ad1",
+      title: "Bike",
+      authorId: 12,
+    });
     expect(rows).toEqual([
       expect.objectContaining({
         action: "delete",
@@ -48,18 +53,54 @@ describe("recordDelete: who deleted which ad", () => {
         actorKind: "user",
         actorUserId: 12,
         actorAdminId: null,
-        actorClass: "member",
+        actorClass: "author",
         source: "content-api",
-        detail: "title: Bike",
+        detail: "role: member; title: Bike",
         keys: null,
       }),
     ]);
   });
 
-  it("records a moderator's takedown with the moderator's role", async () => {
+  it("records a moderator's takedown as class moderator; a moderator's own ad as author", async () => {
     const { strapi, rows } = makeStrapi(userCtx("editor"));
-    await recordDelete(strapi, { kind: "classified", documentId: "ad1", title: "Bike" });
-    expect(rows[0]).toMatchObject({ actorKind: "user", actorUserId: 12, actorClass: "editor" });
+    await recordDelete(strapi, {
+      kind: "classified",
+      documentId: "ad1",
+      title: "Bike",
+      authorId: 5,
+    });
+    expect(rows[0]).toMatchObject({
+      actorKind: "user",
+      actorUserId: 12,
+      actorClass: "moderator",
+      detail: "role: editor; title: Bike",
+    });
+    await recordDelete(strapi, {
+      kind: "classified",
+      documentId: "ad2",
+      title: "Own",
+      authorId: 12,
+    });
+    expect(rows[1]).toMatchObject({ actorClass: "author" });
+  });
+
+  it("uses the authoring scope's class where one is set (batch 15's vocabulary)", async () => {
+    const { strapi, rows } = makeStrapi(userCtx("department_head"));
+    await runInAuthoringScope({ roleClass: "departmentAuthor" }, () =>
+      recordDelete(strapi, { kind: "file", file: { id: 1, documentId: "f1" } }),
+    );
+    expect(rows[0]).toMatchObject({ actorClass: "departmentAuthor" });
+  });
+
+  it("gives no class to a user deleting someone else's item without being a moderator", async () => {
+    const { strapi, rows } = makeStrapi(userCtx("member"));
+    await recordDelete(strapi, {
+      kind: "classified",
+      documentId: "ad1",
+      title: "Bike",
+      authorId: 5,
+    });
+    expect(rows[0]).toMatchObject({ actorClass: null, detail: "role: member; title: Bike" });
   });
 
   it("records an admin-panel delete with the admin's id", async () => {
@@ -125,7 +166,9 @@ describe("recordDelete: which file", () => {
     expect(rows[0]).toMatchObject({
       targetUid: "plugin::upload.file",
       targetDocumentId: "f9",
-      detail: "file 9, image/jpeg, 1536 B, of api::classified.classified ad1: bike.jpg",
+      actorClass: null,
+      detail:
+        "role: member; file 9, image/jpeg, 1536 B, of api::classified.classified ad1: bike.jpg",
     });
   });
 
@@ -141,5 +184,22 @@ describe("recordDelete: which file", () => {
       /^file 9, application\/pdf, 2000 B, linked by api::document\.document#4: x+$/,
     );
     expect(Array.from(String(rows[0].detail))).toHaveLength(255);
+  });
+});
+
+describe("recordDelete: the uploader is the author of a file", () => {
+  it("classes the uploader author, a moderator removing another's upload moderator", async () => {
+    const own = makeStrapi(userCtx("member"));
+    await recordDelete(own.strapi, {
+      kind: "file",
+      file: { id: 3, documentId: "f3", provider_metadata: { uploadedBy: 12 } },
+    });
+    expect(own.rows[0]).toMatchObject({ actorClass: "author" });
+    const other = makeStrapi(userCtx("admin_role"));
+    await recordDelete(other.strapi, {
+      kind: "file",
+      file: { id: 3, documentId: "f3", provider_metadata: { uploadedBy: 99 } },
+    });
+    expect(other.rows[0]).toMatchObject({ actorClass: "moderator" });
   });
 });

@@ -101,14 +101,22 @@ export default {
     if (!where) return;
     // Joins the delete's transaction (the query engine reuses the ambient
     // one); a failing read or insert fails the delete.
-    const ads: Array<{ id: number; documentId: string; title?: unknown }> = await strapi.db
-      .query(CLASSIFIED_UID)
-      .findMany({ where, select: ["id", "documentId", "title"] });
+    const ads: Array<{
+      id: number;
+      documentId: string;
+      title?: unknown;
+      author?: { id?: unknown } | null;
+    }> = await strapi.db.query(CLASSIFIED_UID).findMany({
+      where,
+      select: ["id", "documentId", "title"],
+      populate: { author: { select: ["id"] } },
+    });
     for (const ad of ads) {
       await recordDelete(strapi, {
         kind: "classified",
         documentId: ad.documentId,
         title: ad.title,
+        authorId: typeof ad.author?.id === "number" ? ad.author.id : null,
       });
     }
     try {

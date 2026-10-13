@@ -151,7 +151,7 @@ const install = (strapi: unknown) => {
   (globalThis as { strapi?: unknown }).strapi = strapi;
 };
 
-const AD = { id: 4, documentId: "ad4doc", title: "Bike" };
+const AD = { id: 4, documentId: "ad4doc", title: "Bike", author: { id: 12 } };
 
 describe("classified beforeDelete: the delete trail", () => {
   it("records one audit row per ad, with its documentId and title", async () => {
@@ -162,8 +162,8 @@ describe("classified beforeDelete: the delete trail", () => {
     install(strapi);
     await lifecycles.beforeDelete({ params: { where: { id: 4 } }, state: {} });
     expect(mocks.recordDelete.mock.calls.map((call) => call[1])).toEqual([
-      { kind: "classified", documentId: "ad4doc", title: "Bike" },
-      { kind: "classified", documentId: "ad5doc", title: "Desk" },
+      { kind: "classified", documentId: "ad4doc", title: "Bike", authorId: 12 },
+      { kind: "classified", documentId: "ad5doc", title: "Desk", authorId: null },
     ]);
   });
 

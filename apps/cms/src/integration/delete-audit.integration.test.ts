@@ -81,9 +81,9 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     expect(adRow).toMatchObject({
       actorKind: "user",
       actorUserId: t.fixtures.users.member.id,
-      actorClass: "member",
+      actorClass: "author",
       source: "content-api",
-      detail: "title: Red bike",
+      detail: "role: member; title: Red bike",
     });
     await vi.waitFor(async () => expect(await fileRowsFor(image)).toHaveLength(1), {
       timeout: 5000,
@@ -93,10 +93,13 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
       targetDocumentId: image.documentId,
       actorKind: "user",
       actorUserId: t.fixtures.users.member.id,
+      actorClass: "author",
       source: "content-api",
     });
     expect(String(fileRow.detail)).toMatch(
-      new RegExp(`^file ${image.id}, image/png, \\d+ B, of ${AD} ${ad.documentId}: bike\\.png$`),
+      new RegExp(
+        `^role: member; file ${image.id}, image/png, \\d+ B, of ${AD} ${ad.documentId}: bike\\.png$`,
+      ),
     );
     expect(JSON.stringify(fileRow)).not.toMatch(/127\.0\.0\.1|Bearer/);
   });
@@ -109,7 +112,7 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     expect(row).toMatchObject({
       actorKind: "user",
       actorUserId: t.fixtures.users.editor.id,
-      actorClass: "editor",
+      actorClass: "moderator",
       source: "content-api",
     });
   });
@@ -160,7 +163,7 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     expect(row).toMatchObject({
       actorKind: "user",
       actorUserId: t.fixtures.users.member.id,
-      actorClass: "member",
+      actorClass: "author",
       source: "content-api",
     });
   });

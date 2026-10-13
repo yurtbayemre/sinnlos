@@ -172,14 +172,16 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     await waitGone(oldFile);
     expect(await exists(newFile)).toBe(true);
     const rows = await t.strapi.db.query(AUDIT).findMany({ where: { targetUid: FILE } });
-    const row = rows.find((r) => String(r.detail).startsWith(`file ${oldFile},`));
+    const row = rows.find((r) => String(r.detail).includes(`file ${oldFile},`));
     expect(row).toMatchObject({
       action: "delete",
       actorKind: "user",
       actorUserId: t.fixtures.users.editor.id,
-      actorClass: "editor",
+      // The editor removes their own upload: class author, the role in the detail.
+      actorClass: "author",
     });
     expect(String(row?.detail)).toContain(`of ${D} ${doc.documentId}`);
+    expect(String(row?.detail)).toMatch(/^role: editor; /);
   });
 
   it("a draft-only replace keeps the published file until the publish (S3.5)", async () => {

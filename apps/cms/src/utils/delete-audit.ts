@@ -10,39 +10,56 @@
  *     source: the author through the API, a moderator's takedown through
  *     the web, the admin panel's Content Manager, the nightly
  *     `classified-janitor`. `detail`: the ad's title;
- *   - an uploaded file (`plugin::upload.file`): written by the upload
- *     service's `remove`, which extensions/upload/strapi-server.ts wraps.
- *     Every file delete goes through it: the admin Media Library (single,
- *     bulk and folder deletes), and `claimAndRemove` (utils/upload-orphans.ts)
- *     for the classified image cleanup, the `cleanup-uploads` endpoint, the
- *     nightly `uploads-janitor` and the media claims. The row and the
- *     upload service's work (bytes, then the row) run in ONE transaction,
- *     so the audit row commits exactly when the file row's delete commits.
- *     `detail`: the file id, mime, size in bytes, the related document
- *     (the deleted ad for its images, the saved document for a claim, or
- *     the rows still linking a Media Library file) and the file name.
+ *   - an uploaded file (`plugin::upload.file`): written by the removal's
+ *     reservation (utils/upload-orphans.ts `reserveRemoval`), which every
+ *     file delete takes: the admin Media Library (single, bulk and folder
+ *     deletes, through the wrapped upload service), and `claimAndRemove` for
+ *     the classified image cleanup, the `cleanup-uploads` endpoint, the
+ *     nightly `uploads-janitor` and the media claims. The row commits with
+ *     the reservation's tombstone, right before the bytes go: THE ROW
+ *     RECORDS THE REMOVAL DECISION. A byte removal that fails after it is
+ *     retried (by the janitor, or by a later delete), not recorded again.
+ *     `detail`: the file id, mime, size in bytes, the related document (the
+ *     deleted ad for its images, the saved document for a claim, or the rows
+ *     still linking a Media Library file) and the file name.
  *
  * THE ACTOR, as batch 15 resolves it (`resolveActor`, from
- * `strapi.requestContext`): a users-permissions user (`actorUserId`, and
- * the user's role type as `actorClass`), an admin (`actorAdminId`), or
- * `system`. The source is `content-api`, `admin` or `system`, or `cron`
- * where a janitor runs the delete inside `runWithDeleteAudit({ source:
- * "cron" })`. A commit callback keeps the request's context, so the image
- * cleanup after an ad delete is attributed to whoever deleted the ad.
- * Nothing else is recorded: no IP address, no token, no request data.
+ * `strapi.requestContext`): a users-permissions user (`actorUserId`), an
+ * admin (`actorAdminId`), or `system`. The source is `content-api`,
+ * `admin` or `system`, or `cron` where a janitor runs the delete inside
+ * `runWithDeleteAudit({ source: "cron" })` (or the scheduler's authoring
+ * scope says so). A commit callback keeps the request's context, so the
+ * image cleanup after an ad delete is attributed to whoever deleted the ad.
+ *
+ * THE CLASS (`actorClass`), in batch 15's vocabulary, never a role type:
+ *   - the authoring scope's class where one is set (`moderator`,
+ *     `departmentAuthor`: a document save through the v2 write model);
+ *   - else, for a users-permissions user: `author` when the user owns what
+ *     goes (the ad's author; the file's uploader), `moderator` when an
+ *     admin_role or editor removes someone else's;
+ *   - null for admins, the janitors and boot writers (as batch 15 records
+ *     panel, scheduler and boot writes; `actorKind` says which).
+ * A user's role type goes into `detail` (`role: <type>; …`). Nothing else
+ * is recorded: no IP address, no token, no request data.
  *
  * FAILURES follow batch 15's rule for the trail: the insert is never
  * caught. A failing insert fails the delete (the ad delete rolls back; the
- * file stays, and `claimAndRemove`'s tombstone makes the janitor retry), so
- * no delete commits without its row.
+ * file's reservation rolls back and nothing is removed), so no delete
+ * commits without its row.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
-import { recordAuditEvent, resolveActor, type AuditHost } from "./audit";
-import { getAuthoringScope, type AuditSource } from "./document-lock";
+import { MODERATORS, hasRole } from "../bootstrap/roles";
+import { recordAuditEvent, resolveActor, type AuditActor, type AuditHost } from "./audit";
+import { getAuthoringScope, type AuditSource, type AuthoringScope } from "./document-lock";
 
 export const CLASSIFIED_UID = "api::classified.classified";
 export const UPLOAD_FILE_UID = "plugin::upload.file";
+
+/** The class of a user who deletes what they own (their ad, their upload). */
+export const AUTHOR_CLASS = "author";
+/** batch 15's class of admin_role and editor. */
+export const MODERATOR_CLASS = "moderator";
 
 /** What a caller knows about a delete that the request context does not. */
 export interface DeleteAuditContext {
@@ -72,10 +89,17 @@ export interface DeletedFile {
   mime?: unknown;
   size?: unknown;
   sizeInBytes?: unknown;
+  provider_metadata?: unknown;
 }
 
 export type DeleteTarget =
-  | { kind: "classified"; documentId: string; title?: unknown }
+  | {
+      kind: "classified";
+      documentId: string;
+      title?: unknown;
+      /** The ad's author (users-permissions user id), if any. */
+      authorId?: number | null;
+    }
   | {
       kind: "file";
       file: DeletedFile;
@@ -92,6 +116,27 @@ function roleOfRequest(strapi: Pick<AuditHost, "requestContext">): string | null
   const user = isRecord(ctx) && isRecord(ctx.state) ? ctx.state.user : undefined;
   const role = isRecord(user) ? user.role : undefined;
   return isRecord(role) && typeof role.type === "string" ? role.type : null;
+}
+
+/** The uploader stamp of a file row (utils/upload-orphans.ts uploadedByOf). */
+function uploaderOf(file: DeletedFile): number | null {
+  const metadata = file.provider_metadata;
+  const stamp = isRecord(metadata) ? metadata.uploadedBy : undefined;
+  return typeof stamp === "number" ? stamp : null;
+}
+
+/** The delete's class (see the module comment). */
+export function deleteClass(
+  scope: Pick<AuthoringScope, "roleClass"> | undefined,
+  actor: Pick<AuditActor, "actorKind" | "actorUserId">,
+  role: string | null,
+  ownerId: number | null,
+): string | null {
+  if (scope?.roleClass) return scope.roleClass;
+  if (actor.actorKind !== "user") return null;
+  if (ownerId !== null && ownerId === actor.actorUserId) return AUTHOR_CLASS;
+  if (hasRole({ role: role ? { type: role } : null }, MODERATORS)) return MODERATOR_CLASS;
+  return null;
 }
 
 /** Bytes of a file row: `sizeInBytes` when present, else core's kilobytes. */
@@ -125,15 +170,19 @@ export async function recordDelete(strapi: AuditHost, target: DeleteTarget): Pro
   const scope = getAuthoringScope();
   const actor = resolveActor(strapi, undefined);
   const source = context?.source ?? scope?.source ?? actor.source;
-  const actorClass = actor.actorKind === "user" ? roleOfRequest(strapi) : null;
+  const role = actor.actorKind === "user" ? roleOfRequest(strapi) : null;
+  const ownerId =
+    target.kind === "classified" ? (target.authorId ?? null) : uploaderOf(target.file);
+  const actorClass = deleteClass(scope, actor, role, ownerId);
   const common = { ...actor, source, actorClass, action: "delete" as const, keys: null };
+  const rolePrefix = role ? `role: ${role}; ` : "";
   if (target.kind === "classified") {
     const title = typeof target.title === "string" ? target.title : "";
     await recordAuditEvent(strapi, {
       ...common,
       targetUid: CLASSIFIED_UID,
       targetDocumentId: target.documentId,
-      detail: `title: ${title}`,
+      detail: `${rolePrefix}title: ${title}`,
     });
     return;
   }
@@ -145,6 +194,6 @@ export async function recordDelete(strapi: AuditHost, target: DeleteTarget): Pro
       typeof file.documentId === "string" && file.documentId !== ""
         ? file.documentId
         : `file-${String(file.id)}`,
-    detail: fileDetail(file, context?.related, target.links ?? []),
+    detail: `${rolePrefix}${fileDetail(file, context?.related, target.links ?? [])}`,
   });
 }
