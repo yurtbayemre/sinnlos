@@ -366,6 +366,34 @@ describe("createWikiChecks", () => {
     }
   });
 
+  it("refuses the slugs the web's routes use as words, from any writer", async () => {
+    const checks = createWikiChecks(fakeHost(world()));
+    for (const [uid, action, slug] of [
+      [PAGE, "create", "new"],
+      [PAGE, "update", " New "],
+      [PAGE, "clone", "new"],
+      [SPACE, "create", "drafts"],
+      [SPACE, "update", "DRAFTS"],
+    ] as const) {
+      events.length = 0;
+      const details = await refusal(
+        checks({ uid, action, params: { documentId: "a", data: { slug } } }, async () => {
+          events.push("action");
+          return { documentId: "a" };
+        }),
+      );
+      expect(details, `${uid} ${action}`).toEqual({ keys: ["slug"] });
+      expect(events).not.toContain("action");
+    }
+    // Other words, and the other type's reserved word, pass.
+    await expect(
+      checks(
+        { uid: SPACE, action: "update", params: { documentId: "s1", data: { slug: "new" } } },
+        async () => null,
+      ),
+    ).resolves.toBeNull();
+  });
+
   it("leaves other types and the space's saves alone", async () => {
     const checks = createWikiChecks(fakeHost(world()));
     for (const [uid, action] of [

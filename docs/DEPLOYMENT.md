@@ -1971,6 +1971,12 @@ lanes; on its own it is a cms change plus one web capability value
 - **Department and team deletes** advance the revision of the wiki pages
   that link the deleted row (a head's or lead's form opened before the
   delete answers 404 or 412).
+- **Reserved slugs** (for lane 16C's routes `/wiki/<space>/new` and
+  `/wiki/drafts`): a page slug `new` and a space slug `drafts` are refused
+  for every writer (400 `invalid` on `slug`). The content API never
+  derives them (its slugs carry a random suffix); in the admin panel a
+  page titled "New" needs another slug. A row that already has one keeps
+  it until a panel save that sends the slug (then rename it).
 - **The `/manage` forms name the author** (`editable.authorName`, every
   authored type).
 - **Grants: +52 rows**, no revocation: wiki-space `authoringList`,
@@ -2004,7 +2010,12 @@ parent sits in another space, the page rows without a space, and the
 counts. Expected on the owner's instance: **0, 0, 0** (the demo pages have
 no parents). A loop found here is repaired in the admin panel before or
 after the deploy (clear one page's parent and publish); it does not block
-the deploy.
+the deploy. The reserved slugs (expected: no rows; rename one in the admin
+panel):
+
+```bash
+psql_db -X -c "SELECT 'wiki_page' AS type, document_id, slug FROM wiki_pages WHERE lower(slug) = 'new' UNION ALL SELECT 'wiki_space', document_id, slug FROM wiki_spaces WHERE lower(slug) = 'drafts';"
+```
 
 **After the deploy**
 

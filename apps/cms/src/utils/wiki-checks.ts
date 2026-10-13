@@ -58,6 +58,9 @@ import { refuseKeys } from "./write-allowlist";
  * before must link it after, else the discard refuses (`spaceNotEmpty`)
  * and rolls back.
  *
+ * RESERVED SLUGS: a page slug `new` and a space slug `drafts` are refused
+ * (`invalid` on `slug`): the web's routes use them as words.
+ *
  * LOCK ORDER (K21): the document's own version row (slot 2) first, then the
  * structure row; nothing here locks a document row afterwards.
  */
@@ -69,6 +72,17 @@ const SPACE_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"]
 
 /** The page actions whose payload can name a space. */
 const SPACE_PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
+
+/**
+ * Slugs the web's routes use as words (lane 16C): `/wiki/<space>/new`
+ * (a new page) and `/wiki/drafts` (the caller's drafts). The content API
+ * never derives them (uniqueSlugFrom appends a random suffix); the admin
+ * panel, which sets slugs freely, is refused them here.
+ */
+export const RESERVED_WIKI_SLUGS: Readonly<Record<string, readonly string[]>> = {
+  [WIKI_PAGE_UID]: ["new"],
+  [WIKI_SPACE_UID]: ["drafts"],
+};
 
 /** The slice of the Strapi instance the checks use (own members first: they resolve first). */
 export type WikiChecksHost = {
@@ -286,6 +300,14 @@ export function createWikiChecks(strapi: WikiChecksHost): Middleware {
     const uid = context.uid;
     const action = context.action ?? "";
     const params = isRecord(context.params) ? context.params : {};
+
+    const reserved = uid ? RESERVED_WIKI_SLUGS[uid] : undefined;
+    if (reserved && SPACE_PAYLOAD_ACTIONS.includes(action) && isRecord(params.data)) {
+      const slug = params.data.slug;
+      if (typeof slug === "string" && reserved.includes(slug.trim().toLowerCase())) {
+        refuseKeys(["slug"]);
+      }
+    }
 
     if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
       return strapi.db.transaction(async () => {

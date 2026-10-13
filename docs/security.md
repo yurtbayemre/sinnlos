@@ -844,7 +844,9 @@ writers all pass them, and the cms refuses to boot when
   space links; a discard of a space's draft is refused when it would take
   an unpublished page out of the space (Strapi re-links only pages with a
   published version). `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
-  cross-space parents and pages without a space, read-only.
+  cross-space parents and pages without a space, read-only. The page slug
+  `new` and the space slug `drafts` are refused for every writer (the
+  web's routes use them as words).
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
   a lesson's course and a wiki page's parent must be published; a publish

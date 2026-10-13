@@ -149,6 +149,28 @@ describe.each(testEngines())("wiki checks on %s", (engine) => {
     expect(await hasLoop(t)).toBe(false);
   });
 
+  it("refuses the slugs the web's routes use as words, from the Document Service and the panel", async () => {
+    await expect(
+      docs().create({ data: { title: "New", slug: "new", space: space.documentId } }),
+    ).rejects.toMatchObject({ details: { keys: ["slug"] } });
+    const panel = await contentManager(t);
+    const page = await seedPage(t, { space: space.documentId });
+    const res = await panel.update(WIKI_PAGE, page.documentId, { slug: "new" });
+    expect(res.status).toBe(400);
+    const target = await seedSpace(t);
+    await expect(
+      t.strapi.documents(WIKI_SPACE).update({
+        documentId: target.documentId,
+        data: { slug: "drafts" },
+      }),
+    ).rejects.toMatchObject({ details: { keys: ["slug"] } });
+    // The other type's word is an ordinary slug.
+    const renamed = await panel.update(WIKI_SPACE, target.documentId, {
+      slug: `new-${Date.now()}`,
+    });
+    expect(renamed.status, renamed.text).toBe(200);
+  });
+
   // ---- Postgres: writers queued on the held structure row -------------------
 
   describe.runIf(engine === "postgres")("races on the structure lock (Postgres)", () => {
