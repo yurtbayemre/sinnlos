@@ -1011,40 +1011,105 @@ regular relations. In responses about users, the contact fields `email`,
 
 ## Upload hardening
 
-The only granted content-API upload route, `POST /api/upload`
-(marketplace ad photos), is wrapped by `apps/cms/src/extensions/upload/strapi-server.ts`
-on top of the permission grant, with the pure rules in
-`apps/cms/src/utils/upload-guard.ts`. The admin panel's media library uses
-the separate admin routes and is unaffected.
+The only granted content-API upload route, `POST /api/upload` (marketplace
+ad photos, and since batch 16 document files), is wrapped by
+`apps/cms/src/extensions/upload/strapi-server.ts` on top of the permission
+grant, with the pure rules in `apps/cms/src/utils/upload-guard.ts`,
+`upload-zip.ts` and `upload-ooxml.ts` (deep-dive decision 06 §E1, owner
+amendment 2). The admin panel's media library uses the separate admin
+routes: its uploads are bound only by `deniedTypes` (below).
 
-- **Create-only:** the core action's `?id=` replace/update path is rejected
+- **Create-only:** the core action's `?id=` replace/update path answers 403
   (it would let any uploader overwrite arbitrary existing media).
 - **Body allowlist:** the only accepted multipart text field is `fileInfo`.
   Anything else (`ref`/`refId`/`field`, which core would turn into a link
   on _any_ entry, someone else's ad, an avatar, a document, or `path`) is
-  rejected with 400.
-- **At most 4 files per request, 5 MB per file** (with an `fs.stat`
-  fallback when the reported size is missing; never waved through). The
-  limits come from `@sinnlos/domain`, shared with the web form.
-- **Strict image allowlist by magic bytes** of the temp file, not the
-  client-declared mimetype: JPEG, PNG and WebP only. No SVG (stored XSS)
-  and no GIF (decompression-bomb surface), on purpose.
-- **Canonical filename:** the stored name becomes `<stem>.<extension of
-the sniffed type>` (core stores and serves by extension, so a JPEG named
-  `x.pdf` was served as `application/pdf`). A stem core cannot turn into a
-  slug (CJK, emoji or punctuation only) becomes `image`.
+  refused by key. `fileInfo` is checked against core's schema (a malformed
+  one answers 400 `fileInfo`, not core's 500) and its `name` is dropped:
+  core would prefer it over the canonical name.
+- **Two profiles by role.** Moderators (admin_role, editor) and department
+  heads may upload PDF, DOCX, XLSX and PPTX (20 MB, exactly one per
+  request) and images; every other role JPEG, PNG and WebP only (5 MB, at
+  most 4 per request). Images are capped at 5 MB for every role. The size
+  is checked before any byte is read (`fs.stat` when the reported size is
+  missing; never waved through). The table lives in `@sinnlos/domain`
+  (`uploads.ts`), shared with the web's file input.
+- **The format comes from the content**, read from the temp file through
+  one handle (the head, a PDF's or zip's tail, the zip directory, every
+  local header and data descriptor, and `[Content_Types].xml`; never the
+  whole file):
+  - images by magic bytes; no SVG (stored XSS), no GIF (decompression
+    bombs);
+  - a PDF by `%PDF-` at offset 0 **and no zip end record a zip reader could
+    take**: a PDF that is also a zip is refused;
+  - DOCX, XLSX and PPTX by the **Office Open XML rule**: a zip in exactly
+    one layout (no prefix, no gap, no trailing data, one end record at the
+    end, every local header equal to its directory record, methods 0 and
+    8, strict ASCII names, no duplicates under case folding; ZIP64,
+    multi-disk and encrypted entries refused; at most 5 000 entries and
+    1 MiB of directory), `[Content_Types].xml` read by a bounded tokenizer
+    for a fixed XML subset (no DTD, so no entity is ever expanded; no
+    comments, PIs, CDATA, text or prefixes; references decoded before any
+    comparison; at most 64 KiB compressed, 256 KiB inflated, CRC-checked),
+    exactly one main part of the table in its folder, and no macro-enabled
+    content type, VBA part or Excel 4.0 macro sheet. Every macro-enabled,
+    template, slideshow and binary variant is refused, renamed or not.
+- **What the sniff proves, and what not.** Proven: the container format;
+  for Office files one zip layout every reader sees alike and the main
+  part's type; that `[Content_Types].xml` declares none of the macro
+  carriers the rule knows; that no entry carries a conventional VBA part
+  name or lies under `xl/macrosheets/`. Not proven: that the file is valid;
+  that Office finds no code in a part declared under another type; that
+  the other entries decompress to a safe size (the limits protect the
+  scanner, not the reader's machine); that the file is free of other active
+  content (PDF JavaScript, embedded OLE objects, ActiveX, external
+  relationships, DDE fields). An image that is also a zip is stored as the
+  image. Files are served as downloads behind the session gate with
+  `X-Content-Type-Options: nosniff`.
+- **Canonical name and mime:** the stored name becomes `<stem><extension of
+the sniffed format>` and the mime the table's (core stores and serves by
+  extension, so a JPEG named `x.pdf` was served as `application/pdf`). A
+  stem core cannot turn into a slug becomes `image` or `document`.
+- **Refusals** answer 400 `ValidationError` with `details.keys` and
+  `details.codes.file` (`fileType`, `fileTooLarge`, `required`, `invalid`);
+  core's own type, image and size refusals are mapped the same way.
 - **Uploader attribution:** every stored file is stamped with the caller's
   user id in `provider_metadata.uploadedBy`, also the files already stored
-  when a later file of the same request fails (so the orphan janitor can
-  collect them). The classified controller only accepts image ids whose
-  `uploadedBy` matches the caller (admin and editor bypass), so nobody can
-  attach foreign media (avatars, documents, other people's photos) to
-  their own ad. `cleanupUploads` deletes only files stamped with the
-  caller's own id that no entry uses any more, and the nightly uploads
-  janitor (03:30) only ever touches stamped files.
-- **Upgrade tripwire:** the wrapper depends on Strapi internals; if an
-  upgrade changes them, the cms fails at boot instead of silently serving
-  an unhardened endpoint.
+  when a later file of the same request fails. The classified controller
+  only accepts image ids whose `uploadedBy` matches the caller (admin and
+  editor bypass) and locks their rows inside the ad's write; the media
+  claims (registered from batch 16, lane 16B) accept a document file only
+  when it is the caller's own upload, of an allowed mime, linked by nothing
+  else, checked under the file row's lock.
+- **Removal:** one locked path, `claimAndRemove` (`utils/upload-orphans.ts`):
+  it locks the file row, re-checks "stamped, linked by nothing, old enough"
+  and commits a tombstone before the bytes go, so a failed removal never
+  leaves an attachable row without bytes. `cleanupUploads` removes only the
+  caller's own files; the nightly uploads janitor (03:30) only stamped files
+  older than 24 hours, now including moderators' and department heads'
+  unattached document uploads. Admin-panel uploads carry no stamp and are
+  never removed by the app.
+- **The delete trail:** every ad delete (the author, a moderator's
+  takedown, the Content Manager, the classified janitor) and every file
+  delete (the image cleanup, `cleanupUploads`, the uploads janitor, the
+  media claims, the admin Media Library's single, bulk and folder deletes)
+  writes one append-only `audit_events` row (`utils/delete-audit.ts`): the
+  actor (user id and role, admin id, or system), the source (`content-api`,
+  `admin`, `cron`), the ad's documentId and title or the file's id, mime,
+  size, related document and name. No IP address, no token, no request
+  data. The insert is never caught: a failing insert fails the delete.
+- **Admin-panel backstop:** `security.deniedTypes` (`config/plugins.ts`)
+  adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`. Strapi
+  matches them against the declared type, the extension's type and
+  file-type's guess from the first 4100 bytes, so the panel refuses
+  macro-enabled Office files by extension and, renamed, when file-type
+  recognises them. A renamed `.xlsb` or `.xlam`, or a renamed macro file
+  whose `[Content_Types].xml` lies beyond those 4100 bytes, passes the
+  panel: the known limit (the content API does not depend on the backstop).
+- **Upgrade tripwire:** the wrapper depends on Strapi internals (the
+  controller and service factories, the `upload` dispatch, `remove(file)`);
+  if an upgrade changes them, the cms fails at boot instead of silently
+  serving an unhardened endpoint or deleting unrecorded.
 
 The grant itself (`plugin::upload.content-api.upload`) goes to the staff
 roles only, never `guest` or `authenticated`, and there are deliberately no
