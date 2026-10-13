@@ -1914,7 +1914,8 @@ release left open, and ships before the batch 16 lanes branch. A revision
 is the page body before an edit; whenever a page's draft differs from its
 published version, that body is draft text nobody published, and every
 staff role and `authenticated` could read it through `/api/wiki-revisions`,
-`populate=revisions` and filters through the relation. After this release:
+`populate=revisions` and filters through the relation; even a guest could
+test draft text through a filter inside a populate. After this release:
 
 - `/api/wiki-revisions` and `/api/wiki-revisions/:id` have no route (404
   for every caller);
@@ -1932,16 +1933,17 @@ staff role and `authenticated` could read it through `/api/wiki-revisions`,
   the admin panel, super admins included. An admin role that holds Content
   Manager read on Wiki revision can still open one by its URL, read-only:
   the panel is the moderators' tool and shows every draft anyway (decision
-  06 question 9 lets moderators read history). The wiki page's form shows
-  no revisions.
+  06 question 9 lets moderators read history). The wiki page's form keeps
+  its empty _Revisions_ field, as on batch 15: it lists nothing and cannot
+  link one.
 
 Nothing else changes: the wiki-page lifecycle still writes a revision on
 every body change, page reads answer as before, and the web reads no
 revision (since FX24). Moderators lose the admin panel's list of revisions
 until batch 16 brings page history to the web.
 
-It is **one deploy of cms and web** with `infra/deploy.sh` (both images
-rebuild; the web's code is unchanged). No schema change (the hidden
+It is **one deploy** with `infra/deploy.sh`: both images build, the web
+image comes out identical, so only the cms container restarts. No schema change (the hidden
 `pluginOptions` add no column or table), no env, no edge change, **no
 `JWT_SECRET` rotation**, nobody is signed out. The first boot deletes rows
 in two places, both grants: the users-permissions sync deletes the 18
@@ -2024,7 +2026,7 @@ it; running it is the owner's decision (below).
 
    ```bash
    cat .git/sinnlos-deploy/infra.state
-   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\]|\[admin-permissions\]|Strapi started'
    "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
    ```
 
@@ -2043,7 +2045,8 @@ it; running it is the owner's decision (below).
 
    Stop line: `[admin-permissions] strapi.admin.services.permission.deleteByIds
    not found …` (the cms does not start; nothing was changed; roll back).
-   Later boots log no `revoked` and no `[admin-permissions]` line. A count above 18 means hand-made
+   Later boots log no `revoked` and no `[admin-permissions]` line (a
+   roll-forward after a rollback logs `revoked 18` again). A count above 18 means hand-made
    wiki-revision grants were deleted as well (step 4 named them), one
    below 18 that some of the rows were already gone; neither is a stop
    line. The error filter prints only the expected lines of
@@ -2125,11 +2128,15 @@ write permissions on it stay deleted (super admins keep everything), which
 needs no action. The roll-forward is a normal `infra/deploy.sh`; it logs
 `revoked 18 obsolete permission(s)` again.
 
-**Rehearsal:** the read paths of every role on both engines, the 18-row
-revocation with these boot lines and the admin-permission cleanup are
-covered by the integration suite above. The lane rehearsal on a Postgres
-16 stand-in (batch 15, then batch 15.1, a rollback and forward with the
-effective permissions after each step) is still open.
+**Rehearsal** (2026-10-13, local staging in Traefik mode, from the
+batch 15 tree): this section walked as written. Before the deploy, 13
+probes showed a draft-only marker, 7 match/miss oracles differed (one of
+them for a guest) and the nested sort answered 500; after it, none. The
+deploy took 57 s (cms boot 4.7 s; the web container was not recreated)
+and logged exactly the step 5 lines, with `removed 1` on the admin side.
+The rollback (6.9 s) logged `granted 18` and re-opened the reads; the
+roll-forward (20 s) logged `revoked 18` and closed them again. Spaces and
+pages answered byte-identically before and after for every role.
 
 #### Deploying batch 15 (2026-10-13)
 
