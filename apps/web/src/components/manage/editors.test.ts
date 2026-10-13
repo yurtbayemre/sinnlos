@@ -181,6 +181,75 @@ describe("AnnouncementEditor", () => {
     expect(tagById(html, "announcement-title")).toContain('value="Canteen"');
   });
 
+  it("a D-PT01 announcement (no department or team): its own notice, and the picker reads Restricted, not Everyone", () => {
+    // Staging rehearsal: the notice spoke of a deleted department that never
+    // existed, and the picker showed "Everyone" for a restricted item.
+    const editable: AnnouncementEditable = {
+      ...base,
+      roleClass: "moderator",
+      title: "Legacy",
+      body: null,
+      expiresAt: null,
+      department: null,
+      team: null,
+      audienceRoles: [],
+      ownerDepartment: null,
+      needsRetarget: true,
+      pinned: false,
+      requiresAck: false,
+      ackDeadline: null,
+      publishAt: null,
+      scheduleError: null,
+    };
+    const html = render(
+      createElement(AnnouncementEditor, {
+        ...props,
+        editable,
+        access: { ...MODERATOR, area: "announcements" },
+        ownDepartment: null,
+      }),
+    );
+    expect(html).toContain(t.common.targeting.retargetNoTarget);
+    expect(html).not.toContain(t.common.targeting.retargetNotice);
+    const trigger =
+      /<button[^>]*aria-describedby="announcement-department-hint"[^>]*>[\s\S]*?<\/button>/.exec(
+        html,
+      )?.[0] ?? "";
+    expect(trigger).toContain(t.common.targeting.restricted);
+    expect(trigger).not.toContain(`>${t.common.targeting.everyone}<`);
+    expect(html).toContain(t.common.targeting.restrictedHint);
+  });
+
+  it("a marked announcement whose team remains says a target was deleted", () => {
+    const editable: AnnouncementEditable = {
+      ...base,
+      roleClass: "moderator",
+      title: "Team news",
+      body: null,
+      expiresAt: null,
+      department: null,
+      team: TEAMS[0].documentId,
+      audienceRoles: [],
+      ownerDepartment: null,
+      needsRetarget: true,
+      pinned: false,
+      requiresAck: false,
+      ackDeadline: null,
+      publishAt: null,
+      scheduleError: null,
+    };
+    const html = render(
+      createElement(AnnouncementEditor, {
+        ...props,
+        editable,
+        access: { ...MODERATOR, area: "announcements" },
+        ownDepartment: null,
+      }),
+    );
+    expect(html).toContain(t.common.targeting.retargetNotice);
+    expect(html).not.toContain(t.common.targeting.retargetNoTarget);
+  });
+
   it("a department author's never-published draft offers no Discard", () => {
     const editable: AnnouncementEditable = {
       ...base,

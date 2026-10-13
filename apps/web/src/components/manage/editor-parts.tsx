@@ -81,25 +81,30 @@ export function OptionsNotice({ failed, truncated }: { failed: boolean; truncate
 }
 
 /**
- * Needs re-targeting (§N9): a department or team the item targeted was
- * deleted. A targeting change lowers the marker by itself; the checkbox
- * confirms the audience as it stands, which sends the targeting unchanged.
+ * Needs re-targeting (§N9, D-PT01). `deleted`: a department or team the
+ * item targeted was deleted while another criterion remains. `noTarget`
+ * (the default): the item is restricted to departments but none is
+ * selected, either never (a legacy D-PT01 announcement) or no longer. A
+ * targeting change lowers the marker by itself; the checkbox confirms the
+ * audience as it stands, which sends the targeting unchanged.
  */
 export function RetargetNotice({
   checked,
   disabled,
   onChange,
+  kind = "noTarget",
 }: {
   checked: boolean;
   disabled: boolean;
   onChange: (checked: boolean) => void;
+  kind?: "deleted" | "noTarget";
 }) {
   const t = useTranslations("manage.common.targeting");
   return (
     <div className="space-y-3 rounded-xl border border-amber-600/30 bg-amber-500/10 px-3 py-3">
       <p className="flex items-start gap-2 text-sm text-amber-700 dark:text-amber-300">
         <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        {t("retargetNotice")}
+        {t(kind === "deleted" ? "retargetNotice" : "retargetNoTarget")}
       </p>
       <CheckboxField
         id="retarget-confirm"

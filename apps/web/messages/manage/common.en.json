@@ -206,6 +206,9 @@
     "optionsTruncated": "Not every department or team could be loaded; some may be missing.",
     "retargetNotice": "Needs re-targeting: a department or team this item was meant for was deleted. Only editors and admins see it, and it notifies nobody, until you confirm an audience.",
     "retargetConfirm": "Confirm this audience when saving",
+    "retargetNoTarget": "Needs re-targeting: no department or team is selected (none was chosen, or the one it had was deleted). Only editors and admins see it, and it notifies nobody. Choose one, or set the audience to everyone by confirming it below.",
+    "restricted": "Restricted: needs a new audience",
+    "restrictedHint": "Choose a department, or tick “Confirm this audience when saving” above to keep the audience as shown.",
     "roles": {
       "admin_role": "Admins",
       "editor": "Editors",

@@ -206,6 +206,9 @@
     "optionsTruncated": "Nicht alle Abteilungen oder Teams konnten geladen werden; einige fehlen möglicherweise.",
     "retargetNotice": "Zielgruppe neu festlegen: Eine Abteilung oder ein Team, für das dieser Eintrag gedacht war, wurde gelöscht. Nur Redaktion und Admins sehen ihn, und er benachrichtigt niemanden, bis Sie eine Zielgruppe bestätigen.",
     "retargetConfirm": "Diese Zielgruppe beim Speichern bestätigen",
+    "retargetNoTarget": "Zielgruppe neu festlegen: Es ist keine Abteilung und kein Team gewählt (nie gewählt, oder die gewählte wurde gelöscht). Nur Redaktion und Admins sehen den Eintrag, und er benachrichtigt niemanden. Wählen Sie eine aus, oder geben Sie ihn für alle frei, indem Sie die Zielgruppe unten bestätigen.",
+    "restricted": "Eingeschränkt: braucht eine neue Zielgruppe",
+    "restrictedHint": "Wählen Sie eine Abteilung, oder setzen Sie oben das Häkchen bei „Diese Zielgruppe beim Speichern bestätigen“, um die angezeigte Zielgruppe zu behalten.",
     "roles": {
       "admin_role": "Admins",
       "editor": "Redaktion",

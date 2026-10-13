@@ -112,12 +112,15 @@ export function AnnouncementEditor({
   const disabled = editor.pending;
   const targetingLocked = disabled || optionsFailed;
 
+  // Needs re-targeting and not confirmed: "no department" is not
+  // "everyone" until the author confirms it (§N9, D-PT01).
+  const restricted = editable?.needsRetarget === true && !item.retarget;
   const departmentOptions = useMemo(
     () => [
-      { value: "", label: tc("targeting.everyone") },
+      { value: "", label: tc(restricted ? "targeting.restricted" : "targeting.everyone") },
       ...departments.map((d) => ({ value: d.documentId, label: d.name })),
     ],
-    [departments, tc],
+    [departments, tc, restricted],
   );
   // AND: a team outside the chosen department would reach nobody, so the
   // picker offers the chosen department's teams (and the current one).
@@ -210,6 +213,7 @@ export function AnnouncementEditor({
               checked={item.retarget}
               disabled={targetingLocked}
               onChange={item.setRetarget}
+              kind={editable.department || editable.team ? "deleted" : "noTarget"}
             />
           )}
           <OptionsNotice failed={optionsFailed} truncated={optionsTruncated} />
@@ -219,6 +223,9 @@ export function AnnouncementEditor({
             <SinglePicker
               id={id("department")}
               label={t("fields.department.label")}
+              hint={
+                restricted && values.department === "" ? tc("targeting.restrictedHint") : undefined
+              }
               error={error("department")}
               value={values.department}
               options={departmentOptions}
