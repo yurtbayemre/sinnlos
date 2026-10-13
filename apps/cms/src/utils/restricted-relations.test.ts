@@ -58,6 +58,7 @@ const WIKI_SPACE = "api::wiki-space.wiki-space";
 const WIKI_REVISION = "api::wiki-revision.wiki-revision";
 const ANNOUNCEMENT = "api::announcement.announcement";
 const EVENT = "api::event.event";
+const COMMENT = "api::comment.comment";
 const USER = "plugin::users-permissions.user";
 const ROLE = "plugin::users-permissions.role";
 const FILE = "plugin::upload.file";
@@ -65,7 +66,7 @@ const FILE = "plugin::upload.file";
 const API_NAMES = ["department", "team", "wiki-page", "wiki-space", "wiki-revision"];
 const MODELS: Record<string, RelationModel> = {
   ...Object.fromEntries(
-    [...API_NAMES, "announcement", "event", "poll", "poll-vote"].map((name) => [
+    [...API_NAMES, "announcement", "comment", "event", "poll", "poll-vote"].map((name) => [
       `api::${name}.${name}`,
       runtimeModel(
         `api::${name}.${name}`,
@@ -962,5 +963,56 @@ describe("relations followed inside populate (batch 15.2)", () => {
         }
       }
     });
+  });
+});
+
+/**
+ * comment.parent/replies (batch 15.2): comment-target-visibility narrows
+ * the comment routes per target, and nothing keeps a comment's parent on
+ * its own target (creates before FX04 and the admin panel could link any
+ * comment). Cut for callers without the bypass like poll-vote.poll;
+ * admin_role and editor read every comment anyway.
+ */
+describe("comment.parent and comment.replies are cut below the bypass", () => {
+  it("restricts both relations, and only for callers without the bypass", () => {
+    for (const name of ["parent", "replies"]) {
+      const def = MODELS[COMMENT].attributes?.[name];
+      expect(isRestrictedRelation(MODELS[COMMENT], def, RESTRICTED_RELATION_TARGETS), name).toBe(
+        true,
+      );
+      expect(isRestrictedRelation(MODELS[COMMENT], def, CLOSED_RELATION_TARGETS), name).toBe(false);
+    }
+    expect(
+      isRestrictedRelation(
+        MODELS[COMMENT],
+        MODELS[COMMENT].attributes?.author,
+        RESTRICTED_RELATION_TARGETS,
+      ),
+    ).toBe(false);
+  });
+
+  it("strips the populate in every shape and refuses filters and sort", () => {
+    expect(
+      populateOn(COMMENT, { parent: "true", replies: { count: "true" }, author: "true" }),
+    ).toEqual({ author: "true" });
+    expect(populateOn(COMMENT, "parent,author")).toEqual(["author"]);
+    expect(populateOn(COMMENT, "*")).toEqual(["author"]);
+    expectRejected(
+      COMMENT,
+      { filters: { parent: { body: { $startsWith: "x" } } } },
+      "Invalid key parent",
+    );
+    expectRejected(
+      COMMENT,
+      { filters: { $or: [{ id: -1 }, { replies: { body: "x" } }] } },
+      "Invalid key replies",
+    );
+    expectRejected(COMMENT, { sort: "parent.body:asc" }, "Invalid key parent");
+  });
+
+  it("deletes both from the response (the output backstop)", () => {
+    const comment = { id: 1, body: "b", parent: { id: 2, body: "hidden" }, replies: [{ id: 3 }] };
+    stripRestrictedRelationsFromOutput(comment, MODELS[COMMENT], OPTIONS);
+    expect(comment).toEqual({ id: 1, body: "b" });
   });
 });

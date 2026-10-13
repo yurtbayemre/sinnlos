@@ -141,6 +141,17 @@ export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   // entry keeps it, and any relation added later, from handing out polls
   // outside their audience. No source is trusted.
   "api::poll.poll": [],
+  // Comment target visibility (#28, batch 15.2): comment-target-visibility
+  // narrows the comment routes per TARGET (targetType + targetDocumentId),
+  // and nothing keeps comment.parent/replies on one target: the content API
+  // never writes them (FX04 builds the create payload without them), but a
+  // create before FX04 could point `parent` at any comment, and the admin
+  // panel still can. Such a link handed out a comment under a hidden
+  // announcement or wiki page through `populate[parent]`, and filters and
+  // sort through it were an oracle on its body. The web uses neither
+  // relation. No source is trusted; admin_role and editor read every
+  // comment anyway (the policy's bypass) and keep both.
+  "api::comment.comment": [],
 };
 
 /**
