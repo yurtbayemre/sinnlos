@@ -29,6 +29,7 @@ behind most rules (its §5 conventions and §7 open issues).
   - [Shared policy helpers](#shared-policy-helpers)
   - [Request ids](#request-ids)
 - [Global guards](#global-guards)
+  - [Document Service guards](#document-service-guards)
 - [Content types and their access rules](#content-types-and-their-access-rules)
   - [Poll department targeting](#poll-department-targeting)
   - [Poll guest access](#poll-guest-access)
@@ -638,6 +639,50 @@ query and output handling, and the other three are global middlewares
 `config/middlewares.ts` and fails when the list loses one of the three
 global middlewares.
 
+### Document Service guards
+
+Since batch 15 a second layer sits under every writer, not only the
+content API: Document Service middlewares, registered in one place and in
+one order (`apps/cms/src/bootstrap/document-middlewares.ts`). The content
+API, the admin panel's Content Manager, the scheduler and the boot
+writers all pass them, and the cms refuses to boot when
+`strapi.documents.use` is gone.
+
+- **Offset-less instants** (DT-OFFSETLESS,
+  `utils/offsetless-datetime-guard.ts`, first): a datetime attribute sent
+  as a string without `Z` or a numeric offset answers 400 `ValidationError`
+  with `details.keys`, before any transaction. Strapi would read such a
+  value in the process zone (UTC). Date objects, numbers and null pass;
+  `date` attributes are not instants.
+- **The document lock** (`utils/document-lock.ts`, second): every create,
+  update, clone, delete, publish, unpublish and discard of a guarded type
+  (the seven scheduled types, poll, wiki space, department, team) runs in a
+  transaction that locks the document's revision row and advances the
+  revision afterwards, whoever writes. Inside the authoring scope the web
+  routes open (batch 15 lane 15A: `If-Match`), the lock accepts only the
+  current revision, and re-checks the caller's class on a mismatch: a
+  caller who lost it gets 403 or 404 and never learns the new revision; one
+  who kept it gets 412 with the current revision. Raw writes of guarded
+  rows are inventoried by `raw-writers.test.ts`: each takes the lock and
+  advances the revision, or only raises a targeting flag.
+- **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
+  scheduled type needs the fields the published validation requires, and
+  a lesson's course and a wiki page's parent must be published; a publish
+  that would drop that link anyway is refused and rolled back. This binds
+  the admin panel and the scheduler too.
+- **The audit trail** (`utils/audit.ts`, last of the content middlewares):
+  one `audit_events` row per change of a guarded document, written in the
+  change's transaction (a failing insert rolls the change back): the
+  action, the document, the revision, who (user, admin user or system) and
+  from where (content API, admin panel, scheduler, boot), the role class
+  the gate admitted, and the changed attribute names, never values. The
+  rows are append-only: a lifecycle refuses every create, change and delete
+  except the recorder's creates and the retention janitor's deletes
+  (`AUDIT_RETENTION_DAYS`, default 365). The admin panel can read them, not
+  change them; a database superuser still can (an application trail, not
+  tamper-evident storage). Not covered: user and role changes, refused
+  attempts, raw writes other than the scheduler's.
+
 ## Content types and their access rules
 
 The [README content model](../README.md#content-model) lists the types;
@@ -852,6 +897,18 @@ them, and the ⌘K search skips them. The admin area lives under
 reverse proxy.
 
 ## Tests that pin these rules
+
+- `apps/cms/src/bootstrap/document-middlewares.test.ts`,
+  `index.register.test.ts`: the Document Service middleware slots and their
+  order; `framework-contract.test.ts` pins the Strapi behaviour they rely
+  on (registration order is run order, a middleware's transaction is
+  joined, create/update with status published publish without a publish
+  pass, publish drops a link to an unpublished target).
+- `apps/cms/src/raw-writers.test.ts`: every module that writes through the
+  query layer, and the rule each raw writer of a guarded type satisfies.
+- `apps/cms/src/integration/{datetime-guard,document-concurrency,scheduled-publish,audit,targeting-flags-backfill}.integration.test.ts`:
+  the document layer on SQLite and Postgres 16, through the Content Manager
+  as well.
 
 - `infra/readme-permissions.test.ts`: the README permission tables against
   `PERMISSION_MATRIX`, `CUSTOM_ACTION_GRANTS`, the user reads and the set

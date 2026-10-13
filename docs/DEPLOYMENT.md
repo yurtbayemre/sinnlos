@@ -1366,6 +1366,21 @@ systemctl start docker
 > database, one transaction, the check, and a fresh `JWT_SECRET` before
 > the cms starts.
 
+> **Deploying the authoring document layer (batch 15, lane 15B)?** Part of
+> batch 15 (follow "Deploying batch 15" once it exists). The cms only: a
+> datetime sent without `Z` or an offset now answers 400 everywhere; every
+> change of an announcement, event, document, quick link, wiki page,
+> course, lesson, poll, wiki space, department or team advances a revision
+> (`content_versions`) and writes an audit row (`audit_events`, read-only in
+> the admin panel, kept `AUDIT_RETENTION_DAYS`, default 365); Publish at
+> (and Unpublish at on documents and quick links) work through a
+> `scheduled-publisher` task every minute; a lesson in an unpublished
+> course or a wiki page under an unpublished parent can no longer be
+> published. Additive columns and tables, indexes and a targeting-flag
+> backfill at boot; no grant, no required env. A rollback to batch 14
+> needs the schedule export first. Follow
+> [Upgrading to the authoring document layer (batch 15, lane 15B)](#upgrading-to-the-authoring-document-layer-batch-15-lane-15b).
+
 > **Deploying batch 14 (2026-10-13)?** The page loaders and UI kit, the
 > README and security docs and the documentation pass ship as one normal
 > deploy of cms and web with `infra/deploy.sh`, **once batch 13 runs**.
@@ -1810,6 +1825,243 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the authoring document layer (batch 15, lane 15B)
+
+Lane 15B of batch 15 (branch `feat/v2-authoring-cms-document-layer`, on
+`main` with the Strapi 5.57 update) is the document layer under v2
+authoring (deep-dive decision 06 §D, §F, §G, §H, §K). It changes the
+**cms only**; batch 15 ships it with lanes 15D, 15A and 15C, so follow
+"Deploying batch 15" once that exists; this note is the lane's part of it.
+On its own the lane is deployable too: the content API's routes and
+grants are unchanged, and the web is unaffected. No dependency, no
+required env, no grant, no route, no edge change.
+
+**What changes**
+
+- **Offset-less instants answer 400 everywhere** (DT-OFFSETLESS). A
+  datetime field sent as text without `Z` or a numeric offset
+  (`2026-10-01T09:00`) is refused with `400 ValidationError` "Instants need
+  Z or an offset (e.g. 2026-10-01T07:00:00.000Z): <fields>", through the
+  content API, the admin panel and scripts alike. Strapi used to store such
+  a value as UTC wall time. The admin panel and the web always send `Z`,
+  so nothing they do changes; a script or integration that sends local
+  times must add the offset. [§3.10](#310-datetime-contract) is updated.
+- **Every change of a document advances its revision.** Announcements,
+  events, documents, quick links, wiki pages, courses, lessons, polls,
+  wiki spaces, departments and teams get a revision in the new table
+  `content_versions`: every create, save, publish, unpublish, "Discard
+  changes", clone, delete and every scheduled run moves it, under a row
+  lock, whoever writes. Nobody sees it yet; lane 15A's `If-Match` on the
+  web's saves is built on it.
+- **Scheduled publishing.** The seven types above that have drafts (not
+  polls) get **Publish at** in the admin panel, documents and quick links
+  also **Unpublish at**, and all seven a read-only-in-spirit **Schedule
+  error**. The cms publishes a draft whose Publish at has come, and
+  withdraws a document or quick link whose Unpublish at has come, within a
+  minute (the `scheduled-publisher` task, every minute in
+  `APP_TIME_ZONE`). The times are the draft's: they apply once saved, also
+  for a published item, and the published version's copies are ignored.
+  - Publishing by hand clears a pending Publish at (publishing now wins);
+    unpublishing clears it too (withdrawn content never reappears through
+    an older schedule); "Discard changes" drops it with the other draft
+    changes; a duplicate starts unscheduled.
+  - A scheduled publish whose window already ended (the announcement's
+    Expires at, or Unpublish at, passed, e.g. while the cms was down) is
+    not published and notifies nobody: Schedule error `windowExpired`.
+  - A scheduled publish that fails for good sets Schedule error
+    `notPublishable` (a required field missing, a course or parent not
+    published), `invalid` (Strapi's validation) or `rejected` (a
+    lifecycle, e.g. the lesson checks), clears Publish at and logs
+    `[scheduler] <type> <documentId> failed: <code>`; a passing failure
+    (a lock timeout, a lost connection) is retried every minute and
+    becomes `retryExhausted` after the fifth. The next save of the draft
+    clears the error. After a publish the panel shows **Published**, not
+    Modified.
+  - `CRON_ENABLED=0` stops it with the other tasks; nothing scheduled
+    publishes then, and the first run after the crons are back catches
+    up (with the expired-window rule).
+- **Publish readiness, also in the admin panel.** A lesson can no longer be
+  published while its course is not, and a wiki page not while its parent
+  is not (400 "This draft cannot be published yet: course"); before, the
+  publish dropped the link silently. A publish of a draft without its
+  required fields says which ones.
+- **The content activity trail.** Every such change writes a row to the
+  new table `audit_events` in the same transaction: what (create, update,
+  publish, unpublish, discardDraft, clone, delete, schedulePublish,
+  scheduleUnpublish, scheduleFailed), which document, the revision, who
+  (an intranet user, an admin-panel user, or the system for boot writes
+  and the scheduler) and from where, and the names of the fields the write
+  carried, never their values. The admin panel lists it under **Audit
+  event**; creating, editing or deleting an entry there is refused ("Audit
+  events are append-only"). The new `audit-janitor` deletes rows older than
+  `AUDIT_RETENTION_DAYS` (default 365) at 03:50 `APP_TIME_ZONE`.
+- **New targeting fields, no visible effect yet.** Announcements get
+  **Retarget required** and an **Owner department**, events **Notify
+  audience** (`all`/`departments`) and an **Owner department**, documents
+  an **Owner department**. Lanes 15D and 15A act on them. At every boot
+  the cms raises announcement Audience to `departments` on every row that
+  links a department or a team, and sets an event's Notify audience
+  (`departments` when it links a department, otherwise `all`); see
+  "Rollback" for why this also repairs rows an older image rewrote.
+
+**Schema (additive; no data migration)**
+
+- New columns: `publish_at` and `schedule_error` on `announcements`,
+  `events`, `documents`, `quick_links`, `wiki_pages`, `courses` and
+  `lessons`; `unpublish_at` on `documents` and `quick_links`;
+  `events.notify_audience`, `announcements.retarget_required`.
+- New link tables `announcements_owner_department_lnk`,
+  `events_owner_department_lnk`, `documents_owner_department_lnk`; new
+  tables `content_versions` and `audit_events`.
+- The datetime guard converts the new datetime columns to `timestamptz` on
+  the first boot (15 columns); the boot then creates the unique index
+  `content_versions_target_uq` and nine partial indexes on
+  `publish_at`/`unpublish_at` (`… WHERE … IS NOT NULL`), `IF NOT EXISTS`,
+  at every boot. Without the unique index the cms does not start.
+
+**Env:** none required. `AUDIT_RETENTION_DAYS` (optional, default 365, a
+whole number of days ≥ 1; any other value deletes nothing and logs an
+error every night) is passed through by compose. `CRON_ENABLED` now also
+governs the scheduler and the audit janitor.
+
+**Grants:** none. The permission diff (`prod-perm-diff.sql`) is unchanged
+and the drift report still checks 120 managed actions.
+
+**After the deploy** (read-only):
+
+1. Boot lines, in this order: `[datetime] converted 15 column(s) to
+   timestamptz: announcements.publish_at, audit_events.created_at, …`;
+   `[document-indexes] created 10 index(es): content_versions_target_uq, …`;
+   `[bootstrap] permission drift: none (report-only check of 120 managed
+   actions)`; one `[targeting-flags] announcements: audience 'departments'
+   on N row(s) …; events: notifyAudience 'departments' on N row(s) …,
+   'all' on N` line (the first boot only; later boots log nothing);
+   `Strapi started successfully`. Then one `[cron] scheduled-publisher
+   took …ms` line a minute. Stop lines: any `[document-indexes]`,
+   `[targeting-flags]`, `[audit]` or `[scheduler] … failed` error.
+2. `psql_db -c "SELECT count(*) FROM content_versions"` and the same for
+   `audit_events` grow with the first saves; `\di content_versions_target_uq`
+   exists.
+3. The permission diff is unchanged.
+4. In the admin panel: save an announcement draft with Publish at a minute
+   ahead; within two minutes it is published, the list shows Published,
+   and **Audit event** lists `schedulePublish` for it.
+
+**If the boot stops:**
+
+- `[document-indexes] could not create the index …`: the cms does not
+  start (the lock needs the unique index). A duplicate
+  `(target_uid, target_document_id)` cannot exist on the first boot; fix
+  the database's cause and start again.
+- `[targeting-flags] could not backfill …`: nothing was changed (one
+  transaction); fix the cause and start again (every start retries), or
+  roll back.
+
+**Rollback** (the owner's decision; both images to batch 14's SHA tags,
+`--no-build`, **no `JWT_SECRET` rotation**: batch 14 already checks token
+versions). The batch-14 image keeps the new columns and tables and ignores
+them (`forceMigration` is off). On its boot users-permissions removes no
+grant this lane added (it added none). What the old image does **not** do,
+and how to cover it:
+
+1. **Before the retag, export both schedule fields** and keep the output
+   off the host (lane 15D adds the query as
+   `infra/diagnostics/schedule-export.sql`; for documents and quick links
+   it is):
+   ```sql
+   SELECT d.document_id, d.publish_at, d.unpublish_at, d.schedule_error,
+     EXISTS (SELECT 1 FROM quick_links p WHERE p.document_id = d.document_id
+             AND p.published_at IS NOT NULL) AS published
+   FROM quick_links d
+   WHERE d.published_at IS NULL AND (d.publish_at IS NOT NULL OR d.unpublish_at IS NOT NULL);
+   ```
+   (the same for `documents`; announcements, events, wiki pages, courses
+   and lessons without `unpublish_at`).
+2. **Freeze authoring** while batch 14 runs: nobody publishes or uses
+   "Discard changes" in the panel except for step 3.
+3. **Nothing scheduled runs on batch 14.** A pending publish just waits.
+   A published document or quick link whose exported `unpublish_at` falls
+   inside the rollback window stays published past it: an editor
+   withdraws it by hand in the panel at its time (or before the rollback,
+   when the window is short).
+4. **What an old-image write loses.** A publish or "Discard changes" there
+   rebuilds rows through the old model, which does not know the new
+   columns: the rebuilt row comes back without `publish_at`,
+   `unpublish_at`, `notify_audience`, `retarget_required` and the owner
+   department link.
+5. **On the roll-forward:**
+   - the boot backfill's twin rule restores a lost `notify_audience`
+     (`departments`) or `retarget_required` (`true`) from the other row of
+     the same item; it logs them as "from the twin". Rows where both twins
+     lost the value are lane 15D's saved lists and the guarded raise-only
+     SQL of "Deploying batch 15";
+   - compare the export with the current drafts: a schedule that is still
+     in the future and was lost is re-entered in the admin panel (a
+     Document Service write, so the revision advances; never raw SQL); a
+     withdrawal that fell due and was done by hand needs nothing (the
+     scheduler clears the leftover field); one that fell due and was not
+     done is done now; a publish that fell due is published by hand, or
+     left to the scheduler if the draft kept `publish_at` (the
+     expired-window rule applies);
+   - a lost owner department fails closed: the item is moderator-only for
+     department authors until a moderator sets the owner again;
+   - writes on batch 14 advanced no revision: a web form opened before the
+     rollback can pass its `If-Match` once (accepted);
+   - check the permission diff again.
+
+**Rehearsal (2026-10-13, local; a throwaway compose project with this
+repo's `infra/docker-compose.yml`, Postgres 16; the batch-14 image built
+from `c992b55` with the demo seed and two legacy items, then this lane's
+image):**
+
+- Upgrade: healthy after 8 s; `converted 15 column(s)`, `created 10
+  index(es)`, `[targeting-flags]` 2 announcement rows raised, events 2
+  linked and 12 `all`; every new datetime column `timestamptz`; the three
+  owner link tables, `content_versions` with its unique index,
+  `audit_events` and the nine partial indexes present; the permission
+  diff unchanged (empty), drift none on 120 actions.
+- Admin panel (the Content Manager calls the panel sends): create, save,
+  publish, duplicate and schedule of an announcement, an event and a quick
+  link; each scheduled change was published within the minute and listed
+  as Published; duplicates unscheduled; the revision rose by one per save
+  and per scheduler run; the version row went with a deleted document;
+  editing or deleting an audit entry answered 400; an offset-less `start`
+  answered 400.
+- The real admin UI in headless Chrome: sign-in, a new announcement saved
+  and published, an event with start, end and Publish at saved without a
+  400, and an audit entry's Save refused with the append-only message.
+- Scheduler: with `CRON_ENABLED=false` nothing was published for two
+  minutes; after the restart with the crons on the due draft was published
+  and its 10 recipients notified once each, the announcement whose
+  Publish at and Expires at had both passed ended in `windowExpired` with
+  nobody notified, the draft without a title in `notPublishable`. Two cms
+  containers with the crons on published five due drafts once each (four
+  and one), every recipient was notified once, one `schedulePublish` row
+  each.
+- Unpublish at only: a quick link was withdrawn on time by this image; one
+  that fell due during the rollback stayed published on batch 14 until an
+  editor withdrew it in the panel, and after the roll-forward the scheduler
+  only cleared its leftover field (`cleared 1`); one discarded on batch 14
+  lost its `unpublish_at`, was re-entered from the export through the
+  panel, and was withdrawn at that time.
+- Rollback to batch 14 and forward: both boots clean (batch 14 healthy
+  after 6 s, no warning; the new tables and columns stayed), the
+  permission diff unchanged after each step. On batch 14 "Discard changes"
+  dropped `notify_audience` from the draft of an event restricted only by
+  its flag, and a publish dropped `retarget_required` and the owner
+  department link from an announcement's rewritten published row. The
+  roll-forward's twin rule restored both values ("from the twin on 1"
+  twice in the boot line), the republished event kept `departments`, and
+  the lost owner link stayed lost (fails closed).
+- Not measured here: the boot on a production-sized copy (this machine has
+  no production data). The conversion rewrites the seven content tables
+  once (`ALTER … TYPE timestamptz USING … AT TIME ZONE 'UTC'`, one short
+  transaction per table, the cms not serving yet), the new indexes start
+  nearly empty (only scheduled rows), and the backfill reads the link
+  tables of announcements and events; on an intranet's row counts that
+  should stay within seconds. The batch rehearsal times it on a restored
+  backup-run generation.
 
 #### Deploying batch 14 (2026-10-13)
 
@@ -9807,9 +10059,13 @@ the cms and the database, phase 2 the web):
   `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. Clients must send
   instants with `Z` or an offset. The cms's own code reads instants only
   through its time module, which rejects an offset-less value (a vote
-  against such a `closesAt` counts the poll as open), while Strapi's generic
-  content API and admin panel read one in the process zone, i.e. as UTC.
-  The web and the admin panel always send `Z`.
+  against such a `closesAt` counts the poll as open). Since batch 15 (lane
+  15B, DT-OFFSETLESS) every Document Service write refuses one as well:
+  the content API, the admin panel and scripts answer 400 `ValidationError`
+  "Instants need Z or an offset (e.g. 2026-10-01T07:00:00.000Z): <fields>"
+  instead of storing the value read in the process zone (UTC). Raw
+  `strapi.db.query` writes are not covered; the cms's own code passes Date
+  objects or ISO-Z there. The web and the admin panel always send `Z`.
 - **Calendar dates** (classified `expiresAt`, announcement `ackDeadline`,
   `birthday`, `hireDate`) are Strapi `date` fields: `YYYY-MM-DD`, no zone,
   never turned into a midnight instant.
@@ -9915,11 +10171,15 @@ the cms and the database, phase 2 the web):
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
 - **Cron and backups.** The janitors run at 03:30 / 03:35 (since batch 12
-  also 03:40 / 03:45) and the digest at 07:30 `APP_TIME_ZONE`. The
-  nightly backup may run before or after them: they delete only orphaned
-  uploads older than 24 hours and rows 90 days past their date, which
-  every earlier nightly backup holds (production's `backup-run` runs at
-  04:00).
+  also 03:40 / 03:45, since batch 15 the audit janitor at 03:50), the
+  scheduled publisher every minute (batch 15) and the digest at 07:30
+  `APP_TIME_ZONE`. The nightly backup may run before or after the
+  janitors: they delete only orphaned uploads older than 24 hours, audit
+  rows older than `AUDIT_RETENTION_DAYS` and other rows 90 days past their
+  date, which every earlier nightly backup holds (production's
+  `backup-run` runs at 04:00). The scheduled publisher changes current
+  content like a manual publish in the same minute; `pg_dump` takes a
+  consistent snapshot.
 - **Local development.** SQLite needs nothing. With a local Postgres, set
   `TZ=UTC` in `apps/cms/.env` (a boot that creates or changes the schema
   refuses any other zone).
