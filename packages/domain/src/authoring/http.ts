@@ -81,48 +81,24 @@ export type AuthoringIntent =
   | "authoringList"
   | "editable";
 
+/** Every intent of the table: the explicit-status types offer them all. */
+const EVERY_INTENT: readonly AuthoringIntent[] = [
+  "create",
+  "update",
+  "publish",
+  "unpublish",
+  "discardDraft",
+  "delete",
+  "authoringList",
+  "editable",
+];
+
 /** The intents each type offers. */
 export const AUTHORING_INTENTS: Readonly<Record<AuthoringType, readonly AuthoringIntent[]>> = {
-  announcement: [
-    "create",
-    "update",
-    "publish",
-    "unpublish",
-    "discardDraft",
-    "delete",
-    "authoringList",
-    "editable",
-  ],
-  event: [
-    "create",
-    "update",
-    "publish",
-    "unpublish",
-    "discardDraft",
-    "delete",
-    "authoringList",
-    "editable",
-  ],
-  quickLink: [
-    "create",
-    "update",
-    "publish",
-    "unpublish",
-    "discardDraft",
-    "delete",
-    "authoringList",
-    "editable",
-  ],
-  document: [
-    "create",
-    "update",
-    "publish",
-    "unpublish",
-    "discardDraft",
-    "delete",
-    "authoringList",
-    "editable",
-  ],
+  announcement: EVERY_INTENT,
+  event: EVERY_INTENT,
+  quickLink: EVERY_INTENT,
+  document: EVERY_INTENT,
   poll: ["create", "update", "delete", "authoringList", "editable"],
 };
 
