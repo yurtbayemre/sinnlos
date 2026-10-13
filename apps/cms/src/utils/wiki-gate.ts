@@ -256,6 +256,7 @@ export function wikiPageGate() {
     if (!intent || !caller || config?.uid !== WIKI_PAGE_UID) return refuse(intent);
     const moderator = hasRole(caller, MODERATORS);
     if (MODERATOR_INTENTS.includes(intent) && !moderator) return refuse(intent);
+    const db = strapi as unknown as StrapiDb;
 
     let roleClass: WikiEditorClass;
     let extras: WikiGateExtras;
@@ -276,7 +277,7 @@ export function wikiPageGate() {
       loaded = await loadAuthoringRows(strapi, WIKI_PAGE_UID, idParam);
       if (!loaded) return refuse(intent);
       extras = await callerScope(strapi, caller, moderator);
-      const found = await wikiRowClass(strapi as unknown as StrapiDb, extras, loaded.rows);
+      const found = await wikiRowClass(db, extras, loaded.rows);
       if (!found) return refuse(intent);
       roleClass = found;
     }
@@ -305,14 +306,11 @@ export function wikiPageGate() {
         scope.pageDocumentId = rows.documentId;
         // The page's space: for a moderator the draft's (rows may differ
         // after a panel move), for the others the one readable space.
-        scope.spaceDocumentId =
-          (extras.visibleSpaceIds === null
+        const space =
+          extras.visibleSpaceIds === null
             ? relationDocumentId(draft.space)
-            : await pageSpace(
-                strapi as unknown as StrapiDb,
-                rows.documentId,
-                extras.visibleSpaceIds,
-              )) ?? undefined;
+            : await pageSpace(db, rows.documentId, extras.visibleSpaceIds);
+        scope.spaceDocumentId = space ?? undefined;
         scope.currentParentDocumentId = relationDocumentId(draft.parent);
       }
       const checks = authoringChecks(strapi, {
@@ -332,7 +330,7 @@ export function wikiPageGate() {
           readiness: (merged) => publishBlockers(strapi, WIKI_PAGE_UID, { ...merged }),
           relationChecks: {
             ...checks.relationChecks,
-            ...wikiRelationChecks(strapi as unknown as StrapiDb, scope),
+            ...wikiRelationChecks(db, scope),
           },
         },
         // The author classes' generic writes publish (FX07); everything

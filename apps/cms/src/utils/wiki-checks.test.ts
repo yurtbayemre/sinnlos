@@ -125,16 +125,20 @@ function fakeHost(world: World): WikiChecksHost {
       if (value && typeof value === "object" && "$notNull" in value) return row[key] !== null;
       return row[key] === value;
     });
-  const tableOf = (uid: string): Record<string, unknown>[] =>
-    uid === PAGE
-      ? world.pages
-      : uid === SPACE
-        ? world.spaces
-        : uid === "parent_lnk"
-          ? world.parent
-          : uid === "space_lnk"
-            ? world.space
-            : [];
+  const tableOf = (uid: string): Record<string, unknown>[] => {
+    switch (uid) {
+      case PAGE:
+        return world.pages;
+      case SPACE:
+        return world.spaces;
+      case "parent_lnk":
+        return world.parent;
+      case "space_lnk":
+        return world.space;
+      default:
+        return [];
+    }
+  };
   return {
     db: {
       query: (uid: string) => ({

@@ -651,7 +651,7 @@ const WIKI_PAGE_MODERATOR_UPDATE: WriteRule = {
 };
 
 /** The target attribute each wiki-space visibility needs (§B6; visible-ids.ts reads them). */
-const WIKI_SPACE_VISIBILITY_TARGETS: Readonly<Record<string, string>> = {
+export const WIKI_SPACE_VISIBILITY_TARGETS: Readonly<Record<string, string>> = {
   role: "allowedRoles",
   department: "department",
   team: "team",
@@ -978,10 +978,10 @@ export const WRITE_ALLOWLIST = {
 /**
  * Every attribute of the authored types (the five phase-1 types, wiki
  * pages and wiki spaces) that NO class may write, with the reason (§B1.7
- * attribute coverage). write-allowlist.test.ts walks each
- * schema: an attribute is either a field of some class's rule or listed
- * here, never both, so a new schema attribute fails the test until it is
- * reviewed. The core validator no longer runs on these routes.
+ * attribute coverage). write-allowlist.test.ts walks each schema: an
+ * attribute is either a field of some class's rule or listed here, never
+ * both, so a new schema attribute fails the test until it is reviewed. The
+ * core validator no longer runs on these routes.
  */
 export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [ANNOUNCEMENT_UID]: {

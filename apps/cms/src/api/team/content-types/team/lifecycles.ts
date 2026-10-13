@@ -32,10 +32,12 @@ import {
  *
  * Wiki team SPACES need nothing here: their only write class is the
  * role-only `moderator`, and a space whose team is gone is readable by
- * moderators only (utils/visible-ids.ts). The mechanics are the department hook's (api/department/
- * content-types/department/lifecycles.ts): beforeDelete for the Document
- * Service's per-row delete, beforeDeleteMany for a script's db-level one,
- * the delete's own transaction (a delete outside one is refused), a failing
+ * moderators only (utils/visible-ids.ts).
+ *
+ * The mechanics are the department hook's (api/department/content-types/
+ * department/lifecycles.ts): beforeDelete for the Document Service's
+ * per-row delete, beforeDeleteMany for a script's db-level one, the
+ * delete's own transaction (a delete outside one is refused), a failing
  * step fails the delete.
  */
 

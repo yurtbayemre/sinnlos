@@ -17,6 +17,9 @@ export const WIKI_PAGE = "api::wiki-page.wiki-page";
 const ifMatch = (version: string | number | null | undefined): Record<string, string> =>
   version === null || version === undefined ? {} : { "If-Match": `"${version}"` };
 
+/** `?status=` as the web sends it; null sends none. */
+const statusQuery = (status: string | null): string => (status === null ? "" : `?status=${status}`);
+
 /** The `data` of a wiki write answer (@sinnlos/domain WikiPageResult / WikiSpaceResult). */
 export interface WikiDto {
   documentId: string;
@@ -118,20 +121,14 @@ export function wikiApi(t: TestStrapi): WikiApi {
         headers: ifMatch(version),
       }),
     createPage: (caller, data, status = "published") =>
-      t.api(caller, `/api/wiki-pages${status === null ? "" : `?status=${status}`}`, {
-        json: { data },
-      }),
+      t.api(caller, `/api/wiki-pages${statusQuery(status)}`, { json: { data } }),
     updatePage: (caller, documentId, data, options = {}) => {
       const status = options.status === undefined ? "draft" : options.status;
-      return t.api(
-        caller,
-        `/api/wiki-pages/${documentId}${status === null ? "" : `?status=${status}`}`,
-        {
-          method: "PUT",
-          headers: ifMatch(options.version),
-          json: { data },
-        },
-      );
+      return t.api(caller, `/api/wiki-pages/${documentId}${statusQuery(status)}`, {
+        method: "PUT",
+        headers: ifMatch(options.version),
+        json: { data },
+      });
     },
     createDraft: (caller, data) => t.api(caller, "/api/wiki-pages/drafts", { json: { data } }),
     saveDraft: (caller, documentId, data, version) =>

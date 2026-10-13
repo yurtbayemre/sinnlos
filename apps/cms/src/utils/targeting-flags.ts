@@ -73,13 +73,13 @@ import {
  *      event, document and (batch 16) wiki page that links the deleted row
  *      (`ownerDepartment`, `department`, `departments`, or `team`; a wiki
  *      page's department and team decide its departmentHead and teamLead
- *      classes, can-edit-wiki) and advance it (K2
- *      `lockDocument`/`advanceRevision`), in ascending (uid, documentId)
- *      order after the deleted row's own version row, which the document
- *      lock took first (§G2). A write gate that classified one of these
- *      documents before the delete then fails the revision comparison and
- *      answers 404 or 403 (§N8): the cascade changes ownership and
- *      targeting outside the Document Service;
+ *      classes, can-edit-wiki) and advance it (K2 `lockDocument`/
+ *      `advanceRevision`), in ascending (uid, documentId) order after the
+ *      deleted row's own version row, which the document lock took first
+ *      (§G2). A write gate that classified one of these documents before
+ *      the delete then fails the revision comparison and answers 404 or
+ *      403 (§N8): the cascade changes ownership and targeting outside the
+ *      Document Service;
  *   3. raise the flags and the marker on the linked rows.
  * A failing step fails the delete; a failed delete rolls everything back.
  * A delete outside a transaction (a script's db-level delete) is refused:

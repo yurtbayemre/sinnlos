@@ -66,10 +66,10 @@ import type { AuthoringRoute } from "./http.js";
  *     `invalid` on `space` (missing, hidden, or deleted under the write).
  *
  * THE STRUCTURE LOCK (K21, cms utils/wiki-structure-lock.ts): every
- * mutating wiki-page action and every wiki-space delete, unpublish and
- * deleting discard take one reserved lock row, from every source (content
- * API, admin panel, scheduler), so a parent loop or a page in a vanishing
- * space cannot be committed by two writers at once.
+ * mutating wiki-page and wiki-space action takes one reserved lock row,
+ * from every source (content API, admin panel, scheduler), so a parent
+ * loop, a page in a vanishing space or a page that loses its space to a
+ * space publish cannot be committed by two writers at once.
  */
 
 /** The wiki's authored types, by their web name. */

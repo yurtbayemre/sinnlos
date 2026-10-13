@@ -13,6 +13,7 @@ import {
   type AuthoringType,
   type OwnerDepartment,
   type WikiAuthoringType,
+  type WikiSpaceRef,
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import {
@@ -48,7 +49,13 @@ import {
   type GateIntent,
 } from "./write-gate";
 import { wikiEditContext } from "./wiki-edit-context";
-import { DEPARTMENT_AUTHOR_CLASS, MODERATOR_CLASS, POLL_UID, refuseKeys } from "./write-allowlist";
+import {
+  DEPARTMENT_AUTHOR_CLASS,
+  MODERATOR_CLASS,
+  POLL_UID,
+  WIKI_SPACE_VISIBILITY_TARGETS,
+  refuseKeys,
+} from "./write-allowlist";
 
 /**
  * The authoring controller (deep-dive decision 06 §B3, §G, §N2; batch 15
@@ -429,6 +436,16 @@ export async function resultDto(
 export const documentIdOf = (value: unknown): string | null =>
   isRecord(value) && typeof value.documentId === "string" ? value.documentId : null;
 
+/** A populated wiki space as a page's form and the drafts list name it, or null. */
+export function wikiSpaceRefOf(value: unknown): WikiSpaceRef | null {
+  if (!isRecord(value) || typeof value.documentId !== "string") return null;
+  return {
+    documentId: value.documentId,
+    slug: text(value.slug) ?? "",
+    name: text(value.name) ?? "",
+  };
+}
+
 const ownerOf = (row: AuthoringRow | null): OwnerDepartment | null => {
   const owner = row?.ownerDepartment;
   return isRecord(owner) && typeof owner.documentId === "string"
@@ -453,9 +470,7 @@ const roleTypesOf = (value: unknown): string[] =>
  */
 export function spaceNeedsRetarget(row: Record<string, unknown> | null): boolean {
   if (!row) return false;
-  const target = { role: "allowedRoles", department: "department", team: "team" }[
-    String(row.visibility)
-  ];
+  const target = WIKI_SPACE_VISIBILITY_TARGETS[String(row.visibility)];
   if (!target) return false;
   const value = row[target];
   return Array.isArray(value) ? value.length === 0 : !isRecord(value);
@@ -597,8 +612,7 @@ export async function editableFields(
         needsRetarget: spaceNeedsRetarget(draft),
         pageCount: (await spacePageCounts(strapi, [rows.documentId])).get(rows.documentId) ?? 0,
       };
-    case WIKI_PAGE_UID: {
-      const space = isRecord(draft.space) ? draft.space : null;
+    case WIKI_PAGE_UID:
       return {
         title: text(draft.title) ?? "",
         slug: text(draft.slug) ?? "",
@@ -610,16 +624,9 @@ export async function editableFields(
         // The schema default is true: a NULL column reads as on.
         tocEnabled: draft.tocEnabled !== false,
         order: typeof draft.order === "number" ? draft.order : 0,
-        space:
-          space && typeof space.documentId === "string"
-            ? {
-                documentId: space.documentId,
-                slug: text(space.slug) ?? "",
-                name: text(space.name) ?? "",
-              }
-            : null,
+        space: wikiSpaceRefOf(draft.space),
         parent: documentIdOf(draft.parent),
-        canDiscardUnpublished: roleClass === MODERATOR_CLASS || roleClass === "author",
+        canDiscardUnpublished: mayDeleteByDiscard(roleClass),
         ...(moderator
           ? {
               department: documentIdOf(draft.department),
@@ -629,7 +636,6 @@ export async function editableFields(
             }
           : {}),
       };
-    }
     case POLL_UID:
       return {
         question: text(draft.question) ?? "",
@@ -656,7 +662,7 @@ const LIST_STATUSES = ["draft", "published", "modified", "scheduled", "failed"] 
 type ListStatus = (typeof LIST_STATUSES)[number];
 const OWNER_FILTERS = ["department", "moderators"] as const;
 /** documentIds per `$in` (well below every bind limit). */
-const LIST_CHUNK = 200;
+export const LIST_CHUNK = 200;
 /** The highest page the list serves (a bound on `page`, not on the rows). */
 const MAX_PAGE = 10_000;
 
@@ -739,7 +745,7 @@ export function parseListQuery(
   return out;
 }
 
-const chunks = <T>(items: readonly T[], size: number): T[][] => {
+export const chunks = <T>(items: readonly T[], size: number): T[][] => {
   const out: T[][] = [];
   for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
   return out;

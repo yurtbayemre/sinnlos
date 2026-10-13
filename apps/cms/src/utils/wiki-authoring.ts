@@ -8,7 +8,9 @@ import { errors } from "@strapi/utils";
 
 import {
   AUTHORING_SPECS,
+  LIST_CHUNK,
   answering,
+  chunks,
   documentIdOf,
   documentStatus,
   gateFor,
@@ -18,6 +20,7 @@ import {
   resultDto,
   revisionsOf,
   runDocumentMutation,
+  wikiSpaceRefOf,
   withWikiEdit,
   type AuthoringContext,
   type AuthoringControllerHost,
@@ -156,9 +159,9 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
       const ids = drafts
         .map((row) => row.documentId)
         .filter((id): id is string => typeof id === "string");
-      for (let i = 0; i < ids.length; i += 200) {
+      for (const chunk of chunks(ids, LIST_CHUNK)) {
         const rows = (await strapi.db.query(WIKI_PAGE_UID).findMany({
-          where: { documentId: { $in: ids.slice(i, i + 200) }, publishedAt: { $notNull: true } },
+          where: { documentId: { $in: chunk }, publishedAt: { $notNull: true } },
           select,
           populate,
         })) as unknown[];
@@ -169,8 +172,7 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
       // A non-moderator lists only pages whose every row sits in a space
       // they read: the list must not name a hidden space.
       const readable = (row: Record<string, unknown> | undefined): boolean => {
-        if (!row) return true;
-        if (visible === null) return true;
+        if (!row || visible === null) return true;
         const space = isRecord(row.space) ? row.space : null;
         return space !== null && typeof space.id === "number" && visible.has(space.id);
       };
@@ -181,19 +183,11 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
         if (!readable(draft) || !readable(twin)) continue;
         const status = documentStatus(draft, twin ?? null);
         if (status === "published") continue;
-        const space = isRecord(draft.space) ? draft.space : null;
         data.push({
           documentId,
           title: text(draft.title) ?? "",
           slug: text(draft.slug) ?? "",
-          space:
-            space && typeof space.documentId === "string"
-              ? {
-                  documentId: space.documentId,
-                  slug: text(space.slug) ?? "",
-                  name: text(space.name) ?? "",
-                }
-              : null,
+          space: wikiSpaceRefOf(draft.space),
           status,
           updatedAt: iso(draft.updatedAt),
           version: String(revisions.get(documentId) ?? 0),

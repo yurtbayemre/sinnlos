@@ -1176,10 +1176,14 @@ describe("route → policy matrix (S01)", async () => {
 
     it("rule 2: every authoring custom action goes to exactly its roles, never guest or authenticated", () => {
       const expected: Record<string, readonly string[]> = {};
+      // The always-published types have no publish, unpublish or discard.
+      const intentsOf: Record<string, readonly string[]> = {
+        [POLL]: POLL_INTENTS,
+        [WIKI_SPACE]: WIKI_SPACE_INTENTS,
+      };
       for (const uid of AUTHORED_UIDS) {
         if (uid === WIKI_PAGE) continue; // can-edit-wiki's actions: the next test.
-        const intents =
-          uid === POLL ? POLL_INTENTS : uid === WIKI_SPACE ? WIKI_SPACE_INTENTS : DP_INTENTS;
+        const intents = intentsOf[uid] ?? DP_INTENTS;
         const roles = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)
           ? [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES]
           : [...MODERATORS];

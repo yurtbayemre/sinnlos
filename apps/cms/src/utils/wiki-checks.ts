@@ -2,7 +2,11 @@ import { FORM_KEY } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 
 import { WIKI_PAGE_UID, WIKI_SPACE_UID } from "./authoring-uids";
-import { MUTATING_ACTIONS, type DocumentLockHost } from "./document-lock";
+import {
+  MUTATING_ACTIONS,
+  type DocumentActionMiddleware,
+  type DocumentLockHost,
+} from "./document-lock";
 import { relationLinkTable } from "./targeting-flags";
 import { lockWikiStructure } from "./wiki-structure-lock";
 import { refuseKeys } from "./write-allowlist";
@@ -52,18 +56,18 @@ import { refuseKeys } from "./write-allowlist";
  * lose its space link with the delete's cascade (Codex re-review of lane
  * 16B). Under the lock no page write runs in that window.
  *
- * NON-EMPTY SPACES (S15). A delete, an unpublish and a
- * discard of a space without a published row (it deletes the space) refuse
- * with `_form: spaceNotEmpty` while any page row links any row of the
- * space: a space's pages would otherwise lose their space (a panel
- * unpublish deletes the published row, its pages' links cascade, and a
- * republish does not re-link them). A discard of a space WITH a published
- * row rebuilds the draft row from it, and Strapi 5.57 re-links only the
- * pages that have a published version (Codex review of lane 16B,
- * reproduced on both engines): a draft-only page would lose its space,
- * and with it its author's access. So every page row that linked the space
- * before must link it after, else the discard refuses (`spaceNotEmpty`)
- * and rolls back.
+ * NON-EMPTY SPACES (S15). A delete, an unpublish and a discard of a space
+ * without a published row (it deletes the space) refuse with `_form:
+ * spaceNotEmpty` while any page row links any row of the space: a space's
+ * pages would otherwise lose their space (a panel unpublish deletes the
+ * published row, its pages' links cascade, and a republish does not
+ * re-link them). A discard of a space WITH a published row rebuilds the
+ * draft row from it, and Strapi 5.57 re-links only the pages that have a
+ * published version (Codex review of lane 16B, reproduced on both
+ * engines): a draft-only page would lose its space, and with it its
+ * author's access. So every page row that linked the space before must
+ * link it after, else the discard refuses (`spaceNotEmpty`) and rolls
+ * back.
  *
  * RESERVED SLUGS: a page slug `new` and a space slug `drafts` are refused
  * (`invalid` on `slug`): the web's routes use them as words.
@@ -72,13 +76,11 @@ import { refuseKeys } from "./write-allowlist";
  * structure row; nothing here locks a document row afterwards.
  */
 
-export const WIKI_CHECKS_LOG = "[wiki-checks]";
-
 /** The wiki-space actions that can remove the space's rows (the emptiness checks). */
 const SPACE_REMOVAL_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"];
 
-/** The page actions whose payload can name a space. */
-const SPACE_PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
+/** The actions whose payload the checks read (a reserved slug; a page's space). */
+const PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
 
 /**
  * Slugs the web's routes use as words (lane 16C): `/wiki/<space>/new`
@@ -101,15 +103,6 @@ export type WikiChecksHost = {
     };
   };
 } & DocumentLockHost;
-
-/** What @strapi/core hands a Document Service middleware (C4). */
-export interface WikiChecksContext {
-  uid?: string;
-  action?: string;
-  params?: unknown;
-}
-
-type Middleware = (context: WikiChecksContext, next: () => Promise<unknown>) => Promise<unknown>;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -179,7 +172,7 @@ export function loopThrough(
   return null;
 }
 
-/** Whether a page payload points the page at a space (any Strapi relation shape naming a target). */
+/** Whether a page payload points the page at a space (any relation shape naming a target). */
 export function namesSpace(data: unknown): boolean {
   if (!isRecord(data) || !("space" in data)) return false;
   const value = data.space;
@@ -193,7 +186,7 @@ export function namesSpace(data: unknown): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// The reads (inside the action's transaction: the query engine joins it).
+// The refusals.
 
 /** The `parentCycle` refusal (key `parent`). */
 export function parentCycleError(): InstanceType<typeof errors.ValidationError> {
@@ -210,6 +203,17 @@ export function spaceNotEmptyError(): InstanceType<typeof errors.ValidationError
     codes: { [FORM_KEY]: "spaceNotEmpty" },
   });
 }
+
+/** The refusal of a space discard that would take pages out of the space (`spaceNotEmpty`). */
+export function spaceDiscardError(): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError(
+    "Discarding this space's draft would take its unpublished pages out of the space",
+    { keys: [FORM_KEY], codes: { [FORM_KEY]: "spaceNotEmpty" } },
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The reads (inside the action's transaction: the query engine joins it).
 
 const REFUSAL = "the wiki checks refuse the write";
 
@@ -272,14 +276,6 @@ export async function spaceHasPages(strapi: WikiChecksHost, documentId: string):
   return (await pageRowsInSpace(strapi, documentId)).length > 0;
 }
 
-/** The refusal of a space discard that would take pages out of the space. */
-export function spaceDiscardError(): InstanceType<typeof errors.ValidationError> {
-  return new errors.ValidationError(
-    "Discarding this space's draft would take its unpublished pages out of the space",
-    { keys: [FORM_KEY], codes: { [FORM_KEY]: "spaceNotEmpty" } },
-  );
-}
-
 /** Whether the draft row of page `documentId` links a space. */
 async function draftHasSpace(strapi: WikiChecksHost, documentId: string): Promise<boolean> {
   const draft = await strapi.db.query(WIKI_PAGE_UID).findOne({
@@ -302,14 +298,14 @@ function writtenDocumentId(action: string, params: Record<string, unknown>, resu
 // The middleware.
 
 /** The wiki-checks Document Service middleware (see the module comment). */
-export function createWikiChecks(strapi: WikiChecksHost): Middleware {
+export function createWikiChecks(strapi: WikiChecksHost): DocumentActionMiddleware {
   return async (context, next) => {
     const uid = context.uid;
     const action = context.action ?? "";
     const params = isRecord(context.params) ? context.params : {};
 
     const reserved = uid ? RESERVED_WIKI_SLUGS[uid] : undefined;
-    if (reserved && SPACE_PAYLOAD_ACTIONS.includes(action) && isRecord(params.data)) {
+    if (reserved && PAYLOAD_ACTIONS.includes(action) && isRecord(params.data)) {
       const slug = params.data.slug;
       if (typeof slug === "string" && reserved.includes(slug.trim().toLowerCase())) {
         refuseKeys(["slug"]);
@@ -324,7 +320,7 @@ export function createWikiChecks(strapi: WikiChecksHost): Middleware {
         const after = await readParentEdges(strapi);
         const loop = loopThrough(after, addedEdges(before, after));
         if (loop) throw parentCycleError();
-        if (SPACE_PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data)) {
+        if (PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data)) {
           const documentId = writtenDocumentId(action, params, result);
           if (!documentId || !(await draftHasSpace(strapi, documentId))) refuseKeys(["space"]);
         }

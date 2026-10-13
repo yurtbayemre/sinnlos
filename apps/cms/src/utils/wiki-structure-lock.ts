@@ -15,12 +15,15 @@ import { lockDocument, type DocumentLockHost } from "./document-lock";
  *     unpublish, discardDraft, delete (publish and discard re-create the
  *     incoming self-referential links of other pages, so they can close a
  *     parent loop too);
- *   - a wiki-space delete, unpublish and discardDraft (a discard that
- *     deletes a never-published space).
+ *   - every mutating wiki-space action: a publish (also a create or update
+ *     with `status: published`) re-creates the space's published row from
+ *     the page links it read before, and a delete, an unpublish or a
+ *     discard checks that no page loses its space.
  * So two writers can never commit a parent loop between them, and no page
- * lands in a space that is being deleted, whichever spaces they touch. One
- * row instead of a lock per space (the decision's §G2): a loop can run
- * through pages of four spaces, which no set of per-space locks would see.
+ * lands in a space that is being deleted or loses one that is being
+ * published, whichever spaces they touch. One row instead of a lock per
+ * space (the decision's §G2): a loop can run through pages of four spaces,
+ * which no set of per-space locks would see.
  *
  * LOCK ORDER (§5 R10). A transaction takes the version rows in this order:
  *   1. the document's own version row (the document lock, slot 2);
