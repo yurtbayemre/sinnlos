@@ -1223,11 +1223,13 @@ and the tags it would remove, and changes nothing. The script is
 `set -Eeuo pipefail` and re-run safe; its parameters (environment, the
 defaults are the owner's host): `SMOKE_URL` (`https://$DOMAIN`), `PASSWORDS_FILE`,
 `SINNLOS_CHECKOUT` (the checkout it lives in), `COMPOSE_PROJECT` (`infra`),
-`DEPLOY_STATE_DIR` (state, history, bootstrap marker and lock; by default
-`sinnlos-deploy` in the clone's `.git`, which its linked worktrees share: a
-second clone that deploys the same project must point `DEPLOY_STATE_DIR`
-at that same directory, or the two deploys neither share the lock nor the
-rollback target), `DEPLOY_KEEP_TAGS` and `BACKUP_RUN`
+`DEPLOY_STATE_DIR` (state, history, bootstrap marker and lock, and in
+`restore/` the state and the reservation of `infra/restore-db.sh`; by
+default `sinnlos-deploy` in the clone's `.git`, which its linked worktrees
+share: a second clone that deploys or restores the same project must point
+`DEPLOY_STATE_DIR` at that same directory, or the two neither share the
+lock nor the rollback target, and a deploy from one does not see a restore
+in the other), `DEPLOY_KEEP_TAGS` and `BACKUP_RUN`
 (`/usr/local/sbin/backup-run`, through `sudo -n`). A second compose project (a
 staging copy) needs its own backup dir, smoke URL and edge: `deploy.sh`
 refuses a project other than `infra` without `SMOKE_URL` and
@@ -10720,7 +10722,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra` | A deploy or a restore step of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/restore-db.sh` prints `STOP: …` (exit 1) or, with exit 3, `STOP: another infra/restore-db.sh step or infra/deploy.sh holds the lock …` | The step changed only what the line says; `infra/restore-db.sh status` shows the attempt and its next step ([Restoring a database dump](#restoring-a-database-dump)) |
-| `infra/deploy.sh` stops with `ERROR: a database restore of compose project infra is in progress (…/sinnlos-restore/infra.reservation)` | A restore holds the reservation from its `prepare` until its `start` passes: finish it (`infra/restore-db.sh status` names the next step), or end it with `infra/restore-db.sh cancel` (only before its `apply`); then deploy. Nothing was changed |
+| `infra/deploy.sh` stops with `ERROR: a database restore of compose project infra is in progress (…/sinnlos-deploy/restore/infra.reservation)` | A restore (in this clone, or in another one with the same `DEPLOY_STATE_DIR`) holds the reservation from its `prepare` until its `start` passes: finish it (`infra/restore-db.sh status` names the next step), or end it with `infra/restore-db.sh cancel` (only while no `apply` has begun since the reservation was taken); then deploy. Nothing was changed |
 | `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
 | `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed. Dependabot's own update jobs on the commit do not count (since batch 13; before, they could make a green commit read `pending`) |
 | `infra/deploy.sh` stops with `failed during '<step>'` | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow |
@@ -10837,8 +10839,10 @@ infra/restore-db.sh start
 Each step goes on only from what the step before recorded, so pasting
 the four lines at once, or joining them with `&&`, is safe: after a STOP
 the following steps stop too. The attempt lives in a state file,
-`.git/sinnlos-restore/<project>.state` of the checkout (no secret; the
-earlier attempts next to it), not in the shell: a new shell, an `exit`, a
+`<project>.state` in `restore/` of `infra/deploy.sh`'s state dir
+(`.git/sinnlos-deploy/restore/` of the checkout, or of
+`DEPLOY_STATE_DIR`; no secret; the earlier attempts next to it), not in
+the shell: a new shell, an `exit`, a
 changed variable or another working directory loses nothing. The script
 reads its state files as data it checks, never as code: each must be a
 regular file of the checkout owner with mode 600 in a mode-700 directory,
@@ -10848,14 +10852,22 @@ from the attempt id. Anything else stops the step before it changes
 anything (move the file away and start again with `prepare`).
 
 **The reservation:** from `prepare` on, the project is reserved
-(`.git/sinnlos-restore/<project>.reservation`) until `start` passes or
-`cancel` ends it, also across failed steps. **`infra/deploy.sh` refuses
-to deploy while the reservation exists** (`ERROR: a database restore of
-compose project infra is in progress`, nothing changed), because its `up`
-would start the cms on a database that may be empty, or restored without
-its new secret. Each step also holds the lock of `infra/deploy.sh`
-(`.git/sinnlos-deploy/<project>.lock`), so no second step and no deploy
-of the project run at the same time as a step.
+(`restore/<project>.reservation` next to the lock) until `start` passes
+or `cancel` ends it, also across failed steps. **`infra/deploy.sh`
+refuses to deploy while the reservation exists** (`ERROR: a database
+restore of compose project infra is in progress`, nothing changed),
+because its `up` would start the cms on a database that may be empty, or
+restored without its new secret. As the reservation lies next to
+`infra/deploy.sh`'s lock and state, a second clone that shares
+`DEPLOY_STATE_DIR` ([§3.6](#36-deploy), the parameters) sees a restore of
+the other clone as well. Once an `apply` has begun, the reservation also
+records that the database is **unsafe** (empty, half-restored, or
+restored without its new secret); that mark stays through later
+`prepare`, `back` and failed steps, and only a `start` that passes (its
+attempt's `apply` and `rotate-jwt` passed) ends it, with the reservation.
+Each step also holds the lock of `infra/deploy.sh`
+(`<state dir>/<project>.lock`), so no second step and no deploy of the
+project run at the same time as a step.
 
 **The way back:** after a failed `apply` (the database is then empty, or
 missing after a failed `createdb`), or after a restore you do not want,
@@ -10876,10 +10888,11 @@ nothing was dropped): `infra/restore-db.sh cancel`. It ends the attempt
 and the reservation and deletes the staged dump; it drops, restores and
 starts nothing, so web and cms stay stopped as `prepare` left them, and
 it prints the command that starts them with the attempt's compose files
-(`docker compose -p infra -f … up -d --no-build web cms`). Once `apply`
-has begun, `cancel` refuses (the database may be empty or half-restored):
-only `back` or a passing `apply`, then `rotate-jwt` and `start`, lead to
-running apps.
+(`docker compose -p infra -f … up -d --no-build web cms`). Once any
+`apply` has begun since the reservation was taken, `cancel` refuses, also
+after a later `prepare` or `back` passed (the database may be empty,
+half-restored or restored without its new secret): only `back` or a
+passing `apply`, then `rotate-jwt` and `start`, lead to running apps.
 
 **The compose files** are the ones the project's web and cms containers
 were started with, in their order (their compose `config_files` label):
@@ -10952,7 +10965,8 @@ newer database, a swapped dump path, a failed `createdb` and a failed
 restore with their retries and the way back, a compose file that pins
 `JWT_SECRET`, an exported one, the `.env`-only pair and a held lock).
 `infra/deploy-flow.test.ts` pins `infra/deploy.sh`'s refusal while the
-reservation exists.
+reservation exists, also from a second clone that shares
+`DEPLOY_STATE_DIR` while the real script restores in the first.
 
 **Walked on 2026-10-13** on throwaway containers: a compose project in
 Traefik mode with a real cms schema (105 tables, the demo data) and a
@@ -11238,8 +11252,15 @@ fails unless `up_users` came back. It knows both kinds of backup.
 
 - it checks the generation as `backup-verify` does: `COMPLETE` exists and
   names the directory, and `MANIFEST` lists every other file with a
-  matching sha256, none missing and none extra; it warns when the
-  generation is older than 36 hours (`MAX_AGE_HOURS`, by its name);
+  matching sha256, none missing and none extra; its `generation=` must
+  name the directory and its `service=` be `sinnlos`; it warns when the
+  generation is older than 36 hours (`MAX_AGE_HOURS`, by its name). The
+  format (`# ` comment lines, `key=value` lines, `plain.<component>.bytes`
+  and `.sha256`, `<sha256>  <file>` lines) is the one of a real
+  production generation of 2026-10-13, whose `MANIFEST` and `COMPLETE`
+  the drill read and accepted (with stand-in components) and whose
+  tampered variants it refused; the test fixture writes the same shape
+  with synthetic values;
 - it decrypts every component (`age -d -i <identity> | zstd -d`) into a
   private temporary directory (mode 700, under `TMPDIR`, removed on every
   exit) and compares each plaintext with `plain.<component>.sha256` of
