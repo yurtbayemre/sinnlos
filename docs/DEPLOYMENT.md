@@ -10720,6 +10720,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra` | A deploy or a restore step of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/restore-db.sh` prints `STOP: …` (exit 1) or, with exit 3, `STOP: another infra/restore-db.sh step or infra/deploy.sh holds the lock …` | The step changed only what the line says; `infra/restore-db.sh status` shows the attempt and its next step ([Restoring a database dump](#restoring-a-database-dump)) |
+| `infra/deploy.sh` stops with `ERROR: a database restore of compose project infra is in progress (…/sinnlos-restore/infra.reservation)` | A restore holds the reservation from its `prepare` until its `start` passes: finish it (`infra/restore-db.sh status` names the next step), or end it with `infra/restore-db.sh cancel` (only before its `apply`); then deploy. Nothing was changed |
 | `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
 | `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed. Dependabot's own update jobs on the commit do not count (since batch 13; before, they could make a green commit read `pending`) |
 | `infra/deploy.sh` stops with `failed during '<step>'` | An unexpected error; before `start` the running containers are untouched, from `start` on the rollback commands follow |
@@ -10779,14 +10780,25 @@ its own result and the results of the steps after it before it does
 anything, and a result belongs to one **attempt** (one `prepare`), so a
 retried or failed step never leaves an old "passed" behind:
 
-- `prepare <dump>` starts a new attempt: it reads the dump, stops web and
-  cms, and writes a **new** copy of the current database,
+- `prepare <dump>` starts a new attempt. First it ends the attempt
+  before it (that one can then no longer be applied, rotated or started,
+  even when this `prepare` fails). It copies the dump into the attempt's
+  own file, `infra/backups/restore-<attempt>/dump` (mode 600 in a mode-700
+  directory, the **staged** dump; from here on only this copy is read, so
+  a dump path changed or swapped later changes nothing) and checks that
+  copy. Then it **reserves** the project (below), stops web and cms, and
+  writes a **new** copy of the current database,
   `infra/backups/before-restore-<attempt>.dump` (a name that has not
   existed before), checked the same way; it drops nothing;
-- `apply` runs only for a prepared attempt whose dump and copy still have
-  the sha256 they had at `prepare` and still decode: it stops web and cms
-  again, drops the database (`dropdb --if-exists --force`, so a retry
-  after a failed `createdb` works) and creates it again, runs `pg_restore
+- `apply` runs only for the current attempt, prepared and not ended. It
+  opens the staged dump once and reads everything through that one
+  descriptor: its sha256 must still be the one of `prepare` and it must
+  still decode. It stops web and cms again and then asks Postgres whether
+  the database exists: a database that exists is dropped only when the
+  attempt's copy of it is still there with its sha256 and decodes (when
+  `prepare` found no database, one that exists now stops `apply`). Then
+  it drops the database (`dropdb --if-exists --force`, so a retry after a
+  failed `createdb` works) and creates it again, runs `pg_restore
   --no-owner --exit-on-error --single-transaction`, and checks that the
   database holds the dump's tables and at least one `up_users` row (both
   queries with `ON_ERROR_STOP`); a failed `apply` may be run again;
@@ -10800,13 +10812,16 @@ retried or failed step never leaves an old "passed" behind:
   it turns tracing off itself, so `bash -x` shows no secret either;
 - `start` starts web and cms (`up -d --no-build web cms`) only when
   `apply` and `rotate-jwt` passed for the same attempt and Compose still
-  hands the cms the rotated secret (no `JWT_SECRET` exported since), and
-  ends the attempt: another restore starts with `prepare` again.
+  hands the cms the rotated secret (no `JWT_SECRET` exported since). It
+  ends the attempt and the reservation and deletes the staged dump:
+  another restore starts with `prepare` again.
 
 `infra/restore-db.sh status` shows the current attempt (the dump and the
 copy with their sha256 and table counts, which steps passed and the next
-one; never a secret), and `infra/restore-db.sh back` starts a new attempt
-from the copy of the database as it was before the restore (below).
+one, and the reservation; never a secret). `infra/restore-db.sh back`
+starts a new attempt from the copy of the database as it was before the
+restore (below). `infra/restore-db.sh cancel` ends an attempt whose
+`apply` has not begun, and the reservation (below).
 
 **Restore** (the dump's path in the first step; on the owner's host the
 checkout is `/home/bigemo/git/sinnlos`, elsewhere e.g. `/opt/sinnlos`):
@@ -10822,14 +10837,25 @@ infra/restore-db.sh start
 Each step goes on only from what the step before recorded, so pasting
 the four lines at once, or joining them with `&&`, is safe: after a STOP
 the following steps stop too. The attempt lives in a state file,
-`.git/sinnlos-restore/<project>.state` of the checkout (mode 600, no
-secret; the earlier attempts next to it), not in the shell: a new shell,
-an `exit`, a changed variable or another working directory loses nothing.
-Each step holds the lock of `infra/deploy.sh`
+`.git/sinnlos-restore/<project>.state` of the checkout (no secret; the
+earlier attempts next to it), not in the shell: a new shell, an `exit`, a
+changed variable or another working directory loses nothing. The script
+reads its state files as data it checks, never as code: each must be a
+regular file of the checkout owner with mode 600 in a mode-700 directory,
+hold only its known keys, once each, and every value in its form
+(attempt ids, sha256, counts, times); the paths it works with are derived
+from the attempt id. Anything else stops the step before it changes
+anything (move the file away and start again with `prepare`).
+
+**The reservation:** from `prepare` on, the project is reserved
+(`.git/sinnlos-restore/<project>.reservation`) until `start` passes or
+`cancel` ends it, also across failed steps. **`infra/deploy.sh` refuses
+to deploy while the reservation exists** (`ERROR: a database restore of
+compose project infra is in progress`, nothing changed), because its `up`
+would start the cms on a database that may be empty, or restored without
+its new secret. Each step also holds the lock of `infra/deploy.sh`
 (`.git/sinnlos-deploy/<project>.lock`), so no second step and no deploy
-of the project run at the same time. Between the steps nothing holds it:
-**do not run `infra/deploy.sh` between `prepare` and `start`** (its `up`
-would start the cms on the restored database with the old secret).
+of the project run at the same time as a step.
 
 **The way back:** after a failed `apply` (the database is then empty, or
 missing after a failed `createdb`), or after a restore you do not want,
@@ -10843,22 +10869,31 @@ same copy. Like every `prepare` it writes a new copy first (when the
 database exists), and no copy is ever overwritten. Delete the
 `infra/backups/before-restore-*.dump` copies once the restored site
 works. `--no-owner` makes the restoring user own everything, as the cms
-expects. To give up before `apply` (a STOP of `prepare`, or a change of
-mind: nothing was dropped), start the apps again the usual way, `docker
-compose -p infra -f infra/docker-compose.yml -f
-infra/docker-compose.traefik.yml up -d --no-build web cms` (on a Caddy
-box without the second `-f`); once `apply` has begun, only `back` or a
-passing `apply`, then `rotate-jwt` and `start`, lead to running apps.
+expects.
 
-**Another compose project** (a staging copy): `COMPOSE_PROJECT=<name>`,
-as for `infra/deploy.sh`; it has its own state and lock. The compose
-files are the project's: `infra/docker-compose.yml`, plus
-`infra/docker-compose.traefik.yml` when its containers were started with
-the Traefik overlay (their compose `config_files` label), the base file
-alone on a Caddy box. `RESTORE_EDGE=traefik` or `RESTORE_EDGE=caddy`
-names it when the containers do not tell (there are none, or both kinds).
-An attempt keeps the files its `prepare` used; a later step that would
-use others stops.
+**To give up before `apply`** (a STOP of `prepare`, or a change of mind;
+nothing was dropped): `infra/restore-db.sh cancel`. It ends the attempt
+and the reservation and deletes the staged dump; it drops, restores and
+starts nothing, so web and cms stay stopped as `prepare` left them, and
+it prints the command that starts them with the attempt's compose files
+(`docker compose -p infra -f … up -d --no-build web cms`). Once `apply`
+has begun, `cancel` refuses (the database may be empty or half-restored):
+only `back` or a passing `apply`, then `rotate-jwt` and `start`, lead to
+running apps.
+
+**The compose files** are the ones the project's web and cms containers
+were started with, in their order (their compose `config_files` label):
+`infra/docker-compose.yml`, then any of `docker-compose.traefik.yml`,
+`docker-compose.cms-legacy-tz.yml` and `docker-compose.web-legacy-tz.yml`
+of this checkout's `infra/`, so an overlay such as the cms legacy zone of
+a database before the datetime repair stays when `start` recreates the
+cms. Web and cms with different lists, a file that is not one of these
+(such as `/tmp/cms-direct-start.yml`) or containers that tell nothing
+stop the step: `RESTORE_COMPOSE_FILES=<file>:<file>…` (relative to the
+checkout) names them then. An attempt keeps the files its `prepare` used;
+a later step that would use others stops. **Another compose project** (a
+staging copy): `COMPOSE_PROJECT=<name>`, as for `infra/deploy.sh`; it has
+its own state, reservation and lock.
 
 **Why `rotate-jwt` is mandatory after every database or `.env` restore,
 also with the same images:** a dump holds every user's token version as it
@@ -10885,7 +10920,7 @@ start before `rotate-jwt` has replaced the restored secret. When only
 `infra/.env` was restored and the database is intact:
 `infra/restore-db.sh rotate-jwt --env-only`, then
 `infra/restore-db.sh start --env-only` (refused while a database restore
-is unfinished).
+holds the reservation).
 
 The cms then brings the schema up to its own release on boot (it adds what
 an older dump lacks). A dump taken before the org draft/publish migration
@@ -10907,11 +10942,17 @@ and hands the new secret to `awk` through the environment, never on a
 command line. (Under `set -e` in your own shell a STOP, exit 1, still
 ends that shell, but nothing is lost: `infra/restore-db.sh status` in a
 new one shows the attempt.) `infra/restore-db.test.ts` runs it with docker stubbed
-(each case of this section) and, with `SINNLOS_SLOW_SHELL_TESTS=1`,
-against a real Postgres 16 (a dump cut off in its data, an older dump over
-a newer database, a failed `createdb` and a failed restore with their
-retries and the way back, a compose file that pins `JWT_SECRET`, an
-exported one, the `.env`-only pair and a held lock).
+(each case of this section, and the findings of the review of PR #68: a
+failing `prepare` after a good one, a database that appears between
+`prepare` and `apply`, a state file it did not write, a dump path swapped
+after the checks, the reservation, the legacy-zone overlay) and, with
+`SINNLOS_SLOW_SHELL_TESTS=1`, against a real Postgres 16 started with the
+legacy-zone overlay (a dump cut off in its data, an older dump over a
+newer database, a swapped dump path, a failed `createdb` and a failed
+restore with their retries and the way back, a compose file that pins
+`JWT_SECRET`, an exported one, the `.env`-only pair and a held lock).
+`infra/deploy-flow.test.ts` pins `infra/deploy.sh`'s refusal while the
+reservation exists.
 
 **Walked on 2026-10-13** on throwaway containers: a compose project in
 Traefik mode with a real cms schema (105 tables, the demo data) and a
@@ -10931,7 +10972,10 @@ trace; `start` started web and cms, and the cms container held the
 rotated secret. On the restored database the real cms with the new
 secret answered 401 to the revoked JWT and to the JWT issued after the
 backup and signed the restored password in; with the old secret it had
-accepted the revoked JWT again, which is what the rotation prevents.
+accepted the revoked JWT again, which is what the rotation prevents. The
+same walk passed again after the fixes of the review of PR #68 (the dump
+staged and restored from the staged copy, the reservation released by
+`start`, the staged copy gone with it).
 
 ### 7.2 Backup uploads volume
 
@@ -11205,8 +11249,13 @@ fails unless `up_users` came back. It knows both kinds of backup.
   --single-transaction` into the clean throwaway database and prints the
   table counts, counts the roles of `db-globals.sql` (not applied: only a
   new Postgres container needs them), and lists `uploads.tar` (the file
-  count and the first 20 names) and `config.tar` (its names, and for the
-  `.env` the number of keys; no value is shown).
+  count and the first 20 names) and `config.tar` (its names, and the
+  number of keys of its `.env` files; no value is shown). It never passes
+  a name from an archive or a generation to a command: the archives are
+  listed, and the `.env` files are read by its own pattern; every file
+  name of a generation must follow `backup-run`'s rule
+  (`[a-z0-9][a-z0-9._-]*`), and each of the four components is required
+  by its exact name.
 
 It needs bash, age, zstd, tar and docker:
 

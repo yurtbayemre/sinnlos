@@ -699,7 +699,7 @@ infra/deploy.sh --dry-run    # every deploy check, then the plan; changes nothin
 infra/deploy.sh              # the production deploy (see Deployment)
 infra/live-smoke.sh          # datetime check, then the SSE live pipeline end to end
 infra/restore-db.sh prepare <dump>   # a restore, step 1 of 4: then apply, rotate-jwt, start (see Deployment)
-infra/restore-db.sh status           # where the current restore attempt stands
+infra/restore-db.sh status           # where the current restore attempt stands (cancel: end it before apply)
 infra/backup/restore-drill.sh --all <dir>  # off-box: restore the newest dump into a throwaway Postgres 16
 infra/backup/restore-drill.sh --generation <dir> --identity <age key>  # off-box: the same for a backup-run generation
 ```
