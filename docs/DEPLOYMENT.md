@@ -1950,7 +1950,9 @@ schema change, no env, no edge change, **no permission change**, **no
 `JWT_SECRET` rotation**, nobody is signed out.
 
 Set `COMPOSE` and `psql_db` as in
-[Deploying batch 15.1](#deploying-batch-151-the-wiki-revision-read-closure).
+[Deploying batch 15.1](#deploying-batch-151-the-wiki-revision-read-closure)
+(where its comments say "the batch 15.1 merge", read "the batch 15.2
+merge").
 
 **Before the deploy** (read-only)
 
@@ -1959,6 +1961,7 @@ Set `COMPOSE` and `psql_db` as in
    ```bash
    cat .git/sinnlos-deploy/infra.state
    B151_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B151_TAG}"
    docker image inspect --format '{{.Id}}' "infra-cms:${B151_TAG}" "infra-web:${B151_TAG}"
    ```
 
@@ -2048,17 +2051,37 @@ sha12>`, exit 0. A failure prints the rollback to `<B151_TAG>`, with no
    Expected: `role filter in a populate: 400 blind Invalid key role at
    author.role`, `plain populate: 200`, `comment parent keys: 0`,
    `notifications: 200`. Before the deploy the first line answered 200
-   (the page's author populated or not, depending on the value). Every role
+   (blind or different, depending on the first page's author); only the
+   400 after the deploy is the check. Every role
    and shape is pinned by the integration suite on SQLite and Postgres 16.
 
 8. **In a browser (the owner, as a member and as a guest):** the
-   notification bell, `/wiki` and a page with its comments and reactions,
-   and the marketplace's own ads (member) look as before.
+   notification bell, `/wiki` and a wiki page, `/announcements` with its
+   comments and reactions, and the marketplace's own ads (member) look as
+   before.
 
 9. **+15 and +60 minutes:** no new error types, no restarts, no 5xx, as
    for 15.1.
 
 **Release note:** none for users; nothing the web shows changes.
+
+**Known residual (Strapi 5.57):** a sort through a relation inside a
+populate (`populate[pages][sort]=department.name:asc`) answers 500 with a
+SQL error in the cms log for callers that hold the target's `find`; 15.2
+turns it into 400 only where the grant is missing. Nothing leaks, and the
+web sends no such sort; a line from it in step 5's error filter is someone
+sending that request by hand. Batch 16 refuses every relation sort inside a
+populate.
+
+**Rehearsal** (2026-10-13, local staging in Traefik mode, from 1d0b117):
+this section walked as written. Before the deploy, populate filters
+through department, team and role gave different results for matching and
+non-matching values, and `populate=parent` showed a comment on a hidden
+announcement to every role, guests included; after it, each answered 400
+(or lost the key) where the role lacks the grant, and the granted paths and
+the web's own queries returned identical counts. The deploy took 85 s (cms
+boot 7.5 s, the web image unchanged); the rollback 6.9 s re-opened every
+probe; the roll-forward 27 s closed them again.
 
 **Rollback** (the owner's decision only; to the batch 15.1 images,
 `<B151_TAG>`)
