@@ -236,7 +236,7 @@ describe("the generation check (rules 4, 7)", () => {
       "invalid",
       "x",
     );
-    expect(recorded).toBe(false);
+    expect(recorded).toBeNull();
     expect((await rows(ANNOUNCEMENT, draft.documentId))[0]).toMatchObject({
       publishAt: expect.anything(),
       scheduleError: null,
@@ -319,20 +319,60 @@ describe("withdrawals and pending updates (review findings)", () => {
         true,
       ]);
     }
-    // The fifth failure records it for good; a failed withdrawal also cancels the pending publish.
+    // The fifth failure marks it (once) but keeps the withdrawal pending: the
+    // deadline and the pending update stay, nothing is published over it.
     const fifth = await run(NOW, attempts);
     expect(fifth.failed).toEqual([`${QUICK_LINK} ${link.documentId}`]);
     expect(fifth.published).toEqual([]);
     const [draft] = await rows(QUICK_LINK, link.documentId);
-    expect(draft).toMatchObject({
-      publishAt: null,
-      unpublishAt: null,
-      scheduleError: "retryExhausted",
-    });
+    expect(draft).toMatchObject({ scheduleError: "retryExhausted" });
+    expect(draft.unpublishAt).not.toBeNull();
+    expect(draft.publishAt).not.toBeNull();
     const published = await open.db
       .query(QUICK_LINK)
       .findOne({ where: { documentId: link.documentId, publishedAt: { $notNull: true } } });
     expect(published?.label).toBe("Live");
+  });
+
+  it("five failures, then recovery: the withdrawal waits out its backoff and then succeeds", async () => {
+    const link = await docs(QUICK_LINK).create({ data: { label: "Live" }, status: "published" });
+    await docs(QUICK_LINK).update({ documentId: link.documentId, data: { unpublishAt: PAST } });
+    const remove = failUnpublish();
+    const attempts = new TransientAttempts();
+    for (let attempt = 1; attempt <= 5; attempt += 1) await run(NOW, attempts);
+    expect((await rows(QUICK_LINK, link.documentId))[0]).toMatchObject({
+      scheduleError: "retryExhausted",
+    });
+    const markers = await audit(link.documentId);
+    expect(markers.filter((row) => row[0] === "scheduleFailed")).toHaveLength(1);
+    // Still failing after the first backoff (5 min): marked once, deferred again.
+    const later = new Date(NOW.getTime() + 6 * 60_000);
+    expect((await run(later, attempts)).failed).toEqual([`${QUICK_LINK} ${link.documentId}`]);
+    expect(
+      (await audit(link.documentId)).filter((row) => row[0] === "scheduleFailed"),
+    ).toHaveLength(1);
+    // The cause goes away; inside the second backoff (15 min) nothing is tried.
+    remove();
+    expect(await run(new Date(later.getTime() + 60_000), attempts)).toEqual(emptyResult());
+    // After it, the withdrawal succeeds and the marker goes.
+    const recovered = await run(new Date(later.getTime() + 16 * 60_000), attempts);
+    expect(recovered.unpublished).toEqual([`${QUICK_LINK} ${link.documentId}`]);
+    expect(await rows(QUICK_LINK, link.documentId)).toEqual([
+      expect.objectContaining({ published: false, unpublishAt: null, scheduleError: null }),
+    ]);
+  });
+
+  it("an author's save cuts a failed withdrawal's backoff short", async () => {
+    const link = await docs(QUICK_LINK).create({ data: { label: "Live" }, status: "published" });
+    await docs(QUICK_LINK).update({ documentId: link.documentId, data: { unpublishAt: PAST } });
+    const remove = failUnpublish();
+    const attempts = new TransientAttempts();
+    for (let attempt = 1; attempt <= 5; attempt += 1) await run(NOW, attempts);
+    remove();
+    // A save of the draft (it keeps the deadline) moves the revision: tried at once.
+    await docs(QUICK_LINK).update({ documentId: link.documentId, data: { label: "Live, saved" } });
+    const result = await run(new Date(NOW.getTime() + 60_000), attempts);
+    expect(result.unpublished).toEqual([`${QUICK_LINK} ${link.documentId}`]);
   });
 
   it("drafts that wait for their publish never starve the withdrawals behind them", async () => {
@@ -358,6 +398,41 @@ describe("withdrawals and pending updates (review findings)", () => {
     expect(first.published).toEqual([`${WIKI} ${parent.documentId}`]);
     const second = await run();
     expect(second.published).toEqual([`${WIKI} ${child.documentId}`]);
+  });
+});
+
+describe("the clock is sampled after each document's lock", () => {
+  it("a delayed draft read crossing a quick link's deadline ends in windowExpired, no live row", async () => {
+    const deadline = new Date(NOW.getTime() + 30_000).toISOString();
+    const draft = await docs(QUICK_LINK).create({
+      data: { label: "Short window", publishAt: PAST, unpublishAt: deadline },
+    });
+    // The run starts before the deadline; by the time the lock is held and
+    // the draft read, the deadline has passed.
+    const result = await runScheduledPublishing(
+      strapi,
+      NOW,
+      new TransientAttempts(),
+      () => new Date(NOW.getTime() + 60_000),
+    );
+    expect(result.expired).toEqual([`${QUICK_LINK} ${draft.documentId}`]);
+    expect(result.published).toEqual([]);
+    expect(await rows(QUICK_LINK, draft.documentId)).toEqual([
+      expect.objectContaining({
+        published: false,
+        publishAt: null,
+        scheduleError: "windowExpired",
+      }),
+    ]);
+  });
+
+  it("without the delay the same draft is published (the control)", async () => {
+    const deadline = new Date(NOW.getTime() + 30_000).toISOString();
+    const draft = await docs(QUICK_LINK).create({
+      data: { label: "Short window", publishAt: PAST, unpublishAt: deadline },
+    });
+    const result = await runScheduledPublishing(strapi, NOW, new TransientAttempts(), () => NOW);
+    expect(result.published).toEqual([`${QUICK_LINK} ${draft.documentId}`]);
   });
 });
 

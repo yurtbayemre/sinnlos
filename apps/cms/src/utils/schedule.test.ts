@@ -7,6 +7,7 @@ import {
   SCHEDULE_ERROR_CODES,
   SCHEDULE_TRANSIENT_ATTEMPTS,
   TransientAttempts,
+  WITHDRAWAL_BACKOFF_MINUTES,
   classifyScheduleFailure,
   createScheduleClear,
   describeFailure,
@@ -160,6 +161,38 @@ describe("transient attempts (rule 7)", () => {
     const attempts = new TransientAttempts(5, 3);
     for (const id of ["a", "b", "c", "d", "e"]) attempts.fail(ANNOUNCEMENT, id, 1);
     expect(attempts.size).toBe(3);
+  });
+
+  it("defers a failed withdrawal by 5, 15, then every 60 minutes; a new revision or success ends it", () => {
+    const attempts = new TransientAttempts();
+    const minutes = (n: number) => new Date(NOW.getTime() + n * 60_000);
+    expect(WITHDRAWAL_BACKOFF_MINUTES).toEqual([5, 15, 60]);
+    expect(attempts.withdrawalReady(QUICK_LINK, "q", NOW, 3)).toBe(true);
+
+    expect(attempts.deferWithdrawal(QUICK_LINK, "q", NOW, 3)).toEqual(minutes(5));
+    expect(attempts.withdrawalFailures(QUICK_LINK, "q")).toBe(1);
+    expect(attempts.withdrawalReady(QUICK_LINK, "q", minutes(4), 3)).toBe(false);
+    expect(attempts.withdrawalReady(QUICK_LINK, "q", minutes(5), 3)).toBe(true);
+    // The document changed since the failure: ready at once.
+    expect(attempts.withdrawalReady(QUICK_LINK, "q", minutes(1), 4)).toBe(true);
+    // Another document is not deferred.
+    expect(attempts.withdrawalReady(DOCUMENT, "q", minutes(1), 3)).toBe(true);
+
+    expect(attempts.deferWithdrawal(QUICK_LINK, "q", minutes(5), 3)).toEqual(minutes(20));
+    expect(attempts.deferWithdrawal(QUICK_LINK, "q", minutes(20), 3)).toEqual(minutes(80));
+    expect(attempts.deferWithdrawal(QUICK_LINK, "q", minutes(80), 3)).toEqual(minutes(140));
+    expect(attempts.withdrawalFailures(QUICK_LINK, "q")).toBe(4);
+
+    attempts.clearWithdrawal(QUICK_LINK, "q");
+    expect(attempts.withdrawalFailures(QUICK_LINK, "q")).toBe(0);
+    expect(attempts.withdrawalReady(QUICK_LINK, "q", minutes(81), 3)).toBe(true);
+  });
+
+  it("keeps the deferred withdrawals bounded in memory too", () => {
+    const attempts = new TransientAttempts(5, 2);
+    for (const id of ["a", "b", "c"]) attempts.deferWithdrawal(QUICK_LINK, id, NOW, 1);
+    expect(attempts.withdrawalFailures(QUICK_LINK, "a")).toBe(0);
+    expect(attempts.withdrawalFailures(QUICK_LINK, "c")).toBe(1);
   });
 });
 

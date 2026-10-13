@@ -20,6 +20,7 @@ import {
   classifyScheduleFailure,
   describeFailure,
   instantOf,
+  isKnownTransient,
   windowExpired,
   type ScheduleErrorCode,
 } from "../utils/schedule";
@@ -58,10 +59,26 @@ import {
  * keeps `unpublishAt`, so the publish pass sees the ended window (rule 4).
  * Such waiting drafts are passed over when the selection is read, so they
  * never fill the batch in front of due withdrawals. An unpublish also
- * cancels a pending publish (schedule-clear), and so does a withdrawal
- * that failed for good. The publish pass never publishes a published
- * document whose withdrawal is due: that is the unpublish pass's, also
- * while it is being retried.
+ * cancels a pending publish (schedule-clear). The publish pass never
+ * publishes a published document whose withdrawal is due: that is the
+ * unpublish pass's, also while it is being retried.
+ *
+ * A WITHDRAWAL IS NEVER GIVEN UP. One that fails for good (a permanent
+ * failure, or SCHEDULE_TRANSIENT_ATTEMPTS transient ones) records
+ * `scheduleError` and an audit row once, keeps `unpublishAt` (and a pending
+ * publish, which the publish pass then leaves alone), and is retried after
+ * WITHDRAWAL_BACKOFF_MINUTES (5, 15, then every 60 minutes; sooner when the
+ * document changed in between), until it succeeds (which clears the marker)
+ * or an author changes or clears the deadline. The read paths do not
+ * enforce `unpublishAt` (it is a draft-row setting, rule 2), so until then
+ * the item stays visible: the `[scheduler] … failed` line and the marker
+ * are the signal.
+ *
+ * THE CLOCK. The selection uses the run's start; every due, expiry and
+ * withdrawal check is made with a time sampled after the document's lock
+ * and its draft read, immediately before the claim, so a run that waited
+ * for a lock, or worked through earlier documents, past a deadline does not
+ * publish what the deadline ended.
  *
  * EXPIRED WINDOW (rule 5): a due publish whose announcement `expiresAt` or
  * document/quick-link `unpublishAt` already passed is not published: the
@@ -74,8 +91,9 @@ import {
  *     lifecycle ApplicationError `rejected`): a short transaction locks the
  *     document and, only if the revision is still `r` (otherwise a newer
  *     save or a manual action supersedes the failure: nothing recorded),
- *     sets `scheduleError` and clears the schedule field raw, advances the
- *     revision and writes `scheduleFailed`;
+ *     sets `scheduleError`, clears `publishAt` (a publish; a withdrawal
+ *     keeps its deadline, above) raw, advances the revision and writes
+ *     `scheduleFailed`;
  *   - transient (lock or serialisation failures, a lost connection,
  *     SQLITE_BUSY, anything unknown), and a readiness refusal whose course
  *     or parent is itself due this minute (a child page sorted before its
@@ -141,8 +159,11 @@ export const emptyResult = (): ScheduleRunResult => ({
   skipped: [],
 });
 
-/** Transient failures of this process (rule 7). */
+/** Transient failures and deferred withdrawals of this process (rule 7). */
 const processAttempts = new TransientAttempts();
+
+/** The time source of a run, sampled again after each document's lock (expiry, withdrawal). */
+export type ScheduleClock = () => Date;
 
 const label = (uid: string, documentId: string) => `${uid} ${documentId}`;
 
@@ -171,15 +192,17 @@ async function duePublishes(
 /**
  * The due unpublishes (rule 4): draft rows with unpublishAt passed whose
  * document is published, or that have no pending publish (the claim then
- * only clears the field). A draft with a pending publish and no published
- * row is the publish pass's (its window ended), so it is passed over here
- * and never fills the page: up to UNPUBLISH_MAX_PAGES pages are read until
- * SCHEDULE_BATCH actionable documents are found.
+ * only clears the field). Passed over, and never filling the page: a draft
+ * with a pending publish and no published row (the publish pass's: its
+ * window ended), and a failed withdrawal whose backoff is not over (unless
+ * the document changed since). Up to UNPUBLISH_MAX_PAGES pages are read
+ * until SCHEDULE_BATCH actionable documents are found.
  */
 async function dueUnpublishes(
   strapi: ScheduledPublishStrapi,
   uid: string,
   now: Date,
+  attempts: TransientAttempts,
 ): Promise<string[]> {
   const query = strapi.db.query(uid);
   const actionable: string[] = [];
@@ -205,7 +228,12 @@ async function dueUnpublishes(
     for (const row of rows) {
       if (!isDocumentId(row.documentId)) continue;
       const pendingPublish = row.publishAt !== null && row.publishAt !== undefined;
-      if (published.has(row.documentId) || !pendingPublish) actionable.push(row.documentId);
+      if (!published.has(row.documentId) && pendingPublish) continue;
+      if (attempts.withdrawalFailures(uid, row.documentId) > 0) {
+        const revision = await readRevision(strapi, uid, row.documentId);
+        if (!attempts.withdrawalReady(uid, row.documentId, now, revision)) continue;
+      }
+      actionable.push(row.documentId);
       if (actionable.length >= SCHEDULE_BATCH) break;
     }
     if (rows.length < UNPUBLISH_PAGE) break;
@@ -244,18 +272,22 @@ async function auditScheduleFailed(
   });
 }
 
-/** Unpublish pass, one document (see the module comment). */
+/**
+ * Unpublish pass, one document (see the module comment). The time of the
+ * due check is sampled after the lock and the draft read.
+ */
 async function unpublishOne(
   strapi: ScheduledPublishStrapi,
   uid: string,
   documentId: string,
   r: number,
-  now: Date,
+  clock: ScheduleClock,
 ): Promise<keyof ScheduleRunResult> {
   return strapi.db.transaction(async () => {
     if ((await lockDocument(strapi, uid, documentId)) !== r) return "skipped";
     const draft = await draftOf(strapi, uid, documentId);
-    if (!draft || !isDue(draft.unpublishAt, now)) return "skipped";
+    const at = clock();
+    if (!draft || !isDue(draft.unpublishAt, at)) return "skipped";
     const published = await publishedCount(strapi, uid, documentId);
     if (published === 0 && draft.publishAt !== null && draft.publishAt !== undefined) {
       // A pending publish keeps the end of its window for the publish pass.
@@ -266,6 +298,13 @@ async function unpublishOne(
       data: { unpublishAt: null },
     });
     if ((claim?.count ?? 0) < 1) return "skipped";
+    if (draft.scheduleError !== null && draft.scheduleError !== undefined) {
+      // A withdrawal that failed before and succeeds now: the marker goes.
+      await strapi.db.query(uid).updateMany({
+        where: { documentId, publishedAt: null },
+        data: { scheduleError: null },
+      });
+    }
     if (published === 0) {
       const revision = await advanceRevision(strapi, uid, documentId);
       await auditScheduleFailed(
@@ -283,26 +322,33 @@ async function unpublishOne(
   });
 }
 
-/** Publish pass, one document (see the module comment). */
+/**
+ * Publish pass, one document (see the module comment). The time of the
+ * expiry and withdrawal checks is sampled after the lock and the draft
+ * read, immediately before the claim and the publish: a run that waited
+ * for a lock, or worked through earlier documents, past a deadline does
+ * not publish what that deadline ended.
+ */
 async function publishOne(
   strapi: ScheduledPublishStrapi,
   uid: string,
   documentId: string,
   r: number,
-  now: Date,
+  clock: ScheduleClock,
 ): Promise<keyof ScheduleRunResult> {
   return strapi.db.transaction(async () => {
     if ((await lockDocument(strapi, uid, documentId)) !== r) return "skipped";
     const draft = await draftOf(strapi, uid, documentId);
-    if (!draft || !isDue(draft.publishAt, now)) return "skipped";
-    if (isUnpublishScheduledUid(uid) && isDue(draft.unpublishAt, now)) {
+    const at = clock();
+    if (!draft || !isDue(draft.publishAt, at)) return "skipped";
+    if (isUnpublishScheduledUid(uid) && isDue(draft.unpublishAt, at)) {
       const published = await publishedCount(strapi, uid, documentId);
       // A published document whose withdrawal is due: the unpublish pass
       // withdraws it (and that cancels this pending publish, rule 6); never
       // publish over it, never drop the withdrawal here.
       if (published > 0) return "skipped";
     }
-    if (windowExpired(uid, draft, now)) {
+    if (windowExpired(uid, draft, at)) {
       await strapi.db.query(uid).updateMany({
         where: { documentId, publishedAt: null },
         data: {
@@ -328,7 +374,14 @@ async function publishOne(
 
 /**
  * Records a failure for good (rule 7), unless the document moved on since
- * `r`. Returns whether it recorded.
+ * `r`. Returns the revision it left the document at, or null when a newer
+ * revision superseded the failure (nothing recorded).
+ *   - publish: `scheduleError = <code>`, `publishAt` cleared;
+ *   - unpublish: `scheduleError = <code>` only. The withdrawal stays pending
+ *     (its `unpublishAt` and a pending publish are kept): it is retried with
+ *     a bounded backoff until it succeeds, or an author changes or clears
+ *     the deadline. A repeat of the same failure writes nothing (no new
+ *     revision, no new audit row).
  */
 export async function recordScheduleFailure(
   strapi: ScheduledPublishStrapi,
@@ -338,23 +391,21 @@ export async function recordScheduleFailure(
   pass: Pass,
   code: ScheduleErrorCode,
   detail: string,
-): Promise<boolean> {
+): Promise<number | null> {
   return strapi.db.transaction(async () => {
-    if ((await lockDocument(strapi, uid, documentId)) !== r) return false;
+    if ((await lockDocument(strapi, uid, documentId)) !== r) return null;
+    if (pass === "unpublish") {
+      const draft = await draftOf(strapi, uid, documentId);
+      if (draft?.scheduleError === code) return r;
+    }
     await strapi.db.query(uid).updateMany({
       where: { documentId, publishedAt: null },
-      // A failed withdrawal also cancels a pending publish (rule 6): an
-      // update must not be published over a withdrawal that did not happen.
-      data: {
-        scheduleError: code,
-        publishAt: null,
-        ...(pass === "unpublish" ? { unpublishAt: null } : {}),
-      },
+      data: pass === "publish" ? { scheduleError: code, publishAt: null } : { scheduleError: code },
     });
     const revision = await advanceRevision(strapi, uid, documentId);
     const prefix = pass === "unpublish" ? "unpublish " : "";
     await auditScheduleFailed(strapi, uid, documentId, revision, `${prefix}${code}: ${detail}`);
-    return true;
+    return revision;
   });
 }
 
@@ -393,39 +444,54 @@ async function blockedByDueTarget(
   return target !== null && isDue(target.publishAt, now);
 }
 
+const clockOf = (time: Date | ScheduleClock): ScheduleClock =>
+  typeof time === "function" ? time : () => time;
+
 /**
  * One document of one pass: the transaction, and the failure handling.
  * `r` is the revision the selection read (exported for the tests, which
- * hand it a stale one).
+ * hand it a stale one); `time` is the run's clock (or a fixed instant).
  */
 export async function runScheduledDocument(
   strapi: ScheduledPublishStrapi,
   uid: string,
   documentId: string,
   pass: Pass,
-  now: Date,
+  time: Date | ScheduleClock,
   attempts: TransientAttempts,
   result: ScheduleRunResult,
   r: number,
 ): Promise<void> {
   const key = label(uid, documentId);
+  const clock = clockOf(time);
   try {
     const outcome =
       pass === "publish"
-        ? await publishOne(strapi, uid, documentId, r, now)
-        : await unpublishOne(strapi, uid, documentId, r, now);
+        ? await publishOne(strapi, uid, documentId, r, clock)
+        : await unpublishOne(strapi, uid, documentId, r, clock);
     result[outcome].push(key);
-    if (outcome !== "skipped") attempts.clear(uid, documentId, r, pass);
+    if (outcome !== "skipped") {
+      attempts.clear(uid, documentId, r, pass);
+      if (pass === "unpublish") attempts.clearWithdrawal(uid, documentId);
+    }
     return;
   } catch (error) {
     const failure = classifyScheduleFailure(error);
+    // A withdrawal already deferred once goes straight back into its backoff.
+    const deferred = pass === "unpublish" && attempts.withdrawalFailures(uid, documentId) > 0;
     const retry =
-      failure.kind === "transient" ||
-      (pass === "publish" && (await blockedByDueTarget(strapi, uid, documentId, error, now)));
+      !deferred &&
+      (failure.kind === "transient" ||
+        (pass === "publish" &&
+          (await blockedByDueTarget(strapi, uid, documentId, error, clock()))));
     let code: ScheduleErrorCode;
     if (retry) {
       if (!attempts.fail(uid, documentId, r, pass)) {
-        strapi.log.warn(`${SCHEDULER_LOG} ${key} ${pass} will be retried: ${failure.detail}`);
+        // A known lock or connection code is routine; anything else is worth a look.
+        const kind = isKnownTransient(error) ? "transient" : "unexpected";
+        strapi.log.warn(
+          `${SCHEDULER_LOG} ${key} ${pass} will be retried (${kind} failure: ${failure.detail})`,
+        );
         result.retrying.push(key);
         return;
       }
@@ -434,13 +500,30 @@ export async function runScheduledDocument(
       code = failure.kind === "permanent" ? failure.code : "retryExhausted";
     }
     try {
-      if (await recordScheduleFailure(strapi, uid, documentId, r, pass, code, failure.detail)) {
-        attempts.clear(uid, documentId, r, pass);
-        strapi.log.error(`${SCHEDULER_LOG} ${key} failed: ${code}`);
-        result.failed.push(key);
-      } else {
+      const revision = await recordScheduleFailure(
+        strapi,
+        uid,
+        documentId,
+        r,
+        pass,
+        code,
+        failure.detail,
+      );
+      if (revision === null) {
         result.skipped.push(key);
+        return;
       }
+      attempts.clear(uid, documentId, r, pass);
+      if (pass === "unpublish") {
+        const next = attempts.deferWithdrawal(uid, documentId, clock(), revision);
+        strapi.log.error(
+          `${SCHEDULER_LOG} ${key} failed: ${code}; the withdrawal stays pending, next attempt ` +
+            `after ${next.toISOString()}`,
+        );
+      } else {
+        strapi.log.error(`${SCHEDULER_LOG} ${key} failed: ${code}`);
+      }
+      result.failed.push(key);
     } catch (recordError) {
       // The next run retries the document (its schedule is untouched).
       strapi.log.error(
@@ -453,27 +536,31 @@ export async function runScheduledDocument(
 }
 
 /**
- * One run of the task (see the module comment). `now` and `attempts` are
- * injectable for the tests.
+ * One run of the task (see the module comment). `now` (the selection time),
+ * `attempts` and `clock` (sampled after each document's lock) are
+ * injectable for the tests; a fixed `now` without a clock fixes both.
  */
 export async function runScheduledPublishing(
   strapi: ScheduledPublishStrapi,
-  now: Date = new Date(),
+  now?: Date,
   attempts: TransientAttempts = processAttempts,
+  clock?: ScheduleClock,
 ): Promise<ScheduleRunResult> {
+  const start = now ?? new Date();
+  const tick: ScheduleClock = clock ?? (now ? () => now : () => new Date());
   const result = emptyResult();
   const runPass = async (uid: string, pass: Pass, documentIds: string[]) => {
     for (const documentId of documentIds) {
       const r = await readRevision(strapi, uid, documentId);
-      await runScheduledDocument(strapi, uid, documentId, pass, now, attempts, result, r);
+      await runScheduledDocument(strapi, uid, documentId, pass, tick, attempts, result, r);
     }
   };
   await runInAuthoringScope({ source: "cron" }, async () => {
     for (const uid of SCHEDULED_UIDS) {
       if (isUnpublishScheduledUid(uid)) {
-        await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, now));
+        await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, start, attempts));
       }
-      await runPass(uid, "publish", await duePublishes(strapi, uid, now));
+      await runPass(uid, "publish", await duePublishes(strapi, uid, start));
     }
   });
   const acted =
