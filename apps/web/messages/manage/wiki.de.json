@@ -168,8 +168,8 @@
       "baseline": "Stand bei der Umstellung",
       "before": "Stand vor einer Bearbeitung (älteres Format)"
     },
-    "editorAdmin": "Admin-Bereich",
-    "editorNone": "Nicht erfasst",
+    "editorAdmin": "im Admin-Bereich",
+    "editorNone": "kein Bearbeiter erfasst",
     "by": "von {name}",
     "note": "Notiz: {note}",
     "restoredFrom": "Stellt Fassung #{id} wieder her",

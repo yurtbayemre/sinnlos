@@ -168,8 +168,8 @@
       "baseline": "State at the upgrade",
       "before": "State before an edit (older format)"
     },
-    "editorAdmin": "Admin panel",
-    "editorNone": "Not recorded",
+    "editorAdmin": "in the admin panel",
+    "editorNone": "no editor recorded",
     "by": "by {name}",
     "note": "Note: {note}",
     "restoredFrom": "Restores version #{id}",

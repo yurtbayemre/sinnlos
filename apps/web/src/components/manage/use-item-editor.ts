@@ -77,6 +77,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   actions,
   extraInput,
   extraDirty = false,
+  busy = false,
   drafts = area !== "wiki" && hasDrafts(area),
   itemPath = (data) => areaItemPath(area, data.documentId),
   listPath = AREA_PATH[area],
@@ -92,6 +93,8 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   extraInput?: Record<string, unknown>;
   /** A change the values do not hold (a picked file not uploaded yet): counts as unsaved. */
   extraDirty?: boolean;
+  /** A step the form runs before its saves (an upload) is running (useAuthoringEditor). */
+  busy?: boolean;
   /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
   drafts?: boolean;
   /** Where a create navigates: the new item's page. */
@@ -124,6 +127,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
     fieldOrder,
     source: editable,
     onReset,
+    externalBusy: busy,
   });
   const { meta, run, requestReset } = editor;
   // A ticked re-target confirmation is a change to save: the publish bar

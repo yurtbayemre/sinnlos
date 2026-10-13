@@ -141,6 +141,7 @@ export function useAuthoringEditor<Source extends object | null>({
   fieldOrder,
   source,
   onReset,
+  externalBusy = false,
 }: {
   formId: string;
   initialMeta: ItemMeta | null;
@@ -150,6 +151,12 @@ export function useAuthoringEditor<Source extends object | null>({
   source: Source;
   /** Resets the form's values to `source` (after Reload and after Discard). */
   onReset: (source: Source) => void;
+  /**
+   * A step the form runs itself before its action (a file upload): the
+   * form is busy, and a failure's focus waits until the step has ended
+   * (its controls are disabled while it runs).
+   */
+  externalBusy?: boolean;
 }) {
   const router = useRouter();
   const [meta, setMeta] = useState<ItemMeta | null>(initialMeta);
@@ -189,7 +196,7 @@ export function useAuthoringEditor<Source extends object | null>({
   // the action has settled: the controls are disabled while it runs, and a
   // disabled control cannot take the focus (a state update after the
   // action's await commits before the transition ends).
-  const busy = isPending || refreshing;
+  const busy = isPending || refreshing || externalBusy;
   const focused = useRef<object | null>(null);
   useEffect(() => {
     if (!focusRequest || busy || focused.current === focusRequest) return;

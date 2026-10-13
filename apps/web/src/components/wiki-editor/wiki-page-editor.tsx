@@ -21,6 +21,7 @@ import { PublishBar } from "@/components/manage/publish-bar";
 import { ScheduleDialog } from "@/components/manage/schedule-dialog";
 import { useItemEditor, type ItemActions } from "@/components/manage/use-item-editor";
 import { fieldInputId } from "@/lib/manage/errors";
+import { cn } from "@/lib/utils";
 import type { DepartmentOption, TeamOption } from "@/lib/loaders/manage/options";
 import type { WikiParentOption } from "@/lib/loaders/manage/wiki";
 import { scheduleValuesFromEditable } from "@/lib/manage/values";
@@ -246,7 +247,7 @@ export function WikiPageEditor({
                 value={values.summary}
                 disabled={disabled}
                 onChange={(event) => setValue("summary", event.target.value)}
-                className={`${textareaClass} min-h-16 font-sans`}
+                className={cn(textareaClass, "min-h-16 font-sans")}
               />
             )}
           </Field>

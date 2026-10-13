@@ -27,6 +27,7 @@ import {
   type DocumentValues,
   type ScheduleValues,
 } from "@/lib/manage/values";
+import { cn } from "@/lib/utils";
 import type { DepartmentOption } from "@/lib/loaders/manage/options";
 import { CheckboxList, Field, inputClass, textareaClass } from "./form-controls";
 import { ConflictDialog, EditorStatus, FormAlert, useFieldError } from "./editor-chrome";
@@ -127,11 +128,14 @@ export function DocumentEditor({
     fieldOrder: FIELD_ORDER,
     actions: ACTIONS,
     extraDirty: picked !== null,
+    busy: uploading,
   });
   const { values, setValue, editor } = item;
   const error = useFieldError("documents", editor.fieldErrors);
   const id = (field: string) => fieldInputId(FORM_ID, field);
-  const pending = editor.pending || uploading;
+  // editor.pending covers the upload too (`busy`), so the focus after a
+  // refused upload waits until the file input is enabled again.
+  const pending = editor.pending;
   const targetingLocked = pending || optionsFailed;
 
   const fileError =
@@ -249,7 +253,7 @@ export function DocumentEditor({
                 value={values.description}
                 disabled={pending}
                 onChange={(event) => setValue("description", event.target.value)}
-                className={`${textareaClass} min-h-24 font-sans`}
+                className={cn(textareaClass, "min-h-24 font-sans")}
               />
             )}
           </Field>

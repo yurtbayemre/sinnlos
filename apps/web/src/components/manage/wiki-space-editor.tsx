@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import type { AreaAccess } from "@/lib/manage/access";
 import { fieldInputId } from "@/lib/manage/errors";
+import { cn } from "@/lib/utils";
 import type { DepartmentOption, TeamOption } from "@/lib/loaders/manage/options";
 import { deleteWikiSpace, saveWikiSpace } from "@/lib/manage/wiki-space-actions";
 import {
@@ -173,7 +174,7 @@ export function WikiSpaceEditor({
                 value={values.description}
                 disabled={disabled}
                 onChange={(event) => setValue("description", event.target.value)}
-                className={`${textareaClass} min-h-20 font-sans`}
+                className={cn(textareaClass, "min-h-20 font-sans")}
               />
             )}
           </Field>

@@ -261,8 +261,8 @@ describe("the history", () => {
     expect(html).toContain(t.history.kinds.baseline);
     expect(html).toContain("State before an edit (older format)");
     expect(html).toContain("by Ada Lovelace");
-    expect(html).toContain(`by ${t.history.editorAdmin}`);
-    expect(html).toContain(`by ${t.history.editorNone}`);
+    expect(html).toContain("in the admin panel");
+    expect(html).toContain("no editor recorded");
     expect(html).toContain("Restores version #4");
     expect(html).toContain("Note: Typos");
     expect(html).toContain(t.history.untitled);

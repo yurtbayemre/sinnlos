@@ -43,14 +43,18 @@ const KIND_TONE: Readonly<Record<WikiRevisionKind, "neutral" | "info" | "warning
   before: "warning",
 };
 
-/** Who saved a version, in words. */
+/**
+ * Who saved a version, in words (K15's three shapes): "by <name>" for a
+ * user, "in the admin panel" for a panel save, "no editor recorded" for a
+ * baseline or an unattributed row.
+ */
 function useEditorName() {
   const t = useTranslations("manage.wiki.history");
   return (entry: WikiRevisionEntry): string => {
     const editor = entry.editor;
     if (editor && "admin" in editor) return t("editorAdmin");
     if (editor && typeof editor.displayName === "string" && editor.displayName.trim() !== "") {
-      return editor.displayName;
+      return t("by", { name: editor.displayName });
     }
     return t("editorNone");
   };
@@ -104,7 +108,7 @@ export function WikiHistoryList({
               </p>
               <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
                 {when && <span>{when}</span>}
-                <span>{t("by", { name: editorName(entry) })}</span>
+                <span>{editorName(entry)}</span>
                 {entry.restoredFrom !== null && (
                   <span>{t("restoredFrom", { id: entry.restoredFrom })}</span>
                 )}
@@ -212,7 +216,7 @@ export function WikiRevisionPreview({
           <KindBadge kind={revision.kind} />
         </h2>
         <p className="text-sm text-muted-foreground">
-          {[when, t("by", { name: editorName(revision) })].filter(Boolean).join(" · ")}
+          {[when, editorName(revision)].filter(Boolean).join(" · ")}
         </p>
       </div>
       {legacy && (
