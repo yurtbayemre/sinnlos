@@ -144,8 +144,9 @@ interface StepReport {
   stages: string[];
   /** Archived attempt states (<project>.<attempt>.state). */
   archived: number;
-  /** Whether the reservation file exists. */
+  /** Whether the reservation file exists, and what it holds. */
   reserved: boolean;
+  reservation: Record<string, string>;
   /** The checkout ($REPO). */
   checkout: string;
 }
@@ -208,7 +209,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
     "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
-    'S="$REPO/.git/sinnlos-restore"',
+    'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
   steps.forEach((step, n) => {
@@ -236,7 +237,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
       'for f in "$REPO"/infra/backups/*; do if [[ -e "$f" ]]; then echo "@@BACKUP ${f##*/}"; fi; done',
       'for f in "$REPO"/infra/backups/restore-*; do if [[ -d "$f" ]]; then echo "@@STAGE ${f##*/} $(stat -c %a "$f") $(stat -c %a "$f/dump" 2>/dev/null)"; fi; done',
       'echo "@@ARCHIVED $(ls "$S" 2>/dev/null | grep -c "^infra\\.[0-9].*\\.state$")"',
-      'if [[ -e "$S/infra.reservation" ]]; then echo "@@RESERVED 1"; else echo "@@RESERVED 0"; fi',
+      'if [[ -e "$S/infra.reservation" ]]; then echo "@@RESERVED 1"; sed "s/^/@@RES /" "$S/infra.reservation"; else echo "@@RESERVED 0"; fi',
       'echo "@@CHECKOUT $REPO"',
     );
   });
@@ -265,6 +266,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
         stages: [],
         archived: 0,
         reserved: false,
+        reservation: {},
         checkout: "",
       };
       dbExists = false;
@@ -296,6 +298,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     else if (tag === "@@STAGE") current.stages.push(value);
     else if (tag === "@@ARCHIVED") current.archived = Number(value);
     else if (tag === "@@RESERVED") current.reserved = value === "1";
+    else if (tag === "@@RES") kv(current.reservation);
     else if (tag === "@@CHECKOUT") current.checkout = value;
   }
   expect(reports, res.stdout).toHaveLength(steps.length);
@@ -1077,6 +1080,88 @@ describe.skipIf(!FAST)(`restore-db.sh: the reservation and cancel${FAST_TITLE}`,
     expect(r[12].reserved).toBe(false);
   });
 });
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: once an apply began, only a passing start ends the reservation${FAST_TITLE}`,
+  () => {
+    let a: StepReport[] = [];
+    let b: StepReport[] = [];
+    beforeAll(() => {
+      a = restoreSteps(
+        [
+          /* 0 */ { args: ["prepare", "good.dump"] },
+          /* 1 */ { before: "STUB_RESTORE_FAIL=1", args: ["apply"] },
+          /* 2 */ { before: "STUB_RESTORE_FAIL=", args: ["back"] },
+          /* 3 */ { args: ["cancel"] },
+          /* 4 */ { args: ["status"] },
+          /* 5 */ { args: ["apply"] },
+          /* 6 */ { args: ["rotate-jwt"] },
+          /* 7 */ { args: ["start"] },
+          /* 8 */ { args: ["prepare", "good.dump"] },
+          /* 9 */ { args: ["cancel"] },
+          /* 10 */ { args: ["prepare", "good.dump"] },
+          /* 11 */ { before: 'rm "$S/infra.reservation"', args: ["apply"] },
+        ],
+        MODE as ShellMode,
+      );
+      b = restoreSteps(
+        [
+          /* 0 */ { args: ["prepare", "good.dump"] },
+          /* 1 */ { args: ["apply"] },
+          /* 2 */ { args: ["prepare", "older.dump"] },
+          /* 3 */ { args: ["cancel"] },
+          /* 4 */ { args: ["start", "--env-only"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("a failed apply marks the database unsafe; a passing back does not clear it, so cancel refuses", () => {
+      // Before round 2 the back attempt had no apply of its own, cancel passed,
+      // dropped the reservation and let a deploy start the cms on the empty database.
+      expect(a[0].reservation.UNSAFE_SINCE).toBe("");
+      expect(a[1].status).toBe(1);
+      expect(a[1].reservation.UNSAFE_SINCE).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
+      expect(a[1].reservation.UNSAFE_ATTEMPT).toBe(a[0].state.ATTEMPT);
+      expect(a[2].status, a[2].stderr).toBe(0);
+      expect(a[2].reservation.UNSAFE_SINCE).toBe(a[1].reservation.UNSAFE_SINCE);
+      expect(a[2].reservation.ATTEMPT).toBe(a[2].state.ATTEMPT);
+      expect(a[3].status).toBe(1);
+      expect(stopLine(a[3])).toBe(
+        `STOP: an apply began at ${a[1].reservation.UNSAFE_SINCE} (attempt ${a[0].state.ATTEMPT}) and no start has passed since: the database may be empty, half-restored or restored without its new JWT_SECRET, so cancel refuses; finish with apply, rotate-jwt and start, or go back with back, then apply, rotate-jwt and start; nothing changed`,
+      );
+      expect(a[3].reserved).toBe(true);
+      expect(a[4].stdout).toContain(
+        `unsafe:    since ${a[1].reservation.UNSAFE_SINCE}, when the apply of attempt ${a[0].state.ATTEMPT} began`,
+      );
+    });
+
+    it("a start that passes ends the mark with the reservation; a later prepare can be cancelled again", () => {
+      for (const n of [5, 6, 7]) expect(a[n].status, `step ${n}: ${a[n].stderr}`).toBe(0);
+      expect(a[7].reserved).toBe(false);
+      expect(a[8].reservation.UNSAFE_SINCE).toBe("");
+      expect(a[9].status, a[9].stderr).toBe(0);
+      expect(a[9].reserved).toBe(false);
+    });
+
+    it("apply refuses when the reservation is gone", () => {
+      expect(a[11].status).toBe(1);
+      expect(stopLine(a[11])).toContain("is gone (infra/deploy.sh would deploy meanwhile)");
+      expect(dropped(a[11])).toBe(false);
+    });
+
+    it("an apply that passed but was never rotated and started keeps the mark through another prepare", () => {
+      expect(b[1].status, b[1].stderr).toBe(0);
+      expect(b[2].status, b[2].stderr).toBe(0);
+      expect(b[2].reservation.UNSAFE_ATTEMPT).toBe(b[0].state.ATTEMPT);
+      expect(b[3].status).toBe(1);
+      expect(stopLine(b[3])).toContain("so cancel refuses");
+      expect(b[3].reserved).toBe(true);
+      expect(b[4].status).toBe(1);
+      expect(b[4].apps).toBe("stopped");
+    });
+  },
+);
 
 describe.skipIf(!FAST)(
   `restore-db.sh: order, the env-only pair, the lock and the compose files${FAST_TITLE}`,

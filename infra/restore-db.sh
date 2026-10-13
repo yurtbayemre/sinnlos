@@ -46,29 +46,37 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #   infra/restore-db.sh back             a new attempt from the copy of the database as it
 #                                        was before the restore (prepare <that copy>,
 #                                        whose sha256 must still be the recorded one)
-#   infra/restore-db.sh cancel           ends an attempt whose apply has not begun and
-#                                        the reservation; drops, restores and starts
-#                                        nothing (web and cms stay as they are)
+#   infra/restore-db.sh cancel           ends the attempt and the reservation while no
+#                                        apply has begun since the reservation was taken;
+#                                        drops, restores and starts nothing (web and cms
+#                                        stay as they are)
 #
 # Every step clears its own result and the results after it before it does
 # anything, and a result belongs to one attempt, so a failed or repeated step
 # never leaves an old pass behind. The attempt lives in a state file, not in
 # the shell: a new shell, a changed variable or an `exit` loses nothing.
 #
-# State: <common git dir>/sinnlos-restore/ (mode 700): <project>.state (the
-# current attempt; earlier ones as <project>.<attempt>.state),
-# <project>.env-only.state and <project>.reservation, mode 600, key=value, no
-# secret (the JWT_SECRET is recorded as its sha256 only). A state file is
-# read strictly as data (never sourced): it must be a regular file of the
-# checkout owner with mode 600, hold only known keys once each, and every
-# value must have its form (attempt ids, sha256, counts, times); paths are
-# derived from the attempt id, never read. The staged dump of an attempt is
+# State: next to infra/deploy.sh's own state and lock, in its state dir
+# (DEPLOY_STATE_DIR, default <common git dir>/sinnlos-deploy), so a second
+# clone that deploys the same project with the same DEPLOY_STATE_DIR sees
+# it: restore/ (mode 700) holds <project>.state (the current attempt;
+# earlier ones as <project>.<attempt>.state), <project>.env-only.state and
+# <project>.reservation, mode 600, key=value, no secret (the JWT_SECRET is
+# recorded as its sha256 only). A state file is read strictly as data (never
+# sourced): it must be a regular file of the checkout owner with mode 600,
+# hold only known keys once each, and every value must have its form
+# (attempt ids, sha256, counts, times); paths are derived from the attempt
+# id, never read. The staged dump of an attempt is
 # infra/backups/restore-<attempt>/dump (mode 600 in a mode-700 directory);
 # it goes when the attempt ends. The reservation lasts from prepare until
 # start passes or cancel; infra/deploy.sh refuses to deploy while it exists.
-# One run at a time per compose project: the lock of infra/deploy.sh
-# (<common git dir>/sinnlos-deploy/<project>.lock), so neither a second
-# restore step nor a deploy runs during a step.
+# Once an apply has begun, the reservation records that the database is
+# unsafe (empty, half-restored, or restored without its new JWT_SECRET);
+# that mark survives later prepares and back, only a start that passes (its
+# attempt's apply and rotate-jwt passed) ends it, and cancel refuses while
+# it is set. One run at a time per compose project: the lock of
+# infra/deploy.sh (<state dir>/<project>.lock), so neither a second restore
+# step nor a deploy runs during a step.
 #
 # Exit codes: 0 OK, 1 STOP (a check or a command failed; the STOP line says
 # what changed and what to do), 2 usage, 3 another restore step or a deploy
@@ -85,9 +93,8 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #                          docker-compose.traefik.yml, docker-compose.cms-legacy-tz.yml,
 #                          docker-compose.web-legacy-tz.yml)
 #   SINNLOS_CHECKOUT       the checkout this script lives in
-#   RESTORE_STATE_DIR      <common git dir>/sinnlos-restore (infra/deploy.sh reads the
-#                          reservation there)
-#   DEPLOY_STATE_DIR       <common git dir>/sinnlos-deploy (the lock, as infra/deploy.sh)
+#   DEPLOY_STATE_DIR       <common git dir>/sinnlos-deploy, as infra/deploy.sh: its lock,
+#                          and restore/ with the attempt state and the reservation
 #
 set -Eeuo pipefail
 umask 077
@@ -186,25 +193,27 @@ if [[ "${MY_UID}" != "${OWNER_UID}" ]]; then
   stop "run this as the owner of ${CHECKOUT} (uid ${OWNER_UID}; on the owner's host: sudo -iu bigemo), not as uid ${MY_UID}; nothing changed"
 fi
 
-if [[ -z "${RESTORE_STATE_DIR:-}" || -z "${DEPLOY_STATE_DIR:-}" ]]; then
+if [[ -z "${DEPLOY_STATE_DIR:-}" ]]; then
   if ! REPO_GIT_DIR="$(git -C "${CHECKOUT}" rev-parse --git-common-dir 2>/dev/null)"; then
-    stop "${CHECKOUT} is not a git checkout (set RESTORE_STATE_DIR and DEPLOY_STATE_DIR); nothing changed"
+    stop "${CHECKOUT} is not a git checkout (set DEPLOY_STATE_DIR, as for infra/deploy.sh); nothing changed"
   fi
   if [[ "${REPO_GIT_DIR}" != /* ]]; then REPO_GIT_DIR="${CHECKOUT}/${REPO_GIT_DIR}"; fi
   REPO_GIT_DIR="$(cd "${REPO_GIT_DIR}" && pwd)"
 fi
-STATE_DIR="${RESTORE_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-restore}"
+# infra/deploy.sh's state dir: the lock, and the restore state next to it.
+LOCK_DIR="${DEPLOY_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-deploy}"
+LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"
+STATE_DIR="${LOCK_DIR}/restore"
 STATE_FILE="${STATE_DIR}/${PROJECT}.state"
 ENV_ONLY_FILE="${STATE_DIR}/${PROJECT}.env-only.state"
 RESERVATION="${STATE_DIR}/${PROJECT}.reservation"
-LOCK_DIR="${DEPLOY_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-deploy}"
-LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"
 
 # --- State files (key=value; strictly parsed data, never sourced) -------------
 STATE_KEYS=(ATTEMPT PROJECT CHECKOUT COMPOSE_FILES SOURCE DUMP_SHA256 DUMP_TABLES SAFETY
   SAFETY_SHA256 SAFETY_TABLES ORIGIN_ATTEMPT ORIGIN_SHA256 BACK_OF PREPARED_AT SUPERSEDED_AT
   CANCELLED_AT APPLY_STARTED_AT APPLIED_AT RESTORED_TABLES USERS ROTATED_AT ROTATED_SUM STARTED_AT)
 ENV_ONLY_KEYS=(PROJECT CHECKOUT COMPOSE_FILES ROTATED_AT ROTATED_SUM STARTED_AT)
+RESERVATION_KEYS=(ATTEMPT RESERVED_AT UNSAFE_SINCE UNSAFE_ATTEMPT)
 
 ID_RE='^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$'
 SHA_RE='^[0-9a-f]{64}$'
@@ -328,7 +337,7 @@ load_env_only() {
 
 ensure_state_dir() {
   if [[ ! -e "${STATE_DIR}" && ! -L "${STATE_DIR}" ]]; then
-    mkdir -p "${STATE_DIR%/*}"
+    mkdir -p "${LOCK_DIR}"
     mkdir -m 700 "${STATE_DIR}"
   fi
   state_dir_ok || stop "the state directory ${STATE_DIR} is not a mode-700 directory of uid ${MY_UID}; ${PHASE_NOTE}"
@@ -364,13 +373,43 @@ attempt_open() { [[ -n "${S_ATTEMPT}" && -n "${S_APPLY_STARTED_AT}" && -z "${S_S
 # Apply, rotate-jwt and start take only the current, live attempt.
 attempt_live() { [[ -n "${S_ATTEMPT}" && -z "${S_SUPERSEDED_AT}" && -z "${S_STARTED_AT}" ]]; }
 
+reserved() { [[ -e "${RESERVATION}" || -L "${RESERVATION}" ]]; }
+
+# The reservation, as data: R_ATTEMPT, R_RESERVED_AT, R_UNSAFE_SINCE,
+# R_UNSAFE_ATTEMPT (all empty without one).
+load_reservation() {
+  local bad=""
+  read_state "${RESERVATION}" R_ "${RESERVATION_KEYS[@]}"
+  reserved || return 0
+  matches "${R_ATTEMPT}" "${ID_RE}" || bad+=" ATTEMPT"
+  matches "${R_RESERVED_AT}" "${TIME_RE}" || bad+=" RESERVED_AT"
+  empty_or "${R_UNSAFE_SINCE}" "${TIME_RE}" || bad+=" UNSAFE_SINCE"
+  empty_or "${R_UNSAFE_ATTEMPT}" "${ID_RE}" || bad+=" UNSAFE_ATTEMPT"
+  if [[ -n "${bad}" ]]; then
+    stop "the reservation ${RESERVATION} is not one this script wrote (bad: ${bad# }); nothing changed: look at it"
+  fi
+}
+
+save_reservation() { write_state "${RESERVATION}" R_ "${RESERVATION_KEYS[@]}"; }
+
+# Reserves the project for <attempt>; a mark of an unsafe database stays.
 write_reservation() { # <attempt>
-  local tmp
-  ensure_state_dir
-  tmp="$(mktemp "${RESERVATION}.XXXXXX")"
-  printf 'ATTEMPT=%s\nRESERVED_AT=%s\n' "$1" "$(now)" >"${tmp}"
-  chmod 600 "${tmp}"
-  mv -f "${tmp}" "${RESERVATION}"
+  load_reservation
+  R_ATTEMPT="$1"
+  if [[ -z "${R_RESERVED_AT}" ]]; then R_RESERVED_AT="$(now)"; fi
+  save_reservation
+}
+
+# Before apply drops: from now on the database is unsafe until a start
+# passes, whatever later prepares, backs or failures do.
+mark_unsafe() { # <attempt>
+  load_reservation
+  if ! reserved; then
+    stop "the reservation ${RESERVATION} of attempt $1 is gone (infra/deploy.sh would deploy meanwhile): run infra/restore-db.sh prepare again; nothing dropped"
+  fi
+  if [[ -z "${R_UNSAFE_SINCE}" ]]; then R_UNSAFE_SINCE="$(now)"; fi
+  R_UNSAFE_ATTEMPT="$1"
+  save_reservation
 }
 
 # --- Compose ------------------------------------------------------------------
@@ -710,8 +749,12 @@ cmd_cancel() {
   local stage
   take_lock
   load_attempt
-  if [[ ! -e "${RESERVATION}" && ! -L "${RESERVATION}" ]]; then
+  if ! reserved; then
     stop "compose project ${PROJECT} has no restore reservation; nothing to cancel"
+  fi
+  load_reservation
+  if [[ -n "${R_UNSAFE_SINCE}" ]]; then
+    stop "an apply began at ${R_UNSAFE_SINCE} (attempt ${R_UNSAFE_ATTEMPT}) and no start has passed since: the database may be empty, half-restored or restored without its new JWT_SECRET, so cancel refuses; finish with apply, rotate-jwt and start, or go back with back, then apply, rotate-jwt and start; nothing changed"
   fi
   if attempt_open; then
     stop "attempt ${S_ATTEMPT}'s apply began at ${S_APPLY_STARTED_AT}: the database may be empty or half-restored, so cancel refuses; finish it (apply, rotate-jwt, start) or go back (back, then apply, rotate-jwt, start); nothing changed"
@@ -788,6 +831,7 @@ cmd_apply() {
     stop "the copy $(safety_path "${S_ATTEMPT}") is gone, changed or no longer decodes; nothing dropped (start again with prepare)"
   fi
 
+  mark_unsafe "${S_ATTEMPT}"
   S_APPLY_STARTED_AT="$(now)"
   save_attempt
   PHASE_NOTE="the database may be empty or missing; do not start the apps: run infra/restore-db.sh apply again, or infra/restore-db.sh back (to $(origin_text))"
@@ -894,7 +938,7 @@ cmd_start() {
     if [[ -z "${E_ROTATED_SUM}" || -n "${E_STARTED_AT}" ]]; then
       stop "rotate-jwt --env-only did not pass (or its start was done already); web and cms not started"
     fi
-    if [[ -e "${RESERVATION}" || -L "${RESERVATION}" ]] || attempt_open; then
+    if reserved || attempt_open; then
       stop "a database restore of compose project ${PROJECT} holds the reservation (attempt ${S_ATTEMPT:-unknown}): finish it with apply, rotate-jwt and start, go back with back, or end it with cancel; web and cms not started"
     fi
     use_recorded_compose_files "${E_COMPOSE_FILES}"
@@ -967,8 +1011,12 @@ cmd_status() {
       echo "  next:      infra/restore-db.sh apply (or cancel)"
     fi
   fi
-  if [[ -e "${RESERVATION}" ]]; then
-    echo "reserved:  ${RESERVATION} (infra/deploy.sh refuses to deploy until start passes or cancel)"
+  if reserved; then
+    load_reservation
+    echo "reserved:  ${RESERVATION} since ${R_RESERVED_AT} (attempt ${R_ATTEMPT}; infra/deploy.sh refuses to deploy until start passes or cancel)"
+    if [[ -n "${R_UNSAFE_SINCE}" ]]; then
+      echo "unsafe:    since ${R_UNSAFE_SINCE}, when the apply of attempt ${R_UNSAFE_ATTEMPT} began: only a start that passes ends it; cancel refuses"
+    fi
   fi
   if [[ -n "${E_ROTATED_AT}" ]]; then
     echo "infra/.env only: JWT_SECRET rotated ${E_ROTATED_AT}, started ${E_STARTED_AT:-no}"
