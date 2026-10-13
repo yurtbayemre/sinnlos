@@ -66,6 +66,9 @@ vi.mock("./utils/poll-audience-backfill", () => ({
 vi.mock("./utils/department-audience-backfill", () => ({
   backfillDepartmentAudience: step("backfillDepartmentAudience"),
 }));
+vi.mock("./utils/targeting-flags-backfill", () => ({
+  backfillTargetingFlags: step("backfillTargetingFlags"),
+}));
 vi.mock("./utils/admin-seed", () => ({ seedAdminUser: step("seedAdminUser") }));
 vi.mock("./digest/send-digests", () => ({ reportDigestConfig: step("reportDigestConfig") }));
 vi.mock("./seed-demo", () => ({ seedDemoData: step("seedDemoData") }));
@@ -107,6 +110,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "reportEntraStatus",
       "backfillPollAudience",
       "backfillDepartmentAudience",
+      "backfillTargetingFlags",
       "seedAdminUser",
       "reportDigestConfig",
       "seedDemoData",
@@ -140,6 +144,14 @@ describe("src/index.ts lifecycle order (B01)", () => {
     failing.add("ensureDocumentIndexes");
     await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("ensureDocumentIndexes failed");
     expect(calls).toEqual(["assertTimestamptzContract", "ensureDocumentIndexes"]);
+  });
+
+  it("a failing targeting-flag backfill stops bootstrap() before the seed and the draft twins", async () => {
+    failing.add("backfillTargetingFlags");
+    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("backfillTargetingFlags failed");
+    expect(calls[calls.length - 1]).toBe("backfillTargetingFlags");
+    expect(calls).not.toContain("seedDemoData");
+    expect(calls).not.toContain("ensureDraftTwins");
   });
 
   it("a failing org draft guard stops register() before anything else", async () => {

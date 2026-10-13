@@ -283,20 +283,24 @@ async function seed(t: TestStrapi): Promise<Seeded> {
   await create(POLL, "polls", "S:poll:draft", { question: "S:poll:draft", options }, "draft");
 
   // Training: a published course with a published and a draft lesson, a
-  // draft course with a lesson.
+  // draft course with a published lesson. The last one is built the way the
+  // admin panel gets there, since publish readiness (batch 15, decision 06
+  // §G2) refuses to publish a lesson into a draft-only course: the course is
+  // published, the lesson published in it, then the course unpublished. The
+  // unpublish deletes the course's published row, and the published
+  // lesson's link to it goes with it, so the lesson's published row has no
+  // published course: what policies/training-visibility.ts filters on, and
+  // the same state the old fixture got from the dropped link (C23).
   const COURSE = "api::course.course";
   const LESSON = "api::lesson.lesson";
   const course = await create(COURSE, "courses", "S:course:published", {
     title: "S:course:published",
     slug: "s-course-published",
   });
-  const draftCourse = await create(
-    COURSE,
-    "courses",
-    "S:course:draft",
-    { title: "S:course:draft", slug: "s-course-draft" },
-    "draft",
-  );
+  const draftCourse = await create(COURSE, "courses", "S:course:draft", {
+    title: "S:course:draft",
+    slug: "s-course-draft",
+  });
   const lesson = await create(LESSON, "lessons", "S:lesson:published", {
     title: "S:lesson:published",
     course: course.documentId,
@@ -312,6 +316,7 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     title: "S:lesson:in-draft-course",
     course: draftCourse.documentId,
   });
+  await docs(COURSE).unpublish({ documentId: draftCourse.documentId });
 
   // Comments and one reaction on every target, written past the controllers.
   const announcements = [

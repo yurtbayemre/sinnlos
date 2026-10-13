@@ -41,23 +41,30 @@ const spec = (fn: CronTaskSpec["fn"]): CronTaskSpec => ({
 });
 
 describe("cronRegistry", () => {
-  it("lists the five tasks with their rules, all in the given zone", () => {
+  it("lists the seven tasks with their rules, all in the given zone", () => {
     const table = cronRegistry("Pacific/Auckland").map(({ name, rule, tz }) => ({
       name,
       rule,
       tz,
     }));
     expect(table).toEqual([
+      { name: "scheduled-publisher", rule: "* * * * *", tz: "Pacific/Auckland" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Pacific/Auckland" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Pacific/Auckland" },
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Pacific/Auckland" },
       { name: "classified-janitor", rule: "45 3 * * *", tz: "Pacific/Auckland" },
+      { name: "audit-janitor", rule: "50 3 * * *", tz: "Pacific/Auckland" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Pacific/Auckland" },
     ]);
   });
 
-  it("runs the janitors after the 03:00 host backup, and every task once a day", () => {
+  it("runs the janitors in the 03:00 hour and every task but the scheduler once a day", () => {
     for (const { name, rule } of cronRegistry("Europe/Berlin")) {
+      if (name === "scheduled-publisher") {
+        // Decision 06 §D rule 12: every minute, exempt from the nightly order.
+        expect(rule).toBe("* * * * *");
+        continue;
+      }
       const [minute, hour, ...rest] = rule.split(" ");
       expect(rest, name).toEqual(["*", "*", "*"]);
       const minutes = Number(hour) * 60 + Number(minute);
@@ -244,10 +251,12 @@ describe("buildCronTasks", () => {
   it("keys the tasks by name, with Strapi's rule/tz options", () => {
     const tasks = buildCronTasks(cronRegistry("Europe/Berlin"));
     expect(Object.keys(tasks)).toEqual([
+      "scheduled-publisher",
       "uploads-janitor",
       "search-log-janitor",
       "notification-janitor",
       "classified-janitor",
+      "audit-janitor",
       "digest-mailer",
     ]);
     for (const [name, { task, options }] of Object.entries(tasks)) {

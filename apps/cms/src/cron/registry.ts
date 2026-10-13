@@ -4,13 +4,17 @@
  * load before the `strapi` global exists) and holds no schedule state of its
  * own: the overlap flag lives in the closure `buildCronTasks` returns.
  *
- * Order: the janitors run from 03:30 to 03:45 APP_TIME_ZONE; the digest
- * mails at 07:30. When the host's nightly backup runs (infra/backup/
- * pg-backup.sh, or the host's backup-run; docs/DEPLOYMENT.md §7.3) does not
- * matter for them: they remove only old rows and files (orphaned uploads
- * after 24 hours, search logs, read notifications and expired ads after 90
- * days), so everything they remove is already in the earlier nightly
- * backups.
+ * Order: the scheduled publisher runs every minute (decision 06 §D); the
+ * janitors run from 03:30 to 03:50 APP_TIME_ZONE; the digest mails at
+ * 07:30. When the host's nightly backup runs (infra/backup/pg-backup.sh,
+ * or the host's backup-run at 04:00; docs/DEPLOYMENT.md §7.3) does not
+ * matter for the janitors: they remove only old rows and files (orphaned
+ * uploads after 24 hours, search logs, read notifications and expired ads
+ * after 90 days, audit events after AUDIT_RETENTION_DAYS), so everything
+ * they remove is already in the earlier nightly backups. The scheduled
+ * publisher is the one task that changes current content; each run does
+ * what a moderator's publish or unpublish in the same minute would do
+ * (decision 06 §D rule 12), and pg_dump takes a consistent snapshot.
  *
  * Every task runs through `guardedTask`:
  *  - one `[cron] <name> took <n>ms` info line per run, or `[cron] <name>
@@ -33,13 +37,19 @@
  * running. None of them mails, sweeps or deletes anything.
  */
 import { parseEnvFlag, sendDigests, type DigestStrapi } from "../digest/send-digests";
+import { pruneAuditEvents, type AuditJanitorStrapi } from "./prune-audit-events";
 import { pruneNotifications, type NotificationJanitorStrapi } from "./prune-notifications";
 import { pruneSearchLogs } from "./prune-search-logs";
 import { purgeExpiredClassifieds, type ClassifiedJanitorStrapi } from "./purge-expired-classifieds";
+import { runScheduledPublishing, type ScheduledPublishStrapi } from "./scheduled-publish";
 import { sweepOrphanedUploads } from "./sweep-orphaned-uploads";
 
 /** The slice of the Strapi instance the tasks use: what each of them needs. */
-export type CronStrapi = DigestStrapi & NotificationJanitorStrapi & ClassifiedJanitorStrapi;
+export type CronStrapi = DigestStrapi &
+  NotificationJanitorStrapi &
+  ClassifiedJanitorStrapi &
+  AuditJanitorStrapi &
+  ScheduledPublishStrapi;
 
 /** One cron task: a pure description, no state. */
 export interface CronTaskSpec {
@@ -64,6 +74,17 @@ export interface StrapiCronTask {
  */
 export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
   return [
+    // Decision 06 §D: CE scheduled publishing, every minute; due unpublishes
+    // first, then due publishes, through the Document Service
+    // (scheduled-publish.ts).
+    {
+      name: "scheduled-publisher",
+      rule: "* * * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await runScheduledPublishing(strapi);
+      },
+    },
     // Nightly orphan sweep of stamped marketplace uploads (issue #13).
     {
       name: "uploads-janitor",
@@ -96,6 +117,16 @@ export function cronRegistry(timeZone: string): readonly CronTaskSpec[] {
       tz: timeZone,
       fn: async (strapi) => {
         await purgeExpiredClassifieds(strapi);
+      },
+    },
+    // LF07, decision 06 §H: audit events AUDIT_RETENTION_DAYS (default 365)
+    // after they were written (prune-audit-events.ts).
+    {
+      name: "audit-janitor",
+      rule: "50 3 * * *",
+      tz: timeZone,
+      fn: async (strapi) => {
+        await pruneAuditEvents(strapi);
       },
     },
     // Morning e-mail digests (issue #18): daily users every day, weekly users

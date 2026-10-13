@@ -122,6 +122,11 @@ async function expectScheduledAt(tasks: Tasks, timeZone: string) {
         const [minute, hour] = options.rule.split(" ");
         const next = cron.jobs.find((spec) => spec.name === name)?.job.nextInvocation();
         expect(next, name).toBeInstanceOf(Date);
+        if (minute === "*" && hour === "*") {
+          // Every minute (the scheduled publisher): the next run is within a minute.
+          expect((next as Date).getTime() - Date.now(), name).toBeLessThanOrEqual(60_000);
+          continue;
+        }
         expect(wallClock(timeZone).format(next as Date), name).toBe(
           `${hour.padStart(2, "0")}:${minute.padStart(2, "0")}`,
         );
@@ -177,10 +182,12 @@ describe("config/server", () => {
   it("builds the cron tasks from the registry (names, rules, zone)", () => {
     const { tasks } = serverConfig({ env: makeEnv() }).cron;
     expect(Object.entries(tasks).map(([name, { options }]) => ({ name, ...options }))).toEqual([
+      { name: "scheduled-publisher", rule: "* * * * *", tz: "Europe/Berlin" },
       { name: "uploads-janitor", rule: "30 3 * * *", tz: "Europe/Berlin" },
       { name: "search-log-janitor", rule: "35 3 * * *", tz: "Europe/Berlin" },
       { name: "notification-janitor", rule: "40 3 * * *", tz: "Europe/Berlin" },
       { name: "classified-janitor", rule: "45 3 * * *", tz: "Europe/Berlin" },
+      { name: "audit-janitor", rule: "50 3 * * *", tz: "Europe/Berlin" },
       { name: "digest-mailer", rule: "30 7 * * *", tz: "Europe/Berlin" },
     ]);
   });
@@ -211,10 +218,12 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
       const config = serverConfig({ env: makeEnv(store) });
       expect(config.cron.enabled, JSON.stringify(store)).toBe(true);
       expect(await scheduledByProvider(config), JSON.stringify(store)).toEqual([
+        "scheduled-publisher",
         "uploads-janitor",
         "search-log-janitor",
         "notification-janitor",
         "classified-janitor",
+        "audit-janitor",
         "digest-mailer",
       ]);
     }
@@ -235,10 +244,12 @@ describe("CRON_ENABLED through @strapi/core's cron provider", () => {
     const on = serverConfig({ env: makeEnv() });
     expect(await scheduledByProvider(on, metrics)).toEqual([
       "uploadWeekly",
+      "scheduled-publisher",
       "uploads-janitor",
       "search-log-janitor",
       "notification-janitor",
       "classified-janitor",
+      "audit-janitor",
       "digest-mailer",
     ]);
   });
