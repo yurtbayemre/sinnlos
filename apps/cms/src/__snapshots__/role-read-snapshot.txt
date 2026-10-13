@@ -2,6 +2,8 @@ admin_role | detail announcements S:ann:all | 200
 admin_role | detail announcements S:ann:draft | 404
 admin_role | detail announcements S:ann:eng | 200
 admin_role | detail announcements S:ann:eng-team | 200
+admin_role | detail announcements S:ann:no-target | 200
+admin_role | detail announcements S:ann:retarget | 200
 admin_role | detail announcements S:ann:role-member | 200
 admin_role | detail announcements S:ann:sales | 200
 admin_role | detail announcements S:ann:team | 200
@@ -41,8 +43,8 @@ admin_role | detail wiki-spaces S:space:public | 200
 admin_role | detail wiki-spaces S:space:role-member | 200
 admin_role | detail wiki-spaces S:space:team | 200
 admin_role | list acknowledgements | ["ack@S:ann:all","ack@S:ann:eng","ack@S:ann:sales"]
-admin_role | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
-admin_role | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
+admin_role | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:no-target","S:ann:retarget","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
+admin_role | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:no-target","S:c:S:ann:retarget","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
 admin_role | list courses | ["S:course:published"]
 admin_role | list documents | ["S:doc:all","S:doc:eng","S:doc:sales"]
 admin_role | list event-rsvps | ["rsvp:maybe@S:event:a","rsvp:no@S:event:b","rsvp:yes@S:event:a"]
@@ -51,7 +53,7 @@ admin_role | list lessons | ["S:lesson:in-draft-course","S:lesson:published"]
 admin_role | list notifications | ["S:note:admin","S:note:editor","S:note:guest","S:note:member","S:note:sales"]
 admin_role | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sales"]
 admin_role | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
-admin_role | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
+admin_role | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:no-target","reaction:heart@S:ann:retarget","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
 admin_role | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
 admin_role | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
 admin_role | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
@@ -59,6 +61,8 @@ admin_role | thread comments S:ann:all | ["S:c:S:ann:all"]
 admin_role | thread comments S:ann:draft | ["S:c:S:ann:draft"]
 admin_role | thread comments S:ann:eng | ["S:c:S:ann:eng"]
 admin_role | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+admin_role | thread comments S:ann:no-target | ["S:c:S:ann:no-target"]
+admin_role | thread comments S:ann:retarget | ["S:c:S:ann:retarget"]
 admin_role | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
 admin_role | thread comments S:ann:sales | ["S:c:S:ann:sales"]
 admin_role | thread comments S:ann:team | ["S:c:S:ann:team"]
@@ -73,6 +77,8 @@ admin_role | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 admin_role | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
 admin_role | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
 admin_role | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+admin_role | thread reactions S:ann:no-target | ["reaction:heart@S:ann:no-target"]
+admin_role | thread reactions S:ann:retarget | ["reaction:heart@S:ann:retarget"]
 admin_role | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
 admin_role | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
 admin_role | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
@@ -87,6 +93,8 @@ editor | detail announcements S:ann:all | 200
 editor | detail announcements S:ann:draft | 404
 editor | detail announcements S:ann:eng | 200
 editor | detail announcements S:ann:eng-team | 200
+editor | detail announcements S:ann:no-target | 200
+editor | detail announcements S:ann:retarget | 200
 editor | detail announcements S:ann:role-member | 200
 editor | detail announcements S:ann:sales | 200
 editor | detail announcements S:ann:team | 200
@@ -126,8 +134,8 @@ editor | detail wiki-spaces S:space:public | 200
 editor | detail wiki-spaces S:space:role-member | 200
 editor | detail wiki-spaces S:space:team | 200
 editor | list acknowledgements | ["ack@S:ann:eng"]
-editor | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
-editor | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
+editor | list announcements | ["S:ann:all","S:ann:eng","S:ann:eng-team","S:ann:no-target","S:ann:retarget","S:ann:role-member","S:ann:sales","S:ann:team","S:ann:widened-draft"]
+editor | list comments | ["S:c:S:ann:all","S:c:S:ann:draft","S:c:S:ann:eng","S:c:S:ann:eng-team","S:c:S:ann:no-target","S:c:S:ann:retarget","S:c:S:ann:role-member","S:c:S:ann:sales","S:c:S:ann:team","S:c:S:ann:widened-draft","S:c:S:page:dept-eng","S:c:S:page:dept-sales","S:c:S:page:draft","S:c:S:page:public","S:c:S:page:role-member","S:c:S:page:team"]
 editor | list courses | ["S:course:published"]
 editor | list documents | ["S:doc:all","S:doc:eng","S:doc:sales"]
 editor | list event-rsvps | ["rsvp:maybe@S:event:a"]
@@ -136,7 +144,7 @@ editor | list lessons | ["S:lesson:in-draft-course","S:lesson:published"]
 editor | list notifications | ["S:note:editor"]
 editor | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sales"]
 editor | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
-editor | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
+editor | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:no-target","reaction:heart@S:ann:retarget","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
 editor | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
 editor | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
 editor | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
@@ -144,6 +152,8 @@ editor | thread comments S:ann:all | ["S:c:S:ann:all"]
 editor | thread comments S:ann:draft | ["S:c:S:ann:draft"]
 editor | thread comments S:ann:eng | ["S:c:S:ann:eng"]
 editor | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+editor | thread comments S:ann:no-target | ["S:c:S:ann:no-target"]
+editor | thread comments S:ann:retarget | ["S:c:S:ann:retarget"]
 editor | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
 editor | thread comments S:ann:sales | ["S:c:S:ann:sales"]
 editor | thread comments S:ann:team | ["S:c:S:ann:team"]
@@ -158,6 +168,8 @@ editor | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 editor | thread reactions S:ann:draft | ["reaction:heart@S:ann:draft"]
 editor | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
 editor | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+editor | thread reactions S:ann:no-target | ["reaction:heart@S:ann:no-target"]
+editor | thread reactions S:ann:retarget | ["reaction:heart@S:ann:retarget"]
 editor | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
 editor | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
 editor | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
@@ -172,6 +184,8 @@ department_head | detail announcements S:ann:all | 200
 department_head | detail announcements S:ann:draft | 404
 department_head | detail announcements S:ann:eng | 200
 department_head | detail announcements S:ann:eng-team | 404
+department_head | detail announcements S:ann:no-target | 404
+department_head | detail announcements S:ann:retarget | 404
 department_head | detail announcements S:ann:role-member | 404
 department_head | detail announcements S:ann:sales | 404
 department_head | detail announcements S:ann:team | 404
@@ -229,6 +243,8 @@ department_head | thread comments S:ann:all | ["S:c:S:ann:all"]
 department_head | thread comments S:ann:draft | []
 department_head | thread comments S:ann:eng | ["S:c:S:ann:eng"]
 department_head | thread comments S:ann:eng-team | []
+department_head | thread comments S:ann:no-target | []
+department_head | thread comments S:ann:retarget | []
 department_head | thread comments S:ann:role-member | []
 department_head | thread comments S:ann:sales | []
 department_head | thread comments S:ann:team | []
@@ -243,6 +259,8 @@ department_head | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 department_head | thread reactions S:ann:draft | []
 department_head | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
 department_head | thread reactions S:ann:eng-team | []
+department_head | thread reactions S:ann:no-target | []
+department_head | thread reactions S:ann:retarget | []
 department_head | thread reactions S:ann:role-member | []
 department_head | thread reactions S:ann:sales | []
 department_head | thread reactions S:ann:team | []
@@ -257,6 +275,8 @@ team_lead | detail announcements S:ann:all | 200
 team_lead | detail announcements S:ann:draft | 404
 team_lead | detail announcements S:ann:eng | 200
 team_lead | detail announcements S:ann:eng-team | 200
+team_lead | detail announcements S:ann:no-target | 404
+team_lead | detail announcements S:ann:retarget | 404
 team_lead | detail announcements S:ann:role-member | 404
 team_lead | detail announcements S:ann:sales | 404
 team_lead | detail announcements S:ann:team | 200
@@ -314,6 +334,8 @@ team_lead | thread comments S:ann:all | ["S:c:S:ann:all"]
 team_lead | thread comments S:ann:draft | []
 team_lead | thread comments S:ann:eng | ["S:c:S:ann:eng"]
 team_lead | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+team_lead | thread comments S:ann:no-target | []
+team_lead | thread comments S:ann:retarget | []
 team_lead | thread comments S:ann:role-member | []
 team_lead | thread comments S:ann:sales | []
 team_lead | thread comments S:ann:team | ["S:c:S:ann:team"]
@@ -328,6 +350,8 @@ team_lead | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 team_lead | thread reactions S:ann:draft | []
 team_lead | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
 team_lead | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+team_lead | thread reactions S:ann:no-target | []
+team_lead | thread reactions S:ann:retarget | []
 team_lead | thread reactions S:ann:role-member | []
 team_lead | thread reactions S:ann:sales | []
 team_lead | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
@@ -342,6 +366,8 @@ member | detail announcements S:ann:all | 200
 member | detail announcements S:ann:draft | 404
 member | detail announcements S:ann:eng | 200
 member | detail announcements S:ann:eng-team | 200
+member | detail announcements S:ann:no-target | 404
+member | detail announcements S:ann:retarget | 404
 member | detail announcements S:ann:role-member | 200
 member | detail announcements S:ann:sales | 404
 member | detail announcements S:ann:team | 200
@@ -399,6 +425,8 @@ member | thread comments S:ann:all | ["S:c:S:ann:all"]
 member | thread comments S:ann:draft | []
 member | thread comments S:ann:eng | ["S:c:S:ann:eng"]
 member | thread comments S:ann:eng-team | ["S:c:S:ann:eng-team"]
+member | thread comments S:ann:no-target | []
+member | thread comments S:ann:retarget | []
 member | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
 member | thread comments S:ann:sales | []
 member | thread comments S:ann:team | ["S:c:S:ann:team"]
@@ -413,6 +441,8 @@ member | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 member | thread reactions S:ann:draft | []
 member | thread reactions S:ann:eng | ["reaction:heart@S:ann:eng"]
 member | thread reactions S:ann:eng-team | ["reaction:heart@S:ann:eng-team"]
+member | thread reactions S:ann:no-target | []
+member | thread reactions S:ann:retarget | []
 member | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
 member | thread reactions S:ann:sales | []
 member | thread reactions S:ann:team | ["reaction:heart@S:ann:team"]
@@ -427,6 +457,8 @@ guest | detail announcements S:ann:all | 403
 guest | detail announcements S:ann:draft | 403
 guest | detail announcements S:ann:eng | 403
 guest | detail announcements S:ann:eng-team | 403
+guest | detail announcements S:ann:no-target | 403
+guest | detail announcements S:ann:retarget | 403
 guest | detail announcements S:ann:role-member | 403
 guest | detail announcements S:ann:sales | 403
 guest | detail announcements S:ann:team | 403
@@ -484,6 +516,8 @@ guest | thread comments S:ann:all | ["S:c:S:ann:all"]
 guest | thread comments S:ann:draft | []
 guest | thread comments S:ann:eng | []
 guest | thread comments S:ann:eng-team | []
+guest | thread comments S:ann:no-target | []
+guest | thread comments S:ann:retarget | []
 guest | thread comments S:ann:role-member | []
 guest | thread comments S:ann:sales | []
 guest | thread comments S:ann:team | []
@@ -498,6 +532,8 @@ guest | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 guest | thread reactions S:ann:draft | []
 guest | thread reactions S:ann:eng | []
 guest | thread reactions S:ann:eng-team | []
+guest | thread reactions S:ann:no-target | []
+guest | thread reactions S:ann:retarget | []
 guest | thread reactions S:ann:role-member | []
 guest | thread reactions S:ann:sales | []
 guest | thread reactions S:ann:team | []
@@ -512,6 +548,8 @@ authenticated | detail announcements S:ann:all | 200
 authenticated | detail announcements S:ann:draft | 404
 authenticated | detail announcements S:ann:eng | 404
 authenticated | detail announcements S:ann:eng-team | 404
+authenticated | detail announcements S:ann:no-target | 404
+authenticated | detail announcements S:ann:retarget | 404
 authenticated | detail announcements S:ann:role-member | 404
 authenticated | detail announcements S:ann:sales | 404
 authenticated | detail announcements S:ann:team | 404
@@ -569,6 +607,8 @@ authenticated | thread comments S:ann:all | ["S:c:S:ann:all"]
 authenticated | thread comments S:ann:draft | []
 authenticated | thread comments S:ann:eng | []
 authenticated | thread comments S:ann:eng-team | []
+authenticated | thread comments S:ann:no-target | []
+authenticated | thread comments S:ann:retarget | []
 authenticated | thread comments S:ann:role-member | []
 authenticated | thread comments S:ann:sales | []
 authenticated | thread comments S:ann:team | []
@@ -583,6 +623,8 @@ authenticated | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 authenticated | thread reactions S:ann:draft | []
 authenticated | thread reactions S:ann:eng | []
 authenticated | thread reactions S:ann:eng-team | []
+authenticated | thread reactions S:ann:no-target | []
+authenticated | thread reactions S:ann:retarget | []
 authenticated | thread reactions S:ann:role-member | []
 authenticated | thread reactions S:ann:sales | []
 authenticated | thread reactions S:ann:team | []
@@ -597,6 +639,8 @@ sales_member | detail announcements S:ann:all | 200
 sales_member | detail announcements S:ann:draft | 404
 sales_member | detail announcements S:ann:eng | 404
 sales_member | detail announcements S:ann:eng-team | 404
+sales_member | detail announcements S:ann:no-target | 404
+sales_member | detail announcements S:ann:retarget | 404
 sales_member | detail announcements S:ann:role-member | 200
 sales_member | detail announcements S:ann:sales | 200
 sales_member | detail announcements S:ann:team | 404
@@ -654,6 +698,8 @@ sales_member | thread comments S:ann:all | ["S:c:S:ann:all"]
 sales_member | thread comments S:ann:draft | []
 sales_member | thread comments S:ann:eng | []
 sales_member | thread comments S:ann:eng-team | []
+sales_member | thread comments S:ann:no-target | []
+sales_member | thread comments S:ann:retarget | []
 sales_member | thread comments S:ann:role-member | ["S:c:S:ann:role-member"]
 sales_member | thread comments S:ann:sales | ["S:c:S:ann:sales"]
 sales_member | thread comments S:ann:team | []
@@ -668,6 +714,8 @@ sales_member | thread reactions S:ann:all | ["reaction:heart@S:ann:all"]
 sales_member | thread reactions S:ann:draft | []
 sales_member | thread reactions S:ann:eng | []
 sales_member | thread reactions S:ann:eng-team | []
+sales_member | thread reactions S:ann:no-target | []
+sales_member | thread reactions S:ann:retarget | []
 sales_member | thread reactions S:ann:role-member | ["reaction:heart@S:ann:role-member"]
 sales_member | thread reactions S:ann:sales | ["reaction:heart@S:ann:sales"]
 sales_member | thread reactions S:ann:team | []
@@ -682,6 +730,8 @@ anonymous | detail announcements S:ann:all | 403
 anonymous | detail announcements S:ann:draft | 403
 anonymous | detail announcements S:ann:eng | 403
 anonymous | detail announcements S:ann:eng-team | 403
+anonymous | detail announcements S:ann:no-target | 403
+anonymous | detail announcements S:ann:retarget | 403
 anonymous | detail announcements S:ann:role-member | 403
 anonymous | detail announcements S:ann:sales | 403
 anonymous | detail announcements S:ann:team | 403
@@ -739,6 +789,8 @@ anonymous | thread comments S:ann:all | 403
 anonymous | thread comments S:ann:draft | 403
 anonymous | thread comments S:ann:eng | 403
 anonymous | thread comments S:ann:eng-team | 403
+anonymous | thread comments S:ann:no-target | 403
+anonymous | thread comments S:ann:retarget | 403
 anonymous | thread comments S:ann:role-member | 403
 anonymous | thread comments S:ann:sales | 403
 anonymous | thread comments S:ann:team | 403
@@ -753,6 +805,8 @@ anonymous | thread reactions S:ann:all | 403
 anonymous | thread reactions S:ann:draft | 403
 anonymous | thread reactions S:ann:eng | 403
 anonymous | thread reactions S:ann:eng-team | 403
+anonymous | thread reactions S:ann:no-target | 403
+anonymous | thread reactions S:ann:retarget | 403
 anonymous | thread reactions S:ann:role-member | 403
 anonymous | thread reactions S:ann:sales | 403
 anonymous | thread reactions S:ann:team | 403
