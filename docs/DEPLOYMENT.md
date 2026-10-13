@@ -2182,8 +2182,11 @@ web with `next start`, through a counting proxy: an editor's six tiles; a
 **20 MB PDF uploaded through the Server Action** (both 22 MB edges) and
 attached; a member downloads it through `/uploads` (`application/pdf`); a
 fake `.docx` refused by the cms with the focus on the file input; a
-conflict whose _Overwrite_ uploaded nothing again (one upload in all); the
-schedule's end-before-start refusal; unpublish and delete; a department
+conflict whose _Overwrite_ uploaded nothing again (one upload in all); a
+picked file kept across an unpublish and attached by the next save; a
+refused upload from _Schedule…_ closing the dialog with the focus on the
+file input; the schedule's end-before-start refusal; unpublish and
+delete; a department
 head's three tiles, pinned department, no _Schedule…_ or _Delete_, an
 image published to Engineering that an Engineering member lists and a
 Design member does not, _Discard changes_ only with a published version,
@@ -2196,7 +2199,11 @@ the parent picker, the restore and delete dialogs. **Waiting for the
 integrated cms:** the wiki flows end to end (spaces, a team lead's draft,
 publish, Edit per role, history and restore, the parent loop, the
 non-empty space, two tabs), the preview's "Uploaded by", and an XLSX and
-PPTX upload by a department head.
+PPTX upload by a department head. Two Codex review rounds were fixed before
+the final run: the two routes inside the readers' slug namespace (now
+behind `?create=1` and `?mine=1`, a failed lookup staying with the
+readers), a picked file lost on a status change, and an upload refused
+from the _Schedule…_ dialog hidden behind it.
 
 #### Deploying batch 15.1 (the wiki-revision read closure)
 
