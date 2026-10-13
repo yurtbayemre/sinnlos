@@ -1,10 +1,20 @@
 import { factories } from "@strapi/strapi";
 
+import { authoringActions } from "../../../utils/authoring-controller";
 import { parseEntryRef } from "../../../utils/entry-id";
 import { buildIcs } from "../../../utils/ics";
 import { appTimeZone } from "../../../utils/time";
 
+/**
+ * Events: the v2 authoring controller (utils/authoring-controller.ts;
+ * deep-dive decision 06 §B3, batch 15 lane 15A) replaces the core create,
+ * update and delete and adds publish, unpublish, discardDraft, authoringList and editable; the
+ * ICS download below is the event's own.
+ * find and findOne stay the core's, behind their read policy.
+ */
 export default factories.createCoreController("api::event.event", ({ strapi }) => ({
+  ...authoringActions(strapi, "api::event.event"),
+
   /**
    * GET /api/events/:id/ics. `:id` is the event's documentId (what the web
    * links) or, for links from before 2026-09-27, the numeric id of its

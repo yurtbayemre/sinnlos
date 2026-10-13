@@ -5,12 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
- * createPoll (decision 02): the payload carries the explicit `audience`
- * flag ("departments" when departments are chosen, "all" otherwise), only
- * positive integer department ids reach the CMS, a role that may not
- * create polls is turned away before any write (a viewer the CMS could not
- * resolve answers "unavailable" instead), and the action no longer
- * refreshes or tags a cache (D-DC01; the form navigates to /polls itself).
+ * createPoll (decision 02; batch 15 compatibility edit, plan S6): the
+ * payload carries the departments only (documentIds, or the positive row
+ * ids today's form sends) and never `audience`, which the v2 write rule
+ * refuses and the CMS derives; a role that may not create polls is turned
+ * away before any write (a viewer the CMS could not resolve answers
+ * "unavailable" instead), and the action no longer refreshes or tags a
+ * cache (D-DC01; the form navigates to /polls itself).
  * Guest access (owner decision 2026-09-27): `visibleToGuests` and
  * `guestsCanVote` are always sent as strict booleans, hidden by default,
  * guest voting only together with visibility.
@@ -55,7 +56,7 @@ function captureRedirect(url: string): unknown {
   throw new Error("redirect() did not throw");
 }
 
-const input = (departmentIds: number[]) => ({
+const input = (departmentIds: Array<number | string>) => ({
   question: "Pizza or sushi?",
   options: ["Pizza", "Sushi"],
   closesAt: "",
@@ -100,24 +101,29 @@ const cmsError = (status: number, message: string) =>
   );
 
 describe("createPoll", () => {
-  it("sends audience 'departments' with the chosen department ids", async () => {
+  it("sends the chosen departments and never an audience flag (the CMS derives it)", async () => {
     await expect(createPoll(input([3, 5]))).resolves.toEqual({ ok: true });
-    expect(sentData()).toMatchObject({ audience: "departments", departments: [3, 5] });
+    expect(sentData()).toMatchObject({ departments: [3, 5] });
+    expect(sentData()).not.toHaveProperty("audience");
   });
 
-  it("sends audience 'all' without departments", async () => {
+  it("sends departments by documentId as they come", async () => {
+    const eng = "k3m9x0000000000000000001";
+    const sales = "k3m9x0000000000000000002";
+    await createPoll(input([eng, sales, eng]));
+    expect(sentData()).toMatchObject({ departments: [eng, sales] });
+    expect(sentData()).not.toHaveProperty("audience");
+  });
+
+  it("sends no departments for everyone", async () => {
     await createPoll(input([]));
-    expect(sentData()).toMatchObject({ audience: "all", departments: [] });
+    expect(sentData()).toMatchObject({ departments: [] });
+    expect(sentData()).not.toHaveProperty("audience");
   });
 
-  it("drops non-integer, non-positive and duplicate department ids", async () => {
-    await createPoll(input([2, 0, -4, 1.5, Number.NaN, 2, 7]));
-    expect(sentData()).toMatchObject({ audience: "departments", departments: [2, 7] });
-  });
-
-  it("falls back to audience 'all' when no usable id is left", async () => {
-    await createPoll(input([0, -1, 2.5]));
-    expect(sentData()).toMatchObject({ audience: "all", departments: [] });
+  it("drops non-integer, non-positive, malformed and duplicate department ids", async () => {
+    await createPoll(input([2, 0, -4, 1.5, Number.NaN, 2, 7, "not an id", ""]));
+    expect(sentData()).toMatchObject({ departments: [2, 7] });
   });
 
   it("keeps the other fields as before", async () => {
@@ -127,7 +133,6 @@ describe("createPoll", () => {
       options: ["A", "B"],
       closesAt: null,
       anonymous: true,
-      audience: "all",
       departments: [],
       visibleToGuests: false,
       guestsCanVote: false,
@@ -309,6 +314,9 @@ describe("votePoll", () => {
       join(__dirname, "../../../cms/src/api/poll-vote/controllers/poll-vote.ts"),
       "utf8",
     );
-    expect(controller).toContain('ctx.badRequest("Poll options changed")');
+    // The vote's refusal under the poll's lock (batch 15) answers it with
+    // ctx.badRequest(message) after the transaction.
+    expect(controller).toContain('{ kind: "badRequest", message: "Poll options changed" }');
+    expect(controller).toContain("ctx.badRequest(outcome.message)");
   });
 });

@@ -1,3 +1,7 @@
+import { FORM_KEY, samePollOptions } from "@sinnlos/domain";
+import { errors } from "@strapi/utils";
+
+import { parseAdminJsonField } from "./json-field";
 import { POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
 
 /**
@@ -82,6 +86,56 @@ import { POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  * content types with a `departments` relation and an `audience` flag:
  * documents and quick links use it too, with their own log prefix
  * (utils/department-audience-guard.ts).
+ *
+ * THE VOTE FREEZE (deep-dive decision 06 §G2 poll row; batch 15 plan item
+ * 8). The poll guard (`createPollAudienceGuard`, slot 3a of
+ * bootstrap/document-middlewares.ts) also refuses, before the write, any
+ * action that would change what voters voted on: a poll's `options`
+ * (index by index, after trimming: votes store an option INDEX) and its
+ * `anonymous` switch (anonymous to named would expose voters), once a vote
+ * exists. Votes are cast on the PUBLISHED row (utils/poll-access.ts
+ * loadPublishedPoll), so the comparison is with the currently published
+ * row, never with the stored draft or the payload alone:
+ *   - `publish`: the draft as it stands becomes the published row;
+ *   - `update` with `status: 'published'`: the draft overlaid with the
+ *     payload becomes the published row, without a `publish` pass through
+ *     the chain (C3). A web save that changes only `closesAt` publishes a
+ *     panel draft's changed options with it, so the merged draft is
+ *     compared;
+ *   - a draft-only `update` that carries `options` or `anonymous` and makes
+ *     them differ: a voted poll must not collect a draft that can never be
+ *     published;
+ *   - `create` and `clone` start a new document (no votes), `discardDraft`
+ *     leaves the published row as it is.
+ * A difference with a vote answers 400 `ValidationError` with
+ * `details.keys` and `details.codes: frozenAfterVotes`; nothing is written.
+ *
+ * The published row is the freeze's only baseline, so a voted poll keeps
+ * it (Codex review of 15A, finding 1): the votes survive an unpublish
+ * (Strapi relinks them to the draft), and a poll republished without its
+ * published row was compared with nothing, so new options took over the
+ * old ballots' indexes. Hence, with a vote:
+ *   - `unpublish` is refused (400, `details.keys: ["_form"]`). The Content
+ *     Manager's "unpublish and discard the draft" runs discardDraft and
+ *     unpublish in one transaction, so the refusal undoes both. A voted
+ *     poll leaves the intranet by `delete` (the document and its rows go;
+ *     the ballots lose their poll and count nowhere) or by `closesAt`;
+ *   - a poll without a published row (one unpublished before this release)
+ *     can no longer be published at all (`publish`, or an `update` with
+ *     `status: 'published'`; the same 400): what its ballots were cast on
+ *     is unknown, and the draft is no baseline (it could differ from the
+ *     published row before the first vote). Draft-only updates still pass:
+ *     they reach no voter. docs/DEPLOYMENT.md lists such polls.
+ * The simplest fail-closed rule: a voted poll's baseline cannot go away,
+ * so no second, immutable copy of it is needed.
+ * It runs under the poll's lock: the document lock (slot 2) holds the
+ * poll's version row FOR UPDATE for the whole action, and the vote handler
+ * (api/poll-vote/controllers/poll-vote.ts) takes the same lock before it
+ * reads, checks and inserts, so a vote and an options change sent at the
+ * same moment serialise and one of them is refused. The admin panel is
+ * bound too (release note 6). The authoring allowlist refuses the same
+ * change earlier with the same comparison (`frozenWhen`,
+ * utils/write-allowlist.ts).
  */
 
 export const POLL_AUDIENCE_GUARD_LOG = "[poll-audience]";
@@ -110,6 +164,8 @@ interface FlagWriteQuery {
 
 interface GuardQuery extends FlagWriteQuery {
   findMany(params: Record<string, unknown>): Promise<unknown[]>;
+  /** The vote freeze counts ballots (the real query engine always has it). */
+  count?(params: Record<string, unknown>): Promise<number>;
 }
 
 /** What @strapi/core hands a Document Service middleware. */
@@ -239,12 +295,17 @@ export function createAudienceGuard(
   strapi: PollAudienceGuardHost,
   log: string,
   types: readonly AudienceGuardType[],
+  options: {
+    /** Runs inside the guard's transaction before the action (the poll's vote freeze). */
+    before?: (context: DocumentMiddlewareContext) => Promise<void>;
+  } = {},
 ): DocumentMiddleware {
   return async (context, next) => {
     const action = context.action ?? "";
     const type = types.find((candidate) => candidate.uid === context.uid);
     if (!type || !POLL_WRITE_ACTIONS.includes(action)) return next();
     return strapi.db.transaction(async () => {
+      if (options.before) await options.before(context);
       const result = await next();
       const documentIds = affectedDocumentIds(context.params, result);
       const flagged = await flagLinkedRows(strapi, type.uid, documentIds);
@@ -260,9 +321,133 @@ export function createAudienceGuard(
   };
 }
 
-/** The poll guard. */
+const POLL_VOTE_UID = "api::poll-vote.poll-vote";
+
+/** The poll fields a vote depends on (see THE VOTE FREEZE). */
+export const POLL_FROZEN_FIELDS = ["options", "anonymous"] as const;
+
+/** The code of a refused change to a voted poll (@sinnlos/domain authoring/codes.ts). */
+export const FROZEN_AFTER_VOTES = "frozenAfterVotes";
+
+type FrozenField = (typeof POLL_FROZEN_FIELDS)[number];
+
+/** Whether two values of a frozen field say the same to a voter. */
+function sameFrozen(field: FrozenField, a: unknown, b: unknown): boolean {
+  if (field === "anonymous") return (a === true) === (b === true);
+  return samePollOptions(a, b);
+}
+
+/** The value an update writes into a frozen field (admin JSON text parsed), or null to skip it. */
+function written(field: FrozenField, raw: unknown): { value: unknown } | null {
+  if (field !== "options") return { value: raw };
+  const parsed = parseAdminJsonField(raw);
+  // Unparsable admin JSON: the poll lifecycle refuses it.
+  return parsed.ok ? { value: parsed.value } : null;
+}
+
+/**
+ * The frozen fields an action would change against the published row (see
+ * THE VOTE FREEZE), before any vote is counted.
+ */
+export function frozenChanges(
+  action: string,
+  params: unknown,
+  draft: Record<string, unknown> | null,
+  published: Record<string, unknown> | null,
+): FrozenField[] {
+  if (!published || (action !== "publish" && action !== "update")) return [];
+  const data = isRecord(params) && isRecord(params.data) ? params.data : {};
+  const status = isRecord(params) ? params.status : undefined;
+  const publishes = action === "publish" || status === "published";
+  const changed: FrozenField[] = [];
+  for (const field of POLL_FROZEN_FIELDS) {
+    const carried = action === "update" && field in data && data[field] !== undefined;
+    if (!publishes && !carried) continue;
+    let next: unknown = draft?.[field];
+    if (carried) {
+      const value = written(field, data[field]);
+      if (!value) continue;
+      next = value.value;
+    }
+    if (!sameFrozen(field, next, published[field])) changed.push(field);
+  }
+  return changed;
+}
+
+/** Every ballot of the poll `documentId` (through either row). */
+async function ballotsOf(
+  strapi: Pick<PollAudienceGuardHost, "db">,
+  documentId: string,
+): Promise<number> {
+  const votes = strapi.db.query(POLL_VOTE_UID);
+  if (typeof votes.count !== "function") {
+    throw new Error(`${POLL_AUDIENCE_GUARD_LOG} the vote freeze needs db.query().count`);
+  }
+  return votes.count({ where: { poll: { documentId } } });
+}
+
+/** Whether `action` makes the draft the published row (C3: also an update with status published). */
+function publishes(action: string, params: unknown): boolean {
+  if (action === "publish") return true;
+  return action === "update" && isRecord(params) && params.status === "published";
+}
+
+/** A refusal about the whole voted poll (`_form`, no code: "invalid"). */
+const votedPollRefusal = (message: string) =>
+  new errors.ValidationError(message, { keys: [FORM_KEY] });
+
+/**
+ * Throws when the action would change a frozen field of a poll that has a
+ * vote (`frozenAfterVotes`), unpublish a voted poll, or publish a voted
+ * poll that lost its published row (`_form`; see THE VOTE FREEZE). Runs
+ * inside the action's transaction, under the poll's lock (slot 2).
+ */
+export async function assertPollNotFrozen(
+  strapi: Pick<PollAudienceGuardHost, "db">,
+  action: string,
+  params: unknown,
+): Promise<void> {
+  if (action !== "publish" && action !== "update" && action !== "unpublish") return;
+  const documentId = isRecord(params) ? params.documentId : undefined;
+  if (typeof documentId !== "string" || documentId === "") return;
+  if (action === "unpublish") {
+    if ((await ballotsOf(strapi, documentId)) === 0) return;
+    throw votedPollRefusal(
+      "This poll has votes: it can no longer be unpublished (delete it, or let it close)",
+    );
+  }
+  const rows = await strapi.db.query(POLL_UID).findMany({
+    where: { documentId },
+    select: ["id", "publishedAt", "options", "anonymous"],
+  });
+  const list = (Array.isArray(rows) ? rows : []).filter(isRecord);
+  const draft = list.find((row) => row.publishedAt == null) ?? null;
+  const published = list.find((row) => row.publishedAt != null) ?? null;
+  if (!published) {
+    if (!publishes(action, params) || (await ballotsOf(strapi, documentId)) === 0) return;
+    throw votedPollRefusal(
+      "This poll has votes but no published version: it can no longer be published",
+    );
+  }
+  const changed = frozenChanges(action, params, draft, published);
+  if (changed.length === 0) return;
+  if ((await ballotsOf(strapi, documentId)) === 0) return;
+  const keys = [...changed].sort();
+  throw new errors.ValidationError(
+    `This poll has votes: ${keys.join(" and ")} can no longer change`,
+    { keys, codes: Object.fromEntries(keys.map((key) => [key, FROZEN_AFTER_VOTES])) },
+  );
+}
+
+/**
+ * The poll guard: the vote freeze before the write, the audience flag
+ * after it, in the guard's one transaction (joined into the document
+ * lock's, slot 2).
+ */
 export function createPollAudienceGuard(strapi: PollAudienceGuardHost): DocumentMiddleware {
-  return createAudienceGuard(strapi, POLL_AUDIENCE_GUARD_LOG, [{ uid: POLL_UID, label: "poll" }]);
+  return createAudienceGuard(strapi, POLL_AUDIENCE_GUARD_LOG, [{ uid: POLL_UID, label: "poll" }], {
+    before: (context) => assertPollNotFrozen(strapi, context.action ?? "", context.params),
+  });
 }
 
 /**

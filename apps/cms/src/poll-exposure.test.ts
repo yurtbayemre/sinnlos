@@ -57,10 +57,13 @@ const POLL_REFERENCE = /api::poll\.poll\b|api::poll-vote\.poll-vote\b|\bPOLL_UID
  */
 const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
   "api/poll/controllers/poll.ts":
-    "core find/findOne behind global::poll-visibility (canSeePoll); create (admin/editor) pins the author; batchResults (WD04) keeps only polls canSeePoll admits",
+    "core find/findOne behind global::poll-visibility (canSeePoll); create/update/delete, the list and the form read are the authoring controller's (moderators only); batchResults (WD04) keeps only polls canSeePoll admits",
+  "api/poll/routes/00-authoring.ts":
+    "GET /polls/authoring and /polls/:id/editable: global::can-author, moderators only (no guest grant)",
   "api/poll/routes/custom-poll.ts":
     "GET /poll-results: the batchResults route of the controller above",
-  "api/poll/routes/poll.ts": "find/findOne: global::poll-visibility; writes: admin/editor only",
+  "api/poll/routes/poll.ts":
+    "find/findOne: global::poll-visibility; create/update: global::can-author (moderators); delete: admin/editor",
   "api/poll/services/poll.ts": "core service, reached only through the routes above",
   "api/poll-vote/controllers/poll-vote.ts": "vote/results: canSeePoll 404, canVoteOnPoll 403",
   "api/poll-vote/routes/custom-poll-vote.ts": "the vote/results routes of the controller above",
@@ -71,16 +74,25 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
     "permission matrix and grants (enforcement is in the rules, not the grants)",
   "policies/poll-visibility.ts": "the list/detail filter: canSeePoll per published row",
   "seed-demo.ts": "internal demo seed, no response",
+  "utils/authoring-checks.ts":
+    "the write gate's checks: counts votes for the freeze and the form's hasVotes, behind global::can-author (moderators)",
+  "utils/authoring-controller.ts":
+    "the authoring controller behind global::can-author: poll list and form for moderators only, fixed DTOs",
   "utils/authoring-uids.ts":
     "uid lists of v2 authoring (lock, audit, gate); names types, serves no row",
   "utils/poll-access.ts":
     "loaders for the policy and the controllers; the results body, built only after canSeePoll",
   "utils/poll-audience-backfill.ts": "boot backfill of `audience`, writes flags only",
-  "utils/poll-audience-guard.ts": "write-time `audience` guard, writes flags only",
+  "utils/poll-audience-guard.ts":
+    "write-time `audience` guard (writes flags only) and the vote freeze (refuses writes, serves no row)",
   "utils/poll-ballots.ts":
     "the results count (FX20), called by the results handler after canSeePoll; counts only, no voter",
   "utils/poll-department-delete.ts": "department delete hook, writes `audience` only",
   "utils/restricted-relations.ts": "FX05 guard: no source is trusted into polls",
+  "utils/write-allowlist.ts":
+    "the poll write rule of the moderator class: checks payloads, serves no row",
+  "utils/write-gate.ts":
+    "global::can-author's loader: polls for the moderator class only, serves no row",
 };
 
 /** Non-test .ts files under `dir`, as paths relative to src with `/`. */

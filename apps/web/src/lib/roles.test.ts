@@ -297,14 +297,22 @@ describe("capabilitiesFor", () => {
     }
   });
 
-  it("scopes every non-empty authoring area to 'any', and only the moderators author", () => {
+  it("scopes the moderators' areas to 'any' and the department authors' to 'ownDepartment' (batch 15)", () => {
+    const departmentAreas = ["announcements", "events", "documents"];
     for (const role of ALL_ROLES) {
       const caps = capabilitiesFor(role);
       for (const area of AUTHORING_AREAS) {
         const verbs = caps.author[area];
-        expect(caps.authorScope[area], `${role} ${area}`).toBe(verbs.size > 0 ? "any" : null);
-        if (!["admin_role", "editor"].includes(role)) {
+        if (["admin_role", "editor"].includes(role)) {
+          expect(caps.authorScope[area], `${role} ${area}`).toBe(verbs.size > 0 ? "any" : null);
+        } else if (role === "department_head" && departmentAreas.includes(area)) {
+          expect(caps.authorScope[area], `${role} ${area}`).toBe("ownDepartment");
+          expect([...verbs].sort(), `${role} ${area}`).toEqual(
+            ["create", "discard", "edit", "publish", "unpublish"].sort(),
+          );
+        } else {
           expect(verbs.size, `${role} ${area}`).toBe(0);
+          expect(caps.authorScope[area], `${role} ${area}`).toBeNull();
         }
       }
     }
@@ -313,7 +321,18 @@ describe("capabilitiesFor", () => {
       "delete",
       "edit",
     ]);
+    expect([...capabilitiesFor("editor").author.announcements].sort()).toEqual(
+      ["create", "delete", "discard", "edit", "publish", "schedule", "unpublish"].sort(),
+    );
     expect(capabilitiesFor("admin_role").author.courses.size).toBe(0);
+    // No schedule and no delete for department authors (decision 06 §N2).
+    const head = capabilitiesFor("department_head");
+    for (const area of departmentAreas) {
+      expect(head.author[area as "announcements"].has("schedule"), area).toBe(false);
+      expect(head.author[area as "announcements"].has("delete"), area).toBe(false);
+    }
+    // /manage stays admin-only until lane 15C opens it.
+    expect(head.manage).toBe(false);
   });
 
   it("hands out a fresh, frozen object per call", () => {

@@ -1,10 +1,23 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { errors } from "@strapi/utils";
-import { describe, expect, it } from "vitest";
 import {
+  ANNOUNCEMENT_DEPARTMENT_AUTHOR_FIELDS,
+  ANNOUNCEMENT_MODERATOR_FIELDS,
+  DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
+  DOCUMENT_MODERATOR_FIELDS,
+  EVENT_DEPARTMENT_AUTHOR_FIELDS,
+  EVENT_MODERATOR_FIELDS,
+  POLL_MODERATOR_FIELDS,
+  QUICK_LINK_MODERATOR_FIELDS,
+} from "@sinnlos/domain";
+import { errors } from "@strapi/utils";
+import { describe, expect, it, vi } from "vitest";
+import {
+  DEPARTMENT_AUTHOR_CLASS,
   DEPARTMENT_UID,
   MAX_TAG_LENGTH,
+  MODERATOR_CLASS,
+  REFUSED_ATTRIBUTES,
   MAX_TAGS,
   MISSING_DATA_MESSAGE,
   SLUG_BASE_MAX_LENGTH,
@@ -20,8 +33,11 @@ import {
   uniqueSlugFrom,
   valueChecks,
   writeAllowlistMessage,
+  writeClassesFor,
   writeRuleFor,
   type RelationCheck,
+  type RelationListCheck,
+  type WriteRuleEnvironment,
   type RelationRef,
   type ResolvedToOne,
   type ToOneRelationInput,
@@ -672,7 +688,18 @@ describe("WRITE_ALLOWLIST", () => {
     expect(
       Object.keys(writeRuleFor(WIKI_PAGE_UID, "create", "author")?.derivedFields ?? {}),
     ).toEqual(["slug"]);
-    expect(Object.keys(table).sort()).toEqual([DEPARTMENT_UID, TEAM_UID, WIKI_PAGE_UID].sort());
+    expect(Object.keys(table).sort()).toEqual(
+      [
+        DEPARTMENT_UID,
+        TEAM_UID,
+        WIKI_PAGE_UID,
+        "api::announcement.announcement",
+        "api::event.event",
+        "api::quick-link.quick-link",
+        "api::document.document",
+        "api::poll.poll",
+      ].sort(),
+    );
   });
 
   it("the wiki create rule checks space before parent", () => {
@@ -704,6 +731,20 @@ describe("WRITE_ALLOWLIST", () => {
             }
           });
 
+          it("list and role fields are owning to-many relations", () => {
+            for (const [name, spec] of Object.entries(rule.fields)) {
+              if (spec.kind !== "relationList" && spec.kind !== "roleTypes") continue;
+              expect(attributes[name]?.type, name).toBe("relation");
+              expect(["manyToMany", "oneToMany"], name).toContain(attributes[name].relation);
+              expect(attributes[name].mappedBy, name).toBeUndefined();
+              if (spec.kind === "roleTypes") {
+                expect(attributes[name].target, name).toBe("plugin::users-permissions.role");
+                expect(spec.allowed, name).not.toContain("public");
+                expect(spec.allowed, name).not.toContain("authenticated");
+              }
+            }
+          });
+
           it("controller fields are not schema attributes", () => {
             for (const [name, spec] of Object.entries(rule.fields)) {
               if (spec.kind === "controller") expect(attributes[name], name).toBeUndefined();
@@ -718,7 +759,11 @@ describe("WRITE_ALLOWLIST", () => {
           });
 
           it("derived fields are schema attributes the payload itself may not name", () => {
-            for (const name of Object.keys(rule.derivedFields ?? {})) {
+            for (const name of [
+              ...Object.keys(rule.derivedFields ?? {}),
+              ...Object.keys(rule.derivedFromMerged ?? {}),
+              ...Object.keys(rule.derivedOnCreate ?? {}),
+            ]) {
               expect(attributes[name], name).toBeDefined();
               expect(Object.keys(rule.fields), name).not.toContain(name);
               expect(rule.callerFields ?? [], name).not.toContain(name);
@@ -763,6 +808,750 @@ describe("the engine against the real table", () => {
           }
         }
       }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2 authoring (deep-dive decision 06 §B1, §N6; batch 15 lane 15A)
+// ---------------------------------------------------------------------------
+
+const ANNOUNCEMENT = "api::announcement.announcement";
+const EVENT = "api::event.event";
+const QUICK_LINK = "api::quick-link.quick-link";
+const DOCUMENT = "api::document.document";
+const POLL = "api::poll.poll";
+const V2_UIDS = [ANNOUNCEMENT, EVENT, QUICK_LINK, DOCUMENT, POLL];
+
+const ENG_DOC = "deng00000000000000000000";
+const SALES_DOC = "dsal00000000000000000000";
+const ENG = { id: 10, documentId: ENG_DOC };
+const NOW = Date.parse("2026-10-13T10:00:00.000Z");
+const at = (minutes: number) => new Date(NOW + minutes * 60_000).toISOString();
+
+const docOf = (ref: RelationRef) => ("id" in ref ? `doc-${ref.id}` : ref.documentId);
+
+/**
+ * Checks that resolve every ref to `doc-<id>` or the documentId, except the
+ * ones the test names as unknown; the caller-department checks accept only
+ * Engineering, like utils/authoring-checks.ts (its own suite pins the real
+ * ones against the stub database).
+ */
+function v2Env(
+  overrides: Partial<WriteRuleEnvironment> = {},
+  unknown: readonly string[] = ["doc-404"],
+): WriteRuleEnvironment {
+  const resolve: RelationCheck = async (input) => {
+    const target = input.target ? docOf(input.target) : (input.target as null | undefined);
+    if (typeof target === "string" && unknown.includes(target)) return null;
+    return { target, disconnect: input.disconnect.map(docOf) };
+  };
+  const resolveList: RelationListCheck = async (refs) => {
+    const ids = [...new Set(refs.map(docOf))];
+    return ids.some((id) => unknown.includes(id)) ? null : ids;
+  };
+  return {
+    callerId: 42,
+    relationChecks: {
+      department: resolve,
+      team: resolve,
+      callerDepartment: async (input) =>
+        input.target && docOf(input.target) === ENG_DOC && input.disconnect.length === 0
+          ? { target: ENG_DOC, disconnect: [] }
+          : null,
+      teamOfCallerDepartment: async (input) =>
+        input.target === null
+          ? { target: null, disconnect: [] }
+          : input.target && docOf(input.target) === "team-eng"
+            ? { target: "team-eng", disconnect: [] }
+            : null,
+    },
+    relationListChecks: {
+      departments: resolveList,
+      callerDepartments: async (refs) =>
+        refs.length === 1 && docOf(refs[0]) === ENG_DOC ? [ENG_DOC] : null,
+    },
+    roleTypesCheck: async (types) => types.map((type) => `role-${type}`),
+    frozenChecks: { pollHasVotes: async () => false },
+    readiness: async () => [],
+    callerDepartment: ENG,
+    now: NOW,
+    ...overrides,
+  };
+}
+
+const fieldsOf = (uid: string, action: "create" | "update", roleClass: string) =>
+  Object.keys(writeRuleFor(uid, action, roleClass)?.fields ?? {}).sort();
+
+const rule = (uid: string, action: "create" | "update", roleClass: string): WriteRule => {
+  const found = writeRuleFor(uid, action, roleClass);
+  if (!found) throw new Error(`no rule ${uid} ${action} ${roleClass}`);
+  return found;
+};
+
+describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
+  it("covers every schema attribute: a field of some class, or refused with a reason", () => {
+    for (const uid of V2_UIDS) {
+      const attributes = Object.keys(schemaOf(uid));
+      const listed = new Set(
+        (["create", "update"] as const).flatMap((action) =>
+          writeClassesFor(uid, action).flatMap((roleClass) =>
+            Object.keys(rule(uid, action, roleClass).fields),
+          ),
+        ),
+      );
+      const refused = REFUSED_ATTRIBUTES[uid] ?? {};
+      for (const attribute of attributes) {
+        const inRule = listed.has(attribute);
+        const isRefused = Object.prototype.hasOwnProperty.call(refused, attribute);
+        expect(inRule !== isRefused, `${uid}.${attribute}: exactly one of rule or refused`).toBe(
+          true,
+        );
+        if (isRefused)
+          expect(refused[attribute].length, `${uid}.${attribute} reason`).toBeGreaterThan(10);
+      }
+      for (const attribute of Object.keys(refused)) {
+        expect(attributes, `${uid}.${attribute} is a schema attribute`).toContain(attribute);
+      }
+    }
+  });
+
+  it("refuses the derived and bookkeeping attributes the decision names, for every class", () => {
+    expect(Object.keys(REFUSED_ATTRIBUTES[ANNOUNCEMENT]).sort()).toEqual(
+      ["audience", "author", "ownerDepartment", "retargetRequired", "scheduleError"].sort(),
+    );
+    expect(Object.keys(REFUSED_ATTRIBUTES[EVENT]).sort()).toEqual(
+      ["notifyAudience", "organizer", "ownerDepartment", "scheduleError"].sort(),
+    );
+    expect(Object.keys(REFUSED_ATTRIBUTES[QUICK_LINK]).sort()).toEqual(
+      ["audience", "scheduleError"].sort(),
+    );
+    expect(Object.keys(REFUSED_ATTRIBUTES[DOCUMENT]).sort()).toEqual(
+      ["audience", "file", "ownerDepartment", "scheduleError", "uploadedBy"].sort(),
+    );
+    expect(REFUSED_ATTRIBUTES[DOCUMENT].file).toContain("batch 16");
+    expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(["audience", "author"].sort());
+  });
+
+  it("carries exactly the @sinnlos/domain field lists per class, on create and update", () => {
+    const lists: Record<string, Record<string, readonly string[]>> = {
+      [ANNOUNCEMENT]: {
+        moderator: ANNOUNCEMENT_MODERATOR_FIELDS,
+        departmentAuthor: ANNOUNCEMENT_DEPARTMENT_AUTHOR_FIELDS,
+      },
+      [EVENT]: {
+        moderator: EVENT_MODERATOR_FIELDS,
+        departmentAuthor: EVENT_DEPARTMENT_AUTHOR_FIELDS,
+      },
+      [QUICK_LINK]: { moderator: QUICK_LINK_MODERATOR_FIELDS },
+      [DOCUMENT]: {
+        moderator: DOCUMENT_MODERATOR_FIELDS,
+        departmentAuthor: DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
+      },
+      [POLL]: { moderator: POLL_MODERATOR_FIELDS },
+    };
+    for (const [uid, byClass] of Object.entries(lists)) {
+      for (const action of ["create", "update"] as const) {
+        expect(writeClassesFor(uid, action), `${uid} ${action}`).toEqual(
+          Object.keys(byClass).sort(),
+        );
+        for (const [roleClass, fields] of Object.entries(byClass)) {
+          expect(fieldsOf(uid, action, roleClass), `${uid} ${action} ${roleClass}`).toEqual(
+            [...fields].sort(),
+          );
+        }
+      }
+    }
+  });
+
+  // The exact department-author lists (§N6), written out: a field added to
+  // a moderator rule never reaches department authors unreviewed.
+  it("pins each departmentAuthor rule's fields exactly", () => {
+    expect(fieldsOf(ANNOUNCEMENT, "update", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+      ["audienceRoles", "body", "department", "expiresAt", "team", "title"].sort(),
+    );
+    expect(fieldsOf(EVENT, "update", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+      [
+        "allDay",
+        "capacity",
+        "departments",
+        "description",
+        "end",
+        "location",
+        "rsvpEnabled",
+        "start",
+        "title",
+        "url",
+      ].sort(),
+    );
+    expect(fieldsOf(DOCUMENT, "update", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+      ["category", "departments", "description", "title"].sort(),
+    );
+    for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT]) {
+      expect(fieldsOf(uid, "create", DEPARTMENT_AUTHOR_CLASS)).toEqual(
+        fieldsOf(uid, "update", DEPARTMENT_AUTHOR_CLASS),
+      );
+    }
+    expect(writeRuleFor(QUICK_LINK, "create", DEPARTMENT_AUTHOR_CLASS)).toBeUndefined();
+    expect(writeRuleFor(POLL, "update", DEPARTMENT_AUTHOR_CLASS)).toBeUndefined();
+  });
+
+  it("sets the caller on create only, and the owner only for department authors' creates", () => {
+    const owners = (uid: string, action: "create" | "update", roleClass: string) =>
+      Object.keys(rule(uid, action, roleClass).derivedOnCreate ?? {});
+    expect(rule(ANNOUNCEMENT, "create", MODERATOR_CLASS).callerFields).toEqual(["author"]);
+    expect(rule(EVENT, "create", DEPARTMENT_AUTHOR_CLASS).callerFields).toEqual(["organizer"]);
+    expect(rule(DOCUMENT, "create", MODERATOR_CLASS).callerFields).toEqual(["uploadedBy"]);
+    expect(rule(POLL, "create", MODERATOR_CLASS).callerFields).toEqual(["author"]);
+    expect(rule(QUICK_LINK, "create", MODERATOR_CLASS).callerFields).toBeUndefined();
+    for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT]) {
+      expect(rule(uid, "update", MODERATOR_CLASS).callerFields, uid).toBeUndefined();
+      expect(owners(uid, "create", DEPARTMENT_AUTHOR_CLASS), uid).toEqual(["ownerDepartment"]);
+      expect(owners(uid, "update", DEPARTMENT_AUTHOR_CLASS), uid).toEqual([]);
+      expect(owners(uid, "create", MODERATOR_CLASS), uid).toEqual([]);
+    }
+  });
+});
+
+describe("v2 value checks and codes", () => {
+  const moderatorAnnouncement = rule(ANNOUNCEMENT, "update", MODERATOR_CLASS);
+
+  it("answers the code of each refused value, and none for a refused key", async () => {
+    const error = await refusal(
+      applyWriteRule(
+        {
+          title: "x".repeat(256),
+          body: 42,
+          expiresAt: "2026-10-20T09:00:00",
+          ackDeadline: "2026-13-01",
+          author: 7,
+          populate: "*",
+        },
+        moderatorAnnouncement,
+        v2Env(),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["ackDeadline", "author", "body", "expiresAt", "populate", "title"],
+      codes: {
+        ackDeadline: "invalidDate",
+        body: "invalid",
+        expiresAt: "invalidInstant",
+        title: "tooLong",
+      },
+    });
+  });
+
+  it("refuses a blank title as required and answers only keys without any coded refusal", async () => {
+    const blank = await refusal(applyWriteRule({ title: "  " }, moderatorAnnouncement, v2Env()));
+    expect(blank.details).toEqual({ keys: ["title"], codes: { title: "required" } });
+    const keysOnly = await refusal(
+      applyWriteRule({ pinned: true, audience: "all" }, moderatorAnnouncement, v2Env()),
+    );
+    expect(keysOnly.details).toEqual({ keys: ["audience"] });
+  });
+
+  it("quick links: an http(s) URL or an internal path, an icon key, a category, an order", async () => {
+    const links = rule(QUICK_LINK, "create", MODERATOR_CLASS);
+    const ok = await applyWriteRule(
+      { label: "Payroll", url: "/wiki/hr", icon: "Wallet", category: "hr", order: 3 },
+      links,
+      v2Env(),
+    );
+    expect(ok).toMatchObject({ label: "Payroll", url: "/wiki/hr", icon: "Wallet" });
+    const error = await refusal(
+      applyWriteRule(
+        { label: "x", url: "//evil.example", icon: "wallet", category: "misc", order: 10001 },
+        links,
+        v2Env(),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["category", "icon", "order", "url"],
+      codes: { category: "invalid", icon: "invalid", order: "invalid", url: "invalidUrl" },
+    });
+  });
+
+  it("polls: 2-20 options of at most 200 characters, unique after trimming (plan item 2b)", async () => {
+    const polls = rule(POLL, "create", MODERATOR_CLASS);
+    const options = (count: number) => Array.from({ length: count }, (_, i) => `A${i}`);
+    for (const count of [2, 10, 11, 20]) {
+      const out = await applyWriteRule({ question: "Q?", options: options(count) }, polls, v2Env());
+      expect(out.options, String(count)).toEqual(options(count));
+    }
+    const cases: Array<[unknown, string]> = [
+      [options(21), "optionCount"],
+      [["Only"], "optionCount"],
+      [["x".repeat(201), "B"], "tooLong"],
+      [["A", " A "], "optionDuplicate"],
+      [["A", ""], "required"],
+      ["A,B", "invalid"],
+    ];
+    for (const [value, code] of cases) {
+      const error = await refusal(applyWriteRule({ options: value }, polls, v2Env()));
+      expect(error.details, JSON.stringify(value)).toEqual({
+        keys: ["options"],
+        codes: { options: code },
+      });
+    }
+  });
+});
+
+describe("v2 relations, lists and role types", () => {
+  const moderatorAnnouncement = rule(ANNOUNCEMENT, "update", MODERATOR_CLASS);
+  const moderatorEvent = rule(EVENT, "update", MODERATOR_CLASS);
+
+  it("rewrites to-one and to-many relations to documentIds; null and [] clear", async () => {
+    const out = await applyWriteRule(
+      { department: { documentId: SALES_DOC }, team: null },
+      moderatorAnnouncement,
+      v2Env(),
+    );
+    expect(out).toMatchObject({
+      department: { set: [{ documentId: SALES_DOC }] },
+      team: null,
+    });
+    const list = await applyWriteRule({ departments: [3, SALES_DOC, 3] }, moderatorEvent, v2Env());
+    expect(list.departments).toEqual({
+      set: [{ documentId: "doc-3" }, { documentId: SALES_DOC }],
+    });
+    for (const clear of [null, [], { set: [] }]) {
+      const cleared = await applyWriteRule({ departments: clear }, moderatorEvent, v2Env());
+      expect(cleared.departments, JSON.stringify(clear)).toEqual({ set: [] });
+    }
+  });
+
+  it("refuses list shapes other than a full replacement, and more than the maximum", async () => {
+    for (const value of [
+      { connect: [3] },
+      { set: [3], connect: [4] },
+      [[3]],
+      [{ id: 3, locale: "de" }],
+      Array.from({ length: 51 }, (_, i) => i + 1),
+      "3",
+    ]) {
+      const error = await refusal(applyWriteRule({ departments: value }, moderatorEvent, v2Env()));
+      expect(error.details, JSON.stringify(value)).toEqual({ keys: ["departments"] });
+    }
+  });
+
+  it("answers a relation the check refuses like a malformed one: its key, no code (no oracle)", async () => {
+    for (const data of [{ department: "doc-404" }, { department: { bogus: 1 } }]) {
+      const error = await refusal(applyWriteRule(data, moderatorAnnouncement, v2Env()));
+      expect(error.details, JSON.stringify(data)).toEqual({ keys: ["department"] });
+    }
+    const list = await refusal(
+      applyWriteRule({ departments: ["doc-404"] }, moderatorEvent, v2Env()),
+    );
+    expect(list.details).toEqual({ keys: ["departments"] });
+  });
+
+  it("writes audience roles as role types, resolved on the server", async () => {
+    const roleTypesCheck = vi.fn(async (types: string[]) => types.map((type) => `role-${type}`));
+    const out = await applyWriteRule(
+      { audienceRoles: ["member", "team_lead", "member"] },
+      moderatorAnnouncement,
+      v2Env({ roleTypesCheck }),
+    );
+    expect(out.audienceRoles).toEqual({
+      set: [{ documentId: "role-member" }, { documentId: "role-team_lead" }],
+    });
+    expect(roleTypesCheck).toHaveBeenCalledWith(["member", "team_lead"]);
+    const cleared = await applyWriteRule(
+      { audienceRoles: null },
+      moderatorAnnouncement,
+      v2Env({ roleTypesCheck }),
+    );
+    expect(cleared.audienceRoles).toEqual({ set: [] });
+    // A moderator may name the guest role; department authors only staff role types.
+    await applyWriteRule({ audienceRoles: ["guest"] }, moderatorAnnouncement, v2Env());
+    const head = rule(ANNOUNCEMENT, "update", DEPARTMENT_AUTHOR_CLASS);
+    for (const value of [["guest"], ["public"], ["authenticated"], ["Member"], [3], "member"]) {
+      const error = await refusal(applyWriteRule({ audienceRoles: value }, head, v2Env()));
+      expect(error.details, JSON.stringify(value)).toEqual({ keys: ["audienceRoles"] });
+    }
+    for (const value of [["public"], ["authenticated"], [{ id: 2 }]]) {
+      const error = await refusal(
+        applyWriteRule({ audienceRoles: value }, moderatorAnnouncement, v2Env()),
+      );
+      expect(error.details, JSON.stringify(value)).toEqual({ keys: ["audienceRoles"] });
+    }
+    // A check that cannot resolve a type refuses the field.
+    const unresolved = await refusal(
+      applyWriteRule(
+        { audienceRoles: ["member"] },
+        moderatorAnnouncement,
+        v2Env({ roleTypesCheck: async () => null }),
+      ),
+    );
+    expect(unresolved.details).toEqual({ keys: ["audienceRoles"] });
+  });
+});
+
+describe("v2 department authors: pinned targeting and ownership (§N3, §N4)", () => {
+  it("pins an announcement's department: set on create when missing, D only, never null", async () => {
+    const create = rule(ANNOUNCEMENT, "create", DEPARTMENT_AUTHOR_CLASS);
+    const out = await applyWriteRule({ title: "Hi" }, create, { ...v2Env(), action: "create" });
+    expect(out).toMatchObject({
+      department: { set: [{ documentId: ENG_DOC }] },
+      audience: "departments",
+      retargetRequired: false,
+      ownerDepartment: { set: [{ documentId: ENG_DOC }] },
+      author: 42,
+    });
+    await applyWriteRule({ title: "Hi", department: ENG_DOC }, create, {
+      ...v2Env(),
+      action: "create",
+    });
+    const update = rule(ANNOUNCEMENT, "update", DEPARTMENT_AUTHOR_CLASS);
+    for (const department of [SALES_DOC, null, { connect: [ENG_DOC], disconnect: [SALES_DOC] }]) {
+      const error = await refusal(applyWriteRule({ department }, update, v2Env()));
+      expect(error.details, JSON.stringify(department)).toEqual({ keys: ["department"] });
+    }
+    // An update without the key leaves the stored department (no default).
+    const titleOnly = await applyWriteRule({ title: "x" }, update, {
+      ...v2Env(),
+      action: "update",
+    });
+    expect(titleOnly).toEqual({ title: "x" });
+  });
+
+  it("accepts null or a team of the caller's department, nothing else", async () => {
+    const update = rule(ANNOUNCEMENT, "update", DEPARTMENT_AUTHOR_CLASS);
+    expect((await applyWriteRule({ team: "team-eng" }, update, v2Env())).team).toEqual({
+      set: [{ documentId: "team-eng" }],
+    });
+    expect((await applyWriteRule({ team: null }, update, v2Env())).team).toBeNull();
+    const error = await refusal(applyWriteRule({ team: "team-sales" }, update, v2Env()));
+    expect(error.details).toEqual({ keys: ["team"] });
+  });
+
+  it("pins event and document departments to exactly [D]: set on create, [] and two refused", async () => {
+    for (const uid of [EVENT, DOCUMENT]) {
+      const create = rule(uid, "create", DEPARTMENT_AUTHOR_CLASS);
+      const data = uid === EVENT ? { title: "E", start: at(60) } : { title: "D" };
+      const out = await applyWriteRule(data, create, { ...v2Env(), action: "create" });
+      expect(out.departments, uid).toEqual({ set: [{ documentId: ENG_DOC }] });
+      expect(out.ownerDepartment, uid).toEqual({ set: [{ documentId: ENG_DOC }] });
+      const update = rule(uid, "update", DEPARTMENT_AUTHOR_CLASS);
+      for (const departments of [[], null, [ENG_DOC, SALES_DOC], [SALES_DOC]]) {
+        const error = await refusal(applyWriteRule({ departments }, update, v2Env()));
+        expect(error.details, `${uid} ${JSON.stringify(departments)}`).toEqual({
+          keys: ["departments"],
+        });
+      }
+    }
+  });
+
+  it("refuses the moderator-only keys and the owner as plain keys", async () => {
+    const update = rule(ANNOUNCEMENT, "update", DEPARTMENT_AUTHOR_CLASS);
+    const error = await refusal(
+      applyWriteRule(
+        {
+          pinned: true,
+          requiresAck: true,
+          ackDeadline: "2026-10-30",
+          publishAt: at(60),
+          ownerDepartment: ENG_DOC,
+        },
+        update,
+        v2Env(),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["ackDeadline", "ownerDepartment", "pinned", "publishAt", "requiresAck"],
+    });
+    for (const uid of [EVENT, DOCUMENT]) {
+      for (const key of ["publishAt", "unpublishAt", "ownerDepartment", "scheduleError"]) {
+        const refused = await refusal(
+          applyWriteRule({ [key]: null }, rule(uid, "update", DEPARTMENT_AUTHOR_CLASS), v2Env()),
+        );
+        expect(refused.details, `${uid} ${key}`).toEqual({ keys: [key] });
+      }
+    }
+    // ownerDepartment is refused for moderators too (derived ownership).
+    for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT]) {
+      const refused = await refusal(
+        applyWriteRule({ ownerDepartment: ENG_DOC }, rule(uid, "update", MODERATOR_CLASS), v2Env()),
+      );
+      expect(refused.details, uid).toEqual({ keys: ["ownerDepartment"] });
+    }
+  });
+
+  it("fails closed (500, not a write) when a department author's create comes without the department", async () => {
+    const create = rule(EVENT, "create", DEPARTMENT_AUTHOR_CLASS);
+    await expect(
+      applyWriteRule({ title: "E", start: at(60) }, create, {
+        ...v2Env({ callerDepartment: null }),
+        action: "create",
+      }),
+    ).rejects.toThrow(/caller department/);
+  });
+});
+
+describe("v2 targeting flags: derived from stored + payload, never widened implicitly (K10)", () => {
+  const announcement = rule(ANNOUNCEMENT, "update", MODERATOR_CLASS);
+
+  it("re-derives the announcement audience only when department or team is carried", async () => {
+    const stored = {
+      department: ENG_DOC,
+      team: "team-x",
+      audience: "departments",
+      retargetRequired: true,
+    };
+    expect(await applyWriteRule({ title: "x" }, announcement, v2Env({ existing: stored }))).toEqual(
+      {
+        title: "x",
+      },
+    );
+    expect(
+      await applyWriteRule({ department: null }, announcement, v2Env({ existing: stored })),
+    ).toMatchObject({ department: null, audience: "departments", retargetRequired: false });
+    expect(
+      await applyWriteRule(
+        { department: null, team: null },
+        announcement,
+        v2Env({ existing: stored }),
+      ),
+    ).toMatchObject({ audience: "all", retargetRequired: false });
+    expect(
+      await applyWriteRule(
+        { team: SALES_DOC },
+        announcement,
+        v2Env({ existing: { department: null, team: null } }),
+      ),
+    ).toMatchObject({ audience: "departments" });
+  });
+
+  it("a relation shape that names no target is no re-target: nothing is derived (K10)", async () => {
+    const noOp: RelationCheck = async () => ({ target: undefined, disconnect: [] });
+    const env = v2Env({
+      relationChecks: { department: noOp, team: noOp },
+      existing: {
+        department: null,
+        team: "team-x",
+        audience: "departments",
+        retargetRequired: true,
+      },
+    });
+    expect(await applyWriteRule({ department: { connect: [] } }, announcement, env)).toEqual({});
+    expect(await applyWriteRule({ team: { disconnect: [] } }, announcement, env)).toEqual({});
+  });
+
+  it("lowers the retargetRequired marker on audienceRoles too, without touching audience", async () => {
+    const out = await applyWriteRule(
+      { audienceRoles: ["member"] },
+      announcement,
+      v2Env({
+        existing: { department: null, team: null, audience: "departments", retargetRequired: true },
+      }),
+    );
+    expect(out).toEqual({
+      audienceRoles: { set: [{ documentId: "role-member" }] },
+      retargetRequired: false,
+    });
+  });
+
+  it("derives event notifyAudience and the other types' audience from departments only", async () => {
+    const event = rule(EVENT, "update", MODERATOR_CLASS);
+    expect((await applyWriteRule({ departments: [] }, event, v2Env())).notifyAudience).toBe("all");
+    expect((await applyWriteRule({ departments: [ENG_DOC] }, event, v2Env())).notifyAudience).toBe(
+      "departments",
+    );
+    expect(await applyWriteRule({ title: "x" }, event, v2Env())).toEqual({ title: "x" });
+    for (const uid of [QUICK_LINK, DOCUMENT, POLL]) {
+      const update = rule(uid, "update", MODERATOR_CLASS);
+      expect(
+        (await applyWriteRule({ departments: [ENG_DOC] }, update, v2Env())).audience,
+        uid,
+      ).toBe("departments");
+      expect((await applyWriteRule({ departments: null }, update, v2Env())).audience, uid).toBe(
+        "all",
+      );
+      expect(await applyWriteRule({}, update, v2Env()), uid).toEqual({});
+    }
+  });
+});
+
+describe("v2 cross checks over the stored draft and the payload", () => {
+  const event = rule(EVENT, "update", MODERATOR_CLASS);
+  const announcement = rule(ANNOUNCEMENT, "update", MODERATOR_CLASS);
+
+  it("refuses an end before the stored start, only when start or end is carried", async () => {
+    const existing = { start: at(120), end: null, allDay: false };
+    const error = await refusal(applyWriteRule({ end: at(60) }, event, v2Env({ existing })));
+    expect(error.details).toEqual({ keys: ["end"], codes: { end: "endBeforeStart" } });
+    // A legacy row with a bad span still saves other fields.
+    const legacy = { start: at(120), end: at(60), allDay: false };
+    await applyWriteRule({ title: "x" }, event, v2Env({ existing: legacy }));
+  });
+
+  it("holds all-day events to local midnights of APP_TIME_ZONE", async () => {
+    // 2026-10-14 00:00 Europe/Berlin (CEST) = 2026-10-13T22:00:00Z.
+    const midnight = "2026-10-13T22:00:00.000Z";
+    await applyWriteRule({ allDay: true, start: midnight, end: midnight }, event, v2Env());
+    const error = await refusal(
+      applyWriteRule({ allDay: true, start: "2026-10-14T08:00:00.000Z" }, event, v2Env()),
+    );
+    expect(error.details).toEqual({ keys: ["start"], codes: { start: "notMidnight" } });
+  });
+
+  it("checks the schedule order (§D rule 3)", async () => {
+    const past = await refusal(applyWriteRule({ publishAt: at(0.5) }, announcement, v2Env()));
+    expect(past.details).toEqual({ keys: ["publishAt"], codes: { publishAt: "scheduleInPast" } });
+    const expires = await refusal(
+      applyWriteRule(
+        { publishAt: at(60) },
+        announcement,
+        v2Env({ existing: { expiresAt: at(30) } }),
+      ),
+    );
+    expect(expires.details).toEqual({
+      keys: ["expiresAt"],
+      codes: { expiresAt: "expiresBeforePublish" },
+    });
+    const link = rule(QUICK_LINK, "update", MODERATOR_CLASS);
+    const unpublish = await refusal(
+      applyWriteRule({ publishAt: at(60), unpublishAt: at(60) }, link, v2Env()),
+    );
+    expect(unpublish.details).toEqual({
+      keys: ["unpublishAt"],
+      codes: { unpublishAt: "unpublishBeforePublish" },
+    });
+    // A stored schedule that fell due is the scheduler's business, not this save's.
+    await applyWriteRule({ title: "x" }, announcement, v2Env({ existing: { publishAt: at(-5) } }));
+  });
+
+  it("needs requiresAck for an acknowledgement deadline", async () => {
+    const error = await refusal(
+      applyWriteRule(
+        { ackDeadline: "2026-10-30" },
+        announcement,
+        v2Env({ existing: { requiresAck: false } }),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["ackDeadline"],
+      codes: { ackDeadline: "ackDeadlineWithoutAck" },
+    });
+    await applyWriteRule({ ackDeadline: "2026-10-30", requiresAck: true }, announcement, v2Env());
+  });
+
+  it("asks publish readiness early only when the payload schedules a publish", async () => {
+    const readiness = vi.fn(async () => ["title"]);
+    const error = await refusal(
+      applyWriteRule(
+        { publishAt: at(60) },
+        announcement,
+        v2Env({ readiness, existing: { title: null } }),
+      ),
+    );
+    expect(error.details).toEqual({ keys: ["title"], codes: { title: "notPublishable" } });
+    expect(readiness).toHaveBeenCalledWith(
+      expect.objectContaining({ publishAt: at(60), title: null }),
+    );
+    readiness.mockClear();
+    await applyWriteRule({ publishAt: null }, announcement, v2Env({ readiness }));
+    await applyWriteRule({ title: "x" }, announcement, v2Env({ readiness }));
+    expect(readiness).not.toHaveBeenCalled();
+  });
+});
+
+describe("v2 frozenWhen: poll options and anonymity after the first vote", () => {
+  const poll = rule(POLL, "update", MODERATOR_CLASS);
+  const published = { options: ["A", "B"], anonymous: false };
+
+  it("refuses a change against the published row once a vote exists", async () => {
+    const pollHasVotes = vi.fn(async () => true);
+    const error = await refusal(
+      applyWriteRule(
+        { options: ["A", "C"], anonymous: true },
+        poll,
+        v2Env({ published, frozenChecks: { pollHasVotes } }),
+      ),
+    );
+    expect(error.details).toEqual({
+      keys: ["anonymous", "options"],
+      codes: { anonymous: "frozenAfterVotes", options: "frozenAfterVotes" },
+    });
+    expect(pollHasVotes).toHaveBeenCalledTimes(1);
+  });
+
+  it("passes the same options (after trimming) without asking, and any change without a vote", async () => {
+    const pollHasVotes = vi.fn(async () => true);
+    await applyWriteRule(
+      { options: [" A", "B "], anonymous: false, closesAt: at(60) },
+      poll,
+      v2Env({ published, frozenChecks: { pollHasVotes } }),
+    );
+    expect(pollHasVotes).not.toHaveBeenCalled();
+    await applyWriteRule(
+      { options: ["A", "C"] },
+      poll,
+      v2Env({ published, frozenChecks: { pollHasVotes: async () => false } }),
+    );
+    // No published row: nothing to compare against (no vote can exist).
+    await applyWriteRule({ options: ["X", "Y"] }, poll, v2Env({ published: null }));
+  });
+});
+
+describe("v2 media: retain versus attach (§E2)", () => {
+  const MEDIA_RULE: WriteRule = { fields: { file: { kind: "media", check: "ownUpload" } } };
+
+  it("keeps the stored file without a check, checks a new one, clears with null", async () => {
+    const ownUpload = vi.fn(async (fileId: number) => (fileId === 8 ? 8 : null));
+    const env = (existing: Record<string, unknown> | null) =>
+      v2Env({ existing, mediaChecks: { ownUpload } });
+    expect(await applyWriteRule({ file: 5 }, MEDIA_RULE, env({ file: { id: 5 } }))).toEqual({
+      file: 5,
+    });
+    expect(ownUpload).not.toHaveBeenCalled();
+    expect(await applyWriteRule({ file: { id: 8 } }, MEDIA_RULE, env({ file: { id: 5 } }))).toEqual(
+      {
+        file: 8,
+      },
+    );
+    const error = await refusal(applyWriteRule({ file: 9 }, MEDIA_RULE, env(null)));
+    expect(error.details).toEqual({ keys: ["file"] });
+    expect(await applyWriteRule({ file: null }, MEDIA_RULE, env({ file: { id: 5 } }))).toEqual({
+      file: null,
+    });
+    const malformed = await refusal(applyWriteRule({ file: "abc" }, MEDIA_RULE, env(null)));
+    expect(malformed.details).toEqual({ keys: ["file"] });
+  });
+});
+
+describe("enforceWriteAllowlist for global::can-author", () => {
+  it("leaves the status to the authoring controller (no pin) and checks the payload", async () => {
+    const policyContext = {
+      request: { query: { status: "draft" }, body: { data: { title: "Hi" } } },
+    };
+    await expect(
+      enforceWriteAllowlist(
+        policyContext,
+        { uid: ANNOUNCEMENT, action: "update", roleClass: MODERATOR_CLASS },
+        v2Env(),
+        { status: "controller" },
+      ),
+    ).resolves.toBe(true);
+    expect(policyContext.request.query).toEqual({ status: "draft" });
+    expect(policyContext.request.body.data).toEqual({ title: "Hi" });
+  });
+
+  it("answers false for a class without a rule (department authors on quick links and polls)", async () => {
+    for (const uid of [QUICK_LINK, POLL]) {
+      const policyContext = { request: { query: {}, body: { data: { label: "x" } } } };
+      await expect(
+        enforceWriteAllowlist(
+          policyContext,
+          { uid, action: "create", roleClass: DEPARTMENT_AUTHOR_CLASS },
+          v2Env(),
+          {
+            status: "controller",
+          },
+        ),
+        uid,
+      ).resolves.toBe(false);
     }
   });
 });

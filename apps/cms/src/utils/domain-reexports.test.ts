@@ -9,6 +9,7 @@ import * as entryId from "./entry-id";
 import * as liveContract from "./live-contract";
 import * as plainDate from "./plain-date";
 import * as pollClose from "./poll-close";
+import * as pollOptions from "./poll-options";
 import * as trainingValidation from "./training-validation";
 import * as uploadGuard from "./upload-guard";
 
@@ -109,6 +110,17 @@ const CASES: Array<{
     own: [],
   },
   {
+    module: "utils/poll-options",
+    exports: pollOptions,
+    fromDomain: {
+      MAX_POLL_OPTIONS: "MAX_POLL_OPTIONS",
+      MAX_POLL_OPTION_LENGTH: "MAX_POLL_OPTION_LENGTH",
+      MIN_POLL_OPTIONS: "MIN_POLL_OPTIONS",
+      validatePollOptions: "validatePollOptions",
+    },
+    own: [],
+  },
+  {
     module: "utils/training-validation",
     exports: trainingValidation,
     fromDomain: { validateQuiz: "validateQuiz", youtubeVideoId: "youtubeVideoId" },
@@ -120,9 +132,11 @@ const CASES: Array<{
     fromDomain: {
       ADMIN: "ADMIN",
       AUTHENTICATED: "AUTHENTICATED",
+      DEPARTMENT_AUTHOR_ROLES: "DEPARTMENT_AUTHOR_ROLES",
       GUEST: "GUEST",
       MODERATORS: "MODERATORS",
       ROLE_PRIVILEGE_ORDER: "ROLE_PRIVILEGE_ORDER",
+      SCHEDULER_ROLES: "SCHEDULER_ROLES",
       STAFF_ROLES: "STAFF_ROLES",
       hasRole: "hasRole",
       isRoleType: "isRoleType",

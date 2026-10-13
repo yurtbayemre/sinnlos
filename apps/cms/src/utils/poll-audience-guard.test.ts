@@ -1,8 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { isPollTargeted } from "./poll-audience";
+import { errors } from "@strapi/utils";
 import {
   affectedDocumentIds,
+  assertPollNotFrozen,
   createPollAudienceGuard,
+  frozenChanges,
   POLL_AUDIENCE_GUARD_CHUNK,
   POLL_WRITE_ACTIONS,
   registerPollAudienceGuard,
@@ -81,7 +84,8 @@ function host(initial: PollRow[] = [], options: { failUpdate?: boolean } = {}) {
 
   const strapi: PollAudienceGuardHost = {
     db: {
-      query: vi.fn(() => ({ findMany, updateMany })),
+      // No ballots: the vote freeze (its own block below) lets every action pass.
+      query: vi.fn(() => ({ findMany, updateMany, count: async () => 0 })),
       transaction: <T>(callback: () => Promise<T>) => transaction(callback) as Promise<T>,
     },
     log,
@@ -378,7 +382,13 @@ describe("poll audience guard: never widens, stays in its lane", () => {
     const { strapi, findMany } = host();
     const guard = createPollAudienceGuard(strapi);
     await guard(context("update", { documentId: "p1" }), async () => null);
-    expect(findMany).toHaveBeenCalledExactlyOnceWith({
+    // First the vote freeze's read (before the write), then the flag read.
+    expect(findMany).toHaveBeenCalledTimes(2);
+    expect(findMany).toHaveBeenNthCalledWith(1, {
+      where: { documentId: "p1" },
+      select: ["id", "publishedAt", "options", "anonymous"],
+    });
+    expect(findMany).toHaveBeenLastCalledWith({
       where: { documentId: { $in: ["p1"] } },
       select: ["id", "audience"],
       populate: { departments: { select: ["id", "documentId"] } },
@@ -526,5 +536,200 @@ describe("registerPollAudienceGuard", () => {
     expect(() => registerPollAudienceGuard({ ...strapi, documents: null })).toThrow(
       /refusing to boot/,
     );
+  });
+});
+
+/**
+ * The vote freeze (decision 06 §G2; batch 15 plan item 8): options and
+ * anonymity cannot change once a vote exists, compared with the PUBLISHED
+ * row (votes are cast on it), for a publish, an update with status
+ * published and a draft-only update that carries them. The real query
+ * engine and the lock are exercised by authoring-polls.integration.test.ts.
+ */
+describe("vote freeze", () => {
+  const PUBLISHED = {
+    id: 2,
+    publishedAt: "2026-10-01T00:00:00.000Z",
+    options: ["A", "B"],
+    anonymous: false,
+  };
+  const DRAFT_SAME = { id: 1, publishedAt: null, options: ["A", "B"], anonymous: false };
+  const DRAFT_CHANGED = { id: 1, publishedAt: null, options: ["A", "C"], anonymous: false };
+
+  function freezeHost(rows: object[], ballots: number) {
+    const events: string[] = [];
+    const strapi = {
+      db: {
+        query: vi.fn((uid: string) => ({
+          findMany: vi.fn(async (params: Record<string, unknown>) => {
+            events.push(`findMany ${uid}`);
+            expect(params).toEqual({
+              where: { documentId: "p1" },
+              select: ["id", "publishedAt", "options", "anonymous"],
+            });
+            return rows;
+          }),
+          updateMany: vi.fn(),
+          count: vi.fn(async (params: Record<string, unknown>) => {
+            events.push(`count ${uid}`);
+            expect(params).toEqual({ where: { poll: { documentId: "p1" } } });
+            return ballots;
+          }),
+        })),
+        transaction: async <T>(callback: () => Promise<T>) => callback(),
+      },
+      log: { info: vi.fn() },
+    };
+    return { strapi: strapi as unknown as PollAudienceGuardHost, events };
+  }
+
+  const refusal = async (promise: Promise<unknown>) => {
+    const error = await promise.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(errors.ValidationError);
+    return (error as InstanceType<typeof errors.ValidationError>).details;
+  };
+
+  it("passes unchanged options and anonymity with votes, without counting them", async () => {
+    const { strapi, events } = freezeHost([DRAFT_SAME, PUBLISHED], 3);
+    await assertPollNotFrozen(strapi, "publish", { documentId: "p1" });
+    await assertPollNotFrozen(strapi, "update", {
+      documentId: "p1",
+      status: "published",
+      data: { closesAt: "2026-12-01T00:00:00.000Z", options: [" A", "B "], anonymous: false },
+    });
+    expect(events.filter((event) => event.startsWith("count"))).toEqual([]);
+  });
+
+  it("refuses a publish of a draft whose options changed before the first vote", async () => {
+    const { strapi } = freezeHost([DRAFT_CHANGED, PUBLISHED], 1);
+    expect(await refusal(assertPollNotFrozen(strapi, "publish", { documentId: "p1" }))).toEqual({
+      keys: ["options"],
+      codes: { options: "frozenAfterVotes" },
+    });
+  });
+
+  it("refuses a save-and-publish that carries only closesAt over a changed draft", async () => {
+    const { strapi } = freezeHost([DRAFT_CHANGED, PUBLISHED], 1);
+    const details = await refusal(
+      assertPollNotFrozen(strapi, "update", {
+        documentId: "p1",
+        status: "published",
+        data: { closesAt: "2026-12-01T00:00:00.000Z" },
+      }),
+    );
+    expect(details).toEqual({ keys: ["options"], codes: { options: "frozenAfterVotes" } });
+  });
+
+  it("refuses a flipped anonymity, in the draft and in the payload", async () => {
+    const { strapi } = freezeHost([{ ...DRAFT_SAME, anonymous: true }, PUBLISHED], 1);
+    expect(await refusal(assertPollNotFrozen(strapi, "publish", { documentId: "p1" }))).toEqual({
+      keys: ["anonymous"],
+      codes: { anonymous: "frozenAfterVotes" },
+    });
+    const host = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    expect(
+      await refusal(
+        assertPollNotFrozen(host.strapi, "update", { documentId: "p1", data: { anonymous: true } }),
+      ),
+    ).toEqual({ keys: ["anonymous"], codes: { anonymous: "frozenAfterVotes" } });
+  });
+
+  it("refuses a draft-only update that makes the options differ, not one that leaves them", async () => {
+    const { strapi } = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    await refusal(
+      assertPollNotFrozen(strapi, "update", { documentId: "p1", data: { options: ["A", "C"] } }),
+    );
+    // The admin panel's JSON editor text is read like the lifecycle reads it.
+    await refusal(
+      assertPollNotFrozen(strapi, "update", { documentId: "p1", data: { options: '["A", "C"]' } }),
+    );
+    // A draft that already differs is not touched by a draft save without options.
+    const changed = freezeHost([DRAFT_CHANGED, PUBLISHED], 1);
+    await expect(
+      assertPollNotFrozen(changed.strapi, "update", { documentId: "p1", data: { question: "Q?" } }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("lets anything pass without a vote", async () => {
+    const { strapi, events } = freezeHost([DRAFT_CHANGED, PUBLISHED], 0);
+    await expect(
+      assertPollNotFrozen(strapi, "publish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+    expect(events).toEqual(["findMany api::poll.poll", "count api::poll-vote.poll-vote"]);
+  });
+
+  it("compares the options index by index after trimming", () => {
+    const published = { options: ["A", "B"], anonymous: false };
+    const draft = (options: unknown) => ({ options, anonymous: false });
+    expect(frozenChanges("publish", {}, draft([" A ", "B"]), published)).toEqual([]);
+    expect(frozenChanges("publish", {}, draft(["B", "A"]), published)).toEqual(["options"]);
+    expect(frozenChanges("publish", {}, draft(["A", "B", "C"]), published)).toEqual(["options"]);
+    expect(frozenChanges("publish", {}, draft(["A"]), published)).toEqual(["options"]);
+  });
+
+  it("ignores create, clone, discard, unpublish and delete, and a poll without a published row", () => {
+    const draft = { options: ["X"], anonymous: true };
+    const published = { options: ["A", "B"], anonymous: false };
+    for (const action of ["create", "clone", "discardDraft", "unpublish", "delete"]) {
+      expect(frozenChanges(action, { data: { options: ["Z"] } }, draft, published), action).toEqual(
+        [],
+      );
+    }
+    expect(frozenChanges("publish", {}, draft, null)).toEqual([]);
+  });
+
+  it("refuses to unpublish a voted poll, keeping its baseline; unpublishes one without votes", async () => {
+    const voted = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    expect(
+      await refusal(assertPollNotFrozen(voted.strapi, "unpublish", { documentId: "p1" })),
+    ).toEqual({ keys: ["_form"] });
+    expect(voted.events).toEqual(["count api::poll-vote.poll-vote"]);
+    const fresh = freezeHost([DRAFT_SAME, PUBLISHED], 0);
+    await expect(
+      assertPollNotFrozen(fresh.strapi, "unpublish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to publish a voted poll without a published row, whatever the draft says", async () => {
+    const { strapi } = freezeHost([DRAFT_SAME], 1);
+    expect(await refusal(assertPollNotFrozen(strapi, "publish", { documentId: "p1" }))).toEqual({
+      keys: ["_form"],
+    });
+    expect(
+      await refusal(
+        assertPollNotFrozen(strapi, "update", {
+          documentId: "p1",
+          status: "published",
+          data: { options: ["X", "Y"], anonymous: false },
+        }),
+      ),
+    ).toEqual({ keys: ["_form"] });
+    // A draft-only save reaches no voter; without a vote anything passes.
+    await expect(
+      assertPollNotFrozen(strapi, "update", { documentId: "p1", data: { options: ["X", "Y"] } }),
+    ).resolves.toBeUndefined();
+    const unvoted = freezeHost([DRAFT_CHANGED], 0);
+    await expect(
+      assertPollNotFrozen(unvoted.strapi, "publish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses the unpublish inside the guard, before the write", async () => {
+    const { strapi } = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    const guard = createPollAudienceGuard(strapi);
+    const next = vi.fn(async () => null);
+    await refusal(guard(context("unpublish", { documentId: "p1" }), next));
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it("runs inside the guard before the write, so a refusal writes nothing", async () => {
+    const { strapi } = freezeHost([DRAFT_CHANGED, PUBLISHED], 2);
+    const guard = createPollAudienceGuard(strapi);
+    const next = vi.fn(async () => null);
+    await refusal(guard(context("publish", { documentId: "p1" }), next));
+    expect(next).not.toHaveBeenCalled();
   });
 });

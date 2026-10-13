@@ -7,7 +7,10 @@ import { validatePollOptions } from "../../../../utils/poll-options";
  * Server-side validation of poll answer options (FX20) for EVERY writer:
  * the web's createPoll, direct content-API calls and the admin panel, where
  * editors author polls and where no content-API controller runs. Rules in
- * utils/poll-options.ts (2 to 10 unique, trimmed, non-empty texts).
+ * utils/poll-options.ts, a re-export of @sinnlos/domain (2 to 20 unique,
+ * trimmed, non-empty texts; batch 15 plan item 2b). The per-answer length
+ * limit of the authoring allowlist and the web form (200) is NOT applied
+ * here, so a legacy or panel poll with a longer answer still saves.
  *
  *  - Keys present: only a payload that carries `options` is checked, so a
  *    db.query update of other fields (the audience guard, the department

@@ -180,13 +180,13 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | Content type      | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
 | ----------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
 | `acknowledgement` | CRUD         | CR       | CR                | CR          | CR       | —       | CR              |
-| `announcement`    | CRUD         | CRUD     | R                 | R           | R        | —       | R               |
+| `announcement`    | CRUD         | CRUD     | CRU               | R           | R        | —       | R               |
 | `classified`      | CRUD         | CRUD     | CRUD              | CRUD        | CRUD     | —       | R               |
 | `comment`         | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `course`          | R            | R        | R                 | R           | R        | —       | R               |
 | `department`      | CRUD         | R        | RU                | R           | R        | —       | R               |
-| `document`        | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
-| `event`           | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
+| `document`        | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
+| `event`           | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `event-rsvp`      | CRUD         | CRU      | CRU               | CRU         | CRU      | —       | CRU             |
 | `kudos`           | CRD          | CRD      | CR                | CR          | CR       | —       | CR              |
 | `lesson`          | R            | R        | R                 | R           | R        | —       | R               |
@@ -208,26 +208,48 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 
 <!-- custom-action-grants:start -->
 
-| Action                                          | Endpoint                                | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
-| ----------------------------------------------- | --------------------------------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
-| `api::event.event.ics`                          | `GET /api/events/:id/ics`               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::event-rsvp.event-rsvp.summary`            | `GET /api/event-rsvps/summary`          | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | ✓               |
-| `api::kudos.kudos.celebrations`                 | `GET /api/celebrations`                 | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `api::notification.notification.markRead`       | `POST /api/notifications/mark-read`     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::notification.notification.markAllRead`    | `POST /api/notifications/mark-all-read` | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll-vote.poll-vote.vote`                 | `POST /api/polls/:id/vote`              | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll-vote.poll-vote.results`              | `GET /api/polls/:id/results`            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll.poll.batchResults`                   | `GET /api/poll-results`                 | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::search-log.search-log.summary`            | `GET /api/search-logs/summary`          | ✓            | —        | —                 | —           | —        | —       | —               |
-| `api::profile.profile.me`                       | `GET /api/me`                           | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::profile.profile.updateMe`                 | `PUT /api/me`                           | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.auth.changePassword` | `POST /api/auth/change-password`        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.role.find`           | `GET /api/users-permissions/roles`      | ✓            | —        | —                 | —           | —        | —       | —               |
-| `plugin::upload.content-api.upload`             | `POST /api/upload`                      | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `api::classified.classified.cleanupUploads`     | `POST /api/classifieds/cleanup-uploads` | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `plugin::users-permissions.user.find`           | `GET /api/users`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.user.findOne`        | `GET /api/users/:id`                    | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.user.me`             | `GET /api/users/me`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| Action                                          | Endpoint                                    | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
+| ----------------------------------------------- | ------------------------------------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
+| `api::event.event.ics`                          | `GET /api/events/:id/ics`                   | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::event-rsvp.event-rsvp.summary`            | `GET /api/event-rsvps/summary`              | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | ✓               |
+| `api::kudos.kudos.celebrations`                 | `GET /api/celebrations`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `api::notification.notification.markRead`       | `POST /api/notifications/mark-read`         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::notification.notification.markAllRead`    | `POST /api/notifications/mark-all-read`     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll-vote.poll-vote.vote`                 | `POST /api/polls/:id/vote`                  | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll-vote.poll-vote.results`              | `GET /api/polls/:id/results`                | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll.poll.batchResults`                   | `GET /api/poll-results`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::announcement.announcement.publish`        | `POST /api/announcements/:id/publish`       | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.unpublish`      | `POST /api/announcements/:id/unpublish`     | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.discardDraft`   | `POST /api/announcements/:id/discard-draft` | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.authoringList`  | `GET /api/announcements/authoring`          | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.editable`       | `GET /api/announcements/:id/editable`       | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.publish`                      | `POST /api/events/:id/publish`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.unpublish`                    | `POST /api/events/:id/unpublish`            | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.discardDraft`                 | `POST /api/events/:id/discard-draft`        | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.authoringList`                | `GET /api/events/authoring`                 | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.editable`                     | `GET /api/events/:id/editable`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.publish`                | `POST /api/documents/:id/publish`           | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.unpublish`              | `POST /api/documents/:id/unpublish`         | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.discardDraft`           | `POST /api/documents/:id/discard-draft`     | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.authoringList`          | `GET /api/documents/authoring`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.editable`               | `GET /api/documents/:id/editable`           | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.publish`            | `POST /api/quick-links/:id/publish`         | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.unpublish`          | `POST /api/quick-links/:id/unpublish`       | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.discardDraft`       | `POST /api/quick-links/:id/discard-draft`   | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.authoringList`      | `GET /api/quick-links/authoring`            | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.editable`           | `GET /api/quick-links/:id/editable`         | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::poll.poll.authoringList`                  | `GET /api/polls/authoring`                  | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::poll.poll.editable`                       | `GET /api/polls/:id/editable`               | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::search-log.search-log.summary`            | `GET /api/search-logs/summary`              | ✓            | —        | —                 | —           | —        | —       | —               |
+| `api::profile.profile.me`                       | `GET /api/me`                               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.updateMe`                 | `PUT /api/me`                               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.auth.changePassword` | `POST /api/auth/change-password`            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.role.find`           | `GET /api/users-permissions/roles`          | ✓            | —        | —                 | —           | —        | —       | —               |
+| `plugin::upload.content-api.upload`             | `POST /api/upload`                          | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `api::classified.classified.cleanupUploads`     | `POST /api/classifieds/cleanup-uploads`     | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `plugin::users-permissions.user.find`           | `GET /api/users`                            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.user.findOne`        | `GET /api/users/:id`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.user.me`             | `GET /api/users/me`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 
 <!-- custom-action-grants:end -->
 
