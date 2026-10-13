@@ -1366,6 +1366,11 @@ systemctl start docker
 > database, one transaction, the check, and a fresh `JWT_SECRET` before
 > the cms starts.
 
+> **Deploying batch 14 (2026-10-13)?** The page loaders and UI kit, the
+> README and security docs and the documentation pass ship as one normal
+> deploy of cms and web with `infra/deploy.sh`, **once batch 13 runs**.
+> Follow [Deploying batch 14 (2026-10-13)](#deploying-batch-14-2026-10-13).
+
 > **Deploying batch 13 (2026-10-12)?** The UI primitives with Markdown
 > rendering, the capabilities with the phone navigation and loading states,
 > and the live client with password-change revocation (the three notes
@@ -1805,6 +1810,87 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 14 (2026-10-13)
+
+Batch 14 (branch `batch/14`: `batch/13` plus plan batch 9) ships in one
+normal deploy, **once batch 13 runs** (production since 2026-10-13 07:19,
+`TAG=6fbcd25870c8`). Owner instance: srv-prod-01, Traefik mode, checkout
+`/home/bigemo/git/sinnlos`, compose project `infra`, `infra/deploy.sh` run
+as `bigemo`.
+
+What changes:
+
+- **web (lane 9A):** every page renders a typed view-model from
+  `lib/loaders/*`. A cms outage shows the "couldn't be loaded" banner
+  instead of zeros or empty lists, and a count that failed shows "–" (for
+  screen readers "Unknown"). Shared stat tiles, one announcement card for
+  the list and the dashboard, section titles as `h2` (no page jumps from
+  `h1` to `h3` any more), an author without a name shows "?". The search
+  palette gives the focus back to what opened it; muted text on the accent
+  colour, on the bell's unread tint and the green and amber status texts
+  in the light theme reach 4.5:1. `/wiki` no longer scrolls sideways on a
+  phone. Four unused Radix packages are gone.
+- **cms:** rebuilt, but only code comments changed; no behaviour change.
+- **Docs and tests (lanes 9C, 9B):** README, `docs/security.md`, this file
+  and `architecture.md`; the README permission tables are pinned by a test;
+  the integration suite runs with at most 8 workers.
+- **Nothing else:** no env, schema, permission, route, cron, edge or
+  Traefik change, nothing in the database. `next.config.mjs` sets
+  `agentRules: false`, which only affects `next dev`.
+
+**Before the deploy** (read-only; `COMPOSE` and `psql_db` as defined at the
+start of [batch 13's runbook](#deploying-batch-13-2026-10-12)):
+
+1. `cat .git/sinnlos-deploy/infra.state`: `TAG=6fbcd25870c8`,
+   `LIVE_SMOKE=passed` (batch 13). Anything else: stop.
+2. `git status --short` (nothing), then `git fetch origin && git merge
+   --ff-only <the batch 14 merge commit>`; `git clean -n -d -- apps
+   packages` prints nothing.
+3. `infra/deploy.sh --check` and `--dry-run`: `Preflight OK`, the Traefik
+   host line, the backup line, `last-known-good: infra-{web,cms}:6fbcd25870c8`,
+   `live-smoke: run`. The backup permission as in
+   [Checking the backup permission](#checking-the-backup-permission-production).
+4. The permission diff (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
+   unchanged, only the two informational `authenticated` rows.
+
+**Deploy:** `infra/deploy.sh` as `bigemo` (both images rebuild; the node
+base layer is the one batch 13 brought).
+
+**After the deploy** (read-only, then in a browser):
+
+5. Boot lines: `permission drift: none (report-only check of 120 managed
+   actions)`, no grant or revoke line, `Strapi started successfully`, and
+   the filtered error command of batch 13's step 9 prints nothing.
+6. As a member: the dashboard shows its stat tiles with numbers and no
+   banner; `/announcements`, `/events`, `/polls`, `/kudos` and `/training`
+   look as before. As an admin: `/manage/analytics` shows its numbers. On
+   a phone (or a 360 px window): `/wiki` does not scroll sideways.
+7. The first hour: no new error types in the cms and web logs, no restarts.
+
+**What users notice:** clearer section headings, better contrast in the
+light theme, and during a cms outage an honest "couldn't be loaded" banner
+with "–" instead of zeros or "nothing here yet".
+
+**Rollback:** both images to batch 13's SHA tags; there is no database
+step, and **no `JWT_SECRET` rotation**, because batch 13 already checks
+token versions (`deploy.sh`'s printed rollback shows no MANDATORY step for
+it):
+
+```bash
+docker tag infra-web:6fbcd25870c8 infra-web:latest
+docker tag infra-cms:6fbcd25870c8 infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+**Staging rehearsal (2026-10-12/13):** on a local staging copy of
+production, from the batch 13 state: `infra/deploy.sh` rc 0 (build 86 s,
+outage about 9 s web and 4 s cms), live-smoke passed; member, guest,
+editor and admin walked in light and dark at 360 and 1280 px against the
+batch 13 baseline (same data, no missing section, headings fixed); a cms
+outage showed the banner and "–" counts and no empty states; the search
+palette's focus return; no guest requests for unreadable sections; no
+`AGENTS.md`/`CLAUDE.md` in the web image.
 
 #### Deploying batch 13 (2026-10-12)
 
