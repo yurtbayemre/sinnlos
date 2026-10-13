@@ -17,11 +17,12 @@ import {
  *   1. on Postgres the matched team rows are locked `FOR UPDATE`, so no
  *      link to them commits around the scan (utils/targeting-flags.ts
  *      lockMatchedRows);
- *   2. before any other write (§D rule 13): every announcement whose `team`
- *      is a deleted one has its revision locked and advanced, in ascending
- *      documentId order after the team's own version row (the document
- *      lock's). A write gate that saw the rows before the delete then fails
- *      the revision comparison (§N8);
+ *   2. before any other write (§D rule 13): every announcement and (batch
+ *      16) wiki page whose `team` is a deleted one has its revision locked
+ *      and advanced, in ascending (uid, documentId) order after the team's
+ *      own version row (the document lock's). A write gate that saw the
+ *      rows before the delete then fails the revision comparison (§N8): a
+ *      team lead's class on a page comes from its team;
  *   3. those announcement rows get `audience = 'departments'` and
  *      `retargetRequired = true`. The criteria are AND-combined, so a
  *      department-plus-team announcement without its team would widen to
@@ -29,8 +30,9 @@ import {
  *      notifies nobody until a moderator (or, within their department, a
  *      department author) re-targets it.
  *
- * Teams have no other targeting consumers in batch 15 (wiki team spaces
- * are batch 16). The mechanics are the department hook's (api/department/
+ * Wiki team SPACES need nothing here: their only write class is the
+ * role-only `moderator`, and a space whose team is gone is readable by
+ * moderators only (utils/visible-ids.ts). The mechanics are the department hook's (api/department/
  * content-types/department/lifecycles.ts): beforeDelete for the Document
  * Service's per-row delete, beforeDeleteMany for a script's db-level one,
  * the delete's own transaction (a delete outside one is refused), a failing
@@ -59,8 +61,9 @@ async function keepTargetsRestricted(event: DeleteEvent): Promise<void> {
     if (documents.length + announcements > 0) {
       strapi.log.info(
         `${TARGETING_FLAGS_LOG} team delete: advanced the revision of ${documents.length} ` +
-          `announcement(s) and marked ${announcements} announcement row(s) 'retargetRequired': ` +
-          "they stay restricted (admins and editors only, nobody notified) until re-targeted",
+          `announcement/wiki page(s) and marked ${announcements} announcement row(s) ` +
+          "'retargetRequired': they stay restricted (admins and editors only, nobody notified) " +
+          "until re-targeted",
       );
     }
   });

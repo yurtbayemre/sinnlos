@@ -8,6 +8,7 @@ import {
   POLL,
   QUICK_LINK,
   TEAM,
+  WIKI_PAGE,
   deleteHost,
 } from "../../../../utils/targeting-flags.test.helper";
 import lifecycles from "./lifecycles";
@@ -20,8 +21,9 @@ import lifecycles from "./lifecycles";
  *     restricted: polls, documents and quick links (`audience`),
  *     announcements (`audience` and the `retargetRequired` marker), events
  *     (`notifyAudience`);
- *   - every announcement, event and document that linked it (`department`,
- *     `departments`, `ownerDepartment`) has its revision locked and
+ *   - every announcement, event, document and (batch 16) wiki page that
+ *     linked it (`department`, `departments`, `ownerDepartment`; a page's
+ *     department decides its head's class) has its revision locked and
  *     advanced, in ascending (uid, documentId) order, before any flag
  *     write; on Postgres after the department rows are locked;
  *   - one transaction; a failing step fails the delete.
@@ -187,6 +189,12 @@ function org() {
         publishedAt: null,
       },
     ],
+    // Wiki pages (batch 16): Engineering's page on both rows, a Sales page.
+    [WIKI_PAGE]: [
+      { id: 1, documentId: "wiki-eng", department: { id: ENG }, publishedAt: null },
+      { id: 2, documentId: "wiki-eng", department: { id: ENG }, publishedAt: "2026-01-01" },
+      { id: 3, documentId: "wiki-sales", department: { id: SALES }, publishedAt: null },
+    ],
   };
 }
 
@@ -240,8 +248,8 @@ describe("department delete: what stays restricted", () => {
     const { strapi } = setup();
     await deleteEngineering();
     expect(strapi.log.info).toHaveBeenCalledWith(
-      "[targeting-flags] department delete: advanced the revision of 7 " +
-        "announcement/event/document(s); marked 3 announcement row(s) 'retargetRequired' and " +
+      "[targeting-flags] department delete: advanced the revision of 8 " +
+        "announcement/event/document/wiki page(s); marked 3 announcement row(s) 'retargetRequired' and " +
         "flagged 2 event row(s) to notify 'departments': they stay restricted (admins and " +
         "editors only, nobody notified) until re-targeted",
     );
@@ -249,7 +257,7 @@ describe("department delete: what stays restricted", () => {
 });
 
 describe("department delete: revisions (§D rule 13)", () => {
-  it("locks and advances every linked announcement, event and document, ascending, before any flag write", async () => {
+  it("locks and advances every linked announcement, event, document and wiki page, ascending, before any flag write", async () => {
     const { events } = setup();
     await deleteEngineering();
     const revisionEvents = events.filter((event) => /^(lock|advance) /.test(event));
@@ -262,6 +270,7 @@ describe("department delete: revisions (§D rule 13)", () => {
         `${DOCUMENT} doc-owned`,
         `${EVENT} ev-both`,
         `${EVENT} ev-eng`,
+        `${WIKI_PAGE} wiki-eng`,
       ].flatMap((ref) => [`lock ${ref}`, `advance ${ref}`]),
     );
     const lastRevision = events.map((event) => event.startsWith("advance ")).lastIndexOf(true);
@@ -319,6 +328,7 @@ describe("department delete: revisions (§D rule 13)", () => {
         `advance ${DOCUMENT} doc-sales`,
         `advance ${EVENT} ev-both`,
         `advance ${EVENT} ev-sales`,
+        `advance ${WIKI_PAGE} wiki-sales`,
       ]);
     }
   });

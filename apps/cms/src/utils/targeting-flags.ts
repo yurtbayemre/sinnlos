@@ -1,6 +1,6 @@
 import { AUDIENCE_DEPARTMENTS } from "@sinnlos/domain";
 
-import { ANNOUNCEMENT_UID, DOCUMENT_UID, EVENT_UID } from "./authoring-uids";
+import { ANNOUNCEMENT_UID, DOCUMENT_UID, EVENT_UID, WIKI_PAGE_UID } from "./authoring-uids";
 import {
   advanceRevision,
   lockDocument,
@@ -70,8 +70,10 @@ import {
  *      before the lock and is seen, or waits and then fails the foreign
  *      key check; the CONCURRENT LINKS note of department-delete-restrict.ts);
  *   2. before any other write, lock the revision of every announcement,
- *      event and document that links the deleted row (`ownerDepartment`,
- *      `department`, `departments`, or `team`) and advance it (K2
+ *      event, document and (batch 16) wiki page that links the deleted row
+ *      (`ownerDepartment`, `department`, `departments`, or `team`; a wiki
+ *      page's department and team decide its departmentHead and teamLead
+ *      classes, can-edit-wiki) and advance it (K2
  *      `lockDocument`/`advanceRevision`), in ascending (uid, documentId)
  *      order after the deleted row's own version row, which the document
  *      lock took first (§G2). A write gate that classified one of these
@@ -149,11 +151,20 @@ export const DEPARTMENT_LINKED_DOCUMENTS: readonly { uid: string; attributes: st
   { uid: ANNOUNCEMENT_UID, attributes: ["department", "ownerDepartment"] },
   { uid: EVENT_UID, attributes: ["departments", "ownerDepartment"] },
   { uid: DOCUMENT_UID, attributes: ["departments", "ownerDepartment"] },
+  // The page's departmentHead class (batch 16, S16).
+  { uid: WIKI_PAGE_UID, attributes: ["department"] },
 ];
 
-/** The relations to a deleted team whose documents get a revision advance. */
+/**
+ * The relations to a deleted team whose documents get a revision advance.
+ * Wiki SPACES linked by a deleted department or team need none: their only
+ * write class is the role-only `moderator`, and their visibility already
+ * falls to moderators (utils/visible-ids.ts).
+ */
 export const TEAM_LINKED_DOCUMENTS: readonly { uid: string; attributes: string[] }[] = [
   { uid: ANNOUNCEMENT_UID, attributes: ["team"] },
+  // The page's teamLead class (batch 16, S16).
+  { uid: WIKI_PAGE_UID, attributes: ["team"] },
 ];
 
 interface FlagQuery {

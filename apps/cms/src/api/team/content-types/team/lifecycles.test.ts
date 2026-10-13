@@ -4,6 +4,7 @@ import {
   ANNOUNCEMENT,
   DEPARTMENT,
   TEAM,
+  WIKI_PAGE,
   deleteHost,
 } from "../../../../utils/targeting-flags.test.helper";
 import lifecycles from "./lifecycles";
@@ -12,9 +13,10 @@ import lifecycles from "./lifecycles";
  * The team delete hook (new in batch 15 lane 15D; decision 06 §D rule 13,
  * §N9; amendment rows A2 and A3): before the cascade, every announcement
  * row whose `team` is the deleted one gets `audience = 'departments'` and
- * `retargetRequired = true`, and the revision of each such announcement is
- * locked and advanced, ascending, before that write; on Postgres after the
- * team rows are locked. One transaction; a failing step fails the delete.
+ * `retargetRequired = true`, and the revision of each such announcement and
+ * (batch 16) of each wiki page of the team (its lead's class) is locked and
+ * advanced, ascending, before that write; on Postgres after the team rows
+ * are locked. One transaction; a failing step fails the delete.
  */
 
 const revisions = vi.hoisted(() => ({ record: (_event: string): void => undefined }));
@@ -101,6 +103,11 @@ function org() {
         publishedAt: null,
       },
     ],
+    // Wiki pages (batch 16): Platform's page, a Data page.
+    [WIKI_PAGE]: [
+      { id: 1, documentId: "wiki-platform", team: { id: PLATFORM }, publishedAt: null },
+      { id: 2, documentId: "wiki-data", team: { id: DATA }, publishedAt: null },
+    ],
   };
 }
 
@@ -126,7 +133,7 @@ describe("team delete", () => {
     ]);
   });
 
-  it("locks and advances their revisions, ascending, before the marker write", async () => {
+  it("locks and advances their revisions and the team's wiki pages', ascending, before the marker write", async () => {
     const { events } = setup();
     await deletePlatform();
     expect(events.filter((event) => /^(lock|advance|update) /.test(event))).toEqual([
@@ -134,6 +141,8 @@ describe("team delete", () => {
       `advance ${ANNOUNCEMENT} ann-a-platform`,
       `lock ${ANNOUNCEMENT} ann-z-eng-platform`,
       `advance ${ANNOUNCEMENT} ann-z-eng-platform`,
+      `lock ${WIKI_PAGE} wiki-platform`,
+      `advance ${WIKI_PAGE} wiki-platform`,
       `update ${ANNOUNCEMENT}`,
     ]);
   });
@@ -152,9 +161,9 @@ describe("team delete", () => {
     const { strapi } = setup();
     await deletePlatform();
     expect(strapi.log.info).toHaveBeenCalledWith(
-      "[targeting-flags] team delete: advanced the revision of 2 announcement(s) and marked 3 " +
-        "announcement row(s) 'retargetRequired': they stay restricted (admins and editors only, " +
-        "nobody notified) until re-targeted",
+      "[targeting-flags] team delete: advanced the revision of 3 announcement/wiki page(s) and " +
+        "marked 3 announcement row(s) 'retargetRequired': they stay restricted (admins and " +
+        "editors only, nobody notified) until re-targeted",
     );
   });
 

@@ -22,8 +22,9 @@ import {
  *      flags.ts lockMatchedRows; department-delete-restrict.ts CONCURRENT
  *      LINKS);
  *   2. before any other write (§D rule 13, amendment row A2): every
- *      announcement, event and document that links a deleted department
- *      (`department`, `departments` or `ownerDepartment`) has its revision
+ *      announcement, event, document and (batch 16) wiki page that links a
+ *      deleted department (`department`, `departments` or `ownerDepartment`;
+ *      a page's department decides its departmentHead class) has its revision
  *      locked and advanced, in ascending (uid, documentId) order after the
  *      department's own version row (the document lock's). A department
  *      author's request whose gate saw the rows before the delete then
@@ -107,7 +108,7 @@ async function keepTargetsRestricted(event: DeleteEvent): Promise<void> {
     if (documents.length + announcements + events > 0) {
       strapi.log.info(
         `${TARGETING_FLAGS_LOG} department delete: advanced the revision of ${documents.length} ` +
-          `announcement/event/document(s); marked ${announcements} announcement row(s) ` +
+          `announcement/event/document/wiki page(s); marked ${announcements} announcement row(s) ` +
           `'retargetRequired' and flagged ${events} event row(s) to notify 'departments': ` +
           "they stay restricted (admins and editors only, nobody notified) until re-targeted",
       );
