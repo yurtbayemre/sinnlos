@@ -29,11 +29,23 @@ describe("poll lifecycle: options (FX20)", () => {
     });
   });
 
-  it("answers 1 option, 11 options, duplicates and non-JSON with a ValidationError", () => {
-    const eleven = Array.from({ length: 11 }, (_, i) => `O${i}`);
+  it("accepts 10, 11 and 20 options (batch 15 plan item 2b: the bound is 20)", () => {
+    for (const count of [10, 11, 20]) {
+      const options = Array.from({ length: count }, (_, i) => `O${i}`);
+      expect(run("beforeCreate", { options }).options, String(count)).toEqual(options);
+    }
+  });
+
+  it("does not hold an answer to the authoring length limit (200): panel and legacy polls still save", () => {
+    const long = "x".repeat(201);
+    expect(run("beforeUpdate", { options: [long, "No"] }).options).toEqual([long, "No"]);
+  });
+
+  it("answers 1 option, 21 options, duplicates and non-JSON with a ValidationError", () => {
+    const twentyOne = Array.from({ length: 21 }, (_, i) => `O${i}`);
     for (const options of [
       ["Only"],
-      eleven,
+      twentyOne,
       ["Mon", "Mon"],
       ["Mon", " Mon"],
       ["Mon", ""],
