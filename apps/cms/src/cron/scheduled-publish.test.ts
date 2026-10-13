@@ -25,6 +25,7 @@ import {
   type ScheduleClearHost,
 } from "../utils/schedule";
 import {
+  WAIT_CHAIN_MAX_DEPTH,
   emptyResult,
   recordScheduleFailure,
   runScheduledDocument,
@@ -465,6 +466,89 @@ describe("dependencies (a course or parent page due itself)", () => {
     expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${parent.documentId}`]);
     expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${child.documentId}`]);
   });
+
+  it("a parent behind more than 2,000 waiting children is still selected (no scan cap)", async () => {
+    // Codex review of the fix: a selection that scanned at most 10 pages of
+    // 200 rows skipped the same 2,000 waiting children every minute and
+    // never reached their parent, nor any page after it.
+    const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: PAST } });
+    const WAITING = 2_001;
+    for (let index = 0; index < WAITING; index += 1) {
+      await docs(WIKI).create({
+        data: { title: `Child ${index}`, parent: parent.documentId, publishAt: EARLIER },
+      });
+    }
+    const independent = await docs(WIKI).create({ data: { title: "Other", publishAt: PAST } });
+    const result = await run();
+    expect(result.published).toEqual([
+      `${WIKI} ${parent.documentId}`,
+      `${WIKI} ${independent.documentId}`,
+    ]);
+    expect([result.retrying, result.failed]).toEqual([[], []]);
+    // The next minute takes the first batch of the children, now eligible.
+    expect((await run()).published).toHaveLength(SCHEDULE_BATCH);
+  }, 600_000);
+
+  it("a parent cycle (A under B, B under A, both due) ends in notPublishable, with its children", async () => {
+    // Codex review of the fix: both waited for each other forever, with no
+    // schedule error and no retry ever counted.
+    const a = await docs(WIKI).create({ data: { title: "A", publishAt: PAST } });
+    const b = await docs(WIKI).create({
+      data: { title: "B", parent: a.documentId, publishAt: PAST },
+    });
+    await docs(WIKI).update({ documentId: a.documentId, data: { parent: b.documentId } });
+    const child = await docs(WIKI).create({
+      data: { title: "Under A", parent: a.documentId, publishAt: EARLIER },
+    });
+    const result = await run();
+    expect([...result.failed].sort()).toEqual(
+      [a, b, child].map((page) => `${WIKI} ${page.documentId}`).sort(),
+    );
+    expect(result.published).toEqual([]);
+    for (const page of [a, b, child]) {
+      expect((await rows(WIKI, page.documentId))[0]).toMatchObject({
+        publishAt: null,
+        scheduleError: "notPublishable",
+      });
+    }
+    for (const page of [a, b]) {
+      const trail = await audit(page.documentId);
+      expect(trail[trail.length - 1]).toEqual([
+        "scheduleFailed",
+        "cron",
+        expect.any(Number),
+        "notPublishable: the parent chain loops back",
+      ]);
+    }
+    expect(await run()).toEqual(emptyResult());
+  });
+
+  it(`a waiting chain deeper than ${WAIT_CHAIN_MAX_DEPTH} levels whose top waits too is recorded, not waited on`, async () => {
+    // A loop longer than the walk follows looks like this: it is ended.
+    const top = await docs(WIKI).create({ data: { title: "Top", publishAt: PAST } });
+    let above = top.documentId;
+    const chain: string[] = [];
+    for (let level = 0; level <= WAIT_CHAIN_MAX_DEPTH; level += 1) {
+      const page = await docs(WIKI).create({
+        data: { title: `Level ${level}`, parent: above, publishAt: EARLIER },
+      });
+      chain.push(page.documentId);
+      above = page.documentId;
+    }
+    // Close the loop at the top: the top waits for the deepest page.
+    await docs(WIKI).update({ documentId: top.documentId, data: { parent: above } });
+    const result = await run();
+    expect(result.failed.length).toBeGreaterThan(0);
+    expect(result.published).toEqual([]);
+    // Within a few minutes every page of the loop has its error: none waits forever.
+    for (let minute = 0; minute < 5; minute += 1) await run();
+    for (const documentId of [top.documentId, ...chain]) {
+      expect((await rows(WIKI, documentId))[0]).toMatchObject({
+        publishAt: null,
+        scheduleError: "notPublishable",
+      });
+    }
+  }, 120_000);
 
   it("a child whose parent is not due fails for good (notPublishable), as before", async () => {
     const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: FUTURE } });

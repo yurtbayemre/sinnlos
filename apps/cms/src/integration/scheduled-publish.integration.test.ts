@@ -355,6 +355,46 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     }
   }, 300_000);
 
+  it("a parent cycle among scheduled wiki pages ends in notPublishable, not an endless wait (Codex review)", async () => {
+    // The admin panel and the Document Service let a draft's parent point
+    // back at its own child; both pages then waited for each other forever.
+    const base = Date.now();
+    const slug = (name: string) => `it-cycle-${name}-${base}`;
+    const a = await t.strapi.documents(WIKI_PAGE).create({
+      data: { title: "Cycle A", slug: slug("a"), publishAt: ago(60_000) },
+    });
+    const b = await t.strapi.documents(WIKI_PAGE).create({
+      data: { title: "Cycle B", slug: slug("b"), parent: a.documentId, publishAt: ago(60_000) },
+    });
+    await t.strapi
+      .documents(WIKI_PAGE)
+      .update({ documentId: a.documentId, data: { parent: b.documentId } });
+    const attempts = new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)();
+    const result = await scheduler.runScheduledPublishing(t.strapi, new Date(), attempts);
+    expect(result.failed).toEqual(
+      expect.arrayContaining([key(WIKI_PAGE, a.documentId), key(WIKI_PAGE, b.documentId)]),
+    );
+    for (const page of [a, b]) {
+      expect(await draftOf(WIKI_PAGE, page.documentId)).toMatchObject({
+        publishAt: null,
+        scheduleError: "notPublishable",
+      });
+      const failures = await t.strapi.db.query("api::audit-event.audit-event").findMany({
+        where: { targetDocumentId: page.documentId, action: "scheduleFailed" },
+        select: ["source", "detail"],
+      });
+      expect(failures).toEqual([
+        expect.objectContaining({
+          source: "cron",
+          detail: "notPublishable: the parent chain loops back",
+        }),
+      ]);
+      expect(
+        (await rows(WIKI_PAGE, page.documentId)).filter((row) => row.publishedAt != null),
+      ).toEqual([]);
+    }
+  });
+
   it("the expired window: publishAt and expiresAt both passed during a stop: nothing published, nobody notified", async () => {
     const documentId = await scheduledAnnouncement("Expired while down", {
       publishAt: ago(120_000),

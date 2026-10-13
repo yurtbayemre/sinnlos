@@ -2434,9 +2434,14 @@ required env, no grant, no route, no edge change.
     (a lock timeout, a lost connection) is retried every minute and
     becomes `retryExhausted` after the fifth.
   - A lesson whose course, or a wiki page whose parent, is itself
-    scheduled and due waits for it: the run passes it over (it never fills
-    the batch in front of its course or parent) and publishes it the
-    minute after; such a wait costs no retry.
+    unpublished, scheduled and due waits for it: the selection query leaves
+    it out (however many such pages there are, the course or parent is
+    still reached) and the run publishes it the minute after; such a wait
+    costs no retry. Wiki pages whose parents loop back to them (A under B,
+    B under A, all scheduled; the admin panel allows it) can never be
+    published: the run records them as `notPublishable` ("the parent chain
+    loops back" in the audit trail) instead of waiting forever; so does a
+    scheduled chain of more than 64 nested unpublished pages.
   - A withdrawal is never given up. One that fails for good sets Schedule
     error and logs `[scheduler] <type> <documentId> failed: <code>; the
     withdrawal stays pending, next attempt after <time>`, but keeps
