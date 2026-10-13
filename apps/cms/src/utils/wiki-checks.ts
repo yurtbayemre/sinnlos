@@ -44,8 +44,15 @@ import { refuseKeys } from "./write-allowlist";
  * write's checks and its insert (both now under the structure lock) answers
  * `invalid` on `space`.
  *
- * NON-EMPTY SPACES (S15). A wiki-space `delete`, `unpublish` and
- * `discardDraft` take the structure lock. A delete, an unpublish and a
+ * SPACES. Every mutating wiki-space action takes the structure lock too.
+ * A publish (also a create or update with `status: published`) deletes the
+ * space's published row and re-creates it, re-linking the page rows it
+ * loaded BEFORE the delete (@strapi/core 5.57 repository.js publish,
+ * utils/bidirectional-relations.js); a page published in between would
+ * lose its space link with the delete's cascade (Codex re-review of lane
+ * 16B). Under the lock no page write runs in that window.
+ *
+ * NON-EMPTY SPACES (S15). A delete, an unpublish and a
  * discard of a space without a published row (it deletes the space) refuse
  * with `_form: spaceNotEmpty` while any page row links any row of the
  * space: a space's pages would otherwise lose their space (a panel
@@ -67,8 +74,8 @@ import { refuseKeys } from "./write-allowlist";
 
 export const WIKI_CHECKS_LOG = "[wiki-checks]";
 
-/** The wiki-space actions that can remove the space's rows. */
-const SPACE_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"];
+/** The wiki-space actions that can remove the space's rows (the emptiness checks). */
+const SPACE_REMOVAL_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"];
 
 /** The page actions whose payload can name a space. */
 const SPACE_PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
@@ -325,11 +332,11 @@ export function createWikiChecks(strapi: WikiChecksHost): Middleware {
       });
     }
 
-    if (uid === WIKI_SPACE_UID && SPACE_ACTIONS.includes(action)) {
+    if (uid === WIKI_SPACE_UID && MUTATING_ACTIONS.includes(action)) {
       const documentId = params.documentId;
-      if (!isDocumentId(documentId)) return next();
       return strapi.db.transaction(async () => {
         await lockWikiStructure(strapi);
+        if (!SPACE_REMOVAL_ACTIONS.includes(action) || !isDocumentId(documentId)) return next();
         if (action === "discardDraft") {
           const published = await strapi.db
             .query(WIKI_SPACE_UID)

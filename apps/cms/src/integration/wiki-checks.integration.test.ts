@@ -259,6 +259,48 @@ describe.each(testEngines())("wiki checks on %s", (engine) => {
       }
     });
 
+    it("a space republish against a page publish in it: both commit, every page row keeps its space (Codex re-review)", async () => {
+      // The republish re-creates the published space row from the page
+      // links it loaded before deleting the old row; it queues on the
+      // structure row, so no page publish commits inside that window.
+      const target = await seedSpace(t);
+      const held = await holdStructure();
+      const republish = settle(
+        t.strapi.documents(WIKI_SPACE).update({
+          documentId: target.documentId,
+          data: { description: "IT republished" },
+          status: "published",
+        }),
+      );
+      await lockWaits(1);
+      const creation = settle(
+        docs().create({
+          data: {
+            title: "IT Republish Page",
+            slug: `it-republish-${Date.now()}`,
+            space: target.documentId,
+          },
+          status: "published",
+        }),
+      );
+      await lockWaits(2);
+      await held.commit();
+      const [republished, created] = await Promise.all([republish, creation]);
+      expect(republished.ok, String(errorOf(republished))).toBe(true);
+      expect(created.ok, String(errorOf(created))).toBe(true);
+      const page = (created as { value: { documentId: string } }).value;
+      const rows = await rowsOf(t, WIKI_PAGE, page.documentId);
+      expect(rows).toHaveLength(2);
+      for (const row of rows) {
+        expect((row.space as { documentId?: string } | null)?.documentId).toBe(target.documentId);
+      }
+      // A second republish after the page is in keeps the link as well.
+      await t.strapi.documents(WIKI_SPACE).publish({ documentId: target.documentId });
+      for (const row of await rowsOf(t, WIKI_PAGE, page.documentId)) {
+        expect((row.space as { documentId?: string } | null)?.documentId).toBe(target.documentId);
+      }
+    });
+
     it("Codex's interleaving: a discard, an unpublish and a draft save never commit a loop", async () => {
       // A -> D on both rows; B published under A, its draft without a parent.
       const d = await seedPage(t, { space: space.documentId });

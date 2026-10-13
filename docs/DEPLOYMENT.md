@@ -1959,7 +1959,8 @@ lanes; on its own it is a cms change plus one web capability value
   used to delete the published row and drop its pages' space links. The
   panel's "Discard changes" on a space is refused while it would take an
   unpublished page out of the space (Strapi re-links only the pages that
-  have a published version).
+  have a published version). Every space save and publish queues on the
+  structure lock, so a page published at the same moment keeps its space.
 - **Documents carry a file** (K18): `file` (a row id from
   `POST /api/upload`) in the document rules of moderators and department
   authors. A new file must be the caller's own upload that nothing else
@@ -1995,7 +1996,7 @@ lanes; on its own it is a cms change plus one web capability value
   aborting one transaction (40P01, rolled back whole; the client sees a
   500 and retries): a department or team delete against two wiki saves
   of its pages, and an admin-panel bulk publish or unpublish of several
-  wiki pages against a save of one of them. A discard of a page's draft
+  wiki pages (or spaces) against a save of one of them. A discard of a page's draft
   drops the parent link of its subpages that were never published (Strapi
   5.57); they keep their space and author, who sets the parent again.
 

@@ -394,11 +394,28 @@ describe("createWikiChecks", () => {
     ).resolves.toBeNull();
   });
 
-  it("leaves other types and the space's saves alone", async () => {
+  it("serialises a space's saves and publishes with the page writes, no emptiness check (Codex re-review)", async () => {
+    // A publish re-creates the published row from the page links it loaded
+    // before deleting the old one: no page write may run in between.
+    const checks = createWikiChecks(fakeHost(world()));
+    for (const action of ["create", "update", "clone", "publish"]) {
+      events.length = 0;
+      await checks(
+        { uid: SPACE, action, params: { documentId: "s1", status: "published" } },
+        async () => {
+          events.push("action");
+          return null;
+        },
+      );
+      expect(events, action).toEqual(["lock", "action"]);
+    }
+  });
+
+  it("leaves other types and the reads alone", async () => {
     const checks = createWikiChecks(fakeHost(world()));
     for (const [uid, action] of [
-      [SPACE, "update"],
-      [SPACE, "create"],
+      [SPACE, "findMany"],
+      [SPACE, "findOne"],
       ["api::document.document", "delete"],
     ]) {
       events.length = 0;

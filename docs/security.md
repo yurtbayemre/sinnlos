@@ -834,9 +834,9 @@ writers all pass them, and the cms refuses to boot when
   rows are inventoried by `raw-writers.test.ts`: each takes the lock and
   advances the revision, or only raises a targeting flag.
 - **The wiki checks** (`utils/wiki-checks.ts`, batch 16): every mutating
-  wiki-page action and a wiki space's delete, unpublish and deleting
-  discard take ONE structure lock (a reserved revision row), whoever
-  writes. A write that adds a parent link closing a loop is refused
+  wiki-page and wiki-space action takes ONE structure lock (a reserved
+  revision row), whoever writes (a space publish re-creates its published
+  row from the page links it read first: no page write runs in between). A write that adds a parent link closing a loop is refused
   (`parentCycle`) and rolled back; only added links are judged, so a loop
   that already exists blocks no other save and can be repaired. A space
   that any page links can be neither deleted nor unpublished
