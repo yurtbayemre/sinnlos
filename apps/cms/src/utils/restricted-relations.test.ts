@@ -2,16 +2,20 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { errors } from "@strapi/utils";
 import { describe, expect, it } from "vitest";
+import { computeDesiredGrants } from "../bootstrap/permission-matrix";
 import {
   CLOSED_RELATION_TARGETS,
   NON_BYPASS_RELATION_TARGETS,
   RESTRICTED_RELATION_TARGETS,
+  assertPopulateQueryGrants,
   guardRestrictedRelations,
   isRestrictedRelation,
   stripRestrictedRelationsFromOutput,
+  type PopulateQueryRelation,
   type RelationAttribute,
   type RelationModel,
   type RestrictedRelationOptions,
+  type RestrictedRelationRules,
 } from "./restricted-relations";
 
 /**
@@ -55,6 +59,7 @@ const WIKI_REVISION = "api::wiki-revision.wiki-revision";
 const ANNOUNCEMENT = "api::announcement.announcement";
 const EVENT = "api::event.event";
 const USER = "plugin::users-permissions.user";
+const ROLE = "plugin::users-permissions.role";
 const FILE = "plugin::upload.file";
 
 const API_NAMES = ["department", "team", "wiki-page", "wiki-space", "wiki-revision"];
@@ -672,5 +677,290 @@ describe("closed targets bind every caller (CLOSED_RELATION_TARGETS)", () => {
     };
     stripRestrictedRelationsFromOutput(space, MODELS[WIKI_SPACE], CLOSED);
     expect(space).toEqual({ id: 1, pages: [{ id: 2, children: [{ id: 4 }] }] });
+  });
+});
+
+/**
+ * Grants inside populate (batch 15.2). At the root the core refuses a filter
+ * or sort through a relation whose target the caller holds no `find` on
+ * (validateQuery's throwRestrictedRelations); inside a populate it never
+ * asks. The walk reports each relation a populate's filters and sort follow
+ * (`onPopulateQueryRelation`), and assertPopulateQueryGrants refuses the
+ * first one the caller may not `find`, with the core's root answer. The
+ * guard asks `strapi.auth.verify` (wiring: index.register.test.ts); here
+ * the grants are the matrix's own.
+ */
+describe("relations followed inside populate (batch 15.2)", () => {
+  /** The relations the walk reports for `query` on `uid`, as `path → target`. */
+  function reported(
+    uid: string,
+    query: Record<string, unknown>,
+    rules: RestrictedRelationRules = NON_BYPASS_RELATION_TARGETS,
+  ): string[] {
+    const relations: PopulateQueryRelation[] = [];
+    guardRestrictedRelations(query, MODELS[uid], {
+      getModel: OPTIONS.getModel,
+      rules,
+      onPopulateQueryRelation: (relation) => relations.push(relation),
+    });
+    return relations.map(({ path, target }) => `${path} → ${target}`);
+  }
+
+  it("reports every relation a populate's filters follow, through $and/$or/$not and at depth", () => {
+    expect(
+      reported(WIKI_SPACE, {
+        populate: {
+          pages: {
+            filters: {
+              $and: [
+                { department: { name: { $eq: "x" } } },
+                {
+                  $or: [
+                    { team: { name: "y" } },
+                    { $not: { author: { role: { type: { $eq: "admin_role" } } } } },
+                  ],
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toEqual([
+      `pages.department → ${DEPARTMENT}`,
+      `pages.team → ${TEAM}`,
+      `pages.author → ${USER}`,
+      `pages.author.role → ${ROLE}`,
+    ]);
+  });
+
+  it("reports the relations of every sort shape", () => {
+    const sortOn = (sort: unknown) => reported(WIKI_SPACE, { populate: { pages: { sort } } });
+    expect(sortOn("title:asc,department.name:desc")).toEqual([`pages.department → ${DEPARTMENT}`]);
+    expect(sortOn(["team.name:asc", "author.department.name"])).toEqual([
+      `pages.team → ${TEAM}`,
+      `pages.author → ${USER}`,
+      `pages.author.department → ${DEPARTMENT}`,
+    ]);
+    expect(sortOn({ author: { role: { type: "asc" } } })).toEqual([
+      `pages.author → ${USER}`,
+      `pages.author.role → ${ROLE}`,
+    ]);
+    expect(sortOn([{ department: { name: "asc" } }])).toEqual([`pages.department → ${DEPARTMENT}`]);
+  });
+
+  it("reports them in nested populates and in the array form, from every root", () => {
+    expect(
+      reported(WIKI_SPACE, {
+        populate: { pages: { populate: { author: { filters: { department: { name: "x" } } } } } },
+      }),
+    ).toEqual([`pages.author.department → ${DEPARTMENT}`]);
+    expect(
+      reported(WIKI_SPACE, { populate: [{ pages: { filters: { team: { id: 1 } } } }] }),
+    ).toEqual([`pages.team → ${TEAM}`]);
+    expect(
+      reported(USER, { populate: { teams: { populate: { members: { sort: "role.type" } } } } }),
+    ).toEqual([`teams.members.role → ${ROLE}`]);
+    expect(
+      reported(ANNOUNCEMENT, {
+        populate: { author: { filters: { $or: [{ manager: { role: { id: 1 } } }] } } },
+      }),
+    ).toEqual([`author.manager → ${USER}`, `author.manager.role → ${ROLE}`]);
+  });
+
+  it("reports nothing at the root: the core checks the grants there", () => {
+    expect(
+      reported(WIKI_PAGE, {
+        filters: { department: { name: "x" }, $or: [{ author: { role: { id: 1 } } }] },
+        sort: "author.role.type:asc",
+        populate: { author: "true", department: { fields: ["name"] } },
+      }),
+    ).toEqual([]);
+  });
+
+  it("reports relations only, as the core does: no scalar, media or component", () => {
+    expect(
+      reported(WIKI_PAGE, {
+        populate: { department: { filters: { name: "x", headerImage: { name: "y" } } } },
+      }),
+    ).toEqual([]);
+    // A relation below media is a relation again (upload file.folder; the
+    // core 400s it as private before that).
+    expect(
+      reported(WIKI_PAGE, {
+        populate: { department: { filters: { headerImage: { folder: { name: "z" } } } } },
+      }),
+    ).toEqual(["department.headerImage.folder → plugin::upload.folder"]);
+  });
+
+  it("carries the key and the path the core's message names", () => {
+    const relations: PopulateQueryRelation[] = [];
+    guardRestrictedRelations(
+      { populate: { pages: { sort: "author.role.type" } } },
+      MODELS[WIKI_SPACE],
+      { ...OPTIONS, onPopulateQueryRelation: (relation) => relations.push(relation) },
+    );
+    expect(relations).toEqual([
+      { target: USER, key: "author", path: "pages.author" },
+      { target: ROLE, key: "role", path: "pages.author.role" },
+    ]);
+  });
+
+  it("throws on a restricted or closed relation before it would be reported", () => {
+    expectRejected(
+      WIKI_PAGE,
+      {
+        populate: {
+          children: { filters: { $or: [{ author: { id: 1 } }, { revisions: { id: 1 } }] } },
+        },
+      },
+      "Invalid key revisions at children.revisions",
+    );
+    expect(() => reported(TEAM, { populate: { department: { sort: "pages.title" } } })).toThrow(
+      "Invalid key pages at department.pages",
+    );
+  });
+
+  describe("assertPopulateQueryGrants", () => {
+    const relation = (target: string, key: string, path: string): PopulateQueryRelation => ({
+      target,
+      key,
+      path,
+    });
+    const relations = [
+      relation(USER, "author", "pages.author"),
+      relation(DEPARTMENT, "department", "pages.author.department"),
+      relation(USER, "manager", "pages.author.manager"),
+      relation(ROLE, "role", "pages.author.role"),
+    ];
+
+    it("passes when the caller may find every target, asking once per target", async () => {
+      const asked: string[] = [];
+      await assertPopulateQueryGrants(relations, async (target) => {
+        asked.push(target);
+        return true;
+      });
+      expect(asked).toEqual([USER, DEPARTMENT, ROLE]);
+    });
+
+    it("throws the core's 400 for the first relation it may not find, and asks no further", async () => {
+      const asked: string[] = [];
+      const check = assertPopulateQueryGrants(relations, async (target) => {
+        asked.push(target);
+        return target === USER;
+      });
+      await expect(check).rejects.toBeInstanceOf(errors.ValidationError);
+      await expect(check).rejects.toThrow("Invalid key department at pages.author.department");
+      expect(asked).toEqual([USER, DEPARTMENT]);
+    });
+
+    it("asks nothing without relations", async () => {
+      await expect(
+        assertPopulateQueryGrants([], () => Promise.reject(new Error("asked"))),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  /**
+   * The matrix's own `find` grants per role (computeDesiredGrants: the
+   * matrix, the user reads every role holds, and admin_role's role.find).
+   */
+  describe("against the permission matrix", () => {
+    const FINDS = new Map<string, Set<string>>();
+    for (const { role, action } of computeDesiredGrants()) {
+      if (!action.endsWith(".find")) continue;
+      const finds = FINDS.get(role) ?? new Set<string>();
+      finds.add(action.slice(0, -".find".length));
+      FINDS.set(role, finds);
+    }
+    const ROLES = [...FINDS.keys()].sort();
+
+    /** The guard for `role`: its rules, then its grants inside populate. */
+    async function answer(role: string, uid: string, query: Record<string, unknown>) {
+      const moderator = role === "admin_role" || role === "editor";
+      const relations: PopulateQueryRelation[] = [];
+      try {
+        guardRestrictedRelations(query, MODELS[uid], {
+          getModel: OPTIONS.getModel,
+          rules: moderator ? CLOSED_RELATION_TARGETS : NON_BYPASS_RELATION_TARGETS,
+          onPopulateQueryRelation: (found) => relations.push(found),
+        });
+        await assertPopulateQueryGrants(relations, async (target) =>
+          Boolean(FINDS.get(role)?.has(target)),
+        );
+        return "ok";
+      } catch (err) {
+        return (err as Error).message;
+      }
+    }
+
+    it("covers the seven matrix roles", () => {
+      expect(ROLES).toEqual([
+        "admin_role",
+        "authenticated",
+        "department_head",
+        "editor",
+        "guest",
+        "member",
+        "team_lead",
+      ]);
+    });
+
+    it("guest may not select through departments or teams; every other role may", async () => {
+      const filter = { populate: { pages: { filters: { department: { name: "x" } } } } };
+      const sort = { populate: { pages: { sort: "team.name:asc" } } };
+      for (const role of ROLES) {
+        const denied = role === "guest";
+        expect([role, await answer(role, WIKI_SPACE, filter)]).toEqual([
+          role,
+          denied ? "Invalid key department at pages.department" : "ok",
+        ]);
+        expect([role, await answer(role, WIKI_SPACE, sort)]).toEqual([
+          role,
+          denied ? "Invalid key team at pages.team" : "ok",
+        ]);
+      }
+    });
+
+    it("only admin_role may select users by their role, editor included", async () => {
+      const filter = {
+        populate: { author: { filters: { role: { type: { $eq: "admin_role" } } } } },
+      };
+      for (const role of ROLES) {
+        expect([role, await answer(role, WIKI_PAGE, filter)]).toEqual([
+          role,
+          role === "admin_role" ? "ok" : "Invalid key role at author.role",
+        ]);
+      }
+    });
+
+    it("holds admin_role to its grants too", async () => {
+      // No role holds wiki-revision.find (and the relation is closed besides).
+      expect(
+        await answer("admin_role", WIKI_PAGE, {
+          populate: { children: { filters: { revisions: { id: 1 } } } },
+        }),
+      ).toBe("Invalid key revisions at children.revisions");
+      // Nor plugin::upload.folder.find (below media; the core refuses the
+      // private `folder` first).
+      expect(
+        await answer("admin_role", WIKI_PAGE, {
+          populate: { department: { filters: { headerImage: { folder: { id: 1 } } } } },
+        }),
+      ).toBe("Invalid key folder at department.headerImage.folder");
+    });
+
+    it("every role keeps the nested filters and sorts through what it reads", async () => {
+      const kept: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+        [WIKI_SPACE, { populate: { pages: { filters: { author: { username: "x" } } } } }],
+        [WIKI_SPACE, { populate: { pages: { sort: "author.username:asc,title:asc" } } }],
+        [WIKI_PAGE, { populate: { children: { filters: { space: { slug: "x" } } } } }],
+        [WIKI_PAGE, { populate: { children: { filters: { $or: [{ parent: { id: 1 } }] } } } }],
+      ];
+      for (const role of ROLES) {
+        for (const [uid, query] of kept) {
+          expect([role, uid, await answer(role, uid, query)]).toEqual([role, uid, "ok"]);
+        }
+      }
+    });
   });
 });

@@ -1,8 +1,10 @@
 import {
   CLOSED_RELATION_TARGETS,
   NON_BYPASS_RELATION_TARGETS,
+  assertPopulateQueryGrants,
   guardRestrictedRelations,
   stripRestrictedRelationsFromOutput,
+  type PopulateQueryRelation,
   type RelationModel,
 } from "../utils/restricted-relations";
 import { pickContentApiQueryParams, type RouteWithQuerySchema } from "../utils/rest-query-params";
@@ -11,7 +13,7 @@ import { MODERATORS, hasRole } from "./roles";
 type SanitizeQuery = (
   query: Record<string, unknown>,
   schema: RelationModel,
-  options?: { route?: RouteWithQuerySchema | null; [option: string]: unknown },
+  options?: { auth?: unknown; route?: RouteWithQuerySchema | null; [option: string]: unknown },
 ) => Promise<Record<string, unknown>>;
 
 /** The slice of the Strapi instance registerRestrictedRelationGuard touches. */
@@ -25,6 +27,8 @@ export interface RestrictedRelationGuardHost {
     set: (path: string, value: unknown[]) => unknown;
   };
   contentAPI?: { sanitize?: { query?: SanitizeQuery } };
+  /** Strapi's auth service: the strategy's scope check the core's relation checks use. */
+  auth?: { verify?: (auth: unknown, config: { scope: string }) => Promise<unknown> };
 }
 
 /**
@@ -69,8 +73,22 @@ export interface RestrictedRelationGuardHost {
  * the content API. The bypass never covers CLOSED_RELATION_TARGETS (wiki
  * revisions, batch 15.1): those are cut for every caller, on both sides.
  *
- * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query`, boot
- * throws instead of silently re-opening the side channel.
+ * Grants inside populate (batch 15.2) — the core checks the caller's
+ * `<target>.find` for every relation a ROOT filter or sort follows, but not
+ * for the ones nested in a populate's `filters` or `sort` (@strapi/utils
+ * 5.57: validatePopulate passes no auth, and sanitizePopulate's
+ * removeRestrictedRelations skips those keys). The walk reports each of them
+ * and the wrapper asks the same question the core asks at the root,
+ * `strapi.auth.verify(auth, { scope: "<target>.find" })` with the request's
+ * `auth` (for users-permissions: the role's ability), and answers the
+ * core's `Invalid key` 400 for the first one the caller may not `find`.
+ * No bypass: admin_role and editor are held to their own grants. Without
+ * `auth` the verify throws, so the check fails closed; every content-API
+ * controller passes it.
+ *
+ * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query` or
+ * `auth.verify`, boot throws instead of silently re-opening the side
+ * channel.
  */
 export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardHost) {
   const sanitize = strapi.contentAPI?.sanitize;
@@ -80,6 +98,13 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
       "[restricted-relations] strapi.contentAPI.sanitize.query not found — refusing to boot without the FX05 guard",
     );
   }
+  const authService = strapi.auth;
+  const verify = authService?.verify;
+  if (typeof verify !== "function") {
+    throw new Error(
+      "[restricted-relations] strapi.auth.verify not found — refusing to boot without the populate grant check",
+    );
+  }
 
   const getModel = (uid: string) => strapi.getModel(uid);
   const closed = { getModel, rules: CLOSED_RELATION_TARGETS };
@@ -87,12 +112,28 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
   const optionsForCaller = () =>
     hasRole(strapi.requestContext.get()?.state?.user, MODERATORS) ? closed : restricted;
 
+  /** The core's question (remove-restricted-relations.js canAccessScope): may `auth` find `target`? */
+  const canFind = (auth: unknown) => async (target: string) => {
+    try {
+      await verify.call(authService, auth, { scope: `${target}.find` });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   sanitize.query = async (query, schema, sanitizeOptions) => {
     const sanitized = pickContentApiQueryParams(
       await sanitizeQuery.call(sanitize, query, schema, sanitizeOptions),
       sanitizeOptions?.route,
     );
-    return guardRestrictedRelations(sanitized, schema, optionsForCaller());
+    const populateRelations: PopulateQueryRelation[] = [];
+    const guarded = guardRestrictedRelations(sanitized, schema, {
+      ...optionsForCaller(),
+      onPopulateQueryRelation: (relation) => populateRelations.push(relation),
+    });
+    await assertPopulateQueryGrants(populateRelations, canFind(sanitizeOptions?.auth));
+    return guarded;
   };
 
   const factory = (schema: RelationModel) => (data: unknown) =>
