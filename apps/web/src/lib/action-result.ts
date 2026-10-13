@@ -15,8 +15,10 @@
  *     maps it: the action's own mapError first (a specific code for one CMS
  *     answer), then the common mapping by status below.
  *   - Client side: startCmsAction(startTransition, steps) runs the call in a
- *     transition, applies the optimistic update first and hands the code to
- *     the component; the redirect is rethrown there too.
+ *     transition, applies the optimistic update first and hands the code
+ *     (and, additively since batch 15, the whole failure with its `fields`
+ *     and `version`, for the /manage forms) to the component; the redirect
+ *     is rethrown there too.
  *
  * Common mapping (decision 06 §L3):
  *   400 → invalid (with `fields` from details.keys/details.codes; a key
@@ -218,8 +220,13 @@ export interface CmsActionSteps<Code extends string, Data> {
   action: () => Promise<ActionResult<Code, Data>>;
   /** After `ok: true` (the owner's refetch, …), still inside the transition. */
   onSuccess?: (data: Data | undefined) => void | Promise<void>;
-  /** After `ok: false`, with the code the component translates. */
-  onFailure?: (code: Code | CommonCode) => void | Promise<void>;
+  /**
+   * After `ok: false`, with the code the component translates and the whole
+   * failure: a form reads its `fields` (field → code) and, on "conflict",
+   * the CMS's current `version` (decision 06 §L3, §L4). A rejected call
+   * hands `{ ok: false, code: "unavailable" }`.
+   */
+  onFailure?: (code: Code | CommonCode, failure: ActionFailure<Code>) => void | Promise<void>;
   /** Always, last. */
   onSettled?: () => void;
 }
@@ -242,10 +249,10 @@ export function startCmsAction<Code extends string, Data>(
       steps.optimistic?.();
       const result = await steps.action();
       if (result.ok) await steps.onSuccess?.(result.data);
-      else await steps.onFailure?.(result.code);
+      else await steps.onFailure?.(result.code, result);
     } catch (error) {
       unstable_rethrow(error);
-      await steps.onFailure?.("unavailable");
+      await steps.onFailure?.("unavailable", actionFailure("unavailable"));
     } finally {
       steps.onSettled?.();
     }

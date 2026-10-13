@@ -98,12 +98,27 @@ export function ModalDialog({
   );
 }
 
+/** The confirm button's look: a destructive red, or the primary colour. */
+export type ConfirmTone = "default" | "destructive";
+
+export const CONFIRM_TONE_CLASS: Readonly<Record<ConfirmTone, string>> = {
+  destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+  default: "bg-primary text-primary-foreground hover:bg-primary/90",
+};
+
 /**
  * A yes/no question on {@link ModalDialog}: Cancel (focused first, the safe
- * choice; it closes the dialog) and a destructive confirm button that
- * shows `pendingLabel` and is disabled while `pending`. `error` is shown
- * as an alert above the buttons and the dialog stays open; closing it is
- * the caller's decision (a successful action usually navigates away).
+ * choice; it closes the dialog) and a confirm button that shows
+ * `pendingLabel` and is disabled while `pending`. `error` is shown as an
+ * alert above the buttons and the dialog stays open; closing it is the
+ * caller's decision (a successful action usually navigates away).
+ *
+ * `tone` (batch 15, decision 06 §L5; additive): "destructive" (the
+ * default, so the existing callers are unchanged) for delete and discard,
+ * "default" for a question that destroys nothing (publish, unpublish,
+ * overwrite). An async confirmation is the caller's `pending`: onConfirm
+ * starts the work (a transition) and the caller passes its pending state
+ * back.
  */
 export function ConfirmDialog({
   open,
@@ -116,7 +131,9 @@ export function ConfirmDialog({
   confirmIcon,
   pending = false,
   error,
+  tone = "destructive",
   onConfirm,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -130,7 +147,11 @@ export function ConfirmDialog({
   pending?: boolean;
   /** The failure text of the last attempt, or null. */
   error?: ReactNode;
+  /** The confirm button's look (default: destructive). */
+  tone?: ConfirmTone;
   onConfirm: () => void;
+  /** Shown between the description and the buttons (a field, a note). */
+  children?: ReactNode;
 }) {
   const tCommon = useTranslations("common");
   const cancelRef = useRef<HTMLButtonElement>(null);
@@ -143,6 +164,7 @@ export function ConfirmDialog({
       description={description}
       initialFocus={cancelRef}
     >
+      {children}
       {error ? (
         <p role="alert" className="mt-3 text-sm text-destructive">
           {error}
@@ -162,7 +184,11 @@ export function ConfirmDialog({
           type="button"
           onClick={onConfirm}
           disabled={pending}
-          className="inline-flex items-center gap-2 rounded-xl bg-destructive px-4 py-2 text-sm font-medium text-destructive-foreground outline-none transition-colors hover:bg-destructive/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+          data-tone={tone}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50",
+            CONFIRM_TONE_CLASS[tone],
+          )}
         >
           {confirmIcon}
           {pending && pendingLabel !== undefined ? pendingLabel : confirmLabel}
