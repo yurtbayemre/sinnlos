@@ -86,7 +86,8 @@ describe.each(testEngines())("the wiki revision draft guard on %s", (engine) => 
 
   beforeAll(async () => {
     database = await createTestDatabase(engine);
-    const t = await createTestStrapi({ database });
+    const t = await createTestStrapi({ database, fixtures: false });
+    await untilPoolIdle(t);
     await t.stop();
   });
 
@@ -117,6 +118,7 @@ describe.each(testEngines())("the wiki revision draft guard on %s", (engine) => 
 
       await database.sql("DELETE FROM wiki_revisions WHERE published_at IS NULL");
       const t = await createTestStrapi({ database, fixtures: false });
+      await untilPoolIdle(t);
       await t.stop();
     },
     BOOT_BUDGET,
