@@ -44,6 +44,13 @@ export function MarkdownEditor({
 }) {
   const t = useTranslations("manage.common.markdown");
   const [tab, setTab] = useState<"write" | "preview">(defaultTab);
+  // A new error shows the Write tab: the refused textarea must be visible
+  // to take the focus and to be fixed (state derived from the prop).
+  const [shownError, setShownError] = useState(error);
+  if (error !== shownError) {
+    setShownError(error);
+    if (error && tab === "preview") setTab("write");
+  }
   const writeRef = useRef<HTMLButtonElement>(null);
   const previewRef = useRef<HTMLButtonElement>(null);
   const base = useId();

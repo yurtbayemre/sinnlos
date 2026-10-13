@@ -48,6 +48,9 @@ export interface SaveInput {
   retarget?: unknown;
 }
 
+const isRecord = (value: unknown): value is SaveInput =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
 export interface SaveSpec<V extends object> {
   coerce(raw: unknown): V;
   build(values: V, initial: V | null, ctx: PayloadContext): BuiltPayload;
@@ -57,18 +60,22 @@ export interface SaveSpec<V extends object> {
 
 export async function saveItem<V extends object>(
   area: ManageArea,
-  input: SaveInput,
+  rawInput: SaveInput,
   spec: SaveSpec<V>,
 ): Promise<AuthoringActionResult> {
+  // A Server Action's argument is whatever the client sent: not an object
+  // reads as an empty one (refused below), never as a TypeError.
+  const input: SaveInput = isRecord(rawInput) ? rawInput : { values: undefined };
   const explicit = hasDrafts(area);
   const mode = input.documentId === undefined || input.documentId === null ? "create" : "update";
-  if (explicit && !isWriteStatus(input.status)) return actionFailure("invalid");
   const status = explicit && isWriteStatus(input.status) ? input.status : undefined;
   const schedules =
     input.schedule !== undefined && input.schedule !== null && SCHEDULE_FIELDS[area].length > 0;
 
+  // The capability first (§L3 step 1), then the shape of the request.
   const gate = await authorContext(area, saveVerbs(mode, status === "published", schedules));
   if (!gate.ok) return gate.failure;
+  if (explicit && !status) return actionFailure("invalid");
   if (mode === "update" && !validReference(input.documentId, input.version)) {
     return actionFailure("invalid");
   }

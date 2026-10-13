@@ -236,6 +236,17 @@ describe("saves (create and update)", () => {
     expect(strapiMock).not.toHaveBeenCalled();
   });
 
+  it("reads an argument that is no object as an empty save, never a TypeError", async () => {
+    for (const input of [null, "x", 42, [1]]) {
+      await expect(announcements.saveAnnouncement(input as never)).resolves.toEqual({
+        ok: false,
+        code: "invalid",
+      });
+      await expect(polls.savePoll(input as never)).resolves.toMatchObject({ ok: false });
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
   it("answers forbidden without the capability, unavailable without a readable viewer", async () => {
     for (const role of ["member", "guest", "team_lead", null, "Editor"]) {
       viewerRef.current = viewer(role);

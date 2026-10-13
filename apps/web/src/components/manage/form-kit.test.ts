@@ -6,6 +6,7 @@ import { DateTimeField, DayField } from "./date-fields";
 import { MarkdownEditor } from "./markdown-editor";
 import { NoDepartmentExplanation } from "./page-parts";
 import { PublishBar, publishBarButtons } from "./publish-bar";
+import { sameValues } from "./use-item-editor";
 import { isChecked, isDisabled, MESSAGES, render, tagById } from "./render.test.helper";
 import { StatusBadges } from "./status-badges";
 
@@ -352,5 +353,55 @@ describe("a department head without a department (§N1)", () => {
     const html = render(createElement(NoDepartmentExplanation));
     expect(html).toContain(common.departmentAuthor.noDepartmentTitle);
     expect(html).toContain(common.departmentAuthor.noDepartmentHint);
+  });
+});
+
+describe("unsaved changes (sameValues)", () => {
+  it("compares id lists as sets, a poll's answers in order", () => {
+    expect(
+      sameValues({ departments: ["a", "b"], title: "x" }, { departments: ["b", "a"], title: "x" }),
+    ).toBe(true);
+    expect(sameValues({ departments: ["a"] }, { departments: ["a", "b"] })).toBe(false);
+    expect(sameValues({ options: ["Yes", "No"] }, { options: ["No", "Yes"] })).toBe(false);
+    expect(sameValues({ title: "x", pinned: false }, { title: "x", pinned: true })).toBe(false);
+  });
+});
+
+describe("Save draft on an unchanged item", () => {
+  it("is disabled until something changed (an empty save would show Changes pending)", () => {
+    const handlers = {
+      saveDraft: noop,
+      saveAndPublish: noop,
+      publish: noop,
+      unpublish: noop,
+      discard: noop,
+      delete: noop,
+      schedule: noop,
+    };
+    const meta = {
+      documentId: "d",
+      version: "3",
+      status: "published" as const,
+      publishedAt: "2026-10-01T08:00:00.000Z",
+      publishAt: null,
+      unpublishAt: null,
+      scheduleError: null,
+    };
+    const bar = (dirty: boolean) =>
+      render(
+        createElement(PublishBar, {
+          area: "events",
+          verbs: ["create", "edit", "publish", "unpublish", "discard"],
+          meta,
+          dirty,
+          pending: false,
+          running: null,
+          handlers,
+        }),
+      );
+    const save = (html: string) =>
+      html.match(new RegExp(`<button[^>]*>${common.actions.saveDraft}</button>`))?.[0] ?? "";
+    expect(isDisabled(save(bar(false)))).toBe(true);
+    expect(isDisabled(save(bar(true)))).toBe(false);
   });
 });

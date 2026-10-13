@@ -35,9 +35,31 @@ export interface ItemActions {
   remove: (documentId: string, version: string) => Promise<AuthoringActionResult>;
 }
 
-/** Plain comparison of two values objects (strings, booleans, lists). */
-export function sameValues(a: unknown, b: unknown): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+/** Lists whose order means something (a poll's answers: votes point at an index). */
+const ORDERED_LISTS = new Set(["options"]);
+
+/**
+ * Whether two values objects say the same (strings, booleans, lists). A
+ * list of ids is a set (a checkbox list puts its selection in option
+ * order); `options` keeps its order.
+ */
+export function sameValues(a: object, b: object): boolean {
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)]);
+  for (const key of keys) {
+    const x = left[key];
+    const y = right[key];
+    if (Array.isArray(x) && Array.isArray(y) && !ORDERED_LISTS.has(key)) {
+      if (x.length !== y.length) return false;
+      const sortedX = [...x].map(String).sort();
+      const sortedY = [...y].map(String).sort();
+      if (sortedX.some((value, i) => value !== sortedY[i])) return false;
+    } else if (JSON.stringify(x) !== JSON.stringify(y)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 export function useItemEditor<V extends object, E extends EditableBase>({
@@ -112,6 +134,9 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     (status: "draft" | "published", schedule?: ScheduleValues) => {
       const snapshot = values;
       const creating = meta === null;
+      // A draft save without a change would write an empty draft, advance
+      // the revision (other tabs get 412) and show "Changes pending".
+      if (!creating && !schedule && !dirty && (status === "draft" || !hasDrafts(area))) return;
       const intent = schedule
         ? "schedule"
         : creating
@@ -144,6 +169,8 @@ export function useItemEditor<V extends object, E extends EditableBase>({
               keys.length === 0 ||
               keys.some((key) => key !== "publishAt" && key !== "unpublishAt")
             ) {
+              // The focus goes to the refused field, not back to Schedule….
+              scheduleOpener.current = null;
               setScheduleOpen(false);
             }
           },
@@ -169,7 +196,7 @@ export function useItemEditor<V extends object, E extends EditableBase>({
         },
       );
     },
-    [values, meta, initial, retarget, extraInput, run, actions, flash, t, router, area],
+    [values, meta, initial, retarget, dirty, extraInput, run, actions, flash, t, router, area],
   );
 
   const transition = useCallback(

@@ -135,7 +135,7 @@
     "copied": "Your text is on the clipboard.",
     "copyFailed": "Copying did not work. Select your text in the form and copy it yourself.",
     "overwrite": "Overwrite",
-    "overwriteHint": "Saves your version over the current one."
+    "overwriteHint": "Saves the fields you changed over the current version; everything else keeps the other changes."
   },
   "success": {
     "created": "Saved as a draft.",

@@ -287,6 +287,7 @@ export function AnnouncementEditor({
           blocked={editor.meta === null && optionsFailed}
           running={editor.running}
           handlers={item.handlers}
+          invokerRef={editor.invokerRef}
         >
           <BackToList area="announcements" />
         </PublishBar>

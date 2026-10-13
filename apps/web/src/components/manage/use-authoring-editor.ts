@@ -101,6 +101,15 @@ export type EditorIntent =
 
 export type ActionCall = (version: string | undefined) => Promise<AuthoringActionResult>;
 
+/** The intents that send the form's values. */
+const SAVE_INTENTS: readonly EditorIntent[] = [
+  "create",
+  "saveDraft",
+  "saveAndPublish",
+  "save",
+  "schedule",
+];
+
 export interface RunOptions {
   /** After `ok: true`, with the answer's data (null: the document is gone). */
   onSuccess?: (data: AuthoringResult | null) => void | Promise<void>;
@@ -119,8 +128,11 @@ function focusField(formId: string, field: string): boolean {
   const target = element.matches("input, textarea, select, button")
     ? element
     : element.querySelector<HTMLElement>("input, textarea, select, button");
-  target?.focus();
-  return !!target;
+  if (!target) return false;
+  target.focus();
+  // A control in a hidden panel or a disabled one does not take the focus:
+  // the caller falls back to the alert.
+  return document.activeElement === target;
 }
 
 export function useAuthoringEditor<Source extends object | null>({
@@ -204,8 +216,17 @@ export function useAuthoringEditor<Source extends object | null>({
       setFailure(null);
       setConflict(null);
       setRunning(intent);
+      // The control that started it, unless that is a dialog's own button
+      // (a confirmation, Overwrite): those unmount, and the bar button that
+      // opened the confirmation was recorded on its click (PublishBar).
       const active = typeof document === "undefined" ? null : document.activeElement;
-      if (active instanceof HTMLElement && active !== document.body) invokerRef.current = active;
+      if (
+        active instanceof HTMLElement &&
+        active !== document.body &&
+        !active.closest('[role="dialog"]')
+      ) {
+        invokerRef.current = active;
+      }
       startCmsAction(startTransition, {
         action: () => call(versionOverride ?? meta?.version),
         onSuccess: async (data) => {
@@ -259,15 +280,18 @@ export function useAuthoringEditor<Source extends object | null>({
    */
   const overwrite = useCallback(() => {
     if (!conflict?.version) return;
-    const { options } = conflict;
+    const { options, intent } = conflict;
+    // Only a save sent form values; a transition (unpublish, close now,
+    // publish) keeps the form's unsaved edits as it would without a conflict.
+    const save = SAVE_INTENTS.includes(intent);
     run(
-      conflict.intent,
+      intent,
       conflict.call,
       {
         ...options,
         onSuccess: async (data) => {
           await options.onSuccess?.(data);
-          if (data) requestReset();
+          if (data && save) requestReset();
         },
       },
       conflict.version,

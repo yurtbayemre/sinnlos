@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -47,6 +47,7 @@ export function PublishBar({
   blocked = false,
   running,
   handlers,
+  invokerRef,
   children,
 }: {
   area: ManageArea;
@@ -63,6 +64,11 @@ export function PublishBar({
   blocked?: boolean;
   running: EditorIntent | null;
   handlers: PublishBarHandlers;
+  /**
+   * Set to the button that opens a confirmation: the confirmation's own
+   * button unmounts, so a conflict dialog after it returns the focus here.
+   */
+  invokerRef?: RefObject<HTMLElement | null>;
   /** More controls at the end (the back link). */
   children?: ReactNode;
 }) {
@@ -113,6 +119,9 @@ export function PublishBar({
           type="button"
           variant={variant}
           disabled={pending || (blocked && kind === "saveAndPublish")}
+          onClick={(event) => {
+            if (invokerRef) invokerRef.current = event.currentTarget;
+          }}
         >
           {text}
         </Button>
@@ -132,7 +141,9 @@ export function PublishBar({
         <Button
           type="button"
           variant={showSaveAndPublish || showPublish ? "outline" : "default"}
-          disabled={pending || blocked}
+          // Nothing to save on an unchanged item (an empty draft save would
+          // advance the revision and show "Changes pending").
+          disabled={pending || blocked || (!creating && !dirty)}
           onClick={handlers.saveDraft}
         >
           {label(creating ? "create" : "saveDraft", t("actions.saveDraft"))}
@@ -163,7 +174,10 @@ export function PublishBar({
           type="button"
           variant="outline"
           disabled={pending || blocked}
-          onClick={handlers.schedule}
+          onClick={(event) => {
+            if (invokerRef) invokerRef.current = event.currentTarget;
+            handlers.schedule();
+          }}
         >
           {label("schedule", t("actions.schedule"))}
         </Button>

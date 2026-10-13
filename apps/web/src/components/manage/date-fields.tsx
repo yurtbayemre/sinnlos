@@ -43,6 +43,9 @@ export function DateTimeField({
 }) {
   const t = useTranslations("manage.common.fields");
   const zoneHint = t("timeZone", { zone: timeZone });
+  // The inputs that take the focus carry the group's hint and error too
+  // (FieldGroup's ids): a screen reader reads them on the control itself.
+  const describedBy = [`${id}-hint`, error ? `${id}-error` : null].filter(Boolean).join(" ");
   return (
     <FieldGroup
       id={id}
@@ -61,6 +64,7 @@ export function DateTimeField({
             type="date"
             value={date}
             disabled={disabled}
+            aria-describedby={describedBy}
             aria-invalid={error ? true : undefined}
             aria-required={required ? true : undefined}
             onChange={(event) => onDateChange(event.target.value)}
@@ -76,6 +80,7 @@ export function DateTimeField({
             type="time"
             value={time}
             disabled={disabled}
+            aria-describedby={describedBy}
             aria-invalid={error ? true : undefined}
             aria-required={required ? true : undefined}
             onChange={(event) => onTimeChange(event.target.value)}

@@ -135,7 +135,7 @@
     "copied": "Ihr Text ist in der Zwischenablage.",
     "copyFailed": "Das Kopieren hat nicht geklappt. Markieren Sie Ihren Text im Formular und kopieren Sie ihn selbst.",
     "overwrite": "Überschreiben",
-    "overwriteHint": "Speichert Ihre Fassung über die aktuelle."
+    "overwriteHint": "Speichert die Felder, die Sie geändert haben, über die aktuelle Fassung; alles andere behält die anderen Änderungen."
   },
   "success": {
     "created": "Als Entwurf gespeichert.",

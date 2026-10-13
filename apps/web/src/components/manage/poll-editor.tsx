@@ -316,7 +316,7 @@ export function PollEditor({
           {(creating ? can("create") : can("edit")) && (
             // A create without the department list could only reach everyone
             // (decision 02: fail closed), so it waits for a reload.
-            <Button type="submit" disabled={disabled || (creating && optionsFailed)}>
+            <Button type="submit" disabled={disabled || (creating ? optionsFailed : !item.dirty)}>
               {editor.running === "create" ||
               editor.running === "saveAndPublish" ||
               editor.running === "save"
@@ -331,7 +331,14 @@ export function PollEditor({
               open={confirm === "close"}
               onOpenChange={(open) => setConfirm(open ? "close" : null)}
               trigger={
-                <Button type="button" variant="outline" disabled={disabled}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={disabled}
+                  onClick={(event) => {
+                    editor.invokerRef.current = event.currentTarget;
+                  }}
+                >
                   {editor.running === "close" ? tc("actions.working") : tc("actions.closeNow")}
                 </Button>
               }
@@ -350,7 +357,14 @@ export function PollEditor({
               open={confirm === "delete"}
               onOpenChange={(open) => setConfirm(open ? "delete" : null)}
               trigger={
-                <Button type="button" variant="destructive" disabled={disabled}>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={disabled}
+                  onClick={(event) => {
+                    editor.invokerRef.current = event.currentTarget;
+                  }}
+                >
                   {editor.running === "delete" ? tc("actions.working") : tc("actions.delete")}
                 </Button>
               }
