@@ -1400,8 +1400,8 @@ systemctl start docker
 > state as the rollback target, a clean checkout, `--check` and
 > `--dry-run`, the permission diff, the D-PT01 preflight and the
 > department-heads report (every `department_head` with a department can
-> author after the deploy), and the voted polls that can no longer be
-> published. After it: the boot lines (`granted 65`, drift over 142
+> author after the deploy), and the count of orphaned poll votes (polls
+> unpublished before batch 15). After it: the boot lines (`granted 65`, drift over 142
 > managed actions, the scheduler every minute), the new schema, `/manage`
 > as an editor and a department head, and the next morning's
 > `audit-janitor`. A rollback to batch 14 freezes authoring and saves the
@@ -2029,26 +2029,48 @@ psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTG
      `department_head` without a department authors nothing).
    - `announcement-retarget.sql` and `schedule-export.sql` read columns
      batch 15 adds: on this schema they stop with `ERROR: column
-     "retarget_required" does not exist` and `… "publish_at" does not
-     exist`, and change nothing. That is the expected result here; step 9
-     runs them again.
+     "retarget_required" does not exist` and `ERROR: column d.publish_at
+     does not exist` (followed by a `HINT:` line that suggests
+     `d.published_at`), and change nothing. That is the expected result
+     here; step 9 runs them again.
 
-6. **Polls with votes but no published version,** which batch 15 lets
-   nobody publish again (lane 15A):
+6. **Votes of polls unpublished before batch 15.** On batch 14 (and
+   earlier), unpublishing a poll deleted its published row, and the link of
+   every vote on it (`poll_votes_poll_lnk`) went with it: those votes are
+   orphaned. They no longer count anywhere, the poll counts as unvoted
+   (its answers can be edited and it can be published again), and a voter
+   can vote on it again once it is republished; only the new vote counts.
+   A query for "unpublished polls with votes" therefore finds none. Count
+   the orphaned votes instead (read-only):
 
    ```bash
    psql_db -X <<'SQL'
-   SELECT DISTINCT p.document_id, p.question
-     FROM polls p
-     JOIN poll_votes_poll_lnk l ON l.poll_id = p.id
-    WHERE NOT EXISTS (SELECT 1 FROM polls q
-                       WHERE q.document_id = p.document_id
-                         AND q.published_at IS NOT NULL);
+   SELECT count(*) AS orphaned_votes
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
    SQL
    ```
 
-   Usually none. For each row: leave it unpublished, or delete it and
-   create a new poll after the deploy.
+   Usually 0. Batch 15 changes nothing about them; from batch 15 on a poll
+   with a vote can no longer be unpublished, so no new ones appear.
+   Removing them is optional and the owner's decision: they are already
+   invisible and uncounted; the only effect is a tidier `poll_votes`. If
+   wanted, preview and delete them in one transaction, first ending with
+   `ROLLBACK` (the `DELETE n` must equal the preview's count), then with
+   `COMMIT`:
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN;
+   SELECT v.id, v.created_at
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id)
+    ORDER BY v.id;
+   DELETE FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
+   ROLLBACK;
+   SQL
+   ```
 
 **Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
 `bigemo`. Both images rebuild. Note the pre-deploy generation its backup
@@ -2143,8 +2165,12 @@ it; running it is the owner's decision (below).
       (2027-03-28): it is refused.
     - In the admin panel: save an announcement draft with Publish at a
       minute ahead; within two minutes it is published, the list shows
-      Published, and **Audit event** lists `schedulePublish` for it.
-      Editing or deleting an audit entry is refused.
+      Published, and **Audit event** lists `schedulePublish` for it. The
+      new fields carry their attribute names (`publishAt`, `unpublishAt`,
+      `scheduleError`, `retargetRequired`). The Audit event list offers
+      _Create new entry_ and opens entries in a form that looks editable,
+      but every create, save and delete there is refused ("Audit events
+      are append-only").
     - As a department head with a department (if there is one): `/manage`
       shows _Announcements_ and _Events_ only; a new announcement shows
       the department read-only and has no _Pinned_; the lists hold only
@@ -2186,21 +2212,29 @@ it; running it is the owner's decision (below).
   department sees an explanation instead of the forms.
 - **The admin panel** gains Publish at (and Unpublish at), Schedule error
   and, for super admins, the read-only **Audit event** list (365 days).
+  The new fields show their attribute names (`publishAt`, `unpublishAt`,
+  `scheduleError`, `retargetRequired`); the Audit event list shows _Create
+  new entry_ and an editable-looking form, but every write is refused.
   A lesson in an unpublished course and a wiki page under an unpublished
   parent can no longer be published there; a poll's answers and
   anonymity no longer change after its first vote.
-- **Polls:** up to 20 answers; **a poll with a vote can no longer be
-  unpublished** (delete it or let it close), and a poll with votes but no
-  published version cannot be published again.
+- **Polls:** up to 20 answers; **a poll voted on under batch 15 can no
+  longer be unpublished** (delete it or let it close), and its answers and
+  anonymity are frozen. A poll unpublished before batch 15 lost the link
+  of its votes then (step 6): it counts as unvoted and can be edited and
+  published again, and its old votes do not count.
 - **Members:** an announcement whose targeting is gone (D-PT01, a deleted
   department or team) is hidden from them until a moderator re-targets
   it; authors are no longer notified of their own posts.
 - **Scripts** that write these five types through the content API need
   `?status=`, `If-Match`, documentIds for departments and an offset on
   every datetime (lane 15A's "Who is affected").
-- **Known limitation:** the `/manage` preview of an announcement shows its
-  author as "Unknown" (the form's answer carries no author name); the
-  published card shows the author as before.
+- **Known limitations:** the `/manage` preview of an announcement shows its
+  author as "Unknown" (the form's answer carries no author name; the
+  published card shows the author as before). A department head who opens
+  another department's item by its URL sees "Page not found", but the web
+  answers that page with HTTP 200 (a streamed not-found; the cms itself
+  answers 404, so nothing leaks).
 
 **Release notes** (consolidated; decision 06 phase 1, items 1 to 9):
 
@@ -2219,7 +2253,9 @@ it; running it is the owner's decision (below).
    delete, and discard changes only on items that have a published version.
 8. An announcement whose audience is "departments" but has neither a
    department nor a team is visible to admins and editors only until they
-   re-target it (preflight count: N). In the admin panel, linking a
+   re-target it (N such announcements: N is `published_documents` of
+   step 5's preflight on production; it was 1 in the staging rehearsal).
+   In the admin panel, linking a
    department or team sets Audience to "departments", and removing the
    links no longer makes it company-wide: set Audience to "all"
    explicitly. The same holds for an event's Notify audience.
@@ -2280,8 +2316,9 @@ kinds that R3 can unpublish apart:
   export no longer lists it; this saved list is the record.
 - `pending_publish` (a draft with `publish_at`): waits; R6b re-enters it if
   a batch 14 write dropped it. `leave_alone` (the flag-only events): never
-  publish or discard them on batch 14; R6a re-applies the flag. `none` (a
-  draft row, or a withdrawal time on an unpublished item): nothing to do.
+  publish them on batch 14 (a publish there notifies everyone); R6a
+  re-applies the flag if a batch 14 write dropped it. `none` (a draft row,
+  or a withdrawal time on an unpublished item): nothing to do.
 
 R3. **Unpublish what must stay hidden on batch 14**, in `/manage` or the
 panel while batch 15 still runs:
@@ -2291,8 +2328,10 @@ panel while batch 15 still runs:
   `unpublish_at` falls inside it: withdrawn early, and for good (never
   restored once their `unpublish_at` has passed).
 
-Do not publish or discard the flag-only events (`leave_alone`) on batch 14
-(each would notify everyone).
+Do not publish a flag-only event (`leave_alone`) on batch 14: a publish
+there notifies everyone (in the rehearsal all 7 users). A "Discard
+changes" on it notifies nobody, but drops the flag and the schedule from
+its draft (R6a and R6b restore them); avoid it too.
 
 R4. **Retag both images** (`B14_TAG` from step 1, `9a5beb517529`):
 
@@ -2303,26 +2342,30 @@ docker tag "infra-cms:${B14_TAG}" infra-cms:latest
 ```
 
 Then the effective permissions. On its boot batch 14's users-permissions
-deletes one row per authoring action its controllers lack (22 rows; in the
-rehearsals admin_role's), and its drift line lists department_head's 6
-core `create`/`update` rows. Batch 14's
+deletes one row per authoring action its controllers lack (22 rows; whose
+varies, admin_role's in one rehearsal, editor's in another), and its drift
+line lists department_head's 6 core `create`/`update` rows. Batch 14's
 `git show "${B14_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`
-then shows about **43 `EXTRA_IN_DB` rows**: the other 37 authoring rows
-(editor's 22 and department_head's 15; no batch 14 route serves them) and
-department_head's 6 core rows (the batch 14 routes refuse a department
-head with `is-admin-or-editor`). **Harmless; leave them.** The
+then shows **43 `EXTRA_IN_DB` rows** either way: the other 37 authoring
+rows (the other moderator role's 22 and department_head's 15; no batch 14
+route serves them) and department_head's 6 core rows (the batch 14 routes
+refuse a department head with `is-admin-or-editor`). **Harmless; leave them.** The
 roll-forward re-creates the 22.
 
 R5. **During the window** batch 14 runs no schedule: a due publish simply
 waits, and a published document or quick link whose exported
 `unpublish_at` falls due (`final_withdrawal`) stays visible. An editor
-unpublishes each such item in the admin panel at its time; that
-withdrawal is final.
+unpublishes each such item in the admin panel at its time with
+**Unpublish and keep last draft** (the draft keeps its `unpublish_at`,
+which the roll-forward's scheduler then clears, R6b); that withdrawal is
+final.
 
 R6. **The roll-forward** is a normal `infra/deploy.sh` (it notes that the
 containers do not run the last-known-good images). Its boot logs `granted
-22 permission(s)` and the backfill's "from the twin" counts. Before anyone
-authors again:
+22 permission(s)`, and a `[targeting-flags]` line only when the backfill
+restored or raised something (with its "from the twin" counts); no line
+means it had nothing to restore (an item whose two rows both lost a flag
+is R6a's). Before anyone authors again:
 
 - **a. Flags.** The boot backfill's twin rule restored a lost event
   `notify_audience` and a lost `retarget_required` from the row of the same
@@ -2378,10 +2421,21 @@ authors again:
   14 write dropped it), so the scheduler withdraws it on time. Then lift
   the freeze.
 
-**Staging rehearsal:** the combined rehearsal of the batch (the batch 14
-image, then this one, on a production-like Postgres 16 with the rollback
-cycle above) is recorded here once it has run; the lane rehearsals are in
-the four notes below.
+**Combined staging rehearsal (2026-10-13, 85c8909 and a824aa5):** passed.
+Upgrade deploy 90 s (cms about 6 s to started, web outage about 15 s),
+boot lines as listed; `/manage` walks as editor and department head
+(light and dark, 360 and 1280 px), a stale-version conflict, scheduling
+and withdrawals, the department-head refusals (400, 403, 404, 428, 412),
+the targeting matrix, the voted-poll freeze, the append-only audit trail,
+a department delete and re-targeting; two full rollback cycles R1 to R6
+(rollback 7.6 s; 43 `EXTRA_IN_DB` rows on batch 14; the guarded re-apply;
+final withdrawals stayed withdrawn; `hide_then_restore` items republished
+and restricted again); a wiki parent before its children; a parent cycle
+ended `notPublishable`. The fixes made after it (the scheduler's
+time-bounded dependency wait, the re-check under the lock, the publish
+selection without due withdrawals, the `/manage` re-targeting texts) are
+covered by unit and integration tests on SQLite and Postgres 16. The lane
+rehearsals are in the four notes below.
 
 #### Upgrading to the authoring document layer (batch 15, lane 15B)
 
@@ -2580,8 +2634,8 @@ and how to cover it:
    A published document or quick link whose exported `unpublish_at` falls
    inside the rollback window (`on_rollback = final_withdrawal`) stays
    published past it: an editor withdraws it by hand in the panel at its
-   time (or before the rollback, when the window is short). That
-   withdrawal is final: the item is never published again once its
+   time with "Unpublish and keep last draft" (or before the rollback, when
+   the window is short). That withdrawal is final: the item is never published again once its
    `unpublish_at` has passed, also after the roll-forward's scheduler
    cleared the leftover field.
 4. **What an old-image write loses.** A publish or "Discard changes" there
@@ -2777,8 +2831,10 @@ touches without `retarget_required` and `notify_audience` (NULL).
    `announcement-audience-preflight.sql`, `announcement-retarget.sql` and
    `schedule-export.sql` (lane 15B's schedules).
 2. Unpublish what must stay hidden during the window: the preflight's rows
-   and the marked announcements. Do not publish or discard the flag-only
-   events of `announcement-retarget.sql` on the old image.
+   and the marked announcements. Do not publish the flag-only events of
+   `announcement-retarget.sql` on the old image (a publish there notifies
+   everyone); a "Discard changes" there notifies nobody but drops the flag
+   from the draft (step 3 restores it).
 3. On the roll-forward the boot backfill's twin rule restores a value one
    row of a document lost from the other row. For documents in the saved
    lists where both rows lost it, re-apply it with the guarded raise-only
@@ -2892,9 +2948,11 @@ mirror the new grants.
   what the freeze compares with, so **a poll with a vote can no longer be
   unpublished** (400, `details.keys: ["_form"]`, also "unpublish and
   discard the draft" and the bulk unpublish; delete it or let it close),
-  and **a poll that already has votes but no published version can no
-  longer be published** (same 400; create a new poll). List the latter
-  before the deploy (step 3 below).
+  and a poll that has votes but no published version could no longer be
+  published (same 400). On batch 14, though, an unpublish deleted the
+  vote links with the published row, so such polls come out unvoted and
+  publishable; their orphaned votes are counted in step 3 below and in
+  "Deploying batch 15", step 6.
 - **Grants: +65 rows** (`prod-perm-diff.sql` and the permission snapshot
   change deliberately): the five authoring actions on announcement,
   event, quick-link and document and two on poll for admin_role and
@@ -2920,21 +2978,16 @@ mirror the new grants.
    no `MISSING_IN_DB` and no `EXTRA_IN_DB` rows besides the known ones.
 2. `infra/diagnostics/department-heads.sql` (lane 15D): every user with the
    `department_head` role and a department will be a department author.
-3. Unpublished polls with votes, which this release no longer lets anyone
-   publish again (their published answers are gone, so nothing tells
-   which answer a vote meant):
+3. Votes of polls unpublished before this release: an unpublish there
+   deleted their links, so they no longer count and the poll is unvoted
+   (see "Deploying batch 15", step 6, which also has the optional
+   clean-up):
 
    ```sql
-   SELECT DISTINCT p.document_id, p.question
-     FROM polls p
-     JOIN poll_votes_poll_lnk l ON l.poll_id = p.id
-    WHERE NOT EXISTS (SELECT 1 FROM polls q
-                       WHERE q.document_id = p.document_id
-                         AND q.published_at IS NOT NULL);
+   SELECT count(*) AS orphaned_votes
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
    ```
-
-   Usually none. For each row: leave it unpublished, or delete it and
-   create a new poll.
 
 **After the deploy**
 
@@ -2956,9 +3009,10 @@ with the batch runbook):
   rotation.
 - On the old image's boot users-permissions deletes **one** permission row
   per action its controllers lack (`syncPermissions` deletes by action,
-  one row each; in the rehearsal: admin_role's 22 authoring rows), so the
-  editor's 22 and department_head's 15 authoring rows stay behind as dead
-  rows (no route serves them), and department_head's six core
+  one row each; whose varies: admin_role's 22 authoring rows in one
+  rehearsal, editor's in another), so the other moderator role's 22 and
+  department_head's 15 authoring rows stay behind as dead rows (no route
+  serves them), and department_head's six core
   `create`/`update` rows stay too (the old image's drift line lists those
   six). `prod-perm-diff.sql` of the old release then shows these 43 rows as
   `EXTRA_IN_DB`. The roll-forward's permission sync re-creates the 22

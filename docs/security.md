@@ -907,10 +907,13 @@ Enforced by the cms, not only in the UI:
   vote handler takes before it reads, checks and inserts, so a vote and an
   options change sent at the same moment cannot both succeed. That row is
   the only baseline, so a voted poll keeps it: an unpublish of a poll with
-  a vote is refused (the ballots survive an unpublish, and a republish
-  without a published row compared with nothing), and a voted poll without
-  a published row (unpublished before batch 15) can no longer be
-  published (Codex review of 15A, finding 1).
+  a vote is refused (an unpublish deletes the published row and with it
+  the ballots' links, and a republish would compare with nothing), and a
+  poll with linked votes but no published row can no longer be published
+  (Codex review of 15A, finding 1). A poll unpublished before batch 15 has
+  no such votes: that unpublish deleted its vote links, so it counts as
+  unvoted and its orphaned ballots count nowhere (DEPLOYMENT.md
+  "Deploying batch 15", step 6).
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail), the custom `vote`/`results` actions and the batched
   `GET /api/poll-results`, all through `apps/cms/src/utils/poll-audience.ts`.

@@ -24,8 +24,10 @@ import { StrapiError } from "@/lib/strapi-error";
  *
  * A malformed documentId sends no request. A 404 (missing, or an item the
  * caller has no class on: the cms answers like a hidden findOne, S2.6) and
- * a 403 (no grant) are both `notFound`: the page answers 404 and says
- * nothing about whether the item exists. Anything else that fails is
+ * a 403 (no grant) are both `notFound`: the page shows the not-found page
+ * and says nothing about whether the item exists. Known limitation: the
+ * not-found page is streamed after the layout, so the web's status is 200,
+ * not 404 (the cms itself answers 404). Anything else that fails is
  * `failed` (the banner, no form); the sign-in redirect of an expired
  * session is never swallowed.
  */

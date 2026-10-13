@@ -768,6 +768,8 @@ Die Invarianten, deren Bruch still durchrutscht (kein Typfehler, oft kein roter 
     - **AC01-Erweiterung:** `startCmsAction` reicht `onFailure` additiv den ganzen Fehlschlag (`fields`, `version`).
     - **Picker (Integration):** `SinglePicker` beschreibt seinen Menü-Button selbst mit Hinweis und Fehler (`SelectMenu` `ariaDescribedBy`, additiv), die Gruppe trägt nur das Label; der Fokus eines abgelehnten Felds landet auf dem Button, der Screenreader liest den Fehler mit.
     - **Bekannte Grenze:** die Vorschau einer Ankündigung zeigt den Autor als „Unbekannt“ (`manage.common.preview.unknownAuthor`), weil die `editable`-Antwort keinen Autornamen trägt; die publizierte Karte zeigt ihn wie bisher.
+    - **Bekannte Grenze:** öffnet eine Abteilungsleitung den Eintrag einer anderen Abteilung per URL, zeigt das Web „Seite nicht gefunden“, antwortet aber mit HTTP 200 (der Loader `lib/loaders/manage/editor.ts` liefert `notFound`, die Seite rendert die Not-found-Seite gestreamt nach dem Layout; das cms selbst antwortet 404, es leakt nichts).
+    - **Zielgruppe neu festlegen (Integration nach der Staging-Probe):** `RetargetNotice` unterscheidet `deleted` (ein Kriterium bleibt) und `noTarget` (keine Abteilung und kein Team gewählt: D-PT01 oder das einzige Ziel gelöscht); solange nicht bestätigt, heißt die leere Wahl des Abteilungs-Pickers „Eingeschränkt: braucht eine neue Zielgruppe“ statt „Alle“, mit Hinweis auf die zwei Auswege.
     - **Probe (2026-10-13, Lane 15C):** 66 Browser-Checks gegen echtes cms (Postgres 16, Demo-Seed, Lane 15A gemergt), siehe DEPLOYMENT.md „Upgrading to the /manage authoring pages (batch 15, lane 15C)“.
 
 ## 6. Betrieb
