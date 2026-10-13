@@ -78,6 +78,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   extraInput,
   extraDirty = false,
   busy = false,
+  onReset: onResetExtra,
   drafts = area !== "wiki" && hasDrafts(area),
   itemPath = (data) => areaItemPath(area, data.documentId),
   listPath = AREA_PATH[area],
@@ -95,6 +96,13 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   extraDirty?: boolean;
   /** A step the form runs before its saves (an upload) is running (useAuthoringEditor). */
   busy?: boolean;
+  /**
+   * Runs when the form resets to a fresh `editable` (Reload after a
+   * conflict, Discard changes): state the form keeps outside its values (a
+   * picked file) goes with it. Not on the refresh after a save or a status
+   * change, which keeps every unsaved edit.
+   */
+  onReset?: () => void;
   /** The item has drafts (explicit status); false: every save publishes (polls, wiki spaces). */
   drafts?: boolean;
   /** Where a create navigates: the new item's page. */
@@ -117,8 +125,9 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       setValues(fresh);
       setInitial(fresh);
       setRetarget(false);
+      onResetExtra?.();
     },
-    [toValues],
+    [toValues, onResetExtra],
   );
 
   const editor = useAuthoringEditor({
@@ -302,6 +311,15 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
     scheduleOpen,
     setScheduleOpen,
     scheduleOpener,
+    /**
+     * Closes the Schedule… dialog after a refusal that is not about its own
+     * fields, without returning the focus to Schedule…: the form's error
+     * takes it (a refused upload started from the dialog).
+     */
+    leaveSchedule: () => {
+      scheduleOpener.current = null;
+      setScheduleOpen(false);
+    },
     /**
      * Reload after a conflict: the fresh `editable`, the changes dropped,
      * the Schedule… dialog closed (its values belonged to the old version).

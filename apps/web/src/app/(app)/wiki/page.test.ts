@@ -78,20 +78,20 @@ describe("the writing links (batch 16)", () => {
 
   it("an editor gets My drafts and Manage spaces", async () => {
     viewerRef.current = viewer("editor");
-    expect(await hrefs()).toEqual(expect.arrayContaining(["/wiki/drafts", "/manage/wiki"]));
+    expect(await hrefs()).toEqual(expect.arrayContaining(["/wiki/drafts?mine=1", "/manage/wiki"]));
   });
 
   it.each(["member", "team_lead", "department_head"])("a %s gets My drafts only", async (role) => {
     viewerRef.current = viewer(role);
     const links = await hrefs();
-    expect(links).toContain("/wiki/drafts");
+    expect(links).toContain("/wiki/drafts?mine=1");
     expect(links).not.toContain("/manage/wiki");
   });
 
   it.each(["guest", null])("%s gets neither", async (role) => {
     viewerRef.current = viewer(role);
     const links = await hrefs();
-    expect(links).not.toContain("/wiki/drafts");
+    expect(links).not.toContain("/wiki/drafts?mine=1");
     expect(links).not.toContain("/manage/wiki");
   });
 });

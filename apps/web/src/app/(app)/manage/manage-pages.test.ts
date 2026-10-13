@@ -400,7 +400,7 @@ describe("the wiki area (batch 16, lane 16C)", () => {
     );
     const tree = elements(await ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }));
     const header = tree.find((el) => el.type === ManagePageHeader);
-    expect((header?.props.action as { href: string }).href).toBe("/wiki/handbook/new");
+    expect((header?.props.action as { href: string }).href).toBe("/wiki/handbook/new?create=1");
     expect(hrefs(tree)).toEqual(
       expect.arrayContaining([`/manage/wiki/${SPACE}/edit`, "/wiki/handbook"]),
     );

@@ -7,10 +7,12 @@ import { FetchErrorBanner } from "@/components/fetch-error";
 import { ManagePageHeader } from "@/components/manage/page-parts";
 import { StatusBadges } from "@/components/manage/status-badges";
 import { formatInstant } from "@/lib/date-format";
-import { loadMyWikiDrafts } from "@/lib/loaders/manage/wiki";
+import type { ListSearchParams } from "@/lib/loaders/manage/list";
+import { loadMyWikiDrafts, shadowedWikiSpace } from "@/lib/loaders/manage/wiki";
 import { wikiEditPath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
 import { getViewer } from "@/lib/viewer";
+import WikiSpacePage from "../[space]/page";
 
 export async function generateMetadata() {
   const t = await getTranslations("manage.wiki.drafts");
@@ -23,8 +25,19 @@ export async function generateMetadata() {
  * or have unpublished changes, newest first as the cms answers them. Each
  * opens the wiki editor by documentId (a draft has no published route).
  * Every role that edits wiki pages; everyone else goes back to the wiki.
+ *
+ * The route shadows a space whose slug is `drafts`: the drafts link carries
+ * `?mine=1` (WIKI_DRAFTS_PATH), and without it this address shows that
+ * space when one exists (Codex review).
  */
-export default async function WikiDraftsPage() {
+export default async function WikiDraftsPage({
+  searchParams,
+}: {
+  searchParams: Promise<ListSearchParams>;
+}) {
+  if ((await searchParams).mine !== "1" && (await shadowedWikiSpace())) {
+    return <WikiSpacePage params={Promise.resolve({ space: "drafts" })} />;
+  }
   const viewer = await getViewer();
   if (capabilitiesFor(viewer.role).wikiPages.edit === "none") redirect("/wiki");
   const [t, tWiki, format] = await Promise.all([

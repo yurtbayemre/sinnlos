@@ -30,6 +30,8 @@ const { default: NewWikiPagePage } = await import("./[space]/new/page");
 const { default: EditWikiPagePage } = await import("./[space]/[slug]/edit/page");
 const { default: WikiHistoryPage } = await import("./[space]/[slug]/history/page");
 const { default: WikiDraftsPage } = await import("./drafts/page");
+const { default: WikiReaderPage } = await import("./[space]/[slug]/page");
+const { default: WikiSpaceReaderPage } = await import("./[space]/page");
 
 const SPACE = { id: 1, documentId: "spce00000000000000000001", name: "Handbook", slug: "handbook" };
 const PAGE = "page00000000000000000001";
@@ -101,7 +103,12 @@ describe("/wiki/[space]/new", () => {
   it.each(["member", "guest", null])("%s goes back to the space", async (role) => {
     viewerRef.current = viewer(role);
     expect(
-      await redirectOf(() => NewWikiPagePage({ params: Promise.resolve({ space: "handbook" }) })),
+      await redirectOf(() =>
+        NewWikiPagePage({
+          params: Promise.resolve({ space: "handbook" }),
+          searchParams: search({ create: "1" }),
+        }),
+      ),
     ).toBe("/wiki/handbook");
     expect(strapiMock).not.toHaveBeenCalled();
   });
@@ -112,7 +119,10 @@ describe("/wiki/[space]/new", () => {
       path.startsWith("/api/wiki-spaces") ? list([SPACE]) : list(),
     );
     const tree = elements(
-      await NewWikiPagePage({ params: Promise.resolve({ space: "handbook" }) }),
+      await NewWikiPagePage({
+        params: Promise.resolve({ space: "handbook" }),
+        searchParams: search({ create: "1" }),
+      }),
     );
     const editor = tree.find((el) => el.type === WikiPageEditor);
     expect(editor?.props.space).toEqual({
@@ -128,7 +138,10 @@ describe("/wiki/[space]/new", () => {
   it("a space the caller cannot read is the not-found page", async () => {
     viewerRef.current = viewer("editor");
     await expect(
-      NewWikiPagePage({ params: Promise.resolve({ space: "secret" }) }),
+      NewWikiPagePage({
+        params: Promise.resolve({ space: "secret" }),
+        searchParams: search({ create: "1" }),
+      }),
     ).rejects.toMatchObject({ digest: expect.stringContaining("404") });
   });
 });
@@ -239,20 +252,70 @@ describe("/wiki/[space]/[slug]/history", () => {
 describe("/wiki/drafts", () => {
   it.each(["guest", null])("%s goes back to the wiki", async (role) => {
     viewerRef.current = viewer(role);
-    expect(await redirectOf(() => WikiDraftsPage())).toBe("/wiki");
+    expect(await redirectOf(() => WikiDraftsPage({ searchParams: search({ mine: "1" }) }))).toBe(
+      "/wiki",
+    );
   });
 
   it("lists the caller's drafts (myDrafts); none is the empty state", async () => {
     strapiMock.mockResolvedValue({ data: [] });
-    const tree = elements(await WikiDraftsPage());
+    const tree = elements(await WikiDraftsPage({ searchParams: search({ mine: "1" }) }));
     expect(paths()).toEqual(["/api/wiki-pages/drafts/mine"]);
     expect(tree.some((el) => el.type === EmptyState)).toBe(true);
   });
 
   it("an outage is the banner, not the empty state", async () => {
     strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
-    const tree = elements(await WikiDraftsPage());
+    const tree = elements(await WikiDraftsPage({ searchParams: search({ mine: "1" }) }));
     expect(tree.some((el) => el.type === FetchErrorBanner)).toBe(true);
     expect(tree.some((el) => el.type === EmptyState)).toBe(false);
+  });
+});
+
+describe("the two routes inside the readers' slug namespace (Codex review)", () => {
+  it("/wiki/[space]/new without ?create=1 shows the space's page `new` when it has one", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      path.includes("filters[slug][$eq]=new")
+        ? list([{ id: 9, documentId: PAGE, title: "New", slug: "new" }])
+        : list(),
+    );
+    viewerRef.current = viewer("guest");
+    const tree = elements(
+      await NewWikiPagePage({
+        params: Promise.resolve({ space: "handbook" }),
+        searchParams: search(),
+      }),
+    );
+    expect(tree[0]?.type).toBe(WikiReaderPage);
+  });
+
+  it("without such a page it is the form for a creator, and ?create=1 never reads the page", async () => {
+    viewerRef.current = viewer("team_lead");
+    strapiMock.mockImplementation(async (path: string) =>
+      path.startsWith("/api/wiki-spaces") ? list([SPACE]) : list(),
+    );
+    const tree = elements(
+      await NewWikiPagePage({
+        params: Promise.resolve({ space: "handbook" }),
+        searchParams: search(),
+      }),
+    );
+    expect(tree.some((el) => el.type === WikiPageEditor)).toBe(true);
+    strapiMock.mockClear();
+    await NewWikiPagePage({
+      params: Promise.resolve({ space: "handbook" }),
+      searchParams: search({ create: "1" }),
+    });
+    expect(paths().some((path) => path.includes("filters[slug][$eq]=new"))).toBe(false);
+  });
+
+  it("/wiki/drafts without ?mine=1 shows a space whose slug is `drafts`", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      path.includes("filters[slug][$eq]=drafts") ? list([{ ...SPACE, slug: "drafts" }]) : list(),
+    );
+    const tree = elements(await WikiDraftsPage({ searchParams: search() }));
+    expect(tree[0]?.type).toBe(WikiSpaceReaderPage);
+    const mine = elements(await WikiDraftsPage({ searchParams: search({ mine: "1" }) }));
+    expect(mine.some((el) => el.type === WikiSpaceReaderPage)).toBe(false);
   });
 });

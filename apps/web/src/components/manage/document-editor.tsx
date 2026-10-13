@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useCallback, useState, useTransition } from "react";
 import { useTranslations } from "next-intl";
 import {
   DOCUMENT_CATEGORIES,
@@ -111,13 +111,13 @@ export function DocumentEditor({
   const [pickError, setPickError] = useState<UploadFileCode | null>(null);
   const [uploading, startUpload] = useTransition();
   const [uploadIntent, setUploadIntent] = useState<EditorIntent | null>(null);
-  // Reload and Discard bring a fresh `editable`: a pick belongs to the old one.
-  const [seenEditable, setSeenEditable] = useState(editable);
-  if (editable !== seenEditable) {
-    setSeenEditable(editable);
+  // Reload and Discard reset the form to a fresh `editable`: a pick belongs
+  // to the old one. A refresh after a save or a status change (unpublish,
+  // publish) keeps it, like every other unsaved edit (Codex review).
+  const dropPick = useCallback(() => {
     setPicked(null);
     setPickError(null);
-  }
+  }, []);
 
   const item = useItemEditor<DocumentValues, DocumentEditable>({
     area: "documents",
@@ -129,6 +129,7 @@ export function DocumentEditor({
     actions: ACTIONS,
     extraDirty: picked !== null,
     busy: uploading,
+    onReset: dropPick,
   });
   const { values, setValue, editor } = item;
   const error = useFieldError("documents", editor.fieldErrors);
@@ -159,8 +160,15 @@ export function DocumentEditor({
       return;
     }
     const file = picked;
+    // A refusal from the Schedule… dialog closes it first: the file input
+    // and the alert are behind it, and the focus goes there, not back to
+    // Schedule… (Codex review).
+    const leaveDialog = () => {
+      if (intent === "schedule") item.leaveSchedule();
+    };
     const early = checkUploadFile(file);
     if (early) {
+      leaveDialog();
       editor.refuse({ [UPLOAD_FILE_KEY]: early });
       return;
     }
@@ -172,6 +180,7 @@ export function DocumentEditor({
       action: () => uploadDocumentFile(form),
       onSuccess: (uploaded) => {
         if (!uploaded) {
+          leaveDialog();
           editor.fail("failed");
           return;
         }
@@ -180,6 +189,7 @@ export function DocumentEditor({
         save({ file: uploaded });
       },
       onFailure: (code, failure) => {
+        leaveDialog();
         if (code === "invalid" && failure.fields) {
           const sorted = sortFieldErrors(failure.fields, new Set(FIELD_ORDER));
           if (Object.keys(sorted.fields).length > 0) editor.refuse(sorted.fields);

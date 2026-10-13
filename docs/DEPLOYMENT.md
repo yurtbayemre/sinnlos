@@ -2159,9 +2159,12 @@ above the cap (nothing a form sends).
   the page read the cms once per view but still answered 200, for browsers
   and for HTML-limited bots alike, behind `(app)/loading.tsx`. Question
   18's default stands: no app-wide change.
-- `/wiki/drafts` and `/wiki/[space]/new` are routes: a space whose slug is
-  `drafts`, or a page whose slug is `new`, cannot be read under its address
-  (the cms derives slugs from names; reserving the two is a cms follow-up).
+- `/wiki/drafts` and `/wiki/[space]/new` are routes inside the readers'
+  slug namespace. The authoring links carry a marker (`?mine=1`,
+  `?create=1`), and without it the two addresses show a space whose slug is
+  `drafts` or a page whose slug is `new` when one exists, so readers' links
+  keep working. Reserving the two slugs in the cms (which derives slugs
+  from names) would remove the extra read; not in this lane.
 - The parent picker offers the space's published pages (what readers
   see); a draft-only parent stays selected but is not offered.
 - The page tree of a space reads at most 1 000 pages (it says so when cut).

@@ -5,13 +5,22 @@ import { ManagePageHeader } from "@/components/manage/page-parts";
 import { WikiPageEditor } from "@/components/wiki-editor/wiki-page-editor";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { loadTargetingOptions } from "@/lib/loaders/manage/options";
-import { loadWikiParentOptions, loadWikiSpaceRef } from "@/lib/loaders/manage/wiki";
+import type { ListSearchParams } from "@/lib/loaders/manage/list";
+import {
+  loadWikiParentOptions,
+  loadWikiSpaceRef,
+  shadowedWikiPage,
+} from "@/lib/loaders/manage/wiki";
 import { wikiSpacePath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
 import { SKIPPED_READ } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
+import WikiPage from "../[slug]/page";
 
-type Params = { params: Promise<{ space: string }> };
+type Params = {
+  params: Promise<{ space: string }>;
+  searchParams: Promise<ListSearchParams>;
+};
 
 export async function generateMetadata() {
   const t = await getTranslations("manage.wiki.editor");
@@ -25,9 +34,16 @@ export async function generateMetadata() {
  * reads the space). Everyone else goes back to the space. The space is the
  * one the reader sees under this address: a space the caller cannot read
  * shows the not-found page.
+ *
+ * The route shadows a page whose slug is `new`: the authoring links carry
+ * `?create=1` (wikiNewPagePath), and without it this address shows that
+ * page when the space has one, for every reader (Codex review).
  */
-export default async function NewWikiPagePage({ params }: Params) {
-  const { space: spaceSlug } = await params;
+export default async function NewWikiPagePage({ params, searchParams }: Params) {
+  const [{ space: spaceSlug }, query] = await Promise.all([params, searchParams]);
+  if (query.create !== "1" && (await shadowedWikiPage(spaceSlug))) {
+    return <WikiPage params={Promise.resolve({ space: spaceSlug, slug: "new" })} />;
+  }
   const viewer = await getViewer();
   const { wikiPages } = capabilitiesFor(viewer.role);
   if (!wikiPages.create) redirect(wikiSpacePath(spaceSlug));

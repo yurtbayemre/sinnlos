@@ -314,6 +314,26 @@ export async function loadWikiParentOptions(
 }
 
 // ---------------------------------------------------------------------------
+// The two authoring routes inside the readers' slug namespace
+
+/**
+ * Whether the space has a published page with the slug `new`, which the
+ * route /wiki/[space]/new shadows (lib/manage/wiki-paths.ts): without the
+ * authoring marker that route shows the page. A failed read answers false
+ * (the authoring page, as before).
+ */
+export async function shadowedWikiPage(spaceSlug: string): Promise<boolean> {
+  const result = await tryFetch(() => wikiPageRef(spaceSlug, "new"), "manage-wiki");
+  return (result.data?.data?.length ?? 0) > 0;
+}
+
+/** Whether a readable space has the slug `drafts`, which /wiki/drafts shadows. */
+export async function shadowedWikiSpace(): Promise<boolean> {
+  const result = await tryFetch(() => wikiSpaceBySlug("drafts"), "manage-wiki");
+  return (result.data?.data?.length ?? 0) > 0;
+}
+
+// ---------------------------------------------------------------------------
 // /wiki/drafts
 
 export interface MyWikiDraftsView {
