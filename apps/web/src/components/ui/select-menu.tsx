@@ -39,6 +39,12 @@ type SelectMenuProps = {
    * take focus, and the focus would end on <body>.
    */
   busy?: boolean;
+  /**
+   * Ids of the elements that describe the trigger (a form field's hint and
+   * error): set as the trigger's aria-describedby, so a screen reader reads
+   * them with the trigger, also when a refused field moves the focus there.
+   */
+  ariaDescribedBy?: string;
   /** The trigger button (React 19: a plain prop, no forwardRef). */
   ref?: Ref<HTMLButtonElement>;
 };
@@ -79,6 +85,7 @@ export function SelectMenu({
   icon,
   disabled,
   busy = false,
+  ariaDescribedBy,
   ref,
 }: SelectMenuProps) {
   const id = useId();
@@ -104,6 +111,7 @@ export function SelectMenu({
           ref={ref}
           type="button"
           aria-labelledby={`${labelId} ${valueId}`}
+          aria-describedby={ariaDescribedBy || undefined}
           aria-busy={busy || undefined}
           className={cn(
             "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 aria-busy:opacity-50",

@@ -79,4 +79,13 @@ describe("SelectMenu", () => {
     const idle = /<button[^>]*>/.exec(render())?.[0] ?? "";
     expect(idle).not.toMatch(/\saria-busy=/);
   });
+
+  it("describes the trigger by the given ids (a field's hint and error), else not at all", () => {
+    const described = /<button[^>]*>/.exec(render({ ariaDescribedBy: "f-hint f-error" }))?.[0];
+    expect(described).toContain('aria-describedby="f-hint f-error"');
+    for (const ariaDescribedBy of [undefined, ""]) {
+      const plain = /<button[^>]*>/.exec(render({ ariaDescribedBy }))?.[0] ?? "";
+      expect(plain).not.toMatch(/\saria-describedby=/);
+    }
+  });
 });

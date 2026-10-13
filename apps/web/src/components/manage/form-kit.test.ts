@@ -5,6 +5,7 @@ import { CheckboxField, CheckboxList, Field, inputClass } from "./form-controls"
 import { DateTimeField, DayField } from "./date-fields";
 import { MarkdownEditor } from "./markdown-editor";
 import { NoDepartmentExplanation } from "./page-parts";
+import { SinglePicker } from "./pickers";
 import { PublishBar, publishBarButtons } from "./publish-bar";
 import { sameValues } from "./use-item-editor";
 import { isChecked, isDisabled, MESSAGES, render, tagById } from "./render.test.helper";
@@ -56,6 +57,42 @@ describe("Field", () => {
       }),
     );
     expect(tagById(html, "f-x")).not.toMatch(/aria-(describedby|invalid|required)/);
+  });
+});
+
+describe("SinglePicker", () => {
+  const picker = (props: { hint?: string; error?: string }) =>
+    render(
+      createElement(SinglePicker, {
+        id: "a-team",
+        label: "Team",
+        value: "",
+        options: [
+          { value: "", label: "No team" },
+          { value: "t1", label: "Platform" },
+        ],
+        onChange: noop,
+        ...props,
+      }),
+    );
+  const trigger = (html: string) => /<button[^>]*>/.exec(html)?.[0] ?? "";
+
+  it("describes its trigger by the hint and the error; the label names the group", () => {
+    const html = picker({ hint: "Only your department's teams.", error: "Choose a team." });
+    expect(trigger(html)).toContain('aria-describedby="a-team-hint a-team-error"');
+    expect(html).toContain('id="a-team-hint"');
+    expect(html).toContain('id="a-team-error"');
+    const group = tagById(html, "a-team");
+    expect(group).toContain('role="group"');
+    expect(group).toContain('aria-labelledby="a-team-label"');
+    expect(group).not.toMatch(/aria-describedby=/);
+  });
+
+  it("describes the trigger by the error alone, and not at all without hint and error", () => {
+    expect(trigger(picker({ error: "Choose a team." }))).toContain(
+      'aria-describedby="a-team-error"',
+    );
+    expect(trigger(picker({}))).not.toMatch(/aria-describedby=/);
   });
 });
 
