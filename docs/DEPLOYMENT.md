@@ -1945,11 +1945,13 @@ rebuild; the web's code is unchanged). No schema change (the hidden
 `pluginOptions` add no column or table), no env, no edge change, **no
 `JWT_SECRET` rotation**, nobody is signed out. The first boot deletes rows
 in two places, both grants: the users-permissions sync deletes the 18
-`up_permissions` rows, and Strapi's own admin-permission cleanup deletes the
-admin roles' Content Manager `create`, `update`, `delete` and `publish`
-permissions on Wiki revision (`admin_permissions`; `read` stays, super
-admins are reset at every boot anyway). A rollback brings the 18 back, not
-the admin-role rows; nobody needs those. To take read away from an admin
+`up_permissions` rows, and the admin roles lose their Content Manager
+`create`, `update`, `delete` and `publish` permissions on Wiki revision
+(`admin_permissions`; `read` stays, super admins are reset at every boot
+anyway). Strapi's own admin-permission cleanup deletes most of those; it
+pages while it deletes and can skip rows once there are more than 200, so a
+new boot step (`bootstrap/hidden-type-permissions.ts`) removes the rest. A
+rollback brings the 18 back, not the admin-role rows; nobody needs those. To take read away from an admin
 role as well, untick Wiki revision's Read in Settings → Administration
 panel → Roles (super admins always keep it).
 
@@ -2033,10 +2035,15 @@ it; running it is the owner's decision (below).
      actions)`: the same 142 as batch 15, the five wiki-revision actions
      are now managed as revocations;
    - **no** `[bootstrap] granted …` line;
+   - possibly `[admin-permissions] removed N Content Manager write
+     permission(s) on hidden types: api::wiki-revision.wiki-revision`: the
+     rows Strapi's own cleanup skipped (no line is fine too);
    - `Strapi started successfully`, then the `[cron] scheduled-publisher`
      line every minute as before.
 
-   Later boots log no `revoked` line. A count above 18 means hand-made
+   Stop line: `[admin-permissions] strapi.admin.services.permission.deleteByIds
+   not found …` (the cms does not start; nothing was changed; roll back).
+   Later boots log no `revoked` and no `[admin-permissions]` line. A count above 18 means hand-made
    wiki-revision grants were deleted as well (step 4 named them), one
    below 18 that some of the rows were already gone; neither is a stop
    line. The error filter prints only the expected lines of
@@ -2045,7 +2052,23 @@ it; running it is the owner's decision (below).
 
 6. **The permission diff** (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
    only the two informational `authenticated` rows; no wiki-revision row
-   is left in `up_permissions`.
+   is left in `up_permissions`. Then the admin roles' grants on wiki
+   revisions:
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT r.code, p.action, count(*) AS n
+     FROM admin_permissions p
+     JOIN admin_permissions_role_lnk l ON l.permission_id = p.id
+     JOIN admin_roles r ON r.id = l.role_id
+    WHERE p.subject = 'api::wiki-revision.wiki-revision'
+    GROUP BY r.code, p.action ORDER BY 1, 2;
+   SQL
+   ```
+
+   Only `plugin::content-manager.explorer.read` rows (`strapi-super-admin`
+   and whichever admin roles held read). Any `create`, `update`, `delete`
+   or `publish` row is a finding: report it.
 
 7. **The routes are gone:**
 

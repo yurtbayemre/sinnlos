@@ -402,8 +402,10 @@ letters:
   the web reads none. The type is hidden from the Content Manager and the
   Content-Type Builder, and nobody, super admins included, can create,
   change, publish or delete a revision there: the Content Manager
-  registers those actions for displayed types only, and the admin's boot
-  cleanup drops the rows. An admin role keeps the read it holds (a
+  registers those actions for displayed types only, and every boot
+  removes such grants from every admin role
+  (`bootstrap/hidden-type-permissions.ts`; Strapi's own cleanup pages while
+  it deletes and can skip rows). An admin role keeps the read it holds (a
   revision opens read-only by its URL); the panel is the moderators' tool,
   which shows every draft anyway, and decision 06 lets moderators read
   history. Untick it per admin role to take it away.
