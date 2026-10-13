@@ -5,7 +5,7 @@ import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { clampExpiresAt } from "../../../utils/classified-expiry";
 import { isRowId } from "../../../utils/entry-id";
 import { findByRef, type EntryRow } from "../../../utils/policy-factories";
-import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
+import { claimAndRemove, isTombstoned, lockFileRow } from "../../../utils/upload-orphans";
 
 /**
  * Classifieds are user-generated content created from the web app (not the
@@ -41,15 +41,21 @@ interface ClassifiedRow extends EntryRow {
 /**
  * Normalize + verify the images payload. Returns the deduplicated id list
  * or null when the payload is invalid (wrong shape, > MAX_IMAGES, unknown
- * file id, a file that is not an image, or a file the caller did not
- * upload themselves).
+ * file id, a file that is not an image, a file the caller did not upload
+ * themselves, or one on its way out).
  *
  * Ownership: the upload extension stamps provider_metadata.uploadedBy on
  * every content-api upload, and only files stamped with the CALLER's id
  * are accepted here (admin_role/editor bypass for moderation edits).
  * Media without uploadedBy — avatars, documents, anything predating the
  * marketplace — is rejected automatically, so foreign media ids can never
- * be attached to an ad.
+ * be attached to an ad. One image may hang on several of the caller's ads.
+ *
+ * Locks (batch 16, decision 06 §E3): runs inside the write's transaction
+ * and locks the file rows (ascending ids, FOR UPDATE) before it reads them,
+ * so a concurrent removal (`claimAndRemove`: cleanup-uploads, the janitor,
+ * an ad delete's image cleanup) either sees the new link and keeps the
+ * file, or has already tombstoned it and the ad is refused here.
  */
 async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<number[] | null> {
   if (value == null) return [];
@@ -66,6 +72,7 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   if (ids.length === 0) return [];
   if (ids.length > MAX_IMAGES) return null;
 
+  for (const id of [...ids].sort((a, b) => a - b)) await lockFileRow(strapi, id);
   const files = await strapi.db
     .query("plugin::upload.file")
     .findMany({ where: { id: { $in: ids } } });
@@ -73,6 +80,7 @@ async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<
   if (!files.every((f: any) => typeof f.mime === "string" && f.mime.startsWith("image/"))) {
     return null;
   }
+  if (files.some((f: any) => isTombstoned(f))) return null;
   const isModerator = hasRole(user, MODERATORS);
   if (!isModerator) {
     const ownsAll =
@@ -101,29 +109,33 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
     const priceResult = resolvePrice(input.price);
     if (!priceResult.ok) return ctx.badRequest("Invalid price");
 
-    const images = await resolveImageIds(input.images, strapi, user);
-    if (images === null) {
-      return ctx.badRequest(`Invalid images (max ${MAX_IMAGES} own image files)`);
-    }
+    // The image check and the create in one transaction: the check's file
+    // locks hold until the links are committed (resolveImageIds).
+    return strapi.db.transaction(async () => {
+      const images = await resolveImageIds(input.images, strapi, user);
+      if (images === null) {
+        return ctx.badRequest(`Invalid images (max ${MAX_IMAGES} own image files)`);
+      }
 
-    const category = input.category;
-    ctx.request.body = {
-      data: {
-        title: typeof input.title === "string" ? input.title.trim() : input.title,
-        description:
-          typeof input.description === "string" ? input.description.trim() : input.description,
-        category,
-        // A giveaway has no price by definition — normalize instead of 400ing.
-        price: category === "giveaway" ? null : priceResult.price,
-        priceNegotiable: category === "giveaway" ? false : input.priceNegotiable === true,
-        location: typeof input.location === "string" ? input.location.trim() : null,
-        images,
-        expiresAt: clampExpiresAt(input.expiresAt),
-        // Server-authoritative — never from the payload.
-        author: user.id,
-      },
-    };
-    return super.create(ctx);
+      const category = input.category;
+      ctx.request.body = {
+        data: {
+          title: typeof input.title === "string" ? input.title.trim() : input.title,
+          description:
+            typeof input.description === "string" ? input.description.trim() : input.description,
+          category,
+          // A giveaway has no price by definition — normalize instead of 400ing.
+          price: category === "giveaway" ? null : priceResult.price,
+          priceNegotiable: category === "giveaway" ? false : input.priceNegotiable === true,
+          location: typeof input.location === "string" ? input.location.trim() : null,
+          images,
+          expiresAt: clampExpiresAt(input.expiresAt),
+          // Server-authoritative — never from the payload.
+          author: user.id,
+        },
+      };
+      return super.create(ctx);
+    });
   },
 
   async update(ctx) {
@@ -160,13 +172,6 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
     if ("location" in input) {
       data.location = typeof input.location === "string" ? input.location.trim() : null;
     }
-    if ("images" in input) {
-      const images = await resolveImageIds(input.images, strapi, user);
-      if (images === null) {
-        return ctx.badRequest(`Invalid images (max ${MAX_IMAGES} own image files)`);
-      }
-      data.images = images;
-    }
     // Renewing an ad is a plain update with a fresh expiresAt — clamped the
     // same way as on create, so nobody can push an ad past +90 days.
     if ("expiresAt" in input) data.expiresAt = clampExpiresAt(input.expiresAt);
@@ -179,8 +184,18 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
 
     // `author` is deliberately never copied — ownership is immutable.
     ctx.params.id = entity.documentId;
-    ctx.request.body = { data };
-    return super.update(ctx);
+    // The image check and the update in one transaction (resolveImageIds).
+    return strapi.db.transaction(async () => {
+      if ("images" in input) {
+        const images = await resolveImageIds(input.images, strapi, user);
+        if (images === null) {
+          return ctx.badRequest(`Invalid images (max ${MAX_IMAGES} own image files)`);
+        }
+        data.images = images;
+      }
+      ctx.request.body = { data };
+      return super.update(ctx);
+    });
   },
 
   async delete(ctx) {
@@ -205,7 +220,10 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
    * uploads like avatars/documents carry none and can never match), and
    * (c) has no relation left in files_related_mph (the same image may hang
    * on another of the caller's ads). Anything else is silently skipped —
-   * the endpoint is idempotent and safe to call with stale ids.
+   * the endpoint is idempotent and safe to call with stale ids. Each file
+   * goes through the one locked removal (utils/upload-orphans.ts
+   * claimAndRemove), which re-checks (a)-(c) under the file row's lock and
+   * records the delete.
    */
   async cleanupUploads(ctx) {
     const user = ctx.state.user;
@@ -223,16 +241,9 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
       if (!ids.includes(id)) ids.push(id);
     }
 
-    const files = await strapi.db
-      .query("plugin::upload.file")
-      .findMany({ where: { id: { $in: ids } } });
-    const stillAttached = await attachedFileIds(strapi, ids);
-
     let removed = 0;
-    for (const file of files) {
-      if (uploadedByOf(file) !== user.id) continue;
-      if (stillAttached.has(file.id)) continue;
-      if (await removeUploadFile(strapi, file)) removed += 1;
+    for (const id of ids) {
+      if ((await claimAndRemove(strapi, id, { ownerId: user.id })) === "removed") removed += 1;
     }
     ctx.body = { removed };
   },

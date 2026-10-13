@@ -130,6 +130,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "utils/live-events.ts": "comment only",
   "utils/notify.ts": "notifications",
   "utils/target-visibility.ts": "none (Set.delete); reads only",
+  "utils/upload-orphans.ts":
+    "upload files: the removal tombstone (provider_metadata.removing) under the file row's lock",
   "utils/visible-ids.ts": "none (Map.delete); reads only",
 };
 

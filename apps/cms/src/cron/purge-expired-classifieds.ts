@@ -36,7 +36,11 @@
  * most CLASSIFIED_PURGE_MAX_PER_RUN ads per run; the rest follows the next
  * night. One failing ad is logged and skipped (its delete rolled back on
  * its own), the others still go; the next night retries it.
+ *
+ * Each delete writes its audit row with the source `cron`, and so does each
+ * image removal after it (utils/delete-audit.ts).
  */
+import { runWithDeleteAudit } from "../utils/delete-audit";
 import { comparePlainDates, todayIn, tryParsePlainDate, type PlainDate } from "../utils/time";
 
 /** Days an expired ad is kept after its last listed day (owner default). */
@@ -167,8 +171,10 @@ export async function purgeExpiredClassifieds(
     for (const row of rows) {
       if (!isPurgeableClassified(row, cutoff)) continue;
       try {
-        if (await purgeOne(strapi, row, cutoff)) purged++;
-        else skipped++;
+        // The delete trail records these deletes (and their images) as `cron`.
+        if (await runWithDeleteAudit({ source: "cron" }, () => purgeOne(strapi, row, cutoff))) {
+          purged++;
+        } else skipped++;
       } catch (err) {
         failed++;
         strapi.log.warn(
