@@ -582,42 +582,50 @@ export async function recordScheduleFailure(
 }
 
 /**
- * Whether the stored draft of `documentId` waits for its course or parent
- * at `now` (DEPENDENCIES): within DEPENDENCY_WAIT_MINUTES of its own
- * publishAt, and the linked document has a due draft and no published row.
+ * The state of the stored draft's course or parent at `now`, read once
+ * (DEPENDENCIES):
+ *   - `published`: the linked document has a published row (now);
+ *   - `waiting`: it has none but a due draft, and the draft's own publishAt
+ *     is less than DEPENDENCY_WAIT_MINUTES ago;
+ *   - `none`: no link, the wait is over, or the linked document is neither
+ *     published nor due.
  */
-async function waitsForDependency(
+async function dependencyState(
   strapi: ScheduledPublishStrapi,
   uid: string,
   documentId: string,
   now: Date,
-): Promise<boolean> {
+): Promise<"published" | "waiting" | "none"> {
   const readiness = READINESS_TARGETS[uid];
-  if (!readiness || !hasReadinessRelation(strapi, uid)) return false;
+  if (!readiness || !hasReadinessRelation(strapi, uid)) return "none";
   const draft = await strapi.db.query(uid).findOne({
     where: { documentId, publishedAt: null },
     select: ["id", "publishAt"],
     populate: { [readiness.key]: { select: ["documentId"] } },
   });
-  const due = draft ? instantOf(draft.publishAt) : null;
-  if (!draft || due === null || now.getTime() >= due.getTime() + DEPENDENCY_WAIT_MS) return false;
-  const target = linkedDocumentId(draft, readiness.key);
-  if (target === null) return false;
+  const target = draft ? linkedDocumentId(draft, readiness.key) : null;
+  if (!draft || target === null) return "none";
   const query = strapi.db.query(readiness.target);
   const published = await query.count({
     where: { documentId: target, publishedAt: { $notNull: true } },
   });
-  if (published > 0) return false;
+  if (published > 0) return "published";
+  const due = instantOf(draft.publishAt);
+  if (due === null || now.getTime() >= due.getTime() + DEPENDENCY_WAIT_MS) return "none";
   const waiting = await query.count({
     where: { documentId: target, publishedAt: null, publishAt: { $notNull: true, $lte: now } },
   });
-  return waiting > 0;
+  return waiting > 0 ? "waiting" : "none";
 }
 
 /**
  * Whether a readiness refusal still holds under the lock (FAILURES): the
- * stored draft is still blocked, and it no longer waits for its course or
- * parent.
+ * stored draft is still blocked, and, when the block is its course or
+ * parent, the draft no longer waits for it. The course or parent is read
+ * twice (by the blockers, then here) and is not under this document's
+ * lock: when the second read finds it published, it was published in
+ * between, so the refusal is stale and the next run publishes the draft
+ * (Codex review of batch 15). Nothing is recorded on a contradiction.
  */
 async function refusalStillHolds(
   strapi: ScheduledPublishStrapi,
@@ -627,7 +635,9 @@ async function refusalStillHolds(
 ): Promise<boolean> {
   const blockers = await draftPublishBlockers(strapi, uid, documentId);
   if (blockers === null || blockers.length === 0) return false;
-  return !(await waitsForDependency(strapi, uid, documentId, now));
+  const readiness = READINESS_TARGETS[uid];
+  if (!readiness || !blockers.includes(readiness.key)) return true;
+  return (await dependencyState(strapi, uid, documentId, now)) === "none";
 }
 
 const clockOf = (time: Date | ScheduleClock): ScheduleClock =>

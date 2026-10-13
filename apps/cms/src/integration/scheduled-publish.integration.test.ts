@@ -485,6 +485,92 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     expect(next.published).toContain(key(WIKI_PAGE, child.documentId));
   });
 
+  it("a parent published between the two reads of the refusal's re-check is not recorded (Codex review)", async () => {
+    // Controlled reads inside the failure record (the 2nd outer
+    // transaction): the first "published" count of the parent answers the
+    // database (0), every later one 1. On Postgres the child's lock does
+    // not serialise the parent's publish, so the re-check can see both.
+    const base = Date.now();
+    const slug = (name: string) => `it-two-reads-${name}-${base}`;
+    const parent = await t.strapi.documents(WIKI_PAGE).create({
+      data: { title: "Two reads parent", slug: slug("parent") },
+    });
+    const child = await t.strapi.documents(WIKI_PAGE).create({
+      data: {
+        title: "Two reads child",
+        slug: slug("child"),
+        parent: parent.documentId,
+        publishAt: ago(60_000),
+      },
+    });
+    await settleFanouts();
+    const db = t.strapi.db as unknown as {
+      query(uid: string): unknown;
+      transaction(callback: unknown): Promise<unknown>;
+      inTransaction(): boolean;
+    };
+    const originalQuery = db.query;
+    const originalTransaction = db.transaction;
+    let outer = 0;
+    let inRecord = false;
+    let reads = 0;
+    db.transaction = async function (this: unknown, callback: unknown) {
+      if (!db.inTransaction()) {
+        outer += 1;
+        inRecord = outer === 2;
+      }
+      return originalTransaction.call(db, callback);
+    };
+    db.query = function (this: unknown, name: string) {
+      const query = originalQuery.call(db, name) as Record<string, unknown>;
+      if (name !== WIKI_PAGE) return query;
+      return new Proxy(query, {
+        get(target, prop) {
+          const value = target[prop as string];
+          if (prop !== "count" || typeof value !== "function") {
+            return typeof value === "function" ? value.bind(target) : value;
+          }
+          return async (params: { where?: Record<string, unknown> }) => {
+            const where = params?.where ?? {};
+            const published =
+              where.documentId === parent.documentId &&
+              typeof where.publishedAt === "object" &&
+              where.publishedAt !== null &&
+              "$notNull" in (where.publishedAt as object);
+            if (inRecord && published) {
+              reads += 1;
+              if (reads > 1) return 1;
+            }
+            return (value as (p: unknown) => Promise<number>).call(target, params);
+          };
+        },
+      });
+    };
+    const attempts = newAttempts();
+    const result = scheduler.emptyResult();
+    try {
+      await scheduler.runScheduledDocument(
+        t.strapi,
+        WIKI_PAGE,
+        child.documentId,
+        "publish",
+        new Date(),
+        attempts,
+        result,
+        await revisionOf(WIKI_PAGE, child.documentId),
+      );
+    } finally {
+      db.query = originalQuery;
+      db.transaction = originalTransaction;
+    }
+    expect(reads).toBeGreaterThan(1);
+    expect(result.retrying).toEqual([key(WIKI_PAGE, child.documentId)]);
+    expect(result.failed).toEqual([]);
+    expect(attempts.size).toBe(0);
+    expect(await draftOf(WIKI_PAGE, child.documentId)).toMatchObject({ scheduleError: null });
+    expect((await draftOf(WIKI_PAGE, child.documentId))?.publishAt).not.toBeNull();
+  });
+
   it("published quick links whose withdrawals back off never starve an independent due quick link (Codex review)", async () => {
     // 50 published links with an earlier pending update and a backed-off
     // withdrawal filled every publish batch (each skipped for the

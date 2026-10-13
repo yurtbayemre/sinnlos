@@ -131,6 +131,66 @@ const run = (now = NOW, attempts = new TransientAttempts()) =>
   runScheduledPublishing(strapi, now, attempts);
 
 /**
+ * Controlled reads for the refusal's re-check: inside the scheduler's
+ * `transactionNo`-th outer transaction (the failure record), the first
+ * "has a published row" count of `documentId` of `uid` answers what the
+ * database says, every later one 1: the course or parent was published
+ * between the blockers' read and the dependency read. Returns the undo.
+ */
+function publishedBetweenReads(
+  db: {
+    query(uid: string): unknown;
+    transaction(callback: unknown): Promise<unknown>;
+    inTransaction(): boolean;
+  },
+  uid: string,
+  documentId: string,
+  transactionNo = 2,
+): () => void {
+  const originalQuery = db.query;
+  const originalTransaction = db.transaction;
+  let outer = 0;
+  let inRecord = false;
+  let reads = 0;
+  db.transaction = async function (this: unknown, callback: unknown) {
+    if (!db.inTransaction()) {
+      outer += 1;
+      inRecord = outer === transactionNo;
+    }
+    return originalTransaction.call(db, callback);
+  };
+  db.query = function (this: unknown, name: string) {
+    const query = originalQuery.call(db, name) as Record<string, unknown>;
+    if (name !== uid) return query;
+    return new Proxy(query, {
+      get(target, prop) {
+        const value = target[prop as string];
+        if (prop !== "count" || typeof value !== "function") {
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        return async (params: { where?: Record<string, unknown> }) => {
+          const where = params?.where ?? {};
+          const published =
+            where.documentId === documentId &&
+            typeof where.publishedAt === "object" &&
+            where.publishedAt !== null &&
+            "$notNull" in (where.publishedAt as object);
+          if (inRecord && published) {
+            reads += 1;
+            if (reads > 1) return 1;
+          }
+          return (value as (p: unknown) => Promise<number>).call(target, params);
+        };
+      },
+    });
+  };
+  return () => {
+    db.query = originalQuery;
+    db.transaction = originalTransaction;
+  };
+}
+
+/**
  * Runs `between` just before the `n`-th transaction the scheduler opens
  * outside any other one (its document locks are taken inside those): the
  * window between what a run read and the lock it acts under. Writes made
@@ -663,6 +723,45 @@ describe("dependencies (a course or parent page due itself)", () => {
       scheduleError: null,
     });
     expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${child.documentId}`]);
+  });
+
+  it("a parent published between the two reads of the refusal's re-check is not recorded (Codex review)", async () => {
+    // The blockers read the parent unpublished, the dependency read finds it
+    // published (the child's lock does not serialise the parent's publish):
+    // the refusal is stale, nothing is written, the next run publishes.
+    const parent = await docs(WIKI).create({ data: { title: "Parent" } });
+    const child = await docs(WIKI).create({
+      data: { title: "Child", parent: parent.documentId, publishAt: EARLIER },
+    });
+    const attempts = new TransientAttempts();
+    const result = emptyResult();
+    const revision = await readRevision(strapi, WIKI, child.documentId);
+    const undo = publishedBetweenReads(
+      strapi.db as unknown as Parameters<typeof publishedBetweenReads>[0],
+      WIKI,
+      parent.documentId,
+    );
+    try {
+      await runScheduledDocument(
+        strapi,
+        WIKI,
+        child.documentId,
+        "publish",
+        NOW,
+        attempts,
+        result,
+        revision,
+      );
+    } finally {
+      undo();
+    }
+    expect(result.retrying).toEqual([`${WIKI} ${child.documentId}`]);
+    expect(result.failed).toEqual([]);
+    expect(attempts.size).toBe(0);
+    expect((await rows(WIKI, child.documentId))[0]).toMatchObject({
+      publishAt: EARLIER,
+      scheduleError: null,
+    });
   });
 
   it("a child whose parent is not due fails for good (notPublishable), as before", async () => {
