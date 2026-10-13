@@ -1,4 +1,5 @@
 import type { AuthoringRoleClass } from "./fields.js";
+import type { WikiEditorClass, WikiSpaceVisibility } from "./wiki.js";
 
 /**
  * The response shapes of v2 authoring (deep-dive decision 06 §B3; batch 15
@@ -124,6 +125,13 @@ export interface EditableBase {
   updatedAt: string | null;
   /** The class the caller edits as: the form offers exactly that class's fields (fields.ts). */
   roleClass: AuthoringRoleClass;
+  /**
+   * The display name of the item's author (announcement, poll, wiki page),
+   * organiser (event) or uploader (document), for the preview (batch 16,
+   * K18). null for quick links, wiki spaces and items created in the admin
+   * panel without one. Optional: a cms before batch 16 does not send it.
+   */
+  authorName?: string | null;
 }
 
 export interface AnnouncementEditable extends EditableBase {
@@ -181,7 +189,11 @@ export interface DocumentEditable extends EditableBase {
   description: string | null;
   category: string;
   departments: string[];
-  /** Read-only until batch 16 (set in the admin panel). */
+  /**
+   * The draft's file. Since batch 16 writable: send a file row id from
+   * POST /api/upload to attach a new upload (the caller's own, unattached;
+   * else 400 `invalid` on `file`), the stored id to keep it, null to clear.
+   */
   file: EditableMedia | null;
   ownerDepartment: OwnerDepartment | null;
   needsRetarget: boolean;
@@ -207,4 +219,158 @@ export interface PollEditable extends EditableBase {
 /** The answer of `GET /api/<plural>/:documentId/editable`, with `ETag: "<version>"`. */
 export interface EditableResponse<T extends EditableBase> {
   data: T;
+}
+
+// ---------------------------------------------------------------------------
+// The wiki (batch 16, lane 16B; contract K18). Routes and fields: wiki.ts.
+
+/** A wiki space as a page row or a draft row names it. */
+export interface WikiSpaceRef {
+  documentId: string;
+  slug: string;
+  name: string;
+}
+
+/** `data` of a wiki-space write: the result plus the (derived, fixed) slug. */
+export interface WikiSpaceResult extends AuthoringResult {
+  slug: string;
+}
+
+/**
+ * `data` of a wiki-page write (create, update, createDraft, saveDraft,
+ * publish, unpublish, discardDraft, restore): the result with the page's
+ * `publishAt` and `scheduleError`, its slug and its space's slug (null when
+ * the space is gone), so the web can link the published page.
+ */
+export interface WikiPageResult extends AuthoringResult {
+  slug: string;
+  spaceSlug: string | null;
+}
+
+/** `GET /api/wiki-spaces/:documentId/editable` (moderators). */
+export interface WikiSpaceEditable extends EditableBase {
+  name: string;
+  slug: string;
+  /** An icon key (icons.ts), or a legacy value the admin panel stored. */
+  icon: string | null;
+  description: string | null;
+  visibility: WikiSpaceVisibility;
+  /** Role types (`member`, `team_lead`, ...): who reads a `role` space. */
+  allowedRoles: string[];
+  department: string | null;
+  team: string | null;
+  /** The visibility's target is gone (a deleted department or team): only moderators read it. */
+  needsRetarget: boolean;
+  /** Page documents in the space: a space with pages cannot be deleted (`spaceNotEmpty`). */
+  pageCount: number;
+}
+
+/** One row of `GET /api/wiki-spaces/authoring`: `label` is the space's name. */
+export interface WikiSpaceListRow extends AuthoringListRow {
+  slug: string;
+  icon: string | null;
+  visibility: WikiSpaceVisibility;
+  pageCount: number;
+}
+
+export interface WikiSpaceListResponse {
+  data: WikiSpaceListRow[];
+  meta: { pagination: AuthoringPagination };
+}
+
+/**
+ * `GET /api/wiki-pages/:documentId/editable` (the row classes and
+ * moderators): the draft in the write shape. `parent` is a documentId of
+ * the same space. `department`, `team`, `publishAt` and `scheduleError`
+ * only for moderators, who write them.
+ */
+export interface WikiPageEditable extends Omit<EditableBase, "roleClass"> {
+  /** The class the caller edits as (WIKI_FIELDS lists its keys). */
+  roleClass: WikiEditorClass;
+  title: string;
+  slug: string;
+  body: string | null;
+  summary: string | null;
+  tags: string[];
+  tocEnabled: boolean;
+  order: number;
+  space: WikiSpaceRef | null;
+  parent: string | null;
+  /**
+   * Whether the caller may discard while no published row exists (that
+   * deletes the page): its author and moderators only (§J2).
+   */
+  canDiscardUnpublished: boolean;
+  /** Moderators only. */
+  department?: string | null;
+  team?: string | null;
+  publishAt?: string | null;
+  scheduleError?: string | null;
+}
+
+/** One row of `GET /api/wiki-pages/authoring` (moderators): `label` is the title. */
+export interface WikiPageListRow extends AuthoringListRow {
+  slug: string;
+  /** The space documentId (the list filters by `space`). */
+  space: string | null;
+  parent: string | null;
+  order: number;
+}
+
+export interface WikiPageListResponse {
+  data: WikiPageListRow[];
+  meta: { pagination: AuthoringPagination };
+}
+
+/** One row of `GET /api/wiki-pages/drafts/mine`: the caller's pages with unpublished changes. */
+export interface WikiMyDraftRow {
+  documentId: string;
+  title: string;
+  slug: string;
+  space: WikiSpaceRef | null;
+  /** `draft`: no published row (never published, or unpublished); `modified`: changes pending. */
+  status: Extract<AuthoringDocumentStatus, "draft" | "modified">;
+  updatedAt: string | null;
+  version: string;
+}
+
+export interface WikiMyDraftsResponse {
+  data: WikiMyDraftRow[];
+}
+
+/**
+ * The kind of a history entry: `after` and `baseline` hold the page's
+ * title, body and summary at that point (a save, or the state at an
+ * upgrade); `before` is a legacy entry from before batch 16 that holds only
+ * the body before an edit ("state before an edit (older format)").
+ */
+export type WikiRevisionKind = "before" | "after" | "baseline";
+
+/** Who saved a revision: a user, an admin-panel account, or nobody recorded (a baseline). */
+export type WikiRevisionEditor = { id: number; displayName: string } | { admin: true } | null;
+
+/** One entry of `GET /api/wiki-pages/:documentId/revisions`, newest first, without the body. */
+export interface WikiRevisionEntry {
+  id: number;
+  createdAt: string;
+  /** The page title at that point; null for a legacy `before` entry. */
+  title: string | null;
+  /** The edit note the editor gave (`revisionSummary`). */
+  changeSummary: string | null;
+  kind: WikiRevisionKind;
+  editor: WikiRevisionEditor;
+  /** The revision a restore brought back. */
+  restoredFrom: number | null;
+}
+
+export interface WikiRevisionListResponse {
+  data: WikiRevisionEntry[];
+  meta: { pagination: AuthoringPagination };
+}
+
+/** `GET /api/wiki-pages/:documentId/revisions/:revisionId`: one entry with its content. */
+export interface WikiRevisionDetail extends WikiRevisionEntry {
+  body: string | null;
+  /** The page summary at that point; null for a legacy `before` entry. */
+  pageSummary: string | null;
 }

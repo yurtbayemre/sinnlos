@@ -927,9 +927,8 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
       ["audience", "scheduleError"].sort(),
     );
     expect(Object.keys(REFUSED_ATTRIBUTES[DOCUMENT]).sort()).toEqual(
-      ["audience", "file", "ownerDepartment", "scheduleError", "uploadedBy"].sort(),
+      ["audience", "ownerDepartment", "scheduleError", "uploadedBy"].sort(),
     );
-    expect(REFUSED_ATTRIBUTES[DOCUMENT].file).toContain("batch 16");
     expect(Object.keys(REFUSED_ATTRIBUTES[POLL]).sort()).toEqual(["audience", "author"].sort());
   });
 
@@ -985,7 +984,7 @@ describe("v2 rules: attribute coverage and field lists (§B1.7, §N6)", () => {
       ].sort(),
     );
     expect(fieldsOf(DOCUMENT, "update", DEPARTMENT_AUTHOR_CLASS)).toEqual(
-      ["category", "departments", "description", "title"].sort(),
+      ["category", "departments", "description", "file", "title"].sort(),
     );
     for (const uid of [ANNOUNCEMENT, EVENT, DOCUMENT]) {
       expect(fieldsOf(uid, "create", DEPARTMENT_AUTHOR_CLASS)).toEqual(

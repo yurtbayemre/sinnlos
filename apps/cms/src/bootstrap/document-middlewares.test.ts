@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { DOCUMENT_FILE_MIMES } from "../utils/authoring-checks";
+import { MEDIA_CLAIM_FIELDS } from "../utils/media-claims";
+import { WRITE_ALLOWLIST, type WriteAllowlist } from "../utils/write-allowlist";
 import {
   DOCUMENT_MIDDLEWARE_SLOTS,
   documentMiddlewares,
@@ -66,6 +69,7 @@ describe("Document Service middleware slots (K6)", () => {
       "department-audience-guard",
       "schedule-clear",
       "publish-readiness",
+      "media-claims",
       "audit-recorder",
       "user-write-guard",
     ]);
@@ -77,6 +81,37 @@ describe("Document Service middleware slots (K6)", () => {
     const strapi = host({ use });
     registerDocumentMiddlewares(strapi);
     expect(use).toHaveBeenCalledTimes(documentMiddlewares(strapi).length);
+  });
+
+  // The claim race (decision 06 §E3, Codex row 13): the allowlist's
+  // `ownUpload` runs in the policy, before the transaction, so it only
+  // refuses early. A media field the content API accepts is safe only with
+  // the media claims wired: they lock the file row inside the document
+  // lock's transaction, re-check it there (tombstone, links, stamp, mime)
+  // and remove released files after the commit.
+  it("wires the media claims for every media field the allowlist accepts", () => {
+    const mediaFields = new Map<string, [string, string]>();
+    for (const [uid, actions] of Object.entries(WRITE_ALLOWLIST as WriteAllowlist)) {
+      for (const byClass of Object.values(actions)) {
+        for (const rule of Object.values(byClass ?? {})) {
+          for (const [key, spec] of Object.entries(rule.fields)) {
+            if (spec.kind === "media") mediaFields.set(`${uid}.${key}`, [uid, key]);
+          }
+        }
+      }
+    }
+    expect([...mediaFields.keys()]).toEqual(["api::document.document.file"]);
+    for (const [field, [uid, key]] of mediaFields) {
+      // Claimed, with the very mimes the early check admits.
+      expect([...(MEDIA_CLAIM_FIELDS[uid]?.[key] ?? [])].sort(), field).toEqual(
+        [...DOCUMENT_FILE_MIMES].sort(),
+      );
+    }
+    const slots = documentMiddlewares(host(null)).map((entry) => entry.slot);
+    expect(slots).toContain("media-claims");
+    // Inside the lock's transaction, before the audit row is written.
+    expect(slots.indexOf("media-claims")).toBeGreaterThan(slots.indexOf("document-lock"));
+    expect(slots.indexOf("media-claims")).toBeLessThan(slots.indexOf("audit-recorder"));
   });
 
   it("refuses to boot without strapi.documents.use, registering nothing", () => {

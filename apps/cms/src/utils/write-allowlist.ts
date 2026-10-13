@@ -386,6 +386,8 @@ const toMany = (
   max: options.max ?? MAX_TARGET_DEPARTMENTS,
   ...(options.callerDepartmentOnCreate ? { callerDepartmentOnCreate: true } : {}),
 });
+/** A single media field authorized by a named check (§B1.2 media; retain passes unchecked). */
+const media = (check: MediaCheckName): MediaField => ({ kind: "media", check });
 const roleTypes = (allowed: readonly RoleType[]): RoleTypesField => ({
   kind: "roleTypes",
   allowed,
@@ -697,11 +699,18 @@ const DOCUMENT_COMMON = {
   category: value(enumOf(DOCUMENT_CATEGORIES)),
 };
 
-/** `file` joins both document rules in batch 16, with the upload pipeline (§E2). */
+/**
+ * `file` (batch 16, §E2): a file row id the caller uploaded and nothing
+ * else links (`ownUpload`, utils/authoring-checks.ts), an early refusal;
+ * the media claims re-check it under the file row's lock at the write
+ * (utils/media-claims.ts, document-middlewares slot 7). Keeping the stored
+ * file passes unchecked, null clears it.
+ */
 const DOCUMENT_MODERATOR: WriteRule = {
   fields: {
     ...DOCUMENT_COMMON,
     departments: toMany("departments"),
+    file: media("ownUpload"),
     publishAt: value(checkNullableInstant),
     unpublishAt: value(checkNullableInstant),
   },
@@ -714,6 +723,7 @@ const DOCUMENT_DEPARTMENT_AUTHOR: WriteRule = {
   fields: {
     ...DOCUMENT_COMMON,
     departments: toMany("callerDepartments", { callerDepartmentOnCreate: true }),
+    file: media("ownUpload"),
   },
   derivedFromMerged: { audience: DEPARTMENTS_FLAG },
   crossCheck: scheduledCrossCheck,
@@ -762,9 +772,9 @@ const POLL_RULES = { moderator: withCreate(POLL_MODERATOR, "author", false) };
 /*
  * v2 follow-ups, kept OUT of the table on purpose until each has its own
  * batch and check:
- *   - media: document `file` (batch 16, with the file claims), department
- *     `headerImage` and team `avatar` (batch 17). The `ownUpload` check
- *     exists (utils/authoring-checks.ts) and keeps the retain rule.
+ *   - media: department `headerImage` and team `avatar` (batch 17), with
+ *     the `media` builder and the `ownUpload` check document `file` uses
+ *     since batch 16 (images only there).
  *   - team `members` / `lead`: stay admin-managed. Lead-managed membership
  *     belongs on a dedicated route with its own rules, not in this table.
  *   - wiki `space` on update (moving a page) stays in the admin panel; a
@@ -888,7 +898,6 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
     scheduleError: "scheduler bookkeeping (§D rule 7)",
   },
   [DOCUMENT_UID]: {
-    file: "batch 16: uploads, the document profile and the file claims (§E2)",
     audience: "derived targeting flag (derivedFromMerged, contract K10)",
     uploadedBy: "ownership: the caller, set on create (callerFields)",
     ownerDepartment: "derived ownership: the department author's department, set on create",

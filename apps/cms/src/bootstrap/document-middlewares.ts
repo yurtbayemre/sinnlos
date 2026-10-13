@@ -5,6 +5,7 @@ import {
 import { createAuditRecorder, type AuditHost } from "../utils/audit";
 import { createDepartmentAudienceGuard } from "../utils/department-audience-guard";
 import { createDocumentLock, type DocumentLockMiddlewareHost } from "../utils/document-lock";
+import { createMediaClaims } from "../utils/media-claims";
 import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
 import {
   createPollAudienceGuard,
@@ -37,7 +38,9 @@ import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
  *   4. (batch 16B: the wiki checks);
  *   5. schedule-clear (§D rule 6);
  *   6. publish readiness (§G2);
- *   7. (batch 16B: the media claims);
+ *   7. media claims (§E3, §E4; utils/media-claims.ts, lane 16A): a newly
+ *      linked stamped upload is locked and re-checked before the action
+ *      writes, a released one is removed after the commit;
  *   8. audit recorder (§H): last of the content middlewares, inside the
  *      transaction;
  *   9. the FX40 user write guard: users are neither locked nor audited, so
@@ -101,6 +104,7 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
     { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
     { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
+    { slot: "media-claims", middleware: createMediaClaims(strapi) },
     { slot: "audit-recorder", middleware: createAuditRecorder(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
   ];
@@ -119,7 +123,7 @@ export function registerDocumentMiddlewares(strapi: DocumentMiddlewaresRegistrat
     throw new Error(
       `${DOCUMENT_MIDDLEWARES_LOG} strapi.documents.use not found — refusing to boot without the ` +
         "Document Service middlewares (datetime guard, document lock, audience guards, schedule, " +
-        "readiness, audit, user write guard)",
+        "readiness, media claims, audit, user write guard)",
     );
   }
   for (const { middleware } of documentMiddlewares(strapi)) documents.use(middleware);
