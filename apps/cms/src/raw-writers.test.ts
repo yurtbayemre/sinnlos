@@ -112,6 +112,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "extensions/upload/strapi-server.ts": "upload files",
   "extensions/users-permissions/strapi-server.ts": "users (the token version)",
   "utils/audit.ts": "audit events (the recorder)",
+  "utils/authoring-controller.ts":
+    "guarded documents only through the Document Service (create, update, publish, unpublish, discardDraft, delete inside an authoring scope); the query layer only reads",
   "utils/document-lock.ts": "content_versions, the revision rows themselves",
   "utils/draft-twins.ts": "comment only: the repair writes through documents.discardDraft",
   "utils/live-events.ts": "comment only",
