@@ -371,8 +371,29 @@ async function removeWithDeleteAudit<T>(
   });
 }
 
+/**
+ * Marks the factories this extension installed. @strapi/upload exports its
+ * controllers and services as module-level objects, so a second Strapi in
+ * the same process (the integration harness boots one per engine) hands
+ * the extension the already wrapped factories: wrapping them again would
+ * run every check, and every delete's audit row, twice.
+ */
+const WRAPPED = Symbol.for("sinnlos.upload-extension.wrapped");
+
+const isWrapped = (factory: unknown): boolean =>
+  typeof factory === "function" &&
+  (factory as unknown as Record<symbol, unknown>)[WRAPPED] === true;
+
+function markWrapped<T extends object>(factory: T): T {
+  Object.defineProperty(factory, WRAPPED, { value: true });
+  return factory;
+}
+
 export function createUploadExtension(io: UploadIo = nodeIo) {
   return (plugin: UploadPlugin): UploadPlugin => {
+    if (isWrapped(plugin?.controllers?.["content-api"]) && isWrapped(plugin?.services?.upload)) {
+      return plugin;
+    }
     const originalControllerFactory = plugin?.controllers?.["content-api"];
     // Tripwire, plugin load: v5 registers the controller as a factory.
     if (typeof originalControllerFactory !== "function") {
@@ -391,20 +412,22 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
     const factory = originalControllerFactory as Factory;
     const serviceFactory = originalServiceFactory as Factory;
 
-    (plugin.services as Record<string, unknown>).upload = (deps: { strapi: UploadStrapi }) => {
-      const service = serviceFactory(deps) as Record<string, unknown>;
-      const originalRemove = service?.remove;
-      if (typeof originalRemove !== "function") {
-        throw new Error(
-          "[upload-extension] the upload service no longer exposes remove(file) (delete-audit tripwire).",
-        );
-      }
-      service.remove = (file: DeletedFile) =>
-        removeWithDeleteAudit(deps.strapi, file, () => originalRemove.call(service, file));
-      return service;
-    };
+    (plugin.services as Record<string, unknown>).upload = markWrapped(
+      (deps: { strapi: UploadStrapi }) => {
+        const service = serviceFactory(deps) as Record<string, unknown>;
+        const originalRemove = service?.remove;
+        if (typeof originalRemove !== "function") {
+          throw new Error(
+            "[upload-extension] the upload service no longer exposes remove(file) (delete-audit tripwire).",
+          );
+        }
+        service.remove = (file: DeletedFile) =>
+          removeWithDeleteAudit(deps.strapi, file, () => originalRemove.call(service, file));
+        return service;
+      },
+    );
 
-    plugin.controllers["content-api"] = (deps: { strapi: UploadStrapi }) => {
+    plugin.controllers["content-api"] = markWrapped((deps: { strapi: UploadStrapi }) => {
       const strapi = deps?.strapi;
       assertStrapiShape(strapi);
       const controller = factory(deps);
@@ -485,7 +508,7 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
       };
 
       return controller;
-    };
+    });
 
     return plugin;
   };

@@ -847,3 +847,31 @@ describe("upload extension — upgrade tripwire", () => {
     expect(plugin.controllers["admin-upload"]).toBe(adminFactory);
   });
 });
+
+describe("upload extension — applied twice to one plugin object (two boots in one process)", () => {
+  it("wraps once: one audit row per delete, one check per upload", async () => {
+    const env = makeStrapi();
+    const core = makeCoreFactory(env);
+    const service = makeServiceFactory(env);
+    const plugin: UploadPlugin = {
+      controllers: { "content-api": core.factory },
+      services: { upload: service.factory },
+    };
+    const io = makeIo({ "/tmp/a": { data: JPEG } });
+    createUploadExtension(io)(plugin);
+    const once = {
+      controller: plugin.controllers["content-api"],
+      service: plugin.services?.upload,
+    };
+    createUploadExtension(io)(plugin);
+    expect(plugin.controllers["content-api"]).toBe(once.controller);
+    expect(plugin.services?.upload).toBe(once.service);
+    const removing = (
+      plugin.services?.upload as (deps: { strapi: UploadStrapi }) => {
+        remove(file: Row): Promise<unknown>;
+      }
+    )({ strapi: env.strapi });
+    await removing.remove({ id: 1, documentId: "f1" });
+    expect(env.audit).toHaveLength(1);
+  });
+});
