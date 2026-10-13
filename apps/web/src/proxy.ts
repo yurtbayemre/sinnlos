@@ -129,7 +129,7 @@ export function signInPath(req: NextRequest): string {
  * 200 with `x-action-redirect: <path>;push` and no body (next 16.3.4
  * app-render/action-handler.js createRedirectRenderResult;
  * server-action-reducer.js accepts it as a redirect without Flight data and
- * navigates to it). So an expired session ends at /sign-in?expired=1 for an
+ * navigates to it; both unchanged in 16.4.0). So an expired session ends at /sign-in?expired=1 for an
  * action exactly as for a page load (proxy.test.ts). Any other request gets
  * a plain redirect: 307 for GET/HEAD, 303 for the rest, so that a form
  * posted without JavaScript is followed with a GET (signInRedirectStatus).
