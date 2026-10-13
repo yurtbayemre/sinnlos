@@ -247,6 +247,7 @@ export function QuickLinkEditor({
           pending={editor.pending}
           errorText={(field) => error(field)}
           onOpenChange={item.setScheduleOpen}
+          returnFocus={item.scheduleOpener}
           onSave={(schedule) => item.save("draft", schedule)}
         />
       )}
@@ -257,6 +258,7 @@ export function QuickLinkEditor({
         onReload={item.reload}
         onOverwrite={editor.overwrite}
         onClose={editor.clearConflict}
+        returnFocus={editor.invokerRef}
       />
     </>
   );

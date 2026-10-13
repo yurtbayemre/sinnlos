@@ -303,6 +303,7 @@ export function AnnouncementEditor({
           pending={editor.pending}
           errorText={(field) => error(field)}
           onOpenChange={item.setScheduleOpen}
+          returnFocus={item.scheduleOpener}
           onSave={(schedule) => item.save("draft", schedule)}
         />
       )}
@@ -313,6 +314,7 @@ export function AnnouncementEditor({
         onReload={item.reload}
         onOverwrite={editor.overwrite}
         onClose={editor.clearConflict}
+        returnFocus={editor.invokerRef}
       />
     </>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import type { AuthoringResult, EditableBase } from "@sinnlos/domain";
@@ -87,7 +87,11 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     onReset,
   });
   const { meta, run, requestReset } = editor;
-  const dirty = !sameValues(values, initial);
+  // A ticked re-target confirmation is a change to save: the publish bar
+  // then saves (Save and publish) instead of publishing the draft as it is.
+  const dirty = retarget || !sameValues(values, initial);
+  // The Schedule… button that opened the dialog, for the focus on close.
+  const scheduleOpener = useRef<HTMLElement | null>(null);
 
   // Unsaved changes: ask before the tab closes or reloads.
   useEffect(() => {
@@ -130,6 +134,19 @@ export function useItemEditor<V extends object, E extends EditableBase>({
             ...extraInput,
           }),
         {
+          // A refusal that is not about the schedule's own fields (the
+          // title, a lost permission, an outage) closes the dialog: the
+          // form's errors and alert are behind it.
+          onFailure: (fields) => {
+            if (!schedule) return;
+            const keys = Object.keys(fields);
+            if (
+              keys.length === 0 ||
+              keys.some((key) => key !== "publishAt" && key !== "unpublishAt")
+            ) {
+              setScheduleOpen(false);
+            }
+          },
           onSuccess: (data: AuthoringResult | null) => {
             if (schedule) setScheduleOpen(false);
             if (creating && data) {
@@ -189,7 +206,11 @@ export function useItemEditor<V extends object, E extends EditableBase>({
       unpublish: () => transition("unpublish", actions.unpublish),
       discard: () => transition("discard", actions.discard),
       delete: () => transition("delete", actions.remove),
-      schedule: () => setScheduleOpen(true),
+      schedule: () => {
+        const active = document.activeElement;
+        scheduleOpener.current = active instanceof HTMLElement ? active : null;
+        setScheduleOpen(true);
+      },
     }),
     [save, transition, actions],
   );
@@ -214,9 +235,14 @@ export function useItemEditor<V extends object, E extends EditableBase>({
     setRetarget,
     scheduleOpen,
     setScheduleOpen,
-    /** Reload after a conflict: the fresh `editable`, the changes dropped. */
+    scheduleOpener,
+    /**
+     * Reload after a conflict: the fresh `editable`, the changes dropped,
+     * the Schedule… dialog closed (its values belonged to the old version).
+     */
     reload: () => {
       editor.clearConflict();
+      setScheduleOpen(false);
       requestReset();
     },
   };

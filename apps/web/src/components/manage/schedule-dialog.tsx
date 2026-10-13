@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import * as Dialog from "@radix-ui/react-dialog";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ export function ScheduleDialog({
   timeZone,
   pending,
   errorText,
+  returnFocus,
   onOpenChange,
   onSave,
 }: {
@@ -43,6 +44,8 @@ export function ScheduleDialog({
   pending: boolean;
   /** The text of a refused schedule field, if any. */
   errorText: (field: "publishAt" | "unpublishAt") => string | undefined;
+  /** The control that opened the dialog: the focus goes back to it on close. */
+  returnFocus?: RefObject<HTMLElement | null>;
   onOpenChange: (open: boolean) => void;
   onSave: (schedule: ScheduleValues) => void;
 }) {
@@ -63,6 +66,7 @@ export function ScheduleDialog({
     <ModalDialog
       open={open}
       onOpenChange={onOpenChange}
+      returnFocus={returnFocus}
       title={t("title")}
       description={t("description")}
     >

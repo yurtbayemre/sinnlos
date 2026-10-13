@@ -305,6 +305,16 @@ describe("event payloads", () => {
     expect(
       buildEventPayload({ ...initial, startTime: "09:00" }, initial, moderator({ mode: "update" })),
     ).toEqual({ ok: true, data: { start: "2026-11-03T08:00:00.000Z" } });
+    // A new start day leaves an explicit end alone, even one in a repeated
+    // clock-change hour (it is not re-validated).
+    const explicit = event({ endDate: "2026-10-25", endTime: "02:30" });
+    expect(
+      buildEventPayload(
+        { ...explicit, startDate: "2026-10-24" },
+        explicit,
+        moderator({ mode: "update" }),
+      ),
+    ).toEqual({ ok: true, data: { start: "2026-10-24T08:00:00.000Z" } });
     // An end given as a time alone ends on the start's day: a new start day moves it.
     const sameDay = event({ endTime: "11:00" });
     expect(

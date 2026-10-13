@@ -374,6 +374,7 @@ export function PollEditor({
         onReload={item.reload}
         onOverwrite={editor.overwrite}
         onClose={editor.clearConflict}
+        returnFocus={editor.invokerRef}
       />
     </>
   );

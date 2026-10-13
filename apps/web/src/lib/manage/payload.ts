@@ -83,6 +83,8 @@ export type BuiltPayload =
 interface FieldRule<V extends object> {
   key: string;
   inputs: readonly (keyof V)[];
+  /** The inputs the field reads for these values, when that depends on them (default `inputs`). */
+  inputsOf?: (values: V) => readonly (keyof V)[];
   convert(values: V, ctx: PayloadContext): Converted<unknown>;
   /** Whether two values of one input are the same (default: scalars, lists as sets). */
   same?: (a: unknown, b: unknown) => boolean;
@@ -120,7 +122,9 @@ function buildFields<V extends object>(
   const base = ctx.mode === "create" ? null : initial;
   const changed = (rule: FieldRule<V>) =>
     base === null ||
-    rule.inputs.some((input) => !(rule.same ?? sameValue)(values[input], base[input]));
+    (rule.inputsOf?.(values) ?? rule.inputs).some(
+      (input) => !(rule.same ?? sameValue)(values[input], base[input]),
+    );
   const targetingChanged =
     ctx.retarget === true || rules.some((rule) => targeting.has(rule.key) && changed(rule));
 
@@ -232,7 +236,17 @@ const EVENT_RULES: readonly FieldRule<EventValues>[] = [
   },
   { key: "allDay", inputs: ["allDay"], convert: (v) => ({ value: v.allDay }) },
   { key: "start", inputs: ["allDay", "startDate", "startTime"], convert: eventStart },
-  { key: "end", inputs: ["allDay", "startDate", "endDate", "endTime"], convert: eventEnd },
+  {
+    key: "end",
+    inputs: ["allDay", "startDate", "endDate", "endTime"],
+    // The start's day matters only to an end given as a time alone: a
+    // moved start leaves an explicit end alone (changed fields only).
+    inputsOf: (v) =>
+      !v.allDay && v.endDate.trim() === ""
+        ? ["allDay", "startDate", "endDate", "endTime"]
+        : ["allDay", "endDate", "endTime"],
+    convert: eventEnd,
+  },
   {
     key: "location",
     inputs: ["location"],

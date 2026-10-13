@@ -18,7 +18,8 @@ import { fieldInputId, sortFieldErrors, type ManageErrorCode } from "@/lib/manag
  *    (`If-Match`); every success replaces it with the cms's answer.
  *  - A 412 opens the conflict dialog with the cms's current version:
  *    "Overwrite" repeats the same call with that version (an explicit
- *    choice), "Reload" re-reads the page and resets the form to it.
+ *    choice) and then reloads the item, "Reload" re-reads the page and
+ *    resets the form to it.
  *  - A 400 sorts its fields: the form's own fields get their texts and
  *    the focus moves to the first one; `_form` (neverPublished) and keys
  *    the form cannot show get a text above the actions, which takes the
@@ -103,6 +104,12 @@ export type ActionCall = (version: string | undefined) => Promise<AuthoringActio
 export interface RunOptions {
   /** After `ok: true`, with the answer's data (null: the document is gone). */
   onSuccess?: (data: AuthoringResult | null) => void | Promise<void>;
+  /**
+   * After a refusal other than a conflict, with the refused fields (empty
+   * for a failure without fields): a dialog that started the action can
+   * close so the form's errors are reachable.
+   */
+  onFailure?: (fields: Readonly<Record<string, string>>) => void;
 }
 
 /** The DOM element of a field: its control, or the first focusable inside it. */
@@ -142,6 +149,9 @@ export function useAuthoringEditor<Source extends object | null>({
   // A new failure moves the focus once: to `field`, or to the alert.
   const [focusRequest, setFocusRequest] = useState<{ field: string | null } | null>(null);
   const alertRef = useRef<HTMLDivElement>(null);
+  // The control that started the last action (the focus target when the
+  // conflict dialog closes: Radix returns the focus only to a trigger).
+  const invokerRef = useRef<HTMLElement | null>(null);
 
   // Reload and Discard: re-render the page, then reset the form to the
   // fresh `editable` in the render that brings it (state derived from the
@@ -194,6 +204,8 @@ export function useAuthoringEditor<Source extends object | null>({
       setFailure(null);
       setConflict(null);
       setRunning(intent);
+      const active = typeof document === "undefined" ? null : document.activeElement;
+      if (active instanceof HTMLElement && active !== document.body) invokerRef.current = active;
       startCmsAction(startTransition, {
         action: () => call(versionOverride ?? meta?.version),
         onSuccess: async (data) => {
@@ -220,6 +232,7 @@ export function useAuthoringEditor<Source extends object | null>({
             setFailure({ kind: "common", code });
             setFocusRequest({ field: null });
           }
+          options.onFailure?.(result.fields ?? {});
         },
         onSettled: () => setRunning(null),
       });
@@ -237,16 +250,35 @@ export function useAuthoringEditor<Source extends object | null>({
     [firstField],
   );
 
-  /** "Overwrite" in the conflict dialog: the same call with the cms's current version. */
+  /**
+   * "Overwrite" in the conflict dialog: the same call with the cms's
+   * current version. The call sends only the fields this form changed, so
+   * the other author's changes to the rest stay; afterwards the form
+   * reloads the item, so it shows what the cms now holds and its next save
+   * starts from that, never from the values it opened with.
+   */
   const overwrite = useCallback(() => {
     if (!conflict?.version) return;
-    run(conflict.intent, conflict.call, conflict.options, conflict.version);
-  }, [conflict, run]);
+    const { options } = conflict;
+    run(
+      conflict.intent,
+      conflict.call,
+      {
+        ...options,
+        onSuccess: async (data) => {
+          await options.onSuccess?.(data);
+          if (data) requestReset();
+        },
+      },
+      conflict.version,
+    );
+  }, [conflict, run, requestReset]);
 
   return {
     meta,
     setMeta,
     overwrite,
+    invokerRef,
     pending: busy,
     running,
     fieldErrors,

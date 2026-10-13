@@ -30,6 +30,7 @@ export function ModalDialog({
   title,
   description,
   initialFocus,
+  returnFocus,
   className,
   children,
 }: {
@@ -45,6 +46,13 @@ export function ModalDialog({
    * autoFocus, else the first focusable one (the close button).
    */
   initialFocus?: RefObject<HTMLElement | null>;
+  /**
+   * Where the focus goes when the dialog closes, for a dialog opened
+   * without a `trigger` (programmatically, e.g. after a failed save):
+   * Radix returns the focus only to its own trigger, and without one it
+   * would land on <body>. Ignored while the element is gone.
+   */
+  returnFocus?: RefObject<HTMLElement | null>;
   className?: string;
   children?: ReactNode;
 }) {
@@ -60,6 +68,17 @@ export function ModalDialog({
             // (Radix would point aria-describedby at a missing element and
             // warn about it).
             {...(hasDescription ? {} : { "aria-describedby": undefined })}
+            onCloseAutoFocus={
+              returnFocus
+                ? (event) => {
+                    const target = returnFocus.current;
+                    if (target && target.isConnected) {
+                      event.preventDefault();
+                      target.focus();
+                    }
+                  }
+                : undefined
+            }
             onOpenAutoFocus={
               initialFocus
                 ? (event) => {

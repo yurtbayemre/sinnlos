@@ -141,6 +141,7 @@ export function ConflictDialog({
   onReload,
   onOverwrite,
   onClose,
+  returnFocus,
 }: {
   conflict: ConflictState | null;
   /** The text the author typed (title and body), for the copy button. */
@@ -150,6 +151,8 @@ export function ConflictDialog({
   /** Repeats the refused action with the cms's current version. */
   onOverwrite: () => void;
   onClose: () => void;
+  /** The control that started the refused action: the focus goes back to it. */
+  returnFocus?: RefObject<HTMLElement | null>;
 }) {
   const t = useTranslations("manage.common.conflict");
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
@@ -174,6 +177,7 @@ export function ConflictDialog({
       title={t("title")}
       description={t("body")}
       initialFocus={reloadRef}
+      returnFocus={returnFocus}
     >
       <div className="mt-4 space-y-4 text-sm">
         <div className="space-y-2">
