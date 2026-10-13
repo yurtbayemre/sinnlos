@@ -112,7 +112,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "api/reaction/controllers/reaction.ts": "reactions",
   "api/search-log/controllers/search-log.ts": "search logs",
   "api/team/controllers/team.ts": "team writes only through the Document Service (super.update)",
-  "api/wiki-page/content-types/wiki-page/lifecycles.ts": "wiki revisions (not a guarded type)",
+  "api/wiki-page/content-types/wiki-page/lifecycles.ts":
+    "wiki revisions (not a guarded type): the after-image of a draft save, in its transaction",
   "bootstrap/sync-permissions.ts": "roles and permissions",
   "cron/prune-audit-events.ts": "audit events (the retention janitor)",
   "cron/prune-notifications.ts": "notifications",
@@ -129,6 +130,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
   "utils/draft-twins.ts": "comment only: the repair writes through documents.discardDraft",
   "utils/live-events.ts": "comment only",
   "utils/notify.ts": "notifications",
+  "utils/revision-backfill.ts":
+    "wiki revisions (not a guarded type): anchor, kind and the cutover baseline at boot",
   "utils/target-visibility.ts": "none (Set.delete); reads only",
   "utils/visible-ids.ts": "none (Map.delete); reads only",
 };

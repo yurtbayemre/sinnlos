@@ -449,6 +449,43 @@ describe("org draft guard in register() (decision 05)", () => {
     await expect(lifecycle.register({ strapi })).rejects.toThrow(/^\[org-dp\]/);
     expect(strapi.documents.use).not.toHaveBeenCalled();
   });
+
+  /*
+   * The wiki-revision guard (batch 16, utils/revision-dp-guard.ts) runs right
+   * after the org guard and also before everything else in register():
+   * Strapi deletes revision draft rows in the same beforeSync hook.
+   */
+  const withRevisions = (drafts: Record<string, number>) => {
+    const host = orgHost(drafts);
+    const getModel = host.strapi.getModel;
+    host.strapi.getModel = (uid: string) =>
+      uid === "api::wiki-revision.wiki-revision"
+        ? { collectionName: "wiki_revisions", options: { draftAndPublish: false } }
+        : getModel(uid);
+    return host;
+  };
+
+  it("checks wiki_revisions right after the org tables", async () => {
+    const { strapi, counted } = withRevisions({});
+    await lifecycle.register({ strapi });
+    expect(counted).toEqual(["departments", "teams", "wiki_revisions"]);
+  });
+
+  it("rejects before registering anything while revision draft rows exist", async () => {
+    const { strapi, coreSanitizeQuery } = withRevisions({ wiki_revisions: 3 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(
+      /^\[revision-dp\] wiki_revisions still holds 3 draft row\(s\)/,
+    );
+    expect(strapi.sanitizers.store.has("content-api.output")).toBe(false);
+    expect(strapi.contentAPI.sanitize.query).toBe(coreSanitizeQuery);
+    expect(strapi.documents.use).not.toHaveBeenCalled();
+  });
+
+  it("the org guard decides first when both hold draft rows", async () => {
+    const { strapi, counted } = withRevisions({ teams: 1, wiki_revisions: 3 });
+    await expect(lifecycle.register({ strapi })).rejects.toThrow(/^\[org-dp\]/);
+    expect(counted).toEqual(["departments", "teams"]);
+  });
 });
 
 /**
