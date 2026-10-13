@@ -291,7 +291,10 @@ describe("createMediaClaims: the middleware", () => {
     const state = {
       rows: { d1: [1, 2] } as Record<string, number[]>,
       links: [link(11, 1), link(10, 2)],
-      files: {},
+      files: {
+        10: { id: 10, mime: PDF, provider_metadata: { uploadedBy: 7 } },
+        11: { id: 11, mime: PDF, provider_metadata: { uploadedBy: 7 } },
+      },
       ctx: editor,
     };
     const { strapi, commit } = makeStrapi(state);
@@ -345,7 +348,8 @@ describe("createMediaClaims: the middleware", () => {
         return { documentId: "copy" };
       },
     );
-    expect(log).toEqual([]);
+    // The copied file is locked and checked for a tombstone, nothing more.
+    expect(log).toEqual(["lock:10"]);
     await commit();
     expect(mocks.claimAndRemove).not.toHaveBeenCalled();
   });
@@ -426,6 +430,50 @@ describe("payloadFileIds and the lock before the action", () => {
         next,
       ),
     ).rejects.toMatchObject({ details: { keys: ["file"] } });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
+
+describe("files an action copies (Codex round 2)", () => {
+  it("names the draft's files for publish and clone, the published one's for discard", async () => {
+    const { copiedFiles } = await import("./media-claims");
+    const before = {
+      rowIds: [1, 2],
+      files: new Map([
+        [10, "file"],
+        [11, "file"],
+      ]),
+      draftFiles: new Set([11]),
+      publishedFiles: new Set([10]),
+    };
+    expect(copiedFiles("publish", {}, before)).toEqual([11]);
+    expect(copiedFiles("clone", {}, before)).toEqual([11]);
+    expect(copiedFiles("update", { status: "published" }, before)).toEqual([11]);
+    expect(copiedFiles("discardDraft", {}, before)).toEqual([10]);
+    expect(copiedFiles("update", {}, before)).toEqual([]);
+    expect(copiedFiles("unpublish", {}, before)).toEqual([]);
+  });
+
+  it("refuses to copy a tombstoned file (a removal reserved it)", async () => {
+    const state = {
+      rows: { d1: [1] } as Record<string, number[]>,
+      links: [link(10, 1)],
+      files: {
+        10: {
+          id: 10,
+          mime: PDF,
+          provider_metadata: { uploadedBy: 7, removing: "2026-10-13T00:00:00Z" },
+        },
+      },
+      ctx: undefined,
+    };
+    const next = vi.fn(async () => ({ documentId: "copy" }));
+    for (const action of ["publish", "clone"]) {
+      const { strapi } = makeStrapi(state);
+      await expect(
+        createMediaClaims(strapi)({ uid: UID, action, params: { documentId: "d1" } }, next),
+      ).rejects.toMatchObject({ details: { keys: ["file"] } });
+    }
     expect(next).not.toHaveBeenCalled();
   });
 });

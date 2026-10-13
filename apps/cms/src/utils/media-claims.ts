@@ -16,8 +16,10 @@
  * payload's shape.
  *   - LOCK FIRST: every file the payload names on a claimed field (an id,
  *     a documentId, `{ id }`, `{ documentId }`, a list, `connect`/`set`;
- *     documentIds resolved to row ids) is locked (`FOR UPDATE`, ascending
- *     ids) BEFORE the action. The action's link insert takes a key
+ *     documentIds resolved to row ids), and every stored file the action
+ *     copies to a new row (publish and clone: the draft's; discardDraft: the
+ *     published one's), is locked (`FOR UPDATE`, ascending ids) BEFORE the
+ *     action, and refused when it is gone or tombstoned. The action's link insert takes a key
  *     share on the file row (the foreign key); two transactions that both
  *     inserted and then asked for the row lock would deadlock (Postgres
  *     40P01). File rows come last in the lock order (§5 R10): the document's
@@ -99,6 +101,10 @@ const documentIdOf = (value: unknown): string | null =>
 export interface DocumentLinks {
   rowIds: number[];
   files: Map<number, string>;
+  /** The files the draft rows link (what publish and clone copy). */
+  draftFiles?: ReadonlySet<number>;
+  /** The files the published rows link (what discardDraft copies back). */
+  publishedFiles?: ReadonlySet<number>;
 }
 
 const NO_LINKS: DocumentLinks = { rowIds: [], files: new Map() };
@@ -112,19 +118,53 @@ async function documentLinks(
   trx: unknown,
 ): Promise<DocumentLinks> {
   if (!documentId) return NO_LINKS;
-  const rows: Array<{ id: number }> = await strapi.db
+  const rows: Array<{ id: number; publishedAt?: unknown }> = await strapi.db
     .query(uid)
-    .findMany({ where: { documentId }, select: ["id"] });
+    .findMany({ where: { documentId }, select: ["id", "publishedAt"] });
   const rowIds = rows.map((row) => row.id);
   if (rowIds.length === 0) return { rowIds, files: new Map() };
-  const links: Array<{ file_id: number; field: string }> = await strapi.db
+  const published = new Set(rows.filter((row) => row.publishedAt).map((row) => row.id));
+  const links: Array<{ file_id: number; field: string; related_id: number }> = await strapi.db
     .getConnection("files_related_mph")
     .transacting(trx)
     .where({ related_type: uid })
     .whereIn("related_id", rowIds)
     .whereIn("field", [...fields])
-    .select("file_id", "field");
-  return { rowIds, files: new Map(links.map((link) => [Number(link.file_id), link.field])) };
+    .select("file_id", "field", "related_id");
+  const draftFiles = new Set<number>();
+  const publishedFiles = new Set<number>();
+  for (const link of links) {
+    (published.has(Number(link.related_id)) ? publishedFiles : draftFiles).add(
+      Number(link.file_id),
+    );
+  }
+  return {
+    rowIds,
+    files: new Map(links.map((link) => [Number(link.file_id), link.field])),
+    draftFiles,
+    publishedFiles,
+  };
+}
+
+/**
+ * The stored files an action copies to a new row (Codex round 2): publish
+ * (also a create or update with `status: 'published'`) and clone copy the
+ * draft rows' files, discardDraft the published rows'. They are no
+ * attachments (no ownership or exclusivity check), but a file on its way out
+ * must not be copied: they are locked and checked for a tombstone like the
+ * payload's files.
+ */
+export function copiedFiles(
+  action: string,
+  params: Record<string, unknown>,
+  before: DocumentLinks,
+): number[] {
+  const draft = [...(before.draftFiles ?? [])];
+  const published = [...(before.publishedFiles ?? [])];
+  if (action === "publish" || action === "clone") return draft;
+  if (action === "discardDraft") return published;
+  if ((action === "update" || action === "create") && params.status === "published") return draft;
+  return [];
 }
 
 /**
@@ -203,14 +243,20 @@ export function createMediaClaims(strapi: MediaClaimsHost) {
     return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
       const sourceId = action === "create" ? null : documentIdOf(context.params);
       const params = isRecord(context.params) ? context.params : {};
-      for (const [fileId, field] of await payloadFileIds(strapi, params.data, fields)) {
-        await lockFileRow(strapi, fileId);
-        // A file that is gone or on its way out: refused before the action
-        // writes a link to it (the claim's tombstone, then its delete).
-        const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
-        if (!file || isTombstoned(file)) refuseKeys([field]);
-      }
       const before = await documentLinks(strapi, uid, fields, sourceId, trx);
+      // Every file the action will link anew (the payload's) or copy (the
+      // stored ones publish, clone and discard copy), locked in one ascending
+      // pass before the action writes a link: one that is gone or on its way
+      // out (a removal reserved it) is refused before any link exists.
+      const pending = await payloadFileIds(strapi, params.data, fields);
+      for (const fileId of copiedFiles(action, params, before)) {
+        if (!pending.has(fileId)) pending.set(fileId, before.files.get(fileId) as string);
+      }
+      for (const fileId of [...pending.keys()].sort((a, b) => a - b)) {
+        await lockFileRow(strapi, fileId);
+        const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+        if (!file || isTombstoned(file)) refuseKeys([pending.get(fileId) as string]);
+      }
       const result = await next();
       const targetId = action === "create" || action === "clone" ? documentIdOf(result) : sourceId;
       const after = await documentLinks(strapi, uid, fields, targetId, trx);
