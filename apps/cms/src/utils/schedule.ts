@@ -214,10 +214,27 @@ function scheduleFields(context: ScheduleContext, uid: string): string[] {
   return isUnpublishScheduledUid(uid) ? fields : ["publishAt", "scheduleError"];
 }
 
-/** `data` with `fields` set to null (only the fields the type has). */
-function nulled(data: unknown, fields: readonly string[]): Record<string, unknown> {
+// The keys schedule-clear added to an action's data that the writer did not
+// send, per action context (one context object per action, C4): the audit
+// recorder leaves them out of the row's `keys`, which lists what the
+// writer sent.
+const addedKeys = new WeakMap<object, readonly string[]>();
+
+/** The schedule fields schedule-clear added to this action's data (not sent by the writer). */
+export function scheduleClearAddedKeys(context: object): readonly string[] {
+  return addedKeys.get(context) ?? [];
+}
+
+/** `data` with `fields` set to null (only the fields the type has); records the added keys. */
+function nulled(
+  context: object,
+  data: unknown,
+  fields: readonly string[],
+): Record<string, unknown> {
   const base = isRecord(data) ? { ...data } : {};
+  const added = fields.filter((field) => !(field in base));
   for (const field of fields) base[field] = null;
+  if (added.length > 0) addedKeys.set(context, added);
   return base;
 }
 
@@ -260,7 +277,7 @@ export function createScheduleClear(strapi: ScheduleClearHost) {
         await clearDraft(strapi, uid, params?.documentId, ["publishAt"].filter(has));
         return next();
       case "clone":
-        if (params) params.data = nulled(params.data, fields);
+        if (params) params.data = nulled(context, params.data, fields);
         return next();
       case "create":
       case "update":
@@ -269,7 +286,7 @@ export function createScheduleClear(strapi: ScheduleClearHost) {
           const clear = published
             ? ["publishAt", "scheduleError"].filter(has)
             : ["scheduleError"].filter(has);
-          params.data = nulled(params.data, clear);
+          params.data = nulled(context, params.data, clear);
         }
         return next();
       default:

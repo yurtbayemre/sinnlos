@@ -179,6 +179,28 @@ describe("due publishes (rules 4, 6, 9)", () => {
   });
 });
 
+describe("schedule-clear and the audit keys", () => {
+  it("the trail lists what the writer sent, not the schedule fields schedule-clear added", async () => {
+    const draft = await docs(EVENT).create({ data: { title: "Keys" } });
+    await docs(EVENT).update({
+      documentId: draft.documentId,
+      data: { title: "Keys", publishAt: FUTURE },
+      status: "published",
+    });
+    const keys = (
+      await open.db
+        .query(AUDIT_EVENT_UID)
+        .findMany({ where: { targetDocumentId: draft.documentId }, orderBy: { id: "asc" } })
+    ).map((row) => [row.action, row.keys]);
+    expect(keys).toEqual([
+      ["create", ["title"]],
+      // publishAt was sent (and written as null: publishing now wins), scheduleError was not.
+      ["update", ["publishAt", "title"]],
+      ["publish", null],
+    ]);
+  });
+});
+
 describe("the generation check (rules 4, 7)", () => {
   it("skips a document whose revision moved since the selection", async () => {
     const draft = await docs(ANNOUNCEMENT).create({ data: { title: "Due", publishAt: PAST } });

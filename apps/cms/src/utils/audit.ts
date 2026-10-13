@@ -8,6 +8,7 @@ import {
   type AuditSource,
   type AuthoringScope,
 } from "./document-lock";
+import { scheduleClearAddedKeys } from "./schedule";
 
 /**
  * The content activity trail (decision 06 §H; batch 15 plan item 7;
@@ -267,7 +268,12 @@ export function auditRowsFor(
 ): Array<Pick<AuditEventInput, "action" | "targetDocumentId" | "keys" | "detail" | "revision">> {
   const action = context.action ?? "";
   const params = isRecord(context.params) ? context.params : {};
-  const keys = () => changedKeys(params.data, context.contentType?.attributes);
+  // What the writer sent: the schedule fields schedule-clear added are no change of theirs.
+  const added = scheduleClearAddedKeys(context);
+  const keys = () =>
+    changedKeys(params.data, context.contentType?.attributes)?.filter(
+      (key) => !added.includes(key),
+    ) ?? null;
   const publishedToo = params.status === "published";
   switch (action) {
     case "create":
