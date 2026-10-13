@@ -1906,6 +1906,126 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to the wiki write model and documents with files (batch 16, lane 16B)
+
+Lane 16B of batch 16 (deep-dive decision 06 §J1, §J2, §G2, §K, §N6;
+plan `plan-batch-16.md` §3 16B) ends the admin_role/editor write bypass
+on the wiki, gives wiki authors drafts, history and restore through the
+content API, makes two wiki rules bind every writer (the admin panel and
+the scheduler included), and lets documents carry a file. The
+integration's "Deploying batch 16" runbook carries it with the other
+lanes; on its own it is a cms change plus one web capability value
+(`wikiPages.unpublish`).
+
+**What changes**
+
+- **Wiki spaces** are written through `global::can-author` like the
+  other authored types: moderators only (admin_role, editor), always
+  published, the slug derived from the name on create and fixed
+  afterwards, a visibility needs its target (`visibilityTarget`: a role
+  space its roles, a department space its department, a team space its
+  team), every change needs `If-Match`. New: `GET /api/wiki-spaces/authoring`
+  and `GET /api/wiki-spaces/:id/editable`.
+- **Wiki pages: the bypass ends.** `global::can-edit-wiki` is rebuilt as
+  a row gate: admin_role and editor are the `moderator` class (any page;
+  department, team and the schedule; no space move, no slug edit, both stay
+  in the admin panel), the page's author, the head of its department and
+  the lead of its team edit their pages in spaces they can read, on every
+  row (draft and published). **Scripts that write wiki pages through the
+  content API need `If-Match: "<version>"`** on `PUT /api/wiki-pages/:id`
+  (release note) and get a fixed answer (no `populate`, no client query;
+  400 with the keys otherwise). The author classes' generic create and
+  update still publish whatever `?status=` says.
+- **The eleven wiki-page actions** (§J2): `POST /api/wiki-pages/drafts`
+  (createDraft: department heads, team leads, moderators),
+  `GET /api/wiki-pages/drafts/mine`, `GET …/:id/editable`,
+  `PUT …/:id/draft`, `POST …/:id/publish`, `POST …/:id/discard-draft`
+  (a page without a published row is deleted by it: only its author or a
+  moderator), `POST …/:id/unpublish` and `GET /api/wiki-pages/authoring`
+  (moderators), `GET …/:id/revisions`, `GET …/:id/revisions/:revisionId`
+  and `POST …/:id/restore` (the page's editors and moderators; a restore
+  publishes, in one transaction under one `If-Match`). The web pages
+  arrive with lane 16C; until then nothing calls them.
+- **Parent loops are refused for every writer** (release note): a
+  content-API save, an admin-panel save (also a `connect` across spaces),
+  a publish, a discard, a scheduled publish that would put a page below
+  itself or one of its subpages fails (400 `parentCycle` on `parent`; the
+  panel shows "A page cannot be placed below itself or one of its
+  subpages"). A loop already in the database blocks no other save and can
+  be repaired (clear the parent of one of its pages and publish).
+- **A wiki space with pages can be neither deleted nor unpublished**
+  (release note), in the web and in the admin panel (400
+  `_form: spaceNotEmpty`, "This space still has pages"). A panel unpublish
+  used to delete the published row and drop its pages' space links.
+- **Documents carry a file** (K18): `file` (a row id from
+  `POST /api/upload`) in the document rules of moderators and department
+  authors. A new file must be the caller's own upload that nothing else
+  links; the media claims (16A's middleware, now registered) lock the file
+  row in the save's transaction and check it again, and remove the old
+  stamped file after a replace, a publish of a replaced draft, a discard
+  or a delete (after the commit). Keeping the stored file passes
+  unchecked; admin-panel files are never removed.
+- **Department and team deletes** advance the revision of the wiki pages
+  that link the deleted row (a head's or lead's form opened before the
+  delete answers 404 or 412).
+- **The `/manage` forms name the author** (`editable.authorName`, every
+  authored type).
+- **Grants: +52 rows**, no revocation: wiki-space `authoringList`,
+  `editable` (admin_role, editor); wiki-page `createDraft` (admin_role,
+  editor, department_head, team_lead), `myDrafts`, `editable`,
+  `saveDraft`, `publish`, `discardDraft`, `revisions`, `revision`,
+  `restore` (admin_role, editor, department_head, team_lead, member),
+  `unpublish`, `authoringList` (admin_role, editor). The drift check then
+  covers 155 managed actions.
+- **No schema, no env, no `JWT_SECRET` rotation.** The structure lock is
+  one row in `content_versions` (`target_uid` `sinnlos::wiki-structure`,
+  created by the first wiki write).
+- **Known limits.** A space whose name another space already has answers
+  Strapi's own 400 ("This attribute must be unique", no code). The lock
+  protocol (§5 R10) accepts two rare interleavings that Postgres ends by
+  aborting one transaction (40P01, rolled back whole; the client sees a
+  500 and retries): a department or team delete against two wiki saves
+  of its pages, and an admin-panel bulk publish or unpublish of several
+  wiki pages against a save of one of them.
+
+**Before the deploy (read-only)**
+
+```bash
+psql_db -X < infra/diagnostics/wiki-parent-cycles.sql
+```
+
+It lists the pages on a parent loop (with the path), the page rows whose
+parent sits in another space, the page rows without a space, and the
+counts. Expected on the owner's instance: **0, 0, 0** (the demo pages have
+no parents). A loop found here is repaired in the admin panel before or
+after the deploy (clear one page's parent and publish); it does not block
+the deploy.
+
+**After the deploy**
+
+1. The cms boot log shows `[bootstrap] granted 52 permission(s) across
+   intranet roles` and `[bootstrap] permission drift: none (report-only
+   check of 155 managed actions)`; `prod-perm-diff.sql` equals the
+   snapshot (no `db_only`, no `code_only` rows).
+2. As an editor: `PUT /api/wiki-pages/<id>?status=draft` without
+   `If-Match` answers 428; `GET /api/wiki-pages/<id>/editable` answers 200
+   with `roleClass: "moderator"` and an `ETag`.
+3. In the admin panel: setting a page's parent to its own child is
+   refused; unpublishing a space that has pages is refused; a document
+   whose file is replaced and published loses the old stamped file after
+   the commit (admin-panel uploads stay).
+4. `wiki-parent-cycles.sql` again: unchanged.
+
+**Rollback** (to the image before 16B; the batch runbook covers the whole
+batch): a plain retag, no database step, no `JWT_SECRET` rotation. The old
+image's sync prunes the 13 custom actions' 52 rows with their routes and
+re-creates them on the roll-forward (C31); check the effective
+permissions after both steps (`prod-perm-diff.sql` of the running image).
+The old image gives admin_role and editor the wiki bypass back, lets the
+panel write loops and unpublish non-empty spaces again, and refuses
+`document.file` in the content API; files attached in between stay
+attached. The structure lock row stays (unused by the old image).
+
 #### Upgrading to the document upload profile, the file claims and the delete trail (batch 16, lane 16A)
 
 Lane 16A of batch 16 (deep-dive decision 06 §E1-§E5, owner amendments 1
