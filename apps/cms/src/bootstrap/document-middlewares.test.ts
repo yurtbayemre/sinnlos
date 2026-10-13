@@ -59,7 +59,13 @@ describe("Document Service middleware slots (K6)", () => {
         (a, b) => DOCUMENT_MIDDLEWARE_SLOTS.indexOf(a) - DOCUMENT_MIDDLEWARE_SLOTS.indexOf(b),
       ),
     );
-    expect(slots).toEqual(["poll-audience-guard", "department-audience-guard", "user-write-guard"]);
+    expect(slots).toEqual([
+      "offsetless-datetime-guard",
+      "document-lock",
+      "poll-audience-guard",
+      "department-audience-guard",
+      "user-write-guard",
+    ]);
     expect(slots[slots.length - 1]).toBe("user-write-guard");
   });
 
