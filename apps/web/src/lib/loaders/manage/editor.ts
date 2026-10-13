@@ -53,27 +53,44 @@ export type EditableOf<A extends TypedArea> = A extends "announcements"
 export type EditorLoad<T> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };
 
-export async function loadEditable<A extends TypedArea>(
-  area: A,
+/** A 404 or a 403 of an authoring read: `notFound` (see the header). */
+export function isNotFoundError(error: unknown): boolean {
+  return error instanceof StrapiError && (error.status === 404 || error.status === 403);
+}
+
+/**
+ * One `editable` read as an EditorLoad (see the header), logged under
+ * `label`; the wiki's forms read theirs through it too
+ * (lib/loaders/manage/wiki.ts).
+ */
+export async function editableLoad<T extends { documentId: string; version: string }>(
+  label: string,
   documentId: string,
-): Promise<EditorLoad<EditableOf<A>>> {
+  read: () => Promise<{ data?: T } | undefined>,
+): Promise<EditorLoad<T>> {
   if (!isDocumentId(documentId)) return { state: "notFound" };
   try {
-    const answer = await fetchEditable<EditableOf<A>>(AREA_TYPE[area], documentId);
-    const editable = answer?.data;
+    const editable = (await read())?.data;
     if (!editable || typeof editable.version !== "string" || editable.documentId !== documentId) {
-      console.error(`[manage-${area}] editable answered an unexpected shape`);
+      console.error(`[${label}] editable answered an unexpected shape`);
       return { state: "failed" };
     }
     return { state: "ok", editable };
   } catch (error) {
     unstable_rethrow(error);
-    if (error instanceof StrapiError && (error.status === 404 || error.status === 403)) {
-      return { state: "notFound" };
-    }
-    console.error(`[manage-${area}] editable failed`, error);
+    if (isNotFoundError(error)) return { state: "notFound" };
+    console.error(`[${label}] editable failed`, error);
     return { state: "failed" };
   }
+}
+
+export function loadEditable<A extends TypedArea>(
+  area: A,
+  documentId: string,
+): Promise<EditorLoad<EditableOf<A>>> {
+  return editableLoad(`manage-${area}`, documentId, () =>
+    fetchEditable<EditableOf<A>>(AREA_TYPE[area], documentId),
+  );
 }
 
 /**

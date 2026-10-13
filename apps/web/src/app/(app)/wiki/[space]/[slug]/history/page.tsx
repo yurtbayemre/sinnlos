@@ -12,9 +12,8 @@ import {
   WikiHistoryPagination,
   WikiRevisionPreview,
 } from "@/components/wiki-editor/wiki-history";
-import type { ListSearchParams } from "@/lib/loaders/manage/list";
+import { pageParam, type ListSearchParams } from "@/lib/loaders/manage/list";
 import {
-  historyPage,
   loadWikiHistory,
   loadWikiPageEditable,
   loadWikiRevision,
@@ -74,7 +73,7 @@ export default async function WikiHistoryPage({ params, searchParams }: Props) {
     if (ref.failed) return failed;
     notFound();
   }
-  const page = historyPage(query);
+  const page = pageParam(query);
   const revisionId = revisionParam(query);
   const [load, history, revision] = await Promise.all([
     loadWikiPageEditable(ref.documentId),

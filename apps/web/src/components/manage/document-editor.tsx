@@ -290,10 +290,7 @@ export function DocumentEditor({
             disabled={pending}
             uploading={uploading}
             onPick={pick}
-            onCancelPick={() => {
-              setPicked(null);
-              setPickError(null);
-            }}
+            onCancelPick={dropPick}
           />
         </Section>
 

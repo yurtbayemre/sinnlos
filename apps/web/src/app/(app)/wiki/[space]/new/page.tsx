@@ -13,7 +13,6 @@ import {
 } from "@/lib/loaders/manage/wiki";
 import { wikiSpacePath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
-import { SKIPPED_READ } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 import WikiPage from "../[slug]/page";
 
@@ -67,9 +66,7 @@ export default async function NewWikiPagePage({ params, searchParams }: Params) 
   const moderator = wikiPages.edit === "any";
   const [parents, options] = await Promise.all([
     loadWikiParentOptions(space.slug),
-    moderator
-      ? loadTargetingOptions({ departments: true, teams: true })
-      : Promise.resolve({ ...SKIPPED_READ, departments: [], teams: [], truncated: false }),
+    loadTargetingOptions({ departments: moderator, teams: moderator }),
   ]);
 
   return (

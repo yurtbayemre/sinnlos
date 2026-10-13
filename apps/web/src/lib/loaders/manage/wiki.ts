@@ -1,7 +1,6 @@
 import { unstable_rethrow } from "next/navigation";
 import {
   AUTHORING_LIST_MAX_QUERY,
-  AUTHORING_LIST_PAGE_SIZE,
   WIKI_REVISIONS_PAGE_SIZE,
   type AuthoringPagination,
   type WikiMyDraftRow,
@@ -25,9 +24,8 @@ import { listWikiParentRows, wikiPageRef, wikiSpaceBySlug } from "@/lib/api/wiki
 import { isDocumentId } from "@/lib/entry-id";
 import { walkAllPages } from "@/lib/paginate";
 import { tryFetch } from "@/lib/safe-fetch";
-import { StrapiError } from "@/lib/strapi-error";
-import type { EditorLoad } from "./editor";
-import type { ListSearchParams } from "./list";
+import { editableLoad, isNotFoundError, type EditorLoad } from "./editor";
+import { NO_PAGES, pageParam, type ListSearchParams } from "./list";
 
 /**
  * The wiki's authoring pages (WD03; deep-dive decision 06 §J1, §J2, §L1;
@@ -51,37 +49,6 @@ import type { ListSearchParams } from "./list";
 const first = (value: string | string[] | undefined): string =>
   (Array.isArray(value) ? value[0] : value) ?? "";
 
-const NO_PAGES: AuthoringPagination = {
-  page: 1,
-  pageSize: AUTHORING_LIST_PAGE_SIZE,
-  pageCount: 0,
-  total: 0,
-};
-
-/** One `editable` read as an EditorLoad (see the header). */
-async function editableLoad<T extends { documentId: string; version: string }>(
-  label: string,
-  documentId: string,
-  read: () => Promise<{ data?: T } | undefined>,
-): Promise<EditorLoad<T>> {
-  if (!isDocumentId(documentId)) return { state: "notFound" };
-  try {
-    const editable = (await read())?.data;
-    if (!editable || typeof editable.version !== "string" || editable.documentId !== documentId) {
-      console.error(`[${label}] editable answered an unexpected shape`);
-      return { state: "failed" };
-    }
-    return { state: "ok", editable };
-  } catch (error) {
-    unstable_rethrow(error);
-    if (error instanceof StrapiError && (error.status === 404 || error.status === 403)) {
-      return { state: "notFound" };
-    }
-    console.error(`[${label}] editable failed`, error);
-    return { state: "failed" };
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Spaces (/manage/wiki)
 
@@ -92,10 +59,9 @@ export interface WikiSpaceFilters {
 
 /** The filters of a /manage/wiki URL. */
 export function parseWikiSpaceFilters(params: ListSearchParams): WikiSpaceFilters {
-  const page = Number(first(params.page));
   return {
     q: first(params.q).trim().slice(0, AUTHORING_LIST_MAX_QUERY),
-    page: Number.isInteger(page) && page >= 1 && page <= 10_000 ? page : 1,
+    page: pageParam(params),
   };
 }
 
@@ -362,12 +328,6 @@ export interface WikiHistoryView {
   pagination: AuthoringPagination;
 }
 
-/** The URL's `page` of the history (1 when it is no bounded integer). */
-export function historyPage(params: ListSearchParams): number {
-  const page = Number(first(params.page));
-  return Number.isInteger(page) && page >= 1 && page <= 10_000 ? page : 1;
-}
-
 /** One page of a page's history, newest first (its row classes and moderators). */
 export async function loadWikiHistory(documentId: string, page: number): Promise<WikiHistoryView> {
   const empty = { ...NO_PAGES, pageSize: WIKI_REVISIONS_PAGE_SIZE, page };
@@ -381,9 +341,7 @@ export async function loadWikiHistory(documentId: string, page: number): Promise
     };
   } catch (error) {
     unstable_rethrow(error);
-    if (error instanceof StrapiError && (error.status === 404 || error.status === 403)) {
-      return { state: "notFound", entries: [], pagination: empty };
-    }
+    if (isNotFoundError(error)) return { state: "notFound", entries: [], pagination: empty };
     console.error("[manage-wiki] revisions failed", error);
     return { state: "failed", entries: [], pagination: empty };
   }
@@ -412,9 +370,7 @@ export async function loadWikiRevision(
     return { state: "ok", revision };
   } catch (error) {
     unstable_rethrow(error);
-    if (error instanceof StrapiError && (error.status === 404 || error.status === 403)) {
-      return { state: "notFound" };
-    }
+    if (isNotFoundError(error)) return { state: "notFound" };
     console.error("[manage-wiki] revision failed", error);
     return { state: "failed" };
   }

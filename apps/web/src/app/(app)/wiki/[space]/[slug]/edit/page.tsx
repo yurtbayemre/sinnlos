@@ -13,7 +13,6 @@ import {
 } from "@/lib/loaders/manage/wiki";
 import { wikiEditPath, wikiPagePath, wikiSpacePath } from "@/lib/manage/wiki-paths";
 import { capabilitiesFor } from "@/lib/roles";
-import { SKIPPED_READ } from "@/lib/safe-fetch";
 import { getViewer } from "@/lib/viewer";
 
 type Props = {
@@ -70,9 +69,7 @@ export default async function EditWikiPagePage({ params, searchParams }: Props) 
   const moderator = editable.roleClass === "moderator";
   const [parents, options] = await Promise.all([
     loadWikiParentOptions(space.slug, editable.documentId),
-    moderator
-      ? loadTargetingOptions({ departments: true, teams: true })
-      : Promise.resolve({ ...SKIPPED_READ, departments: [], teams: [], truncated: false }),
+    loadTargetingOptions({ departments: moderator, teams: moderator }),
   ]);
 
   return (

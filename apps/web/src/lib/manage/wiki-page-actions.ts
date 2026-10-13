@@ -89,9 +89,10 @@ export async function saveWikiPage(rawInput: WikiPageSaveInput): Promise<WikiPag
 
   // The route (see the header): moderators the generic one with their
   // status; the other classes draft through the draft actions.
-  const moderator = roleClass === "moderator";
-  const intent: WikiPageWriteIntent =
-    moderator || status === "published" ? mode : mode === "create" ? "createDraft" : "saveDraft";
+  let intent: WikiPageWriteIntent = mode;
+  if (roleClass !== "moderator" && status === "draft") {
+    intent = mode === "create" ? "createDraft" : "saveDraft";
+  }
   const generic = intent === "create" || intent === "update";
   return wikiPageWrite(
     intent,

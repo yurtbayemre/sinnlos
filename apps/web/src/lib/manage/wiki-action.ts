@@ -63,20 +63,30 @@ export function isRevisionId(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 2147483647;
 }
 
-/** One wiki-page write. `refreshPage`: re-render the page the action came from. */
+/**
+ * One wiki write, answered with its `data` (null: the item is gone).
+ * `refreshPage`: re-render the page the action came from, while the item
+ * still exists.
+ */
+function wikiWrite<R>(
+  label: string,
+  send: () => Promise<{ data: R } | undefined>,
+  refreshPage: boolean,
+): Promise<ActionResult<never, R | null>> {
+  return runCmsAction<never, { data: R } | undefined, R | null>(send, {
+    label: `[manage-wiki] ${label}`,
+    after: refreshPage ? (answer) => (answer ? refresh() : undefined) : undefined,
+    data: (answer) => answer?.data ?? null,
+  });
+}
+
+/** One wiki-page write. */
 export function wikiPageWrite(
   intent: WikiPageWriteIntent,
   request: WikiPageWriteRequest,
   { refreshPage }: { refreshPage: boolean },
 ): Promise<WikiPageActionResult> {
-  return runCmsAction<never, Awaited<ReturnType<typeof sendWikiPageWrite>>, WikiPageResult | null>(
-    () => sendWikiPageWrite(intent, request),
-    {
-      label: `[manage-wiki] page ${intent}`,
-      after: refreshPage ? (answer) => (answer ? refresh() : undefined) : undefined,
-      data: (answer) => answer?.data ?? null,
-    },
-  );
+  return wikiWrite(`page ${intent}`, () => sendWikiPageWrite(intent, request), refreshPage);
 }
 
 /** One wiki-space write. */
@@ -85,13 +95,5 @@ export function wikiSpaceWrite(
   request: WikiWriteRequest,
   { refreshPage }: { refreshPage: boolean },
 ): Promise<WikiSpaceActionResult> {
-  return runCmsAction<
-    never,
-    Awaited<ReturnType<typeof sendWikiSpaceWrite>>,
-    WikiSpaceResult | null
-  >(() => sendWikiSpaceWrite(intent, request), {
-    label: `[manage-wiki] space ${intent}`,
-    after: refreshPage ? (answer) => (answer ? refresh() : undefined) : undefined,
-    data: (answer) => answer?.data ?? null,
-  });
+  return wikiWrite(`space ${intent}`, () => sendWikiSpaceWrite(intent, request), refreshPage);
 }

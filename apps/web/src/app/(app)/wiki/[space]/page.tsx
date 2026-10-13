@@ -2,7 +2,6 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, FileText, Plus, Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import type { Route } from "next";
 import { buttonVariants } from "@/components/ui/button";
 import { areaAccess } from "@/lib/manage/access";
 import { areaItemPath } from "@/lib/manage/areas";
@@ -72,7 +71,7 @@ export default async function WikiSpacePage({ params }: Props) {
             )}
             {manageSpace && (
               <Link
-                href={areaItemPath("wiki", entry.documentId as string) as Route}
+                href={areaItemPath("wiki", entry.documentId as string)}
                 className={buttonVariants({ variant: "outline", size: "sm" })}
               >
                 <Settings className="h-4 w-4" aria-hidden="true" />

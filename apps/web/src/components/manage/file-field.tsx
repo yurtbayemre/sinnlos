@@ -115,7 +115,7 @@ export function FileField({
             type="button"
             disabled={disabled}
             onClick={onCancelPick}
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
           >
             <X className="h-4 w-4" aria-hidden="true" />
             {current ? t("cancelPick") : t("cancelPickNew")}

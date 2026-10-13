@@ -6,7 +6,7 @@ import { useTranslations } from "next-intl";
 import type { AuthoringDocumentStatus } from "@sinnlos/domain";
 import { ConflictDialog, FormAlert } from "@/components/manage/editor-chrome";
 import { useManageFlash } from "@/components/manage/flash";
-import { useAuthoringEditor } from "@/components/manage/use-authoring-editor";
+import { metaOf, useAuthoringEditor } from "@/components/manage/use-authoring-editor";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { restoreWikiRevision } from "@/lib/manage/wiki-page-actions";
@@ -47,15 +47,7 @@ export function RestoreRevision({
   const [confirm, setConfirm] = useState(false);
   const editor = useAuthoringEditor({
     formId: "wiki-history",
-    initialMeta: {
-      documentId: page.documentId,
-      version: page.version,
-      status: page.status,
-      publishedAt: page.publishedAt,
-      publishAt: null,
-      unpublishAt: null,
-      scheduleError: null,
-    },
+    initialMeta: metaOf(page),
     fieldOrder: NO_FIELDS,
     source: page,
     onReset: () => undefined,

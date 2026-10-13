@@ -78,6 +78,24 @@ export interface WikiEditorSpace {
 }
 
 /**
+ * A department or team picker's options: "none" first, then `options`; a
+ * value the list does not hold stays selectable under its documentId.
+ */
+function choicesWithNone(
+  none: string,
+  options: readonly { documentId: string; name: string }[],
+  value: string,
+): { value: string; label: string }[] {
+  return [
+    { value: "", label: none },
+    ...options.map((option) => ({ value: option.documentId, label: option.name })),
+    ...(value && !options.some((option) => option.documentId === value)
+      ? [{ value, label: value }]
+      : []),
+  ];
+}
+
+/**
  * The wiki editor (deep-dive decision 06 §J2, §L4, §L5; batch 16 plan,
  * lane 16C item 5): a page's title, summary, Markdown text, its place in
  * the space (parent and order), tags and the table-of-contents switch, the
@@ -179,23 +197,11 @@ export function WikiPageEditor({
     ];
   }, [parentOptions, values.parent, t]);
   const departmentChoices = useMemo(
-    () => [
-      { value: "", label: t("fields.department.none") },
-      ...departments.map((d) => ({ value: d.documentId, label: d.name })),
-      ...(values.department && !departments.some((d) => d.documentId === values.department)
-        ? [{ value: values.department, label: values.department }]
-        : []),
-    ],
+    () => choicesWithNone(t("fields.department.none"), departments, values.department),
     [departments, values.department, t],
   );
   const teamChoices = useMemo(
-    () => [
-      { value: "", label: t("fields.team.none") },
-      ...teams.map((team) => ({ value: team.documentId, label: team.name })),
-      ...(values.team && !teams.some((team) => team.documentId === values.team)
-        ? [{ value: values.team, label: values.team }]
-        : []),
-    ],
+    () => choicesWithNone(t("fields.team.none"), teams, values.team),
     [teams, values.team, t],
   );
 

@@ -113,6 +113,7 @@ function TreeItems({
     <ul className={cn(depth > 0 && "ml-3 border-l pl-3 sm:ml-5 sm:pl-4")}>
       {nodes.map((node) => {
         const { row } = node;
+        const title = row.label || t("untitled");
         const updated = formatInstant(format, row.updatedAt, UPDATED);
         return (
           <li key={row.documentId} className="py-1.5">
@@ -125,9 +126,9 @@ function TreeItems({
                 <Link
                   href={wikiEditPath(spaceSlug, row.slug, row.documentId)}
                   className="block break-words font-medium outline-none hover:text-primary hover:underline focus-visible:rounded focus-visible:ring-2 focus-visible:ring-ring"
-                  aria-label={t("editPage", { title: row.label || t("untitled") })}
+                  aria-label={t("editPage", { title })}
                 >
-                  {row.label || t("untitled")}
+                  {title}
                 </Link>
                 <StatusBadges item={row} />
                 <div className="flex flex-wrap gap-x-3 text-xs text-muted-foreground">

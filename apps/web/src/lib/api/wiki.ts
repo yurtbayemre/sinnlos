@@ -126,6 +126,8 @@ export function wikiPageBySlug(
   );
 }
 
+type WikiPageRefRow = Pick<WikiPage, "id" | "documentId" | "title" | "slug">;
+
 /**
  * A page's documentId by its slugs (the published page the reader sees):
  * the wiki editor and the history resolve their page with it when the URL
@@ -134,8 +136,8 @@ export function wikiPageBySlug(
 export function wikiPageRef(
   spaceSlug: string,
   pageSlug: string,
-): Promise<StrapiListResponse<Pick<WikiPage, "id" | "documentId" | "title" | "slug">>> {
-  return strapi<StrapiListResponse<Pick<WikiPage, "id" | "documentId" | "title" | "slug">>>(
+): Promise<StrapiListResponse<WikiPageRefRow>> {
+  return strapi<StrapiListResponse<WikiPageRefRow>>(
     withQuery(
       "/api/wiki-pages",
       strapiQuery()

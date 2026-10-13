@@ -15,6 +15,7 @@ const strapiMock = vi.fn();
 vi.mock("@/lib/strapi/client", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
 
 const wiki = await import("./wiki");
+const { pageParam } = await import("./list");
 
 const doc = (n: number) => `page${String(n).padStart(20, "0")}`;
 
@@ -231,9 +232,9 @@ describe("the editor and the history", () => {
   });
 
   it("reads the URL's page and rev as bounded integers", () => {
-    expect(wiki.historyPage({ page: "3" })).toBe(3);
-    expect(wiki.historyPage({ page: "-1" })).toBe(1);
-    expect(wiki.historyPage({ page: "x" })).toBe(1);
+    expect(pageParam({ page: "3" })).toBe(3);
+    expect(pageParam({ page: "-1" })).toBe(1);
+    expect(pageParam({ page: "x" })).toBe(1);
     expect(wiki.revisionParam({ rev: "41" })).toBe(41);
     expect(wiki.revisionParam({ rev: "0" })).toBeNull();
     expect(wiki.revisionParam({ rev: "4e1" })).toBeNull();

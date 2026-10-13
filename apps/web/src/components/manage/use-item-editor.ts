@@ -160,6 +160,16 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
   const goToList = useCallback(() => router.push(listPath), [router, listPath]);
 
   /**
+   * Closes the Schedule… dialog after a refusal that is not about its own
+   * fields, without returning the focus to Schedule…: the form's error
+   * takes it (a refused field, or a refused upload started from the dialog).
+   */
+  const leaveSchedule = useCallback(() => {
+    scheduleOpener.current = null;
+    setScheduleOpen(false);
+  }, []);
+
+  /**
    * A save of the current values; `schedule` from the Schedule… dialog.
    * `override`: values the form set in the same event and React has not
    * rendered yet (a file just uploaded), part of what is saved.
@@ -203,9 +213,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
               keys.length === 0 ||
               keys.some((key) => key !== "publishAt" && key !== "unpublishAt")
             ) {
-              // The focus goes to the refused field, not back to Schedule….
-              scheduleOpener.current = null;
-              setScheduleOpen(false);
+              leaveSchedule();
             }
           },
           onSuccess: (data: AuthoringResult | null) => {
@@ -244,6 +252,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
       router,
       drafts,
       itemPath,
+      leaveSchedule,
     ],
   );
 
@@ -311,15 +320,7 @@ export function useItemEditor<V extends object, E extends Omit<EditableBase, "ro
     scheduleOpen,
     setScheduleOpen,
     scheduleOpener,
-    /**
-     * Closes the Schedule… dialog after a refusal that is not about its own
-     * fields, without returning the focus to Schedule…: the form's error
-     * takes it (a refused upload started from the dialog).
-     */
-    leaveSchedule: () => {
-      scheduleOpener.current = null;
-      setScheduleOpen(false);
-    },
+    leaveSchedule,
     /**
      * Reload after a conflict: the fresh `editable`, the changes dropped,
      * the Schedule… dialog closed (its values belonged to the old version).

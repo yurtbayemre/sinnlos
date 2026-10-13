@@ -182,7 +182,6 @@
     "previewLegacy": "This older entry holds only the text from before an edit. Restoring it gives the page this text and keeps its current title and summary.",
     "previewNotFound": "This version does not belong to the page, or it no longer exists.",
     "previewFailed": "This version could not be loaded.",
-    "hide": "Hide",
     "emptyBody": "This version has no text.",
     "restore": "Restore this version",
     "restoreTitle": "Restore this version?",
