@@ -3,6 +3,7 @@ import {
   type TokenVersionStrapi,
 } from "../extensions/users-permissions/strapi-server";
 import { createDepartmentAudienceGuard } from "../utils/department-audience-guard";
+import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
 import {
   createPollAudienceGuard,
   type DocumentMiddleware,
@@ -85,6 +86,7 @@ export interface SlottedMiddleware {
  */
 export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMiddleware[] {
   const slotted: SlottedMiddleware[] = [
+    { slot: "offsetless-datetime-guard", middleware: createOffsetlessDatetimeGuard() },
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
