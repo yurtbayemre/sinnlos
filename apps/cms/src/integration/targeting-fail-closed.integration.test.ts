@@ -403,6 +403,38 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
     expect(await notified(created.documentId)).toContain(insider.id);
   });
 
+  it("refuses a db-level department or team delete outside a transaction; inside one it runs", async () => {
+    const unit = await department("FC Script Dept");
+    const squad = await team("FC Script Squad", t.fixtures.departments.engineering);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC script delete",
+      department: unit.documentId,
+      team: squad.documentId,
+    });
+    // The query engine opens no transaction around a lifecycle and its
+    // DELETE: the hook refuses, and nothing changes.
+    await expect(t.strapi.db.query(DEPARTMENT).delete({ where: { id: unit.id } })).rejects.toThrow(
+      /\[targeting-flags\] department delete: refused outside a transaction/,
+    );
+    await expect(t.strapi.db.query(TEAM).delete({ where: { id: squad.id } })).rejects.toThrow(
+      /\[targeting-flags\] team delete: refused outside a transaction/,
+    );
+    expect(await t.strapi.db.query(DEPARTMENT).count({ where: { id: unit.id } })).toBe(1);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", false],
+      [true, "departments", false],
+    ]);
+    // A script that wraps it in a transaction deletes with every safeguard.
+    await t.strapi.db.transaction(() =>
+      t.strapi.db.query(DEPARTMENT).delete({ where: { id: unit.id } }),
+    );
+    expect(await t.strapi.db.query(DEPARTMENT).count({ where: { id: unit.id } })).toBe(0);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+  });
+
   // ---------------------------------------------------------------------------
   // The boot backfill (lane 15B, utils/targeting-flags-backfill.ts) and what
   // a republish then notifies: the end of the legacy-unlink case (decision 06
