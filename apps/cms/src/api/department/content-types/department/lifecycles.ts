@@ -15,7 +15,8 @@ import {
 /**
  * Department deletes keep what the department targeted restricted, before
  * the delete cascades the link rows away (decision 02, the FX29 residual,
- * decision 06 §N9). The delete itself is never refused. In this order:
+ * decision 06 §N9). Linked content never blocks the delete (only a delete
+ * outside a transaction is refused, below). In this order:
  *   1. on Postgres the matched department rows are locked `FOR UPDATE`, so
  *      no link to them commits around the scans below (utils/targeting-
  *      flags.ts lockMatchedRows; department-delete-restrict.ts CONCURRENT

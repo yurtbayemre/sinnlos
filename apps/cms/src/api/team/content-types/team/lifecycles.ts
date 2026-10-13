@@ -12,7 +12,8 @@ import {
 /**
  * Team deletes keep the announcements that targeted the team restricted
  * (batch 15 lane 15D, decision 06 §N9, amendment rows A2 and A3), before
- * the delete cascades the link rows away. The delete is never refused.
+ * the delete cascades the link rows away. Linked content never blocks the
+ * delete (only a delete outside a transaction is refused, below).
  *   1. on Postgres the matched team rows are locked `FOR UPDATE`, so no
  *      link to them commits around the scan (utils/targeting-flags.ts
  *      lockMatchedRows);
