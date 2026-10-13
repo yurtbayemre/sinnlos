@@ -163,12 +163,18 @@ export function useAuthoringEditor<Source extends object | null>({
     startRefresh(() => router.refresh());
   }, [router]);
 
-  // Focus after a failure: the first refused field, else the alert.
+  // Focus after a failure: the first refused field, else the alert. Once
+  // the action has settled: the controls are disabled while it runs, and a
+  // disabled control cannot take the focus (a state update after the
+  // action's await commits before the transition ends).
+  const busy = isPending || refreshing;
+  const focused = useRef<object | null>(null);
   useEffect(() => {
-    if (!focusRequest) return;
+    if (!focusRequest || busy || focused.current === focusRequest) return;
+    focused.current = focusRequest;
     if (focusRequest.field && focusField(formId, focusRequest.field)) return;
     alertRef.current?.focus();
-  }, [focusRequest, formId]);
+  }, [focusRequest, busy, formId]);
 
   /** The first of `fields` in the form's order, or null. */
   const firstField = useCallback(
@@ -241,7 +247,7 @@ export function useAuthoringEditor<Source extends object | null>({
     meta,
     setMeta,
     overwrite,
-    pending: isPending || refreshing,
+    pending: busy,
     running,
     fieldErrors,
     failure,

@@ -225,7 +225,7 @@
   },
   "preview": {
     "title": "Preview",
-    "description": "The saved draft as readers will see it. Save to update the preview.",
+    "description": "The saved version as readers will see it. Save to update the preview.",
     "unknownAuthor": "Unknown"
   },
   "editor": {

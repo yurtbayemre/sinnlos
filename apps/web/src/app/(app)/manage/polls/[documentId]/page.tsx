@@ -47,6 +47,7 @@ export default async function EditPollPage({ params }: Params) {
   const { editable } = load;
   const timeZone = appTimeZone();
   const now = new Date();
+  const closed = isPollClosed(editable.closesAt, now);
   return (
     <div className="space-y-8">
       {header}
@@ -56,13 +57,13 @@ export default async function EditPollPage({ params }: Params) {
         access={access}
         timeZone={timeZone}
         today={zonedDateKey(now, timeZone)}
-        closed={isPollClosed(editable.closesAt, now)}
+        closed={closed}
         departments={options.departments}
         optionsFailed={options.failed}
         optionsTruncated={options.truncated}
       />
       <PreviewSection>
-        <PollPreview editable={editable} />
+        <PollPreview editable={editable} closed={closed} />
       </PreviewSection>
     </div>
   );

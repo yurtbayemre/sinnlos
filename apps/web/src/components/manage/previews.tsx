@@ -116,7 +116,7 @@ export function QuickLinkPreview({ editable }: { editable: QuickLinkEditable }) 
   );
 }
 
-export function PollPreview({ editable }: { editable: PollEditable }) {
+export function PollPreview({ editable, closed }: { editable: PollEditable; closed: boolean }) {
   const t = useTranslations("manage.polls.state");
   const format = useFormatter();
   const closes = formatInstant(format, editable.closesAt, LONG_DAY);
@@ -124,9 +124,11 @@ export function PollPreview({ editable }: { editable: PollEditable }) {
     <Card>
       <CardHeader>
         <CardTitle className="text-lg">{editable.question}</CardTitle>
-        {closes && (
+        {closed ? (
+          <p className="text-sm text-muted-foreground">{t("closed")}</p>
+        ) : closes ? (
           <p className="text-sm text-muted-foreground">{t("closesOn", { date: closes })}</p>
-        )}
+        ) : null}
       </CardHeader>
       <CardContent>
         <ol className="space-y-2">

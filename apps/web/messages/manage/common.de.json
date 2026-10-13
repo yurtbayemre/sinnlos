@@ -225,7 +225,7 @@
   },
   "preview": {
     "title": "Vorschau",
-    "description": "Der gespeicherte Entwurf, wie ihn die Zielgruppe sehen wird. Speichern aktualisiert die Vorschau.",
+    "description": "Die gespeicherte Fassung, wie sie die Zielgruppe sehen wird. Speichern aktualisiert die Vorschau.",
     "unknownAuthor": "Unbekannt"
   },
   "editor": {
