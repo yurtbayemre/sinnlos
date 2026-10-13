@@ -3,10 +3,12 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ADMIN_ENV, adminRequest, cmPath, contentManager } from "./admin-api.test.helper";
 import {
   TEST_ROLES,
+  createTestDatabase,
   createTestStrapi,
   testEngines,
   type Caller,
   type Row,
+  type TestDatabase,
   type TestRole,
   type TestStrapi,
 } from "./harness.test.helper";
@@ -64,14 +66,25 @@ const BATCH_15_GRANTS: Readonly<Record<string, readonly string[]>> = {
   authenticated: ["find", "findOne"],
 };
 
+/** docs/DEPLOYMENT.md, "Deploying batch 15.1", step 6: the admin roles' grants on wiki revisions. */
+const RUNBOOK_ADMIN_PERMISSIONS_SQL = `SELECT r.code, p.action, count(*) AS n
+  FROM admin_permissions p
+  JOIN admin_permissions_role_lnk l ON l.permission_id = p.id
+  JOIN admin_roles r ON r.id = l.role_id
+ WHERE p.subject = 'api::wiki-revision.wiki-revision'
+ GROUP BY r.code, p.action ORDER BY 1, 2`;
+
 describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
+  let database: TestDatabase;
   let t: TestStrapi;
   let page: Row;
   let revision: Row;
 
   beforeAll(async () => {
-    // ADMIN_ENV seeds a super admin for the admin-panel cases.
-    t = await createTestStrapi({ engine, env: ADMIN_ENV });
+    // ADMIN_ENV seeds a super admin for the admin-panel cases; the last case
+    // restarts on the same database.
+    database = await createTestDatabase(engine);
+    t = await createTestStrapi({ database, env: ADMIN_ENV });
     const docs = (uid: string) => t.strapi.documents(uid);
     const space = await docs(SPACE).create({
       data: { name: "IT Revisions Space", slug: "it-revisions-space", visibility: "public" },
@@ -108,6 +121,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
 
   afterAll(async () => {
     await t?.stop();
+    await database?.drop();
   });
 
   /** Every revision body linked to the page's rows, read past the content API. */
@@ -521,18 +535,22 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       expect(list.status).toBe(200);
     });
 
-    it("the boot's RBAC cleanup leaves the admin roles read-only on it", async () => {
+    // Last: it restarts the cms on this database, without fixtures.
+    it("after an upgrade boot no admin role keeps a Content Manager write on it; read stays", async () => {
       // A batch-15 database: an admin role (Strapi's own Editor role here)
-      // may hold every Content Manager action on wiki revisions.
+      // may hold every Content Manager action on wiki revisions. 300 such
+      // rows span more than one of the 200-row pages of Strapi's own
+      // cleanup, which deletes while it pages and so skips rows
+      // (bootstrap/hidden-type-permissions.ts removes them explicitly).
       const role = await t.strapi.db
         .query("admin::role")
         .findOne({ where: { code: "strapi-editor" } });
       if (!role) throw new Error("fixture: the admin Editor role is missing");
-      const seeded = new Map<number, string>();
-      for (const action of ["create", "read", "update", "delete", "publish"]) {
-        const row = await t.strapi.db.query(ADMIN_PERMISSION).create({
+      const actions = ["create", "read", "update", "delete", "publish"];
+      for (let i = 0; i < 300; i += 1) {
+        await t.strapi.db.query(ADMIN_PERMISSION).create({
           data: {
-            action: `${EXPLORER}.${action}`,
+            action: `${EXPLORER}.${actions[i % actions.length]}`,
             actionParameters: {},
             subject: REVISION,
             properties: { fields: ["page", "body", "summary", "editor"] },
@@ -540,18 +558,28 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
             role: role.id,
           },
         });
-        seeded.set(row.id, action);
       }
-      const admin = (t.strapi as unknown as { admin: { services: Record<string, unknown> } }).admin;
-      const permissions = admin.services.permission as {
-        cleanPermissionsInDatabase(): Promise<void>;
-      };
-      await permissions.cleanPermissionsInDatabase();
 
-      const left = await t.strapi.db
-        .query(ADMIN_PERMISSION)
-        .findMany({ where: { id: { $in: [...seeded.keys()] } } });
-      expect(left.map((row) => seeded.get(row.id))).toEqual(["read"]);
-    });
+      await t.stop();
+      t = await createTestStrapi({ database, env: ADMIN_ENV, fixtures: false });
+
+      const left = await t.strapi.db.query(ADMIN_PERMISSION).findMany({
+        // `id` too: a filter through the role link makes the query DISTINCT.
+        select: ["id", "action"],
+        where: { subject: REVISION, role: { id: role.id } },
+      });
+      const kinds = [...new Set(left.map((row) => String(row.action)))].sort();
+      expect(kinds).toEqual([`${EXPLORER}.read`]);
+      // The 60 seeded reads (and the role's own) stay.
+      expect(left.length).toBeGreaterThanOrEqual(60);
+
+      // The runbook's read-only check (docs/DEPLOYMENT.md, "Deploying batch
+      // 15.1", step 6), verbatim: only read rows on wiki revisions.
+      const runbook = await t.database.sql<{ code: string; action: string }>(
+        RUNBOOK_ADMIN_PERMISSIONS_SQL,
+      );
+      expect(runbook.length).toBeGreaterThan(0);
+      expect([...new Set(runbook.map((row) => row.action))]).toEqual([`${EXPLORER}.read`]);
+    }, 300_000);
   });
 });
