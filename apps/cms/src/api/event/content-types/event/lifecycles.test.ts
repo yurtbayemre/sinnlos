@@ -84,6 +84,39 @@ describe("event afterCreate", () => {
     );
   });
 
+  it("notifyAudience 'departments' without a department notifies nobody, with a log line", async () => {
+    const strapi = setup();
+    const row = publish(strapi, { notifyAudience: "departments" });
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual([]);
+    expect(notificationRows(strapi)).toEqual([]);
+    expect(strapi.log.warn).toHaveBeenCalledWith(
+      `[notifications] event ${row.documentId} notifies nobody: notifyAudience is ` +
+        "'departments' without a department (re-target it)",
+    );
+  });
+
+  it("notifyAudience 'departments' with departments notifies them; 'all' or NULL without notifies everyone", async () => {
+    const strapi = setup();
+    const targeted = publish(strapi, {
+      notifyAudience: "departments",
+      departments: [{ id: DEPT.engineering }],
+    });
+    await lifecycles.afterCreate({ result: targeted });
+    expect(recipientsOf(strapi, (n) => n.sourceDocumentId === targeted.documentId)).toEqual([
+      USER.alice,
+      USER.gina,
+    ]);
+    for (const notifyAudience of ["all", null]) {
+      const everyone = publish(strapi, { notifyAudience });
+      await lifecycles.afterCreate({ result: everyone });
+      expect(
+        recipientsOf(strapi, (n) => n.sourceDocumentId === everyone.documentId),
+        String(notifyAudience),
+      ).toEqual(READERS.filter((id) => id !== USER.carol));
+    }
+  });
+
   it("the read grant comes from up_permissions: a role without event.find is out", async () => {
     const strapi = setup();
     strapi.tables[PERMISSION_UID] = strapi.tables[PERMISSION_UID].filter(
