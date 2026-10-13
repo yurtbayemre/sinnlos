@@ -1906,6 +1906,319 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to wiki history as after-images (batch 16, lane 16D)
+
+Lane 16D of batch 16 (branch `feat/v2-authoring-cms-wiki-revisions`) is the
+data side of the wiki page history (deep-dive decision 06 §J3, §J4, DA03)
+and the fix of issue #73. It changes the **cms** and `infra/deploy.sh`.
+Batch 16 ships it with lanes 16A, 16B and 16C ("Deploying batch 16"); this
+note is the lane's part of it. On its own the lane is deployable after
+batch 15.1.
+
+- **No:** dependency, required env, grant (batch 15.1 revoked the revision
+  rows), route, edge change, or `JWT_SECRET` rotation.
+- **Yes:** a schema change with a one-time data step, which takes the
+  **fast path** on an instance without revision drafts.
+
+**What changes**
+
+- **A wiki revision records the state AFTER each save.** Before, it recorded
+  the body before an edit.
+  - **Recorded:** every content change of a page's draft, whoever writes it
+    (the web from lane 16B on, the admin panel, scripts). Each revision
+    holds the page's title, body and summary at that point, the edit note,
+    and who saved: the web user, or the admin user for a panel save.
+  - **Not recorded:** a save that changes none of title, body and summary
+    (for example only the order or a relation); a publish (it copies the
+    draft).
+  - **Discards and restores:** a "Discard changes" back to content that is
+    not the latest snapshot is recorded. A restore (lane 16B) is always
+    recorded and names the revision it restored.
+  - **Anchor:** revisions belong to their page by `page_document_id`, not by
+    their page link (a publish adds a second link row to each).
+  - **Reads:** nothing reads revisions through the content API (no route
+    since batch 15.1); the history reaches the web only through lane 16B's
+    page actions.
+- **Wiki revisions have no draft & publish any more.** `wiki_revisions` gets
+  six columns: `page_document_id`, `title`, `page_summary`, `kind` (`before`,
+  `after`, `baseline`), `admin_editor_id` and `restored_from`. Every boot
+  ensures the index `wiki_revisions_page_document_id_idx`.
+  - **Boot guard:** a database that still holds revision rows with
+    `published_at IS NULL` would lose them (Strapi deletes drafts when a type
+    leaves draft & publish), so the cms **refuses to start** on one:
+    `[revision-dp] wiki_revisions still holds N draft row(s) …`.
+  - **Deploy check:** `infra/deploy.sh` asks the same question before its
+    backup and refuses the deploy, naming `migrate.sql`. With nothing to
+    migrate, its preflight prints `wiki revisions: no draft rows`.
+  - **Where such rows come from:** production had none at the DA03 audit; a
+    rollback to batch 15.1 makes one twin of every revision (below). The
+    one-time step is
+    [One-time: wiki revisions draft/publish off](#one-time-wiki-revisions-draftpublish-off-batch-16).
+- **The cutover baseline.** At every boot, a page whose draft content, or
+  published content, is in no `after` or `baseline` revision gets a
+  `baseline` revision of it, so it stays restorable. The draft and published
+  states are checked separately, and the published baseline is written
+  first.
+  - **First boot of the release:** every page gets one. Existing revisions
+    get their anchor and `kind = 'before'`.
+  - **After a rollback window:** the boot records whatever batch 15.1 changed
+    in the meantime.
+  - **Later boots:** nothing to do.
+  - **Failure:** the backfill fails closed, so the cms does not start
+    (`[revision-backfill] could not …`, nothing changed).
+- **Issue #73: a failing withdrawal no longer hides a healthy one.** The
+  scheduler's withdrawal pass used to read at most ten pages of 200 rows from
+  the earliest due withdrawal, so more than 2,000 earlier withdrawals that
+  keep failing kept a later healthy one visible. Now:
+  - it first takes the due withdrawals that never failed for good, in
+    deadline order;
+  - it retries at most 10 of the failing ones (those with Schedule error) per
+    run, whose backoff is over, from where the previous run stopped, and wraps
+    around at the end. Every failing one is retried within one run per 10
+    failures, however many healthy ones are due;
+  - the backoff (5, 15, then every 60 minutes) and "never given up" are
+    unchanged.
+
+**Before the deploy** (read only, while batch 15.1 runs):
+
+```bash
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+psql_db < infra/migrations/wiki-revision-dp/preflight.sql
+```
+
+- **R0 `draft_rows` 0 is the fast path:** deploy as usual (`deploy.sh
+  --check` prints `wiki revisions: no draft rows`).
+- **Anything else:** follow the one-time section before the deploy.
+- **Keep R3** (revisions per page): the check after the deploy compares with
+  it.
+
+**After the first boot**
+
+- **Expected log lines** (once):
+  - `[document-indexes] created 1 index(es): wiki_revisions_page_document_id_idx`;
+  - `[revision-backfill] anchored N revision(s) to their page, marked N
+    legacy revision(s) 'before', wrote K baseline(s); 0 revision(s) have no
+    page anchor (page deleted, or linked to several pages)`. K is about one
+    per page, two where a page's draft differs from its published version.
+- **Later boots** log neither line.
+- **Stop lines:** `[revision-dp]` (the cms does not start: run the one-time
+  section, or roll back) and `[revision-backfill] could not …`.
+- **Checks:**
+
+  ```bash
+  psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) FILTER (WHERE page_document_id IS NULL) AS unanchored, count(*) FILTER (WHERE kind IS NULL) AS no_kind FROM wiki_revisions"
+  psql_db -c "SELECT document_id FROM wiki_revisions GROUP BY document_id HAVING count(*) > 1"
+  ```
+
+  - `drafts` and `no_kind` must be 0.
+  - `unanchored` equals R2's orphans (revisions of deleted pages).
+  - The second query returns no rows.
+  - Revisions per page equal R3 plus the new baselines.
+
+**Release note:** "A page's history (its editors and moderators, in the
+web) shows revisions written before batch 16 as 'state before an edit
+(older format)', and each page starts with a snapshot of its content at the
+upgrade."
+
+**Rollback** to the batch-15.1 images: a retag, as `deploy.sh` prints it.
+No `JWT_SECRET` rotation. The hint adds that a roll-forward needs
+`migrate.sql` first.
+
+- **The 15.1 boot** turns draft & publish back on for wiki revisions and
+  clones **one draft twin of every revision**. The draft count equals the
+  published count:
+
+  ```bash
+  psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) FILTER (WHERE published_at IS NOT NULL) AS published FROM wiki_revisions"
+  ```
+
+- **The batch-16 columns stay** (`forceMigration` is off); 15.1 ignores
+  them.
+- **What 15.1 shows:** its lifecycle writes before-images again, and nobody
+  reads revisions there either (15.1's closure); the admin panel lists no
+  Wiki revision.
+- **Edits during the window** are fine.
+- **Rolling forward** needs `migrate.sql` before the deploy (the one-time
+  section, steps 0 and 2 to 7). `deploy.sh` refuses the deploy until then.
+  The first boot afterwards records each page batch 15.1 changed as a
+  baseline.
+
+**Tests**
+
+- **Unit:**
+  - the lifecycle;
+  - the guard and its place in `register()`;
+  - the backfill, on Strapi's query engine over SQLite;
+  - the history module;
+  - the index;
+  - the scheduler's two tiers and its cursor;
+  - the deploy preflight and the rollback hint;
+  - the framework pins on 5.57: `register()` before the delete hook, the
+    rollback's twins, `publishedAt` on writes without draft & publish, one
+    event state per update, and columns kept on a sync.
+- **Integration, SQLite and Postgres 16:**
+  - `authoring-wiki-revisions`: the after-images, panel attribution, discard
+    and clone, atomicity, restore, no read path, a restart, and the cutover
+    including a rollback window;
+  - `authoring-wiki-revision-dp`: the guard, and on Postgres the migration
+    rehearsal with the real SQL files;
+  - `scheduled-publish`: #73 with 2,001 failing withdrawals, and a full
+    tier 1.
+- **deploy-flow:** a stubbed deploy refused by a rollback's twins.
+
+#### One-time: wiki revisions draft/publish off (batch 16)
+
+Batch 16 (lane 16D, decision 06 §J4 and Migration §2) turns draft & publish
+**off for wiki revisions**: a revision is one published row, anchored to its
+page by `page_document_id`.
+
+**When you need this section:**
+
+- When the preflight of the upgrade shows draft rows: a revision draft made
+  in the admin panel before batch 15.1 hid the type, or raw SQL. Production
+  had none at the DA03 audit, so its first upgrade takes the fast path.
+- **Every time you roll forward after a rollback** to batch 15.1 or older:
+  that image's first boot clones a draft twin of every revision.
+
+Strapi deletes revision rows with `published_at IS NULL` when a batch-16 cms
+boots, together with their links. So the new cms **refuses to boot while any
+exist**:
+
+- the log shows `[revision-dp] wiki_revisions still holds N draft row(s)`;
+- compose restarts it in a loop, and the data stays untouched;
+- `infra/deploy.sh` refuses such a deploy before its backup.
+
+The SQL in `infra/migrations/wiki-revision-dp/` handles them (see the README
+there):
+
+- it deletes the identical twins a rollback made;
+- it promotes revision drafts that have no published row;
+- it stops on anything it cannot decide.
+
+**A fresh install needs nothing.**
+
+Set these on the host, in the checkout (`/home/bigemo/git/sinnlos`, as
+`bigemo`):
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**0. Preflight** (read only; any time while the current release is live).
+Save its output off the host:
+
+```bash
+psql_db < infra/migrations/wiki-revision-dp/preflight.sql
+```
+
+- **FAST PATH:** R0 `draft_rows` = 0. Deploy as usual and stop here. The
+  guard passes, and Strapi's own switch deletes nothing.
+- **R1 classes the draft rows:**
+  - `identical twin`: a rollback made it, and the migration deletes it.
+    After a rollback there is one per revision that existed at the
+    rollback.
+  - `draft-only`: the migration promotes it (it becomes a plain, legacy
+    revision).
+  - `divergent twin`: it must be resolved by hand first. The second R1 list
+    names what differs; the README has the two choices as SQL. Since batch
+    15.1 the panel cannot make one.
+- **Must be 0 before you continue:** R2 conflicts (a revision linked to two
+  pages; the README has the fix) and every R4 line.
+- **R3** is the count of revisions per page. Keep it for step 6.
+
+**1. Rehearsal** (recommended; the first time, required), on a throwaway copy
+of the live database:
+
+- both `migrate.sql` runs must end with `NOTICE:  revision-dp: OK - …`, and
+  the second changes nothing (`promoted=0, twins_deleted=0`);
+- the final preflight shows R0 `draft_rows` 0.
+
+```bash
+(
+  umask 077; D=$(mktemp -d)
+  trap 'docker rm -f -v revdp-rehearsal >/dev/null 2>&1; rm -rf "$D"' EXIT
+  docker exec infra-db-1 sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc --no-owner' > "$D/live.dump"
+  docker run -d --name revdp-rehearsal -e POSTGRES_USER=sinnlos -e POSTGRES_PASSWORD=rehearsal -e POSTGRES_DB=sinnlos postgres:16-alpine
+  until docker exec revdp-rehearsal pg_isready -q -h 127.0.0.1 -U sinnlos -d sinnlos; do sleep 1; done
+  docker exec -i revdp-rehearsal pg_restore -U sinnlos -d sinnlos --no-owner --no-privileges < "$D/live.dump"
+  for run in 1 2; do
+    docker exec -i revdp-rehearsal psql -X -v ON_ERROR_STOP=1 --single-transaction -U sinnlos -d sinnlos < infra/migrations/wiki-revision-dp/migrate.sql
+  done
+  docker exec -i revdp-rehearsal psql -X -U sinnlos -d sinnlos < infra/migrations/wiki-revision-dp/preflight.sql
+)
+```
+
+**2. Pre-build** the new images; the running site keeps serving:
+
+```bash
+"${COMPOSE[@]}" build cms web
+```
+
+**3. Stop the apps.** No writes after this point; the site is down until
+step 7.
+
+```bash
+"${COMPOSE[@]}" stop web cms
+```
+
+**4. Back up** with the rule `infra/deploy.sh` uses, and check the
+generation it reports. It is the rollback point:
+
+```bash
+sudo -n /usr/local/sbin/backup-run --kind predeploy sinnlos
+```
+
+**5. Migrate.** It runs as one transaction, so any `RAISE` rolls everything
+back. It refuses to run outside one transaction or while another session is
+connected:
+
+```bash
+psql_db --single-transaction < infra/migrations/wiki-revision-dp/migrate.sql
+```
+
+- **Success** ends with
+  `NOTICE:  revision-dp: OK - promoted=N, twins_deleted=M, orphans=K`.
+- **After a `RAISE` nothing has changed.** It lists the divergent twins,
+  conflicts or anomalies. Resolve them per the README and rerun (the script
+  is idempotent), or give up and start the old containers again with
+  `"${COMPOSE[@]}" start cms web` (`start`, not `up`: step 2 already tagged
+  the new images).
+
+**6. Verify:**
+
+```bash
+psql_db -c "SELECT count(*) FILTER (WHERE published_at IS NULL) AS drafts, count(*) AS rows, count(DISTINCT document_id) AS documents FROM wiki_revisions"
+```
+
+- `drafts` must be 0 and `rows` must equal `documents`.
+- The optional preflight shows the counts per page (R3) minus the deleted
+  twins.
+
+**7. Deploy**, then check the cms log:
+
+```bash
+infra/deploy.sh
+"${COMPOSE[@]}" logs cms | grep -E '\[revision-dp\]|\[revision-backfill\]'
+```
+
+- The preflight of `deploy.sh` prints `wiki revisions: no draft rows`.
+- The log shows no `[revision-dp]` line, and one `[revision-backfill] …`
+  line: the anchors and kinds of the rows the migration kept, and a baseline
+  for each page whose content no snapshot holds (after a rollback: each page
+  edited on 15.1).
+- Revisions per page now equal R3, minus the deleted twins, plus those
+  baselines.
+
+**Rollback** of the migration itself: there is no reverse script. Restore the
+step-4 backup (`infra/restore-db.sh`) together with the previous images.
+Wiki edits made since are lost. If `migrate.sql` failed, nothing changed:
+`"${COMPOSE[@]}" start cms web`.
+
+**Local SQLite dev:** the guard also blocks a dev database with revision
+drafts. Delete `apps/cms/.tmp/data.db` and reseed (`SEED_DEMO_DATA=1`).
+
 #### Deploying batch 15.1 (the wiki-revision read closure)
 
 Batch 15.1 (branch `fix/wiki-revision-reads-closed`, lane 16-0 of plan
@@ -2760,13 +3073,15 @@ required env, no grant, no route, no edge change.
     writes no new audit row; a cms restart starts the backoff over. Until
     then the item stays visible: the site does not hide an item whose
     Unpublish at passed (the time is a setting of the draft). If it must
-    go now, unpublish it in the panel. Known limit: each run reads the due
-    withdrawals from the earliest on, at most 2,000 rows, and passes over
-    those still backing off; with more than 2,000 earlier withdrawals that
-    keep failing, a later healthy one is not reached. Failing withdrawals
-    show Schedule error (and the `[scheduler] … failed` line): fix their
-    cause, clear or change their Unpublish at, or unpublish them by hand,
-    and the rest follow.
+    go now, unpublish it in the panel. Since batch 16 (issue #73) failing
+    withdrawals never hold up a healthy one: each run takes the due
+    withdrawals that never failed for good first, in deadline order, and
+    retries at most 10 failing ones whose backoff is over, from where the
+    previous run stopped (wrapping at the end), so each is retried within
+    one run per 10 failures ("Upgrading to wiki history as after-images
+    (batch 16, lane 16D)"). Failing withdrawals show Schedule error (and
+    the `[scheduler] … failed` line): fix their cause, clear or change
+    their Unpublish at, or unpublish them by hand.
   - Every check of a time (due, an ended window) is made when the run
     holds the item's lock, not when the run started: a run that reaches an
     item late, behind a lock or a long batch, does not publish one whose

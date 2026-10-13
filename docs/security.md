@@ -386,9 +386,11 @@ letters:
   `REVOKED_PERMISSIONS`); `routes.matrix.test.ts` pins every content-API
   route to its policies and cross-checks the grants against the routes that
   exist.
-- **Nobody reads wiki revisions** (batch 15.1). A revision is the page
-  body before an edit, so whenever a page's draft differs from its
-  published version it holds unpublished text. Up to batch 15 every staff
+- **Nobody reads wiki revisions** (batch 15.1). Since batch 16 a revision
+  records a page's draft after each save (and a baseline of its content at
+  an upgrade; older rows hold the body before an edit), so whenever a
+  page's draft differs from its published version it holds unpublished
+  text. Up to batch 15 every staff
   role and `authenticated` read them (`/api/wiki-revisions`,
   `populate=revisions`, filters through the relation). Now
   `/api/wiki-revisions` has no route at all (404), no role holds any of its
@@ -398,8 +400,11 @@ letters:
   `wiki-revision.find` grant Strapi drops a populate of it and refuses a
   root filter or sort with 400, and the relation guard refuses the filter
   and sort inside a populate, which Strapi does not check
-  ([Global guards](#global-guards)). The lifecycle still writes revisions;
-  the web reads none. The type is hidden from the Content Manager and the
+  ([Global guards](#global-guards)). The lifecycle writes revisions in the
+  save's transaction; the only reader is `utils/wiki-revisions.ts`, which
+  the wiki-page history actions call (lane 16B: the page's editors and
+  moderators, fixed projections, a revision of another page is a 404).
+  The web reads none otherwise. The type is hidden from the Content Manager and the
   Content-Type Builder, and nobody, super admins included, can create,
   change, publish or delete a revision there: the Content Manager
   registers those actions for displayed types only, and every boot
@@ -699,9 +704,10 @@ In `apps/cms/src/utils/`:
 - `visible-ids.ts` (`loadUserScope`, read once per request and user;
   `visibleWikiSpaceIds`), `target-visibility.ts` (`visibleTargetAnchors`,
   `isTargetVisible`) and `wiki-edit-context.ts` (carries the authenticated
-  editor from the wiki-page controller into the revision lifecycle, so
-  revisions written through the REST API record who edited; edits in the
-  Strapi admin have no such context).
+  editor, the edit note and a restore's source revision from the wiki-page
+  write paths into the revision lifecycle; a save in the Strapi admin
+  records the admin user from the request's admin strategy instead, never
+  from the payload).
 
 ### Request ids
 
@@ -843,7 +849,7 @@ this is who sees and changes what, per type.
 | `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                         |
 | `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                             |
-| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only. Hidden in the admin panel.                                                                                                                                                                                                                    |
+| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Since batch 16 one published row per revision, anchored by `pageDocumentId`, written in the save's transaction after every content change of a page's draft (web editor or panel admin); the boot and `deploy.sh` refuse revision drafts. Read only through the history actions. Hidden in the admin panel.                                                      |
 | _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
 | _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -1156,6 +1162,14 @@ reverse proxy.
   its rollback, the admin-panel guard and the dropped `tokenVersion`;
   `apps/cms/src/utils/deploy-preflight.test.ts` covers the rollback hint's
   rotation step.
+- `apps/cms/src/integration/authoring-wiki-revisions.integration.test.ts`
+  and `authoring-wiki-revision-dp.integration.test.ts` (batch 16): the
+  after-images and who they name (web editor, panel admin), atomicity with
+  the save, no read path for any role, the boot guard against revision
+  drafts on both engines, and the migration rehearsal with the real SQL on
+  Postgres 16; `infra/deploy-flow.test.ts` and
+  `apps/cms/src/utils/deploy-preflight.test.ts` the deploy refused while
+  revision drafts exist.
 - `apps/cms/src/integration/wiki-revisions-closed.integration.test.ts`:
   every caller, `admin_role` and `editor` included, on SQLite and
   Postgres 16: no `/api/wiki-revisions` route, no revision through any
