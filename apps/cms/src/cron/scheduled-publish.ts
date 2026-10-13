@@ -216,6 +216,9 @@ async function dueUnpublishes(
 const draftOf = (strapi: ScheduledPublishStrapi, uid: string, documentId: string) =>
   strapi.db.query(uid).findOne({ where: { documentId, publishedAt: null } });
 
+const publishedCount = (strapi: ScheduledPublishStrapi, uid: string, documentId: string) =>
+  strapi.db.query(uid).count({ where: { documentId, publishedAt: { $notNull: true } } });
+
 const isDue = (value: unknown, now: Date): boolean => {
   const at = instantOf(value);
   return at !== null && at.getTime() <= now.getTime();
@@ -253,9 +256,7 @@ async function unpublishOne(
     if ((await lockDocument(strapi, uid, documentId)) !== r) return "skipped";
     const draft = await draftOf(strapi, uid, documentId);
     if (!draft || !isDue(draft.unpublishAt, now)) return "skipped";
-    const published = await strapi.db.query(uid).count({
-      where: { documentId, publishedAt: { $notNull: true } },
-    });
+    const published = await publishedCount(strapi, uid, documentId);
     if (published === 0 && draft.publishAt !== null && draft.publishAt !== undefined) {
       // A pending publish keeps the end of its window for the publish pass.
       return "skipped";
@@ -295,9 +296,7 @@ async function publishOne(
     const draft = await draftOf(strapi, uid, documentId);
     if (!draft || !isDue(draft.publishAt, now)) return "skipped";
     if (isUnpublishScheduledUid(uid) && isDue(draft.unpublishAt, now)) {
-      const published = await strapi.db.query(uid).count({
-        where: { documentId, publishedAt: { $notNull: true } },
-      });
+      const published = await publishedCount(strapi, uid, documentId);
       // A published document whose withdrawal is due: the unpublish pass
       // withdraws it (and that cancels this pending publish, rule 6); never
       // publish over it, never drop the withdrawal here.
@@ -463,27 +462,18 @@ export async function runScheduledPublishing(
   attempts: TransientAttempts = processAttempts,
 ): Promise<ScheduleRunResult> {
   const result = emptyResult();
+  const runPass = async (uid: string, pass: Pass, documentIds: string[]) => {
+    for (const documentId of documentIds) {
+      const r = await readRevision(strapi, uid, documentId);
+      await runScheduledDocument(strapi, uid, documentId, pass, now, attempts, result, r);
+    }
+  };
   await runInAuthoringScope({ source: "cron" }, async () => {
     for (const uid of SCHEDULED_UIDS) {
       if (isUnpublishScheduledUid(uid)) {
-        for (const documentId of await dueUnpublishes(strapi, uid, now)) {
-          const r = await readRevision(strapi, uid, documentId);
-          await runScheduledDocument(
-            strapi,
-            uid,
-            documentId,
-            "unpublish",
-            now,
-            attempts,
-            result,
-            r,
-          );
-        }
+        await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, now));
       }
-      for (const documentId of await duePublishes(strapi, uid, now)) {
-        const r = await readRevision(strapi, uid, documentId);
-        await runScheduledDocument(strapi, uid, documentId, "publish", now, attempts, result, r);
-      }
+      await runPass(uid, "publish", await duePublishes(strapi, uid, now));
     }
   });
   const acted =
