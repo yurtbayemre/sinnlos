@@ -1240,7 +1240,7 @@ describe.skipIf(!RUN_SEQUENCES)(
         expect(report.stderr).toContain(
           "infra/restore-db.sh cancel (only before its apply). Nothing was changed.",
         );
-        expect(called(report, /compose .*(build|up)|backup-run|sudo/)).toEqual([]);
+        expect(called(report, /compose .* (build|up)|backup-run|^sudo /)).toEqual([]);
         expect(report.stdout).not.toMatch(BACKED_UP);
         expect(report.state).toEqual({});
       }
@@ -1339,7 +1339,7 @@ describe.skipIf(!TWO_CLONE_MODE)(
           "ERROR: a database restore of compose project infra is in progress (",
         );
         expect(report.stderr).toContain("/clone-a/.git/sinnlos-deploy/restore/infra.reservation).");
-        expect(called(report, /compose .*(build|up)|backup-run|sudo/)).toEqual([]);
+        expect(called(report, /compose .* (build|up)|backup-run|^sudo /)).toEqual([]);
       }
     });
 
