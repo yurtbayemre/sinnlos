@@ -151,6 +151,51 @@ describe.each(testEngines())("document revisions on %s", (engine) => {
     expect(rows).toBe(0);
   });
 
+  it("an owner department deleted under an admitted scope: the lock re-classifies and answers 404", async () => {
+    const DEPARTMENT = "api::department.department";
+    const owner = await t.strapi.documents(DEPARTMENT).create({
+      data: { name: "IT Owner", slug: "it-owner" },
+    });
+    const created = await docs().create({
+      data: { title: "owned", audience: "all", ownerDepartment: owner.documentId },
+    });
+    const documentId = created.documentId as string;
+    // The gate admitted a department author of IT Owner at this revision.
+    const observed = await revision(documentId);
+    const classify = async () => {
+      const draft = await t.strapi.db.query(ANNOUNCEMENT).findOne({
+        where: { documentId, publishedAt: null },
+        populate: { ownerDepartment: { select: ["id"] } },
+      });
+      return (draft?.ownerDepartment as { id?: number } | null)?.id === owner.id
+        ? "departmentAuthor"
+        : null;
+    };
+    // The department is deleted in between: the cascade removes the owner
+    // link outside the Document Service (this lane does not advance the
+    // announcement's revision for it; lane 15D's delete hook does).
+    await t.strapi.documents(DEPARTMENT).delete({ documentId: owner.documentId });
+    const scope: Scope = {
+      uid: ANNOUNCEMENT,
+      documentId,
+      expectedRevision: observed,
+      observedRevision: observed,
+      classify,
+    };
+    const outcome = await lock
+      .runInAuthoringScope(scope, () =>
+        docs().update({
+          documentId,
+          data: { title: "written after losing ownership" },
+          status: "draft",
+        }),
+      )
+      .then(() => ({ status: 200 }))
+      .catch((error: { status?: number }) => ({ status: error.status ?? 500 }));
+    expect(outcome).toEqual({ status: 404 });
+    expect(await title(documentId)).toBe("owned");
+  });
+
   it.runIf(engine === "postgres")(
     "binding (A2): a save waiting at the lock re-classifies on the committed change: no class → 404, class → 412",
     async () => {

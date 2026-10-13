@@ -358,6 +358,31 @@ describe("the middleware: the authoring scope (§G step 3, amendment row A2)", (
     expect(await revisionOf(documentId)).toBe(3);
   });
 
+  it("re-classifies even when the tokens match: a class lost without a revision change answers 404", async () => {
+    // A cascade outside the Document Service (an owner department deleted
+    // by a hook that did not advance the revision) leaves both tokens
+    // current; only the classifier sees the lost ownership.
+    const { docs, documentId } = await seeded();
+    const classify = vi.fn(async () => null);
+    const error = await scoped(
+      { uid: ANNOUNCEMENT, documentId, expectedRevision: 2, observedRevision: 2, classify },
+      () => docs.update({ documentId, data: { title: "after the ownership vanished" } }),
+    ).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ClassLost);
+    expect(error).not.toHaveProperty("details.current");
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect((await docs.findOne({ documentId }))?.title).toBe("v2");
+    expect(await revisionOf(documentId)).toBe(2);
+    // With the class kept and the tokens current, the save goes through (one classifier call).
+    const kept = vi.fn(async () => "departmentAuthor");
+    await scoped(
+      { uid: ANNOUNCEMENT, documentId, expectedRevision: 2, observedRevision: 2, classify: kept },
+      () => docs.update({ documentId, data: { title: "v3" } }),
+    );
+    expect(kept).toHaveBeenCalledTimes(1);
+    expect(await revisionOf(documentId)).toBe(3);
+  });
+
   it("answers the route's missingClass (403 on generic routes)", async () => {
     const { docs, documentId } = await seeded();
     const error = await scoped(

@@ -35,13 +35,17 @@ import { isGuardedUid } from "./authoring-uids";
  * Document Service call inside `runInAuthoringScope`. The scope names the
  * document (`uid`, `documentId`), the client's token (`expectedRevision`,
  * from `If-Match`) and what the write gate saw (`observedRevision`, read
- * BEFORE the rows it classified, plus its `classify` function). The lock
- * accepts only when the locked revision equals both. On a mismatch it asks
- * `classify` again, under the lock: no class answers 403/404 (`ClassLost`,
- * the route's `missingClass`), a class 412 (`RevisionStale` with the
- * current revision). So a caller who predicts the next revision cannot
- * ride on a gate decision about an older state (amendment row A2), and a
- * caller who lost the class never learns the new revision. Without a
+ * BEFORE the rows it classified, plus its `classify` function). Under the
+ * lock it asks `classify` again, on every scoped mutation, whatever the
+ * tokens say: no class answers 403/404 (`ClassLost`, the route's
+ * `missingClass`) and writes nothing, so a change the revision did not
+ * see (a cascade that removed an ownership or targeting link outside the
+ * Document Service, a demoted or moved author) cannot ride on the gate's
+ * older decision. With the class kept, it accepts only when the locked
+ * revision equals both tokens, and answers 412 (`RevisionStale` with the
+ * current revision) otherwise. So a caller who predicts the next revision
+ * cannot ride on a gate decision about an older state (amendment row A2),
+ * and a caller who lost the class never learns the new revision. Without a
  * scope (admin panel, scheduler, generic routes, boot writers) the lock
  * compares nothing, but it still locks and advances: every source moves
  * the revision, so a web form detects a panel save, a publish, a discard
@@ -94,8 +98,8 @@ export interface DocumentRef {
 }
 
 /**
- * The write gate's class decision, run again by the lock on a mismatch,
- * inside the transaction and after the lock is held: it re-reads the rows
+ * The write gate's class decision, run again by the lock on every scoped
+ * mutation, inside the transaction and after the lock is held: it re-reads the rows
  * it needs and answers the caller's class, or null when the caller no
  * longer holds one.
  */
@@ -511,20 +515,22 @@ const isTarget = (scope: AuthoringScope | undefined, uid: string, documentId: st
   scope !== undefined && scope.uid === uid && scope.documentId === documentId;
 
 /**
- * Accepts when the locked revision equals every token the scope carries;
- * otherwise re-classifies under the lock (§G mechanism step 3).
+ * Re-classifies under the lock whenever the scope carries a classifier
+ * (a lost class answers ClassLost, even with matching tokens: not every
+ * change of the rows a class reads advances the revision), then accepts
+ * only when the locked revision equals every token the scope carries
+ * (§G mechanism step 3).
  */
 async function compare(scope: AuthoringScope, locked: number, target: DocumentRef): Promise<void> {
-  const expectedOk = scope.expectedRevision === undefined || scope.expectedRevision === locked;
-  const observedOk = scope.observedRevision === undefined || scope.observedRevision === locked;
-  if (expectedOk && observedOk) return;
   if (scope.classify) {
     const roleClass = await scope.classify(target);
     if (roleClass === null || roleClass === undefined) {
       throw new ClassLost(scope.missingClass ?? 404);
     }
   }
-  throw new RevisionStale(locked);
+  const expectedOk = scope.expectedRevision === undefined || scope.expectedRevision === locked;
+  const observedOk = scope.observedRevision === undefined || scope.observedRevision === locked;
+  if (!expectedOk || !observedOk) throw new RevisionStale(locked);
 }
 
 /** The document a create or clone produced (`{ documentId }` or `{ documentId, entries }`). */
