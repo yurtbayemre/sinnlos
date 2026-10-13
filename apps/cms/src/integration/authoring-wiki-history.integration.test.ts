@@ -88,14 +88,16 @@ describe.each(testEngines())("authoring wiki history on %s", (engine) => {
 
   it("lists the history newest first for the page's editors and moderators, without bodies", async () => {
     const { page, before, baseline, after } = await pageWithHistory();
+    // The seeded entries, newest first. With lane 16D's lifecycle in the
+    // tree, the page's create has recorded one more (the oldest).
+    const seeded = [after.id, baseline.id, before.id];
     for (const role of ["member", "department_head", "editor", "admin_role"] as const) {
       const res = await wiki.revisions<Record<string, unknown>>(role, page.documentId);
       expect(res.status, `${role} ${res.text}`).toBe(200);
-      expect(
-        res.body.data.map((entry) => entry.id),
-        role,
-      ).toEqual([after.id, baseline.id, before.id]);
-      expect(res.body.meta.pagination.total).toBe(3);
+      const ids = res.body.data.map((entry) => entry.id as number);
+      expect(ids.slice(0, 3), role).toEqual(seeded);
+      expect(ids, role).toEqual([...ids].sort((x, y) => y - x));
+      expect(res.body.meta.pagination.total).toBe(ids.length);
     }
     const res = await wiki.revisions<Record<string, unknown>>("member", page.documentId);
     expect(res.body.data[0]).toEqual({
