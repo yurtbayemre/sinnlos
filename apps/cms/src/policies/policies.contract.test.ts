@@ -45,6 +45,15 @@ import {
  *      leaves behind; a client filter is kept and $and-narrowed, never
  *      replaced; read policies on draft & publish types pin
  *      status=published and drop the publication-cohort keys (§5.24).
+ *   5. The v2 write gate (global::can-author, batch 15, decision 06 §B2):
+ *      kinds `moderator-write-gate` (quick-link, poll: admin_role/editor
+ *      enforced, everyone else false, no bypass) and
+ *      `department-author-write-gate` (announcement, event, document: also
+ *      a department_head with a department, on rows their department owns
+ *      and targets). A route config without its uid gets no class. On a
+ *      custom document action (publish, unpublish, discardDraft, editable)
+ *      a refusal is a thrown NotFoundError (404, like a hidden findOne),
+ *      on the generic create/update and the list a plain false.
  */
 
 type PolicyFn = (ctx: StubPolicyContext, config: unknown, deps: { strapi: StrapiStub }) => unknown;
@@ -295,7 +304,22 @@ function fixture(): Fixture {
 // The table
 // ---------------------------------------------------------------------------
 
-type Kind = "read-filter" | "status-pin" | "ownership" | "role-gate" | "write-allowlist";
+type Kind =
+  | "read-filter"
+  | "status-pin"
+  | "ownership"
+  | "role-gate"
+  | "write-allowlist"
+  | "moderator-write-gate"
+  | "department-author-write-gate";
+
+/** Kinds whose payload refusal is the allowlist's 400 (a ValidationError). */
+const WRITE_GATE_KINDS: readonly Kind[] = [
+  "write-allowlist",
+  "moderator-write-gate",
+  "department-author-write-gate",
+];
+const isWriteGate = (kind: Kind) => WRITE_GATE_KINDS.includes(kind);
 
 interface ContractCase {
   /** The route config the case stands for (routes.matrix.test.ts pins the routes). */
@@ -306,6 +330,8 @@ interface ContractCase {
   injectsFilter: boolean;
   /** A non-bypass caller gets status=published (draft & publish type). */
   pinsStatus: boolean;
+  /** How this case refuses, when it differs from the contract's (can-author's custom actions: 404). */
+  refusal?: "false" | "forbidden" | "notFound";
 }
 
 interface PolicyContract {
@@ -314,9 +340,11 @@ interface PolicyContract {
   anonymous: "deny" | "filter";
   /**
    * How a refusal looks: `false` (the default; Strapi answers PolicyError),
-   * or a thrown ForbiddenError("Forbidden"), the body of ctx.forbidden().
+   * a thrown ForbiddenError("Forbidden"), the body of ctx.forbidden(), or
+   * a thrown NotFoundError (a case's own refusal, can-author's custom
+   * document actions).
    */
-  refusal?: "false" | "forbidden";
+  refusal?: "false" | "forbidden" | "notFound";
   cases: readonly ContractCase[];
   /** A request the member (105) may make: params and body for the positive branch. */
   ownRequest?: (ids: Record<string, string>) => {
@@ -326,6 +354,15 @@ interface PolicyContract {
 }
 
 const ADMIN_EDITOR = ["admin_role", "editor"] as const;
+
+/** The five types global::can-author guards (utils/authoring-uids.ts AUTHORED_UIDS). */
+const CAN_AUTHOR_UIDS = [
+  "api::announcement.announcement",
+  "api::event.event",
+  "api::quick-link.quick-link",
+  "api::document.document",
+  "api::poll.poll",
+] as const;
 const ADMIN_ONLY = ["admin_role"] as const;
 
 const read = (
@@ -489,6 +526,30 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
     ownRequest: (ids) => ({ params: { id: ids.pageOwn }, body: { data: { title: "Renamed" } } }),
   },
+  // v2 write gate (batch 15): no bypass. The moderator class is role-only,
+  // so the list (no row, no payload) passes moderators without a read;
+  // everything else reads rows or checks a payload. The positive branches
+  // are pinned per kind below and in can-author.test.ts.
+  "can-author": {
+    kind: "department-author-write-gate",
+    anonymous: "deny",
+    cases: CAN_AUTHOR_UIDS.flatMap((uid) => [
+      { config: { uid }, bypass: [], injectsFilter: false, pinsStatus: false },
+      {
+        config: { uid, intent: "authoringList" },
+        bypass: ADMIN_EDITOR,
+        injectsFilter: false,
+        pinsStatus: false,
+      },
+      ...(uid === "api::poll.poll" ? [] : (["publish", "editable"] as const)).map((intent) => ({
+        config: { uid, intent },
+        bypass: [] as RoleType[],
+        injectsFilter: false,
+        pinsStatus: false,
+        refusal: "notFound" as const,
+      })),
+    ]),
+  },
 };
 
 /** The member who owns the positive branch; for department/team writes the head/lead. */
@@ -549,6 +610,10 @@ async function run(
 const describeOutcome = (outcome: Outcome) =>
   "result" in outcome ? `returned ${String(outcome.result)}` : `threw ${String(outcome.error)}`;
 
+/** A NotFoundError, thrown by can-author on a custom document action. */
+const isNotFoundThrow = (outcome: Outcome): boolean =>
+  "error" in outcome && outcome.error instanceof errors.NotFoundError;
+
 /** ctx.forbidden()'s error, thrown by a `refusal: "forbidden"` gate (never a PolicyError). */
 const isForbiddenThrow = (outcome: Outcome): boolean =>
   "error" in outcome &&
@@ -556,11 +621,17 @@ const isForbiddenThrow = (outcome: Outcome): boolean =>
   !(outcome.error instanceof errors.PolicyError) &&
   outcome.error.message === "Forbidden";
 
-/** The contract's refusal: `false`, or the forbidden throw for a `refusal: "forbidden"` gate. */
-const isRefusal = (contract: PolicyContract, outcome: Outcome): boolean =>
-  contract.refusal === "forbidden"
-    ? isForbiddenThrow(outcome)
-    : "result" in outcome && outcome.result === false;
+/** The refusal of a case: `false`, or the throw its contract (or the case) names. */
+const isRefusal = (
+  contract: PolicyContract,
+  outcome: Outcome,
+  contractCase?: ContractCase,
+): boolean => {
+  const refusal = contractCase?.refusal ?? contract.refusal ?? "false";
+  if (refusal === "forbidden") return isForbiddenThrow(outcome);
+  if (refusal === "notFound") return isNotFoundThrow(outcome);
+  return "result" in outcome && outcome.result === false;
+};
 
 // ---------------------------------------------------------------------------
 // Callers and requests for the sweep
@@ -652,11 +723,13 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
   it("returns strict booleans on every branch (or the allowlist's 400)", async () => {
     // Policies only read data, so one fixture serves the whole sweep.
     const { strapi, ids } = fixture();
-    const targeted = contract.kind === "ownership" || contract.kind === "write-allowlist";
+    const targeted = contract.kind === "ownership" || isWriteGate(contract.kind);
     const params = targeted ? targetParams(ids) : [undefined, { id: "1" }];
-    const bodies = contract.kind === "write-allowlist" ? writeBodies(ids) : [undefined];
+    const bodies = isWriteGate(contract.kind) ? writeBodies(ids) : [undefined];
     const failures: string[] = [];
-    for (const { config } of contract.cases) {
+    for (const contractCase of contract.cases) {
+      const { config } = contractCase;
+      const refusal = contractCase.refusal ?? contract.refusal ?? "false";
       for (const caller of ALL_CALLERS) {
         for (const param of params) {
           for (const body of bodies) {
@@ -665,11 +738,11 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
             const ok =
               "result" in outcome
                 ? typeof outcome.result === "boolean" &&
-                  // A `refusal: "forbidden"` gate never answers a plain false.
-                  (outcome.result || contract.refusal !== "forbidden")
-                : (contract.kind === "write-allowlist" &&
-                    outcome.error instanceof errors.ValidationError) ||
-                  (contract.refusal === "forbidden" && isForbiddenThrow(outcome));
+                  // A gate that refuses by throwing never answers a plain false.
+                  (outcome.result || refusal === "false")
+                : (isWriteGate(contract.kind) && outcome.error instanceof errors.ValidationError) ||
+                  (refusal === "forbidden" && isForbiddenThrow(outcome)) ||
+                  (refusal === "notFound" && isNotFoundThrow(outcome));
             if (!ok) {
               failures.push(
                 `${caller.label} params=${JSON.stringify(param)} body=${JSON.stringify(body)} ` +
@@ -687,33 +760,36 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     it("refuses a request without a signed-in user", async () => {
       const { strapi, ids } = fixture();
       const own = contract.ownRequest?.(ids) ?? {};
-      for (const { config } of contract.cases) {
+      for (const contractCase of contract.cases) {
+        const { config } = contractCase;
         for (const caller of ANONYMOUS) {
           const ctx = policyContext(caller.user, { query: CLIENT_QUERY, ...own });
           const outcome = await run(name, config, ctx, strapi);
-          expect(isRefusal(contract, outcome), `${caller.label}: ${describeOutcome(outcome)}`).toBe(
-            true,
-          );
+          expect(
+            isRefusal(contract, outcome, contractCase),
+            `${caller.label}: ${describeOutcome(outcome)}`,
+          ).toBe(true);
           expect(ctx.request.query, caller.label).toEqual(CLIENT_QUERY);
         }
       }
     });
   }
 
-  if (contract.kind === "role-gate" || contract.kind === "write-allowlist") {
+  if (contract.kind === "role-gate" || isWriteGate(contract.kind)) {
     it("refuses a caller without a role type", async () => {
       const { strapi, ids } = fixture();
       const own = contract.ownRequest?.(ids) ?? {};
-      for (const { config } of contract.cases) {
+      for (const contractCase of contract.cases) {
         for (const caller of ROLELESS) {
           const ctx = policyContext(caller.user, { query: CLIENT_QUERY, ...own });
-          expect(await run(name, config, ctx, strapi), caller.label).toEqual({ result: false });
+          const outcome = await run(name, contractCase.config, ctx, strapi);
+          expect(isRefusal(contract, outcome, contractCase), caller.label).toBe(true);
         }
       }
     });
   }
 
-  if (contract.kind === "ownership" || contract.kind === "write-allowlist") {
+  if (contract.kind === "ownership" || isWriteGate(contract.kind)) {
     // Without a numeric id the caller owns nothing, not even a row whose
     // owner is gone (a deleted user leaves the relation null). The ownership
     // gates got this with the PL02 factories (ownerGate); users-permissions
@@ -753,7 +829,7 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
         const { strapi } = fixture();
         const body = { data: { name: "Hijack", description: "x" } };
         // A target the caller does not own, so only a bypass can pass untouched.
-        const params = { id: contract.kind === "write-allowlist" ? ids.pageForeign : "2" };
+        const params = { id: isWriteGate(contract.kind) ? ids.pageForeign : "2" };
         const ctx = policyContext(caller.user, { query: CLIENT_QUERY, params, body });
         const outcome = await run(name, contractCase.config, ctx, strapi);
         const untouched =
@@ -847,4 +923,148 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
       }
     });
   }
+});
+
+// ---------------------------------------------------------------------------
+// The v2 write-gate kinds (decision 06 §B2; batch 15 lane 15A)
+// ---------------------------------------------------------------------------
+
+describe("policy contract kind: moderator-write-gate (can-author on quick-link and poll)", () => {
+  const bodies: Record<string, unknown> = {
+    "api::quick-link.quick-link": { data: { label: "Payroll", url: "/payroll" } },
+    "api::poll.poll": { data: { question: "Lunch?", options: ["A", "B"] } },
+  };
+
+  it.each(Object.keys(bodies))(
+    "%s: moderators enforced, everyone else false, no bypass",
+    async (uid) => {
+      for (const type of ROLE_TYPES) {
+        const { strapi } = fixture();
+        const body = bodies[uid];
+        const ctx = policyContext({ id: USER_ID[type], role: roleOf(type) }, { body });
+        const outcome = await run("can-author", { uid }, ctx, strapi);
+        const moderator = (ADMIN_EDITOR as readonly string[]).includes(type);
+        expect(outcome, type).toEqual({ result: moderator });
+        // Enforced: the payload is the allowlist's copy (the caller field added).
+        const data = (ctx.request.body as { data: Record<string, unknown> }).data;
+        if (moderator) expect(data).not.toBe((body as { data: unknown }).data);
+      }
+    },
+  );
+
+  it.each(Object.keys(bodies))("%s: a route config without its uid gives no class", async (uid) => {
+    const { strapi } = fixture();
+    for (const config of [
+      undefined,
+      {},
+      { uid: "" },
+      { uid: 42 },
+      { uid: "api::wiki-page.wiki-page" },
+    ]) {
+      const ctx = policyContext(
+        { id: USER_ID.editor, role: roleOf("editor") },
+        { body: bodies[uid] },
+      );
+      expect(await run("can-author", config, ctx, strapi), JSON.stringify(config)).toEqual({
+        result: false,
+      });
+    }
+  });
+});
+
+describe("policy contract kind: department-author-write-gate (can-author on announcement, event, document)", () => {
+  const A = "api::announcement.announcement";
+  const head = { id: USER_ID.department_head, role: roleOf("department_head") };
+
+  /** The fixture plus department-owned and moderator rows. */
+  function owned() {
+    const { strapi, ids } = fixture();
+    const published = { status: "published" as const };
+    const mine = strapi.seedDocument(
+      A,
+      {
+        title: "Mine",
+        department: { id: 10 },
+        ownerDepartment: { id: 10 },
+        audience: "departments",
+      },
+      published,
+    );
+    const theirs = strapi.seedDocument(
+      A,
+      {
+        title: "Theirs",
+        department: { id: 11 },
+        ownerDepartment: { id: 11 },
+        audience: "departments",
+      },
+      published,
+    );
+    const moderators = strapi.seedDocument(A, { title: "Mod", department: { id: 10 } }, published);
+    const widened = strapi.seedDocument(
+      A,
+      { title: "Wide", department: null, ownerDepartment: { id: 10 }, audience: "all" },
+      published,
+    );
+    return { strapi, ids, mine, theirs, moderators, widened };
+  }
+
+  it("moderators enforced on any row; a department head only with a department and on an owned, in-scope row", async () => {
+    const world = owned();
+    const update = (user: StubUser, documentId: string) =>
+      run(
+        "can-author",
+        { uid: A },
+        policyContext(user, { params: { id: documentId }, body: { data: { title: "x" } } }),
+        world.strapi,
+      );
+    expect(await update(head, world.mine.documentId)).toEqual({ result: true });
+    for (const documentId of [
+      world.theirs.documentId,
+      world.moderators.documentId,
+      world.widened.documentId,
+    ]) {
+      expect(await update(head, documentId), documentId).toEqual({ result: false });
+    }
+    for (const type of ["admin_role", "editor"] as const) {
+      for (const row of [world.mine, world.theirs, world.moderators]) {
+        expect(
+          await update({ id: USER_ID[type], role: roleOf(type) }, row.documentId),
+          type,
+        ).toEqual({
+          result: true,
+        });
+      }
+    }
+    for (const type of ["team_lead", "member", "guest", "authenticated"] as const) {
+      expect(
+        await update({ id: USER_ID[type], role: roleOf(type) }, world.mine.documentId),
+        type,
+      ).toEqual({
+        result: false,
+      });
+    }
+    // A department_head without a department (the stranger's role swapped).
+    const loner = { id: USER_ID.editor, role: roleOf("department_head") };
+    expect(await update(loner, world.mine.documentId)).toEqual({ result: false });
+  });
+
+  it("a custom document action refuses with a 404, never a 403 or a 412", async () => {
+    const world = owned();
+    const outcome = await run(
+      "can-author",
+      { uid: A, intent: "editable" },
+      policyContext(head, { params: { id: world.theirs.documentId } }),
+      world.strapi,
+    );
+    expect("error" in outcome && outcome.error instanceof errors.NotFoundError).toBe(true);
+    expect(
+      await run(
+        "can-author",
+        { uid: A, intent: "editable" },
+        policyContext(head, { params: { id: world.mine.documentId } }),
+        world.strapi,
+      ),
+    ).toEqual({ result: true });
+  });
 });

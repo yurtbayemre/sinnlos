@@ -8,7 +8,7 @@ import {
   type CommonCode,
 } from "@/lib/action-result";
 import { appTimeZone } from "@/lib/app-time-zone";
-import { parseEntryRef } from "@/lib/entry-id";
+import { isDocumentId, parseEntryRef } from "@/lib/entry-id";
 import { pollClosesAtForDay } from "@/lib/poll-close";
 import { normalizeGuestAccess } from "@/lib/poll-guest-access";
 import { canCreatePolls } from "@/lib/roles";
@@ -29,8 +29,12 @@ export type CreatePollInput = {
   /** yyyy-mm-dd from <input type="date">, empty = no closing date. */
   closesAt: string;
   anonymous: boolean;
-  /** Numeric ids of the departments to restrict the poll to; empty = everyone. */
-  departmentIds: number[];
+  /**
+   * The departments to restrict the poll to, by documentId (the v2 shape,
+   * decision 06 §B1) or by the numeric id of the single department row
+   * (decision 05; what today's form sends); empty = everyone.
+   */
+  departmentIds: ReadonlyArray<number | string>;
   /** Guests see the poll (owner decision 2026-09-27); missing = hidden. */
   visibleToGuests?: boolean;
   /** Guests may vote; only together with visibleToGuests. */
@@ -70,12 +74,18 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
     if (!closesAt) return actionFailure("invalid");
   }
 
-  // Department targeting (decision 02): the flag is set explicitly, so the
-  // poll stays restricted even if its departments are deleted later (the
-  // CMS then shows it to admins and editors only). Department ids are the
-  // numeric ids of the single department rows (decision 05).
+  // Department targeting (decision 02): only the departments are sent. The
+  // CMS derives the `audience` flag from them (batch 15: the v2 write rule
+  // refuses a client `audience`, decision 06 §B1.2) and keeps a poll whose
+  // departments are deleted later restricted (admins and editors only).
+  // A documentId or a positive row id of a single department row
+  // (decision 05); anything else is dropped before the request.
   const departmentIds = [
-    ...new Set(input.departmentIds.filter((id) => Number.isInteger(id) && id > 0)),
+    ...new Set(
+      input.departmentIds.filter(
+        (id) => (typeof id === "number" && Number.isInteger(id) && id > 0) || isDocumentId(id),
+      ),
+    ),
   ];
 
   // Guest access (owner decision 2026-09-27): always sent, as strict
@@ -91,8 +101,9 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
   // (/polls/new) first would only re-render the form (FX20).
   return runCmsAction<CreatePollCode>(
     () =>
-      // Polls use draftAndPublish — without status=published the REST
-      // create lands as an invisible draft.
+      // A poll always publishes (the v2 authoring controller, decision 06
+      // §B3: `status` absent or `published`); the explicit status keeps
+      // this request valid on every cms since decision 02.
       strapi<unknown>(`/api/polls?status=published`, {
         method: "POST",
         body: JSON.stringify({
@@ -101,7 +112,6 @@ export async function createPoll(input: CreatePollInput): Promise<CreatePollResu
             options,
             closesAt,
             anonymous: input.anonymous,
-            audience: departmentIds.length > 0 ? "departments" : "all",
             departments: departmentIds,
             visibleToGuests,
             guestsCanVote,
