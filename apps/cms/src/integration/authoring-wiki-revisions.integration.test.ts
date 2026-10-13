@@ -11,6 +11,7 @@ import {
   type TestDatabase,
   type TestStrapi,
 } from "./harness.test.helper";
+import { untilPoolIdle } from "./pool-idle.test.helper";
 
 /**
  * Wiki page history as after-images (decision 06 §J3, DA03; batch 16 lane
@@ -104,6 +105,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   });
 
   afterAll(async () => {
+    if (t) await untilPoolIdle(t);
     await t?.stop();
     await database?.drop();
   });
@@ -320,6 +322,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
   it(
     "a restart after writes: the guard passes, and no revision lacks published_at",
     async () => {
+      await untilPoolIdle(t);
       await t.stop();
       await boot(false);
       const [row] = await database.sql<{ n: number | string }>(
@@ -359,6 +362,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
       await database.sql("UPDATE wiki_pages SET body = 'B' WHERE id = ?", [draft.id]);
 
       // The upgrade: the boot records B (the draft) and A (published, in no snapshot).
+      await untilPoolIdle(t);
       await t.stop();
       await boot(false);
       const afterUpgrade = await revisionsOf(documentId);
@@ -384,6 +388,7 @@ describe.each(testEngines())("wiki revisions as after-images on %s", (engine) =>
       // A rollback window on 15.1: C → D, with the before-image of C.
       await legacyBeforeImage("C");
       await database.sql("UPDATE wiki_pages SET body = 'D' WHERE id = ?", [draft.id]);
+      await untilPoolIdle(t);
       await t.stop();
       await boot(false);
       // Back on batch 16: D is recorded, and a save back to C (which an older
