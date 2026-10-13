@@ -1,6 +1,18 @@
 /**
- * An ad's delete: its audit row, and its images after the commit (issue
- * #13; batch 16 lane 16A: the delete trail and the one locked removal).
+ * An ad's images and delete: the image lock on every write, the audit row
+ * of a delete, and the images after the commit (issue #13; batch 16 lane
+ * 16A: the file claims, the delete trail and the one locked removal).
+ *
+ * WRITES (beforeCreate, beforeUpdate; review fix of Codex round 1): every
+ * write of an ad's `images`, from every source (the content API, the
+ * Content Manager's create, update and clone, any Document Service caller),
+ * locks the named file rows (`FOR UPDATE`, ascending ids, before the link
+ * rows are written) inside the write's transaction and refuses a file that
+ * is gone or on its way out (a removal reserved it, utils/upload-orphans.ts).
+ * So a removal either sees the new link and keeps the file, or has reserved
+ * it and the write fails with 400 `images`. The sharing rules stay the
+ * controller's: one image may hang on several of the caller's ads, and
+ * moderators may attach any image.
  *
  * Classifieds are the only content type whose media is user-generated and
  * throwaway: without this hook every deleted (or admin-moderated) ad left
@@ -44,9 +56,17 @@
  * File removal errors are logged, never thrown — the ad delete must not
  * fail because a file refused to die; the janitor retries nightly.
  */
+import { errors } from "@strapi/utils";
+
 import { afterCommit } from "../../../../utils/after-commit";
 import { CLASSIFIED_UID, recordDelete, runWithDeleteAudit } from "../../../../utils/delete-audit";
-import { classifiedImageFileIds, claimAndRemove } from "../../../../utils/upload-orphans";
+import {
+  classifiedImageFileIds,
+  claimAndRemove,
+  lockAttachableFiles,
+  mediaReferences,
+  resolveFileIds,
+} from "../../../../utils/upload-orphans";
 
 /** An image of a deleted ad, recorded before the relation rows go. */
 interface DeletedImage {
@@ -54,7 +74,28 @@ interface DeletedImage {
   adDocumentId: string;
 }
 
+/** Locks the images a write names and refuses one that is gone or being removed. */
+async function lockWrittenImages(event: any): Promise<void> {
+  const data = event.params?.data;
+  if (!data || typeof data !== "object" || !("images" in data)) return;
+  const fileIds = await resolveFileIds(strapi, mediaReferences(data.images));
+  if (fileIds.length === 0) return;
+  if (!(await lockAttachableFiles(strapi, fileIds))) {
+    throw new errors.ValidationError("Invalid images: a file is missing or being removed", {
+      keys: ["images"],
+    });
+  }
+}
+
 export default {
+  async beforeCreate(event: any) {
+    await lockWrittenImages(event);
+  },
+
+  async beforeUpdate(event: any) {
+    await lockWrittenImages(event);
+  },
+
   async beforeDelete(event: any) {
     const where = event.params?.where;
     if (!where) return;

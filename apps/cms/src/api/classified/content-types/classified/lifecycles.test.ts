@@ -23,6 +23,7 @@ import lifecycles from "./lifecycles";
 const mocks = vi.hoisted(() => ({
   recordDelete: vi.fn(async (_strapi: unknown, _target: unknown) => undefined),
   claimAndRemove: vi.fn(async (_strapi: unknown, _fileId: number) => "removed"),
+  lockAttachableFiles: vi.fn(async (_strapi: unknown, _ids: number[]) => true),
   contexts: [] as unknown[],
 }));
 
@@ -34,6 +35,7 @@ vi.mock("../../../../utils/delete-audit", async (importOriginal) => ({
 vi.mock("../../../../utils/upload-orphans", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../../utils/upload-orphans")>()),
   claimAndRemove: mocks.claimAndRemove,
+  lockAttachableFiles: mocks.lockAttachableFiles,
 }));
 
 /** The transaction the Document Service's delete runs in. */
@@ -231,5 +233,32 @@ describe("classified afterDelete cleanup (K2 — after the commit, one locked re
     install(strapi);
     await lifecycles.afterDelete({ state: {} });
     expect(commitCallbacks).toHaveLength(0);
+  });
+});
+
+describe("classified writes lock their images (every source)", () => {
+  it("locks the named image rows, ascending, before the write", async () => {
+    const { strapi } = makeStrapi({ ads: [], joinRows: [] });
+    install(strapi);
+    mocks.lockAttachableFiles.mockReset().mockResolvedValue(true);
+    await lifecycles.beforeCreate({ params: { data: { title: "Bike", images: [4, { id: 3 }] } } });
+    await lifecycles.beforeUpdate({ params: { data: { images: { set: [{ id: 9 }] } } } });
+    expect(mocks.lockAttachableFiles.mock.calls.map((call) => call[1])).toEqual([[3, 4], [9]]);
+  });
+
+  it("refuses a missing or tombstoned image with 400 images", async () => {
+    const { strapi } = makeStrapi({ ads: [], joinRows: [] });
+    install(strapi);
+    mocks.lockAttachableFiles.mockReset().mockResolvedValue(false);
+    await expect(
+      lifecycles.beforeCreate({ params: { data: { images: [3] } } }),
+    ).rejects.toMatchObject({ name: "ValidationError", details: { keys: ["images"] } });
+  });
+
+  it("does nothing for a write without images", async () => {
+    mocks.lockAttachableFiles.mockReset();
+    await lifecycles.beforeUpdate({ params: { data: { title: "x" } } });
+    await lifecycles.beforeUpdate({ params: { data: { images: [] } } });
+    expect(mocks.lockAttachableFiles).not.toHaveBeenCalled();
   });
 });

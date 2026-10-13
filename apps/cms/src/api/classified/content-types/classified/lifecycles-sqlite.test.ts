@@ -212,8 +212,12 @@ describe("classified delete on SQLite (FX45)", () => {
     ).map((f) => f.id);
     // The admin upload is never touched; the image of the other ad stays.
     expect(left.sort()).toEqual([adminUpload, shared].sort());
-    // The ad's delete is recorded (the files' rows come from the upload service's remove).
-    expect(audit.rows).toEqual([expect.objectContaining({ kind: "classified", title: "Bike" })]);
+    // The ad's delete is recorded, and each removed image by its reservation.
+    expect(audit.rows).toEqual([
+      expect.objectContaining({ kind: "classified", title: "Bike" }),
+      expect.objectContaining({ kind: "file", file: expect.objectContaining({ id: photo }) }),
+      expect.objectContaining({ kind: "file", file: expect.objectContaining({ id: second }) }),
+    ]);
   });
 
   it("still works without an ambient transaction", async () => {
