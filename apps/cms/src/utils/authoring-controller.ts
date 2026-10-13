@@ -601,23 +601,29 @@ const chunks = <T>(items: readonly T[], size: number): T[][] => {
   return out;
 };
 
-/** Every revision of `documentIds` of `uid` (0 without a version row). */
+/**
+ * Every revision of `uid`'s documents (a document without a version row:
+ * 0). The list reads them BEFORE the rows (Codex review of 15A, finding
+ * 2): the reads are separate statements, and a write that commits between
+ * them must leave the list with newer content under an older version (its
+ * next write answers 412 and the client reloads), never with older content
+ * under the newer version, which would authorise a change the caller never
+ * saw. A document created in between has no version here: 0, which no
+ * stored revision matches.
+ */
 async function revisionsOf(
   strapi: AuthoringControllerHost,
   uid: string,
-  documentIds: readonly string[],
 ): Promise<Map<string, number>> {
   const revisions = new Map<string, number>();
-  for (const chunk of chunks(documentIds, LIST_CHUNK)) {
-    const rows = (await strapi.db.query(CONTENT_VERSION_UID).findMany({
-      where: { targetUid: uid, targetDocumentId: { $in: chunk } },
-      select: ["targetDocumentId", "revision"],
-    })) as Record<string, unknown>[];
-    for (const row of rows) {
-      const revision = Number(row.revision);
-      if (typeof row.targetDocumentId === "string" && Number.isInteger(revision)) {
-        revisions.set(row.targetDocumentId, revision);
-      }
+  const rows = (await strapi.db.query(CONTENT_VERSION_UID).findMany({
+    where: { targetUid: uid },
+    select: ["targetDocumentId", "revision"],
+  })) as Record<string, unknown>[];
+  for (const row of rows) {
+    const revision = Number(row.revision);
+    if (typeof row.targetDocumentId === "string" && Number.isInteger(revision)) {
+      revisions.set(row.targetDocumentId, revision);
     }
   }
   return revisions;
@@ -838,6 +844,8 @@ export function authoringActionsFor(
       const gate = gateFor(ctx, uid, "authoringList");
       const owned = DEPARTMENT_AUTHORED_UIDS.includes(uid);
       const query = parseListQuery(ctx.query, owned && gate.roleClass === MODERATOR_CLASS);
+      // Versions first, then the rows (see revisionsOf).
+      const revisions = await revisionsOf(strapi, uid);
       const documentsList = (await listDocuments(strapi, spec, gate, query)).filter((rows) =>
         listStatusMatches(rows, query.status),
       );
@@ -848,11 +856,6 @@ export function authoringActionsFor(
       const total = documentsList.length;
       const pageSize = AUTHORING_LIST_PAGE_SIZE;
       const page = documentsList.slice((query.page - 1) * pageSize, query.page * pageSize);
-      const revisions = await revisionsOf(
-        strapi,
-        uid,
-        page.map((rows) => rows.documentId),
-      );
       ctx.status = 200;
       ctx.body = {
         data: page.map((rows) => listRow(spec, rows, revisions.get(rows.documentId) ?? 0)),

@@ -507,6 +507,25 @@ describe("delete", () => {
   });
 });
 
+describe("authoringList", () => {
+  it("reads the versions before the rows, so a version is never newer than its row", async () => {
+    const { stub, host } = harness();
+    seedRows(stub, "doc0000000000000000000a1", true);
+    stub.tables["api::content-version.content-version"] = [
+      { id: 1, targetUid: A, targetDocumentId: "doc0000000000000000000a1", revision: 5 },
+    ];
+    const ctx = context(gateFor({ intent: "authoringList", documentId: undefined }));
+    await authoringActionsFor(host, A).authoringList(ctx);
+    expect(ctx.status).toBe(200);
+    expect((ctx.body as { data: { version: string }[] }).data).toMatchObject([{ version: "5" }]);
+    const reads = stub.calls
+      .filter((call) => call.api === "db" && call.method === "findMany")
+      .map((call) => call.uid);
+    expect(reads[0]).toBe("api::content-version.content-version");
+    expect(reads.slice(1)).toEqual([A, A]);
+  });
+});
+
 describe("the action set per type", () => {
   it("gives polls no publish, unpublish or discard", () => {
     const { host } = harness();

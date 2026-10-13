@@ -13,9 +13,16 @@ import { createTestStrapi, testEngines, type TestStrapi } from "./harness.test.h
  * publish, an unpublish, a discard, a scheduler run and a Content Manager
  * save each make an old token answer 412, so a web form never overwrites a
  * change it did not see.
+ *
+ * A read never hands out a version newer than the rows it shows (Codex
+ * review of 15A, finding 2): with a write committed between the list's
+ * statements, its token answers 412 to a publish and a delete; the form
+ * (`editable`) reads its version first the same way.
  */
 const A = "api::announcement.announcement";
 const P = "announcements";
+const QL = "api::quick-link.quick-link";
+const QP = "quick-links";
 
 interface Scheduler {
   runScheduledPublishing(strapi: unknown, now?: Date): Promise<unknown>;
@@ -213,5 +220,93 @@ describe.each(testEngines())("authoring: HTTP concurrency on %s", (engine) => {
     expect(await storedRevision(t, A, item.documentId)).toBe(before);
     const [row] = await t.strapi.db.query(A).findMany({ where: { documentId: item.documentId } });
     expect(row.title).toBe("Untouched");
+  });
+
+  describe("a write committed between a read's statements (Codex review of 15A, finding 2)", () => {
+    type Params = { where?: Record<string, unknown> } | undefined;
+    /**
+     * Commits `write` right after the next quick-link `findMany` that
+     * `when` matches has read its rows, before the reader goes on (the
+     * reads of the list and of the form are separate statements).
+     */
+    const commitAfterNextRead = (
+      when: (params: Params) => boolean,
+      write: () => Promise<unknown>,
+    ) => {
+      const repository = t.strapi.db.query(QL) as unknown as {
+        findMany(params: Params): Promise<unknown>;
+      };
+      const original = repository.findMany;
+      let armed = true;
+      repository.findMany = async function (this: unknown, params: Params) {
+        const rows = await original.call(this, params);
+        if (armed && when(params)) {
+          armed = false;
+          await write();
+        }
+        return rows;
+      };
+      return () => {
+        repository.findMany = original;
+      };
+    };
+    const link = async (label: string) => {
+      const res = await api.create("editor", QP, { label, url: "/race" }, "draft");
+      expect(res.status, res.text).toBe(201);
+      return { documentId: res.body.data.documentId, version: res.body.data.version };
+    };
+    const changeUnseen = (documentId: string, label: string) => () =>
+      t.strapi.documents(QL).update({ documentId, data: { label } });
+
+    it("the list's version is never newer than its rows: that token cannot publish or delete the unseen change", async () => {
+      const item = await link("Listed race");
+      const restore = commitAfterNextRead(
+        // The list's draft read (no documentId in its where).
+        (params) => params?.where !== undefined && !("documentId" in params.where),
+        changeUnseen(item.documentId, "Listed race, changed unseen"),
+      );
+      let list: Awaited<
+        ReturnType<typeof api.list<{ documentId: string; label: string; version: string }>>
+      >;
+      try {
+        list = await api.list<{ documentId: string; label: string; version: string }>(
+          "editor",
+          QP,
+          "q=listed%20race",
+        );
+      } finally {
+        restore();
+      }
+      expect(list.status, list.text).toBe(200);
+      expect(await storedRevision(t, QL, item.documentId)).toBe(Number(item.version) + 1);
+      const row = list.body.data.find((entry) => entry.documentId === item.documentId);
+      expect(row?.label).toBe("Listed race");
+      expect(row?.version).toBe(item.version);
+      const publish = await api.action("editor", QP, item.documentId, "publish", row?.version);
+      expect(publish.status, publish.text).toBe(412);
+      const remove = await api.remove("editor", QP, item.documentId, row?.version);
+      expect(remove.status, remove.text).toBe(412);
+      const rows = await t.strapi.db.query(QL).findMany({ where: { documentId: item.documentId } });
+      expect(rows.map((entry) => entry.publishedAt)).toEqual([null]);
+    });
+
+    it("the form reads its version before its rows: a change committed after them answers 412", async () => {
+      const item = await link("Form race");
+      const restore = commitAfterNextRead(
+        (params) => params?.where?.documentId === item.documentId,
+        changeUnseen(item.documentId, "Form race, changed unseen"),
+      );
+      let form: Awaited<ReturnType<typeof api.editable<{ label: string }>>>;
+      try {
+        form = await api.editable<{ label: string }>("editor", QP, item.documentId);
+      } finally {
+        restore();
+      }
+      expect(form.status, form.text).toBe(200);
+      expect(await storedRevision(t, QL, item.documentId)).toBe(Number(item.version) + 1);
+      expect(form.body.data).toMatchObject({ label: "Form race", version: item.version });
+      const remove = await api.remove("editor", QP, item.documentId, form.body.data.version);
+      expect(remove.status, remove.text).toBe(412);
+    });
   });
 });
