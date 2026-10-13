@@ -2,6 +2,7 @@ import {
   createUserWriteGuard,
   type TokenVersionStrapi,
 } from "../extensions/users-permissions/strapi-server";
+import { createAuditRecorder, type AuditHost } from "../utils/audit";
 import { createDepartmentAudienceGuard } from "../utils/department-audience-guard";
 import { createDocumentLock, type DocumentLockMiddlewareHost } from "../utils/document-lock";
 import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
@@ -74,7 +75,8 @@ export type DocumentMiddlewaresHost = PollAudienceGuardHost &
   TokenVersionStrapi &
   DocumentLockMiddlewareHost &
   ScheduleClearHost &
-  PublishReadinessHost;
+  PublishReadinessHost &
+  AuditHost;
 
 /** register() also needs `strapi.documents.use`. */
 export type DocumentMiddlewaresRegistrationHost = DocumentMiddlewaresHost & {
@@ -99,6 +101,7 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
     { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
     { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
+    { slot: "audit-recorder", middleware: createAuditRecorder(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
   ];
   return slotted.sort(
