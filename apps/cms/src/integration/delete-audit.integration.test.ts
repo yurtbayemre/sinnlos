@@ -43,6 +43,10 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     await t?.stop();
   });
 
+  /** One admin login per boot: POST /admin/login is rate limited. */
+  let adminJwt: string | undefined;
+  const admin = async () => (adminJwt ??= await adminToken(t));
+
   const upload = async (role: TestRole, bytes: Uint8Array = PNG_1PX, name = "bike.png") => {
     const res = await uploadFiles(t, await t.loginAs(role), [{ name, bytes }]);
     expect(res.status, JSON.stringify(res.body)).toBe(201);
@@ -113,7 +117,7 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
   it("a Content Manager delete is recorded as the admin, with its images", async () => {
     const image = await upload("member");
     const ad = await postAd("member", "Panel removed", [image.id]);
-    const token = await adminToken(t);
+    const token = await admin();
     const panel = await contentManager(t, token);
     const del = await panel.delete(AD, ad.documentId);
     expect([200, 204], del.text).toContain(del.status);
@@ -177,8 +181,20 @@ describe.each(testEngines())("the delete trail on %s", (engine) => {
     expect(String(row.detail)).toMatch(/application\/pdf, \d+ B: draft\.pdf$/);
   });
 
+  it("overlapping Media Library deletes of one file record it once", async () => {
+    const token = await admin();
+    const file = await upload("member");
+    const results = await Promise.all([
+      adminRequest(t, token, `/upload/files/${file.id}`, { method: "DELETE" }),
+      adminRequest(t, token, `/upload/files/${file.id}`, { method: "DELETE" }),
+    ]);
+    expect(results.some((r) => r.status === 200)).toBe(true);
+    expect(await t.strapi.db.query(FILE).findOne({ where: { id: file.id } })).toBeNull();
+    expect(await fileRowsFor(file)).toHaveLength(1);
+  });
+
   it("the admin Media Library: a single and a bulk delete, each file recorded", async () => {
-    const token = await adminToken(t);
+    const token = await admin();
     const [one, two, three] = [
       await upload("editor", minimalPdf(), "a.pdf"),
       await upload("member"),

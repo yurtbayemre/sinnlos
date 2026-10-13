@@ -62,6 +62,10 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     await t?.stop();
   });
 
+  /** One admin login per boot: POST /admin/login is rate limited. */
+  let adminJwt: string | undefined;
+  const admin = async () => (adminJwt ??= await adminToken(t));
+
   const docs = () => t.strapi.documents(D);
 
   /** A stamped upload through the real endpoint. */
@@ -221,7 +225,7 @@ describe.each(testEngines())("media claims on %s", (engine) => {
   });
 
   it("a Content Manager replace and publish removes the old stamped file", async () => {
-    const panel = await contentManager(t, await adminToken(t));
+    const panel = await contentManager(t, await admin());
     const [oldFile, newFile] = [await upload(), await upload()];
     const doc = await create({ file: oldFile }, "published");
     const saved = await panel.update(D, doc.documentId, { title: "Policy", file: newFile });
@@ -247,6 +251,67 @@ describe.each(testEngines())("media claims on %s", (engine) => {
     expect(errorOf(refused)).toMatchObject({ details: { keys: ["file"] } });
   });
 
+  it("a classified write refuses a tombstoned image from every source (API, Content Manager)", async () => {
+    const image = await upload("member", PNG_1PX);
+    await t.strapi.db.query(FILE).update({
+      where: { id: image },
+      data: {
+        provider_metadata: {
+          uploadedBy: t.fixtures.users.member.id,
+          removing: new Date().toISOString(),
+        },
+      },
+    });
+    const api = await t.api("member", "/api/classifieds", {
+      json: { data: { title: "Bike", description: "Red", category: "sale", images: [image] } },
+    });
+    expect(api.status, api.text).toBe(400);
+    const panel = await contentManager(t, await admin());
+    const created = await panel.create("api::classified.classified", {
+      title: "Panel ad",
+      description: "x",
+      category: "sale",
+      expiresAt: "2030-01-01",
+      images: [image],
+    });
+    expect(created.status, created.text).toBe(400);
+    const clean = await upload("member", PNG_1PX);
+    const ok = await panel.create("api::classified.classified", {
+      title: "Panel ad",
+      description: "x",
+      category: "sale",
+      expiresAt: "2030-01-01",
+      images: [clean],
+    });
+    expect(ok.status, ok.text).toBe(201);
+  });
+
+  it("attaches by the file's documentId too; a tombstoned one is refused before any link", async () => {
+    const res = await uploadFiles(t, await t.loginAs("editor"), [
+      { name: "a.pdf", bytes: minimalPdf() },
+    ]);
+    const { id, documentId } = res.body[0] as { id: number; documentId: string };
+    const doc = await asUser("editor", () => create({ file: { documentId } }));
+    const row = await docs().findOne({ documentId: doc.documentId, populate: { file: true } });
+    expect((row?.file as { id: number }).id).toBe(id);
+    const doomed = await uploadFiles(t, await t.loginAs("editor"), [
+      { name: "b.pdf", bytes: minimalPdf() },
+    ]);
+    const target = doomed.body[0] as { id: number; documentId: string };
+    await t.strapi.db.query(FILE).update({
+      where: { id: target.id },
+      data: {
+        provider_metadata: {
+          uploadedBy: t.fixtures.users.editor.id,
+          removing: new Date().toISOString(),
+        },
+      },
+    });
+    await expect(
+      asUser("editor", () => create({ file: { set: [{ documentId: target.documentId }] } })),
+    ).rejects.toMatchObject({ details: { keys: ["file"] } });
+  });
+
   describe.runIf(engine === "postgres")("races under the file row's lock (Postgres)", () => {
     const makeOld = (fileId: number) =>
       t.database.sql(
@@ -265,6 +330,19 @@ describe.each(testEngines())("media claims on %s", (engine) => {
       await held.commit();
       return Promise.all([a, b]);
     }
+
+    it("two concurrent attaches by documentId: one wins, the other fails invalid (no 40P01)", async () => {
+      const res = await uploadFiles(t, await t.loginAs("editor"), [
+        { name: "c.pdf", bytes: minimalPdf() },
+      ]);
+      const { documentId } = res.body[0] as { documentId: string };
+      const results = await Promise.all([
+        settle(asUser("editor", () => create({ file: { documentId } }))),
+        settle(asUser("editor", () => create({ file: { documentId } }))),
+      ]);
+      expect(results.filter((r) => r.ok)).toHaveLength(1);
+      expect(errorOf(results.find((r) => !r.ok))).toMatchObject({ details: { keys: ["file"] } });
+    });
 
     it("the janitor against an attach: the form keeps the file or fails invalid, never a dangling link", async () => {
       for (const order of ["attach first", "janitor first"] as const) {
