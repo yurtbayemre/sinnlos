@@ -76,18 +76,20 @@ describe("message catalogs", () => {
   });
 
   it("carry the poll targeting copy (decision 02)", () => {
-    for (const key of [
-      "formDepartments",
-      "formDepartmentsHint",
-      "audienceDepartments",
-      "notInAudience",
-      "audienceMissing",
-      "departmentsUnavailable",
-    ]) {
+    for (const key of ["audienceDepartments", "notInAudience", "audienceMissing"]) {
       expect(lookup(en, `polls.${key}`), key).toBeTruthy();
       expect(lookup(de, `polls.${key}`), key).toBeTruthy();
     }
     expect(argumentsOf(lookup(en, "polls.audienceDepartments"))).toEqual(["departments"]);
+    // The poll form moved to /manage (batch 15): its targeting copy, and the
+    // refusal while the department list is unavailable, live there.
+    for (const locale of ["en", "de"]) {
+      const polls = loadManage("polls", locale);
+      const common = loadManage("common", locale);
+      expect(lookup(polls, "fields.departments.label"), locale).toBeTruthy();
+      expect(lookup(polls, "fields.departments.hint"), locale).toBeTruthy();
+      expect(lookup(common, "targeting.optionsFailed"), locale).toBeTruthy();
+    }
   });
 });
 
