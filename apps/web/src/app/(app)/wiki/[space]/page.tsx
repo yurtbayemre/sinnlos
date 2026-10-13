@@ -1,8 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ArrowLeft, FileText, Plus, Settings } from "lucide-react";
 import { getTranslations } from "next-intl/server";
+import type { Route } from "next";
+import { buttonVariants } from "@/components/ui/button";
+import { areaAccess } from "@/lib/manage/access";
+import { areaItemPath } from "@/lib/manage/areas";
+import { wikiNewPagePath } from "@/lib/manage/wiki-paths";
+import { capabilitiesFor } from "@/lib/roles";
 import { api } from "@/lib/strapi";
+import { getViewer } from "@/lib/viewer";
 import type { WikiSpace } from "@/lib/types";
 import { sortWikiPages, wikiSpaceIconName } from "@/lib/wiki-content";
 import { ICONS } from "@/components/icon-map";
@@ -15,12 +22,17 @@ interface Props {
 
 export default async function WikiSpacePage({ params }: Props) {
   const { space } = await params;
-  const t = await getTranslations("wiki");
+  const [t, viewer] = await Promise.all([getTranslations("wiki"), getViewer()]);
   // Let fetch errors propagate to app/(app)/error.tsx so the user sees a
   // retry prompt instead of a misleading 404.
   const data = await api.wiki.space(space);
   const entry = data.data?.[0] as WikiSpace | undefined;
   if (!entry) notFound();
+  // Writing (batch 16): a new page for department heads, team leads and
+  // moderators (the cms also requires that they read this space, which
+  // they do on this page); the space's tree in /manage for moderators.
+  const capabilities = capabilitiesFor(viewer.role);
+  const manageSpace = areaAccess(capabilities, "wiki") !== null && !!entry.documentId;
   // DA02: the author-set order, ties by title (lib/wiki-content.ts).
   const pages = sortWikiPages(entry.pages ?? []);
   const SpaceIcon = ICONS[wikiSpaceIconName(entry.icon)];
@@ -46,6 +58,28 @@ export default async function WikiSpacePage({ params }: Props) {
         </h1>
         {entry.description ? (
           <p className="mt-1 text-muted-foreground">{entry.description}</p>
+        ) : null}
+        {capabilities.wikiPages.create || manageSpace ? (
+          <div role="group" aria-label={t("spaceActions")} className="mt-4 flex flex-wrap gap-2">
+            {capabilities.wikiPages.create && (
+              <Link
+                href={wikiNewPagePath(space)}
+                className={buttonVariants({ variant: "default", size: "sm" })}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                {t("newPage")}
+              </Link>
+            )}
+            {manageSpace && (
+              <Link
+                href={areaItemPath("wiki", entry.documentId as string) as Route}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                <Settings className="h-4 w-4" aria-hidden="true" />
+                {t("manageSpace")}
+              </Link>
+            )}
+          </div>
         ) : null}
       </header>
 
