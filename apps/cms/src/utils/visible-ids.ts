@@ -352,7 +352,6 @@ export function announcementRecipients(
   );
 }
 
-const listRows = (rows: unknown): unknown[] => (Array.isArray(rows) ? rows : []);
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -396,13 +395,12 @@ export async function withFreshAnnouncementFlags<T extends AnnouncementFlagRow>(
   where: Record<string, unknown>,
 ): Promise<T[]> {
   if (rows.length === 0) return rows;
+  const reread = await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    where,
+    select: ["id", "audience", "retargetRequired"],
+  });
   const fresh = new Map<unknown, Record<string, unknown>>();
-  for (const row of listRows(
-    await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      where,
-      select: ["id", "audience", "retargetRequired"],
-    }),
-  )) {
+  for (const row of rowsOf<unknown>(reread)) {
     if (isObject(row)) fresh.set(row.id, row);
   }
   return rows.map((row) => {

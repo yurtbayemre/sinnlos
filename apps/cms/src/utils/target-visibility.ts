@@ -114,6 +114,22 @@ const ANNOUNCEMENT_POPULATE = {
 const listOf = <T>(rows: unknown): T[] => (Array.isArray(rows) ? (rows as T[]) : []);
 
 /**
+ * The announcement rows `where` matches, with their targeting relations;
+ * the flags read again after the relations (utils/targeting-flags.ts).
+ */
+async function loadAnnouncementRows(
+  strapi: PolicyStrapi,
+  where: Record<string, unknown>,
+): Promise<AnnouncementRow[]> {
+  const rows = await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    where,
+    select: ANNOUNCEMENT_SELECT,
+    populate: ANNOUNCEMENT_POPULATE,
+  });
+  return withFreshAnnouncementFlags(strapi, listOf<AnnouncementRow>(rows), where);
+}
+
+/**
  * The row whose targeting counts per documentId: the PUBLISHED one. A
  * documentId with only a draft row is left out (no target, see the header).
  */
@@ -202,13 +218,8 @@ export async function visibleTargetAnchors(
   const raw = user ? await loadUserScope(strapi, user.id) : null;
   const audience = toAudienceScope(raw);
 
-  const published = { publishedAt: { $notNull: true } };
   const [announcementRows, spaceIds] = await Promise.all([
-    strapi.db
-      .query(ANNOUNCEMENT_UID)
-      .findMany({ where: published, select: ANNOUNCEMENT_SELECT, populate: ANNOUNCEMENT_POPULATE })
-      // The flags again, after the relations (utils/targeting-flags.ts).
-      .then((rows) => withFreshAnnouncementFlags(strapi, listOf<AnnouncementRow>(rows), published)),
+    loadAnnouncementRows(strapi, { publishedAt: { $notNull: true } }),
     visibleWikiSpaceIds(strapi, raw),
   ]);
 
@@ -239,18 +250,10 @@ export async function isTargetVisible(
   user: CallerUser | null | undefined,
 ): Promise<boolean> {
   if (targetType === "announcement") {
-    const where = { documentId: targetDocumentId, publishedAt: { $notNull: true } };
-    const rows = await withFreshAnnouncementFlags(
-      strapi,
-      listOf<AnnouncementRow>(
-        await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-          where,
-          select: ANNOUNCEMENT_SELECT,
-          populate: ANNOUNCEMENT_POPULATE,
-        }),
-      ),
-      where,
-    );
+    const rows = await loadAnnouncementRows(strapi, {
+      documentId: targetDocumentId,
+      publishedAt: { $notNull: true },
+    });
     const row = publishedByAnchor(rows).get(targetDocumentId);
     if (!row) return false;
     if (hasRole(user, MODERATORS)) return true;

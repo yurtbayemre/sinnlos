@@ -1,7 +1,12 @@
 import { AUDIENCE_DEPARTMENTS } from "@sinnlos/domain";
 
 import { ANNOUNCEMENT_UID, DOCUMENT_UID, EVENT_UID } from "./authoring-uids";
-import { advanceRevision, lockDocument, type DocumentLockHost } from "./document-lock";
+import {
+  advanceRevision,
+  lockDocument,
+  type DocumentLockHost,
+  type DocumentRef,
+} from "./document-lock";
 import {
   affectedDocumentIds,
   POLL_WRITE_ACTIONS,
@@ -408,11 +413,8 @@ async function rowIdsLinking(
   return [...rowIds].sort((a, b) => a - b);
 }
 
-/** A document whose revision a delete hook advances. */
-export interface DocumentRef {
-  uid: string;
-  documentId: string;
-}
+/** A document whose revision a delete hook advances (the document lock's ref). */
+export type { DocumentRef };
 
 /** Ascending (uid, documentId): the one order every multi-document lock takes (§G2). */
 export const compareDocumentRefs = (a: DocumentRef, b: DocumentRef): number =>
