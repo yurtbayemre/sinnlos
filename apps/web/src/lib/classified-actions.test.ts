@@ -35,9 +35,8 @@ vi.mock("@/lib/config", () => ({ DEMO_MODE: false, STRAPI_URL: "http://cms.test"
 vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 vi.stubGlobal("fetch", fetchMock);
 
-const { createClassified, deleteClassified, renewClassified, updateClassified } = await import(
-  "./classified-actions"
-);
+const { createClassified, deleteClassified, renewClassified, updateClassified } =
+  await import("./classified-actions");
 
 const NOW = new Date("2026-09-28T10:00:00.000Z");
 

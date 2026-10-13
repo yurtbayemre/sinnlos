@@ -43,12 +43,7 @@ import {
 } from "@/lib/classified-shared";
 
 export type ClassifiedErrorCode =
-  | "missingFields"
-  | "invalidPrice"
-  | "imageCount"
-  | "imageType"
-  | "imageSize"
-  | "failed";
+  "missingFields" | "invalidPrice" | "imageCount" | "imageType" | "imageSize" | "failed";
 
 /**
  * Raw (untrimmed/unparsed) field values as submitted. Returned alongside

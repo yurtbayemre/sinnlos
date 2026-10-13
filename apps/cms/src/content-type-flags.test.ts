@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { isLocalizedModel } from "./utils/draft-twins";
 
 /**
  * Pins the draftAndPublish flag of every content type.
@@ -68,6 +69,7 @@ const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
 
 interface SchemaOptions {
   options?: { draftAndPublish?: unknown };
+  pluginOptions?: { i18n?: { localized?: unknown } };
 }
 
 function readSchema(file: string): SchemaOptions {
@@ -116,6 +118,20 @@ describe("draftAndPublish flags (flipping one is a boot-time data migration)", (
       // addDraftAndPublish); an explicit boolean keeps the intent visible.
       expect(typeof schema.options?.draftAndPublish, uid).toBe("boolean");
       expect(schema.options?.draftAndPublish, uid).toBe(expected);
+    });
+  }
+});
+
+/**
+ * No content type is localized. Strapi's document service ignores the locale
+ * of a type that is not (strapi.localization, framework-contract.test.ts),
+ * and utils/draft-twins.ts relies on that when it repairs drafts; localizing
+ * a type adds per-locale rows and needs its own plan.
+ */
+describe("i18n: no content type is localized", () => {
+  for (const [uid, schema] of loadSchemas()) {
+    it(`${uid} is not localized`, () => {
+      expect(isLocalizedModel(schema), uid).toBe(false);
     });
   }
 });

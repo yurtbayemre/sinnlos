@@ -80,7 +80,7 @@ interface CookieJar {
  * Next then renders the page again in the same request with cookies()
  * updated but headers() as it arrived (next 16.3.4 request-store.js
  * synchronizeMutableCookies, "does this need to update headers as well?";
- * unchanged in 16.3.8).
+ * unchanged in 16.3.8 and 16.4.0).
  * The password change (FX40, lib/profile-actions.ts) sets the session cookie
  * with the new Strapi JWT, and the cms has just revoked the old one: read
  * from the raw header, that re-render sent the revoked JWT, got 401 and

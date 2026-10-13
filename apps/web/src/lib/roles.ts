@@ -260,13 +260,7 @@ export type AuthoringArea =
   | "lessons";
 
 export type AuthoringVerb =
-  | "create"
-  | "edit"
-  | "publish"
-  | "unpublish"
-  | "schedule"
-  | "discard"
-  | "delete";
+  "create" | "edit" | "publish" | "unpublish" | "schedule" | "discard" | "delete";
 
 /** Amendment 1 (§N7): "ownDepartment" arrives with the department authors in batch 15. */
 export type AuthoringScope = "any" | "ownDepartment";

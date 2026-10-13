@@ -21,12 +21,7 @@
 import { daysBetweenKeys, formatPlainDate, instantEpochMs, zonedDateKey } from "./plain-date";
 
 export type RelativeTimeKey =
-  | "justNow"
-  | "minutesAgo"
-  | "hoursAgo"
-  | "today"
-  | "yesterday"
-  | "daysAgo";
+  "justNow" | "minutesAgo" | "hoursAgo" | "today" | "yesterday" | "daysAgo";
 
 export type RelativeTimeT = (key: RelativeTimeKey, values?: Record<string, number>) => string;
 

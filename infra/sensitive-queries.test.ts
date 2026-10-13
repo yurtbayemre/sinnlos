@@ -39,12 +39,10 @@ vi.mock("next-intl/server", () => ({
   getTranslations: async () => (key: string) => key,
 }));
 
-const { liveSearchPaths, preloadPath, PRELOAD_KINDS, canSearchByEmail } = await import(
-  "../apps/web/src/lib/search-action"
-);
-const { kudosRecipientQuery, PEOPLE_QUERY, ORG_CHART_QUERY } = await import(
-  "../apps/web/src/lib/people-dto"
-);
+const { liveSearchPaths, preloadPath, PRELOAD_KINDS, canSearchByEmail } =
+  await import("../apps/web/src/lib/search-action");
+const { kudosRecipientQuery, PEOPLE_QUERY, ORG_CHART_QUERY } =
+  await import("../apps/web/src/lib/people-dto");
 
 const ROOT = join(__dirname, "..");
 const CMS_SRC = join(ROOT, "apps", "cms", "src");

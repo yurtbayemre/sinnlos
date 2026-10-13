@@ -100,8 +100,7 @@ export const DIGEST_EXCLUDED_ROLE_TYPES: readonly RoleType[] = [GUEST];
  * `misconfigured`: SMTP is set but the link base or sender is missing → error.
  */
 export type DigestGate =
-  | { kind: "send"; baseUrl: string }
-  | { kind: "skip" | "misconfigured"; reason: string };
+  { kind: "send"; baseUrl: string } | { kind: "skip" | "misconfigured"; reason: string };
 
 /**
  * An on/off env switch (B05): "1", "true", "yes" and "on" (any case,

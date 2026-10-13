@@ -23,15 +23,16 @@ import {
   type QueryEngine,
   type SqliteEngine,
 } from "./test/sqlite-engine.test.helper";
+import { isLocalizedModel } from "./utils/draft-twins";
 import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
 
 /**
  * Framework contract (roadmap S04): the Strapi behaviour this cms is built
  * on, pinned against the INSTALLED packages (@strapi/utils, @strapi/core,
  * @strapi/database, @strapi/upload, @strapi/plugin-users-permissions
- * 5.55.1). Each block names the code that relies on it. The utils, core and
- * upload traps run the real modules; the database traps run
- * @strapi/database on a throwaway SQLite file
+ * 5.57.0; first pinned on 5.55.1). Each block names the code that relies
+ * on it. The utils, core and upload traps run the real modules; the
+ * database traps run @strapi/database on a throwaway SQLite file
  * (src/test/sqlite-engine.test.helper.ts), like
  * utils/poll-audience-backfill-sqlite.test.ts.
  *
@@ -46,7 +47,7 @@ import { getMutableQuery, restrictiveIdFilter } from "./utils/policy-query";
  * longer holds, not that the test is wrong.
  */
 
-const STRAPI_VERSION = "5.55.1";
+const STRAPI_VERSION = "5.57.0";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -192,7 +193,7 @@ describe("@strapi/utils validateQuery: filters through a relation need the targe
     await expect(attempt).rejects.toThrow("Invalid key author");
   });
 
-  it("passes the same filter with the find scope, and never checks populate (5.55.1)", async () => {
+  it("passes the same filter with the find scope, and never checks populate (5.55.1-5.57.0)", async () => {
     const { auth, asked } = stubAuth([`${USER_UID}.find`]);
     await expect(
       validators().query({ filters: { author: { id: 1 } } }, article(), { auth }),
@@ -636,6 +637,54 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     findMany(params?: Record<string, unknown>): Promise<DocumentEntry[]>;
   }
 
+  interface Localization {
+    register(provider: unknown): void;
+    isEnabled(): boolean;
+    isLocalizedContentType(model: unknown): boolean;
+    getDefaultLocale(): Promise<string | null>;
+  }
+
+  /**
+   * strapi.localization as a booted app has it (5.57+, strapi#27806): core's
+   * capability (services/localization.js) with @strapi/i18n's provider
+   * registered, as i18n's register() does on every boot (i18n is an internal
+   * plugin, loaders/plugins/get-enabled-plugins.js). Both are the real
+   * modules; the provider asks the real i18n content-types service
+   * (pluginOptions.i18n.localized). Only the locales service is stubbed: its
+   * default locale lives in the core store, and nothing reads it for a type
+   * that is not localized.
+   */
+  function i18nLocalization(fake: Record<string, unknown>): Localization {
+    const i18nDir = strapiPackageDir("@strapi/i18n");
+    const contentTypesService = requirePackageFile<() => unknown>(
+      i18nDir,
+      "dist/server/services/content-types.js",
+    )();
+    const localesService = {
+      getDefaultLocale: async () => "en",
+      find: async () => [{ code: "en", name: "English (en)" }],
+    };
+    fake.plugin = (name: string) =>
+      name === "i18n"
+        ? {
+            service: (service: string) => {
+              if (service === "content-types") return contentTypesService;
+              if (service === "locales") return localesService;
+              throw new Error(`i18n service ${service} not stubbed`);
+            },
+          }
+        : undefined;
+    const { createLocalizationService } = requirePackageFile<{
+      createLocalizationService(): Localization;
+    }>(coreDir(), "dist/services/localization.js");
+    const { createLocalizationProvider } = requirePackageFile<{
+      createLocalizationProvider(strapi: unknown): unknown;
+    }>(i18nDir, "dist/server/localization.js");
+    const localization = createLocalizationService();
+    localization.register(createLocalizationProvider(fake));
+    return localization;
+  }
+
   let engine: SqliteEngine | undefined;
 
   afterEach(async () => {
@@ -666,23 +715,17 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
         error: () => undefined,
         debug: () => undefined,
       },
-      // i18n is always installed; this type is not localized.
-      plugin: (name: string) =>
-        name === "i18n"
-          ? {
-              service: (service: string) =>
-                service === "content-types"
-                  ? { isLocalizedContentType: () => false }
-                  : { getDefaultLocale: async () => "en" },
-            }
-          : undefined,
     };
+    // i18n is always installed; this type is not localized.
+    const localization = i18nLocalization(fake);
+    fake.localization = localization;
     const queryParams = requirePackageFile<(strapi: unknown) => unknown>(
       coreDir(),
       "dist/services/query-params.js",
     )(fake);
     fake.get = (name: string) => {
       if (name === "query-params") return queryParams;
+      if (name === "localization") return localization;
       throw new Error(`strapi.get(${name}) not stubbed`);
     };
     vi.stubGlobal("strapi", fake);
@@ -691,6 +734,23 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     }>(coreDir(), "dist/services/document-service/index.js");
     return { docs: createDocumentService(fake)(NOTE), db };
   }
+
+  it("asks i18n's provider through strapi.localization: only pluginOptions.i18n.localized localizes (draft-twins.ts)", async () => {
+    const localization = i18nLocalization({});
+    expect(localization.isEnabled()).toBe(true);
+    const localized = { ...NOTE_TYPE, pluginOptions: { i18n: { localized: true } } };
+    expect(localization.isLocalizedContentType(NOTE_TYPE)).toBe(false);
+    expect(localization.isLocalizedContentType(localized)).toBe(true);
+    // utils/draft-twins.ts mirrors this test for its locale handling.
+    expect(isLocalizedModel(NOTE_TYPE)).toBe(false);
+    expect(isLocalizedModel(localized)).toBe(true);
+    expect(await localization.getDefaultLocale()).toBe("en");
+    // Without a provider core answers "not localized" on its own.
+    const { createLocalizationService } = requirePackageFile<{
+      createLocalizationService(): Localization;
+    }>(coreDir(), "dist/services/localization.js");
+    expect(createLocalizationService().isLocalizedContentType(localized)).toBe(false);
+  });
 
   it("publishing keeps a draft row and a published row with different ids (§5.17, §5.36)", async () => {
     const { docs, db } = await documents();

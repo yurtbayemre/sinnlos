@@ -2,11 +2,7 @@
 import type { UserLite } from "./common";
 
 export type ClassifiedCategory =
-  | "sale"
-  | "giveaway"
-  | "wanted"
-  | "service-offer"
-  | "service-wanted";
+  "sale" | "giveaway" | "wanted" | "service-offer" | "service-wanted";
 
 export interface ClassifiedImage {
   id: number;

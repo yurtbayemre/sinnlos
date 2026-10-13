@@ -25,9 +25,8 @@ const sessionMock = vi.fn();
 vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
 vi.mock("@/lib/session", () => ({ getSession: () => sessionMock() }));
 
-const { getNotifications, markAllNotificationsRead, markNotificationsRead } = await import(
-  "./notification-actions"
-);
+const { getNotifications, markAllNotificationsRead, markNotificationsRead } =
+  await import("./notification-actions");
 
 function signInRedirect(): unknown {
   try {

@@ -92,6 +92,31 @@ describe("verifyIdToken", () => {
     expect(result).toMatchObject({ ok: true, claims: { roles: [], name: null, email: null } });
   });
 
+  it("selects a key shaped like the tenant's: no alg, use sig, Microsoft's extra members", async () => {
+    // .../discovery/v2.0/keys lists RSA keys without `alg`, with x5t, x5c,
+    // issuer and cloud_instance_name; jose's key selection checks kid, kty,
+    // alg, use, key_ops and ext (6.2.10+). x5c is never read here (WebCrypto
+    // drops members outside the JWK dictionary): a placeholder stands in.
+    const tenantShaped = {
+      keys: [
+        {
+          ...(await exportJWK(signing.publicKey)),
+          kid: KID,
+          use: "sig",
+          x5t: KID,
+          x5c: ["MIIC"],
+          cloud_instance_name: "microsoftonline.com",
+          issuer: "https://login.microsoftonline.com/{tenantid}/v2.0",
+        },
+      ],
+    };
+    expect(tenantShaped.keys[0]).not.toHaveProperty("alg");
+    const result = await verifyIdToken(await sign(claims()), config, {
+      keys: createLocalJWKSet(tenantShaped),
+    });
+    expect(result).toMatchObject({ ok: true, claims: { oid: OID } });
+  });
+
   const invalid: [string, () => Promise<string>][] = [
     ["a wrong audience", () => sign(claims({ aud: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb" }))],
     ["a wrong issuer", () => sign(claims({ iss: entraIssuer(OTHER_TENANT) }))],
