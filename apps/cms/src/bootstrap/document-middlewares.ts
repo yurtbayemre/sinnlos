@@ -10,6 +10,8 @@ import {
   type DocumentMiddleware,
   type PollAudienceGuardHost,
 } from "../utils/poll-audience-guard";
+import { createPublishReadiness, type PublishReadinessHost } from "../utils/publish-readiness";
+import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
 
 /**
  * Every Document Service middleware of the app, registered in one place and
@@ -70,7 +72,9 @@ export type DocumentMiddlewareSlot = (typeof DOCUMENT_MIDDLEWARE_SLOTS)[number];
 /** The slice of the Strapi instance the middlewares use. */
 export type DocumentMiddlewaresHost = PollAudienceGuardHost &
   TokenVersionStrapi &
-  DocumentLockMiddlewareHost;
+  DocumentLockMiddlewareHost &
+  ScheduleClearHost &
+  PublishReadinessHost;
 
 /** register() also needs `strapi.documents.use`. */
 export type DocumentMiddlewaresRegistrationHost = DocumentMiddlewaresHost & {
@@ -93,6 +97,8 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "document-lock", middleware: createDocumentLock(strapi) },
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
+    { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
+    { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
   ];
   return slotted.sort(

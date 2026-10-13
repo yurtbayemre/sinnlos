@@ -1,6 +1,6 @@
 import { errors } from "@strapi/utils";
 
-import { LESSON_UID, WIKI_PAGE_UID } from "./authoring-uids";
+import { LESSON_UID, WIKI_PAGE_UID, isScheduledUid } from "./authoring-uids";
 
 /**
  * Publish readiness (decision 06 §D rule 3 and §G2 "publish readiness";
@@ -30,6 +30,19 @@ import { LESSON_UID, WIKI_PAGE_UID } from "./authoring-uids";
  * with `details.keys` and `details.codes: { <key>: 'notPublishable' }`, so
  * the web maps it like any field error and the admin panel shows its
  * message.
+ *
+ * THE MIDDLEWARE (`createPublishReadiness`, slot 6 of
+ * bootstrap/document-middlewares.ts, inside the document lock's
+ * transaction): on `publish`, and on `create`/`update` with `status:
+ * 'published'` (which publish inside the action, C3), for the scheduled
+ * types. Before the action it asks `publishBlockers` about the stored draft
+ * (publish) or the stored draft overlaid with the payload (create/update);
+ * after it, it checks that every readiness relation the draft holds is
+ * still held by the new published row, so a target unpublished between the
+ * check and the publish cannot drop the link either. Either failure throws
+ * `NotPublishableError` and rolls the action back. It binds every source:
+ * the web, the admin panel (C19) and the scheduler (which records
+ * `scheduleError = notPublishable`).
  */
 
 export const NOT_PUBLISHABLE = "notPublishable";
@@ -55,6 +68,7 @@ export interface PublishReadinessHost {
   db: {
     query(uid: string): {
       findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+      findMany(params: Record<string, unknown>): Promise<Record<string, unknown>[]>;
       count(params: Record<string, unknown>): Promise<number>;
     };
   };
@@ -182,4 +196,130 @@ export async function publishBlockers(
     }
   }
   return blockers.sort();
+}
+
+// ---------------------------------------------------------------------------
+// The middleware.
+
+interface ReadinessContext {
+  uid?: string;
+  action?: string;
+  params?: unknown;
+}
+
+const PUBLISHING_WRITES: readonly string[] = ["create", "update"];
+
+/** Whether this action publishes (C3: create/update with status 'published' do). */
+export function publishesInAction(action: string | undefined, params: unknown): boolean {
+  if (action === "publish") return true;
+  return (
+    PUBLISHING_WRITES.includes(action ?? "") && isRecord(params) && params.status === "published"
+  );
+}
+
+const relationPopulate = (uid: string): Record<string, { select: string[] }> =>
+  Object.fromEntries(
+    (READINESS_RELATIONS[uid] ?? []).map((key) => [key, { select: ["documentId"] }]),
+  );
+
+/** The stored draft row of a document, with the readiness relations as `{ documentId }`. */
+async function storedDraft(
+  strapi: PublishReadinessHost,
+  uid: string,
+  documentId: string,
+): Promise<Record<string, unknown> | null> {
+  return strapi.db.query(uid).findOne({
+    where: { documentId, publishedAt: null },
+    populate: relationPopulate(uid),
+  });
+}
+
+const RELATION_OPERATIONS = ["set", "connect", "disconnect"];
+
+/**
+ * The stored draft overlaid with a payload, as `publishBlockers` reads it.
+ * A relation payload with operations keeps the stored value unless it sets
+ * or connects a target (to-one: the last one counts) or only disconnects
+ * (then no target remains); the Content Manager sends empty operations for
+ * an untouched relation.
+ */
+export function overlayDraft(
+  stored: Record<string, unknown> | null,
+  data: unknown,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = { ...(stored ?? {}) };
+  if (!isRecord(data)) return merged;
+  for (const [key, value] of Object.entries(data)) {
+    if (isRecord(value) && RELATION_OPERATIONS.some((operation) => operation in value)) {
+      const set = value.set;
+      const connect = Array.isArray(value.connect) ? value.connect : [];
+      const disconnect = Array.isArray(value.disconnect) ? value.disconnect : [];
+      if (Array.isArray(set)) merged[key] = set;
+      else if (connect.length > 0) merged[key] = connect;
+      else if (disconnect.length > 0) merged[key] = null;
+      continue;
+    }
+    merged[key] = value;
+  }
+  return merged;
+}
+
+/** The documentId a populated to-one relation holds, or null. */
+const linkedDocumentId = (row: Record<string, unknown> | undefined, key: string): string | null => {
+  const value = row?.[key];
+  return isRecord(value) && typeof value.documentId === "string" ? value.documentId : null;
+};
+
+const isPublishedRow = (row: Record<string, unknown>) =>
+  row.publishedAt !== null && row.publishedAt !== undefined;
+
+/** After the publish: the readiness links of the draft the new published row lost. */
+async function lostLinks(
+  strapi: PublishReadinessHost,
+  uid: string,
+  documentId: string,
+): Promise<string[]> {
+  const keys = READINESS_RELATIONS[uid] ?? [];
+  if (keys.length === 0) return [];
+  const rows = await strapi.db.query(uid).findMany({
+    where: { documentId },
+    populate: relationPopulate(uid),
+  });
+  const draft = rows.find((row) => !isPublishedRow(row));
+  const published = rows.find(isPublishedRow);
+  if (!draft || !published) return [];
+  return keys.filter(
+    (key) => linkedDocumentId(draft, key) !== null && linkedDocumentId(published, key) === null,
+  );
+}
+
+const documentIdOf = (params: unknown, result: unknown): string | null => {
+  if (isRecord(params) && typeof params.documentId === "string" && params.documentId !== "") {
+    return params.documentId;
+  }
+  if (isRecord(result) && typeof result.documentId === "string") return result.documentId;
+  return null;
+};
+
+/** The publish-readiness middleware (see the module comment). */
+export function createPublishReadiness(strapi: PublishReadinessHost) {
+  return async (context: ReadinessContext, next: () => Promise<unknown>): Promise<unknown> => {
+    const uid = context.uid;
+    if (!isScheduledUid(uid) || !publishesInAction(context.action, context.params)) return next();
+    const params = isRecord(context.params) ? context.params : {};
+    const documentId = documentIdOf(params, null);
+    const stored = documentId ? await storedDraft(strapi, uid, documentId) : null;
+    // A publish of a document without a draft publishes nothing: Strapi's own answer.
+    if (context.action === "publish" && stored === null) return next();
+    const draft = context.action === "publish" ? (stored ?? {}) : overlayDraft(stored, params.data);
+    const blockers = await publishBlockers(strapi, uid, draft);
+    if (blockers.length > 0) throw new NotPublishableError(blockers);
+    const result = await next();
+    const published = documentIdOf(params, result);
+    if (published) {
+      const lost = await lostLinks(strapi, uid, published);
+      if (lost.length > 0) throw new NotPublishableError(lost);
+    }
+    return result;
+  };
 }

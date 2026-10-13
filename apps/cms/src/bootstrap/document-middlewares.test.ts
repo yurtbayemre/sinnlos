@@ -64,6 +64,8 @@ describe("Document Service middleware slots (K6)", () => {
       "document-lock",
       "poll-audience-guard",
       "department-audience-guard",
+      "schedule-clear",
+      "publish-readiness",
       "user-write-guard",
     ]);
     expect(slots[slots.length - 1]).toBe("user-write-guard");
