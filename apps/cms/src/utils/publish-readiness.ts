@@ -234,6 +234,20 @@ async function storedDraft(
   });
 }
 
+/**
+ * The keys that block publishing the stored draft of `documentId` now, or
+ * null when the document has no draft (the scheduler's re-check of a
+ * refusal under its lock).
+ */
+export async function draftPublishBlockers(
+  strapi: PublishReadinessHost,
+  uid: string,
+  documentId: string,
+): Promise<string[] | null> {
+  const stored = await storedDraft(strapi, uid, documentId);
+  return stored === null ? null : publishBlockers(strapi, uid, stored);
+}
+
 const RELATION_OPERATIONS = ["set", "connect", "disconnect"];
 
 /**

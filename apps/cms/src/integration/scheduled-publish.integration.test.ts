@@ -355,22 +355,69 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     }
   }, 300_000);
 
-  it("a parent cycle among scheduled wiki pages ends in notPublishable, not an endless wait (Codex review)", async () => {
+  /** Runs `between` before the n-th transaction opened outside any other; returns the undo. */
+  const pauseBeforeTransaction = (n: number, between: () => Promise<void>) => {
+    const db = t.strapi.db as unknown as {
+      transaction(callback: unknown): Promise<unknown>;
+      inTransaction(): boolean;
+    };
+    const original = db.transaction;
+    let count = 0;
+    let busy = false;
+    db.transaction = async function (this: unknown, callback: unknown) {
+      if (!busy && !db.inTransaction()) {
+        count += 1;
+        if (count === n) {
+          busy = true;
+          try {
+            await between();
+          } finally {
+            busy = false;
+          }
+        }
+      }
+      return original.call(db, callback);
+    };
+    return () => {
+      db.transaction = original;
+    };
+  };
+  const revisionOf = (uid: string, documentId: string) =>
+    t
+      .requireBuilt<{
+        readRevision(strapi: unknown, uid: string, documentId: string): Promise<number>;
+      }>("src/utils/document-lock")
+      .readRevision(t.strapi, uid, documentId);
+  const newAttempts = () =>
+    new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)() as {
+      size: number;
+      deferWithdrawal(uid: string, documentId: string, now: Date, revision: number): Date;
+    };
+
+  it("a parent cycle among scheduled wiki pages waits out the dependency limit, then ends in notPublishable (Codex review)", async () => {
     // The admin panel and the Document Service let a draft's parent point
-    // back at its own child; both pages then waited for each other forever.
+    // back at its own child; both pages waited for each other forever. The
+    // wait is bounded now (DEPENDENCY_WAIT_MINUTES, 60).
     const base = Date.now();
     const slug = (name: string) => `it-cycle-${name}-${base}`;
+    const due = new Date(base - 60_000).toISOString();
     const a = await t.strapi.documents(WIKI_PAGE).create({
-      data: { title: "Cycle A", slug: slug("a"), publishAt: ago(60_000) },
+      data: { title: "Cycle A", slug: slug("a"), publishAt: due },
     });
     const b = await t.strapi.documents(WIKI_PAGE).create({
-      data: { title: "Cycle B", slug: slug("b"), parent: a.documentId, publishAt: ago(60_000) },
+      data: { title: "Cycle B", slug: slug("b"), parent: a.documentId, publishAt: due },
     });
     await t.strapi
       .documents(WIKI_PAGE)
       .update({ documentId: a.documentId, data: { parent: b.documentId } });
-    const attempts = new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)();
-    const result = await scheduler.runScheduledPublishing(t.strapi, new Date(), attempts);
+    const attempts = newAttempts();
+    const within = await scheduler.runScheduledPublishing(t.strapi, new Date(base), attempts);
+    for (const page of [a, b]) {
+      expect(within.failed).not.toContain(key(WIKI_PAGE, page.documentId));
+      expect(within.published).not.toContain(key(WIKI_PAGE, page.documentId));
+    }
+    const late = new Date(base + 61 * 60_000);
+    const result = await scheduler.runScheduledPublishing(t.strapi, late, attempts);
     expect(result.failed).toEqual(
       expect.arrayContaining([key(WIKI_PAGE, a.documentId), key(WIKI_PAGE, b.documentId)]),
     );
@@ -384,10 +431,7 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
         select: ["source", "detail"],
       });
       expect(failures).toEqual([
-        expect.objectContaining({
-          source: "cron",
-          detail: "notPublishable: the parent chain loops back",
-        }),
+        expect.objectContaining({ source: "cron", detail: "notPublishable: keys: parent" }),
       ]);
       expect(
         (await rows(WIKI_PAGE, page.documentId)).filter((row) => row.publishedAt != null),
@@ -395,59 +439,89 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     }
   });
 
-  it("a parent cycle is judged again under the locks: an author who breaks it before the record leaves both pages scheduled", async () => {
-    // TOCTOU review: the cycle walk reads before any lock; the record walks
-    // again under the pages' locks (on Postgres in the lock's transaction).
+  it("a refusal whose parent was published before its record is not recorded; the next run publishes (Codex review)", async () => {
     const base = Date.now();
-    const slug = (name: string) => `it-cycle-race-${name}-${base}`;
-    const a = await t.strapi.documents(WIKI_PAGE).create({
-      data: { title: "Race A", slug: slug("a"), publishAt: ago(60_000) },
+    const slug = (name: string) => `it-refusal-${name}-${base}`;
+    const parent = await t.strapi.documents(WIKI_PAGE).create({
+      data: { title: "Late parent", slug: slug("parent") },
     });
-    const b = await t.strapi.documents(WIKI_PAGE).create({
-      data: { title: "Race B", slug: slug("b"), parent: a.documentId, publishAt: ago(60_000) },
+    const child = await t.strapi.documents(WIKI_PAGE).create({
+      data: {
+        title: "Early child",
+        slug: slug("child"),
+        parent: parent.documentId,
+        publishAt: ago(60_000),
+      },
     });
-    await t.strapi
-      .documents(WIKI_PAGE)
-      .update({ documentId: a.documentId, data: { parent: b.documentId } });
     await settleFanouts();
-    // Before the first transaction of the run (the loop's record), an
-    // author moves A to the top level.
-    const db = t.strapi.db as unknown as {
-      transaction(callback: unknown): Promise<unknown>;
-      inTransaction(): boolean;
-    };
-    const original = db.transaction;
-    let pending = true;
-    let busy = false;
-    db.transaction = async function (this: unknown, callback: unknown) {
-      if (pending && !busy && !db.inTransaction()) {
-        pending = false;
-        busy = true;
-        try {
-          await t.strapi
-            .documents(WIKI_PAGE)
-            .update({ documentId: a.documentId, data: { parent: null } });
-        } finally {
-          busy = false;
-        }
-      }
-      return original.call(db, callback);
-    };
-    const attempts = new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)();
-    let first: RunResult;
+    const attempts = newAttempts();
+    const result = scheduler.emptyResult();
+    const revision = await revisionOf(WIKI_PAGE, child.documentId);
+    // The 1st transaction is the refused publish (the parent is not
+    // published); before the 2nd, its record, an author publishes the parent.
+    const undo = pauseBeforeTransaction(2, async () => {
+      await t.strapi.documents(WIKI_PAGE).publish({ documentId: parent.documentId });
+    });
     try {
-      first = await scheduler.runScheduledPublishing(t.strapi, new Date(), attempts);
+      await scheduler.runScheduledDocument(
+        t.strapi,
+        WIKI_PAGE,
+        child.documentId,
+        "publish",
+        new Date(),
+        attempts,
+        result,
+        revision,
+      );
     } finally {
-      db.transaction = original;
+      undo();
     }
-    expect(pending).toBe(false);
-    expect(first.failed).not.toContain(key(WIKI_PAGE, a.documentId));
-    expect(first.failed).not.toContain(key(WIKI_PAGE, b.documentId));
-    expect(first.published).toContain(key(WIKI_PAGE, a.documentId));
-    expect(await draftOf(WIKI_PAGE, b.documentId)).toMatchObject({ scheduleError: null });
-    const second = await scheduler.runScheduledPublishing(t.strapi, new Date(), attempts);
-    expect(second.published).toContain(key(WIKI_PAGE, b.documentId));
+    expect(result.retrying).toEqual([key(WIKI_PAGE, child.documentId)]);
+    expect(result.failed).toEqual([]);
+    expect(attempts.size).toBe(0);
+    expect(await draftOf(WIKI_PAGE, child.documentId)).toMatchObject({ scheduleError: null });
+    expect((await draftOf(WIKI_PAGE, child.documentId))?.publishAt).not.toBeNull();
+    const next = await scheduler.runScheduledPublishing(t.strapi, new Date(), attempts);
+    expect(next.published).toContain(key(WIKI_PAGE, child.documentId));
   });
+
+  it("published quick links whose withdrawals back off never starve an independent due quick link (Codex review)", async () => {
+    // 50 published links with an earlier pending update and a backed-off
+    // withdrawal filled every publish batch (each skipped for the
+    // withdrawal's precedence); the selection now leaves them out.
+    const attempts = newAttempts();
+    const now = new Date();
+    const earlier = new Date(now.getTime() - 10 * 60_000).toISOString();
+    const backedOff = new Set<string>();
+    for (let index = 0; index < SCHEDULE_BATCH; index += 1) {
+      const link = await t.strapi.documents(QUICK_LINK).create({
+        data: { label: `Backed off ${index}`, url: `https://example.org/backed-off-${index}` },
+        status: "published",
+      });
+      await t.strapi.documents(QUICK_LINK).update({
+        documentId: link.documentId,
+        data: { label: `Update ${index}`, publishAt: earlier, unpublishAt: earlier },
+      });
+      attempts.deferWithdrawal(
+        QUICK_LINK,
+        link.documentId,
+        now,
+        await revisionOf(QUICK_LINK, link.documentId),
+      );
+      backedOff.add(key(QUICK_LINK, link.documentId));
+    }
+    const independent = await t.strapi.documents(QUICK_LINK).create({
+      data: {
+        label: "Independent",
+        url: "https://example.org/independent",
+        // Due at the run's time, taken before the 100 writes above.
+        publishAt: new Date(now.getTime() - 1_000).toISOString(),
+      },
+    });
+    const result = await scheduler.runScheduledPublishing(t.strapi, now, attempts);
+    expect(result.published).toContain(key(QUICK_LINK, independent.documentId));
+    expect([...result.skipped, ...result.published].filter((k) => backedOff.has(k))).toEqual([]);
+  }, 300_000);
 
   it("the expired window: publishAt and expiresAt both passed during a stop: nothing published, nobody notified", async () => {
     const documentId = await scheduledAnnouncement("Expired while down", {

@@ -13,7 +13,11 @@ import {
   runInAuthoringScope,
   type DocumentLockHost,
 } from "../utils/document-lock";
-import { NotPublishableError } from "../utils/publish-readiness";
+import {
+  NotPublishableError,
+  draftPublishBlockers,
+  type PublishReadinessHost,
+} from "../utils/publish-readiness";
 import {
   SCHEDULE_BATCH,
   TransientAttempts,
@@ -43,38 +47,18 @@ import {
  *
  * DEPENDENCIES. A lesson needs its course published, a wiki page its parent
  * (publish readiness). A draft WAITS while its course or parent has no
- * published row and a due draft (publishAt passed). The publish selection
- * of these two types excludes waiting drafts in the database query itself
- * (NOT EXISTS over the link table), so the batch, and the pages behind it,
- * hold only drafts that can run: a course or parent scheduled later than
- * any number of its waiting children is still selected (Codex review of
- * batch 15: 50 children kept their parent out of every batch, and a scan
- * capped at 2,000 rows never reached a parent behind 2,000 children).
- * Courses are walked before lessons, so a due course is published before
- * the lesson pass selects. A waiting child is published the minute after
- * its course or parent (one level of a chain per minute). A refusal at
- * publish time whose course or parent became due after the selection is a
- * wait, not a failure: it costs no retry attempt (the course or parent runs
- * on its own and either publishes, or fails for good and loses its
- * schedule, which ends the wait).
- *
- * WAITING CYCLES. Wiki parents can form a loop that no writer prevents in
- * the admin panel (A's draft under B, B's under A, both unpublished and
- * due): every page of it waits on the next, forever. Each run walks the
- * waiting chains of up to SCHEDULE_BATCH waiting pages, following the
- * parents while they wait too (at most WAIT_CHAIN_MAX_DEPTH levels and
- * WAIT_WALK_BUDGET lookups a run). That walk only finds candidates; the
- * record locks the candidate pages and walks every page's chain again
- * under those locks with a fresh clock before it writes anything. A chain
- * that comes back to a page it passed, or that is deeper than the bound,
- * cannot finish: the pages of
- * the loop (or the walked ones) are recorded as `notPublishable`
- * (scheduleError, publishAt cleared, a `scheduleFailed` audit row whose
- * detail names the reason; rule 7), so the schedule badge shows them, and
- * the pages waiting on them then fail the same way on their own turn. A
- * scheduled chain of more than WAIT_CHAIN_MAX_DEPTH nested, unpublished,
- * due pages is ended the same way (a loop longer than the walk looks
- * alike); such a tree is published level by level by hand.
+ * published row and a due draft (publishAt passed), but only for
+ * DEPENDENCY_WAIT_MINUTES after its own publishAt. The publish selection
+ * excludes waiting drafts in the database query itself (NOT EXISTS over the
+ * link table and the target's rows), so the batch holds only drafts that
+ * can run, and a course or parent scheduled later than any number of its
+ * waiting children is still selected. Courses are walked before lessons, so
+ * a due course is published before the lesson pass selects; a waiting
+ * child is published the minute after its course or parent. Once its wait
+ * is over a draft is selected like any other: if readiness still refuses
+ * it, it is recorded `notPublishable`. Parent chains that loop back (the
+ * admin panel allows A under B and B under A) or that are too deep end this
+ * way, without walking them.
  *
  * Then ONE transaction per document:
  *   1. lock the document (utils/document-lock.ts lockDocument) and re-read:
@@ -98,7 +82,9 @@ import {
  * never fill the batch in front of due withdrawals. An unpublish also
  * cancels a pending publish (schedule-clear). The publish pass never
  * publishes a published document whose withdrawal is due: that is the
- * unpublish pass's, also while it is being retried.
+ * unpublish pass's, also while it is being retried. Its selection leaves
+ * such documents out in the query (they would fill its batch while their
+ * withdrawals back off), and the publish re-checks it under the lock.
  *
  * A WITHDRAWAL IS NEVER GIVEN UP. One that fails for good (a permanent
  * failure, or SCHEDULE_TRANSIENT_ATTEMPTS transient ones) records
@@ -136,17 +122,19 @@ import {
  *     minute retries; the SCHEDULE_TRANSIENT_ATTEMPTS-th failure for the
  *     same (uid, documentId, r, pass) in this process is recorded as
  *     `retryExhausted`. A restart forgets the count (only adds retries);
- *   - a readiness refusal whose course or parent is itself unpublished and
- *     due (DEPENDENCIES above): the schedule stays, the next minute tries
- *     again, and no attempt is counted. Whether a refusal is such a wait is
- *     decided under the document's lock in the failure record, with a fresh
- *     clock, never from a read before it.
+ *   - a readiness refusal (`notPublishable`) is judged again under the
+ *     failure record's lock with a fresh clock: the stored draft's
+ *     publish blockers are computed anew, and the refusal is recorded only
+ *     when something still blocks AND the draft no longer waits
+ *     (DEPENDENCIES). Otherwise nothing is written, no attempt is counted
+ *     and the schedule stays (a course or parent published in between: the
+ *     next minute publishes the draft; one that became due: it waits).
  *
  * TIME OF CHECK. Nothing read before a document's lock decides a write:
- * the selection (due, waiting, a withdrawal's backoff) only picks
- * candidates; under the lock the revision must be the selected one, and
- * due, expiry, the withdrawal precedence, a pending publish, the readiness
- * wait and a parent loop are judged again on the locked rows with a clock
+ * the selection (due, waiting, a withdrawal's backoff or precedence) only
+ * picks candidates; under the lock the revision must be the selected one,
+ * and due, expiry, the withdrawal precedence, a pending publish and the
+ * readiness refusal are judged again on the locked rows with a clock
  * sampled after the lock. A save in between moves the revision (skipped)
  * or changes what the re-check sees.
  * Each recorded failure logs `[scheduler] <uid> <documentId> failed: <code>`.
@@ -179,6 +167,8 @@ export interface ScheduledPublishStrapi {
     publish(params: { documentId: string }): Promise<unknown>;
     unpublish(params: { documentId: string }): Promise<unknown>;
   };
+  /** The models' schemas (publish readiness reads the required attributes). */
+  getModel: PublishReadinessHost["getModel"];
   requestContext?: AuditHost["requestContext"];
   log: { info(message: string): void; warn(message: string): void; error(message: string): void };
 }
@@ -230,122 +220,49 @@ const READINESS_TARGETS: Readonly<Record<string, { key: string; target: string }
   [WIKI_PAGE_UID]: { key: "parent", target: WIKI_PAGE_UID },
 };
 
-/** Levels a waiting chain is followed before it counts as one that cannot finish. */
-export const WAIT_CHAIN_MAX_DEPTH = 64;
-
-/** Chain lookups per type and run for the cycle check (the next run goes on). */
-const WAIT_WALK_BUDGET = 500;
+/**
+ * Minutes a due draft waits for its course or parent (DEPENDENCIES in the
+ * module comment), counted from its own publishAt. After that it is
+ * selected like any other, and a refusal is recorded.
+ */
+export const DEPENDENCY_WAIT_MINUTES = 60;
+const DEPENDENCY_WAIT_MS = DEPENDENCY_WAIT_MINUTES * 60_000;
 
 const linkedDocumentId = (row: Record<string, unknown>, key: string): string | null => {
   const linked = row[key] as { documentId?: unknown } | null | undefined;
   return linked && isDocumentId(linked.documentId) ? linked.documentId : null;
 };
 
-/**
- * Of `targetIds` (documentIds of `targetUid`), those that wait for their own
- * publish: no published row, and a draft whose publishAt has passed.
- */
-async function dueUnpublishedTargets(
-  strapi: ScheduledPublishStrapi,
-  targetUid: string,
-  targetIds: readonly string[],
-  now: Date,
-): Promise<Set<string>> {
-  if (targetIds.length === 0) return new Set();
-  const query = strapi.db.query(targetUid);
-  const published = new Set(
-    (
-      await query.findMany({
-        where: { documentId: { $in: [...targetIds] }, publishedAt: { $notNull: true } },
-        select: ["documentId"],
-      })
-    ).map((row) => row.documentId),
-  );
-  const unpublished = targetIds.filter((id) => !published.has(id));
-  if (unpublished.length === 0) return new Set();
-  return new Set(
-    (
-      await query.findMany({
-        where: {
-          documentId: { $in: unpublished },
-          publishedAt: null,
-          publishAt: { $notNull: true, $lte: now },
-        },
-        select: ["documentId"],
-      })
-    )
-      .map((row) => row.documentId)
-      .filter(isDocumentId),
-  );
-}
-
 const field = (value: unknown, key: string): unknown =>
   typeof value === "object" && value !== null ? (value as Record<string, unknown>)[key] : undefined;
 
 const isName = (value: unknown): value is string => typeof value === "string" && value.length > 0;
 
-/** Table and column names of a type, its readiness link and its target, from Strapi's metadata. */
-interface WaitTables {
-  table: string;
-  id: string;
-  documentId: string;
-  publishedAt: string;
-  publishAt: string;
-  link: string;
-  linkRow: string;
-  linkTarget: string;
-  target: string;
-  targetId: string;
-  targetDocumentId: string;
-  targetPublishedAt: string;
-  targetPublishAt: string;
+/** A model's table (schema-qualified on Postgres) and a column lookup, from Strapi's metadata. */
+function modelNames(strapi: ScheduledPublishStrapi, uid: string) {
+  const meta = strapi.db.metadata.get(uid) as unknown;
+  const tableName = field(meta, "tableName");
+  if (!isName(tableName)) throw new Error(`${SCHEDULER_LOG} the model ${uid} is not loaded`);
+  const schema = strapi.db.getSchemaName?.() || null;
+  const attributes = field(meta, "attributes");
+  return {
+    attributes,
+    table: schema ? `${schema}.${tableName}` : tableName,
+    qualified: (name: string) => (schema ? `${schema}.${name}` : name),
+    column: (attribute: string, fallback: string) => {
+      const name = field(field(attributes, attribute), "columnName");
+      return isName(name) ? name : fallback;
+    },
+  };
 }
 
-/**
- * The names `dueRowsByWait` needs, or null for a type without a readiness
- * link (nothing to wait for: a model without the relation, as in a test).
- */
-function waitTables(strapi: ScheduledPublishStrapi, uid: string): WaitTables | null {
+/** Whether `uid` has its readiness relation (a model without it waits for nothing). */
+function hasReadinessRelation(strapi: ScheduledPublishStrapi, uid: string): boolean {
   const readiness = READINESS_TARGETS[uid];
-  if (!readiness) return null;
-  const schema = strapi.db.getSchemaName?.() || null;
-  const qualified = (table: string) => (schema ? `${schema}.${table}` : table);
-  const model = (name: string) => {
-    const meta = strapi.db.metadata.get(name) as unknown;
-    const tableName = field(meta, "tableName");
-    if (!isName(tableName)) throw new Error(`${SCHEDULER_LOG} the model ${name} is not loaded`);
-    const column = (attribute: string, fallback: string) => {
-      const name = field(field(field(meta, "attributes"), attribute), "columnName");
-      return isName(name) ? name : fallback;
-    };
-    return { meta, table: qualified(tableName), column };
-  };
-  const own = model(uid);
-  const relation = field(field(own.meta, "attributes"), readiness.key);
-  if (relation === undefined) return null;
-  const target = model(readiness.target);
-  const joinTable = field(relation, "joinTable");
-  const link = field(joinTable, "name");
-  const linkRow = field(field(joinTable, "joinColumn"), "name");
-  const linkTarget = field(field(joinTable, "inverseJoinColumn"), "name");
-  if (!isName(link) || !isName(linkRow) || !isName(linkTarget)) {
-    throw new Error(`${SCHEDULER_LOG} the link table of ${uid}.${readiness.key} is unknown`);
-  }
-  return {
-    table: own.table,
-    id: own.column("id", "id"),
-    documentId: own.column("documentId", "document_id"),
-    publishedAt: own.column("publishedAt", "published_at"),
-    publishAt: own.column("publishAt", "publish_at"),
-    link: qualified(link),
-    linkRow,
-    linkTarget,
-    target: target.table,
-    targetId: target.column("id", "id"),
-    targetDocumentId: target.column("documentId", "document_id"),
-    targetPublishedAt: target.column("publishedAt", "published_at"),
-    targetPublishAt: target.column("publishAt", "publish_at"),
-  };
+  if (!readiness) return false;
+  return (
+    field(field(strapi.db.metadata.get(uid) as unknown, "attributes"), readiness.key) !== undefined
+  );
 }
 
 const rawRows = (result: unknown): Record<string, unknown>[] => {
@@ -355,200 +272,86 @@ const rawRows = (result: unknown): Record<string, unknown>[] => {
 };
 
 /**
- * The due draft rows of a type with a readiness target, `waiting` or not
- * (see DEPENDENCIES), ordered by the due time, then the row id. A waiting
- * row also names the document it waits for (`target_document_id`). One
- * read query: the link table and the target's rows are in the statement,
- * so the database pages over eligible rows only. `onlyDocumentId` narrows
- * it to one document (the cycle walk). With `trx` (the knex transaction of
- * a held document lock) the read runs in that transaction: on SQLite's one
- * connection a read beside it would wait for it forever.
- */
-async function dueRowsByWait(
-  strapi: ScheduledPublishStrapi,
-  uid: string,
-  now: Date,
-  waiting: boolean,
-  limit: number,
-  onlyDocumentId?: string,
-  trx?: unknown,
-): Promise<Array<{ documentId: string; targetDocumentId: string | null }> | null> {
-  const t = waitTables(strapi, uid);
-  if (t === null) return null;
-  // The target document waits: a due draft, and no published row.
-  const waitsFor = `
-      FROM ?? AS l
-      JOIN ?? AS p ON p.?? = l.??
-     WHERE l.?? = d.??
-       AND EXISTS (SELECT 1 FROM ?? AS w
-                    WHERE w.?? = p.?? AND w.?? IS NULL AND w.?? IS NOT NULL AND w.?? <= ?)
-       AND NOT EXISTS (SELECT 1 FROM ?? AS q WHERE q.?? = p.?? AND q.?? IS NOT NULL)`;
-  const waitsBindings = [
-    t.link,
-    t.target,
-    t.targetId,
-    t.linkTarget,
-    t.linkRow,
-    t.id,
-    t.target,
-    t.targetDocumentId,
-    t.targetDocumentId,
-    t.targetPublishedAt,
-    t.targetPublishAt,
-    t.targetPublishAt,
-    now,
-    t.target,
-    t.targetDocumentId,
-    t.targetDocumentId,
-    t.targetPublishedAt,
-  ];
-  const sql = `
-    SELECT d.?? AS document_id${waiting ? `, (SELECT p.?? ${waitsFor} LIMIT 1) AS target_document_id` : ""}
-      FROM ?? AS d
-     WHERE d.?? IS NULL AND d.?? IS NOT NULL AND d.?? <= ?
-       ${onlyDocumentId === undefined ? "" : "AND d.?? = ?"}
-       AND ${waiting ? "" : "NOT "}EXISTS (SELECT 1 ${waitsFor})
-     ORDER BY d.?? ASC, d.?? ASC
-     LIMIT ?`;
-  const bindings: unknown[] = [t.documentId];
-  if (waiting) bindings.push(t.targetDocumentId, ...waitsBindings);
-  bindings.push(t.table, t.publishedAt, t.publishAt, t.publishAt, now);
-  if (onlyDocumentId !== undefined) bindings.push(t.documentId, onlyDocumentId);
-  bindings.push(...waitsBindings, t.publishAt, t.id, limit);
-  const runner = (trx as { raw?: unknown } | undefined)?.raw
-    ? (trx as { raw(sql: string, bindings: readonly unknown[]): unknown })
-    : strapi.db.connection;
-  const rows = rawRows(await runner.raw(sql, bindings));
-  return rows
-    .map((row) => ({
-      documentId: row.document_id,
-      targetDocumentId: isDocumentId(row.target_document_id) ? row.target_document_id : null,
-    }))
-    .filter((row): row is { documentId: string; targetDocumentId: string | null } =>
-      isDocumentId(row.documentId),
-    );
-}
-
-/**
- * The due publishes (rule 4): draft rows with publishAt passed, ordered and
- * bounded. For a type with a readiness target, the waiting drafts are left
- * out by the query (see DEPENDENCIES in the module comment).
+ * The due publishes (rule 4): draft rows with publishAt passed, ordered by
+ * the due time, then the row id, at most SCHEDULE_BATCH. One read query,
+ * so the database pages over runnable drafts only. It leaves out:
+ *   - documents and quick links that have a published row and a due
+ *     withdrawal (the unpublish pass's; an unpublished draft with a passed
+ *     unpublishAt stays, for the expired-window rule);
+ *   - lessons and wiki pages that wait for their course or parent
+ *     (DEPENDENCIES): its link holds a document with a due draft and no
+ *     published row, and the draft's own publishAt is less than
+ *     DEPENDENCY_WAIT_MINUTES ago.
  */
 async function duePublishes(
   strapi: ScheduledPublishStrapi,
   uid: string,
   now: Date,
 ): Promise<string[]> {
-  const eligible = await dueRowsByWait(strapi, uid, now, false, SCHEDULE_BATCH);
-  if (eligible !== null) return eligible.map((row) => row.documentId);
-  const rows = await strapi.db.query(uid).findMany({
-    where: { publishedAt: null, publishAt: { $notNull: true, $lte: now } },
-    select: ["id", "documentId", "publishAt"],
-    orderBy: [{ publishAt: "asc" }, { id: "asc" }],
-    limit: SCHEDULE_BATCH,
-  });
-  return rows.map((row) => row.documentId).filter(isDocumentId);
-}
-
-/**
- * Why the waiting chain of one page cannot finish, or null: it loops back
- * to the page, or it is deeper than WAIT_CHAIN_MAX_DEPTH. A page that does
- * not wait, or waits on a chain that ends (or on a loop it is not part
- * of), has no problem of its own. Run under the page's lock, with a fresh
- * clock, before anything is recorded (`trx`: see dueRowsByWait).
- */
-async function waitingChainProblem(
-  strapi: ScheduledPublishStrapi,
-  uid: string,
-  documentId: string,
-  now: Date,
-  trx?: unknown,
-): Promise<string | null> {
-  const waitsOn = async (page: string): Promise<string | null> => {
-    const [row] = (await dueRowsByWait(strapi, uid, now, true, 1, page, trx)) ?? [];
-    return row?.targetDocumentId ?? null;
-  };
-  const path = [documentId];
-  let current = await waitsOn(documentId);
-  while (current !== null) {
-    if (current === documentId) return LOOP_REASON;
-    if (path.includes(current)) return null;
-    if (path.length >= WAIT_CHAIN_MAX_DEPTH) return DEEP_REASON;
-    path.push(current);
-    current = await waitsOn(current);
+  const own = modelNames(strapi, uid);
+  const id = own.column("id", "id");
+  const documentId = own.column("documentId", "document_id");
+  const publishedAt = own.column("publishedAt", "published_at");
+  const publishAt = own.column("publishAt", "publish_at");
+  let sql = `SELECT d.?? AS document_id FROM ?? AS d
+     WHERE d.?? IS NULL AND d.?? IS NOT NULL AND d.?? <= ?`;
+  const bindings: unknown[] = [documentId, own.table, publishedAt, publishAt, publishAt, now];
+  if (isUnpublishScheduledUid(uid)) {
+    const unpublishAt = own.column("unpublishAt", "unpublish_at");
+    sql += `
+       AND NOT (d.?? IS NOT NULL AND d.?? <= ?
+                AND EXISTS (SELECT 1 FROM ?? AS q WHERE q.?? = d.?? AND q.?? IS NOT NULL))`;
+    bindings.push(unpublishAt, unpublishAt, now, own.table, documentId, documentId, publishedAt);
   }
-  return null;
-}
-
-const LOOP_REASON = "the parent chain loops back";
-const DEEP_REASON = `the parent chain is deeper than ${WAIT_CHAIN_MAX_DEPTH} levels`;
-
-/**
- * The waiting chains that cannot finish (WAITING CYCLES in the module
- * comment), for a type whose readiness target is itself (wiki pages): the
- * pages to record as `notPublishable`, each with the reason. Walks from up
- * to SCHEDULE_BATCH waiting pages, parent by parent while the parent waits
- * too, remembering what it learned in this run.
- */
-async function unfinishableWaits(
-  strapi: ScheduledPublishStrapi,
-  uid: string,
-  now: Date,
-): Promise<string[][]> {
-  const groups: string[][] = [];
-  const found = new Set<string>();
   const readiness = READINESS_TARGETS[uid];
-  if (!readiness || readiness.target !== uid) return groups;
-  const sample = (await dueRowsByWait(strapi, uid, now, true, SCHEDULE_BATCH)) ?? [];
-  if (sample.length === 0) return groups;
-  /** What each waiting page waits for (null: it does not wait, its chain ends). */
-  const waitsFor = new Map<string, string | null>(
-    sample.map((row) => [row.documentId, row.targetDocumentId]),
-  );
-  /** Pages whose chain was followed to its end in this run. */
-  const settled = new Set<string>();
-  let budget = WAIT_WALK_BUDGET;
-  const next = async (documentId: string): Promise<string | null | undefined> => {
-    if (waitsFor.has(documentId)) return waitsFor.get(documentId) ?? null;
-    if (budget <= 0) return undefined;
-    budget -= 1;
-    const [row] = (await dueRowsByWait(strapi, uid, now, true, 1, documentId)) ?? [];
-    const target = row?.targetDocumentId ?? null;
-    waitsFor.set(documentId, target);
-    return target;
-  };
-  for (const { documentId: start } of sample) {
-    if (settled.has(start) || found.has(start)) continue;
-    const path = [start];
-    let current = waitsFor.get(start) ?? null;
-    let outcome: "ends" | "loop" | "deep" | "unknown" = "ends";
-    while (current !== null) {
-      if (settled.has(current) || found.has(current)) break;
-      const seen = path.indexOf(current);
-      if (seen >= 0) {
-        outcome = "loop";
-        const members = path.slice(seen);
-        for (const member of members) found.add(member);
-        groups.push(members);
-        break;
-      }
-      if (path.length >= WAIT_CHAIN_MAX_DEPTH) {
-        outcome = "deep";
-        for (const page of path) found.add(page);
-        groups.push([...path]);
-        break;
-      }
-      path.push(current);
-      const after = await next(current);
-      if (after === undefined) {
-        outcome = "unknown";
-        break;
-      }
-      current = after;
+  if (readiness && hasReadinessRelation(strapi, uid)) {
+    const target = modelNames(strapi, readiness.target);
+    const joinTable = field(field(own.attributes, readiness.key), "joinTable");
+    const link = field(joinTable, "name");
+    const linkRow = field(field(joinTable, "joinColumn"), "name");
+    const linkTarget = field(field(joinTable, "inverseJoinColumn"), "name");
+    if (!isName(link) || !isName(linkRow) || !isName(linkTarget)) {
+      throw new Error(`${SCHEDULER_LOG} the link table of ${uid}.${readiness.key} is unknown`);
     }
-    if (outcome === "ends" || outcome === "loop") for (const page of path) settled.add(page);
+    const targetId = target.column("id", "id");
+    const targetDocumentId = target.column("documentId", "document_id");
+    const targetPublishedAt = target.column("publishedAt", "published_at");
+    const targetPublishAt = target.column("publishAt", "publish_at");
+    sql += `
+       AND (d.?? <= ? OR NOT EXISTS (
+             SELECT 1 FROM ?? AS l JOIN ?? AS p ON p.?? = l.??
+              WHERE l.?? = d.??
+                AND EXISTS (SELECT 1 FROM ?? AS w WHERE w.?? = p.?? AND w.?? IS NULL
+                              AND w.?? IS NOT NULL AND w.?? <= ?)
+                AND NOT EXISTS (SELECT 1 FROM ?? AS x WHERE x.?? = p.?? AND x.?? IS NOT NULL)))`;
+    bindings.push(
+      publishAt,
+      new Date(now.getTime() - DEPENDENCY_WAIT_MS),
+      own.qualified(link),
+      target.table,
+      targetId,
+      linkTarget,
+      linkRow,
+      id,
+      target.table,
+      targetDocumentId,
+      targetDocumentId,
+      targetPublishedAt,
+      targetPublishAt,
+      targetPublishAt,
+      now,
+      target.table,
+      targetDocumentId,
+      targetDocumentId,
+      targetPublishedAt,
+    );
   }
-  return groups;
+  sql += `
+     ORDER BY d.?? ASC, d.?? ASC
+     LIMIT ?`;
+  bindings.push(publishAt, id, SCHEDULE_BATCH);
+  const rows = rawRows(await strapi.db.connection.raw(sql, bindings));
+  return rows.map((row) => row.document_id).filter(isDocumentId);
 }
 
 /**
@@ -747,8 +550,8 @@ async function publishOne(
  * `stillApplies`, when given, decides again under the lock (the locked
  * rows, a fresh clock) whether the failure holds; when it no longer does,
  * nothing is written and the answer is "stale". A decision that rests on
- * other documents (a course or parent, a parent chain) is never taken from
- * what was read before the lock.
+ * other documents (a course or parent) is never taken from what was read
+ * before the lock.
  */
 export async function recordScheduleFailure(
   strapi: ScheduledPublishStrapi,
@@ -758,11 +561,11 @@ export async function recordScheduleFailure(
   pass: Pass,
   code: ScheduleErrorCode,
   detail: string,
-  stillApplies?: (trx: unknown) => Promise<boolean>,
+  stillApplies?: () => Promise<boolean>,
 ): Promise<number | null | "stale"> {
-  return strapi.db.transaction(async ({ trx }) => {
+  return strapi.db.transaction(async () => {
     if ((await lockDocument(strapi, uid, documentId)) !== r) return null;
-    if (stillApplies && !(await stillApplies(trx))) return "stale";
+    if (stillApplies && !(await stillApplies())) return "stale";
     if (pass === "unpublish") {
       const draft = await draftOf(strapi, uid, documentId);
       if (draft?.scheduleError === code) return r;
@@ -779,28 +582,52 @@ export async function recordScheduleFailure(
 }
 
 /**
- * Whether a readiness refusal names a target that is itself unpublished and
- * due (it became due after the selection, or lies beyond the course's
- * batch): then the draft waits for it, without a counted attempt, instead
- * of dropping the schedule.
+ * Whether the stored draft of `documentId` waits for its course or parent
+ * at `now` (DEPENDENCIES): within DEPENDENCY_WAIT_MINUTES of its own
+ * publishAt, and the linked document has a due draft and no published row.
  */
-async function blockedByDueTarget(
+async function waitsForDependency(
   strapi: ScheduledPublishStrapi,
   uid: string,
   documentId: string,
-  error: unknown,
   now: Date,
 ): Promise<boolean> {
   const readiness = READINESS_TARGETS[uid];
-  if (!readiness || !(error instanceof NotPublishableError)) return false;
-  if (!error.keys.includes(readiness.key)) return false;
+  if (!readiness || !hasReadinessRelation(strapi, uid)) return false;
   const draft = await strapi.db.query(uid).findOne({
     where: { documentId, publishedAt: null },
+    select: ["id", "publishAt"],
     populate: { [readiness.key]: { select: ["documentId"] } },
   });
-  const linked = draft ? linkedDocumentId(draft, readiness.key) : null;
-  if (linked === null) return false;
-  return (await dueUnpublishedTargets(strapi, readiness.target, [linked], now)).has(linked);
+  const due = draft ? instantOf(draft.publishAt) : null;
+  if (!draft || due === null || now.getTime() >= due.getTime() + DEPENDENCY_WAIT_MS) return false;
+  const target = linkedDocumentId(draft, readiness.key);
+  if (target === null) return false;
+  const query = strapi.db.query(readiness.target);
+  const published = await query.count({
+    where: { documentId: target, publishedAt: { $notNull: true } },
+  });
+  if (published > 0) return false;
+  const waiting = await query.count({
+    where: { documentId: target, publishedAt: null, publishAt: { $notNull: true, $lte: now } },
+  });
+  return waiting > 0;
+}
+
+/**
+ * Whether a readiness refusal still holds under the lock (FAILURES): the
+ * stored draft is still blocked, and it no longer waits for its course or
+ * parent.
+ */
+async function refusalStillHolds(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  documentId: string,
+  now: Date,
+): Promise<boolean> {
+  const blockers = await draftPublishBlockers(strapi, uid, documentId);
+  if (blockers === null || blockers.length === 0) return false;
+  return !(await waitsForDependency(strapi, uid, documentId, now));
 }
 
 const clockOf = (time: Date | ScheduleClock): ScheduleClock =>
@@ -839,13 +666,13 @@ export async function runScheduledDocument(
     // A withdrawal already deferred once goes straight back into its backoff.
     const deferred = pass === "unpublish" && attempts.withdrawalFailures(uid, documentId) > 0;
     const retry = !deferred && failure.kind === "transient";
-    // A permanent publish refusal whose course or parent is unpublished and
-    // due is a wait (no attempt counted, nothing written). That is decided
-    // under the document's lock with a fresh clock (recordScheduleFailure's
-    // re-check), not from a read before it.
+    // A readiness refusal is judged again under the failure record's lock,
+    // with a fresh clock (FAILURES): when nothing blocks any more, or the
+    // draft waits for its course or parent, nothing is written and no
+    // attempt is counted.
     const stillApplies =
-      pass === "publish" && failure.kind === "permanent"
-        ? async () => !(await blockedByDueTarget(strapi, uid, documentId, error, clock()))
+      pass === "publish" && error instanceof NotPublishableError
+        ? () => refusalStillHolds(strapi, uid, documentId, clock())
         : undefined;
     let code: ScheduleErrorCode;
     if (retry) {
@@ -875,7 +702,8 @@ export async function runScheduledDocument(
       );
       if (revision === "stale") {
         strapi.log.warn(
-          `${SCHEDULER_LOG} ${key} publish waits for its course or parent, which is due itself`,
+          `${SCHEDULER_LOG} ${key} publish not recorded as failed: it waits for its course or ` +
+            "parent, or nothing blocks it any more (the next run tries again)",
         );
         result.retrying.push(key);
         return;
@@ -907,85 +735,6 @@ export async function runScheduledDocument(
 }
 
 /**
- * Records a waiting chain that cannot finish (WAITING CYCLES), one group
- * (the pages of a loop, or a walked chain deeper than the bound) in one
- * transaction. The walk that found the group ran before any lock, so
- * nothing is taken from it: the group's pages are locked in ascending
- * order (the lock order of utils/document-lock.ts), every page's chain is
- * walked again under those locks with a fresh clock, and only the pages
- * whose chain still cannot finish are recorded `notPublishable`, each only
- * if its revision is still the one read before the lock. An author who
- * moved a parent or unscheduled a page in between ends the loop: nothing
- * is recorded, and the pages publish as their turn comes. All pages are
- * judged before the first is recorded (recording one clears its
- * publishAt, which would hide the loop from the next one's walk).
- */
-async function recordUnfinishableGroup(
-  strapi: ScheduledPublishStrapi,
-  uid: string,
-  group: readonly string[],
-  result: ScheduleRunResult,
-  clock: ScheduleClock,
-): Promise<void> {
-  const members = [...new Set(group)].sort();
-  const revisions = new Map<string, number>();
-  for (const documentId of members) {
-    revisions.set(documentId, await readRevision(strapi, uid, documentId));
-  }
-  let outcomes: Array<{ documentId: string; revision: number | null | "stale"; reason: string }>;
-  try {
-    outcomes = await strapi.db.transaction(async ({ trx }) => {
-      for (const documentId of members) await lockDocument(strapi, uid, documentId);
-      const at = clock();
-      const confirmed: Array<{ documentId: string; reason: string }> = [];
-      for (const documentId of members) {
-        const reason = await waitingChainProblem(strapi, uid, documentId, at, trx);
-        if (reason !== null) confirmed.push({ documentId, reason });
-      }
-      const recorded: Array<{
-        documentId: string;
-        revision: number | null | "stale";
-        reason: string;
-      }> = members
-        .filter((documentId) => !confirmed.some((page) => page.documentId === documentId))
-        .map((documentId) => ({ documentId, revision: "stale" as const, reason: "" }));
-      for (const { documentId, reason } of confirmed) {
-        const revision = await recordScheduleFailure(
-          strapi,
-          uid,
-          documentId,
-          revisions.get(documentId) ?? 0,
-          "publish",
-          "notPublishable",
-          reason,
-        );
-        recorded.push({ documentId, revision, reason });
-      }
-      return recorded;
-    });
-  } catch (error) {
-    for (const documentId of members) {
-      const key = label(uid, documentId);
-      strapi.log.error(
-        `${SCHEDULER_LOG} ${key} failed: notPublishable, and recording it failed too: ` +
-          describeFailure(error),
-      );
-      result.retrying.push(key);
-    }
-    return;
-  }
-  for (const { documentId, revision, reason } of outcomes) {
-    const key = label(uid, documentId);
-    if (revision === null || revision === "stale") {
-      result.skipped.push(key);
-      continue;
-    }
-    strapi.log.error(`${SCHEDULER_LOG} ${key} failed: notPublishable (${reason})`);
-    result.failed.push(key);
-  }
-}
-
-/**
  * One run of the task (see the module comment). `now` (the selection time),
  * `attempts` and `clock` (sampled after each document's lock) are
  * injectable for the tests; a fixed `now` without a clock fixes both.
@@ -1009,9 +758,6 @@ export async function runScheduledPublishing(
     for (const uid of SCHEDULED_UIDS) {
       if (isUnpublishScheduledUid(uid)) {
         await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, start, attempts));
-      }
-      for (const group of await unfinishableWaits(strapi, uid, start)) {
-        await recordUnfinishableGroup(strapi, uid, group, result, tick);
       }
       await runPass(uid, "publish", await duePublishes(strapi, uid, start));
     }

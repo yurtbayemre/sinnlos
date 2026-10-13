@@ -2434,14 +2434,22 @@ required env, no grant, no route, no edge change.
     (a lock timeout, a lost connection) is retried every minute and
     becomes `retryExhausted` after the fifth.
   - A lesson whose course, or a wiki page whose parent, is itself
-    unpublished, scheduled and due waits for it: the selection query leaves
-    it out (however many such pages there are, the course or parent is
-    still reached) and the run publishes it the minute after; such a wait
-    costs no retry. Wiki pages whose parents loop back to them (A under B,
-    B under A, all scheduled; the admin panel allows it) can never be
-    published: the run records them as `notPublishable` ("the parent chain
-    loops back" in the audit trail) instead of waiting forever; so does a
-    scheduled chain of more than 64 nested unpublished pages.
+    unpublished, scheduled and due waits for it, for at most 60 minutes
+    after its own Publish at: the selection query leaves it out (however
+    many such pages there are, the course or parent is still reached) and
+    the run publishes it the minute after its course or parent; such a
+    wait costs no retry. After the 60 minutes it is tried like any other
+    draft, and if its course or parent is still unpublished it ends in
+    `notPublishable` ("keys: parent" or "keys: course" in the audit trail).
+    That is also how wiki pages whose parents loop back to them (A under B,
+    B under A, all scheduled; the admin panel allows it) end. A refusal is
+    only recorded after the run has checked it again under the item's lock:
+    if the course or parent was published meanwhile, the next minute
+    publishes the item instead.
+  - A published document or quick link whose Unpublish at is due belongs
+    to the withdrawal: the publish run leaves it out (also while its
+    withdrawal backs off after failures, below), so it never keeps other
+    due items out of the batch.
   - A withdrawal is never given up. One that fails for good sets Schedule
     error and logs `[scheduler] <type> <documentId> failed: <code>; the
     withdrawal stays pending, next attempt after <time>`, but keeps
