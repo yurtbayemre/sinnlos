@@ -51,6 +51,22 @@ export const GUEST = "guest" satisfies RoleType;
 /** The roles that moderate and author content: admin_role and editor. */
 export const MODERATORS: readonly RoleType[] = [ADMIN, "editor"];
 
+/**
+ * The roles that author for their own department (deep-dive decision 06
+ * amendment 1, §N1): a caller with one of these role types AND a
+ * `user.department` is a department author of that department, read per
+ * request. Without a department they author nothing (fail closed).
+ */
+export const DEPARTMENT_AUTHOR_ROLES: readonly RoleType[] = ["department_head"];
+
+/**
+ * The roles that may schedule a publish or an unpublish (`publishAt`,
+ * `unpublishAt`; decision 06 §D rule 1, §L2): the moderators. Department
+ * authors hold `update` but may not schedule (§N2), so the web's
+ * `schedule` capability needs the role here as well as the update grant.
+ */
+export const SCHEDULER_ROLES: readonly RoleType[] = MODERATORS;
+
 /** Every intranet role except guest: the employees. */
 export const STAFF_ROLES: readonly RoleType[] = ROLE_PRIVILEGE_ORDER.filter(
   (role) => role !== GUEST,

@@ -220,7 +220,7 @@ describe("More sheet: open only on its route and below md", () => {
 describe("MoreSheetLinks", () => {
   const more = (role: string) => navItemsFor(role).filter((item) => !item.mobilePrimary);
 
-  it("lists every other section, /manage for an admin only", () => {
+  it("lists every other section: no /manage for a member, /manage last for an admin", () => {
     const member = render(
       createElement(MoreSheetLinks, { items: more("member"), pathname: "/", onChoose() {} }),
     );

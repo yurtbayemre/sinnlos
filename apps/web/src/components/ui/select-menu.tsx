@@ -39,6 +39,18 @@ type SelectMenuProps = {
    * take focus, and the focus would end on <body>.
    */
   busy?: boolean;
+  /**
+   * Ids of the elements that describe the trigger (a form field's hint and
+   * error): set as the trigger's aria-describedby, so a screen reader reads
+   * them with the trigger, also when a refused field moves the focus there.
+   */
+  ariaDescribedBy?: string;
+  /**
+   * Shown in the closed trigger (and read with its name) while `value` is
+   * none of the options: a state the menu cannot select, such as "needs a
+   * new audience". Choosing an option replaces it.
+   */
+  placeholder?: string;
   /** The trigger button (React 19: a plain prop, no forwardRef). */
   ref?: Ref<HTMLButtonElement>;
 };
@@ -79,6 +91,8 @@ export function SelectMenu({
   icon,
   disabled,
   busy = false,
+  ariaDescribedBy,
+  placeholder,
   ref,
 }: SelectMenuProps) {
   const id = useId();
@@ -97,13 +111,14 @@ export function SelectMenu({
         {ariaLabel}
       </span>
       <span id={valueId} hidden>
-        {active?.label}
+        {active?.label ?? placeholder}
       </span>
       <DropdownMenu.Trigger asChild disabled={disabled}>
         <button
           ref={ref}
           type="button"
           aria-labelledby={`${labelId} ${valueId}`}
+          aria-describedby={ariaDescribedBy || undefined}
           aria-busy={busy || undefined}
           className={cn(
             "group flex h-10 items-center justify-between gap-2 rounded-xl border bg-muted/40 px-3 text-sm outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50 aria-busy:opacity-50",
@@ -111,7 +126,7 @@ export function SelectMenu({
           )}
         >
           {icon}
-          <span className="truncate">{active?.short ?? active?.label}</span>
+          <span className="truncate">{active?.short ?? active?.label ?? placeholder}</span>
           <ChevronDown
             aria-hidden="true"
             className="h-4 w-4 shrink-0 opacity-60 transition-transform group-data-[state=open]:rotate-180"

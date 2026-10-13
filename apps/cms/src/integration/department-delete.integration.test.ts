@@ -198,8 +198,16 @@ describe.each(testEngines())("department delete on %s", (engine) => {
         where: { [type.field]: "IT only temp", publishedAt: { $notNull: true } },
         select: ["documentId"],
       });
-      const res = await t.api("editor", `${type.path}/${row.documentId}`, {
+      // The v2 authoring write (batch 15, lane 15A): an explicit status and
+      // If-Match from the form read.
+      const form = await t.api<{ data: { version: string } }>(
+        "editor",
+        `${type.path}/${row.documentId}/editable`,
+      );
+      expect(form.status, type.path).toBe(200);
+      const res = await t.api("editor", `${type.path}/${row.documentId}?status=published`, {
         method: "PUT",
+        headers: { "If-Match": `"${form.body.data.version}"` },
         json: { data: { departments: { set: [engineering] } } },
       });
       expect(res.status, type.path).toBe(200);

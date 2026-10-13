@@ -136,12 +136,17 @@ services:
       # Kill switch for the live SSE pipeline (issue #17/#27): 1 = emitter
       # no-ops and the app runs byte-for-byte on the pre-SSE polling.
       LIVE_EVENTS_DISABLED: ${LIVE_EVENTS_DISABLED:-0}
-      # Scheduled jobs (uploads, search-log, notification and classified
-      # janitors, digest mailer): unset or true runs them; false (also
-      # 0/no/off) switches these five off in this process (Strapi's own
-      # metrics jobs run on). The cms reads it like its other on/off
-      # switches (apps/cms/src/cron/registry.ts, LF03).
+      # Scheduled jobs (the every-minute scheduled publisher; uploads,
+      # search-log, notification, classified and audit janitors; digest
+      # mailer): unset or true runs them; false (also 0/no/off) switches
+      # these seven off in this process (Strapi's own metrics jobs run on).
+      # Off, nothing scheduled publishes or unpublishes; the next run after
+      # switching it back on catches up. The cms reads it like its other
+      # on/off switches (apps/cms/src/cron/registry.ts, LF03).
       CRON_ENABLED: ${CRON_ENABLED:-true}
+      # Days the content activity trail (audit_events) is kept; the
+      # 03:50 audit-janitor deletes older rows. Empty = 365.
+      AUDIT_RETENTION_DAYS: ${AUDIT_RETENTION_DAYS:-}
       # No usage telemetry to Strapi; also spares a stop the telemetry
       # lookups that run into the DNS timeout on a host without DNS (B05).
       STRAPI_TELEMETRY_DISABLED: ${STRAPI_TELEMETRY_DISABLED:-true}

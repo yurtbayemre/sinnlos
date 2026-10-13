@@ -35,6 +35,14 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user"
-    }
+    },
+    "ownerDepartment": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "publishAt": { "type": "datetime" },
+    "unpublishAt": { "type": "datetime" },
+    "scheduleError": { "type": "string" }
   }
 }

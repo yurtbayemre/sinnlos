@@ -6,6 +6,7 @@ import {
   type PollAudienceGuardHost,
   type PollAudienceGuardRegistrationHost,
 } from "./poll-audience-guard";
+import { createTargetingFlagsGuard, TARGETING_FLAG_TYPES } from "./targeting-flags";
 
 /**
  * Write-time enforcement of the document and quick-link audience flag
@@ -59,9 +60,21 @@ import {
 
 export const DEPARTMENT_AUDIENCE_LOG = "[department-audience]";
 
-/** The middleware for documents and quick links. */
+/**
+ * The department/targeting guard (slot 3b of bootstrap/document-
+ * middlewares.ts; name and signature frozen, contract K6): the document and
+ * quick-link `audience` flag (above), and since batch 15 (lane 15D) the
+ * announcement `audience` and event `notifyAudience` flags
+ * (utils/targeting-flags.ts createTargetingFlagsGuard). One middleware;
+ * each write runs the half for its type, every other type passes through.
+ */
 export function createDepartmentAudienceGuard(strapi: PollAudienceGuardHost): DocumentMiddleware {
-  return createAudienceGuard(strapi, DEPARTMENT_AUDIENCE_LOG, DEPARTMENT_SCOPED_TYPES);
+  const scoped = createAudienceGuard(strapi, DEPARTMENT_AUDIENCE_LOG, DEPARTMENT_SCOPED_TYPES);
+  const targeting = createTargetingFlagsGuard(strapi);
+  return (context, next) =>
+    TARGETING_FLAG_TYPES.some((type) => type.uid === context.uid)
+      ? targeting(context, next)
+      : scoped(context, next);
 }
 
 /**
@@ -73,6 +86,6 @@ export function registerDepartmentAudienceGuard(strapi: PollAudienceGuardRegistr
   useDocumentMiddleware(
     strapi,
     createDepartmentAudienceGuard(strapi),
-    `${DEPARTMENT_AUDIENCE_LOG} strapi.documents.use not found — refusing to boot without the write-time document and quick-link audience guard`,
+    `${DEPARTMENT_AUDIENCE_LOG} strapi.documents.use not found — refusing to boot without the write-time document, quick-link, announcement and event targeting guard`,
   );
 }

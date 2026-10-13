@@ -67,6 +67,12 @@ Further reading:
   comprehension quizzes with an optional completion gate, and a per-user
   completion report.
 - **Notifications** and opt-in **e-mail digests** (daily or weekly).
+- **Authoring in the web** at `/manage`: editors and admins write
+  announcements, events, polls and quick links with drafts, a preview,
+  scheduled publishing and a check for concurrent changes; department heads
+  write announcements and events for their own department. Every change
+  advances a per-document revision and lands in an append-only activity
+  trail that the admin panel lists.
 - **Global search (⌘K)** with anonymous search analytics.
 
 ### Repository layout
@@ -180,13 +186,13 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | Content type      | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
 | ----------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
 | `acknowledgement` | CRUD         | CR       | CR                | CR          | CR       | —       | CR              |
-| `announcement`    | CRUD         | CRUD     | R                 | R           | R        | —       | R               |
+| `announcement`    | CRUD         | CRUD     | CRU               | R           | R        | —       | R               |
 | `classified`      | CRUD         | CRUD     | CRUD              | CRUD        | CRUD     | —       | R               |
 | `comment`         | CRD          | CRD      | CRD               | CRD         | CRD      | R       | CR              |
 | `course`          | R            | R        | R                 | R           | R        | —       | R               |
 | `department`      | CRUD         | R        | RU                | R           | R        | —       | R               |
-| `document`        | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
-| `event`           | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
+| `document`        | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
+| `event`           | CRUD         | CRUD     | CRU               | R           | R        | R       | R               |
 | `event-rsvp`      | CRUD         | CRU      | CRU               | CRU         | CRU      | —       | CRU             |
 | `kudos`           | CRD          | CRD      | CR                | CR          | CR       | —       | CR              |
 | `lesson`          | R            | R        | R                 | R           | R        | —       | R               |
@@ -208,26 +214,48 @@ Custom actions and plugin routes (`✓` = granted, `—` = not granted):
 
 <!-- custom-action-grants:start -->
 
-| Action                                          | Endpoint                                | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
-| ----------------------------------------------- | --------------------------------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
-| `api::event.event.ics`                          | `GET /api/events/:id/ics`               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::event-rsvp.event-rsvp.summary`            | `GET /api/event-rsvps/summary`          | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | ✓               |
-| `api::kudos.kudos.celebrations`                 | `GET /api/celebrations`                 | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `api::notification.notification.markRead`       | `POST /api/notifications/mark-read`     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::notification.notification.markAllRead`    | `POST /api/notifications/mark-all-read` | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll-vote.poll-vote.vote`                 | `POST /api/polls/:id/vote`              | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll-vote.poll-vote.results`              | `GET /api/polls/:id/results`            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::poll.poll.batchResults`                   | `GET /api/poll-results`                 | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::search-log.search-log.summary`            | `GET /api/search-logs/summary`          | ✓            | —        | —                 | —           | —        | —       | —               |
-| `api::profile.profile.me`                       | `GET /api/me`                           | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `api::profile.profile.updateMe`                 | `PUT /api/me`                           | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.auth.changePassword` | `POST /api/auth/change-password`        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.role.find`           | `GET /api/users-permissions/roles`      | ✓            | —        | —                 | —           | —        | —       | —               |
-| `plugin::upload.content-api.upload`             | `POST /api/upload`                      | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `api::classified.classified.cleanupUploads`     | `POST /api/classifieds/cleanup-uploads` | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
-| `plugin::users-permissions.user.find`           | `GET /api/users`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.user.findOne`        | `GET /api/users/:id`                    | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
-| `plugin::users-permissions.user.me`             | `GET /api/users/me`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| Action                                          | Endpoint                                    | `admin_role` | `editor` | `department_head` | `team_lead` | `member` | `guest` | `authenticated` |
+| ----------------------------------------------- | ------------------------------------------- | ------------ | -------- | ----------------- | ----------- | -------- | ------- | --------------- |
+| `api::event.event.ics`                          | `GET /api/events/:id/ics`                   | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::event-rsvp.event-rsvp.summary`            | `GET /api/event-rsvps/summary`              | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | ✓               |
+| `api::kudos.kudos.celebrations`                 | `GET /api/celebrations`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `api::notification.notification.markRead`       | `POST /api/notifications/mark-read`         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::notification.notification.markAllRead`    | `POST /api/notifications/mark-all-read`     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll-vote.poll-vote.vote`                 | `POST /api/polls/:id/vote`                  | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll-vote.poll-vote.results`              | `GET /api/polls/:id/results`                | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::poll.poll.batchResults`                   | `GET /api/poll-results`                     | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::announcement.announcement.publish`        | `POST /api/announcements/:id/publish`       | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.unpublish`      | `POST /api/announcements/:id/unpublish`     | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.discardDraft`   | `POST /api/announcements/:id/discard-draft` | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.authoringList`  | `GET /api/announcements/authoring`          | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::announcement.announcement.editable`       | `GET /api/announcements/:id/editable`       | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.publish`                      | `POST /api/events/:id/publish`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.unpublish`                    | `POST /api/events/:id/unpublish`            | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.discardDraft`                 | `POST /api/events/:id/discard-draft`        | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.authoringList`                | `GET /api/events/authoring`                 | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::event.event.editable`                     | `GET /api/events/:id/editable`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.publish`                | `POST /api/documents/:id/publish`           | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.unpublish`              | `POST /api/documents/:id/unpublish`         | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.discardDraft`           | `POST /api/documents/:id/discard-draft`     | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.authoringList`          | `GET /api/documents/authoring`              | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::document.document.editable`               | `GET /api/documents/:id/editable`           | ✓            | ✓        | ✓                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.publish`            | `POST /api/quick-links/:id/publish`         | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.unpublish`          | `POST /api/quick-links/:id/unpublish`       | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.discardDraft`       | `POST /api/quick-links/:id/discard-draft`   | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.authoringList`      | `GET /api/quick-links/authoring`            | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::quick-link.quick-link.editable`           | `GET /api/quick-links/:id/editable`         | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::poll.poll.authoringList`                  | `GET /api/polls/authoring`                  | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::poll.poll.editable`                       | `GET /api/polls/:id/editable`               | ✓            | ✓        | —                 | —           | —        | —       | —               |
+| `api::search-log.search-log.summary`            | `GET /api/search-logs/summary`              | ✓            | —        | —                 | —           | —        | —       | —               |
+| `api::profile.profile.me`                       | `GET /api/me`                               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `api::profile.profile.updateMe`                 | `PUT /api/me`                               | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.auth.changePassword` | `POST /api/auth/change-password`            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.role.find`           | `GET /api/users-permissions/roles`          | ✓            | —        | —                 | —           | —        | —       | —               |
+| `plugin::upload.content-api.upload`             | `POST /api/upload`                          | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `api::classified.classified.cleanupUploads`     | `POST /api/classifieds/cleanup-uploads`     | ✓            | ✓        | ✓                 | ✓           | ✓        | —       | —               |
+| `plugin::users-permissions.user.find`           | `GET /api/users`                            | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.user.findOne`        | `GET /api/users/:id`                        | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
+| `plugin::users-permissions.user.me`             | `GET /api/users/me`                         | ✓            | ✓        | ✓                 | ✓           | ✓        | ✓       | ✓               |
 
 <!-- custom-action-grants:end -->
 
@@ -566,7 +594,8 @@ anything is deployed.
 | `STRAPI_ADMIN_EMAIL`, `STRAPI_ADMIN_PASSWORD`                                                                  | (empty)                                                     | First Strapi super admin, created when `admin_users` is empty. Template placeholders and passwords failing the admin policy (8+ characters, upper case, lower case, digit) are refused with an error log.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | `STRAPI_ADMIN_FIRSTNAME`, `STRAPI_ADMIN_LASTNAME`                                                              | `Admin`, `User`                                             | Name of that admin. Compose does not pass them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `SEED_DEMO_DATA`                                                                                               | off                                                         | `1` seeds demo data into a database without departments and users ([what it writes](#standalone-mode-no-microsoft)).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `CRON_ENABLED`                                                                                                 | on                                                          | The five cms crons (03:30 uploads janitor, 03:35 search-log janitor, 03:40 notification janitor, 03:45 classified janitor, 07:30 digest mailer, in `APP_TIME_ZONE`). Unset, empty or a true value (`1`/`true`/`yes`/`on`) runs them; anything else, such as `false` or `0`, switches them off in that process.                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `CRON_ENABLED`                                                                                                 | on                                                          | The seven cms crons (every minute the scheduled publisher, which publishes and withdraws the drafts whose Publish at or Unpublish at has come; 03:30 uploads janitor, 03:35 search-log janitor, 03:40 notification janitor, 03:45 classified janitor, 03:50 audit janitor; 07:30 digest mailer; in `APP_TIME_ZONE`). Unset, empty or a true value (`1`/`true`/`yes`/`on`) runs them; anything else, such as `false` or `0`, switches them off in that process (then nothing scheduled publishes until they run again).                                                                                                                                                                                                                     |
+| `AUDIT_RETENTION_DAYS`                                                                                         | `365`                                                       | Days the content activity trail (`audit_events`) is kept; the 03:50 audit janitor deletes older rows. A whole number of days, at least 1; any other value deletes nothing and logs an error.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `STRAPI_TELEMETRY_DISABLED`                                                                                    | (unset; example and compose: `true`)                        | `true` (or `1`) sends no usage telemetry to Strapi.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `FLAG_NPS`, `FLAG_PROMOTE_EE`                                                                                  | `false`                                                     | Strapi admin panel survey and Enterprise Edition promotion. Compose does not pass them.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
@@ -773,7 +802,10 @@ Roles and access:
       a department head can change their own department's description; a
       department member sees the announcements and wiki spaces targeted at
       their department
-- [ ] An admin sees the _Admin_ link and `/manage`; an editor sees
+- [ ] An admin and an editor see the _Manage_ link and `/manage` with the
+      announcement, event, poll and quick-link areas (an admin also the
+      reports); a department head with a department sees _Manage_ with
+      announcements and events of their department only; an editor sees
       _New poll_; a guest sees no RSVP controls and no _New ad_ button
 - [ ] A guest's navigation has no Announcements, Departments, Teams, Kudos,
       Marketplace or Training; opening one of them by URL shows _Not

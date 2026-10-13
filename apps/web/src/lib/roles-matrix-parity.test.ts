@@ -44,8 +44,12 @@ const { PERMISSION_MATRIX, CUSTOM_ACTION_GRANTS } = (await import(
   CUSTOM_ACTION_GRANTS: Record<string, readonly string[] | "*" | undefined>;
 };
 
-const { MODERATORS } = (await import(join(CMS_SRC, "bootstrap", "roles.ts"))) as {
+const { MODERATORS, DEPARTMENT_AUTHOR_ROLES, SCHEDULER_ROLES } = (await import(
+  join(CMS_SRC, "bootstrap", "roles.ts")
+)) as {
   MODERATORS: readonly string[];
+  DEPARTMENT_AUTHOR_ROLES: readonly string[];
+  SCHEDULER_ROLES: readonly string[];
 };
 
 const { DIGEST_EXCLUDED_ROLE_TYPES } = (await import(
@@ -275,9 +279,11 @@ describe("read sections = the cms read grants", () => {
 /**
  * Decision 06 §L2: area → verb → the cms action that decides it. `edit` and
  * `schedule` are `update`, `discard` is `discardDraft`; publish, unpublish
- * and discardDraft do not exist before batch 15, so no role holds them yet.
- * A verb an area does not offer (§A: a poll is published at create and
- * closed by closesAt; a wiki space at save) has no entry.
+ * and discardDraft are the custom actions batch 15 (lane 15A) grants. A
+ * verb an area does not offer (§A: a poll is published at create and
+ * closed by closesAt; a wiki space at save) has no entry. `schedule` also
+ * needs the role in SCHEDULER_ROLES: department authors hold `update` but
+ * may not schedule (§N2).
  */
 const AUTHORING_GRANTS: Record<AuthoringArea, Partial<Record<AuthoringVerb, string>>> = (() => {
   const draftAndPublish = (uid: string, withDelete: boolean) => ({
@@ -329,8 +335,9 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
       for (const area of AUTHORING_AREAS) {
         for (const verb of VERBS) {
           const action = AUTHORING_GRANTS[area][verb];
+          const scheduler = verb !== "schedule" || SCHEDULER_ROLES.includes(role);
           expect(caps.author[area].has(verb), `${area}.${verb}`).toBe(
-            action !== undefined && holds(role, action),
+            action !== undefined && holds(role, action) && scheduler,
           );
         }
       }
@@ -342,12 +349,23 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     for (const area of AUTHORING_AREAS) {
       if (caps.author[area].size === 0) {
         expect(caps.authorScope[area], area).toBeNull();
-      } else {
-        // Batch 13: only moderators author; batch 15 adds "ownDepartment"
-        // for the department authors together with their grants.
-        expect(MODERATORS, `${role} authors ${area}`).toContain(role);
+      } else if (MODERATORS.includes(role)) {
         expect(caps.authorScope[area], area).toBe("any");
+      } else {
+        // Batch 15: "ownDepartment" exactly for the department authors.
+        expect(DEPARTMENT_AUTHOR_ROLES, `${role} authors ${area}`).toContain(role);
+        expect(caps.authorScope[area], area).toBe("ownDepartment");
       }
+    }
+  });
+
+  it("schedule is a SCHEDULER_ROLES verb: department authors hold update but never schedule", () => {
+    expect([...SCHEDULER_ROLES]).toEqual([...MODERATORS]);
+    for (const role of DEPARTMENT_AUTHOR_ROLES) {
+      const caps = capabilitiesFor(role);
+      for (const area of AUTHORING_AREAS)
+        expect(caps.author[area].has("schedule"), area).toBe(false);
+      expect(holds(role, `${A.announcement}.update`)).toBe(true);
     }
   });
 
@@ -375,10 +393,14 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     expect(org.editTeam).toBe(scope(A.team));
   });
 
-  it.each(MATRIX_ROLES)("%s: manage and the reports follow the admin page gates (§L1)", (role) => {
+  it.each(MATRIX_ROLES)("%s: manage and the reports follow the page gates (§L1)", (role) => {
     const caps = capabilitiesFor(role);
     const admin = roles.isAdmin(role);
-    expect(caps.manage).toBe(admin);
+    // The /manage shell opens exactly to the roles that author an area,
+    // MODERATORS and DEPARTMENT_AUTHOR_ROLES (batch 15, §L1, §N7): a
+    // capability is what the cms grants, so no role gets an empty shell.
+    expect(caps.manage).toBe(AUTHORING_AREAS.some((area) => caps.author[area].size > 0));
+    expect(caps.manage).toBe(MODERATORS.includes(role) || DEPARTMENT_AUTHOR_ROLES.includes(role));
     expect(caps.reports.analytics).toBe(holds(role, "api::search-log.search-log.summary"));
     expect(caps.reports.acknowledgements).toBe(holds(role, "plugin::users-permissions.role.find"));
     expect(caps.reports.training).toBe(admin);

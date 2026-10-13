@@ -1,0 +1,55 @@
+{
+  "title": "Umfragen",
+  "description": "Fragen stellen, bearbeiten und beenden.",
+  "new": "Neue Umfrage",
+  "newDescription": "Eine Umfrage wird veröffentlicht, sobald sie erstellt ist.",
+  "editTitle": "Umfrage bearbeiten",
+  "emptyTitle": "Noch keine Umfragen",
+  "emptyHint": "Stellen Sie die erste Frage.",
+  "sections": {
+    "question": "Frage",
+    "audience": "Zielgruppe",
+    "guestAccess": "Gastzugang"
+  },
+  "fields": {
+    "question": {
+      "label": "Frage",
+      "placeholder": "Was möchten Sie fragen?"
+    },
+    "options": {
+      "label": "Antworten",
+      "hint": "{min} bis {max} Antworten mit je bis zu {length} Zeichen.",
+      "frozen": "Es wurde bereits abgestimmt, daher lassen sich die Antworten nicht mehr ändern.",
+      "option": "Antwort {number}",
+      "add": "Antwort hinzufügen",
+      "remove": "Antwort {number} entfernen"
+    },
+    "closesAt": {
+      "label": "Endet am",
+      "hint": "Die Abstimmung endet mit Ablauf dieses Tages. Leer: kein Ende."
+    },
+    "anonymous": {
+      "label": "Anonyme Abstimmung",
+      "hint": "Niemand sieht, wer wie abgestimmt hat.",
+      "frozen": "Fest, sobald abgestimmt wurde."
+    },
+    "departments": {
+      "label": "Auf Abteilungen beschränken",
+      "hint": "Nur Mitglieder der gewählten Abteilungen sehen sie und stimmen ab; Redaktion und Admins sehen sie immer. Keine gewählt: alle (Gäste nur, wenn sie für Gäste sichtbar ist)."
+    },
+    "visibleToGuests": {
+      "label": "Für Gäste sichtbar"
+    },
+    "guestsCanVote": {
+      "label": "Gäste können abstimmen"
+    },
+    "guestAccess": {
+      "hint": "Umfragen sind für Gäste standardmäßig verborgen. Gäste stimmen nur bei einer Umfrage ab, die für sie sichtbar ist."
+    }
+  },
+  "state": {
+    "open": "Offen",
+    "closed": "Beendet",
+    "closesOn": "Endet am {date}"
+  }
+}

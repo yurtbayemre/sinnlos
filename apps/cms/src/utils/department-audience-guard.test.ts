@@ -21,6 +21,10 @@ import type { DocumentMiddlewareContext, PollAudienceGuardHost } from "./poll-au
  * The stub keeps one table per type (draft and published rows, links as
  * department documentIds) and a transaction with Strapi's nesting rule;
  * `next` does what the Strapi 5.55.1 repository action does to the rows.
+ *
+ * Since batch 15 (lane 15D) the same middleware also raises the
+ * announcement and event targeting flags (utils/targeting-flags.ts); that
+ * half has its own suite, targeting-flags.test.ts. Here only the dispatch.
  */
 
 const TYPES = [
@@ -294,7 +298,9 @@ describe("department audience guard: stays in its lane", () => {
     const guard = createDepartmentAudienceGuard(strapi);
     const cases: DocumentMiddlewareContext[] = [
       context("api::poll.poll", "publish", { documentId: "p1" }),
-      context("api::announcement.announcement", "update", { documentId: "a1" }),
+      context("api::course.course", "update", { documentId: "c1" }),
+      context("api::announcement.announcement", "findOne", { documentId: "a1" }),
+      context("api::event.event", "delete", { documentId: "e1" }),
       context("api::document.document", "findMany"),
       context("api::quick-link.quick-link", "findOne", { documentId: "q1" }),
       context("api::document.document", "delete", { documentId: "d1" }),
@@ -308,8 +314,14 @@ describe("department audience guard: stays in its lane", () => {
     expect(findMany).not.toHaveBeenCalled();
   });
 
-  it("guards every writing action of both types in a transaction", async () => {
-    for (const { uid } of TYPES) {
+  it("guards every writing action of both types, and of announcements and events, in a transaction", async () => {
+    // Announcements and events: the targeting half (utils/targeting-flags.ts,
+    // batch 15), pinned in targeting-flags.test.ts.
+    for (const { uid } of [
+      ...TYPES,
+      { uid: "api::announcement.announcement" },
+      { uid: "api::event.event" },
+    ]) {
       for (const action of ["create", "update", "clone", "publish", "unpublish", "discardDraft"]) {
         const { strapi, transaction } = host(uid);
         const guard = createDepartmentAudienceGuard(strapi);

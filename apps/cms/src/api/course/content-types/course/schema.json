@@ -42,6 +42,12 @@
       "relation": "oneToMany",
       "target": "api::lesson.lesson",
       "mappedBy": "course"
+    },
+    "publishAt": {
+      "type": "datetime"
+    },
+    "scheduleError": {
+      "type": "string"
     }
   }
 }

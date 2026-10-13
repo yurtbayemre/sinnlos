@@ -1369,6 +1369,85 @@ systemctl start docker
 > database, one transaction, the check, and a fresh `JWT_SECRET` before
 > the cms starts.
 
+> **Expected log lines after a deploy** (every release since the
+> dependency update of 2026-10, whatever its runbook lists):
+>
+> - the cms prints a two-line `(node:N) DeprecationWarning: Calling
+>   client.query() when the client is already executing a query is
+>   deprecated and will be removed in pg@9.0. …` / ``(Use `node
+>   --trace-deprecation ...` to show where the warning was created)`` on
+>   stderr after its first publish or upload (the pg driver under
+>   Strapi 5.57). Harmless, once per process; it does not match the
+>   runbooks' error filters;
+> - after every web redeploy the web logs `Error: Failed to find Server
+>   Action "<id>". This request might be from an older or newer
+>   deployment.` (with `Read more:
+>   https://nextjs.org/docs/messages/failed-to-find-server-action`) for each
+>   browser tab that was opened before the restart and then submits a form
+>   or presses a button of the old build. Harmless: nothing was written,
+>   and the tab works again after a reload. They come in a burst right
+>   after the deploy and fade as people reload; the runbooks' error
+>   filters print them, so count them as expected there.
+
+> **Deploying batch 15 (2026-10-13)?** V2 authoring, phase 1: the document
+> layer, fail-closed department targeting, the v2 write model and the
+> `/manage` authoring pages (the four notes below) ship as **one deploy of
+> cms and web** with `infra/deploy.sh`, **once batch 14 with the dependency
+> update runs** (`TAG=9a5beb517529`). No required env, no edge change, no
+> `JWT_SECRET` rotation, nobody signed out; the first cms boot adds
+> columns, two tables and indexes, backfills the targeting flags and
+> grants **65 permission rows**. Read-only checks before it: the batch 14
+> state as the rollback target, a clean checkout, `--check` and
+> `--dry-run`, the permission diff, the D-PT01 preflight and the
+> department-heads report (every `department_head` with a department can
+> author after the deploy), and the count of orphaned poll votes (polls
+> unpublished before batch 15). After it: the boot lines (`granted 65`, drift over 142
+> managed actions, the scheduler every minute), the new schema, `/manage`
+> as an editor and a department head, and the next morning's
+> `audit-janitor`. A rollback to batch 14 freezes authoring and saves the
+> schedule and targeting lists first, then re-applies them after the
+> roll-forward. Follow
+> [Deploying batch 15 (2026-10-13)](#deploying-batch-15-2026-10-13).
+>
+> **Deploying the authoring document layer (batch 15, lane 15B)?** Part of
+> batch 15 (follow the batch section above). The cms only: a datetime sent
+> without `Z` or an offset now answers 400 everywhere; every
+> change of an announcement, event, document, quick link, wiki page,
+> course, lesson, poll, wiki space, department or team advances a revision
+> (`content_versions`) and writes an audit row (`audit_events`, read-only in
+> the admin panel, kept `AUDIT_RETENTION_DAYS`, default 365); Publish at
+> (and Unpublish at on documents and quick links) work through a
+> `scheduled-publisher` task every minute; a lesson in an unpublished
+> course or a wiki page under an unpublished parent can no longer be
+> published. Additive columns and tables, indexes and a targeting-flag
+> backfill at boot; no grant, no required env. A rollback to batch 14
+> needs the schedule export first. Follow
+> [Upgrading to the authoring document layer (batch 15, lane 15B)](#upgrading-to-the-authoring-document-layer-batch-15-lane-15b).
+>
+> **Deploying fail-closed department targeting (batch 15, lane 15D)?**
+> Only with batch 15 (it reads lane 15B's columns). An announcement whose
+> audience is "departments" without a department or team, or whose
+> department or team was deleted (`retargetRequired`), becomes visible to
+> admins and editors only and notifies nobody; an event without its
+> departments notifies nobody. Run the read-only D-PT01 preflight and the
+> department-heads report first. Follow
+> [Upgrading to fail-closed department targeting (batch 15, lane 15D)](#upgrading-to-fail-closed-department-targeting-batch-15-lane-15d).
+>
+> **Upgrading to the v2 write model (batch 15, lane 15A)?** Content-API
+> writes of announcements, events, quick links, documents and polls go
+> through `global::can-author` and need `?status=` and `If-Match` (admin and
+> editor payloads are checked too); department heads author for their own
+> department; polls allow 20 answers and freeze after the first vote, also
+> in the admin panel; +65 grant rows; deploy cms and web together. Follow
+> [Upgrading to the v2 write model (batch 15, lane 15A)](#upgrading-to-the-v2-write-model-batch-15-lane-15a).
+>
+> **Deploying the /manage authoring pages (batch 15, lane 15C)?** The web
+> only, and only with the cms of batch 15: `/manage` opens to editors and
+> department heads, with lists, forms, a preview, scheduling and a
+> conflict dialog for announcements, events, polls and quick links;
+> `/polls/new` redirects to `/manage/polls/new`. Follow
+> [Upgrading to the /manage authoring pages (batch 15, lane 15C)](#upgrading-to-the-manage-authoring-pages-batch-15-lane-15c).
+
 > **Deploying batch 14 (2026-10-13)?** The page loaders and UI kit, the
 > README and security docs and the documentation pass ship as one normal
 > deploy of cms and web with `infra/deploy.sh`, **once batch 13 runs**.
@@ -1813,6 +1892,1259 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 15 (2026-10-13)
+
+Batch 15 (branch `batch/15`: `main` `9a5beb5` plus the four lanes of plan
+batch 10, v2 authoring phase 1) ships in one deploy of cms and web, **once
+batch 14 with the dependency update and the restore script runs**
+(production since 2026-10-13, `TAG=9a5beb517529`) and its watch was clean.
+The lane notes below explain each change in detail; **this section is the
+one sequence to follow** on the owner instance (srv-prod-01, Traefik mode,
+checkout `/home/bigemo/git/sinnlos`, compose project `infra`,
+`infra/deploy.sh` run as `bigemo`):
+
+- [the authoring document layer](#upgrading-to-the-authoring-document-layer-batch-15-lane-15b)
+  (lane 15B, cms): a datetime without `Z` or an offset answers 400
+  everywhere, the admin panel included (DT-OFFSETLESS); every change of an
+  announcement, event, document, quick link, wiki page, course, lesson,
+  poll, wiki space, department or team advances a per-document revision
+  (`content_versions`) and writes an append-only audit row
+  (`audit_events`, read-only in the admin panel, deleted after
+  `AUDIT_RETENTION_DAYS` by the `audit-janitor` at 03:50); scheduled
+  publishing (Publish at; Unpublish at on documents and quick links)
+  through the `scheduled-publisher` task every minute; a lesson in an
+  unpublished course or a wiki page under an unpublished parent can no
+  longer be published; the boot backfill of the announcement and event
+  targeting flags;
+- [fail-closed department targeting](#upgrading-to-fail-closed-department-targeting-batch-15-lane-15d)
+  (lane 15D, cms and the web's acknowledgement report): an announcement
+  whose audience is "departments" without a department or team (D-PT01),
+  or whose department or team was deleted (`retargetRequired`), is
+  visible to admins and editors only and notifies nobody; an event whose
+  notified departments vanished notifies nobody; department and team
+  deletes lock and advance the revisions of every linked item first; four
+  read-only diagnostics;
+- [the v2 write model](#upgrading-to-the-v2-write-model-batch-15-lane-15a)
+  (lane 15A, cms and web): content-API writes of announcements, events,
+  quick links, documents and polls go through one gate and one field
+  allowlist per role class, so admin and editor payloads are checked too
+  (the FX07 bypass ends on these five types); `?status=`, `If-Match` and
+  fixed answers; department heads author announcements, events and
+  documents of their own department; authors are no longer notified of
+  their own posts; polls take 2 to 20 answers and freeze their answers and
+  anonymity at the first vote, also in the admin panel; **+65 grant
+  rows**;
+- [the /manage authoring pages](#upgrading-to-the-manage-authoring-pages-batch-15-lane-15c)
+  (lane 15C, web): `/manage` opens to editors and department heads, with
+  lists, forms, preview, scheduling and the conflict dialog for
+  announcements, events, polls and quick links; `/polls/new` redirects to
+  `/manage/polls/new`;
+- from the integration: the dead `createPoll` action is gone, a `/manage`
+  picker's hint and error describe its menu button, and this runbook.
+
+It is **one deploy of cms and web** with `infra/deploy.sh`; the rollback
+below takes both back. No required env (`AUDIT_RETENTION_DAYS` is
+optional, default 365, and compose passes it through), no Traefik, edge,
+route-prefix or dependency change, no data migration: the first cms boot
+adds columns, two tables and indexes, converts the new datetime columns
+to `timestamptz`, backfills the targeting flags and grants 65 permission
+rows. **Nobody is signed out** and there is **no `JWT_SECRET` rotation**,
+neither now nor on a rollback (both sides check token versions since
+batch 13). The site is down while the cms boots, as with every deploy.
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Batch 14 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B14_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   B14_SHA="$(sed -n 's/^SHA=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B14_TAG} ${B14_SHA}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B14_TAG}" "infra-web:${B14_TAG}"
+   ```
+
+   `TAG=9a5beb517529`, `SHA=9a5beb5…`, `LIVE_SMOKE=passed`, and both
+   images exist. Keep `B14_TAG` and `B14_SHA` in this shell for the
+   rollback. Anything else: stop.
+
+2. **A clean checkout, fast-forwarded to the batch 15 merge:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git fetch origin && git merge --ff-only <the batch 15 merge commit>
+   git log -1 --oneline      # the batch 15 merge
+   git clean -n -d -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   ```
+
+   The `git clean -n` dry run must print nothing.
+
+3. **The preflight, the plan and the backup permission:**
+   `infra/deploy.sh --check` (`Preflight OK`, the Traefik host line) and
+   `infra/deploy.sh --dry-run` (`lock: free`, the clean checkout at the
+   batch 15 commit, its CI result, the backup line, `last-known-good:
+   infra-{web,cms}:9a5beb517529`, `live-smoke: run`, and **no**
+   `MANDATORY` line). The backup permission as in
+   [Checking the backup permission](#checking-the-backup-permission-production).
+
+4. **The permission diff:** `git show "${B14_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`
+   (batch 14's file) is unchanged: only the two informational
+   `authenticated` rows. The checkout's own file
+   (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`) shows the same
+   plus exactly **65 `MISSING_IN_DB` rows**, the new grants of admin_role
+   and editor (22 each: `publish`, `unpublish`, `discardDraft`,
+   `authoringList` and `editable` on announcement, event, document and
+   quick-link, `authoringList` and `editable` on poll) and of
+   department_head (21: `create` and `update` plus the same five actions
+   on announcement, event and document). The first boot creates them.
+
+5. **The batch 15 diagnostics (the owner; all read-only):**
+
+   ```bash
+   psql_db -X < infra/diagnostics/announcement-audience-preflight.sql
+   psql_db -X < infra/diagnostics/department-heads.sql
+   psql_db -X < infra/diagnostics/announcement-retarget.sql
+   psql_db -X < infra/diagnostics/schedule-export.sql
+   ```
+
+   - **The D-PT01 preflight** lists the announcements whose audience is
+     "departments" with neither a department nor a team. Its
+     `published_documents` is the number members stop seeing; put it into
+     release note 8. For each one: link a department or team in the admin
+     panel, set Audience to "all" if it is meant for everyone, or accept
+     that it becomes admins' and editors' only. Expected: 0 or a handful.
+   - **The department-heads report:** **every `department_head` with a
+     department can author announcements and events for it after the
+     deploy.** Align the role and the user's department in the admin
+     panel first (a head without the role authors nothing; a
+     `department_head` without a department authors nothing).
+   - `announcement-retarget.sql` and `schedule-export.sql` read columns
+     batch 15 adds: on this schema they stop with `ERROR: column
+     "retarget_required" does not exist` and `ERROR: column d.publish_at
+     does not exist` (followed by a `HINT:` line that suggests
+     `d.published_at`), and change nothing. That is the expected result
+     here; step 9 runs them again.
+
+6. **Votes of polls unpublished before batch 15.** On batch 14 (and
+   earlier), unpublishing a poll deleted its published row, and the link of
+   every vote on it (`poll_votes_poll_lnk`) went with it: those votes are
+   orphaned. They no longer count anywhere, the poll counts as unvoted
+   (its answers can be edited and it can be published again), and a voter
+   can vote on it again once it is republished; only the new vote counts.
+   A query for "unpublished polls with votes" therefore finds none. Count
+   the orphaned votes instead (read-only):
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT count(*) AS orphaned_votes
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
+   SQL
+   ```
+
+   Usually 0. Batch 15 changes nothing about them; from batch 15 on a poll
+   with a vote can no longer be unpublished, so no new ones appear.
+   Removing them is optional and the owner's decision: they are already
+   invisible and uncounted; the only effect is a tidier `poll_votes`. If
+   wanted, preview and delete them in one transaction, first ending with
+   `ROLLBACK` (the `DELETE n` must equal the preview's count), then with
+   `COMMIT`:
+
+   ```bash
+   psql_db -X <<'SQL'
+   BEGIN;
+   SELECT v.id, v.created_at
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id)
+    ORDER BY v.id;
+   DELETE FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
+   ROLLBACK;
+   SQL
+   ```
+
+**Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
+`bigemo`. Both images rebuild. Note the pre-deploy generation its backup
+step names (`sinnlos/<YYYYMMDD>T<HHMMSS>Z-predeploy`): it is the restore
+point should the database ever have to go back. Expected: lock, the clean
+checkout, the CI line, the backup, last-known-good `9a5beb517529` kept,
+both images built, `up -d --no-build`, `Smoke check OK`, live-smoke
+passed, `Recording infra-{web,cms}:<batch 15 sha12>`, exit 0. A failure
+prints the rollback to `9a5beb517529`, with no `MANDATORY` step: report
+it; running it is the owner's decision (below).
+
+**After the deploy** (read-only, then in a browser)
+
+7. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[(bootstrap|datetime|document-indexes|targeting-flags|scheduler|audit|audit-janitor)\]|\[cron\] scheduled-publisher|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
+   ```
+
+   The state names the batch 15 commit (`LIVE_SMOKE=passed`). The cms
+   logs, on this first boot:
+   - `[datetime] converted 15 column(s) to timestamptz: announcements.publish_at, audit_events.created_at, …`;
+   - `[document-indexes] created 10 index(es): content_versions_target_uq, …`;
+   - `[bootstrap] granted 65 permission(s) across intranet roles` and
+     `[bootstrap] permission drift: none (report-only check of 142 managed
+     actions)` (120 before; the 22 new custom actions);
+   - one `[targeting-flags] announcements: audience 'departments' on N
+     row(s) …; events: notifyAudience 'departments' on N row(s) …, 'all'
+     on N` line (later boots log nothing);
+   - `Strapi started successfully`;
+   - from then on **one `[cron] scheduled-publisher took …ms` line per
+     minute**, and a `[scheduler] published …, unpublished …` line only
+     when something was due.
+
+   Stop lines: `[document-indexes] could not …` or `[targeting-flags]
+   could not backfill …` (the cms does not start; nothing was changed;
+   roll back or fix the cause, see the lane 15B note), any `[audit]` error
+   (a write whose audit row fails is rolled back), and `[scheduler] …
+   failed` (report it; the item keeps its schedule error).
+
+   **Expected, harmless:**
+   - a two-line `(node:N) DeprecationWarning: Calling client.query() when
+     the client is already executing a query is deprecated and will be
+     removed in pg@9.0. …` / ``(Use `node --trace-deprecation ...` to show
+     where the warning was created)`` on
+     the cms's stderr after its first publish or upload (since the
+     Strapi 5.57 update; it does not match the error filter);
+   - in the web log, `Error: Failed to find Server Action "<id>". This
+     request might be from an older or newer deployment.` (with `Read
+     more: https://nextjs.org/docs/messages/failed-to-find-server-action`):
+     a browser tab opened before the web restarted posted a form or a
+     button of the old build. Harmless; the tab works again after a
+     reload. They come in a burst right after a web redeploy and fade as
+     people reload. The third command shows them; anything else it prints
+     is a finding.
+
+8. **The permission diff** (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
+   only the two informational `authenticated` rows; the database equals
+   the new snapshot.
+
+9. **The new schema and the diagnostics:**
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT indexname FROM pg_indexes
+    WHERE indexname = 'content_versions_target_uq' OR indexname LIKE '%publish_at_partial_idx'
+    ORDER BY 1;
+   SELECT table_name, column_name, data_type FROM information_schema.columns
+    WHERE table_schema = 'public' AND column_name IN ('publish_at', 'unpublish_at')
+    ORDER BY 1, 2;
+   SELECT (SELECT count(*) FROM content_versions) AS versions, (SELECT count(*) FROM audit_events) AS audit_rows;
+   SQL
+   psql_db -X < infra/diagnostics/announcement-retarget.sql
+   psql_db -X < infra/diagnostics/schedule-export.sql
+   ```
+
+   10 indexes; 9 columns, all `timestamp with time zone`; both counts
+   grow with the first saves (0 right after the boot is fine).
+   `announcement-retarget.sql` lists no marked announcement until a
+   department or team is deleted (its flag-only events are events with
+   Notify audience "departments" and no department); `schedule-export.sql`
+   lists nothing until somebody schedules.
+
+10. **In a browser (the owner):**
+    - As an editor: the navigation shows _Manage_; `/manage` shows four
+      tiles (announcements, events, polls, quick links). Create a draft
+      announcement, check the preview, publish it (the confirmation says
+      it notifies the audience), read it as a member, unpublish it, delete
+      it. Open _Schedule…_ and type 02:30 on the next clock-change day
+      (2027-03-28): it is refused.
+    - In the admin panel: save an announcement draft with Publish at a
+      minute ahead; within two minutes it is published, the list shows
+      Published, and **Audit event** lists `schedulePublish` for it. The
+      new fields carry their attribute names (`publishAt`, `unpublishAt`,
+      `scheduleError`, `retargetRequired`). The Audit event list offers
+      _Create new entry_ and opens entries in a form that looks editable,
+      but every create, save and delete there is refused ("Audit events
+      are append-only").
+    - As a department head with a department (if there is one): `/manage`
+      shows _Announcements_ and _Events_ only; a new announcement shows
+      the department read-only and has no _Pinned_; the lists hold only
+      that department's items.
+    - As a member: nothing visible changed, except that the announcements
+      the preflight listed are gone; `/polls/new` lands on
+      `/manage/polls/new` for an editor.
+
+11. **The /manage log lines:**
+    `"${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'`.
+    Refusals are warnings (`[manage-announcements] update refused: 412 …`
+    after a conflict), outages and bugs errors; a `428` is always a web bug
+    and must not appear.
+
+12. **+15 and +60 minutes:** no new error types in the cms and web logs,
+    no restarts (`docker inspect -f '{{.RestartCount}}' infra-cms-1
+    infra-web-1`), no 5xx, the scheduler line every minute, 401s only from
+    deliberate checks.
+
+13. **The next morning:** `[cron] audit-janitor took …ms` at 03:50 (an
+    `[audit-janitor] pruned …` line only once rows are older than the
+    retention, so not in the first year), the nightly backup-run at 04:00,
+    the other janitors and the digest as before, no restarts.
+
+**What users and admins notice**
+
+- **Editors and department heads** get _Manage_ in the navigation. Editors
+  and admins write announcements, events, polls and quick links at
+  `/manage`: drafts, a preview, publish, unpublish, discard, delete, and
+  **scheduling** (Publish at; Unpublish at on quick links), with
+  _Scheduled_ and _Schedule failed_ badges. When someone changed the item
+  meanwhile (another tab, the admin panel, the scheduler), a save opens a
+  conflict dialog (Reload or Overwrite). Documents are still uploaded in
+  the admin panel (their web pages come in batch 16).
+- **Department heads author for their own department only:**
+  announcements and events with the department fixed by the server; no
+  scheduling, deleting, pinning or read confirmation; _Discard changes_
+  only while a published version exists. A department head without a
+  department sees an explanation instead of the forms.
+- **The admin panel** gains Publish at (and Unpublish at), Schedule error
+  and, for super admins, the read-only **Audit event** list (365 days).
+  The new fields show their attribute names (`publishAt`, `unpublishAt`,
+  `scheduleError`, `retargetRequired`); the Audit event list shows _Create
+  new entry_ and an editable-looking form, but every write is refused.
+  A lesson in an unpublished course and a wiki page under an unpublished
+  parent can no longer be published there; a poll's answers and
+  anonymity no longer change after its first vote.
+- **Polls:** up to 20 answers; **a poll voted on under batch 15 can no
+  longer be unpublished** (delete it or let it close), and its answers and
+  anonymity are frozen. A poll unpublished before batch 15 lost the link
+  of its votes then (step 6): it counts as unvoted and can be edited and
+  published again, and its old votes do not count.
+- **Members:** an announcement whose targeting is gone (D-PT01, a deleted
+  department or team) is hidden from them until a moderator re-targets
+  it; authors are no longer notified of their own posts.
+- **Scripts** that write these five types through the content API need
+  `?status=`, `If-Match`, documentIds for departments and an offset on
+  every datetime (lane 15A's "Who is affected").
+- **Known limitations:** the `/manage` preview of an announcement shows its
+  author as "Unknown" (the form's answer carries no author name; the
+  published card shows the author as before). A department head who opens
+  another department's item by its URL sees "Page not found", but the web
+  answers that page with HTTP 200 (a streamed not-found; the cms itself
+  answers 404, so nothing leaks).
+
+**Release notes** (consolidated; decision 06 phase 1, items 1 to 9):
+
+1. Admin and editor content-API payloads are validated (400 on unknown or
+   refused keys), and `status` is required on authoring writes.
+2. Authors are no longer notified of their own announcements and events.
+3. Datetimes without an offset answer 400 everywhere.
+4. Updates need `If-Match` with the document's revision.
+5. `/manage` opens to editors and department heads.
+6. Also in the admin panel: a lesson in an unpublished course and a wiki
+   page under an unpublished parent cannot be published; a poll's answers
+   and anonymity cannot change after the first vote; audit entries cannot
+   be edited.
+7. Department heads write announcements and events for their own
+   department in `/manage` (documents follow in batch 16); they cannot
+   delete, and discard changes only on items that have a published version.
+8. An announcement whose audience is "departments" but has neither a
+   department nor a team is visible to admins and editors only until they
+   re-target it (N such announcements: N is `published_documents` of
+   step 5's preflight on production; it was 1 in the staging rehearsal).
+   In the admin panel, linking a
+   department or team sets Audience to "departments", and removing the
+   links no longer makes it company-wide: set Audience to "all"
+   explicitly. The same holds for an event's Notify audience.
+9. Deleting a department or team makes every announcement that targeted it
+   visible to admins and editors only until they re-target it ("Needs
+   re-targeting" in `/manage`; Retarget required in the admin panel).
+
+Plus: scheduled publishing in the web and in the admin panel (Publish at,
+and Unpublish at on quick links and documents), and polls with up to 20
+answers.
+
+**Rollback** (the owner's decision only; to the batch 14 images,
+`9a5beb517529`)
+
+The batch 14 images keep the new columns and tables and ignore them
+(`forceMigration` is off), so there is no database step and **no
+`JWT_SECRET` rotation** (batch 14 already checks token versions;
+`deploy.sh`'s printed rollback shows no `MANDATORY` step). What batch 14
+does not do, and the steps that cover it:
+
+R1. **Freeze authoring.** Tell editors and department heads to stop.
+While batch 14 runs, nobody publishes or uses "Discard changes" in the
+admin panel, except the withdrawals of R5: an old-image publish or discard
+rewrites rows without `publish_at`, `unpublish_at`, `notify_audience`,
+`retarget_required` and the owner department.
+
+R2. **Save the lists, then copy them off the host:**
+
+```bash
+D=/home/bigemo/b15-rollback-$(date +%Y%m%d-%H%M); mkdir -m 700 "$D"
+for f in schedule-export announcement-audience-preflight announcement-retarget; do
+  psql_db -X < "infra/diagnostics/$f.sql" > "$D/$f.txt"
+done
+psql_db -X -c "SELECT DISTINCT document_id, question FROM polls WHERE jsonb_array_length(options) > 10" > "$D/polls-over-10-answers.txt"
+```
+
+- `schedule-export.sql`: per draft row `publish_at` and `unpublish_at`,
+  whether the document is published, `withdraw_by_hand`, and `on_rollback`;
+- the D-PT01 preflight, with `on_rollback`;
+- `announcement-retarget.sql`: the `retargetRequired` announcements **and
+  the events restricted only by `notify_audience`**, per row, with
+  `on_rollback`;
+- the polls with more than 10 answers: batch 14 refuses every panel save
+  and publish of them; leave them alone until the roll-forward.
+
+Each row's `on_rollback` is what the steps below do with it; keep the two
+kinds that R3 can unpublish apart:
+
+- `hide_then_restore` (published D-PT01 and `retargetRequired`
+  announcements): hidden for the window only. R3 unpublishes them, R6f
+  republishes them.
+- `final_withdrawal` (published documents and quick links with an
+  `unpublish_at`, the export's `withdraw_by_hand`): a scheduled withdrawal
+  batch 14 would miss. It is withdrawn at its `unpublish_at` (R5), or
+  early in R3 when the window is short, and it is **final**: once its
+  `unpublish_at` has passed it is never published again. After the
+  roll-forward the scheduler clears the leftover field (R6b) and a new
+  export no longer lists it; this saved list is the record.
+- `pending_publish` (a draft with `publish_at`): waits; R6b re-enters it if
+  a batch 14 write dropped it. `leave_alone` (the flag-only events): never
+  publish them on batch 14 (a publish there notifies everyone); R6a
+  re-applies the flag if a batch 14 write dropped it. `none` (a draft row,
+  or a withdrawal time on an unpublished item): nothing to do.
+
+R3. **Unpublish what must stay hidden on batch 14**, in `/manage` or the
+panel while batch 15 still runs:
+- every `hide_then_restore` announcement (the preflight's and the
+  `retargetRequired` ones): hidden for the window, restored in R6f;
+- when the window is short, the `final_withdrawal` items whose
+  `unpublish_at` falls inside it: withdrawn early, and for good (never
+  restored once their `unpublish_at` has passed).
+
+Do not publish a flag-only event (`leave_alone`) on batch 14: a publish
+there notifies everyone (in the rehearsal all 7 users). A "Discard
+changes" on it notifies nobody, but drops the flag and the schedule from
+its draft (R6a and R6b restore them); avoid it too.
+
+R4. **Retag both images** (`B14_TAG` from step 1, `9a5beb517529`):
+
+```bash
+docker tag "infra-web:${B14_TAG}" infra-web:latest
+docker tag "infra-cms:${B14_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+Then the effective permissions. On its boot batch 14's users-permissions
+deletes one row per authoring action its controllers lack (22 rows; whose
+varies, admin_role's in one rehearsal, editor's in another), and its drift
+line lists department_head's 6 core `create`/`update` rows. Batch 14's
+`git show "${B14_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`
+then shows **43 `EXTRA_IN_DB` rows** either way: the other 37 authoring
+rows (the other moderator role's 22 and department_head's 15; no batch 14
+route serves them) and department_head's 6 core rows (the batch 14 routes
+refuse a department head with `is-admin-or-editor`). **Harmless; leave them.** The
+roll-forward re-creates the 22.
+
+R5. **During the window** batch 14 runs no schedule: a due publish simply
+waits, and a published document or quick link whose exported
+`unpublish_at` falls due (`final_withdrawal`) stays visible. An editor
+unpublishes each such item in the admin panel at its time with
+**Unpublish and keep last draft** (the draft keeps its `unpublish_at`,
+which the roll-forward's scheduler then clears, R6b); that withdrawal is
+final.
+
+R6. **The roll-forward** is a normal `infra/deploy.sh` (it notes that the
+containers do not run the last-known-good images). Its boot logs `granted
+22 permission(s)`, and a `[targeting-flags]` line only when the backfill
+restored or raised something (with its "from the twin" counts); no line
+means it had nothing to restore (an item whose two rows both lost a flag
+is R6a's). Before anyone authors again:
+
+- **a. Flags.** The boot backfill's twin rule restored a lost event
+  `notify_audience` and a lost `retarget_required` from the row of the same
+  item that kept it. For items where both rows lost it, re-apply the saved
+  lists with the guarded raise-only SQL from the header of
+  `infra/diagnostics/announcement-retarget.sql`, with the saved documentIds
+  of R2 (the marked announcements and the flag-only events) in place of
+  `<saved>`; run it first as it stands, ending with `ROLLBACK` (a dry run
+  that prints the `UPDATE` counts), then again with `COMMIT`:
+
+  ```bash
+  psql_db -X <<'SQL'
+  BEGIN;
+  UPDATE announcements SET retarget_required = true
+   WHERE document_id IN (<saved>) AND retarget_required IS NOT TRUE;
+  UPDATE events SET notify_audience = 'departments'
+   WHERE document_id IN (<saved>) AND notify_audience IS DISTINCT FROM 'departments';
+  ROLLBACK;
+  SQL
+  ```
+
+  `<saved>` is a quoted, comma-separated list (`'k3m9…', 'p2x7…'`); leave a
+  statement out when its list is empty. The event guard is **`IS DISTINCT
+  FROM 'departments'`, not `IS NULL`**: the first boot already filled a
+  NULL `notify_audience` without a department link with "all". Both
+  statements only raise a flag, so they need no revision advance.
+- **b. Schedules.** Compare the export with the current drafts
+  (`schedule-export.sql` again): a publish or withdrawal time that is still
+  ahead and was lost is **re-entered in the admin panel or `/manage`** (a
+  Document Service write, so the revision advances; never raw SQL); a
+  withdrawal that fell due and was done by hand needs nothing (the
+  scheduler clears the leftover field); one that fell due and was not done
+  is done now; a publish that fell due is published by hand, or left to the
+  scheduler if the draft kept `publish_at` (an item whose window ended
+  meanwhile gets `windowExpired` and notifies nobody). A `final_withdrawal`
+  whose `unpublish_at` has passed stays unpublished: the scheduler only
+  clears its leftover field (`cleared` in its log line), after which the
+  current export no longer shows it; the saved list does.
+- **c. Owners.** An item whose owner department a batch 14 write dropped
+  stays moderator-only for department heads until a moderator sets the
+  owner again in the panel (it fails closed).
+- **d. Permissions:** `psql_db -X < infra/diagnostics/prod-perm-diff.sql`
+  shows only the two informational rows again.
+- **e.** Writes on batch 14 advanced no revision: a web form opened before
+  the rollback can pass its `If-Match` once (accepted).
+- **f.** Re-publish the `hide_then_restore` announcements R3 unpublished
+  (the marked ones come back moderator-only until re-targeted). **Never
+  re-publish a `final_withdrawal` item whose saved `unpublish_at` has
+  passed**, whether R3 withdrew it early or R5 at its time. One that R3
+  withdrew early and whose `unpublish_at` is still ahead may be
+  re-published, after `schedule-export.sql` lists that `unpublish_at` on
+  its draft again (re-enter it in the panel or `/manage` first if a batch
+  14 write dropped it), so the scheduler withdraws it on time. Then lift
+  the freeze.
+
+**Combined staging rehearsal (2026-10-13, 85c8909 and a824aa5):** passed.
+Upgrade deploy 90 s (cms about 6 s to started, web outage about 15 s),
+boot lines as listed; `/manage` walks as editor and department head
+(light and dark, 360 and 1280 px), a stale-version conflict, scheduling
+and withdrawals, the department-head refusals (400, 403, 404, 428, 412),
+the targeting matrix, the voted-poll freeze, the append-only audit trail,
+a department delete and re-targeting; two full rollback cycles R1 to R6
+(rollback 7.6 s; 43 `EXTRA_IN_DB` rows on batch 14; the guarded re-apply;
+final withdrawals stayed withdrawn; `hide_then_restore` items republished
+and restricted again); a wiki parent before its children; a parent cycle
+ended `notPublishable`. The fixes made after it (the scheduler's
+time-bounded dependency wait, the re-check under the lock, the publish
+selection without due withdrawals, the `/manage` re-targeting texts) are
+covered by unit and integration tests on SQLite and Postgres 16. The lane
+rehearsals are in the four notes below.
+
+#### Upgrading to the authoring document layer (batch 15, lane 15B)
+
+Lane 15B of batch 15 (branch `feat/v2-authoring-cms-document-layer`, on
+`main` with the Strapi 5.57 update) is the document layer under v2
+authoring (deep-dive decision 06 §D, §F, §G, §H, §K). It changes the
+**cms only**; batch 15 ships it with lanes 15D, 15A and 15C, so follow
+[Deploying batch 15](#deploying-batch-15-2026-10-13); this note is the lane's part of it.
+On its own the lane is deployable too: the content API's routes and
+grants are unchanged, and the web is unaffected. No dependency, no
+required env, no grant, no route, no edge change.
+
+**What changes**
+
+- **Offset-less instants answer 400 everywhere** (DT-OFFSETLESS). A
+  datetime field sent as text without `Z` or a numeric offset
+  (`2026-10-01T09:00`) is refused with `400 ValidationError` "Instants need
+  Z or an offset (e.g. 2026-10-01T07:00:00.000Z): <fields>", through the
+  content API, the admin panel and scripts alike. Strapi used to store such
+  a value as UTC wall time. The admin panel and the web always send `Z`,
+  so nothing they do changes; a script or integration that sends local
+  times must add the offset. [§3.10](#310-datetime-contract) is updated.
+- **Every change of a document advances its revision.** Announcements,
+  events, documents, quick links, wiki pages, courses, lessons, polls,
+  wiki spaces, departments and teams get a revision in the new table
+  `content_versions`: every create, save, publish, unpublish, "Discard
+  changes", clone, delete and every scheduled run moves it, under a row
+  lock, whoever writes. Nobody sees it yet; lane 15A's `If-Match` on the
+  web's saves is built on it.
+- **Scheduled publishing.** The seven types above that have drafts (not
+  polls) get **Publish at** in the admin panel, documents and quick links
+  also **Unpublish at**, and all seven a read-only-in-spirit **Schedule
+  error**. The cms publishes a draft whose Publish at has come, and
+  withdraws a document or quick link whose Unpublish at has come, within a
+  minute (the `scheduled-publisher` task, every minute in
+  `APP_TIME_ZONE`). The times are the draft's: they apply once saved, also
+  for a published item, and the published version's copies are ignored.
+  - Publishing by hand clears a pending Publish at (publishing now wins);
+    unpublishing clears it too (withdrawn content never reappears through
+    an older schedule); "Discard changes" drops it with the other draft
+    changes; a duplicate starts unscheduled.
+  - A scheduled publish whose window already ended (the announcement's
+    Expires at, or Unpublish at, passed, e.g. while the cms was down) is
+    not published and notifies nobody: Schedule error `windowExpired`.
+  - A scheduled publish that fails for good sets Schedule error
+    `notPublishable` (a required field missing, a course or parent not
+    published), `invalid` (Strapi's validation) or `rejected` (a
+    lifecycle, e.g. the lesson checks), clears Publish at and logs
+    `[scheduler] <type> <documentId> failed: <code>`; a passing failure
+    (a lock timeout, a lost connection) is retried every minute and
+    becomes `retryExhausted` after the fifth.
+  - A lesson whose course, or a wiki page whose parent, is itself
+    unpublished, scheduled and due waits for it, for at most 60 minutes
+    after its own Publish at: the selection query leaves it out (however
+    many such pages there are, the course or parent is still reached) and
+    the run publishes it the minute after its course or parent; such a
+    wait costs no retry. After the 60 minutes it is tried like any other
+    draft, and if its course or parent is still unpublished it ends in
+    `notPublishable` ("keys: parent" or "keys: course" in the audit trail).
+    That is also how wiki pages whose parents loop back to them (A under B,
+    B under A, all scheduled; the admin panel allows it) end. A refusal is
+    only recorded after the run has checked it again under the item's lock:
+    if the course or parent was published meanwhile, the next minute
+    publishes the item instead.
+  - A published document or quick link whose Unpublish at is due belongs
+    to the withdrawal: the publish run leaves it out (also while its
+    withdrawal backs off after failures, below), so it never keeps other
+    due items out of the batch.
+  - A withdrawal is never given up. One that fails for good sets Schedule
+    error and logs `[scheduler] <type> <documentId> failed: <code>; the
+    withdrawal stays pending, next attempt after <time>`, but keeps
+    Unpublish at, and a pending Publish at waits with it (an update is
+    never published over a withdrawal that did not happen). It is tried
+    again after 5, 15, then every 60 minutes (at once when the item is
+    saved in between), until it succeeds, which clears the error, or an
+    editor changes or clears Unpublish at. A repeat of the same failure
+    writes no new audit row; a cms restart starts the backoff over. Until
+    then the item stays visible: the site does not hide an item whose
+    Unpublish at passed (the time is a setting of the draft). If it must
+    go now, unpublish it in the panel. Known limit: each run reads the due
+    withdrawals from the earliest on, at most 2,000 rows, and passes over
+    those still backing off; with more than 2,000 earlier withdrawals that
+    keep failing, a later healthy one is not reached. Failing withdrawals
+    show Schedule error (and the `[scheduler] … failed` line): fix their
+    cause, clear or change their Unpublish at, or unpublish them by hand,
+    and the rest follow.
+  - Every check of a time (due, an ended window) is made when the run
+    holds the item's lock, not when the run started: a run that reaches an
+    item late, behind a lock or a long batch, does not publish one whose
+    Unpublish at or Expires at passed in between (`windowExpired`).
+  - The error details in the log and the audit trail name the error class,
+    a database code and field names, never a message; a passing failure's
+    retry line says whether its code is a known lock or connection code
+    (`transient`) or not (`unexpected`). The next save of the draft clears
+    the error. After a publish the panel shows **Published**, not
+    Modified.
+  - `CRON_ENABLED=0` stops it with the other tasks; nothing scheduled
+    publishes then, and the first run after the crons are back catches
+    up (with the expired-window rule).
+- **Publish readiness, also in the admin panel.** A lesson can no longer be
+  published while its course is not, and a wiki page not while its parent
+  is not (400 "This draft cannot be published yet: course"); before, the
+  publish dropped the link silently. A publish of a draft without its
+  required fields says which ones.
+- **The content activity trail.** Every such change writes a row to the
+  new table `audit_events` in the same transaction: what (create, update,
+  publish, unpublish, discardDraft, clone, delete, schedulePublish,
+  scheduleUnpublish, scheduleFailed), which document, the revision, who
+  (an intranet user, an admin-panel user, or the system for boot writes
+  and the scheduler) and from where, and the names of the fields the write
+  carried, never their values. The admin panel lists it under **Audit
+  event** (super admins; another admin-panel role only once it is granted
+  under Settings → Administration panel → Roles); creating, editing or
+  deleting an entry there is refused ("Audit events are append-only"),
+  whatever the role. The new `audit-janitor` deletes rows older than
+  `AUDIT_RETENTION_DAYS` (default 365) at 03:50 `APP_TIME_ZONE`.
+- **New targeting fields, no visible effect yet.** Announcements get
+  **Retarget required** and an **Owner department**, events **Notify
+  audience** (`all`/`departments`) and an **Owner department**, documents
+  an **Owner department**. Lanes 15D and 15A act on them. At every boot
+  the cms raises announcement Audience to `departments` on every row that
+  links a department or a team, and sets an event's Notify audience
+  (`departments` when it links a department, otherwise `all`); see
+  "Rollback" for why this also repairs rows an older image rewrote.
+
+**Schema (additive; no data migration)**
+
+- New columns: `publish_at` and `schedule_error` on `announcements`,
+  `events`, `documents`, `quick_links`, `wiki_pages`, `courses` and
+  `lessons`; `unpublish_at` on `documents` and `quick_links`;
+  `events.notify_audience`, `announcements.retarget_required`.
+- New link tables `announcements_owner_department_lnk`,
+  `events_owner_department_lnk`, `documents_owner_department_lnk`; new
+  tables `content_versions` and `audit_events`.
+- The datetime guard converts the new datetime columns to `timestamptz` on
+  the first boot (15 columns); the boot then creates the unique index
+  `content_versions_target_uq` and nine partial indexes on
+  `publish_at`/`unpublish_at` (`… WHERE … IS NOT NULL`), `IF NOT EXISTS`,
+  at every boot. Without the unique index the cms does not start.
+
+**Env:** none required. `AUDIT_RETENTION_DAYS` (optional, default 365, a
+whole number of days ≥ 1; any other value deletes nothing and logs an
+error every night) is passed through by compose. `CRON_ENABLED` now also
+governs the scheduler and the audit janitor.
+
+**Grants:** none. The permission diff (`prod-perm-diff.sql`) is unchanged
+and the drift report still checks 120 managed actions.
+
+**After the deploy** (read-only):
+
+1. Boot lines, in this order: `[datetime] converted 15 column(s) to
+   timestamptz: announcements.publish_at, audit_events.created_at, …`;
+   `[document-indexes] created 10 index(es): content_versions_target_uq, …`;
+   `[bootstrap] permission drift: none (report-only check of 120 managed
+   actions)`; one `[targeting-flags] announcements: audience 'departments'
+   on N row(s) …; events: notifyAudience 'departments' on N row(s) …,
+   'all' on N` line (the first boot only; later boots log nothing);
+   `Strapi started successfully`. Then one `[cron] scheduled-publisher
+   took …ms` line a minute. Stop lines: any `[document-indexes]`,
+   `[targeting-flags]`, `[audit]` or `[scheduler] … failed` error.
+2. `psql_db -c "SELECT count(*) FROM content_versions"` and the same for
+   `audit_events` grow with the first saves; `\di content_versions_target_uq`
+   exists.
+3. The permission diff is unchanged.
+4. In the admin panel: save an announcement draft with Publish at a minute
+   ahead; within two minutes it is published, the list shows Published,
+   and **Audit event** lists `schedulePublish` for it.
+
+**If the boot stops:**
+
+- `[document-indexes] could not create the index …`: the cms does not
+  start (the lock needs the unique index). A duplicate
+  `(target_uid, target_document_id)` cannot exist on the first boot; fix
+  the database's cause and start again.
+- `[targeting-flags] could not backfill …`: nothing was changed (one
+  transaction); fix the cause and start again (every start retries), or
+  roll back.
+
+**Rollback** (the owner's decision; both images to batch 14's SHA tags,
+`--no-build`, **no `JWT_SECRET` rotation**: batch 14 already checks token
+versions). The batch-14 image keeps the new columns and tables and ignores
+them (`forceMigration` is off). On its boot users-permissions removes no
+grant this lane added (it added none). What the old image does **not** do,
+and how to cover it:
+
+1. **Before the retag, export both schedule fields** and keep the output
+   off the host (lane 15D adds the query as
+   `infra/diagnostics/schedule-export.sql`; for documents and quick links
+   it is):
+   ```sql
+   SELECT d.document_id, d.publish_at, d.unpublish_at, d.schedule_error,
+     EXISTS (SELECT 1 FROM quick_links p WHERE p.document_id = d.document_id
+             AND p.published_at IS NOT NULL) AS published
+   FROM quick_links d
+   WHERE d.published_at IS NULL AND (d.publish_at IS NOT NULL OR d.unpublish_at IS NOT NULL);
+   ```
+   (the same for `documents`; announcements, events, wiki pages, courses
+   and lessons without `unpublish_at`).
+2. **Freeze authoring** while batch 14 runs: nobody publishes or uses
+   "Discard changes" in the panel except for step 3.
+3. **Nothing scheduled runs on batch 14.** A pending publish just waits.
+   A published document or quick link whose exported `unpublish_at` falls
+   inside the rollback window (`on_rollback = final_withdrawal`) stays
+   published past it: an editor withdraws it by hand in the panel at its
+   time with "Unpublish and keep last draft" (or before the rollback, when
+   the window is short). That withdrawal is final: the item is never published again once its
+   `unpublish_at` has passed, also after the roll-forward's scheduler
+   cleared the leftover field.
+4. **What an old-image write loses.** A publish or "Discard changes" there
+   rebuilds rows through the old model, which does not know the new
+   columns: the rebuilt row comes back without `publish_at`,
+   `unpublish_at`, `notify_audience`, `retarget_required` and the owner
+   department link.
+5. **On the roll-forward:**
+   - the boot backfill's twin rule restores a lost `notify_audience`
+     (`departments`) or `retarget_required` (`true`) from the other row of
+     the same item; it logs them as "from the twin". Rows where both twins
+     lost the value are lane 15D's saved lists and the guarded raise-only
+     SQL of [Deploying batch 15](#deploying-batch-15-2026-10-13) (rollback step R6);
+   - compare the export with the current drafts: a schedule that is still
+     in the future and was lost is re-entered in the admin panel (a
+     Document Service write, so the revision advances; never raw SQL); a
+     withdrawal that fell due and was done by hand needs nothing (the
+     scheduler clears the leftover field; the item stays unpublished, and
+     only the saved export still shows it was a final withdrawal); one
+     that fell due and was not done is done now; a publish that fell due is published by hand, or
+     left to the scheduler if the draft kept `publish_at` (the
+     expired-window rule applies);
+   - a lost owner department fails closed: the item is moderator-only for
+     department authors until a moderator sets the owner again;
+   - writes on batch 14 advanced no revision: a web form opened before the
+     rollback can pass its `If-Match` once (accepted);
+   - check the permission diff again.
+
+**Rehearsal (2026-10-13, local; a throwaway compose project with this
+repo's `infra/docker-compose.yml`, Postgres 16; the batch-14 image built
+from `c992b55` with the demo seed and two legacy items, then this lane's
+image):**
+
+- Upgrade: healthy after 8 s; `converted 15 column(s)`, `created 10
+  index(es)`, `[targeting-flags]` 2 announcement rows raised, events 2
+  linked and 12 `all`; every new datetime column `timestamptz`; the three
+  owner link tables, `content_versions` with its unique index,
+  `audit_events` and the nine partial indexes present; the permission
+  diff unchanged (empty), drift none on 120 actions.
+- Admin panel (the Content Manager calls the panel sends): create, save,
+  publish, duplicate and schedule of an announcement, an event and a quick
+  link; each scheduled change was published within the minute and listed
+  as Published; duplicates unscheduled; the revision rose by one per save
+  and per scheduler run; the version row went with a deleted document;
+  editing or deleting an audit entry answered 400; an offset-less `start`
+  answered 400.
+- The real admin UI in headless Chrome: sign-in, a new announcement saved
+  and published, an event with start, end and Publish at saved without a
+  400, and an audit entry's Save refused with the append-only message.
+- Scheduler: with `CRON_ENABLED=false` nothing was published for two
+  minutes; after the restart with the crons on the due draft was published
+  and its 10 recipients notified once each, the announcement whose
+  Publish at and Expires at had both passed ended in `windowExpired` with
+  nobody notified, the draft without a title in `notPublishable`. Two cms
+  containers with the crons on published five due drafts once each (four
+  and one), every recipient was notified once, one `schedulePublish` row
+  each.
+- Unpublish at only: a quick link was withdrawn on time by this image; one
+  that fell due during the rollback stayed published on batch 14 until an
+  editor withdrew it in the panel, and after the roll-forward the scheduler
+  only cleared its leftover field (`cleared 1`); one discarded on batch 14
+  lost its `unpublish_at`, was re-entered from the export through the
+  panel, and was withdrawn at that time.
+- Rollback to batch 14 and forward: both boots clean (batch 14 healthy
+  after 6 s, no warning; the new tables and columns stayed), the
+  permission diff unchanged after each step. On batch 14 "Discard changes"
+  dropped `notify_audience` from the draft of an event restricted only by
+  its flag, and a publish dropped `retarget_required` and the owner
+  department link from an announcement's rewritten published row. The
+  roll-forward's twin rule restored both values ("from the twin on 1"
+  twice in the boot line), the republished event kept `departments`, and
+  the lost owner link stayed lost (fails closed).
+- Not measured here: the boot on a production-sized copy (this machine has
+  no production data). The conversion rewrites the seven content tables
+  once (`ALTER … TYPE timestamptz USING … AT TIME ZONE 'UTC'`, one short
+  transaction per table, the cms not serving yet), the new indexes start
+  nearly empty (only scheduled rows), and the backfill reads the link
+  tables of announcements and events; on an intranet's row counts that
+  should stay within seconds. The batch rehearsal times it on a restored
+  backup-run generation.
+
+#### Upgrading to fail-closed department targeting (batch 15, lane 15D)
+
+Lane 15D of batch 15 (branch `feat/v2-authoring-cms-targeting-fail-closed`,
+on lane 15B's document layer) makes department targeting fail closed for
+announcements and events (decision 06 §B6, §N9). It changes the cms; the
+web's acknowledgement report follows on its own (it reads the same rule).
+It ships **only with batch 15**: it reads the columns and the boot
+backfill of lane 15B (`announcements.retarget_required`,
+`events.notify_audience`), so it is never deployed without 15B, and
+[Deploying batch 15](#deploying-batch-15-2026-10-13) is the runbook. No schema of its own, no grant, no
+env, no compose or edge change.
+
+**What changes (release notes 8 and 9)**
+
+- **Release note 8 (D-PT01).** An announcement whose audience is
+  "departments" but that has neither a department nor a team is visible to
+  admins and editors only until they re-target it, and it notifies nobody
+  (before, it was company-wide, and a republish notified everyone). The
+  preflight below counts these announcements; put the count in the release
+  note. In the admin panel, linking a department or a team now sets the
+  announcement's Audience to "departments", and removing the links no
+  longer makes it company-wide: set Audience to "all" explicitly. This also
+  holds for items created before the upgrade (the boot backfill sets the
+  flag on every announcement that links a department or team). The same
+  holds for an event's Notify audience: every event that links a
+  department gets "departments", and an event whose departments are all
+  removed (or deleted) notifies nobody when it is published, instead of the
+  whole company; set Notify audience to "all" to notify everyone again.
+  Events stay readable in everyone's calendar, as before.
+- **Release note 9 (`retargetRequired`).** Deleting a department or a team
+  makes every announcement that targeted it visible to admins and editors
+  only, even when another criterion (a team, the department, audience
+  roles) remains, until they re-target it: "Needs re-targeting" in
+  `/manage` (lane 15C), the Retarget required field in the admin panel.
+  Before, a department-plus-team announcement whose department was deleted
+  reached the team's members in other departments, and one whose team was
+  deleted reached the whole department. Re-target in the panel by setting
+  the department, team or roles and clearing Retarget required, or in
+  `/manage` (the save clears it with any change to the targeting).
+- **Deletes take more locks.** A department or team delete now also locks
+  the department or team rows on Postgres and advances the revision of
+  every announcement, event and document that linked it (its department,
+  departments, owner department or team), before the delete removes the
+  links. A web form opened on one of them before the delete gets a
+  conflict (or, for a department head who lost the item, "not found") on
+  its next save instead of writing over it. The deletes are rare admin
+  actions; a delete that races a save of a linked item on Postgres can be
+  aborted by the database (deadlock), which leaves both unchanged: delete
+  again. A department or team delete outside a transaction (a script's
+  `strapi.db.query(...).delete()`) is refused with
+  `[targeting-flags] … refused outside a transaction`; the admin panel and
+  the API always delete inside one.
+- **Every reader follows.** The announcement list and detail, the bell
+  and the digest fan-out, comment and reaction threads, acknowledgements
+  and the acknowledgement report all use the same rule
+  (`packages/domain/src/audience.ts`): a restricted announcement is not in
+  a member's list, its detail and its thread answer like a missing item,
+  nobody gets it in a digest, and the report counts no audience for it.
+
+**Log lines**
+
+- At the first boot (lane 15B's backfill):
+  `[targeting-flags] announcements: audience 'departments' on N row(s) that link a department or team, retargetRequired from the twin on 0; events: notifyAudience 'departments' on N row(s) …, 'all' on N`.
+  Later boots log nothing when nothing changed.
+- On a save that links a target: `[targeting-flags] announcement <action>: set the audience of N announcement row(s) to 'departments' (they link a target)`
+  (and the same for `event … notifyAudience`).
+- On a delete: `[targeting-flags] department delete: advanced the revision of N announcement/event/document(s); marked N announcement row(s) 'retargetRequired' and flagged N event row(s) …`
+  and `[targeting-flags] team delete: …`, next to the existing
+  `[poll-audience]` and `[department-delete]` lines.
+- On a publish of a restricted event: `[notifications] event <documentId> notifies nobody: notifyAudience is 'departments' without a department (re-target it)` (a warning, by design).
+
+**Before the deploy (read-only, the owner)**
+
+1. Run the D-PT01 preflight on production (it works on the batch-14
+   schema and changes nothing):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+     < infra/diagnostics/announcement-audience-preflight.sql
+   ```
+
+   The summary's `published_documents` is the number of announcements
+   members stop seeing; the rows name them. For each one: re-target it in
+   the admin panel (link a department or a team), set its Audience to
+   "all" if it is meant for everyone, or accept that it becomes
+   admins'/editors' only. Expected on production: 0 or a handful.
+2. Run `infra/diagnostics/department-heads.sql` the same way and align the
+   department heads in the admin panel (the role `department_head` and the
+   user's department). After the deploy every `department_head` user with a
+   department can author announcements and events for it (lane 15A).
+
+**After the deploy**
+
+1. The backfill line above, and no `[targeting-flags] could not backfill`
+   error (that one stops the boot on purpose; fix the cause and start
+   again, or roll back).
+2. Run the preflight again: the listed announcements now answer 404 to a
+   member and 200 to an editor.
+3. `infra/diagnostics/announcement-retarget.sql` runs (the columns exist
+   now) and lists nothing until a department or team is deleted.
+
+**Rollback (with [Deploying batch 15](#deploying-batch-15-2026-10-13))**
+
+The batch-14 image knows neither D-PT01, the marker nor
+`notify_audience`. While it runs, the D-PT01 announcements and the marked
+ones are readable by their remaining criteria (company-wide when none is
+left), and an event restricted only by its flag notifies everyone on its
+next publish. An old-image publish or "Discard changes" rewrites the rows it
+touches without `retarget_required` and `notify_audience` (NULL).
+
+1. Freeze authoring, then **save off the host** the output of
+   `announcement-audience-preflight.sql`, `announcement-retarget.sql` and
+   `schedule-export.sql` (lane 15B's schedules).
+2. Unpublish what must stay hidden during the window: the preflight's rows
+   and the marked announcements. Do not publish the flag-only events of
+   `announcement-retarget.sql` on the old image (a publish there notifies
+   everyone); a "Discard changes" there notifies nobody but drops the flag
+   from the draft (step 3 restores it).
+3. On the roll-forward the boot backfill's twin rule restores a value one
+   row of a document lost from the other row. For documents in the saved
+   lists where both rows lost it, re-apply it with the guarded raise-only
+   SQL in the header of `announcement-retarget.sql`. For events the guard
+   is `notify_audience IS DISTINCT FROM 'departments'`, not `IS NULL`: when
+   neither row restricts, the backfill has already filled the NULL with
+   "all" at the first boot. Both statements only raise, so they need no
+   revision advance.
+4. Re-publish what step 2 unpublished (the announcements of the two
+   lists, `on_rollback = hide_then_restore`), once it is re-targeted or
+   the window is over. A document or quick link withdrawn for its
+   `unpublish_at` is not part of this: its withdrawal is final
+   ([Deploying batch 15](#deploying-batch-15-2026-10-13), R6f).
+
+**Residuals (accepted)**
+
+- An admin-panel form opened before a department or team delete still
+  holds Retarget required as loaded (off) and saves it back; the admin
+  panel is not revision-checked (decision 06 §G, "the reverse direction").
+  After a delete, reload open panel forms of the affected announcements;
+  `announcement-retarget.sql` shows what is marked.
+- A link written outside the Document Service (raw SQL, an old image) after
+  a delete's scan gets its flag on the next save but no revision advance.
+
+**Rehearsal (2026-10-13, Postgres 16, demo seed; `main` 9a5829c, then this lane on 15B)**
+
+- On the batch-14 image: an announcement with Audience "departments" and no
+  target (1), an event for Engineering (2), an announcement for Engineering
+  plus a team of it (3), one for the team only (4), a document and a quick
+  link for Engineering (5), and an event for Design (6). On batch 14 item 1
+  was readable by every member and its publish notified all 15 users. The
+  preflight listed exactly item 1 (both rows); `department-heads.sql` ran;
+  the two batch-15-only files stopped with "column … does not exist".
+- Upgrade: the backfill raised 2 announcement rows (item 4, Audience "all"
+  next to its team) and 4 event rows (items 2 and 6), and filled 12 NULL
+  event rows with "all". Item 1 answered 404 to every member, 200 to an
+  editor.
+- Team deleted in the panel: items 3 and 4 marked on both rows, their
+  revisions advanced (0 → 1), every member 404, editor 200; their
+  republish created 0 notifications.
+- Engineering deleted in the panel: 4 revisions advanced (item 3, the
+  event, the document, and the demo's Engineering announcement, which was
+  marked); the event's republish logged "notifies nobody" and created 0
+  notifications; the document and the quick link were readable by editors
+  only.
+- Item 6 (seeded on batch 14, flag NULL until the backfill): its
+  departments removed in the panel and republished: 0 notifications.
+- The four diagnostics matched the data (preflight 4 documents after the
+  deletes, `announcement-retarget.sql` 3 marked announcements and 2
+  flag-only events, the schedule export with a scheduled draft and a link
+  to withdraw).
+- Rollback to the batch-14 image: items 1, 3 and 4 readable by every
+  member again (as warned). "Discard changes" on the event there left its
+  draft with `notify_audience` NULL. Roll forward: the backfill restored it
+  from the published row ("on 1 from the twin"), and the republish created
+  0 notifications; items 1, 3 and 4 were moderator-only again. The guarded
+  re-apply SQL restored a both-rows-lost marker and event flag (2 rows
+  each), where an `IS NULL` guard would have matched no event row.
+
+#### Upgrading to the v2 write model (batch 15, lane 15A)
+
+Lane 15A of batch 15 (deep-dive decision 06 §A-§C, §N; the batch's
+runbook, [Deploying batch 15](#deploying-batch-15-2026-10-13), carries it with lanes 15B, 15D and 15C) closes
+the admin/editor payload bypass on announcements, events, quick links,
+documents and polls, and lets department heads author for their own
+department. It ships cms and web together (`infra/deploy.sh`, both images):
+the web's poll form sends the new payload, and the web's capability values
+mirror the new grants.
+
+**What changes**
+
+- **Content-API writes of the five types go through one gate.**
+  `global::can-author` and the authoring controller replace the core
+  create and update; admin_role and editor are the `moderator` class of
+  the field allowlist, so their payloads are checked like everyone's
+  (release note 1). A payload key the class may not write (Strapi keys,
+  `author`, `audience`, `retargetRequired`, `ownerDepartment`,
+  `scheduleError`, `document.file` until batch 16, an unknown key) answers
+  `400 Invalid or disallowed data field(s): <keys>`; a refused value adds
+  `details.codes`. A create or update needs `?status=draft` or
+  `?status=published` (polls: none, or `published`); every other query key
+  answers 400. The answer is a fixed DTO
+  (`{ documentId, version, status, publishedAt, … }`) with an `ETag`.
+- **Updates, publish, unpublish, discard-draft and delete need
+  `If-Match: "<version>"`** (release note 4): 428 without it, 412 with
+  `details.current` when someone changed the item in between (the admin
+  panel, the scheduler or another tab included).
+- **New routes** per type: `POST /api/<plural>/:id/publish`, `/unpublish`,
+  `/discard-draft`, `GET /api/<plural>/authoring` (the /manage list) and
+  `GET /api/<plural>/:id/editable` (the form read); polls only the last
+  two. Delete stays admin_role/editor.
+- **Authors are no longer notified of their own posts** (release note 2):
+  the author or organiser is the caller on create, and the lifecycles
+  leave them out.
+- **Department authors** (release note 7): a `department_head` with a
+  department in their user record creates, edits, publishes, unpublishes
+  and discards announcements, events and documents of their own department
+  (pinned on the server; no schedule, delete, pinning or acknowledgement;
+  a discard needs a published version). There is no web UI before lane 15C,
+  and `/manage` stays admin-only until then. **Every `department_head` with
+  a department can author after the deploy:** run
+  `infra/diagnostics/department-heads.sql` first and align the roles and
+  departments in the admin panel (lane 15D ships the query).
+- **Polls** (release note 6, the poll part): up to **20** answers for
+  every writer (was 10), at most 200 characters each through the content
+  API; once a poll has a vote, its options and anonymity can no longer
+  change, **also in the admin panel** (a publish of a draft with other
+  options answers 400 `frozenAfterVotes`; set the options back to the
+  published ones, or create a new poll). Votes take the poll's lock, so a
+  vote and an options change cannot both succeed. The published row is
+  what the freeze compares with, so **a poll with a vote can no longer be
+  unpublished** (400, `details.keys: ["_form"]`, also "unpublish and
+  discard the draft" and the bulk unpublish; delete it or let it close),
+  and a poll that has votes but no published version could no longer be
+  published (same 400). On batch 14, though, an unpublish deleted the
+  vote links with the published row, so such polls come out unvoted and
+  publishable; their orphaned votes are counted in step 3 below and in
+  "Deploying batch 15", step 6.
+- **Grants: +65 rows** (`prod-perm-diff.sql` and the permission snapshot
+  change deliberately): the five authoring actions on announcement,
+  event, quick-link and document and two on poll for admin_role and
+  editor (44 rows), `create`/`update` and the five actions on
+  announcement, event and document for department_head (21 rows). No
+  `role.find` for editor or department_head. No schema, no env, no compose
+  or edge change.
+
+**Who is affected**
+
+- **Scripts or integrations** that write these five types through the
+  content API with an editor or admin token must send `?status=`,
+  `If-Match` on every change (read it from `GET …/:id/editable` or the last
+  answer's `ETag`), department and role targets as documentIds and role
+  types, and no `audience`, `author`, `organizer` or `uploadedBy`. The web
+  of this release is the only caller in the repository and does that.
+- **The admin panel** keeps working as before, except the poll freeze and
+  the 20-answer bound above; it bypasses the content-API gate.
+
+**Before the deploy (read-only)**
+
+1. `psql_db -X < infra/diagnostics/prod-perm-diff.sql`: the baseline shows
+   no `MISSING_IN_DB` and no `EXTRA_IN_DB` rows besides the known ones.
+2. `infra/diagnostics/department-heads.sql` (lane 15D): every user with the
+   `department_head` role and a department will be a department author.
+3. Votes of polls unpublished before this release: an unpublish there
+   deleted their links, so they no longer count and the poll is unvoted
+   (see "Deploying batch 15", step 6, which also has the optional
+   clean-up):
+
+   ```sql
+   SELECT count(*) AS orphaned_votes
+     FROM poll_votes v
+    WHERE NOT EXISTS (SELECT 1 FROM poll_votes_poll_lnk l WHERE l.poll_vote_id = v.id);
+   ```
+
+**After the deploy**
+
+1. The boot line of the permission sync adds the 65 rows; the drift line
+   says `permission drift: none`.
+2. `prod-perm-diff.sql` shows no differences against the new snapshot.
+3. As an editor (a session token from the web or `POST /api/auth/local`):
+   `GET /api/announcements/authoring` answers 200 with `data` and
+   `meta.pagination`; as a member it answers 403. A `PUT
+   /api/announcements/<documentId>?status=draft` without `If-Match`
+   answers 428.
+4. In the web, a poll is created with and without departments (with batch
+   15 at `/manage/polls/new`, lane 15C; `/polls/new` redirects there).
+
+**Rollback** (to the images before 15A, i.e. 15B and 15D, or further back
+with the batch runbook):
+
+- Retag both images (`--no-build`); no database step and no `JWT_SECRET`
+  rotation.
+- On the old image's boot users-permissions deletes **one** permission row
+  per action its controllers lack (`syncPermissions` deletes by action,
+  one row each; whose varies: admin_role's 22 authoring rows in one
+  rehearsal, editor's in another), so the other moderator role's 22 and
+  department_head's 15 authoring rows stay behind as dead rows (no route
+  serves them), and department_head's six core
+  `create`/`update` rows stay too (the old image's drift line lists those
+  six). `prod-perm-diff.sql` of the old release then shows these 43 rows as
+  `EXTRA_IN_DB`. The roll-forward's permission sync re-creates the 22
+  deleted rows (`granted 22 permission(s)`) and the diff is empty again.
+  Run `prod-perm-diff.sql` after both steps.
+- On the old image admin_role/editor payloads are open again and polls
+  accept 10 answers at most: a poll saved with 11 to 20 answers keeps them
+  and its votes, but the old lifecycle refuses every panel save and every
+  publish of it (the publish re-runs the check on the stored options).
+  List such polls before a rollback
+  (`SELECT DISTINCT document_id, question FROM polls WHERE jsonb_array_length(options) > 10`)
+  and leave them alone until the roll-forward.
+- Roll back both images together: the batch 15 web writes only through
+  the authoring routes (lane 15C), which an older cms does not have. (The
+  lane's own interim web, before 15C, still created polls on the old cms;
+  the integration deleted that `createPoll`.)
+
+#### Upgrading to the /manage authoring pages (batch 15, lane 15C)
+
+This release (branch `feat/v2-authoring-web-p1`, on lane 15A's contracts
+commit `3fd84d8`, with lane 15A's write model merged for its rehearsal)
+changes the web only. It needs the cms of lanes 15B, 15D and 15A (the
+authoring routes, the revision lock, the grants), so it ships with them as
+one deploy: follow [Deploying batch 15](#deploying-batch-15-2026-10-13).
+What users notice:
+
+- **`/manage` opens to editors and department heads** (decision 06 §L1).
+  The navigation entry reads _Manage_ (_Verwaltung_) and appears for
+  `admin_role`, `editor` and `department_head`. The landing has one tile
+  per area the role writes in, with how many drafts, scheduled items and
+  failed schedules it holds (a count the cms could not deliver reads "–",
+  never 0). Admins keep the reports (analytics, read confirmations,
+  training) and the Strapi admin links below.
+- **Announcements, events, polls and quick links are written in the
+  web.** Each area has a list (status tabs, a title search, pages of 25,
+  for moderators an owner filter), a _New_ page and an edit page with a
+  preview of the saved version. Buttons: _Save draft_, _Publish_ (or _Save
+  and publish_ with unsaved changes), _Schedule…_, _Unpublish_, _Discard
+  changes_ (only while a published version exists and the draft differs)
+  and _Delete_, each shown only when the role holds it and asking first
+  where it changes what readers see; publishing an announcement or an
+  event says that it notifies the audience now. The texts (Markdown) have
+  _Write_ and _Preview_ tabs; HTML stays text.
+- **Dates and times** are typed as a date and a time in the business zone
+  (`APP_TIME_ZONE`, named under every pair). A time that a clock change
+  repeats or skips (for example 2027-03-28 02:30 or 2027-10-31 02:30 in
+  Europe/Berlin) is refused with "This time occurs twice / does not exist
+  on this day because of the clock change", never guessed. An all-day
+  event is saved from its first and last day.
+- **Somebody changed it meanwhile.** When the item changed after the form
+  was opened (another tab, another author, the admin panel, the
+  scheduler), a save answers with a dialog: _Reload_ (with _Copy my text_
+  first) or _Overwrite_ with the current version. An update sends only the
+  fields the author changed, so _Overwrite_ keeps the other author's
+  changes to the rest; the form then shows the item as it now is. _Save
+  draft_ stays disabled until something changed.
+- **Department heads** (with a department) write announcements and events
+  for their own department: the department is shown, not chosen; the team
+  picker lists that department's teams; no _Pinned_, read confirmation,
+  _Schedule…_ or _Delete_; _Discard changes_ only with a published
+  version. Events say "Visible to everyone in the calendar; notifies your
+  department." A department head without a department sees an explanation
+  instead of the forms. Their list holds their department's items only.
+- **Polls** are created at `/manage/polls/new` (`/polls/new` redirects
+  there), take 2 to 20 answers of up to 200 characters, can be edited
+  after creation (the answers and the anonymity lock at the first vote)
+  and close at once with _Close now_.
+
+**Configuration:** none. No `.env`, compose, schema, permission or Traefik
+change in this lane; the message catalogs gain `messages/manage/*.json`
+(they ship in the web image).
+
+**Deploy (as part of batch 15):**
+
+1. **Before (read-only):** `infra/deploy.sh --check` and `--dry-run`.
+2. **Deploy:** `infra/deploy.sh` (both images; this lane changes the web).
+3. **After: as an editor.** `/manage` shows four tiles. Create a draft
+   announcement, publish it (the confirmation says it notifies), check
+   it on `/announcements` as a member, unpublish it, delete it. Open
+   _Schedule…_ and type 02:30 on the next clock-change day: it is refused.
+4. **After: as a department head** (if there is one with a department):
+   `/manage` shows _Announcements_ and _Events_ only; a new announcement
+   shows the department read-only and has no _Pinned_; the list holds
+   only that department's items.
+5. **After: `/polls/new`** lands on `/manage/polls/new`.
+6. **After: logs.** Refusals are warnings (`[manage-announcements] update
+   refused: 412 …`), outages and web bugs errors; a `428` is always a web
+   bug and should never appear:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'
+   ```
+
+**Rollback:** with batch 15: both images back to batch 14 ([Deploying batch 15](#deploying-batch-15-2026-10-13),
+rollback R1 to R6, covers the cms side). This lane alone has no data to
+undo: the web writes only through the cms's authoring routes.
+
+**Rehearsal (2026-10-13, lane 15C):** unit suite, typecheck (apps and
+tests), lint and `next build` passed. End to end against a real cms (the
+worktree's Strapi 5.57 build on a throwaway Postgres 16 container with the
+demo seed and lane 15A merged; the web with `next start`; host Playwright
+with Chromium), 66 checks passed: an editor's create, save and publish
+read by a member; a second tab's save then this tab's save opens the
+conflict dialog, _Copy my text_, _Overwrite_ (the form then shows the
+other tab's untouched title) and _Reload_ work; a
+Content Manager save between load and save gives the same dialog; the
+schedule refuses 2027-03-28 and 2027-10-31 02:30 Berlin and stores
+09:00 as `08:00Z`; discard, unpublish (the member no longer reads it) and
+delete; a refused field takes the focus and is described by its error; a
+department head's landing has two tiles, their form has no moderator-only
+field, their list hides an editor's Engineering item and its URL shows the
+not-found page; crafted requests with the head's token (`pinned`,
+another department, `publishAt`, `DELETE`, a discard after an unpublish)
+are refused (400 with the key, 403, `_form` `neverPublished`); a head
+without a department and a member get no form; `/polls/new` redirects; a
+poll's answers lock after a vote and _Close now_ closes it; an all-day
+event across 2027-10-31 is stored as local midnights; the capacity warning;
+a quick link refuses `//evil.example`, and its schedule refuses an end
+before the start. Every `/manage` page at 360 and 1280 px, light and dark,
+English and German, has no horizontal scroll; the Markdown tabs follow
+the arrow keys, and the publish and Schedule… dialogs return the focus on
+Escape. Two review rounds (Codex, and a second reading) were fixed before
+the final run: Overwrite and the schedule dialog after a conflict, empty
+draft saves, the focus targets, the input shape of the save actions.
+Screenshots: the lane's scratch directory. Not exercised: a screen-reader
+pass (NVDA or VoiceOver) and the scheduler actually publishing.
 
 #### Deploying batch 14 (2026-10-13)
 
@@ -9813,9 +11145,13 @@ the cms and the database, phase 2 the web):
   `timestamptz(6)` and sent as ISO-8601 in UTC with `Z`. Clients must send
   instants with `Z` or an offset. The cms's own code reads instants only
   through its time module, which rejects an offset-less value (a vote
-  against such a `closesAt` counts the poll as open), while Strapi's generic
-  content API and admin panel read one in the process zone, i.e. as UTC.
-  The web and the admin panel always send `Z`.
+  against such a `closesAt` counts the poll as open). Since batch 15 (lane
+  15B, DT-OFFSETLESS) every Document Service write refuses one as well:
+  the content API, the admin panel and scripts answer 400 `ValidationError`
+  "Instants need Z or an offset (e.g. 2026-10-01T07:00:00.000Z): <fields>"
+  instead of storing the value read in the process zone (UTC). Raw
+  `strapi.db.query` writes are not covered; the cms's own code passes Date
+  objects or ISO-Z there. The web and the admin panel always send `Z`.
 - **Calendar dates** (classified `expiresAt`, announcement `ackDeadline`,
   `birthday`, `hireDate`) are Strapi `date` fields: `YYYY-MM-DD`, no zone,
   never turned into a midnight instant.
@@ -9921,11 +11257,15 @@ the cms and the database, phase 2 the web):
   admin's **browser** zone; the stored instant is right either way. Admins
   outside `APP_TIME_ZONE` see their own local times there.
 - **Cron and backups.** The janitors run at 03:30 / 03:35 (since batch 12
-  also 03:40 / 03:45) and the digest at 07:30 `APP_TIME_ZONE`. The
-  nightly backup may run before or after them: they delete only orphaned
-  uploads older than 24 hours and rows 90 days past their date, which
-  every earlier nightly backup holds (production's `backup-run` runs at
-  04:00).
+  also 03:40 / 03:45, since batch 15 the audit janitor at 03:50), the
+  scheduled publisher every minute (batch 15) and the digest at 07:30
+  `APP_TIME_ZONE`. The nightly backup may run before or after the
+  janitors: they delete only orphaned uploads older than 24 hours, audit
+  rows older than `AUDIT_RETENTION_DAYS` and other rows 90 days past their
+  date, which every earlier nightly backup holds (production's
+  `backup-run` runs at 04:00). The scheduled publisher changes current
+  content like a manual publish in the same minute; `pg_dump` takes a
+  consistent snapshot.
 - **Local development.** SQLite needs nothing. With a local Postgres, set
   `TZ=UTC` in `apps/cms/.env` (a boot that creates or changes the schema
   refuses any other zone).
@@ -10701,6 +12041,8 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | Traefik mode: every path answers `404 page not found` (after a hand-run `docker compose up`, or a deploy with a `deploy.sh` from before batch 10; the current preflight refuses such a `DOMAIN`) | `DOMAIN` in `infra/.env` is not the bare public host name (a scheme, a port, a typo, the example host), so no router matches. Correct it and run `docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml up -d --no-build web cms`; an image rollback does not help ([§3.6 B](#b-shared-traefik-live-production-layout)) |
 | Traefik mode: the site answers 404, or shows another instance's data, after a second Sinnlos stack started behind the same Traefik | One Sinnlos stack per Traefik: the `sinnlos-*` routers of both stacks conflict (Traefik log: `Router defined multiple times with different configurations`) or their services merge. Stop the second stack and give it its own host or Traefik ([§3.6 B](#b-shared-traefik-live-production-layout)) |
 | Every signed-in user lands on `/sign-in?expired=1` right after a deploy | Expected once after a `JWT_SECRET` rotation — signing in again fixes it |
+| web log after a deploy: `Error: Failed to find Server Action "…". This request might be from an older or newer deployment.` | Expected and harmless: a browser tab opened before the web restarted submitted a form or pressed a button of the old build. Nothing was written; the tab works after a reload ([§3.8](#38-updates), "Expected log lines after a deploy") |
+| cms stderr: `(node:N) DeprecationWarning: Calling client.query() when the client is already executing a query is deprecated …` | Expected and harmless since the Strapi 5.57 update: the pg driver warns once per process ([§3.8](#38-updates)) |
 | Every uploaded image/document answers 404 | `INTERNAL_UPLOAD_TOKEN` unset on the cms or different on cms and web |
 | Sign-in form says "Too many sign-in attempts" for everyone | Strapi's throttle sees one client IP for all users: the edge does not pass the client's `X-Forwarded-For` (see [§3.9](#39-production-hardening)) |
 | Admin link / `/manage` missing for an admin | `GET /api/me` failed for that request (check the web log for `[viewer]`), or the web was rolled back past 2026-09-24 and the user has not signed in again ([Rolling back the 2026-09-24 release](#rolling-back-the-2026-09-24-release)) |
@@ -10750,7 +12092,7 @@ From the Docker Compose host (on the owner's host the checkout is
 `/home/bigemo/git/sinnlos`):
 
 ```bash
-cd /opt/sinnlos/infra
+cd /home/bigemo/git/sinnlos/infra   # a standalone Caddy box: cd /opt/sinnlos/infra
 umask 077 && mkdir -p backups   # the dump holds every user and password hash
 
 # Dump to a timestamped file

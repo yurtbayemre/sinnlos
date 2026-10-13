@@ -1,5 +1,6 @@
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
+import { documentMiddlewares } from "./bootstrap/document-middlewares";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
 import lifecycle from "./index";
@@ -414,16 +415,18 @@ describe("org draft guard in register() (decision 05)", () => {
 });
 
 /**
- * Wiring test for the write-time audience guards (decision 02, Codex
- * review finding 1; utils/poll-audience-guard.ts; for documents and quick
- * links the batch 12 review B12-01, utils/department-audience-guard.ts):
- * register() hangs two Document Service middlewares onto
- * `strapi.documents`, one for polls and one for documents and quick links,
- * before any plugin bootstrap or our own bootstrap writes a row, and
- * refuses to boot without the registry. A third one guards user writes
- * (FX40, extensions/users-permissions/strapi-server.ts createUserWriteGuard).
+ * Wiring test for the Document Service middlewares
+ * (bootstrap/document-middlewares.ts, decision 06 §K): register() hangs them
+ * onto `strapi.documents` in slot order, before any plugin bootstrap or our
+ * own bootstrap writes a row, and refuses to boot without the registry.
+ * Among them the write-time audience guards (decision 02, Codex review
+ * finding 1; utils/poll-audience-guard.ts; for documents and quick links
+ * the batch 12 review B12-01, utils/department-audience-guard.ts) and the
+ * user write guard (FX40, extensions/users-permissions/strapi-server.ts
+ * createUserWriteGuard). Their order is pinned in
+ * bootstrap/document-middlewares.test.ts.
  */
-describe("audience guards in register() (decision 02, FX29 residual)", () => {
+describe("Document Service middlewares in register() (decision 06 §K)", () => {
   function guardHost(documents: unknown) {
     const stub = datetimeHost();
     const transaction = vi.fn(async (callback: () => Promise<unknown>) => callback());
@@ -432,7 +435,12 @@ describe("audience guards in register() (decision 02, FX29 residual)", () => {
       db: {
         ...stub.db,
         transaction,
-        query: () => ({ findMany: async () => [], updateMany: async () => ({ count: 0 }) }),
+        // No rows and no ballots (the poll guard's vote freeze counts them).
+        query: () => ({
+          findMany: async () => [],
+          updateMany: async () => ({ count: 0 }),
+          count: async () => 0,
+        }),
       },
       getModel: () => undefined,
       requestContext: { get: () => undefined },
@@ -448,12 +456,19 @@ describe("audience guards in register() (decision 02, FX29 residual)", () => {
     next: () => Promise<unknown>,
   ) => Promise<unknown>;
 
-  it("registers one middleware for polls, one for documents and quick links, one for users (FX40)", async () => {
+  it("registers every slot's middleware in order: polls, documents and quick links, users (FX40) among them", async () => {
     const use = vi.fn();
     const strapi = guardHost({ use });
     await lifecycle.register({ strapi });
-    expect(use).toHaveBeenCalledTimes(3);
-    const [polls, departmentScoped, users] = use.mock.calls.map((call) => call[0] as Middleware);
+    const slots = documentMiddlewares(strapi as never).map((entry) => entry.slot);
+    expect(use).toHaveBeenCalledTimes(slots.length);
+    const bySlot = new Map(
+      slots.map((slot, index) => [slot, use.mock.calls[index][0] as Middleware]),
+    );
+    const polls = bySlot.get("poll-audience-guard")!;
+    const departmentScoped = bySlot.get("department-audience-guard")!;
+    const users = bySlot.get("user-write-guard")!;
+    expect(slots[slots.length - 1]).toBe("user-write-guard");
     // The user guard: tokenVersion never reaches a user write; other types
     // pass untouched.
     const reached: unknown[] = [];
@@ -488,15 +503,18 @@ describe("audience guards in register() (decision 02, FX29 residual)", () => {
       return hits;
     };
     expect(await guarded(polls)).toEqual(["api::poll.poll"]);
+    // Batch 15 lane 15D: the department/targeting guard also raises the
+    // announcement (and event) targeting flags (utils/targeting-flags.ts).
     expect(await guarded(departmentScoped)).toEqual([
       "api::document.document",
       "api::quick-link.quick-link",
+      "api::announcement.announcement",
     ]);
   });
 
   it("refuses to boot when strapi.documents.use is gone", async () => {
     await expect(lifecycle.register({ strapi: guardHost({}) })).rejects.toThrow(
-      /^\[poll-audience\] strapi\.documents\.use not found/,
+      /^\[document-middlewares\] strapi\.documents\.use not found/,
     );
   });
 });

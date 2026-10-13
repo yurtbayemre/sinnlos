@@ -1,5 +1,7 @@
 import { syncAdvancedSettings } from "./bootstrap/advanced-settings";
 import { checkEntraConfig, reportEntraStatus, syncAuthProviders } from "./bootstrap/auth-providers";
+import { ensureDocumentIndexes } from "./bootstrap/document-indexes";
+import { registerDocumentMiddlewares } from "./bootstrap/document-middlewares";
 import { ensureEntraIdentityIndex } from "./bootstrap/entra-identity-index";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
@@ -11,16 +13,14 @@ import {
 } from "./database/ensure-timestamptz";
 import { reportDigestConfig } from "./digest/send-digests";
 import { parseEntraConfig } from "./entra/config";
-import { registerUserWriteGuard } from "./extensions/users-permissions/strapi-server";
 import { seedAdminUser } from "./utils/admin-seed";
 import { backfillDepartmentAudience } from "./utils/department-audience-backfill";
-import { registerDepartmentAudienceGuard } from "./utils/department-audience-guard";
 import { ensureDraftTwins } from "./utils/draft-twins";
 import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
-import { registerPollAudienceGuard } from "./utils/poll-audience-guard";
+import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 
 /**
  * Strapi application lifecycle: a thin orchestrator (roadmap B01). The
@@ -33,6 +33,9 @@ import { registerPollAudienceGuard } from "./utils/poll-audience-guard";
  *   - auth-providers.ts: the Entra configuration check, the sign-in
  *     provider grants and the `[entra]` status line (D-ENTRA-01);
  *   - entra-identity-index.ts: the (tenant, object id) unique index;
+ *   - document-middlewares.ts: every Document Service middleware, in its
+ *     slot order (decision 06 §K);
+ *   - document-indexes.ts: the revision and schedule indexes;
  *   - user-contact-sanitizer.ts and restricted-relation-guard.ts: the two
  *     content-API hooks register() installs.
  * The ORDER of the calls below is load-bearing (see the comments), and
@@ -80,31 +83,33 @@ export default {
     checkEntraConfig(strapi.log);
     registerUserContactSanitizer(strapi);
     registerRestrictedRelationGuard(strapi);
-    // Decision 02, fail closed: every Document Service write of a poll sets
-    // audience='departments' on each row of the poll that links a
-    // department, in the write's own transaction (utils/poll-audience-guard.ts).
-    // Here, before any plugin or bootstrap code writes a poll; throws when
+    // Every Document Service middleware, in its slot order
+    // (bootstrap/document-middlewares.ts, decision 06 §K), among them:
+    //  - decision 02, fail closed: every write of a poll sets
+    //    audience='departments' on each row that links a department, in the
+    //    write's own transaction (utils/poll-audience-guard.ts);
+    //  - FX29 residual, the same for documents and quick links (batch 12
+    //    review B12-01, utils/department-audience-guard.ts), so a department
+    //    delete cannot open them, not even through a publish or an admin
+    //    form that copied the row before the delete;
+    //  - FX40: a password the admin panel (or any Document Service update)
+    //    sets raises the user's token version in the write's own
+    //    transaction, and no write may carry tokenVersion itself
+    //    (extensions/users-permissions/strapi-server.ts createUserWriteGuard).
+    // Here, before any plugin or bootstrap code writes a row; throws when
     // strapi.documents.use is gone.
-    registerPollAudienceGuard(strapi);
-    // FX29 residual, the same for documents and quick links (batch 12 review
-    // B12-01): a row that links a department carries audience='departments'
-    // from the write that linked it (utils/department-audience-guard.ts), so
-    // a department delete cannot open it, not even through a publish or an
-    // admin form that copied the row before the delete. Same place, same
-    // refusal to boot.
-    registerDepartmentAudienceGuard(strapi);
-    // FX40: a password the admin panel (or any Document Service update)
-    // sets raises the user's token version in the write's own transaction,
-    // and no write may carry tokenVersion itself
-    // (extensions/users-permissions/strapi-server.ts createUserWriteGuard).
-    // Same refusal to boot without strapi.documents.use.
-    registerUserWriteGuard(strapi);
+    registerDocumentMiddlewares(strapi);
   },
 
   async bootstrap({ strapi }: { strapi: any }) {
     // Datetime contract: no start while any column is still timestamp
     // without time zone (retries what afterSync could not convert).
     await assertTimestamptzContract(strapi);
+    // Decision 06 §G, §D: the unique index the document lock's
+    // `insert … on conflict` needs, and the scheduler's partial indexes.
+    // Before any Document Service write of this boot (seed, backfills,
+    // draft twins); throws, so the cms does not start without them.
+    await ensureDocumentIndexes(strapi);
 
     // Live-update pings for the web SSE bus (issue #17/#27). Registered
     // before any seeding so bulk writes exercise the batching path; the
@@ -137,6 +142,14 @@ export default {
     // the cms does not start (utils/department-audience-backfill.ts).
     // Before the demo seed and the draft-twin repair, like the poll one.
     await backfillDepartmentAudience(strapi);
+    // Decision 06 §N9 (amendment row A5): announcement `audience` and event
+    // `notifyAudience` raised on every row that links a target, NULL event
+    // rows set, and the twin rule after a rollback (a NULL notifyAudience or
+    // retargetRequired takes the other row's restricting value). Raise
+    // only; one transaction; THROWS on error, so the cms does not start
+    // (utils/targeting-flags-backfill.ts). Before the seed and the draft
+    // twins, so a cloned draft copies the repaired value.
+    await backfillTargetingFlags(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.

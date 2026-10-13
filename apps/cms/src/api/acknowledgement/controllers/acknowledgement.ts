@@ -6,7 +6,12 @@ import {
   type AnnouncementTargeting,
 } from "../../../utils/announcement-audience";
 import { isAnnouncementExpired, type ExpiringRow } from "../../../utils/announcement-expiry";
-import { loadUserScope, toAudienceScope } from "../../../utils/visible-ids";
+import {
+  loadUserScope,
+  toAudienceScope,
+  withFreshAnnouncementFlags,
+  type ScopeStrapi,
+} from "../../../utils/visible-ids";
 
 /**
  * Acknowledgements follow the poll-vote integrity pattern: the caller can
@@ -52,17 +57,27 @@ interface AckCaller {
  * expired announcements), then expiry, then the audience. Any other target
  * type fails closed: documents have no requiresAck yet, and would need
  * their own visibility rules here once they do.
+ *
+ * An announcement that targets nobody (batch 15: D-PT01, or the
+ * `retargetRequired` marker after a department or team delete) is outside
+ * every audience, so it answers the same 400 to everyone but admin_role
+ * and editor. The target lookup selects no columns, so the flag and the
+ * marker reach the predicate with every other scalar.
  */
 async function isVisibleToCaller(
-  strapi: unknown,
+  strapi: ScopeStrapi,
   targetType: string,
-  target: AnnouncementTargeting & ExpiringRow,
+  target: AnnouncementTargeting & ExpiringRow & { id?: unknown },
   user: AckCaller,
 ): Promise<boolean> {
   if (targetType !== "announcement") return false;
   if (hasRole(user, MODERATORS)) return true;
   if (isAnnouncementExpired(target, new Date())) return false;
-  return isAnnouncementVisible(target, toAudienceScope(await loadUserScope(strapi, user.id)));
+  // The flag and the marker read again after the relations, so a department
+  // or team delete between the statements cannot pair an old marker with the
+  // new links (utils/visible-ids.ts withFreshAnnouncementFlags).
+  const [checked] = await withFreshAnnouncementFlags(strapi, [target], { id: target.id });
+  return isAnnouncementVisible(checked, toAudienceScope(await loadUserScope(strapi, user.id)));
 }
 
 export default factories.createCoreController(

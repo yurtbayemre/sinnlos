@@ -183,6 +183,19 @@ async function seed(t: TestStrapi): Promise<Seeded> {
   });
   // The draft drops the department; the published row stays Engineering-only.
   await docs(ANN).update({ documentId: annWidened.documentId, data: { department: null } });
+  // Batch 15 (lane 15D), fail closed: "departments" without a department or
+  // a team (D-PT01), and the re-target marker a department or team delete
+  // sets while a criterion remains. Admins and editors read both, nobody
+  // else, and their threads answer like a missing target.
+  const annNoTarget = await create(ANN, "announcements", "S:ann:no-target", {
+    title: "S:ann:no-target",
+    audience: "departments",
+  });
+  const annRetarget = await create(ANN, "announcements", "S:ann:retarget", {
+    title: "S:ann:retarget",
+    department: engineering.documentId,
+    retargetRequired: true,
+  });
 
   // Documents and quick links: company-wide or per department.
   const DOC = "api::document.document";
@@ -283,20 +296,24 @@ async function seed(t: TestStrapi): Promise<Seeded> {
   await create(POLL, "polls", "S:poll:draft", { question: "S:poll:draft", options }, "draft");
 
   // Training: a published course with a published and a draft lesson, a
-  // draft course with a lesson.
+  // draft course with a published lesson. The last one is built the way the
+  // admin panel gets there, since publish readiness (batch 15, decision 06
+  // §G2) refuses to publish a lesson into a draft-only course: the course is
+  // published, the lesson published in it, then the course unpublished. The
+  // unpublish deletes the course's published row, and the published
+  // lesson's link to it goes with it, so the lesson's published row has no
+  // published course: what policies/training-visibility.ts filters on, and
+  // the same state the old fixture got from the dropped link (C23).
   const COURSE = "api::course.course";
   const LESSON = "api::lesson.lesson";
   const course = await create(COURSE, "courses", "S:course:published", {
     title: "S:course:published",
     slug: "s-course-published",
   });
-  const draftCourse = await create(
-    COURSE,
-    "courses",
-    "S:course:draft",
-    { title: "S:course:draft", slug: "s-course-draft" },
-    "draft",
-  );
+  const draftCourse = await create(COURSE, "courses", "S:course:draft", {
+    title: "S:course:draft",
+    slug: "s-course-draft",
+  });
   const lesson = await create(LESSON, "lessons", "S:lesson:published", {
     title: "S:lesson:published",
     course: course.documentId,
@@ -312,6 +329,7 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     title: "S:lesson:in-draft-course",
     course: draftCourse.documentId,
   });
+  await docs(COURSE).unpublish({ documentId: draftCourse.documentId });
 
   // Comments and one reaction on every target, written past the controllers.
   const announcements = [
@@ -323,6 +341,8 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     annEngTeam,
     annDraft,
     annWidened,
+    annNoTarget,
+    annRetarget,
   ];
   const targets: Seeded["targets"] = [
     ...announcements.map((row) => ({

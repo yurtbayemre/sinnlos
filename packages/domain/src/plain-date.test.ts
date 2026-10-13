@@ -8,11 +8,14 @@ import {
   instantEpochMs,
   isPlainDate,
   isValidTimeZone,
+  isWallTimeError,
   isoWeekdayOfKey,
   resolveAppTimeZone,
+  WallTimeError,
   zonedDateKey,
   zonedDayStart,
   zonedHour,
+  zonedTimeOfDay,
   zonedWallTimeToInstant,
 } from "./plain-date.js";
 
@@ -196,5 +199,113 @@ describe("isoWeekdayOfKey and daysBetweenKeys", () => {
   it("refuses values that are no calendar dates", () => {
     expect(() => isoWeekdayOfKey("2026-9-1")).toThrow(/calendar date/);
     expect(() => daysBetweenKeys("2026-09-30", "2026-09-31")).toThrow(/calendar date/);
+  });
+});
+
+/**
+ * 'reject' mode (deep-dive decision 06 §L4): the authoring forms convert a
+ * typed date and time in APP_TIME_ZONE and must refuse a time that a clock
+ * change repeats or skips instead of guessing. The cms's Temporal
+ * wallTimeToInstant(..., "reject") refuses the same inputs
+ * (apps/cms/src/utils/time-parity.test.ts).
+ */
+describe("zonedWallTimeToInstant in 'reject' mode", () => {
+  /** The WallTimeError a call throws, or null. */
+  function rejection(key: string, time: string, zone: string): WallTimeError | null {
+    try {
+      zonedWallTimeToInstant(key, time, zone, "reject");
+      return null;
+    } catch (error) {
+      if (error instanceof WallTimeError) return error;
+      throw error;
+    }
+  }
+
+  it.each([
+    // [day, time, zone, kind]
+    ["2026-10-25", "02:30", "Europe/Berlin", "repeated"],
+    ["2026-10-25", "02:00", "Europe/Berlin", "repeated"],
+    ["2026-10-25", "02:59:59", "Europe/Berlin", "repeated"],
+    ["2027-10-31", "02:30", "Europe/Berlin", "repeated"],
+    ["2027-03-28", "02:30", "Europe/Berlin", "skipped"],
+    ["2027-03-28", "02:00", "Europe/Berlin", "skipped"],
+    ["2026-09-27", "02:30", "Pacific/Auckland", "skipped"],
+    ["2027-04-04", "02:30", "Pacific/Auckland", "repeated"],
+  ] as const)("%s %s in %s is %s", (key, time, zone, kind) => {
+    const error = rejection(key, time, zone);
+    expect(error?.kind).toBe(kind);
+    expect(error).toBeInstanceOf(RangeError);
+    expect(error?.name).toBe("WallTimeError");
+    expect(isWallTimeError(error)).toBe(true);
+    expect(error).toMatchObject({ date: key, time, timeZone: zone });
+  });
+
+  it.each([
+    // The hours around the changes that exist exactly once.
+    ["2026-10-25", "01:59", "Europe/Berlin", "2026-10-24T23:59:00.000Z"],
+    ["2026-10-25", "03:00", "Europe/Berlin", "2026-10-25T02:00:00.000Z"],
+    ["2027-03-28", "01:59", "Europe/Berlin", "2027-03-28T00:59:00.000Z"],
+    ["2027-03-28", "03:00", "Europe/Berlin", "2027-03-28T01:00:00.000Z"],
+    ["2026-09-30", "23:59:59", "Europe/Berlin", "2026-09-30T21:59:59.000Z"],
+    ["2026-09-27", "03:00", "Pacific/Auckland", "2026-09-26T14:00:00.000Z"],
+    ["2026-09-30", "12:00", "UTC", "2026-09-30T12:00:00.000Z"],
+  ])("%s %s in %s is the one instant %s", (key, time, zone, iso) => {
+    expect(zonedWallTimeToInstant(key, time, zone, "reject").toISOString()).toBe(iso);
+    expect(zonedWallTimeToInstant(key, time, zone).toISOString()).toBe(iso);
+  });
+
+  it("keeps 'compatible' the default: the earlier instant, a gap moved forward", () => {
+    expect(zonedWallTimeToInstant("2026-10-25", "02:30", "Europe/Berlin").toISOString()).toBe(
+      "2026-10-25T00:30:00.000Z",
+    );
+    expect(
+      zonedWallTimeToInstant("2027-03-28", "02:30", "Europe/Berlin", "compatible").toISOString(),
+    ).toBe("2027-03-28T01:30:00.000Z");
+  });
+
+  it("still throws a plain RangeError for a malformed input", () => {
+    for (const call of [
+      () => zonedWallTimeToInstant("2026-02-30", "12:00", "Europe/Berlin", "reject"),
+      () => zonedWallTimeToInstant("2026-09-30", "24:00", "Europe/Berlin", "reject"),
+      () => zonedWallTimeToInstant("2026-09-30", "12:00", "Mars/Olympus", "reject"),
+    ]) {
+      expect(call).toThrow(RangeError);
+      expect(call).not.toThrow(WallTimeError);
+    }
+  });
+
+  it("isWallTimeError recognises the error by name and kind, nothing else", () => {
+    const foreign = Object.assign(new RangeError("x"), { name: "WallTimeError", kind: "skipped" });
+    expect(isWallTimeError(foreign)).toBe(true);
+    expect(isWallTimeError(new RangeError("x"))).toBe(false);
+    expect(isWallTimeError(Object.assign(new Error("x"), { name: "WallTimeError" }))).toBe(false);
+    expect(isWallTimeError("WallTimeError")).toBe(false);
+    expect(isWallTimeError(null)).toBe(false);
+  });
+});
+
+describe("zonedTimeOfDay: the HH:mm an instant shows in a zone", () => {
+  it.each([
+    ["2026-09-30T22:30:00.000Z", "Europe/Berlin", "00:30"],
+    ["2026-10-25T00:30:00.000Z", "Europe/Berlin", "02:30"],
+    ["2026-10-25T01:30:00.000Z", "Europe/Berlin", "02:30"],
+    ["2027-03-28T01:00:00.000Z", "Europe/Berlin", "03:00"],
+    ["2026-09-30T10:05:59.999Z", "UTC", "10:05"],
+    ["2026-09-30T10:00:00+02:00", "Asia/Kathmandu", "13:45"],
+  ])("%s in %s is %s", (instant, zone, time) => {
+    expect(zonedTimeOfDay(instant, zone)).toBe(time);
+    expect(zonedTimeOfDay(new Date(instant), zone)).toBe(time);
+  });
+
+  it("round-trips a wall time that exists once", () => {
+    for (const time of ["00:00", "07:15", "12:00", "23:59"]) {
+      const instant = zonedWallTimeToInstant("2026-11-03", time, "Europe/Berlin", "reject");
+      expect(zonedTimeOfDay(instant, "Europe/Berlin")).toBe(time);
+      expect(zonedDateKey(instant, "Europe/Berlin")).toBe("2026-11-03");
+    }
+  });
+
+  it("refuses an offset-less date-time", () => {
+    expect(() => zonedTimeOfDay("2026-09-30T10:00:00", "Europe/Berlin")).toThrow(/instant/);
   });
 });

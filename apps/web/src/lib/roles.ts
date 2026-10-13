@@ -20,12 +20,17 @@
  * roles-matrix-parity.test.ts; a matrix change that is not mirrored here
  * fails that test. The Capabilities shape follows decision 06 §L2
  * (approved 2026-09-29, with the additive `authorScope`): the shape is
- * fixed, the values per batch are in §L1 and §L2.
+ * fixed, the values per batch are in §L1 and §L2. Batch 15 (lane 15A) set
+ * the authoring values (moderators: publish, unpublish and discard; the
+ * department authors' "ownDepartment" areas), and lane 15C opened the
+ * /manage shell (`manage`) to moderators and department authors.
  */
 import {
   AUTHENTICATED,
+  DEPARTMENT_AUTHOR_ROLES,
   MODERATORS,
   ROLE_PRIVILEGE_ORDER,
+  SCHEDULER_ROLES,
   type MatrixRoleType,
 } from "@sinnlos/domain";
 
@@ -277,7 +282,7 @@ export const AUTHORING_AREAS: readonly AuthoringArea[] = [
 ];
 
 export interface Capabilities {
-  /** The /manage shell: admin_role until batch 15 opens it (§L1); then moderators and department authors. */
+  /** The /manage shell (§L1): moderators and department authors since batch 15 (admin_role before). */
   manage: boolean;
   author: Readonly<Record<AuthoringArea, ReadonlySet<AuthoringVerb>>>;
   /** Amendment 1: null exactly when author[area] is empty. */
@@ -297,25 +302,54 @@ export interface Capabilities {
   // canPostAds, canDeleteAnyAd, canEditAnyAd, canTrain.
 }
 
+/** Every verb of a draft & publish area the moderators author (batch 15). */
+const DRAFT_AND_PUBLISH_VERBS: readonly AuthoringVerb[] = [
+  "create",
+  "edit",
+  "publish",
+  "unpublish",
+  "schedule",
+  "discard",
+  "delete",
+];
+
 /**
  * What the moderators (admin_role, editor) may author per area, from the
- * CMS grants of today (batch 13): full CRUD on announcements, events,
- * polls, quick links, documents and wiki spaces, nothing on courses and
- * lessons (their write routes do not exist; the admin panel authors them).
- * Decision 06 §L2 maps each verb to a CMS action: `edit` and `schedule` to
- * `update`, `publish`/`unpublish`/`discard` to the Draft & Publish actions
- * batch 15 adds (no role holds them yet), and an area only has the verbs
- * its §A row offers (polls and wiki spaces: create, edit, delete).
+ * CMS grants since batch 15 (lane 15A): announcements, events, quick links
+ * and documents with every verb (the custom publish, unpublish and
+ * discardDraft actions, `schedule` as `update`), polls and wiki spaces with
+ * create, edit and delete (a poll publishes at create; §A), nothing on
+ * courses and lessons (their write routes arrive in batch 17). Decision 06
+ * §L2 maps each verb to a CMS action: `edit` and `schedule` to `update`,
+ * `discard` to `discardDraft`. Documents have no web pages before 16C; the
+ * capability says what the CMS allows, not which page exists (§N7).
  */
 const MODERATOR_AUTHORING: Readonly<Record<AuthoringArea, readonly AuthoringVerb[]>> = {
-  announcements: ["create", "edit", "schedule", "delete"],
-  events: ["create", "edit", "schedule", "delete"],
+  announcements: DRAFT_AND_PUBLISH_VERBS,
+  events: DRAFT_AND_PUBLISH_VERBS,
   polls: ["create", "edit", "delete"],
-  quickLinks: ["create", "edit", "schedule", "delete"],
-  documents: ["create", "edit", "schedule", "delete"],
+  quickLinks: DRAFT_AND_PUBLISH_VERBS,
+  documents: DRAFT_AND_PUBLISH_VERBS,
   wikiSpaces: ["create", "edit", "delete"],
   courses: [],
   lessons: [],
+};
+
+/**
+ * What a department author (decision 06 amendment 1, §N2, §N7: the
+ * `department_head` role, DEPARTMENT_AUTHOR_ROLES) may author: their own
+ * department's announcements, events and documents, with create, edit,
+ * publish, unpublish and discard. No schedule (the role is not in
+ * SCHEDULER_ROLES, although it holds `update`), no delete (no grant). The
+ * scope is "ownDepartment": the CMS admits only items their department owns
+ * and targets, and a page also needs viewer.department (§L2).
+ */
+const DEPARTMENT_AUTHOR_AUTHORING: Readonly<
+  Partial<Record<AuthoringArea, readonly AuthoringVerb[]>>
+> = {
+  announcements: ["create", "edit", "publish", "unpublish", "discard"],
+  events: ["create", "edit", "publish", "unpublish", "discard"],
+  documents: ["create", "edit", "publish", "unpublish", "discard"],
 };
 
 /** wiki-page create: moderators, department heads and team leads. */
@@ -334,6 +368,12 @@ const WIKI_PAGE_ROW_EDITOR_ROLES: ReadonlySet<string> = roleSet(
 
 const MODERATOR_ROLES: ReadonlySet<string> = roleSet(...MODERATORS);
 
+/** The department authors (amendment 1, §N1): role only, the department is checked per page. */
+const DEPARTMENT_AUTHOR_ROLE_SET: ReadonlySet<string> = roleSet(...DEPARTMENT_AUTHOR_ROLES);
+
+/** The roles that may schedule (`publishAt`, `unpublishAt`; §D rule 1, §L2). */
+const SCHEDULER_ROLE_SET: ReadonlySet<string> = roleSet(...SCHEDULER_ROLES);
+
 /**
  * The capabilities of a role type; role-only (the CMS decides row gates per
  * request) and fail-closed: a missing or unknown role gets nothing.
@@ -341,15 +381,27 @@ const MODERATOR_ROLES: ReadonlySet<string> = roleSet(...MODERATORS);
 export function capabilitiesFor(role: Role): Capabilities {
   const admin = isAdmin(role);
   const moderator = hasRole(MODERATOR_ROLES, role);
+  const departmentAuthor = !moderator && hasRole(DEPARTMENT_AUTHOR_ROLE_SET, role);
+  const scheduler = hasRole(SCHEDULER_ROLE_SET, role);
   const author = {} as Record<AuthoringArea, ReadonlySet<AuthoringVerb>>;
   const authorScope = {} as Record<AuthoringArea, AuthoringScope | null>;
   for (const area of AUTHORING_AREAS) {
-    const verbs = new Set<AuthoringVerb>(moderator ? MODERATOR_AUTHORING[area] : []);
+    const granted = moderator
+      ? MODERATOR_AUTHORING[area]
+      : departmentAuthor
+        ? (DEPARTMENT_AUTHOR_AUTHORING[area] ?? [])
+        : [];
+    // `schedule` is `update` plus SCHEDULER_ROLES (§L2): never for department authors.
+    const verbs = new Set<AuthoringVerb>(
+      granted.filter((verb) => verb !== "schedule" || scheduler),
+    );
     author[area] = verbs;
-    authorScope[area] = verbs.size > 0 ? "any" : null;
+    authorScope[area] = verbs.size === 0 ? null : moderator ? "any" : "ownDepartment";
   }
   return {
-    manage: admin,
+    // The /manage shell (§L1, §N7): every role that authors an area. A
+    // department author's pages still need the viewer's department (§N1).
+    manage: moderator || departmentAuthor,
     author: Object.freeze(author),
     authorScope: Object.freeze(authorScope),
     wikiPages: {

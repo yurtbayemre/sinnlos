@@ -29,7 +29,9 @@ behind most rules (its §5 conventions and §7 open issues).
   - [Shared policy helpers](#shared-policy-helpers)
   - [Request ids](#request-ids)
 - [Global guards](#global-guards)
+  - [Document Service guards](#document-service-guards)
 - [Content types and their access rules](#content-types-and-their-access-rules)
+  - [Announcement and event targeting](#announcement-and-event-targeting)
   - [Poll department targeting](#poll-department-targeting)
   - [Poll guest access](#poll-guest-access)
   - [Private user fields](#private-user-fields)
@@ -308,8 +310,8 @@ per-user token version so that a password change can end the older ones:
 | Role              | Who                                                                                                                                                                                                                                                                                                                                    |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `admin_role`      | Full access, user management, the `/manage` area and reports                                                                                                                                                                                                                                                                           |
-| `editor`          | Authors announcements, events, polls, documents, quick links and the wiki; moderates comments, reactions and ads                                                                                                                                                                                                                       |
-| `department_head` | Edits their own department (description, colour) and its teams (description); writes wiki pages                                                                                                                                                                                                                                        |
+| `editor`          | Authors announcements, events, polls, documents, quick links and the wiki; announcements, events, polls and quick links also in the web at `/manage` (since batch 15); moderates comments, reactions and ads                                                                                                                           |
+| `department_head` | Edits their own department (description, colour) and its teams (description); writes wiki pages; since batch 15 authors announcements, events and documents of their own department (announcements and events at `/manage`)                                                                                                            |
 | `team_lead`       | Edits their own team (description); writes wiki pages                                                                                                                                                                                                                                                                                  |
 | `member`          | Reads, comments, reacts, gives kudos, posts ads, answers RSVPs, edits wiki pages they wrote                                                                                                                                                                                                                                            |
 | `guest`           | Restricted reader: no announcements (and so no read receipts), no departments or teams, no kudos, no marketplace, no RSVPs, no training; sees only the polls opened to guests                                                                                                                                                          |
@@ -348,6 +350,21 @@ letters:
   [write allowlist](#field-level-write-allowlist) (description, plus colour
   on the head's own department); wiki page `C`/`U` by `can-edit-wiki` and
   the same allowlist.
+- **Department authors (batch 15).** `department_head` holds `C` and `U` on
+  announcements, events and documents, plus the five authoring actions
+  (`publish`, `unpublish`, `discardDraft`, `authoringList`, `editable`) on
+  the same three types. `global::can-author` admits the role only with a
+  `user.department` and only on items that department owns
+  (`ownerDepartment`) and targets ([below](#field-level-write-allowlist));
+  there is no `delete` grant, and no authoring grant on quick links, polls,
+  wiki spaces or training.
+- **The authoring actions (batch 15).** Moderators hold `publish`,
+  `unpublish`, `discardDraft`, `authoringList` and `editable` on
+  announcements, events, quick links and documents, and `authoringList`
+  and `editable` on polls (a poll publishes at create and closes through
+  `closesAt`). Never `guest` or `authenticated`. Neither editors nor
+  department heads hold `role.find`: audience roles are written as role
+  types and resolved on the server.
 - **Courses and lessons** have no content-API write routes at all
   (`only: ["find", "findOne"]`); authoring happens in the Strapi admin.
 - **`search-log`** is write-only telemetry: no content-API route lists raw
@@ -425,15 +442,37 @@ letters:
 
 ## Route policies
 
-Policies live in `apps/cms/src/policies/` (21 files) and are attached per
+Policies live in `apps/cms/src/policies/` (22 files) and are attached per
 route in `apps/cms/src/api/*/routes/*.ts`.
 
 ### Write-side guards
 
-- `is-admin-or-editor`: create, update and delete of announcements,
-  events, polls, documents, quick links, wiki spaces and wiki revisions;
-  create and delete of departments and teams; wiki page delete; kudos
-  delete; the search-log `summary` route.
+- `can-author` (batch 15, decision 06 §B2): create and update of
+  announcements, events, quick links, documents and polls, and their
+  authoring actions (publish, unpublish, discard-draft, the `/authoring`
+  list and the `/:id/editable` form read), configured per route with
+  `{ uid }` (and the action's `intent`). `admin_role` and `editor` are the
+  `moderator` class: **no bypass**, their payloads go through the
+  allowlist below like everyone's. A `department_head` with a
+  `user.department` is the `departmentAuthor` class on announcements,
+  events and documents, on an existing item only when every row of it
+  (draft and published) is owned by that department and lies in its
+  scope: announcement `department` = theirs, `team` null or one of theirs,
+  audience roles staff role types only; event and document `departments`
+  = exactly theirs. Everyone else, and every item outside that scope,
+  gets 403 on the generic create/update and on the list, and 404 on the
+  custom actions (like a hidden findOne, so the answer says nothing about
+  the item). Before it reads any row the gate reads the document's
+  revision, and the document lock accepts the write only when the locked
+  revision still equals it as well as the client's `If-Match`; on a
+  mismatch the lock asks the gate's classifier again on the rows under
+  the lock, so a caller whose class went away in between (a moderator
+  widened the item, the department was deleted, the head was demoted)
+  gets 403/404, never 412, and never the new revision.
+- `is-admin-or-editor`: delete of announcements, events, polls, documents
+  and quick links (with `If-Match`); create, update and delete of wiki
+  spaces and wiki revisions; create and delete of departments and teams;
+  wiki page delete; kudos delete; the search-log `summary` route.
 - `can-edit-department`: department update only by the `department_head`
   of that department, and only `description` and `color` (`#rrggbb`);
   `admin_role` and `editor` bypass.
@@ -463,10 +502,71 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Field-level write allowlist
 
 The write policies decide _whether_ a caller may write a row and in which
-role class (head, lead, author, …);
-`apps/cms/src/utils/write-allowlist.ts` decides _what_ a caller without the
-`admin_role`/`editor` bypass may send (FX07). It is the single place those
-payload rules live:
+role class (head, lead, author, moderator, department author, …);
+`apps/cms/src/utils/write-allowlist.ts` decides _what_ that class may send
+(FX07). It is the single place those payload rules live. Since batch 15 it
+also holds the `admin_role`/`editor` payloads on announcements, events,
+quick links, documents and polls (the `moderator` class); the bypass is
+left only on the wiki, department and team gates until batches 16 and 17
+rebuild them.
+
+The v2 authoring rules (batch 15, decision 06 §B1):
+
+- **Exact keys per class.** The fields each class may send are listed in
+  `@sinnlos/domain` (`authoring/fields.ts`) and pinned equal to the rules.
+  Department authors get no `pinned`, `requiresAck`, `ackDeadline`,
+  `publishAt` or `unpublishAt`. Never writable by anyone: the targeting
+  flags (`audience`, `notifyAudience`, `retargetRequired`), ownership
+  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`), `scheduleError`
+  and, until batch 16, `document.file`. A test walks every schema
+  attribute of the five types: each is a field of some class or listed in
+  `REFUSED_ATTRIBUTES` with its reason.
+- **Values have codes.** A refused value answers its key in
+  `details.keys` and, where the check names a reason, a code in
+  `details.codes` (`tooLong`, `invalidInstant`, `invalidUrl`,
+  `endBeforeStart`, `notMidnight`, `scheduleInPast`,
+  `unpublishBeforePublish`, `expiresBeforePublish`, `optionCount`,
+  `frozenAfterVotes`, … : `@sinnlos/domain` `authoring/codes.ts`). A
+  relation, role or media value that does not resolve, is foreign or lies
+  outside the caller's department answers its key and **no code**, exactly
+  like a malformed one: no existence oracle.
+- **Relations and roles.** To-one relations and to-many lists are resolved
+  to documentIds and written as a full replacement (a to-one targeting key
+  takes exactly one target or `null`; a disconnect or an empty shape such
+  as `{ connect: [] }` is refused, so it can neither skip a department
+  author's pin nor count as a re-target); audience roles are
+  role types (`member`, `team_lead`, …) resolved to the users-permissions
+  roles on the server, `public` and `authenticated` refused.
+- **Targeting never widens implicitly.** `audience` (announcement, poll,
+  document, quick link) and the event's `notifyAudience` are re-derived
+  ("departments" iff a target is linked) only when the payload carries a
+  targeting key; an announcement's `retargetRequired` marker is lowered
+  only by a payload that carries `department`, `team` or `audienceRoles`.
+  A department author's targeting is pinned to their department (set on
+  create when missing; `null`, `[]`, another department or its team are
+  refused), and their creates set `ownerDepartment` to it.
+- **Server-set fields.** The author, organizer or uploader is the caller
+  on create (which also keeps authors out of their own notifications).
+- **Cross checks** run over the stored draft overlaid with the payload:
+  end after start, an all-day event's local midnights in `APP_TIME_ZONE`,
+  the schedule order, an acknowledgement deadline only with
+  `requiresAck`, and early publish readiness when `publishAt` is set.
+- **Polls.** 2 to 20 answers, unique after trimming (every writer, the
+  poll lifecycle); at most 200 characters each through the content API.
+  Once a poll has a vote, its options and anonymity can no longer change:
+  compared with the published row, refused early here and again under
+  the poll's lock at the write ([Poll department targeting](#poll-department-targeting)).
+- **No client query on writes.** The authoring controller refuses every
+  query key but `status`, takes the status explicitly per type
+  (announcements, events, quick links and documents need `draft` or
+  `published`; polls always publish), writes through the Document Service
+  and answers a fixed DTO (`documentId`, `version`, `status`,
+  `publishedAt`, the schedule fields) with `ETag: "<version>"`. Updates and
+  the custom actions need `If-Match` (428 without it, 412 with the current
+  revision when stale). A department author's discard of an item without
+  a published version answers 400 `neverPublished` instead of deleting it.
+
+The FX07 rules of the other gates:
 
 - A department head may write `description` and `color` of their own
   department; a team lead, or the head of the team's department, the
@@ -485,7 +585,9 @@ payload rules live:
   suffix, and these writes always publish (`?status=draft` is pinned away).
 - `routes.matrix.test.ts` fails when a write route that a non-bypass role
   holds on these types, or on any relation into the wiki, skips the
-  allowlist.
+  allowlist, and when a create or update a moderator holds on an authored
+  type is not enforced for the `moderator` class (`KNOWN_OPEN_PAYLOADS`
+  lists the wiki, department and team gates that still bypass).
 
 The web has no write path for wiki pages, departments or teams; these rules
 govern direct API calls. Department-head and team-lead rights compare
@@ -640,6 +742,50 @@ query and output handling, and the other three are global middlewares
 `config/middlewares.ts` and fails when the list loses one of the three
 global middlewares.
 
+### Document Service guards
+
+Since batch 15 a second layer sits under every writer, not only the
+content API: Document Service middlewares, registered in one place and in
+one order (`apps/cms/src/bootstrap/document-middlewares.ts`). The content
+API, the admin panel's Content Manager, the scheduler and the boot
+writers all pass them, and the cms refuses to boot when
+`strapi.documents.use` is gone.
+
+- **Offset-less instants** (DT-OFFSETLESS,
+  `utils/offsetless-datetime-guard.ts`, first): a datetime attribute sent
+  as a string without `Z` or a numeric offset answers 400 `ValidationError`
+  with `details.keys`, before any transaction. Strapi would read such a
+  value in the process zone (UTC). Date objects, numbers and null pass;
+  `date` attributes are not instants.
+- **The document lock** (`utils/document-lock.ts`, second): every create,
+  update, clone, delete, publish, unpublish and discard of a guarded type
+  (the seven scheduled types, poll, wiki space, department, team) runs in a
+  transaction that locks the document's revision row and advances the
+  revision afterwards, whoever writes. Inside the authoring scope the web
+  routes open (batch 15 lane 15A: `If-Match`), the lock accepts only the
+  current revision, and re-checks the caller's class on a mismatch: a
+  caller who lost it gets 403 or 404 and never learns the new revision; one
+  who kept it gets 412 with the current revision. Raw writes of guarded
+  rows are inventoried by `raw-writers.test.ts`: each takes the lock and
+  advances the revision, or only raises a targeting flag.
+- **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
+  scheduled type needs the fields the published validation requires, and
+  a lesson's course and a wiki page's parent must be published; a publish
+  that would drop that link anyway is refused and rolled back. This binds
+  the admin panel and the scheduler too.
+- **The audit trail** (`utils/audit.ts`, last of the content middlewares):
+  one `audit_events` row per change of a guarded document, written in the
+  change's transaction (a failing insert rolls the change back): the
+  action, the document, the revision, who (user, admin user or system) and
+  from where (content API, admin panel, scheduler, boot), the role class
+  the gate admitted, and the changed attribute names, never values. The
+  rows are append-only: a lifecycle refuses every create, change and delete
+  except the recorder's creates and the retention janitor's deletes
+  (`AUDIT_RETENTION_DAYS`, default 365). The admin panel can read them, not
+  change them; a database superuser still can (an application trail, not
+  tamper-evident storage). Not covered: user and role changes, refused
+  attempts, raw writes other than the scheduler's.
+
 ## Content types and their access rules
 
 The [README content model](../README.md#content-model) lists the types;
@@ -649,13 +795,13 @@ this is who sees and changes what, per type.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                         |
 | `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. The `audience` field is not part of the decision. From its `expiresAt` instant it leaves lists, threads and digests for everyone but admins and editors.                                                                                                                                                                              |
+| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                            |
 | `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                 |
 | `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                               |
 | `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
 | `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
 | `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows. |
-| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read. ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                                                                                                                                                  |
+| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read; `notifyAudience` = `departments` without a department notifies nobody ([below](#announcement-and-event-targeting)). ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                              |
 | `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                                   |
 | `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                              |
 | `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                             |
@@ -671,6 +817,59 @@ this is who sees and changes what, per type.
 | `wiki-revision`   | Inherits its page's visibility; not readable by `guest`. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only.                                                                                                                                                                                                                                                                                                                      |
 | _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
 | _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### Announcement and event targeting
+
+Batch 15 makes department targeting fail closed (decision 06 §B6, §N9).
+Enforced by the cms for every reader and every notification:
+
+- **Announcements** are read through one rule,
+  `packages/domain/src/audience.ts` (`isAnnouncementTargetedTo`), which the
+  read policy, the bell and digest fan-outs, the comment and reaction
+  target checks, the acknowledgement controller and the web acknowledgement
+  report all ask. Besides the AND-combined criteria, two states target
+  nobody, whatever else is set:
+  - **D-PT01:** `audience` is `departments` but neither a department nor a
+    team is linked (a legacy row, an unlink in the admin panel, or a
+    delete that removed the last target). Until batch 15 such a row was
+    company-wide.
+  - **`retargetRequired`:** a department or team the announcement targeted
+    was deleted. Deleting one AND-combined criterion would widen the
+    audience to what remains (a department-plus-team announcement would
+    reach the team's members in other departments, or the whole
+    department), so the department and team delete hooks set the marker
+    first.
+
+  Such an announcement is readable by admins and editors only (their read
+  bypass), its thread answers like a missing target, nobody is notified
+  of it or gets it in a digest, and the acknowledgement report counts no
+  audience. It stays so until a moderator re-targets it.
+
+- **Events** stay readable calendar-wide. `notifyAudience` is
+  `departments` on every event row that links a department; such an event
+  without a department left notifies nobody when it is published, instead
+  of the whole company.
+- **The flags only restrict.** The cms raises the announcement `audience`
+  and the event `notifyAudience` on every row that links a target, in the
+  same transaction as each write (admin panel, content API, scheduler;
+  `apps/cms/src/utils/targeting-flags.ts`), and a boot backfill raises them
+  on rows written before. Before a department or team delete cascades its
+  links away, the delete sets the flags and the marker on the rows that
+  linked it and advances the revision of every announcement, event and
+  document that linked it, so a form opened before the delete gets a
+  conflict or "not found" instead of writing over it (a delete outside a
+  transaction, which only a script can make, is refused). Every reader
+  reads the flag and the marker once more after the targeting relations
+  and keeps the raised value, so a delete between those statements never
+  pairs the old marker with the new links; a row that second read no
+  longer finds (unpublished, republished or deleted in between) counts as
+  restricted. Nothing lowers a
+  flag or the marker except an explicit re-target: in the admin panel, set
+  Audience (or Notify audience) to `all` or clear Retarget required; a
+  save that still links a target is flipped back to `departments`.
+- **Residual:** an admin-panel form opened before a department or team
+  delete still holds the old marker value (false) and saves it back; the
+  admin panel is not revision-checked. The audit trail shows the save.
 
 ### Poll department targeting
 
@@ -696,7 +895,25 @@ Enforced by the cms, not only in the UI:
   (`apps/cms/src/utils/poll-audience-guard.ts`), and deleting a department
   sets it on every poll that still has the department. To open a
   restricted poll to everyone, remove its departments **and** set Audience
-  to `all`.
+  to `all` (in the web, an explicit departments change; the content API
+  derives Audience from it and refuses a client `audience` since batch 15).
+- **Options and anonymity freeze at the first vote** (batch 15). A vote
+  stores an option index and may be anonymous, so once a poll has a vote,
+  no writer (web, content API, admin panel) can publish other options or
+  another anonymity: the poll guard compares what a publish, a Save and
+  publish or a draft save that carries them would write with the
+  currently **published** row (votes are cast on it) and refuses with
+  `frozenAfterVotes`. It runs under the poll's document lock, which the
+  vote handler takes before it reads, checks and inserts, so a vote and an
+  options change sent at the same moment cannot both succeed. That row is
+  the only baseline, so a voted poll keeps it: an unpublish of a poll with
+  a vote is refused (an unpublish deletes the published row and with it
+  the ballots' links, and a republish would compare with nothing), and a
+  poll with linked votes but no published row can no longer be published
+  (Codex review of 15A, finding 1). A poll unpublished before batch 15 has
+  no such votes: that unpublish deleted its vote links, so it counts as
+  unvoted and its orphaned ballots count nowhere (DEPLOYMENT.md
+  "Deploying batch 15", step 6).
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail), the custom `vote`/`results` actions and the batched
   `GET /api/poll-results`, all through `apps/cms/src/utils/poll-audience.ts`.
@@ -820,22 +1037,22 @@ allowed. Every helper and role set is pinned to the cms grants by
 `apps/web/src/lib/roles-matrix-parity.test.ts`: a grant change in
 `permission-matrix.ts` that the web does not mirror fails CI.
 
-| Helper                 | Roles                                   | Used for                                                                                                                                                                                                          |
-| ---------------------- | --------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `isAdmin`              | `admin_role`                            | `/manage` and `/manage/analytics` (redirect non-admins to `/`)                                                                                                                                                    |
-| `capabilitiesFor`      | per role (decision 06 §L2)              | `manage` (the _Admin_ nav entry, `admin_role` only), `reports` (the acknowledgement and training reports), and the authoring, wiki and org capabilities the authoring pages use                                   |
-| `canCreatePolls`       | `admin_role`, `editor`                  | _New poll_ button, `/polls/new`, the create-poll action; the "Visible to guests" / "Guests can vote" notes on poll cards                                                                                          |
-| `canRsvp`              | the five staff roles + `authenticated`  | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant)                                                                                                                   |
-| `canPostAds`           | the five staff roles                    | _New ad_ button, `/marketplace/new`                                                                                                                                                                               |
-| `canEditAnyAd`         | `admin_role`                            | editing someone else's ad (the _Edit_ link and `/marketplace/[id]/edit`)                                                                                                                                          |
-| `canDeleteAnyAd`       | `admin_role`, `editor`                  | the _Moderation_ card with _Delete ad_ on someone else's ad                                                                                                                                                       |
-| `canComment`           | the five staff roles + `authenticated`  | the comment form                                                                                                                                                                                                  |
-| `canReact`             | the five staff roles + `authenticated`  | the reaction bar                                                                                                                                                                                                  |
-| `canDeleteOwnComments` | the five staff roles                    | the delete button on one's own comments                                                                                                                                                                           |
-| `canTrain`             | the five staff roles + `authenticated`  | no caller yet (pinned by the parity test); the training report counts the same set (`TRAINING_ROLES`), and the training pages gate with `isReadDenied(role, "training")`                                          |
-| `canReceiveDigests`    | the five staff roles + `authenticated`  | the digest options on `/profile` (the announcement readers)                                                                                                                                                       |
-| `isReadDenied`         | a known role without the section's read | pages skip the request and show _Not available for your account_; the nav hides the entry (guest: announcements, departments, teams, kudos, marketplace, training; `authenticated`: the celebrations on `/kudos`) |
-| `isGuest`              | `guest`                                 | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint                                                                                                      |
+| Helper                 | Roles                                   | Used for                                                                                                                                                                                                                                                                                                                                      |
+| ---------------------- | --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `isAdmin`              | `admin_role`                            | `/manage/analytics` (redirects non-admins to `/`), and the reports and Strapi admin links on the `/manage` landing                                                                                                                                                                                                                            |
+| `capabilitiesFor`      | per role (decision 06 §L2)              | `manage` (the _Manage_ nav entry and the `/manage` shell: `admin_role`, `editor` and, since batch 15, `department_head`), `author` and `authorScope` per area (the `/manage` tiles, lists, forms and buttons; `ownDepartment` for a department head), `reports` (the acknowledgement and training reports), and the wiki and org capabilities |
+| `canCreatePolls`       | `admin_role`, `editor`                  | the _New poll_ button on `/polls` (`/polls/new` redirects to `/manage/polls/new`, which needs the `create` verb of `author.polls`); the "Visible to guests" / "Guests can vote" notes on poll cards                                                                                                                                           |
+| `canRsvp`              | the five staff roles + `authenticated`  | RSVP controls and the RSVP summary fetch on `/events` (the same roles hold the `summary` grant)                                                                                                                                                                                                                                               |
+| `canPostAds`           | the five staff roles                    | _New ad_ button, `/marketplace/new`                                                                                                                                                                                                                                                                                                           |
+| `canEditAnyAd`         | `admin_role`                            | editing someone else's ad (the _Edit_ link and `/marketplace/[id]/edit`)                                                                                                                                                                                                                                                                      |
+| `canDeleteAnyAd`       | `admin_role`, `editor`                  | the _Moderation_ card with _Delete ad_ on someone else's ad                                                                                                                                                                                                                                                                                   |
+| `canComment`           | the five staff roles + `authenticated`  | the comment form                                                                                                                                                                                                                                                                                                                              |
+| `canReact`             | the five staff roles + `authenticated`  | the reaction bar                                                                                                                                                                                                                                                                                                                              |
+| `canDeleteOwnComments` | the five staff roles                    | the delete button on one's own comments                                                                                                                                                                                                                                                                                                       |
+| `canTrain`             | the five staff roles + `authenticated`  | no caller yet (pinned by the parity test); the training report counts the same set (`TRAINING_ROLES`), and the training pages gate with `isReadDenied(role, "training")`                                                                                                                                                                      |
+| `canReceiveDigests`    | the five staff roles + `authenticated`  | the digest options on `/profile` (the announcement readers)                                                                                                                                                                                                                                                                                   |
+| `isReadDenied`         | a known role without the section's read | pages skip the request and show _Not available for your account_; the nav hides the entry (guest: announcements, departments, teams, kudos, marketplace, training; `authenticated`: the celebrations on `/kudos`)                                                                                                                             |
+| `isGuest`              | `guest`                                 | wording only, never a gate: the poll card's "Guests can't vote on this poll." instead of the department hint                                                                                                                                                                                                                                  |
 
 Poll voting has no role helper: the poll card renders what the cms answers
 per poll in `GET /api/polls/:id/results` (`canVote`, the targeted
@@ -854,6 +1071,18 @@ them, and the ⌘K search skips them. The admin area lives under
 reverse proxy.
 
 ## Tests that pin these rules
+
+- `apps/cms/src/bootstrap/document-middlewares.test.ts`,
+  `index.register.test.ts`: the Document Service middleware slots and their
+  order; `framework-contract.test.ts` pins the Strapi behaviour they rely
+  on (registration order is run order, a middleware's transaction is
+  joined, create/update with status published publish without a publish
+  pass, publish drops a link to an unpublished target).
+- `apps/cms/src/raw-writers.test.ts`: every module that writes through the
+  query layer, and the rule each raw writer of a guarded type satisfies.
+- `apps/cms/src/integration/{datetime-guard,document-concurrency,scheduled-publish,audit,targeting-flags-backfill}.integration.test.ts`:
+  the document layer on SQLite and Postgres 16, through the Content Manager
+  as well.
 
 - `infra/readme-permissions.test.ts`: the README permission tables against
   `PERMISSION_MATRIX`, `CUSTOM_ACTION_GRANTS`, the user reads and the set
@@ -887,6 +1116,12 @@ reverse proxy.
   against the cms grants.
 - `apps/cms/src/poll-exposure.test.ts`: no module reads polls past the
   poll rules.
+- `packages/domain/src/audience.test.ts`, `apps/cms/src/utils/targeting-flags.test.ts`
+  and the department and team lifecycle suites: D-PT01, the re-target
+  marker, the flags raised and never lowered, the delete hooks' revision
+  advance in ascending order; `integration/targeting-fail-closed.integration.test.ts`
+  runs them over HTTP on SQLite and Postgres, with the batch-14 discard
+  case and the read-only diagnostics.
 - `apps/cms/src/extensions/users-permissions/strapi-server.test.ts`: the
   token versions: the claim, the bump and the save in one transaction and
   its rollback, the admin-panel guard and the dropped `tokenVersion`;

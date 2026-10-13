@@ -7,6 +7,13 @@
  * plain-date.ts), so importers did not change.
  */
 export * from "./audience.js";
+export * from "./authoring/codes.js";
+export * from "./authoring/dto.js";
+export * from "./authoring/fields.js";
+export * from "./authoring/http.js";
+export * from "./authoring/icons.js";
+export * from "./authoring/poll-options.js";
+export * from "./authoring/validators.js";
 export * from "./classified.js";
 export * from "./comment-target.js";
 export * from "./entry-id.js";

@@ -41,6 +41,8 @@
  * up_permissions at runtime (loadRoleGrants), once per run. A recipient is
  * targeted AND holds the read grant AND is not blocked.
  */
+import { AUDIENCE_DEPARTMENTS } from "@sinnlos/domain";
+
 import {
   isAnnouncementVisible,
   type AnnouncementTargeting,
@@ -48,6 +50,7 @@ import {
 } from "./announcement-audience";
 
 const USER_UID = "plugin::users-permissions.user";
+const ANNOUNCEMENT_UID = "api::announcement.announcement";
 const TEAM_UID = "api::team.team";
 const PERMISSION_UID = "plugin::users-permissions.permission";
 
@@ -331,6 +334,12 @@ export function holdsGrant(scope: UserScope, roles: ReadonlySet<number>): boolea
  * announcement.find, not blocked (`scopes` holds active users only).
  * admin_role and editor get strictly the targeted audience like everyone
  * else (owner default, FX19): their read bypass is not a subscription.
+ *
+ * An announcement that targets nobody (batch 15: D-PT01, or the
+ * `retargetRequired` marker) reaches nobody, admin_role and editor
+ * included. The caller hands in the row with its `audience` and
+ * `retargetRequired`: the announcement lifecycle re-reads the published
+ * row with every scalar (no select).
  */
 export function announcementRecipients(
   announcement: AnnouncementTargeting,
@@ -341,6 +350,81 @@ export function announcementRecipients(
     (scope) =>
       holdsGrant(scope, readers) && isAnnouncementVisible(announcement, toAudienceScope(scope)),
   );
+}
+
+const isObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/** The announcement columns the read-side helper raises. */
+export interface AnnouncementFlagRow {
+  id?: unknown;
+  audience?: string | null;
+  retargetRequired?: boolean | null;
+}
+
+/**
+ * Re-reads `audience` and `retargetRequired` of the announcement rows that
+ * match `where`, AFTER the caller loaded `rows` with their targeting
+ * relations, and returns `rows` with each value raised to what either read
+ * says. A row the second read misses comes back restricted
+ * (`retargetRequired: true`): it is gone or was replaced (an unpublish, a
+ * republish, a delete) after the first read, so its relations may already
+ * show a department or team delete whose marker the first read predates.
+ *
+ * WHY. The query engine selects a row's scalars and then loads each
+ * populated relation with a statement of its own. Under Read Committed a
+ * department or team delete that commits between those statements hands
+ * the predicate the marker as it was BEFORE the delete (false) next to the
+ * relations as they are AFTER it (the deleted criterion gone): the
+ * remaining criterion alone would admit readers that neither state admits
+ * (Codex review of lane 15D). The second read runs after the relations,
+ * so it sees the delete whenever they do, and the marker is raised. An
+ * explicit re-target (the only thing that lowers) committing between the
+ * reads is caught by the first read, which still says restricted. Taking
+ * the raised value of either read only ever restricts. A row the second
+ * read cannot see any more has no fresh marker to raise from, so it fails
+ * closed (Codex review of batch 15: a team delete between the scalar and
+ * the relation reads, then an unpublish before the re-read, handed the
+ * fan-out the old `false` with the team already gone, and the rest of the
+ * department was notified). The callers treat it like any other
+ * restricted row: not listed, not readable, nobody notified. (Relations
+ * read by separate populate statements can still disagree with each other
+ * during a concurrent re-target, as before batch 15; that never involves a
+ * delete.)
+ *
+ * Every announcement predicate caller in the cms runs its rows through this:
+ * the read policy, the comment and reaction target checks, the digest, the
+ * acknowledgement controller and the fan-out (lane 15D; the flags are
+ * utils/targeting-flags.ts's).
+ */
+export async function withFreshAnnouncementFlags<T extends AnnouncementFlagRow>(
+  strapi: {
+    db: { query(uid: string): { findMany(params: Record<string, unknown>): Promise<unknown> } };
+  },
+  rows: T[],
+  where: Record<string, unknown>,
+): Promise<T[]> {
+  if (rows.length === 0) return rows;
+  const reread = await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+    where,
+    select: ["id", "audience", "retargetRequired"],
+  });
+  const fresh = new Map<unknown, Record<string, unknown>>();
+  for (const row of rowsOf<unknown>(reread)) {
+    if (isObject(row)) fresh.set(row.id, row);
+  }
+  return rows.map((row) => {
+    const now = fresh.get(row.id);
+    if (!now) return { ...row, retargetRequired: true };
+    return {
+      ...row,
+      audience:
+        row.audience === AUDIENCE_DEPARTMENTS || now.audience === AUDIENCE_DEPARTMENTS
+          ? AUDIENCE_DEPARTMENTS
+          : row.audience,
+      retargetRequired: row.retargetRequired === true || now.retargetRequired === true,
+    };
+  });
 }
 
 /** Decide whether a single space is visible to the given scope. */

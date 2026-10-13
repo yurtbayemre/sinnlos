@@ -1,0 +1,55 @@
+{
+  "title": "Polls",
+  "description": "Ask questions, edit them and close them.",
+  "new": "New poll",
+  "newDescription": "A poll is published as soon as it is created.",
+  "editTitle": "Edit poll",
+  "emptyTitle": "No polls yet",
+  "emptyHint": "Ask the first question.",
+  "sections": {
+    "question": "Question",
+    "audience": "Audience",
+    "guestAccess": "Guest access"
+  },
+  "fields": {
+    "question": {
+      "label": "Question",
+      "placeholder": "What do you want to ask?"
+    },
+    "options": {
+      "label": "Answers",
+      "hint": "{min} to {max} answers, each up to {length} characters.",
+      "frozen": "Someone has voted, so the answers can no longer change.",
+      "option": "Answer {number}",
+      "add": "Add an answer",
+      "remove": "Remove answer {number}"
+    },
+    "closesAt": {
+      "label": "Closes on",
+      "hint": "Voting ends at the end of this day. Empty: no end."
+    },
+    "anonymous": {
+      "label": "Anonymous voting",
+      "hint": "Nobody sees who voted for what.",
+      "frozen": "Fixed once someone has voted."
+    },
+    "departments": {
+      "label": "Restrict to departments",
+      "hint": "Only members of the chosen departments see it and vote; editors and admins always see it. None chosen: everyone (guests only if it is visible to them)."
+    },
+    "visibleToGuests": {
+      "label": "Visible to guests"
+    },
+    "guestsCanVote": {
+      "label": "Guests can vote"
+    },
+    "guestAccess": {
+      "hint": "Polls are hidden from guests by default. Guests vote only on a poll that is visible to them."
+    }
+  },
+  "state": {
+    "open": "Open",
+    "closed": "Closed",
+    "closesOn": "Closes on {date}"
+  }
+}

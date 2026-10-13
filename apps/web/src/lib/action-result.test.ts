@@ -265,8 +265,29 @@ describe("startCmsAction", () => {
       onFailure,
     });
     await t.settled();
-    expect(onFailure).toHaveBeenCalledWith("pollOptionsChanged");
+    expect(onFailure).toHaveBeenCalledWith("pollOptionsChanged", {
+      ok: false,
+      code: "pollOptionsChanged",
+    });
     expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  it("hands onFailure the whole failure: a form's fields and a conflict's version", async () => {
+    const t = transitions();
+    const onFailure = vi.fn();
+    startCmsAction(t.start, {
+      action: async () => actionFailure("invalid", { fields: { title: "required" } }),
+      onFailure,
+    });
+    startCmsAction(t.start, {
+      action: async () => actionFailure("conflict", { version: "8" }),
+      onFailure,
+    });
+    await t.settled();
+    expect(onFailure.mock.calls).toEqual([
+      ["invalid", { ok: false, code: "invalid", fields: { title: "required" } }],
+      ["conflict", { ok: false, code: "conflict", version: "8" }],
+    ]);
   });
 
   it("reports a rejected call (web server unreachable) and a failed refetch as unavailable", async () => {
@@ -285,7 +306,11 @@ describe("startCmsAction", () => {
       onSettled,
     });
     await t.settled();
-    expect(onFailure.mock.calls).toEqual([["unavailable"], ["unavailable"]]);
+    const unavailable = { ok: false, code: "unavailable" };
+    expect(onFailure.mock.calls).toEqual([
+      ["unavailable", unavailable],
+      ["unavailable", unavailable],
+    ]);
     expect(onSettled).toHaveBeenCalledTimes(2);
   });
 

@@ -24,7 +24,11 @@ import {
  *   - the notifications of a publish are written AFTER the publish commits
  *     (LF02, batch 7): none exist inside the publish transaction, the
  *     audience has them afterwards, and a publish that rolls back notifies
- *     nobody.
+ *     nobody;
+ *   - since batch 15 (lane 15A) a REST write goes through the v2 authoring
+ *     controller: an explicit `status`, `If-Match` from the form read
+ *     (`editable`) on an update, and the author set to the caller, who is
+ *     NOT notified of their own post (owner answer 3).
  */
 
 const ANNOUNCEMENT = "api::announcement.announcement";
@@ -106,11 +110,17 @@ describe.each(testEngines())("publish cycles on %s", (engine) => {
     });
 
     it("a REST republish (editor PUT ?status=published) keeps the thread", async () => {
+      const form = await t.api<{ data: { version: string } }>(
+        "editor",
+        `/api/announcements/${announcement.documentId}/editable`,
+      );
+      expect(form.status).toBe(200);
       const res = await t.api(
         "editor",
         `/api/announcements/${announcement.documentId}?status=published`,
         {
           method: "PUT",
+          headers: { "If-Match": `"${form.body.data.version}"` },
           json: { data: { title: "IT cycle v2" } },
         },
       );
@@ -320,18 +330,21 @@ describe.each(testEngines())("publish cycles on %s", (engine) => {
         .map((role) => t.fixtures.users[role].id)
         .sort((a, b) => a - b);
 
-    it("a REST publish notifies the audience, never guest", async () => {
+    it("a REST publish notifies the audience, never guest, never its author", async () => {
       const res = await t.api<{ data: { documentId: string } }>(
         "admin_role",
         "/api/announcements?status=published",
         {
-          json: { data: { title: "IT notify via REST", audience: "all" } },
+          json: { data: { title: "IT notify via REST" } },
         },
       );
       expect(res.status).toBe(201);
       await settle();
       const documentId = res.body.data.documentId;
-      expect(await recipientsOf(documentId)).toEqual(audience());
+      // The author is the caller (batch 15: the allowlist's caller field),
+      // and the announcement lifecycle leaves the author out (owner answer 3).
+      const author = t.fixtures.users.admin_role.id;
+      expect(await recipientsOf(documentId)).toEqual(audience().filter((id) => id !== author));
 
       const bell = await t.api<{ data: { title: string; sourceDocumentId: string }[] }>(
         "member",

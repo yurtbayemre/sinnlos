@@ -1,0 +1,38 @@
+{
+  "title": "Schnellzugriff",
+  "description": "Die Verknüpfungen auf der Übersicht: anlegen, ordnen, planen und zurückziehen.",
+  "new": "Neue Verknüpfung",
+  "newDescription": "Wird zuerst als Entwurf gespeichert; auf der Übersicht erscheint sie, sobald sie veröffentlicht ist.",
+  "editTitle": "Verknüpfung bearbeiten",
+  "emptyTitle": "Noch keine Verknüpfungen",
+  "emptyHint": "Legen Sie die erste an; sie bleibt ein Entwurf, bis Sie sie veröffentlichen.",
+  "sections": {
+    "link": "Verknüpfung",
+    "audience": "Zielgruppe"
+  },
+  "fields": {
+    "label": {
+      "label": "Bezeichnung"
+    },
+    "url": {
+      "label": "Adresse",
+      "hint": "Eine Webadresse (https://…) oder ein Pfad im Intranet, z. B. /wiki/handbook.",
+      "invalidUrl": "Geben Sie eine Webadresse ein, die mit https:// oder http:// beginnt, oder einen Pfad im Intranet wie /wiki/handbook."
+    },
+    "icon": {
+      "label": "Symbol",
+      "none": "Kein Symbol"
+    },
+    "category": {
+      "label": "Kategorie"
+    },
+    "order": {
+      "label": "Reihenfolge",
+      "hint": "0 bis 10000; kleinere Zahlen stehen vorn."
+    },
+    "departments": {
+      "label": "Für Abteilungen anzeigen",
+      "hint": "Nur Mitglieder der gewählten Abteilungen sehen sie; Redaktion und Admins immer. Keine gewählt: alle."
+    }
+  }
+}

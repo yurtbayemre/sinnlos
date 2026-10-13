@@ -21,9 +21,11 @@ import type { RoleType } from "@sinnlos/domain";
 export {
   ADMIN,
   AUTHENTICATED,
+  DEPARTMENT_AUTHOR_ROLES,
   GUEST,
   MODERATORS,
   ROLE_PRIVILEGE_ORDER,
+  SCHEDULER_ROLES,
   STAFF_ROLES,
   hasRole,
   isRoleType,
