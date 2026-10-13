@@ -19,12 +19,12 @@
  *     documentIds resolved to row ids), and every stored file the action
  *     copies to a new row (publish and clone: the draft's; discardDraft: the
  *     published one's), is locked (`FOR UPDATE`, ascending ids) BEFORE the
- *     action, and refused when it is gone or tombstoned. The action's link insert takes a key
- *     share on the file row (the foreign key); two transactions that both
- *     inserted and then asked for the row lock would deadlock (Postgres
- *     40P01). File rows come last in the lock order (§5 R10): the document's
- *     own version row is already held, and nothing locks file rows before
- *     other rows.
+ *     action, and refused when it is gone or tombstoned. The action's link
+ *     insert takes a key share on the file row (the foreign key); two
+ *     transactions that both inserted and then asked for the row lock would
+ *     deadlock (Postgres 40P01). File rows come last in the lock order (§5
+ *     R10): the document's own version row is already held, and nothing
+ *     locks file rows before other rows.
  *   - ATTACH: every file linked after and not before (for a clone: not by
  *     the source document either; a panel clone copies the source's file,
  *     which is no attachment, and the two documents then share it) is
@@ -59,14 +59,14 @@ import { resolveActor } from "./audit";
 import { runWithDeleteAudit } from "./delete-audit";
 import { MUTATING_ACTIONS } from "./document-lock";
 import {
-  FILE_UID,
   claimAndRemove,
   fileLinks,
   isTombstoned,
-  lockFileRow,
+  lockAndReadFile,
   mediaReferences,
   resolveFileIds,
   uploadedByOf,
+  type FileLink,
 } from "./upload-orphans";
 import { refuseKeys } from "./write-allowlist";
 
@@ -206,7 +206,7 @@ export function releasedFiles(before: DocumentLinks, after: DocumentLinks): numb
 /** One attached file, read under its lock. */
 export interface AttachCheck {
   file: any;
-  links: ReadonlyArray<{ relatedType: string; relatedId: number }>;
+  links: ReadonlyArray<FileLink>;
   uid: string;
   ownRowIds: readonly number[];
   /** The users-permissions caller, if any. */
@@ -253,8 +253,7 @@ export function createMediaClaims(strapi: MediaClaimsHost) {
         if (!pending.has(fileId)) pending.set(fileId, before.files.get(fileId) as string);
       }
       for (const fileId of [...pending.keys()].sort((a, b) => a - b)) {
-        await lockFileRow(strapi, fileId);
-        const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+        const file = await lockAndReadFile(strapi, fileId);
         if (!file || isTombstoned(file)) refuseKeys([pending.get(fileId) as string]);
       }
       const result = await next();
@@ -265,8 +264,7 @@ export function createMediaClaims(strapi: MediaClaimsHost) {
       const callerId = actor.actorKind === "user" ? actor.actorUserId : null;
       for (const fileId of attachedFiles(before, after)) {
         const field = after.files.get(fileId) as string;
-        await lockFileRow(strapi, fileId);
-        const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+        const file = await lockAndReadFile(strapi, fileId);
         const links = file ? await fileLinks(strapi, fileId, trx) : [];
         const verdict = attachVerdict({
           file,

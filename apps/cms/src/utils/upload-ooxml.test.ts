@@ -6,6 +6,7 @@ import {
   MAIN_TYPES,
   buildZip,
   contentTypesXml,
+  memoryFile,
   minimalDocx,
   minimalOffice,
   minimalOfficeEntries,
@@ -15,7 +16,7 @@ import {
   ooxmlFixture,
 } from "../integration/upload.test.helper";
 import { decodeAttributeValue, parseContentTypes, sniffOfficeFormat } from "./upload-ooxml";
-import { ZipRefusal, readEntry, readZipLayout, type RandomAccessFile } from "./upload-zip";
+import { ZipRefusal, readEntry, readZipLayout } from "./upload-zip";
 
 /**
  * The Office Open XML rule (decision 06 §E1, owner amendment 2, amendment
@@ -24,14 +25,9 @@ import { ZipRefusal, readEntry, readZipLayout, type RandomAccessFile } from "./u
  * cases.
  */
 
-const fileOf = (bytes: Uint8Array): RandomAccessFile => ({
-  size: bytes.length,
-  read: async (position, length) => bytes.subarray(position, position + length),
-});
-
 async function verdict(bytes: Uint8Array): Promise<string> {
   try {
-    return await sniffOfficeFormat(fileOf(bytes));
+    return await sniffOfficeFormat(memoryFile(bytes));
   } catch (error) {
     if (error instanceof ZipRefusal) return `refused: ${error.reason}`;
     throw error;
@@ -102,7 +98,7 @@ describe("fixtures carry no personal data (L9)", () => {
     "%s: author empty or 'sinnlos fixture', no company",
     async (name) => {
       const bytes = ooxmlFixture(name);
-      const file = fileOf(bytes);
+      const file = memoryFile(bytes);
       const layout = await readZipLayout(file);
       const props = layout.entries.filter((entry) => /^docprops\/.*\.xml$/i.test(entry.name));
       expect(props.length).toBeGreaterThan(0);

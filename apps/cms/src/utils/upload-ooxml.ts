@@ -161,6 +161,11 @@ class Cursor {
     return this.text.startsWith(literal, this.at);
   }
 
+  /** At a `<` that opens a tag: no `<!` (DOCTYPE, comment, CDATA), no `<?` (instruction). */
+  atTag(): boolean {
+    return this.startsWith("<") && !this.startsWith("<!") && !this.startsWith("<?");
+  }
+
   expect(literal: string): void {
     if (!this.startsWith(literal)) refuse(`expected ${literal}`);
     this.at += literal.length;
@@ -265,6 +270,13 @@ function exactlyAttributes(element: Element, names: readonly string[]): void {
   }
 }
 
+/** Adds `value` (ASCII-case-folded) to `seen`, refusing with `reason` when it is there already. */
+function addOnce(seen: Set<string>, value: string, reason: string): void {
+  const key = foldName(value);
+  if (seen.has(key)) refuse(reason);
+  seen.add(key);
+}
+
 /** `[Content_Types].xml` read as the fixed XML subset (step 2). */
 export function parseContentTypes(bytes: Uint8Array): ContentTypes {
   const body = BOM.every((byte, i) => bytes[i] === byte) ? bytes.subarray(3) : bytes;
@@ -277,9 +289,7 @@ export function parseContentTypes(bytes: Uint8Array): ContentTypes {
   const cursor = new Cursor(text);
   parseDeclaration(cursor);
   cursor.skipSpace();
-  if (!cursor.startsWith("<") || cursor.startsWith("<!") || cursor.startsWith("<?")) {
-    refuse("no root element (or a DOCTYPE, comment or processing instruction)");
-  }
+  if (!cursor.atTag()) refuse("no root element (or a DOCTYPE, comment or processing instruction)");
   const root = parseStartTag(cursor);
   if (root.name !== "Types") refuse("root is not Types");
   exactlyAttributes(root, ["xmlns"]);
@@ -295,16 +305,13 @@ export function parseContentTypes(bytes: Uint8Array): ContentTypes {
         expectEndTag(cursor, "Types");
         break;
       }
-      if (!cursor.startsWith("<") || cursor.startsWith("<!") || cursor.startsWith("<?")) {
-        refuse("text, comment, CDATA or processing instruction inside Types");
-      }
+      if (!cursor.atTag()) refuse("text, comment, CDATA or processing instruction inside Types");
       const child = parseStartTag(cursor);
       if (!child.selfClosing) expectEndTag(cursor, child.name);
       if (child.name === "Default") {
         exactlyAttributes(child, ["Extension", "ContentType"]);
         const extension = child.attributes.get("Extension") as string;
-        if (extensions.has(foldName(extension))) refuse("two Defaults for one extension");
-        extensions.add(foldName(extension));
+        addOnce(extensions, extension, "two Defaults for one extension");
         types.defaults.push({
           extension,
           contentType: child.attributes.get("ContentType") as string,
@@ -312,8 +319,7 @@ export function parseContentTypes(bytes: Uint8Array): ContentTypes {
       } else if (child.name === "Override") {
         exactlyAttributes(child, ["PartName", "ContentType"]);
         const partName = child.attributes.get("PartName") as string;
-        if (partNames.has(foldName(partName))) refuse("two Overrides for one part");
-        partNames.add(foldName(partName));
+        addOnce(partNames, partName, "two Overrides for one part");
         types.overrides.push({
           partName,
           contentType: child.attributes.get("ContentType") as string,

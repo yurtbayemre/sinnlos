@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   PNG_1PX,
+  memoryFile,
   minimalDocx,
   minimalPdf,
   minimalPptx,
@@ -236,12 +237,8 @@ describe("uploadProfileOf", () => {
 });
 
 describe("sniffUpload", () => {
-  const fileOf = (bytes: Uint8Array, size = bytes.length): RandomAccessFile => ({
-    size,
-    read: async (position, length) => bytes.subarray(position, position + length),
-  });
   const sniff = (bytes: Uint8Array, profile: UploadProfile, size?: number) =>
-    sniffUpload(fileOf(bytes, size), profile);
+    sniffUpload(memoryFile(bytes, size), profile);
 
   it("stores PDF, DOCX, XLSX, PPTX and images for the document profile", async () => {
     const cases: Array<[Uint8Array, UploadFormat]> = [

@@ -77,6 +77,7 @@ const SIG_ZIP64_LOCATOR = 0x07064b50;
 const END_RECORD_BYTES = 22;
 const CENTRAL_RECORD_BYTES = 46;
 const LOCAL_HEADER_BYTES = 30;
+const ZIP64_LOCATOR_BYTES = 20;
 const ZIP64_EXTRA_ID = 0x0001;
 /** Info-ZIP Unicode Path: an alternative name some readers prefer. */
 const UNICODE_PATH_EXTRA_ID = 0x7075;
@@ -130,6 +131,13 @@ function hasSignature(bytes: Uint8Array, from: number, to: number, signature: nu
   return false;
 }
 
+/** Whether a ZIP64 end-record locator stands right before the end record at `endPosition`. */
+async function hasZip64Locator(file: RandomAccessFile, endPosition: number): Promise<boolean> {
+  if (endPosition < ZIP64_LOCATOR_BYTES) return false;
+  const locator = await readExactly(file, endPosition - ZIP64_LOCATOR_BYTES, 4);
+  return u32(locator, 0) === SIG_ZIP64_LOCATOR;
+}
+
 interface EndRecordCandidate {
   /** Absolute offset of the signature. */
   position: number;
@@ -178,25 +186,23 @@ export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> 
   for (let start = 0; start < file.size; start += SCAN_CHUNK_BYTES) {
     const length = Math.min(SCAN_CHUNK_BYTES + END_RECORD_BYTES - 1, file.size - start);
     const bytes = await readExactly(file, start, length);
-    let at = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf(END_SIGNATURE);
+    const view = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length);
+    let at = view.indexOf(END_SIGNATURE);
     while (at >= 0 && at < SCAN_CHUNK_BYTES) {
       if (at + END_RECORD_BYTES <= bytes.length) {
         const position = start + at;
-        if (position >= 20) {
-          const locator = await readExactly(file, position - 20, 4);
-          if (u32(locator, 0) === SIG_ZIP64_LOCATOR) return true;
-        }
+        if (await hasZip64Locator(file, position)) return true;
         const directorySize = u32(bytes, at + 12);
         const directoryOffset = u32(bytes, at + 16);
-        const starts = [position - directorySize, directoryOffset].filter(
-          (start) => start >= 0 && start + CENTRAL_RECORD_BYTES <= position,
+        const directoryStarts = [position - directorySize, directoryOffset].filter(
+          (candidate) => candidate >= 0 && candidate + CENTRAL_RECORD_BYTES <= position,
         );
-        for (const start of starts) {
-          const signature = await readExactly(file, start, 4);
+        for (const directoryStart of directoryStarts) {
+          const signature = await readExactly(file, directoryStart, 4);
           if (u32(signature, 0) === SIG_CENTRAL) return true;
         }
       }
-      at = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf(END_SIGNATURE, at + 1);
+      at = view.indexOf(END_SIGNATURE, at + 1);
     }
   }
   return false;
@@ -394,10 +400,7 @@ export async function readZipLayout(file: RandomAccessFile): Promise<ZipLayout> 
   if (disk !== 0 || directoryDisk !== 0 || entriesOnDisk !== entryCount) {
     throw new ZipRefusal("multi-disk archive");
   }
-  if (endPosition >= 20) {
-    const locator = await readExactly(file, endPosition - 20, 4);
-    if (u32(locator, 0) === SIG_ZIP64_LOCATOR) throw new ZipRefusal("ZIP64 locator");
-  }
+  if (await hasZip64Locator(file, endPosition)) throw new ZipRefusal("ZIP64 locator");
   if (entryCount === 0) throw new ZipRefusal("no entries");
   if (entryCount > ZIP_LIMITS.maxEntries) throw new ZipRefusal("too many entries");
   if (directorySize > ZIP_LIMITS.maxDirectoryBytes) throw new ZipRefusal("directory too large");
@@ -417,10 +420,10 @@ export async function readZipLayout(file: RandomAccessFile): Promise<ZipLayout> 
   if (ordered[0].localHeaderOffset !== 0) throw new ZipRefusal("prefix before the first entry");
   const entries: ZipEntry[] = [];
   for (let i = 0; i < ordered.length; i++) {
-    const { nameBytes, ...record } = ordered[i];
     const nextStart = i + 1 < ordered.length ? ordered[i + 1].localHeaderOffset : directoryOffset;
-    const dataOffset = await checkLocalEntry(file, { ...record, nameBytes }, nextStart);
-    entries.push({ ...record, dataOffset });
+    const dataOffset = await checkLocalEntry(file, ordered[i], nextStart);
+    const { nameBytes: _nameBytes, ...entry } = ordered[i];
+    entries.push({ ...entry, dataOffset });
   }
   return { entries, byName: new Map(entries.map((entry) => [foldName(entry.name), entry])) };
 }

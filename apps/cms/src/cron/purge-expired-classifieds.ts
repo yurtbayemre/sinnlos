@@ -172,9 +172,11 @@ export async function purgeExpiredClassifieds(
       if (!isPurgeableClassified(row, cutoff)) continue;
       try {
         // The delete trail records these deletes (and their images) as `cron`.
-        if (await runWithDeleteAudit({ source: "cron" }, () => purgeOne(strapi, row, cutoff))) {
-          purged++;
-        } else skipped++;
+        const deleted = await runWithDeleteAudit({ source: "cron" }, () =>
+          purgeOne(strapi, row, cutoff),
+        );
+        if (deleted) purged++;
+        else skipped++;
       } catch (err) {
         failed++;
         strapi.log.warn(
