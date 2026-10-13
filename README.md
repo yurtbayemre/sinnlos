@@ -145,7 +145,7 @@ rules are in
 | `search-log`      | Anonymous search telemetry (term and result count, no user)                                                     |
 | `wiki-space`      | Namespace for wiki pages with its own visibility                                                                |
 | `wiki-page`       | Markdown page with tags, order, optional table of contents, parent page                                         |
-| `wiki-revision`   | Snapshot of a page's previous text, written when an edit changes it                                             |
+| `wiki-revision`   | Snapshot of a page's previous text, written when an edit changes it; no API route, hidden in the admin panel    |
 | _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                      |
 | _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off) |
 
