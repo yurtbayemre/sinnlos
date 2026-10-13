@@ -2515,7 +2515,13 @@ required env, no grant, no route, no edge change.
     writes no new audit row; a cms restart starts the backoff over. Until
     then the item stays visible: the site does not hide an item whose
     Unpublish at passed (the time is a setting of the draft). If it must
-    go now, unpublish it in the panel.
+    go now, unpublish it in the panel. Known limit: each run reads the due
+    withdrawals from the earliest on, at most 2,000 rows, and passes over
+    those still backing off; with more than 2,000 earlier withdrawals that
+    keep failing, a later healthy one is not reached. Failing withdrawals
+    show Schedule error (and the `[scheduler] … failed` line): fix their
+    cause, clear or change their Unpublish at, or unpublish them by hand,
+    and the rest follow.
   - Every check of a time (due, an ended window) is made when the run
     holds the item's lock, not when the run started: a run that reaches an
     item late, behind a lock or a long batch, does not publish one whose
