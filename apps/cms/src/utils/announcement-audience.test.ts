@@ -86,11 +86,26 @@ describe("isAnnouncementVisible", () => {
       expect(isAnnouncementVisible(a, engineer)).toBe(true);
     });
 
-    it("does not restrict when audience is 'departments' but no department is linked", () => {
-      // Documented edge case: there is no department to restrict TO.
+    it("shows nobody an audience='departments' announcement without a department or team (D-PT01)", () => {
+      // Until batch 15 this edge case stayed company-wide: there was no
+      // department to restrict TO. It now fails closed: moderators only
+      // (their bypass runs before the predicate), and nobody is notified.
       const a = announcement({ audience: "departments", department: null });
-      expect(isAnnouncementVisible(a, designer)).toBe(true);
-      expect(isAnnouncementVisible(announcement({ audience: "departments" }), null)).toBe(true);
+      expect(isAnnouncementVisible(a, designer)).toBe(false);
+      expect(isAnnouncementVisible(a, engineer)).toBe(false);
+      expect(isAnnouncementVisible(announcement({ audience: "departments" }), null)).toBe(false);
+    });
+  });
+
+  describe("the retargetRequired marker", () => {
+    it("shows nobody an announcement whose department or team was deleted", () => {
+      const teamLeft = announcement({
+        audience: "departments",
+        team: { id: FRONTEND_TEAM },
+        retargetRequired: true,
+      });
+      expect(isAnnouncementVisible(teamLeft, engineer)).toBe(false);
+      expect(isAnnouncementVisible({ ...teamLeft, retargetRequired: false }, engineer)).toBe(true);
     });
   });
 
