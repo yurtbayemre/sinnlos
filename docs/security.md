@@ -400,9 +400,13 @@ letters:
   and sort inside a populate, which Strapi does not check
   ([Global guards](#global-guards)). The lifecycle still writes revisions;
   the web reads none. The type is hidden from the Content Manager and the
-  Content-Type Builder; the admin roles keep only read on it (the
-  admin's boot cleanup drops their create, update, delete and publish
-  rows).
+  Content-Type Builder, and nobody, super admins included, can create,
+  change, publish or delete a revision there: the Content Manager
+  registers those actions for displayed types only, and the admin's boot
+  cleanup drops the rows. An admin role keeps the read it holds (a
+  revision opens read-only by its URL); the panel is the moderators' tool,
+  which shows every draft anyway, and decision 06 lets moderators read
+  history. Untick it per admin role to take it away.
 - **Revocations must be listed.** The boot sync only ever adds rows, so
   removing an entry from the matrix revokes nothing on an existing
   database: obsolete pairs go into `REVOKED_PERMISSIONS`, which must stay

@@ -1928,12 +1928,17 @@ staff role and `authenticated` could read it through `/api/wiki-revisions`,
   (`/api/wiki-spaces?populate[pages][filters][revisions][body]…`), which
   Strapi 5.57 does not check by itself and the relation guard now does;
 - the Content Manager and the Content-Type Builder no longer list Wiki
-  revision.
+  revision, and nobody can create, change, publish or delete a revision in
+  the admin panel, super admins included. An admin role that holds Content
+  Manager read on Wiki revision can still open one by its URL, read-only:
+  the panel is the moderators' tool and shows every draft anyway (decision
+  06 question 9 lets moderators read history). The wiki page's form shows
+  no revisions.
 
 Nothing else changes: the wiki-page lifecycle still writes a revision on
 every body change, page reads answer as before, and the web reads no
-revision (since FX24). Moderators lose the admin panel's view of revision
-history until batch 16 brings history to the web.
+revision (since FX24). Moderators lose the admin panel's list of revisions
+until batch 16 brings page history to the web.
 
 It is **one deploy of cms and web** with `infra/deploy.sh` (both images
 rebuild; the web's code is unchanged). No schema change (the hidden
@@ -1944,7 +1949,9 @@ in two places, both grants: the users-permissions sync deletes the 18
 admin roles' Content Manager `create`, `update`, `delete` and `publish`
 permissions on Wiki revision (`admin_permissions`; `read` stays, super
 admins are reset at every boot anyway). A rollback brings the 18 back, not
-the admin-role rows; nobody needs those.
+the admin-role rows; nobody needs those. To take read away from an admin
+role as well, untick Wiki revision's Read in Settings → Administration
+panel → Roles (super admins always keep it).
 
 Set these on the host, in the checkout, for the checks below:
 
@@ -2057,7 +2064,9 @@ it; running it is the owner's decision (below).
 
 8. **In a browser (the owner):** the admin panel's Content Manager lists
    no _Wiki Revision_; a wiki page still opens and saves there (each body
-   change still writes a revision, which nobody reads); in Settings →
+   change still writes a revision, which nobody reads through the API); in
+   Settings → Administration panel → Roles, the Editor and Author roles
+   show only Read for Wiki revision, if anything; in Settings →
    Users & Permissions plugin → Roles, no role has a _Wiki-revision_ action
    ticked. As a member, `/wiki` and a page look as before.
 

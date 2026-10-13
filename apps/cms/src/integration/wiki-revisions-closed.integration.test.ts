@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { ADMIN_ENV, adminRequest, cmPath, contentManager } from "./admin-api.test.helper";
 import {
   TEST_ROLES,
   createTestStrapi,
@@ -29,6 +30,10 @@ import {
  *     a populate, which the core does not check at all;
  *   - the boot revokes the 18 grants a batch-15 database holds;
  *   - page reads and the lifecycle's revision writes are unchanged.
+ * The admin panel is not the content API: it no longer lists the type, and
+ * nobody can write a revision there, super admins included; an admin role
+ * that holds Content Manager read on it keeps reading it (the panel's users
+ * are moderators, who read every draft anyway; decision 06 question 9).
  */
 
 const PAGE = "api::wiki-page.wiki-page";
@@ -65,7 +70,8 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
   let revision: Row;
 
   beforeAll(async () => {
-    t = await createTestStrapi({ engine });
+    // ADMIN_ENV seeds a super admin for the admin-panel cases.
+    t = await createTestStrapi({ engine, env: ADMIN_ENV });
     const docs = (uid: string) => t.strapi.documents(uid);
     const space = await docs(SPACE).create({
       data: { name: "IT Revisions Space", slug: "it-revisions-space", visibility: "public" },
@@ -486,6 +492,33 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       const displayed = contentTypes.findDisplayedContentTypes().map((type) => type.uid);
       expect(displayed).toContain(PAGE);
       expect(displayed).not.toContain(REVISION);
+    });
+
+    it("nobody writes a revision in the Content Manager, super admins included; read stays", async () => {
+      const panel = await contentManager(t);
+      // Content Manager create, update, delete and publish are registered for
+      // displayed types only, and the super admin's permissions are reset to
+      // the registered ones at every boot.
+      const writes = [
+        ["create", await panel.create(REVISION, { body: "panel", page: page.documentId })],
+        ["update", await panel.update(REVISION, revision.documentId, { body: "panel" })],
+        ["publish", await panel.publish(REVISION, revision.documentId)],
+        ["discard", await panel.discard(REVISION, revision.documentId)],
+        ["delete", await panel.delete(REVISION, revision.documentId)],
+      ] as const;
+      for (const [action, res] of writes) {
+        expect({ action, status: res.status }).toEqual({ action, status: 403 });
+      }
+      const stored = await t.strapi.db.query(REVISION).findOne({ where: { id: revision.id } });
+      expect(stored?.body).toBe(revision.body);
+      expect(await t.strapi.db.query(REVISION).count({ where: { body: "panel" } })).toBe(0);
+
+      // Read stays for an admin role that holds it: the panel's own path, not
+      // the content API (the relation field on the wiki-page form, or a URL).
+      const one = await panel.findOne(REVISION, revision.documentId, "published");
+      expect(one.status).toBe(200);
+      const list = await adminRequest(t, panel.token, `${cmPath(REVISION)}?page=1&pageSize=10`);
+      expect(list.status).toBe(200);
     });
 
     it("the boot's RBAC cleanup leaves the admin roles read-only on it", async () => {
