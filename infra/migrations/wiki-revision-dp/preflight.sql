@@ -56,7 +56,8 @@ WITH page_docs AS (
          concat_ws(', ',
            CASE WHEN d.body IS DISTINCT FROM pub.body THEN 'body' END,
            CASE WHEN d.summary IS DISTINCT FROM pub.summary THEN 'summary' END,
-           CASE WHEN dp.docs IS DISTINCT FROM pp.docs THEN 'page' END,
+           CASE WHEN dp.docs IS DISTINCT FROM coalesce(to_jsonb(pub) ->> 'page_document_id', pp.docs)
+                   AND dp.docs IS NOT NULL THEN 'page' END,
            CASE WHEN de.users IS DISTINCT FROM pe.users THEN 'editor' END,
            CASE WHEN jsonb_strip_nulls(to_jsonb(d) - ARRAY['id', 'document_id', 'body', 'summary',
                        'created_at', 'updated_at', 'published_at', 'created_by_id', 'updated_by_id',
@@ -92,7 +93,8 @@ WITH page_docs AS (
          concat_ws(', ',
            CASE WHEN d.body IS DISTINCT FROM pub.body THEN 'body' END,
            CASE WHEN d.summary IS DISTINCT FROM pub.summary THEN 'summary' END,
-           CASE WHEN dp.docs IS DISTINCT FROM pp.docs THEN 'page' END,
+           CASE WHEN dp.docs IS DISTINCT FROM coalesce(to_jsonb(pub) ->> 'page_document_id', pp.docs)
+                   AND dp.docs IS NOT NULL THEN 'page' END,
            CASE WHEN de.users IS DISTINCT FROM pe.users THEN 'editor' END,
            CASE WHEN jsonb_strip_nulls(to_jsonb(d) - ARRAY['id', 'document_id', 'body', 'summary',
                        'created_at', 'updated_at', 'published_at', 'created_by_id', 'updated_by_id',

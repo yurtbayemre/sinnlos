@@ -37,13 +37,20 @@ A fresh install needs nothing.
   - **draft-only**: no published row with its `document_id`. `migrate.sql`
     **promotes** it (`published_at = coalesce(updated_at, created_at, now())`).
     The boot backfill then marks it `before` (a legacy row) and anchors it.
-  - **identical twin**: its published row has the same `body` and `summary`,
-    links the same page **documents** and the same editor (users by id), and
-    the draft's batch-16 columns are NULL. A rollback's boot makes exactly this,
-    and `migrate.sql` **deletes** it with its link rows. The page links are
-    compared by document, never by row id: a twin links the page's draft row,
-    while its published row links the draft row and, after a publish, the
-    published row too (spike 5 S5.7).
+  - **identical twin**: its published row has the same `body` and `summary`
+    and the same editor (users by id), the draft's batch-16 columns are NULL,
+    and its page link names the page **document** the published row belongs
+    to. A rollback's boot makes exactly this, and `migrate.sql` **deletes** it
+    with its link rows.
+    - **Pages are compared by document, never by row id.** A twin links the
+      page's draft row, while its published row links the draft row and,
+      after a publish, the published row too (spike 5 S5.7).
+    - **The published row's page is its `page_document_id`** where it has one
+      (every revision of batch 16), else the pages its links reach. On 15.1, a
+      discard and an unpublish of the page can leave the published revision
+      without page links while its twin keeps one.
+    - **A twin without any page link** (its page row was deleted) differs in
+      nothing that is kept.
   - **divergent twin**: anything else with a published row. `migrate.sql`
     **stops** and lists each one with what differs. Since batch 15.1 hides the
     type in the admin panel, only raw SQL can make one.

@@ -12,6 +12,7 @@ import {
   type TestDatabase,
   type TestStrapi,
 } from "./harness.test.helper";
+import { untilPoolIdle } from "./pool-idle.test.helper";
 
 /**
  * Wiki revisions without draft & publish (batch 16, lane 16D; decision 06
@@ -34,7 +35,9 @@ import {
  *   3. a rollback to batch 15.1 and forward: one identical twin per revision
  *      as 15.1's boot makes them (C26: a draft with the same content, its
  *      page link to the page's DRAFT row, the batch-16 columns NULL), and
- *      two edits on 15.1 (before-images, a draft-only page change). The
+ *      two edits on 15.1 (before-images, a draft-only page change), and a
+ *      discard plus unpublish there that leaves the published revisions of a
+ *      page without page links (Codex review). The
  *      deploy.sh probe counts the twins (so the deploy is refused), the boot
  *      refuses, the preflight classifies them, migrate.sql refuses outside
  *      one transaction and with another session connected, then deletes
@@ -360,6 +363,7 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
       return t;
     };
     const stop = async () => {
+      if (t) await untilPoolIdle(t);
       await t?.stop();
       t = null;
     };
@@ -391,6 +395,7 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
       });
       pageOne = one.documentId;
       pageTwo = two.documentId;
+      await untilPoolIdle(first);
       await first.stop();
     }, BOOT_BUDGET);
 
@@ -481,6 +486,21 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
         await asBeforeBatch16({ forgetSchema: false });
         twins = await rollbackTwins();
         expect(twins).toBe(beforeRollback.length);
+        // A discard and an unpublish of One on 15.1 (Codex review): its
+        // published revisions lose their page links while their twins keep
+        // the link to One's draft. And a twin whose page link went (its page
+        // row was deleted). Both stay identical twins: the published row's
+        // anchor is its page_document_id, and a twin without a page link
+        // differs in nothing that is kept.
+        await sql(
+          `DELETE FROM wiki_revisions_page_lnk WHERE wiki_revision_id IN
+             (SELECT id FROM wiki_revisions WHERE published_at IS NOT NULL AND page_document_id = ?)`,
+          [pageOne],
+        );
+        await sql(
+          `DELETE FROM wiki_revisions_page_lnk WHERE wiki_revision_id =
+             (SELECT min(id) FROM wiki_revisions WHERE published_at IS NULL)`,
+        );
         // Two edits on 15.1: a draft-only change of Two, each with its before-image.
         const twoDraft = await draftRowOf(pageTwo);
         editsOn151 = [await beforeImage(pageTwo, "w1", editorId)];
@@ -577,7 +597,9 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
 
     it("4. divergent twins stop migrate.sql, which changes nothing; the README's two resolutions work", async () => {
       const sources = await sql<{ id: number; document_id: string }>(
-        "SELECT id, document_id FROM wiki_revisions ORDER BY id LIMIT 2",
+        `SELECT id, document_id FROM wiki_revisions r
+          WHERE EXISTS (SELECT 1 FROM wiki_revisions_page_lnk l WHERE l.wiki_revision_id = r.id)
+          ORDER BY id LIMIT 2`,
       );
       const twins: number[] = [];
       for (const [index, source] of sources.entries()) {
