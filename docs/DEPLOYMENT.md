@@ -1945,13 +1945,18 @@ rebuilds both images; the web is unchanged).
   file-type recognises it in the first 4100 bytes. **Known limit:** a
   renamed `.xlsb` or `.xlam` (and a renamed macro file whose
   `[Content_Types].xml` lies beyond those bytes) still passes the panel.
-- **One locked removal.** The classified image cleanup, `cleanup-uploads`
-  and the uploads janitor (and, from 16B, the media claims) remove a file
-  only through `claimAndRemove`: the file row is locked, re-checked,
-  tombstoned (`provider_metadata.removing`) and only then removed. A
-  removal that fails after its claim leaves a tombstoned row that nothing
-  can attach; the janitor retries it 10 minutes later. Saving an ad now
-  locks its image rows inside the save.
+- **One reservation before every removal.** The classified image cleanup,
+  `cleanup-uploads` and the uploads janitor (and, from 16B, the media
+  claims) remove a file only through `claimAndRemove`, and the admin Media
+  Library's deletes go through the same reservation: the file row is
+  locked and re-read (a file already gone or being removed is skipped, so
+  two overlapping deletes remove it once), tombstoned
+  (`provider_metadata.removing`) together with its audit row, and only then
+  removed. A removal that fails after its reservation leaves a tombstoned
+  row that nothing can attach; the next janitor run retries it once it is
+  10 minutes old and unlinked, an admin may delete it again after that.
+  Every write of an ad (also in the Content Manager) locks its image rows
+  and refuses one that is being removed (400, `images`).
 - **The janitor's scope grows** (release note): moderators' and department
   heads' document uploads are stamped like ad images, so the 03:30
   `uploads-janitor` sweeps them once they are unattached and older than
@@ -1966,8 +1971,10 @@ rebuilds both images; the web is unchanged).
   and role type in `actor_class`, an admin's id, or `system`), from where
   (`content-api`, `admin`, `cron`), and what (`detail`: the ad's title; the
   file's id, mime, size, related ad or document, and name). No IP address,
-  no token. The row commits with the delete; a failing insert fails the
-  delete. The audit-janitor keeps the rows 365 days (`AUDIT_RETENTION_DAYS`).
+  no token. An ad's row commits with its delete, a file's with its
+  reservation right before the bytes go (a retried removal records nothing
+  new); a failing insert fails the delete. The audit-janitor keeps the rows
+  365 days (`AUDIT_RETENTION_DAYS`).
 - **No schema, no grants, no env, no `JWT_SECRET` rotation.** The
   `media-claims` middleware is built but not registered (lane 16B wires
   it).

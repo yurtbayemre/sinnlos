@@ -1077,14 +1077,21 @@ the sniffed format>` and the mime the table's (core stores and serves by
   user id in `provider_metadata.uploadedBy`, also the files already stored
   when a later file of the same request fails. The classified controller
   only accepts image ids whose `uploadedBy` matches the caller (admin and
-  editor bypass) and locks their rows inside the ad's write; the media
+  editor bypass), and every write of an ad, from any source (the Content
+  Manager too), locks its image rows and refuses one that is being removed
+  (the classified lifecycle); the media
   claims (registered from batch 16, lane 16B) accept a document file only
   when it is the caller's own upload, of an allowed mime, linked by nothing
   else, checked under the file row's lock.
-- **Removal:** one locked path, `claimAndRemove` (`utils/upload-orphans.ts`):
-  it locks the file row, re-checks "stamped, linked by nothing, old enough"
-  and commits a tombstone before the bytes go, so a failed removal never
-  leaves an attachable row without bytes. `cleanupUploads` removes only the
+- **Removal:** every delete, the app's and the Media Library's, first
+  takes one reservation (`reserveRemoval`, `utils/upload-orphans.ts`): it
+  locks the file row, re-reads it (a file that is gone or already being
+  removed is skipped, so overlapping deletes remove and record it once),
+  and commits a tombstone with the audit row before the bytes go, so a
+  failed removal never leaves an attachable row without bytes; the janitor
+  retries an unlinked tombstoned row after 10 minutes. The app's removers
+  (`claimAndRemove`) add their rules under the lock: stamped, linked by
+  nothing, old enough. `cleanupUploads` removes only the
   caller's own files; the nightly uploads janitor (03:30) only stamped files
   older than 24 hours, now including moderators' and department heads'
   unattached document uploads. Admin-panel uploads carry no stamp and are
@@ -1097,7 +1104,9 @@ the sniffed format>` and the mime the table's (core stores and serves by
   actor (user id and role, admin id, or system), the source (`content-api`,
   `admin`, `cron`), the ad's documentId and title or the file's id, mime,
   size, related document and name. No IP address, no token, no request
-  data. The insert is never caught: a failing insert fails the delete.
+  data. The insert is never caught: a failing insert fails the delete. A
+  file's row is written with its reservation, right before the bytes go; a
+  removal that fails after it is retried, not recorded again.
 - **Admin-panel backstop:** `security.deniedTypes` (`config/plugins.ts`)
   adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`. Strapi
   matches them against the declared type, the extension's type and
