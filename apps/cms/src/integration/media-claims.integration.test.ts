@@ -275,6 +275,20 @@ describe.each(testEngines())("media claims on %s", (engine) => {
       images: [image],
     });
     expect(created.status, created.text).toBe(400);
+    // Strings Strapi coerces to the id are refused too (Codex round 3).
+    for (const ref of [` ${image}`, `+${image}`]) {
+      await expect(
+        t.strapi.documents("api::classified.classified").create({
+          data: {
+            title: "Coerced",
+            description: "x",
+            category: "sale",
+            expiresAt: "2030-01-01",
+            images: [ref],
+          },
+        }),
+      ).rejects.toMatchObject({ details: { keys: ["images"] } });
+    }
     const clean = await upload("member", PNG_1PX);
     const ok = await panel.create("api::classified.classified", {
       title: "Panel ad",

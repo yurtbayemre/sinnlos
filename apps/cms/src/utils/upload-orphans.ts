@@ -148,24 +148,31 @@ export interface MediaReferences {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** A row id as Strapi coerces one (`Number`): " 1", "+1" and "1.0" are id 1. */
+function asRowId(item: unknown): number | null {
+  if (typeof item !== "number" && typeof item !== "string") return null;
+  if (typeof item === "string" && item.trim() === "") return null;
+  const id = Number(item);
+  return Number.isInteger(id) && id > 0 && id <= 2147483647 ? id : null;
+}
+
 /**
  * Every media reference in a relation value as Strapi 5.57 accepts it: a
- * row id (number or numeric string), a documentId (any other string),
- * `{ id }`, `{ documentId }`, lists, and `connect`/`set` lists. Anything else
- * is ignored.
+ * row id (a number, or a string Strapi coerces to one: " 1", "+1"), a
+ * documentId (any other string; a string that is not only digits is read
+ * both ways, Codex round 3), `{ id }`, `{ documentId }`, lists, and
+ * `connect`/`set` lists. Anything else is ignored.
  */
 export function mediaReferences(value: unknown): MediaReferences {
   const ids = new Set<number>();
   const documentIds = new Set<string>();
   const visit = (item: unknown, depth: number): void => {
     if (depth > 4 || item === null || item === undefined) return;
-    if (typeof item === "number" || (typeof item === "string" && /^\d+$/.test(item))) {
-      const id = Number(item);
-      if (Number.isInteger(id) && id > 0 && id <= 2147483647) ids.add(id);
-      return;
-    }
+    const id = asRowId(item);
+    if (id !== null) ids.add(id);
+    if (typeof item === "number") return;
     if (typeof item === "string") {
-      if (item !== "") documentIds.add(item);
+      if (item !== "" && !/^\d+$/.test(item)) documentIds.add(item);
       return;
     }
     if (Array.isArray(item)) {

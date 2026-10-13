@@ -81,6 +81,15 @@ describe("mediaReferences / resolveFileIds (every shape Strapi 5.57 accepts)", (
     expect(mediaReferences(2 ** 40)).toEqual({ ids: [], documentIds: [] });
   });
 
+  it("reads the strings Strapi coerces to a row id as that id too (Codex round 3)", () => {
+    for (const raw of [" 1", "+1", "1.0", "1 "]) {
+      expect(mediaReferences(raw).ids, JSON.stringify(raw)).toEqual([1]);
+    }
+    expect(mediaReferences({ set: [{ id: " 2" }] }).ids).toEqual([2]);
+    expect(mediaReferences(" ")).toEqual({ ids: [], documentIds: [" "] });
+    expect(mediaReferences("1.5").ids).toEqual([]);
+  });
+
   it("resolves documentIds to row ids, ascending, dropping unknown ones", async () => {
     const strapi = {
       db: {
