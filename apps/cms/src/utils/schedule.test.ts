@@ -8,6 +8,8 @@ import {
   SCHEDULE_TRANSIENT_ATTEMPTS,
   TransientAttempts,
   WITHDRAWAL_BACKOFF_MINUTES,
+  WITHDRAWAL_RETRY_QUOTA,
+  WITHDRAWAL_RETRY_SCAN,
   classifyScheduleFailure,
   createScheduleClear,
   describeFailure,
@@ -193,6 +195,15 @@ describe("transient attempts (rule 7)", () => {
     for (const id of ["a", "b", "c"]) attempts.deferWithdrawal(QUICK_LINK, id, NOW, 1);
     expect(attempts.withdrawalFailures(QUICK_LINK, "a")).toBe(0);
     expect(attempts.withdrawalFailures(QUICK_LINK, "c")).toBe(1);
+  });
+
+  it("keeps one retry-tier cursor per type, starting at the beginning (issue #73)", () => {
+    const attempts = new TransientAttempts();
+    expect(attempts.withdrawalCursor(QUICK_LINK)).toBe(0);
+    attempts.setWithdrawalCursor(QUICK_LINK, 42);
+    expect(attempts.withdrawalCursor(QUICK_LINK)).toBe(42);
+    expect(attempts.withdrawalCursor("api::document.document")).toBe(0);
+    expect([WITHDRAWAL_RETRY_QUOTA, WITHDRAWAL_RETRY_SCAN]).toEqual([10, 200]);
   });
 });
 

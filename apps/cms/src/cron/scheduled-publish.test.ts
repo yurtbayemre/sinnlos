@@ -1,3 +1,4 @@
+import { errors } from "@strapi/utils";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import auditLifecycles from "../api/audit-event/content-types/audit-event/lifecycles";
@@ -21,6 +22,8 @@ import {
   SCHEDULE_BATCH,
   SCHEDULE_TRANSIENT_ATTEMPTS,
   TransientAttempts,
+  WITHDRAWAL_RETRY_QUOTA,
+  WITHDRAWAL_RETRY_SCAN,
   createScheduleClear,
   type ScheduleClearHost,
 } from "../utils/schedule";
@@ -882,4 +885,140 @@ describe("due unpublishes (rules 4, 6)", () => {
       "scheduleUnpublish",
     ]);
   });
+});
+
+describe("issue #73: failing withdrawals never starve a healthy one (two tiers, a keyset cursor)", () => {
+  /** Published quick links whose withdrawal failed for good before (`scheduleError` set). */
+  async function seedFailing(prefix: string, count: number): Promise<string[]> {
+    const documentIds: string[] = [];
+    const data: Record<string, unknown>[] = [];
+    for (let index = 0; index < count; index += 1) {
+      const documentId = `${prefix}${String(index).padStart(24 - prefix.length, "0")}`;
+      documentIds.push(documentId);
+      data.push(
+        { documentId, label: `${prefix} ${index}`, publishedAt: new Date(EARLIER) },
+        {
+          documentId,
+          label: `${prefix} ${index}`,
+          publishedAt: null,
+          unpublishAt: new Date(EARLIER),
+          scheduleError: "rejected",
+        },
+      );
+    }
+    const query = open.db.query(QUICK_LINK) as unknown as {
+      createMany(params: { data: Record<string, unknown>[] }): Promise<unknown>;
+    };
+    for (let start = 0; start < data.length; start += 400) {
+      await query.createMany({ data: data.slice(start, start + 400) });
+    }
+    return documentIds;
+  }
+
+  /** Every unpublish attempt by documentId; `refuse` fails for good, `stall` transiently. */
+  function watchUnpublishes(refuse: ReadonlySet<string>, stall: ReadonlySet<string> = new Set()) {
+    const attempted: string[] = [];
+    open.service.use(async (context, next) => {
+      const documentId = String((context.params as { documentId?: unknown })?.documentId);
+      if (context.action === "unpublish") {
+        attempted.push(documentId);
+        if (refuse.has(documentId)) throw new errors.ApplicationError("refused");
+        if (stall.has(documentId)) {
+          throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+        }
+      }
+      return next();
+    });
+    return attempted;
+  }
+
+  const live = async (documentId: string) =>
+    (await rows(QUICK_LINK, documentId)).some((row) => row.published);
+
+  it("2,001 failing earlier withdrawals: a healthy later one is withdrawn in the first run", async () => {
+    const failing = await seedFailing("fail", 2_001);
+    const attempted = watchUnpublishes(new Set(failing));
+    const healthy = await docs(QUICK_LINK).create({
+      data: { label: "Healthy" },
+      status: "published",
+    });
+    await docs(QUICK_LINK).update({ documentId: healthy.documentId, data: { unpublishAt: PAST } });
+    const result = await run(NOW, new TransientAttempts());
+    expect(result.unpublished).toEqual([`${QUICK_LINK} ${healthy.documentId}`]);
+    expect(await live(healthy.documentId)).toBe(false);
+    // The reserved quota still tried the oldest failures, in id order.
+    expect(result.failed).toHaveLength(WITHDRAWAL_RETRY_QUOTA);
+    expect(attempted.filter((id) => id !== healthy.documentId)).toEqual(
+      failing.slice(0, WITHDRAWAL_RETRY_QUOTA),
+    );
+  }, 120_000);
+
+  it("with tier 1 full, every ready failure is attempted within ⌈N/10⌉ runs, in cursor order, none skipped", async () => {
+    const failing = await seedFailing("ffff", 25);
+    const attempts = new TransientAttempts();
+    // Three failures still back off: examined, passed over, never attempted.
+    const waiting = new Set([failing[3], failing[12], failing[20]]);
+    for (const documentId of waiting) {
+      attempts.deferWithdrawal(
+        QUICK_LINK,
+        documentId,
+        NOW,
+        await readRevision(strapi, QUICK_LINK, documentId),
+      );
+    }
+    // 60 healthy due withdrawals that fail transiently keep tier 1 full.
+    const stalled = new Set<string>();
+    for (let index = 0; index < 60; index += 1) {
+      const link = await docs(QUICK_LINK).create({
+        data: { label: `Stalled ${index}` },
+        status: "published",
+      });
+      await docs(QUICK_LINK).update({ documentId: link.documentId, data: { unpublishAt: PAST } });
+      stalled.add(link.documentId);
+    }
+    const attempted = watchUnpublishes(new Set(failing), stalled);
+    const ready = failing.filter((id) => !waiting.has(id));
+    const runs = Math.ceil(ready.length / WITHDRAWAL_RETRY_QUOTA);
+    expect(runs).toBe(3);
+    const perRun: string[][] = [];
+    for (let n = 0; n < runs; n += 1) {
+      const before = attempted.length;
+      const result = await run(NOW, attempts);
+      // Tier 1 takes every slot the retry tier leaves.
+      expect(result.retrying.length + result.failed.length).toBe(SCHEDULE_BATCH);
+      perRun.push(attempted.slice(before).filter((id) => !stalled.has(id)));
+    }
+    expect(perRun).toEqual([ready.slice(0, 10), ready.slice(10, 20), ready.slice(20)]);
+    expect(attempted.filter((id) => waiting.has(id))).toEqual([]);
+  }, 180_000);
+
+  it("the cursor wraps at the end, never past where the run began, and starts over after a full circle", async () => {
+    const failing = await seedFailing("wrap", 15);
+    const attempted = watchUnpublishes(new Set(failing));
+    const attempts = new TransientAttempts();
+    expect((await run(NOW, attempts)).failed).toHaveLength(10);
+    // The last five, then the wrap finds only rows that back off now.
+    expect((await run(NOW, attempts)).failed).toHaveLength(5);
+    expect(attempted).toEqual(failing);
+    expect((await run(NOW, attempts)).failed).toEqual([]);
+    // After the first backoff (5 minutes) the circle starts again at the beginning.
+    const later = new Date(NOW.getTime() + 6 * 60_000);
+    expect((await run(later, attempts)).failed).toEqual(
+      failing.slice(0, 10).map((id) => `${QUICK_LINK} ${id}`),
+    );
+  }, 120_000);
+
+  it(`examines at most ${WITHDRAWAL_RETRY_SCAN} rows per run and goes on from there the next run`, async () => {
+    const failing = await seedFailing("scan", WITHDRAWAL_RETRY_SCAN + 50);
+    const attempts = new TransientAttempts();
+    const last = failing[failing.length - 1];
+    for (const documentId of failing.slice(0, -1)) {
+      attempts.deferWithdrawal(QUICK_LINK, documentId, NOW, 0);
+    }
+    const attempted = watchUnpublishes(new Set(failing));
+    await run(NOW, attempts);
+    expect(attempted).toEqual([]);
+    await run(NOW, attempts);
+    expect(attempted).toEqual([last]);
+  }, 120_000);
 });
