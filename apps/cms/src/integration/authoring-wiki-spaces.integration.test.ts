@@ -249,9 +249,9 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
     expect(custom).toHaveLength(52);
     // An image before 16B prunes these rows with their routes (C31); the
     // roll-forward's boot sync re-creates exactly them.
-    await t.strapi.db
-      .query(PERMISSION)
-      .deleteMany({ where: { id: { $in: custom.map((row) => row.id) } } });
+    for (const row of custom) {
+      await t.strapi.db.query(PERMISSION).delete({ where: { id: row.id } });
+    }
     const lines: string[] = [];
     const log = {
       info: (message: string) => lines.push(message),
