@@ -9,18 +9,24 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 # Run it as the owner of the checkout (on the owner's host bigemo), from any
 # directory; the dump path is taken relative to the current directory.
 #
-#   infra/restore-db.sh prepare <dump>   a new attempt: checks the whole dump (it lists
+#   infra/restore-db.sh prepare <dump>   a new attempt: ends the eligibility of the
+#                                        attempt before it, copies the dump into the
+#                                        attempt's own file (staged: from now on only
+#                                        that copy is read), checks it in full (it lists
 #                                        at least one table and decodes to the end),
+#                                        reserves the project against infra/deploy.sh,
 #                                        stops web and cms, writes a NEW copy of the
 #                                        current database to
 #                                        infra/backups/before-restore-<attempt>.dump and
 #                                        checks it the same way; drops nothing
-#   infra/restore-db.sh apply            the attempt's dump (same sha256, decodes) and
-#                                        copy (same sha256, decodes) checked again, web
-#                                        and cms stopped, dropdb --if-exists --force +
-#                                        createdb, pg_restore --no-owner --exit-on-error
-#                                        --single-transaction, then the database must hold
-#                                        the dump's tables and at least one up_users row;
+#   infra/restore-db.sh apply            the staged dump checked again (same sha256,
+#                                        decodes), web and cms stopped, then: a database
+#                                        that exists needs the attempt's checked copy
+#                                        (same sha256, decodes); dropdb --if-exists
+#                                        --force + createdb, pg_restore --no-owner
+#                                        --exit-on-error --single-transaction of the
+#                                        staged dump, then the database must hold the
+#                                        dump's tables and at least one up_users row;
 #                                        may be run again after a failure
 #   infra/restore-db.sh rotate-jwt       after apply: a fresh JWT_SECRET (openssl rand
 #                                        -base64 48) on the one JWT_SECRET= line of
@@ -31,39 +37,57 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #   infra/restore-db.sh start            after apply and rotate-jwt of the same attempt,
 #                                        with the rotated secret still the one Compose
 #                                        hands the cms: up -d --no-build web cms; ends
-#                                        the attempt
+#                                        the attempt and the reservation
 #   infra/restore-db.sh rotate-jwt --env-only
 #   infra/restore-db.sh start --env-only the same pair when only infra/.env was restored
-#                                        (the database is intact)
+#                                        (the database is intact; refused while a
+#                                        restore holds the reservation)
 #   infra/restore-db.sh status           what the current attempt has done (no secrets)
 #   infra/restore-db.sh back             a new attempt from the copy of the database as it
-#                                        was before the restore (prepare <that copy>)
+#                                        was before the restore (prepare <that copy>,
+#                                        whose sha256 must still be the recorded one)
+#   infra/restore-db.sh cancel           ends an attempt whose apply has not begun and
+#                                        the reservation; drops, restores and starts
+#                                        nothing (web and cms stay as they are)
 #
 # Every step clears its own result and the results after it before it does
 # anything, and a result belongs to one attempt, so a failed or repeated step
 # never leaves an old pass behind. The attempt lives in a state file, not in
 # the shell: a new shell, a changed variable or an `exit` loses nothing.
 #
-# State: <common git dir>/sinnlos-restore/<project>.state (the current
-# attempt; earlier ones as <project>.<attempt>.state) and
-# <project>.env-only.state, mode 600, key=value, no secret (the JWT_SECRET is
-# recorded as its sha256 only). One run at a time per compose project: the
-# lock of infra/deploy.sh (<common git dir>/sinnlos-deploy/<project>.lock),
-# so neither a second restore step nor a deploy runs during a step.
+# State: <common git dir>/sinnlos-restore/ (mode 700): <project>.state (the
+# current attempt; earlier ones as <project>.<attempt>.state),
+# <project>.env-only.state and <project>.reservation, mode 600, key=value, no
+# secret (the JWT_SECRET is recorded as its sha256 only). A state file is
+# read strictly as data (never sourced): it must be a regular file of the
+# checkout owner with mode 600, hold only known keys once each, and every
+# value must have its form (attempt ids, sha256, counts, times); paths are
+# derived from the attempt id, never read. The staged dump of an attempt is
+# infra/backups/restore-<attempt>/dump (mode 600 in a mode-700 directory);
+# it goes when the attempt ends. The reservation lasts from prepare until
+# start passes or cancel; infra/deploy.sh refuses to deploy while it exists.
+# One run at a time per compose project: the lock of infra/deploy.sh
+# (<common git dir>/sinnlos-deploy/<project>.lock), so neither a second
+# restore step nor a deploy runs during a step.
 #
 # Exit codes: 0 OK, 1 STOP (a check or a command failed; the STOP line says
 # what changed and what to do), 2 usage, 3 another restore step or a deploy
 # of the project holds the lock (nothing changed).
 #
 # Parameters (environment; the defaults are the owner's production host):
-#   COMPOSE_PROJECT    infra (as infra/deploy.sh; a staging project has its own
-#                      containers, state and lock)
-#   RESTORE_EDGE       traefik (docker-compose.yml + docker-compose.traefik.yml) or
-#                      caddy (docker-compose.yml alone); unset: what the project's
-#                      containers were started with (their compose config_files label)
-#   SINNLOS_CHECKOUT   the checkout this script lives in
-#   RESTORE_STATE_DIR  <common git dir>/sinnlos-restore
-#   DEPLOY_STATE_DIR   <common git dir>/sinnlos-deploy (the lock, as infra/deploy.sh)
+#   COMPOSE_PROJECT        infra (as infra/deploy.sh; a staging project has its own
+#                          containers, state, reservation and lock)
+#   RESTORE_COMPOSE_FILES  the compose files, ':'-separated (relative to the
+#                          checkout or absolute), when the project's containers do
+#                          not tell; unset: the ordered config_files label of its web
+#                          and cms containers, each a known compose file of this
+#                          checkout's infra/ (docker-compose.yml first, then any of
+#                          docker-compose.traefik.yml, docker-compose.cms-legacy-tz.yml,
+#                          docker-compose.web-legacy-tz.yml)
+#   SINNLOS_CHECKOUT       the checkout this script lives in
+#   RESTORE_STATE_DIR      <common git dir>/sinnlos-restore (infra/deploy.sh reads the
+#                          reservation there)
+#   DEPLOY_STATE_DIR       <common git dir>/sinnlos-deploy (the lock, as infra/deploy.sh)
 #
 set -Eeuo pipefail
 umask 077
@@ -76,6 +100,7 @@ usage: infra/restore-db.sh prepare <dump>
        infra/restore-db.sh start [--env-only]
        infra/restore-db.sh status
        infra/restore-db.sh back
+       infra/restore-db.sh cancel
 (docs/DEPLOYMENT.md §7.1, "Restoring a database dump")
 USAGE
   exit 2
@@ -89,7 +114,7 @@ case "${CMD}" in
     (($# == 2)) && [[ -n "$2" ]] || usage
     DUMP_ARG="$2"
     ;;
-  apply | status | back) (($# == 1)) || usage ;;
+  apply | status | back | cancel) (($# == 1)) || usage ;;
   rotate-jwt | start)
     if (($# == 2)) && [[ "$2" == "--env-only" ]]; then
       ENV_ONLY=1
@@ -123,12 +148,15 @@ on_signal() {
   exit "$1"
 }
 # rotate-jwt's temporary copy of infra/.env (it holds the new secret) goes
-# on every exit.
+# on every exit; so does the staging directory of a prepare that did not
+# pass.
 ROTATE_TMP=""
+STAGE_TMP=""
 cleanup() {
   # Never fails (a failing EXIT trap would set off the ERR trap); the exit
   # status stays the one the script exited with.
   if [[ -n "${ROTATE_TMP}" ]]; then rm -f "${ROTATE_TMP}" || true; fi
+  if [[ -n "${STAGE_TMP}" ]]; then rm -rf "${STAGE_TMP}" || true; fi
 }
 trap 'on_error $? $LINENO' ERR
 trap cleanup EXIT
@@ -142,8 +170,7 @@ CHECKOUT="$(cd "${SINNLOS_CHECKOUT:-${SCRIPT_DIR}/..}" && pwd)"
 INFRA_DIR="${CHECKOUT}/infra"
 ENV_FILE="${INFRA_DIR}/.env"
 BACKUP_DIR="${INFRA_DIR}/backups"
-COMPOSE_BASE="${INFRA_DIR}/docker-compose.yml"
-COMPOSE_TRAEFIK="${INFRA_DIR}/docker-compose.traefik.yml"
+KNOWN_COMPOSE=(docker-compose.yml docker-compose.traefik.yml docker-compose.cms-legacy-tz.yml docker-compose.web-legacy-tz.yml)
 
 PROJECT="${COMPOSE_PROJECT:-infra}"
 if ! [[ "${PROJECT}" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
@@ -153,9 +180,10 @@ fi
 
 # The checkout owner runs every step: the copies, the state and infra/.env
 # stay theirs (a root run would leave infra/.env unreadable for deploy.sh).
+MY_UID="$(id -u)"
 OWNER_UID="$(stat -c %u "${CHECKOUT}")"
-if [[ "$(id -u)" != "${OWNER_UID}" ]]; then
-  stop "run this as the owner of ${CHECKOUT} (uid ${OWNER_UID}; on the owner's host: sudo -iu bigemo), not as uid $(id -u); nothing changed"
+if [[ "${MY_UID}" != "${OWNER_UID}" ]]; then
+  stop "run this as the owner of ${CHECKOUT} (uid ${OWNER_UID}; on the owner's host: sudo -iu bigemo), not as uid ${MY_UID}; nothing changed"
 fi
 
 if [[ -z "${RESTORE_STATE_DIR:-}" || -z "${DEPLOY_STATE_DIR:-}" ]]; then
@@ -168,14 +196,20 @@ fi
 STATE_DIR="${RESTORE_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-restore}"
 STATE_FILE="${STATE_DIR}/${PROJECT}.state"
 ENV_ONLY_FILE="${STATE_DIR}/${PROJECT}.env-only.state"
+RESERVATION="${STATE_DIR}/${PROJECT}.reservation"
 LOCK_DIR="${DEPLOY_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-deploy}"
 LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"
 
-# --- State files (key=value; read as data, never sourced) ---------------------
-STATE_KEYS=(ATTEMPT PROJECT CHECKOUT EDGE DUMP DUMP_SHA256 DUMP_TABLES SAFETY SAFETY_SHA256
-  SAFETY_TABLES ORIGIN ORIGIN_ATTEMPT BACK_OF PREPARED_AT APPLY_STARTED_AT APPLIED_AT
-  RESTORED_TABLES USERS ROTATED_AT ROTATED_SUM STARTED_AT)
-ENV_ONLY_KEYS=(PROJECT CHECKOUT EDGE ROTATED_AT ROTATED_SUM STARTED_AT)
+# --- State files (key=value; strictly parsed data, never sourced) -------------
+STATE_KEYS=(ATTEMPT PROJECT CHECKOUT COMPOSE_FILES SOURCE DUMP_SHA256 DUMP_TABLES SAFETY
+  SAFETY_SHA256 SAFETY_TABLES ORIGIN_ATTEMPT ORIGIN_SHA256 BACK_OF PREPARED_AT SUPERSEDED_AT
+  CANCELLED_AT APPLY_STARTED_AT APPLIED_AT RESTORED_TABLES USERS ROTATED_AT ROTATED_SUM STARTED_AT)
+ENV_ONLY_KEYS=(PROJECT CHECKOUT COMPOSE_FILES ROTATED_AT ROTATED_SUM STARTED_AT)
+
+ID_RE='^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{4}$'
+SHA_RE='^[0-9a-f]{64}$'
+TIME_RE='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
+COUNT_RE='^(0|[1-9][0-9]{0,8})$'
 
 clear_state() { # <prefix> <keys...>
   local prefix="$1" key
@@ -183,24 +217,127 @@ clear_state() { # <prefix> <keys...>
   for key in "$@"; do printf -v "${prefix}${key}" '%s' ""; done
 }
 
-read_state() { # <file> <prefix> <keys...>; S_<KEY> from the file, unknown keys ignored
-  local file="$1" prefix="$2" line key value known
+state_dir_ok() {
+  [[ ! -L "${STATE_DIR}" && -d "${STATE_DIR}" && "$(stat -c %u "${STATE_DIR}")" == "${MY_UID}" &&
+    "$(stat -c %a "${STATE_DIR}")" == 700 ]]
+}
+
+# Fails with a reason on stdout unless <file> is a regular file (no symlink)
+# of the checkout owner with mode 600 in the owner's mode-700 state dir.
+check_owned_file() { # <file>
+  local file="$1"
+  if ! state_dir_ok; then
+    echo "the state directory ${STATE_DIR} is not a mode-700 directory of uid ${MY_UID}"
+    return 1
+  fi
+  if [[ -L "${file}" || ! -f "${file}" ]]; then
+    echo "${file} is not a regular file"
+    return 1
+  fi
+  if [[ "$(stat -c %u "${file}")" != "${MY_UID}" || "$(stat -c %a "${file}")" != 600 ]]; then
+    echo "${file} is not mode 600 and owned by uid ${MY_UID}"
+    return 1
+  fi
+}
+
+# Reads <file> into <prefix><KEY>: only known keys, each at most once, values
+# without control characters; anything else stops the step. A missing file
+# leaves every key empty.
+read_state() { # <file> <prefix> <keys...>
+  local file="$1" prefix="$2" line key value known reason k seen=" "
   shift 2
   clear_state "${prefix}" "$@"
-  [[ -f "${file}" ]] || return 0
+  [[ -e "${file}" || -L "${file}" ]] || return 0
+  if ! reason="$(check_owned_file "${file}")"; then
+    stop "the state file ${file} is not one this script wrote (${reason}); nothing changed: look at it, then move it away and start again with prepare"
+  fi
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    [[ "${line}" == *=* ]] || continue
+    [[ -n "${line}" && "${line}" != \#* ]] || continue
     key="${line%%=*}" value="${line#*=}"
-    for known in "$@"; do
-      if [[ "${key}" == "${known}" ]]; then printf -v "${prefix}${key}" '%s' "${value}"; fi
-    done
+    known=0
+    for k in "$@"; do if [[ "${key}" == "${k}" ]]; then known=1; fi; done
+    if ((!known)) || [[ "${line}" != *=* || "${seen}" == *" ${key} "* || "${value}" == *[[:cntrl:]]* ]]; then
+      stop "the state file ${file} is not one this script wrote (line '${key}'); nothing changed: look at it, then move it away and start again with prepare"
+    fi
+    seen+="${key} "
+    printf -v "${prefix}${key}" '%s' "${value}"
   done <"${file}"
+}
+
+matches() { [[ "$1" =~ $2 ]]; }
+empty_or() { [[ -z "$1" ]] || [[ "$1" =~ $2 ]]; }
+
+# Every value of the attempt state in its form; paths are derived, not read.
+validate_attempt_state() {
+  local bad=""
+  [[ -z "${S_ATTEMPT}" ]] && return 0
+  matches "${S_ATTEMPT}" "${ID_RE}" || bad="ATTEMPT"
+  [[ "${S_PROJECT}" == "${PROJECT}" ]] || bad+=" PROJECT"
+  [[ "${S_CHECKOUT}" == "${CHECKOUT}" ]] || bad+=" CHECKOUT"
+  valid_compose_list "${S_COMPOSE_FILES}" || bad+=" COMPOSE_FILES"
+  [[ "${S_SOURCE}" == /* ]] || bad+=" SOURCE"
+  matches "${S_DUMP_SHA256}" "${SHA_RE}" || bad+=" DUMP_SHA256"
+  matches "${S_DUMP_TABLES}" '^[1-9][0-9]{0,8}$' || bad+=" DUMP_TABLES"
+  case "${S_SAFETY}" in
+    yes) matches "${S_SAFETY_SHA256}" "${SHA_RE}" && matches "${S_SAFETY_TABLES}" "${COUNT_RE}" || bad+=" SAFETY" ;;
+    none) [[ -z "${S_SAFETY_SHA256}${S_SAFETY_TABLES}" ]] || bad+=" SAFETY" ;;
+    *) bad+=" SAFETY" ;;
+  esac
+  if [[ -n "${S_ORIGIN_ATTEMPT}" ]]; then
+    matches "${S_ORIGIN_ATTEMPT}" "${ID_RE}" && matches "${S_ORIGIN_SHA256}" "${SHA_RE}" || bad+=" ORIGIN"
+  else
+    [[ -z "${S_ORIGIN_SHA256}" ]] || bad+=" ORIGIN"
+  fi
+  empty_or "${S_BACK_OF}" "${ID_RE}" || bad+=" BACK_OF"
+  matches "${S_PREPARED_AT}" "${TIME_RE}" || bad+=" PREPARED_AT"
+  local t
+  for t in SUPERSEDED_AT CANCELLED_AT APPLY_STARTED_AT APPLIED_AT ROTATED_AT STARTED_AT; do
+    local v="S_${t}"
+    empty_or "${!v}" "${TIME_RE}" || bad+=" ${t}"
+  done
+  empty_or "${S_RESTORED_TABLES}" "${COUNT_RE}" || bad+=" RESTORED_TABLES"
+  empty_or "${S_USERS}" "${COUNT_RE}" || bad+=" USERS"
+  empty_or "${S_ROTATED_SUM}" "${SHA_RE}" || bad+=" ROTATED_SUM"
+  if [[ -n "${bad}" ]]; then
+    stop "the state file ${STATE_FILE} is not one this script wrote (bad: ${bad# }); nothing changed: look at it, then move it away and start again with prepare"
+  fi
+}
+
+validate_env_only_state() {
+  local bad=""
+  [[ -z "${E_PROJECT}${E_CHECKOUT}${E_COMPOSE_FILES}${E_ROTATED_AT}${E_ROTATED_SUM}${E_STARTED_AT}" ]] && return 0
+  [[ "${E_PROJECT}" == "${PROJECT}" ]] || bad+=" PROJECT"
+  [[ "${E_CHECKOUT}" == "${CHECKOUT}" ]] || bad+=" CHECKOUT"
+  valid_compose_list "${E_COMPOSE_FILES}" || bad+=" COMPOSE_FILES"
+  empty_or "${E_ROTATED_AT}" "${TIME_RE}" || bad+=" ROTATED_AT"
+  empty_or "${E_ROTATED_SUM}" "${SHA_RE}" || bad+=" ROTATED_SUM"
+  empty_or "${E_STARTED_AT}" "${TIME_RE}" || bad+=" STARTED_AT"
+  if [[ -n "${bad}" ]]; then
+    stop "the state file ${ENV_ONLY_FILE} is not one this script wrote (bad: ${bad# }); nothing changed: look at it, then move it away"
+  fi
+}
+
+load_attempt() {
+  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
+  validate_attempt_state
+}
+load_env_only() {
+  read_state "${ENV_ONLY_FILE}" E_ "${ENV_ONLY_KEYS[@]}"
+  validate_env_only_state
+}
+
+ensure_state_dir() {
+  if [[ ! -e "${STATE_DIR}" && ! -L "${STATE_DIR}" ]]; then
+    mkdir -p "${STATE_DIR%/*}"
+    mkdir -m 700 "${STATE_DIR}"
+  fi
+  state_dir_ok || stop "the state directory ${STATE_DIR} is not a mode-700 directory of uid ${MY_UID}; ${PHASE_NOTE}"
 }
 
 write_state() { # <file> <prefix> <keys...>; atomic (rename), mode 600
   local file="$1" prefix="$2" key tmp var
   shift 2
-  mkdir -p "${STATE_DIR}"
+  ensure_state_dir
   tmp="$(mktemp "${file}.XXXXXX")"
   {
     echo "# infra/restore-db.sh state (no secrets); written $(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -209,6 +346,7 @@ write_state() { # <file> <prefix> <keys...>; atomic (rename), mode 600
       printf '%s=%s\n' "${key}" "${!var}"
     done
   } >"${tmp}"
+  chmod 600 "${tmp}"
   mv -f "${tmp}" "${file}"
 }
 
@@ -216,61 +354,123 @@ save_attempt() { write_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"; }
 save_env_only() { write_state "${ENV_ONLY_FILE}" E_ "${ENV_ONLY_KEYS[@]}"; }
 now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 
+# Paths of an attempt, derived from its id.
+safety_path() { printf '%s/before-restore-%s.dump\n' "${BACKUP_DIR}" "$1"; }
+stage_dir() { printf '%s/restore-%s\n' "${BACKUP_DIR}" "$1"; }
+
+# An attempt whose apply began and that was not started: the database may be
+# empty, restored but not yet checked, or restored without the new secret.
+attempt_open() { [[ -n "${S_ATTEMPT}" && -n "${S_APPLY_STARTED_AT}" && -z "${S_STARTED_AT}" ]]; }
+# Apply, rotate-jwt and start take only the current, live attempt.
+attempt_live() { [[ -n "${S_ATTEMPT}" && -z "${S_SUPERSEDED_AT}" && -z "${S_STARTED_AT}" ]]; }
+
+write_reservation() { # <attempt>
+  local tmp
+  ensure_state_dir
+  tmp="$(mktemp "${RESERVATION}.XXXXXX")"
+  printf 'ATTEMPT=%s\nRESERVED_AT=%s\n' "$1" "$(now)" >"${tmp}"
+  chmod 600 "${tmp}"
+  mv -f "${tmp}" "${RESERVATION}"
+}
+
 # --- Compose ------------------------------------------------------------------
-# Which edge the project runs: RESTORE_EDGE, or the compose files its
-# containers were created with (the config_files label compose writes).
-detect_edge() {
-  local labels traefik=0 plain=0 line
-  case "${RESTORE_EDGE:-}" in
-    traefik | caddy)
-      printf '%s\n' "${RESTORE_EDGE}"
-      return 0
-      ;;
-    "") ;;
-    *)
-      echo "RESTORE_EDGE must be traefik or caddy, not ${RESTORE_EDGE}"
+# A list of compose files as the state keeps it: comma-separated absolute
+# paths, no control characters.
+valid_compose_list() { # <list>
+  local list="$1" f files
+  [[ -n "${list}" && "${list}" != *[[:cntrl:]]* ]] || return 1
+  IFS=',' read -r -a files <<<"${list}"
+  ((${#files[@]})) || return 1
+  for f in "${files[@]}"; do [[ "${f}" == /* ]] || return 1; done
+}
+
+# The project's compose files, in order, comma-separated: RESTORE_COMPOSE_FILES,
+# or the config_files label of its web and cms containers (which must agree;
+# the db container's when neither exists), each a known compose file of this
+# checkout's infra/ that exists, docker-compose.yml first. Prints a reason
+# and fails when that cannot be determined.
+detect_compose_files() {
+  local raw="" svc label labels=() files=() out=() f base known k infra_real
+  if [[ -n "${RESTORE_COMPOSE_FILES:-}" ]]; then
+    IFS=':' read -r -a files <<<"${RESTORE_COMPOSE_FILES}"
+    for f in "${files[@]}"; do
+      [[ -n "${f}" ]] || continue
+      if [[ "${f}" != /* ]]; then f="${CHECKOUT}/${f}"; fi
+      if [[ "${f}" == *[,[:cntrl:]]* || -L "${f}" || ! -f "${f}" ]]; then
+        echo "RESTORE_COMPOSE_FILES names ${f}, which is no regular file (or holds a comma)"
+        return 1
+      fi
+      out+=("${f}")
+    done
+    if ((${#out[@]} == 0)); then
+      echo "RESTORE_COMPOSE_FILES names no file"
       return 1
-      ;;
-  esac
-  if ! labels="$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT}" \
-    --format '{{.Label "com.docker.compose.project.config_files"}}' </dev/null)"; then
-    echo "docker ps failed (is docker reachable for this user?)"
-    return 1
-  fi
-  while IFS= read -r line; do
-    [[ -n "${line}" ]] || continue
-    if [[ "${line}" == *docker-compose.traefik.yml* ]]; then traefik=1; else plain=1; fi
-  done <<<"${labels}"
-  if ((traefik && plain)); then
-    echo "the containers of compose project ${PROJECT} were started with and without docker-compose.traefik.yml: set RESTORE_EDGE=traefik or RESTORE_EDGE=caddy"
-    return 1
-  elif ((traefik)); then
-    echo traefik
-  elif ((plain)); then
-    echo caddy
+    fi
   else
-    echo "compose project ${PROJECT} has no containers: set RESTORE_EDGE=traefik or RESTORE_EDGE=caddy"
-    return 1
+    for svc in web cms db; do
+      if ! label="$(docker ps -a --filter "label=com.docker.compose.project=${PROJECT}" \
+        --filter "label=com.docker.compose.service=${svc}" \
+        --format '{{.Label "com.docker.compose.project.config_files"}}' </dev/null)"; then
+        echo "docker ps failed (is docker reachable for this user?)"
+        return 1
+      fi
+      labels+=("${label}")
+    done
+    if [[ -n "${labels[0]}" && -n "${labels[1]}" && "${labels[0]}" != "${labels[1]}" ]]; then
+      echo "the web and cms containers of compose project ${PROJECT} were started with different compose files (${labels[0]} / ${labels[1]}): set RESTORE_COMPOSE_FILES"
+      return 1
+    fi
+    raw="${labels[0]:-${labels[1]:-${labels[2]}}}"
+    if [[ -z "${raw}" || "${raw}" == *$'\n'* ]]; then
+      echo "the containers of compose project ${PROJECT} do not tell their compose files (none, or several of one service): set RESTORE_COMPOSE_FILES"
+      return 1
+    fi
+    infra_real="$(readlink -f -- "${INFRA_DIR}")"
+    IFS=',' read -r -a files <<<"${raw}"
+    for f in "${files[@]}"; do
+      base="${f##*/}"
+      known=0
+      for k in "${KNOWN_COMPOSE[@]}"; do if [[ "${base}" == "${k}" ]]; then known=1; fi; done
+      if ((!known)) || [[ "${f}" != /* || "$(readlink -f -- "${f%/*}" 2>/dev/null)" != "${infra_real}" ]]; then
+        echo "the containers of compose project ${PROJECT} were started with ${f}, which is not a known compose file of ${INFRA_DIR}: set RESTORE_COMPOSE_FILES to the files to use"
+        return 1
+      fi
+      if [[ -L "${INFRA_DIR}/${base}" || ! -f "${INFRA_DIR}/${base}" ]]; then
+        echo "the containers of compose project ${PROJECT} were started with ${base}, which is missing from ${INFRA_DIR}"
+        return 1
+      fi
+      out+=("${INFRA_DIR}/${base}")
+    done
+    if [[ "${out[0]##*/}" != docker-compose.yml ]]; then
+      echo "the compose files of project ${PROJECT} do not begin with docker-compose.yml (${raw}): set RESTORE_COMPOSE_FILES"
+      return 1
+    fi
   fi
+  (
+    IFS=','
+    printf '%s\n' "${out[*]}"
+  )
 }
 
 COMPOSE=()
-EDGE=""
-use_edge() { # <edge>
-  EDGE="$1"
-  COMPOSE=(docker compose -p "${PROJECT}" -f "${COMPOSE_BASE}")
-  if [[ "${EDGE}" == traefik ]]; then COMPOSE+=(-f "${COMPOSE_TRAEFIK}"); fi
+COMPOSE_FILES=""
+use_compose_files() { # <comma-separated list>
+  local f files
+  COMPOSE_FILES="$1"
+  COMPOSE=(docker compose -p "${PROJECT}")
+  IFS=',' read -r -a files <<<"$1"
+  for f in "${files[@]}"; do COMPOSE+=(-f "${f}"); done
 }
 
-# The edge for a step of a recorded attempt: the recorded one, and the
-# environment must not say otherwise now.
-use_recorded_edge() { # <recorded edge>
-  local recorded="$1" now_edge
-  if ! now_edge="$(detect_edge)"; then stop "${now_edge}; ${PHASE_NOTE}"; fi
-  if [[ "${now_edge}" != "${recorded}" ]]; then
-    stop "the attempt runs with the ${recorded} compose files, but ${now_edge} is selected now (RESTORE_EDGE or the containers changed); run with the settings of the attempt, or start again with prepare; ${PHASE_NOTE}"
+# A step of a recorded attempt runs with the recorded compose files, and the
+# project must still tell the same ones.
+use_recorded_compose_files() { # <recorded list>
+  local recorded="$1" now_files
+  if ! now_files="$(detect_compose_files)"; then stop "${now_files}; ${PHASE_NOTE}"; fi
+  if [[ "${now_files}" != "${recorded}" ]]; then
+    stop "the attempt runs with the compose files ${recorded}, but ${now_files} are selected now (RESTORE_COMPOSE_FILES or the containers changed); run with the files of the attempt, or start again with prepare; ${PHASE_NOTE}"
   fi
-  use_edge "${recorded}"
+  use_compose_files "${recorded}"
 }
 
 # compose exec forwards stdin: every call that needs none gets /dev/null, so a
@@ -300,9 +500,12 @@ db_query() { compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$PO
 # 1 when the project's database exists, 0 when it does not (after a dropdb
 # whose createdb failed); fails when Postgres cannot be asked.
 db_exists() {
+  local n
   # shellcheck disable=SC2016
-  compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -v db="$POSTGRES_DB"' \
-    <<<"SELECT count(*) FROM pg_database WHERE datname = :'db';"
+  n="$(compose exec -T db sh -c 'psql -X -q -tA -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres -v db="$POSTGRES_DB"' \
+    <<<"SELECT count(*) FROM pg_database WHERE datname = :'db';")" || return 1
+  [[ "${n}" == 0 || "${n}" == 1 ]] || return 1
+  printf '%s\n' "${n}"
 }
 
 stop_apps() { compose stop web cms </dev/null; }
@@ -344,9 +547,13 @@ refuse_exported_jwt() {
   fi
 }
 
-# An attempt whose apply began and that was not started: the database may be
-# empty, restored but not yet checked, or restored without the new secret.
-attempt_open() { [[ -n "${S_ATTEMPT}" && -n "${S_APPLY_STARTED_AT}" && -z "${S_STARTED_AT}" ]]; }
+# A copy the script wrote: a regular file of the owner (no symlink) whose
+# sha256 is still <sum> and that decodes.
+copy_intact() { # <file> <sha256>
+  local sum
+  [[ -f "$1" && ! -L "$1" && "$(stat -c %u "$1")" == "${MY_UID}" ]] || return 1
+  sum="$(sha256_of "$1")" && [[ "${sum}" == "$2" ]] && dump_tables "$1" >/dev/null
+}
 
 take_lock() {
   if ! command -v flock >/dev/null 2>&1; then
@@ -362,79 +569,119 @@ take_lock() {
 }
 
 # --- Steps --------------------------------------------------------------------
-do_prepare() { # <dump> [back-of attempt]
-  local dump="$1" back_of="${2:-}" edge n safety safety_n exists attempt prev_attempt=""
-  local prev_open=0 prev_origin="" prev_origin_attempt="" dump_sum safety_sum
+# A new attempt. <source> is read once, into the attempt's own staged file;
+# with <expected sha256> (back) the staged copy must have it.
+do_prepare() { # <source> [back-of attempt] [expected sha256]
+  local src="$1" back_of="${2:-}" expected="${3:-}" files n safety safety_n="" exists attempt
+  local prev_attempt prev_open=0 prev_origin="" prev_origin_sum="" dump_sum safety_sum="" real stage
   PHASE_NOTE="nothing changed"
-  if [[ "${dump}" == *$'\n'* ]]; then stop "the dump path holds a line break; nothing changed"; fi
-  if [[ "${dump}" != /* ]]; then dump="${PWD}/${dump}"; fi
-  if [[ ! -f "${dump}" || ! -r "${dump}" || ! -s "${dump}" ]]; then
-    stop "${dump} is missing, empty or not readable; nothing changed"
+  load_attempt
+  prev_attempt="${S_ATTEMPT}"
+  if attempt_open; then
+    prev_open=1 prev_origin="${S_ORIGIN_ATTEMPT}" prev_origin_sum="${S_ORIGIN_SHA256}"
+  fi
+  # First of all, the attempt before loses its eligibility (it stays on
+  # record, for status and back): whatever happens below, apply, rotate-jwt
+  # and start never act on it again.
+  if [[ -n "${prev_attempt}" && -z "${S_SUPERSEDED_AT}" && -z "${S_STARTED_AT}" ]]; then
+    S_SUPERSEDED_AT="$(now)"
+    save_attempt
+    rm -rf "$(stage_dir "${prev_attempt}")"
+  fi
+
+  if [[ "${src}" == *[[:cntrl:]]* ]]; then stop "the dump path holds a control character; nothing changed"; fi
+  if [[ "${src}" != /* ]]; then src="${PWD}/${src}"; fi
+  if ! real="$(readlink -f -- "${src}")" || [[ ! -f "${real}" || ! -r "${real}" || ! -s "${real}" ]]; then
+    stop "${src} is missing, empty or not readable; nothing changed"
   fi
   require_env_file
-  if ! edge="$(detect_edge)"; then stop "${edge}; nothing changed"; fi
-  use_edge "${edge}"
-  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
-  if attempt_open; then
-    prev_open=1 prev_origin="${S_ORIGIN}" prev_origin_attempt="${S_ORIGIN_ATTEMPT}"
-  fi
-  prev_attempt="${S_ATTEMPT}"
+  if ! files="$(detect_compose_files)"; then stop "${files}; nothing changed"; fi
+  use_compose_files "${files}"
 
-  if ! n="$(dump_tables "${dump}")" || ((n <= 0)); then
-    stop "${dump} is no readable dump (it must list at least one table and decode to the end; tables: ${n:-none}); nothing changed"
-  fi
-  dump_sum="$(sha256_of "${dump}")"
-
+  # The staged copy: the only bytes this attempt checks and restores.
   attempt="$(date -u +%Y%m%dT%H%M%SZ)-$(printf '%04x' "${RANDOM}")"
-  safety="${BACKUP_DIR}/before-restore-${attempt}.dump"
-  if ! stop_apps; then stop "web and cms did not stop; nothing dropped"; fi
-  PHASE_NOTE="web and cms are stopped; nothing dropped"
+  stage="$(stage_dir "${attempt}")"
+  if [[ ! -d "${BACKUP_DIR}" ]]; then mkdir -m 700 "${BACKUP_DIR}"; fi
+  if ! mkdir -m 700 "${stage}"; then stop "${stage} exists already; nothing changed"; fi
+  STAGE_TMP="${stage}"
+  if ! (
+    set -o noclobber
+    cat <"${real}" >"${stage}/dump"
+  ); then
+    stop "copying ${real} into ${stage} failed; nothing changed"
+  fi
+  if ! n="$(dump_tables "${stage}/dump")" || ((n <= 0)); then
+    stop "${src} is no readable dump (it must list at least one table and decode to the end; tables: ${n:-none}); nothing changed"
+  fi
+  dump_sum="$(sha256_of "${stage}/dump")"
+  if [[ -n "${expected}" && "${dump_sum}" != "${expected}" ]]; then
+    stop "${src} changed since it was taken (sha256 ${dump_sum}, recorded ${expected}); nothing changed"
+  fi
+
+  safety="$(safety_path "${attempt}")"
+  # From here on the project is reserved: infra/deploy.sh refuses to deploy
+  # until start passes or cancel.
+  write_reservation "${attempt}"
+  if ! stop_apps; then stop "web and cms did not stop; nothing dropped (the project is reserved: prepare again, or cancel)"; fi
+  PHASE_NOTE="web and cms are stopped; nothing dropped (the project is reserved: prepare again, or cancel)"
 
   if ! exists="$(db_exists)"; then
-    stop "Postgres of project ${PROJECT} did not answer (is its db container running?); web and cms are stopped, nothing dropped"
+    stop "Postgres of project ${PROJECT} did not answer (is its db container running?); ${PHASE_NOTE}"
   fi
-  mkdir -p "${BACKUP_DIR}"
   if [[ "${exists}" == 0 ]]; then
     # A dropdb whose createdb failed: there is nothing to copy (or to lose).
-    safety="none" safety_sum="" safety_n=""
+    safety="none"
     note "the database of project ${PROJECT} does not exist (a createdb that failed?): there is nothing to copy"
   else
-    if [[ -e "${safety}" ]]; then stop "${safety} exists already; web and cms are stopped, nothing dropped"; fi
+    if [[ -e "${safety}" || -L "${safety}" ]]; then stop "${safety} exists already; ${PHASE_NOTE}"; fi
     # shellcheck disable=SC2016
     if ! (
       set -o noclobber
       compose exec -T db sh -c 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" --format=custom' </dev/null >"${safety}"
     ) || [[ ! -s "${safety}" ]] || ! safety_n="$(dump_tables "${safety}")"; then
       rm -f "${safety}"
-      stop "no usable copy of the current database (pg_dump or its check failed); web and cms are stopped, nothing dropped"
+      stop "no usable copy of the current database (pg_dump or its check failed); ${PHASE_NOTE}"
     fi
     safety_sum="$(sha256_of "${safety}")"
   fi
 
-  if [[ -n "${prev_attempt}" && -f "${STATE_FILE}" ]]; then
+  if [[ -n "${prev_attempt}" ]]; then
     mv -f "${STATE_FILE}" "${STATE_DIR}/${PROJECT}.${prev_attempt}.state"
   fi
   clear_state S_ "${STATE_KEYS[@]}"
-  S_ATTEMPT="${attempt}" S_PROJECT="${PROJECT}" S_CHECKOUT="${CHECKOUT}" S_EDGE="${EDGE}"
-  S_DUMP="${dump}" S_DUMP_SHA256="${dump_sum}" S_DUMP_TABLES="${n}"
-  S_SAFETY="${safety}" S_SAFETY_SHA256="${safety_sum}" S_SAFETY_TABLES="${safety_n}"
+  S_ATTEMPT="${attempt}" S_PROJECT="${PROJECT}" S_CHECKOUT="${CHECKOUT}" S_COMPOSE_FILES="${COMPOSE_FILES}"
+  S_SOURCE="${real}" S_DUMP_SHA256="${dump_sum}" S_DUMP_TABLES="${n}"
+  if [[ "${safety}" == none ]]; then
+    S_SAFETY="none"
+  else
+    S_SAFETY="yes" S_SAFETY_SHA256="${safety_sum}" S_SAFETY_TABLES="${safety_n}"
+  fi
   S_BACK_OF="${back_of}" S_PREPARED_AT="$(now)"
   # `back` goes to the database as it was before the restore: an attempt
   # that began its apply and was not started left no state worth a copy, so
   # its origin carries over.
   if ((prev_open)); then
-    S_ORIGIN="${prev_origin}" S_ORIGIN_ATTEMPT="${prev_origin_attempt}"
-  else
-    S_ORIGIN="${safety}" S_ORIGIN_ATTEMPT="${attempt}"
+    S_ORIGIN_ATTEMPT="${prev_origin}" S_ORIGIN_SHA256="${prev_origin_sum}"
+  elif [[ "${safety}" != none ]]; then
+    S_ORIGIN_ATTEMPT="${attempt}" S_ORIGIN_SHA256="${safety_sum}"
   fi
   save_attempt
+  STAGE_TMP=""
   if ((prev_open)); then
-    note "attempt ${prev_attempt} did not finish; back from here goes to ${S_ORIGIN} (the database before it)"
+    note "attempt ${prev_attempt} did not finish; back from here goes to $(origin_text)"
   fi
   if [[ "${safety}" == none ]]; then
-    ok "attempt ${attempt}: ${dump} holds ${n} tables; web and cms stopped; no database to copy. Next: infra/restore-db.sh apply"
+    ok "attempt ${attempt}: ${real} holds ${n} tables (staged in ${stage}); web and cms stopped; no database to copy. Next: infra/restore-db.sh apply"
   else
-    ok "attempt ${attempt}: ${dump} holds ${n} tables; web and cms stopped; the current database (${safety_n} tables) is saved in ${safety}. Next: infra/restore-db.sh apply"
+    ok "attempt ${attempt}: ${real} holds ${n} tables (staged in ${stage}); web and cms stopped; the current database (${safety_n} tables) is saved in ${safety}. Next: infra/restore-db.sh apply"
+  fi
+}
+
+origin_text() {
+  if [[ -n "${S_ORIGIN_ATTEMPT}" ]]; then
+    printf '%s (the database before attempt %s)\n' "$(safety_path "${S_ORIGIN_ATTEMPT}")" "${S_ORIGIN_ATTEMPT}"
+  else
+    printf 'none (there was no database to copy)\n'
   fi
 }
 
@@ -444,56 +691,106 @@ cmd_prepare() {
 }
 
 cmd_back() {
+  local origin
   take_lock
-  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
+  load_attempt
   [[ -n "${S_ATTEMPT}" ]] || stop "there is no restore attempt of project ${PROJECT} to go back from; nothing changed"
-  if [[ -z "${S_ORIGIN}" || "${S_ORIGIN}" == none ]]; then
+  if [[ -z "${S_ORIGIN_ATTEMPT}" ]]; then
     stop "attempt ${S_ATTEMPT} has no copy of the database before it (its database did not exist); nothing changed"
   fi
-  if [[ ! -f "${S_ORIGIN}" ]]; then
-    stop "the copy ${S_ORIGIN} is gone; nothing changed"
+  origin="$(safety_path "${S_ORIGIN_ATTEMPT}")"
+  if [[ -L "${origin}" || ! -f "${origin}" ]]; then
+    stop "the copy ${origin} is gone; nothing changed"
   fi
-  note "back: the database as it was before attempt ${S_ORIGIN_ATTEMPT}, ${S_ORIGIN}"
-  do_prepare "${S_ORIGIN}" "${S_ATTEMPT}"
+  note "back: the database as it was before attempt ${S_ORIGIN_ATTEMPT}, ${origin}"
+  do_prepare "${origin}" "${S_ATTEMPT}" "${S_ORIGIN_SHA256}"
+}
+
+cmd_cancel() {
+  local stage
+  take_lock
+  load_attempt
+  if [[ ! -e "${RESERVATION}" && ! -L "${RESERVATION}" ]]; then
+    stop "compose project ${PROJECT} has no restore reservation; nothing to cancel"
+  fi
+  if attempt_open; then
+    stop "attempt ${S_ATTEMPT}'s apply began at ${S_APPLY_STARTED_AT}: the database may be empty or half-restored, so cancel refuses; finish it (apply, rotate-jwt, start) or go back (back, then apply, rotate-jwt, start); nothing changed"
+  fi
+  if [[ -n "${S_ATTEMPT}" && -z "${S_STARTED_AT}" ]]; then
+    S_CANCELLED_AT="$(now)"
+    if [[ -z "${S_SUPERSEDED_AT}" ]]; then S_SUPERSEDED_AT="${S_CANCELLED_AT}"; fi
+    save_attempt
+    stage="$(stage_dir "${S_ATTEMPT}")"
+    rm -rf "${stage}"
+  fi
+  rm -f "${RESERVATION}"
+  ok "restore of compose project ${PROJECT} cancelled${S_ATTEMPT:+ (attempt ${S_ATTEMPT})}: nothing was dropped or started, and infra/deploy.sh may deploy again. Web and cms stay as they are (prepare stopped them); to start them: $(start_hint)"
+}
+
+# The command that starts web and cms with the attempt's compose files.
+start_hint() {
+  local files f line="docker compose -p ${PROJECT}"
+  if [[ -z "${S_COMPOSE_FILES}" ]]; then
+    printf '%s\n' "${line} -f <the project's compose files> up -d --no-build web cms"
+    return 0
+  fi
+  IFS=',' read -r -a files <<<"${S_COMPOSE_FILES}"
+  for f in "${files[@]}"; do line+=" -f ${f}"; done
+  printf '%s\n' "${line} up -d --no-build web cms"
 }
 
 cmd_apply() {
-  local n sum t u exists
+  local n sum t u exists stage
   take_lock
   PHASE_NOTE="nothing dropped"
-  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
-  [[ -n "${S_ATTEMPT}" && -n "${S_PREPARED_AT}" ]] ||
+  load_attempt
+  [[ -n "${S_ATTEMPT}" ]] ||
     stop "no prepared attempt of project ${PROJECT}: run infra/restore-db.sh prepare <dump> first; nothing dropped"
   [[ -z "${S_STARTED_AT}" ]] ||
     stop "attempt ${S_ATTEMPT} is used up (web and cms started at ${S_STARTED_AT}): another restore starts with prepare; nothing dropped"
-  [[ "${S_CHECKOUT}" == "${CHECKOUT}" ]] ||
-    stop "attempt ${S_ATTEMPT} belongs to the checkout ${S_CHECKOUT}; nothing dropped"
+  [[ -z "${S_SUPERSEDED_AT}" ]] ||
+    stop "attempt ${S_ATTEMPT} was ended at ${S_SUPERSEDED_AT} (a later prepare, back or cancel): run infra/restore-db.sh prepare <dump> (or back) again; nothing dropped"
   require_env_file
-  use_recorded_edge "${S_EDGE}"
+  use_recorded_compose_files "${S_COMPOSE_FILES}"
 
   # This step's result and the rotation after it go first.
   S_APPLIED_AT="" S_RESTORED_TABLES="" S_USERS="" S_ROTATED_AT="" S_ROTATED_SUM=""
   save_attempt
 
-  if [[ ! -f "${S_DUMP}" ]] || ! sum="$(sha256_of "${S_DUMP}")" || [[ "${sum}" != "${S_DUMP_SHA256}" ]]; then
-    stop "the dump ${S_DUMP} is gone or changed since prepare; nothing dropped (start again with prepare)"
+  # The staged dump, opened once: every check and the restore read this
+  # inode, whatever happens to its path meanwhile.
+  stage="$(stage_dir "${S_ATTEMPT}")/dump"
+  if [[ -L "${stage}" || ! -f "${stage}" || "$(stat -c %u "${stage}")" != "${MY_UID}" ]]; then
+    stop "the staged dump ${stage} is gone; nothing dropped (start again with prepare)"
   fi
-  if ! n="$(dump_tables "${S_DUMP}")" || [[ "${n}" != "${S_DUMP_TABLES}" ]]; then
-    stop "the dump ${S_DUMP} no longer decodes or lists ${n:-no} tables instead of ${S_DUMP_TABLES}; nothing dropped"
+  exec 7<"${stage}"
+  if ! sum="$(sha256_of /dev/fd/7)" || [[ "${sum}" != "${S_DUMP_SHA256}" ]]; then
+    stop "the staged dump ${stage} changed since prepare; nothing dropped (start again with prepare)"
   fi
-  if [[ "${S_SAFETY}" != none ]]; then
-    if [[ ! -f "${S_SAFETY}" ]] || ! sum="$(sha256_of "${S_SAFETY}")" || [[ "${sum}" != "${S_SAFETY_SHA256}" ]]; then
-      stop "the copy ${S_SAFETY} is gone or changed since prepare; nothing dropped (start again with prepare, which writes a new copy)"
-    fi
-    if ! dump_tables "${S_SAFETY}" >/dev/null; then
-      stop "the copy ${S_SAFETY} no longer decodes; nothing dropped (start again with prepare)"
-    fi
+  if ! n="$(dump_tables /dev/fd/7)" || [[ "${n}" != "${S_DUMP_TABLES}" ]]; then
+    stop "the staged dump ${stage} no longer decodes or lists ${n:-no} tables instead of ${S_DUMP_TABLES}; nothing dropped"
   fi
   if ! stop_apps; then stop "web and cms did not stop; nothing dropped"; fi
 
+  # With the apps stopped and the lock held: a database that exists now is
+  # dropped only with the attempt's own, intact copy of it.
+  if ! exists="$(db_exists)"; then
+    stop "Postgres of project ${PROJECT} did not answer (is its db container running?); nothing dropped"
+  fi
+  if [[ "${exists}" == 1 ]]; then
+    if [[ "${S_SAFETY}" != yes ]]; then
+      stop "the database of project ${PROJECT} exists now, but prepare found none and took no copy of it: run infra/restore-db.sh prepare <dump> again (it copies the database first); nothing dropped"
+    fi
+    if ! copy_intact "$(safety_path "${S_ATTEMPT}")" "${S_SAFETY_SHA256}"; then
+      stop "the copy $(safety_path "${S_ATTEMPT}") is gone, changed or no longer decodes; nothing dropped (start again with prepare, which writes a new copy)"
+    fi
+  elif [[ "${S_SAFETY}" == yes ]] && ! copy_intact "$(safety_path "${S_ATTEMPT}")" "${S_SAFETY_SHA256}"; then
+    stop "the copy $(safety_path "${S_ATTEMPT}") is gone, changed or no longer decodes; nothing dropped (start again with prepare)"
+  fi
+
   S_APPLY_STARTED_AT="$(now)"
   save_attempt
-  PHASE_NOTE="the database may be empty or missing; do not start the apps: run infra/restore-db.sh apply again, or infra/restore-db.sh back (the copy is ${S_SAFETY})"
+  PHASE_NOTE="the database may be empty or missing; do not start the apps: run infra/restore-db.sh apply again, or infra/restore-db.sh back (to $(origin_text))"
   # --if-exists: a retry after a dropdb whose createdb failed works.
   # shellcheck disable=SC2016
   if ! compose exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"' </dev/null; then
@@ -503,14 +800,15 @@ cmd_apply() {
     stop "dropping or creating the database failed; run infra/restore-db.sh status, fix the cause and apply again (or back); do not start the apps"
   fi
   # shellcheck disable=SC2016
-  if ! compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' <"${S_DUMP}"; then
-    stop "pg_restore failed and rolled back: the database is empty; to go back: infra/restore-db.sh back (the copy is ${S_SAFETY}), or fix the cause and apply again; do not start the apps"
+  if ! compose exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' </dev/fd/7; then
+    stop "pg_restore failed and rolled back: the database is empty; to go back: infra/restore-db.sh back (to $(origin_text)), or fix the cause and apply again; do not start the apps"
   fi
+  exec 7<&-
   if ! t="$(db_query <<<"SELECT count(*) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema');")" ||
     ! u="$(db_query <<<"SELECT count(*) FROM up_users;")"; then
     stop "the check queries failed (no up_users table: not a sinnlos dump?); do not start the apps: infra/restore-db.sh back, or apply another dump"
   fi
-  if ! [[ "${t}" =~ ^[0-9]+$ && "${u}" =~ ^[0-9]+$ ]] || [[ "${t}" != "${S_DUMP_TABLES}" ]] || ((u <= 0)); then
+  if ! [[ "${t}" =~ ${COUNT_RE} && "${u}" =~ ${COUNT_RE} ]] || [[ "${t}" != "${S_DUMP_TABLES}" ]] || ((u <= 0)); then
     stop "the database holds ${t:-?} tables (the dump ${S_DUMP_TABLES}) and ${u:-?} users; do not start the apps: infra/restore-db.sh back, or apply another dump"
   fi
   S_APPLIED_AT="$(now)" S_RESTORED_TABLES="${t}" S_USERS="${u}"
@@ -519,30 +817,30 @@ cmd_apply() {
 }
 
 cmd_rotate_jwt() {
-  local edge new new_sum file_sum effective_sum mode owner
+  local files new new_sum file_sum effective_sum mode owner
   take_lock
   PHASE_NOTE="JWT_SECRET is not rotated"
   if ((ENV_ONLY)); then
-    if ! edge="$(detect_edge)"; then stop "${edge}; JWT_SECRET left alone"; fi
-    use_edge "${edge}"
-    read_state "${ENV_ONLY_FILE}" E_ "${ENV_ONLY_KEYS[@]}"
+    load_env_only
+    if ! files="$(detect_compose_files)"; then stop "${files}; JWT_SECRET left alone"; fi
+    use_compose_files "${files}"
     clear_state E_ "${ENV_ONLY_KEYS[@]}"
     # shellcheck disable=SC2034 # written by save_env_only (indirect)
-    E_PROJECT="${PROJECT}" E_CHECKOUT="${CHECKOUT}" E_EDGE="${EDGE}"
+    E_PROJECT="${PROJECT}" E_CHECKOUT="${CHECKOUT}" E_COMPOSE_FILES="${COMPOSE_FILES}"
     save_env_only
   else
-    read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
-    if [[ -z "${S_ATTEMPT}" || -z "${S_APPLIED_AT}" || -n "${S_STARTED_AT}" ]]; then
-      stop "apply did not pass for the current attempt (${S_ATTEMPT:-none}); when only infra/.env was restored: infra/restore-db.sh rotate-jwt --env-only; JWT_SECRET left alone"
+    load_attempt
+    if ! attempt_live || [[ -z "${S_APPLIED_AT}" ]]; then
+      stop "apply did not pass for the current attempt (${S_ATTEMPT:-none}${S_SUPERSEDED_AT:+, ended ${S_SUPERSEDED_AT}}); when only infra/.env was restored: infra/restore-db.sh rotate-jwt --env-only; JWT_SECRET left alone"
     fi
-    use_recorded_edge "${S_EDGE}"
+    use_recorded_compose_files "${S_COMPOSE_FILES}"
     S_ROTATED_AT="" S_ROTATED_SUM=""
     save_attempt
   fi
   refuse_exported_jwt
   require_env_file
-  if [[ -L "${ENV_FILE}" || "$(stat -c %u "${ENV_FILE}")" != "$(id -u)" ]]; then
-    stop "${ENV_FILE} is a symlink or not owned by you (uid $(id -u)); JWT_SECRET left alone"
+  if [[ -L "${ENV_FILE}" || "$(stat -c %u "${ENV_FILE}")" != "${MY_UID}" ]]; then
+    stop "${ENV_FILE} is a symlink or not owned by you (uid ${MY_UID}); JWT_SECRET left alone"
   fi
   if [[ "$(env_jwt_lines)" != 1 ]]; then
     stop "${ENV_FILE} needs exactly one JWT_SECRET= line (it has $(env_jwt_lines)); nothing written"
@@ -569,7 +867,7 @@ cmd_rotate_jwt() {
   mode="$(stat -c %a "${ENV_FILE}")"
   owner="$(stat -c %u "${ENV_FILE}")"
   file_sum="$(env_jwt_sum)"
-  if [[ "${mode}" != 600 || "${owner}" != "$(id -u)" || "$(env_jwt_lines)" != 1 || "${file_sum}" != "${new_sum}" ]]; then
+  if [[ "${mode}" != 600 || "${owner}" != "${MY_UID}" || "$(env_jwt_lines)" != 1 || "${file_sum}" != "${new_sum}" ]]; then
     stop "${ENV_FILE} does not hold the new JWT_SECRET as written (mode ${mode}, owner ${owner}, $(env_jwt_lines) JWT_SECRET lines); do not start the apps"
   fi
   if ! effective_sum="$(effective_jwt_sum)" || [[ "${effective_sum}" != "${new_sum}" ]]; then
@@ -590,22 +888,22 @@ cmd_start() {
   local effective sum
   take_lock
   PHASE_NOTE="web and cms not started"
-  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
+  load_attempt
   if ((ENV_ONLY)); then
-    read_state "${ENV_ONLY_FILE}" E_ "${ENV_ONLY_KEYS[@]}"
+    load_env_only
     if [[ -z "${E_ROTATED_SUM}" || -n "${E_STARTED_AT}" ]]; then
       stop "rotate-jwt --env-only did not pass (or its start was done already); web and cms not started"
     fi
-    if attempt_open; then
-      stop "attempt ${S_ATTEMPT} of a database restore is not finished (its apply began at ${S_APPLY_STARTED_AT}): finish it with apply, rotate-jwt and start, or go back with back; web and cms not started"
+    if [[ -e "${RESERVATION}" || -L "${RESERVATION}" ]] || attempt_open; then
+      stop "a database restore of compose project ${PROJECT} holds the reservation (attempt ${S_ATTEMPT:-unknown}): finish it with apply, rotate-jwt and start, go back with back, or end it with cancel; web and cms not started"
     fi
-    use_recorded_edge "${E_EDGE}"
+    use_recorded_compose_files "${E_COMPOSE_FILES}"
     sum="${E_ROTATED_SUM}"
   else
-    if [[ -z "${S_ATTEMPT}" || -z "${S_APPLIED_AT}" || -z "${S_ROTATED_SUM}" || -n "${S_STARTED_AT}" ]]; then
-      stop "web and cms not started (attempt ${S_ATTEMPT:-none}: restored ${S_APPLIED_AT:-no}, JWT_SECRET rotated ${S_ROTATED_AT:-no}, started ${S_STARTED_AT:-no})"
+    if ! attempt_live || [[ -z "${S_APPLIED_AT}" || -z "${S_ROTATED_SUM}" ]]; then
+      stop "web and cms not started (attempt ${S_ATTEMPT:-none}: restored ${S_APPLIED_AT:-no}, JWT_SECRET rotated ${S_ROTATED_AT:-no}, started ${S_STARTED_AT:-no}${S_SUPERSEDED_AT:+, ended ${S_SUPERSEDED_AT}})"
     fi
-    use_recorded_edge "${S_EDGE}"
+    use_recorded_compose_files "${S_COMPOSE_FILES}"
     sum="${S_ROTATED_SUM}"
   fi
   refuse_exported_jwt
@@ -624,40 +922,53 @@ cmd_start() {
   else
     S_STARTED_AT="$(now)"
     save_attempt
-    ok "attempt ${S_ATTEMPT} complete: web and cms started on the restored database with the rotated JWT_SECRET. Delete ${BACKUP_DIR}/before-restore-*.dump once the site works"
+    rm -rf "$(stage_dir "${S_ATTEMPT}")"
+    rm -f "${RESERVATION}"
+    ok "attempt ${S_ATTEMPT} complete: web and cms started on the restored database with the rotated JWT_SECRET; the reservation is gone. Delete ${BACKUP_DIR}/before-restore-*.dump once the site works"
   fi
 }
 
 cmd_status() {
-  read_state "${STATE_FILE}" S_ "${STATE_KEYS[@]}"
-  read_state "${ENV_ONLY_FILE}" E_ "${ENV_ONLY_KEYS[@]}"
+  load_attempt
+  load_env_only
   if [[ -z "${S_ATTEMPT}" ]]; then
     echo "no restore attempt of compose project ${PROJECT} (${STATE_FILE})"
   else
-    echo "attempt ${S_ATTEMPT} of compose project ${S_PROJECT} (${S_EDGE} compose files, checkout ${S_CHECKOUT})"
-    echo "  dump:      ${S_DUMP} (${S_DUMP_TABLES} tables, sha256 ${S_DUMP_SHA256})"
+    echo "attempt ${S_ATTEMPT} of compose project ${S_PROJECT} (checkout ${S_CHECKOUT})"
+    echo "  compose:   ${S_COMPOSE_FILES}"
+    echo "  dump:      ${S_SOURCE} (${S_DUMP_TABLES} tables, sha256 ${S_DUMP_SHA256}; staged in $(stage_dir "${S_ATTEMPT}"))"
     if [[ "${S_SAFETY}" == none ]]; then
       echo "  copy:      none (the database did not exist at prepare)"
     else
-      echo "  copy:      ${S_SAFETY} (${S_SAFETY_TABLES} tables, sha256 ${S_SAFETY_SHA256})"
+      echo "  copy:      $(safety_path "${S_ATTEMPT}") (${S_SAFETY_TABLES} tables, sha256 ${S_SAFETY_SHA256})"
     fi
-    echo "  back to:   ${S_ORIGIN} (the database before attempt ${S_ORIGIN_ATTEMPT})"
+    echo "  back to:   $(origin_text)"
     if [[ -n "${S_BACK_OF}" ]]; then echo "  goes back from attempt ${S_BACK_OF}"; fi
     echo "  prepared:  ${S_PREPARED_AT:-no}"
     echo "  apply:     began ${S_APPLY_STARTED_AT:-no}, passed ${S_APPLIED_AT:-no}${S_APPLIED_AT:+ (${S_RESTORED_TABLES} tables, ${S_USERS} users)}"
     echo "  rotated:   ${S_ROTATED_AT:-no}"
     echo "  started:   ${S_STARTED_AT:-no}"
+    if [[ -n "${S_SUPERSEDED_AT}" ]]; then
+      echo "  ended:     ${S_SUPERSEDED_AT}${S_CANCELLED_AT:+ (cancelled)} (apply, rotate-jwt and start refuse it)"
+    fi
     if [[ -n "${S_STARTED_AT}" ]]; then
       echo "  next:      nothing (done); another restore starts with prepare"
-    elif [[ -n "${S_ROTATED_AT}" ]]; then
-      echo "  next:      infra/restore-db.sh start"
-    elif [[ -n "${S_APPLIED_AT}" ]]; then
-      echo "  next:      infra/restore-db.sh rotate-jwt"
-    elif [[ -n "${S_APPLY_STARTED_AT}" ]]; then
-      echo "  next:      the apply did not pass, the database may be empty: apply again, or back; do not start the apps"
+    elif attempt_open; then
+      if [[ -n "${S_ROTATED_AT}" && -z "${S_SUPERSEDED_AT}" ]]; then
+        echo "  next:      infra/restore-db.sh start"
+      elif [[ -n "${S_APPLIED_AT}" && -z "${S_SUPERSEDED_AT}" ]]; then
+        echo "  next:      infra/restore-db.sh rotate-jwt"
+      else
+        echo "  next:      the database may be empty or not yet checked: apply again, or back (or prepare another dump); do not start the apps"
+      fi
+    elif [[ -n "${S_SUPERSEDED_AT}" ]]; then
+      echo "  next:      infra/restore-db.sh prepare <dump> (or back)"
     else
-      echo "  next:      infra/restore-db.sh apply"
+      echo "  next:      infra/restore-db.sh apply (or cancel)"
     fi
+  fi
+  if [[ -e "${RESERVATION}" ]]; then
+    echo "reserved:  ${RESERVATION} (infra/deploy.sh refuses to deploy until start passes or cancel)"
   fi
   if [[ -n "${E_ROTATED_AT}" ]]; then
     echo "infra/.env only: JWT_SECRET rotated ${E_ROTATED_AT}, started ${E_STARTED_AT:-no}"
@@ -671,4 +982,5 @@ case "${CMD}" in
   start) cmd_start ;;
   status) cmd_status ;;
   back) cmd_back ;;
+  cancel) cmd_cancel ;;
 esac

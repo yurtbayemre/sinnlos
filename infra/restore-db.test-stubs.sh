@@ -13,8 +13,9 @@
 # END. Without END its table of contents lists, but it does not decode (a
 # dump cut off in its data); a GRANT line makes its restore fail (a role
 # the target lacks).
-# Switches: STUB_EDGE (traefik | caddy | mixed | empty: the config_files of
-# the project's containers), STUB_STOP_FAIL, STUB_UP_FAIL, STUB_PGDUMP_FAIL,
+# Switches: STUB_LABEL_WEB, STUB_LABEL_CMS, STUB_LABEL_DB (the compose
+# config_files label of that service's container; empty: none), STUB_STOP_FAIL,
+# STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop), STUB_PGDUMP_FAIL,
 # STUB_CREATEDB_FAIL (dropdb runs, createdb fails), STUB_RESTORE_FAIL,
 # STUB_LOCK_HELD.
 : "${T:?}" "${REPO:?}"
@@ -131,11 +132,11 @@ stub_db() {
 docker() {
   printf 'docker %s\n' "$*" >>"${T}/calls"
   if [[ "$1" == ps ]]; then
-    local both="${REPO}/infra/docker-compose.yml,${REPO}/infra/docker-compose.traefik.yml"
-    case "${STUB_EDGE}" in
-      traefik) printf '%s\n%s\n' "${both}" "${both}" ;;
-      caddy) echo "${REPO}/infra/docker-compose.yml" ;;
-      mixed) printf '%s\n%s\n' "${REPO}/infra/docker-compose.yml" "${both}" ;;
+    # The config_files label of the asked service's container(s).
+    case "$*" in
+      *com.docker.compose.service=web*) [[ -z "${STUB_LABEL_WEB}" ]] || printf '%s\n' "${STUB_LABEL_WEB}" ;;
+      *com.docker.compose.service=cms*) [[ -z "${STUB_LABEL_CMS}" ]] || printf '%s\n' "${STUB_LABEL_CMS}" ;;
+      *com.docker.compose.service=db*) [[ -z "${STUB_LABEL_DB}" ]] || printf '%s\n' "${STUB_LABEL_DB}" ;;
     esac
     return 0
   fi
@@ -165,6 +166,9 @@ docker() {
     stop)
       if [[ -n "${STUB_STOP_FAIL}" ]]; then return 1; fi
       echo stopped >"${T}/apps"
+      # STUB_ON_STOP: bash run when the apps stop, i.e. in apply after every
+      # check of the dump and before the drop (a race with the restore).
+      if [[ -n "${STUB_ON_STOP}" ]]; then eval "${STUB_ON_STOP}"; fi
       ;;
     up)
       if [[ -n "${STUB_UP_FAIL}" ]]; then return 1; fi

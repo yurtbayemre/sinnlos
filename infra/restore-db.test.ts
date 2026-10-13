@@ -1,25 +1,36 @@
 /**
  * infra/restore-db.sh: the database restore of docs/DEPLOYMENT.md §7.1 as a
  * script with an on-disk attempt state. Pinned:
- *   1. a dump must list at least one table AND decode to the end before
- *      anything changes; web and cms stop, and a NEW copy of the database
- *      (never overwritten, checked the same way) exists before any drop;
- *   2. apply drops only for a prepared attempt whose dump and copy still
- *      have the sha256 of prepare and decode; it restores into a clean
- *      database in one transaction and requires the dump's tables and a
- *      user; a failed createdb or restore can be retried, and `back`
- *      returns to the database from before the restore, also after a
- *      failed way back;
- *   3. rotate-jwt refuses an exported JWT_SECRET and an .env without
+ *   1. prepare copies the dump into the attempt's own staged file and checks
+ *      that copy in full (it lists a table AND decodes to the end) before
+ *      anything changes; later steps read only the staged copy, so a dump
+ *      path swapped or rewritten after prepare changes nothing; web and cms
+ *      stop, and a NEW copy of the database (never overwritten, checked the
+ *      same way) exists before any drop;
+ *   2. every prepare first ends the eligibility of the attempt before it,
+ *      also when it fails; apply drops only for the live attempt, whose
+ *      staged dump still has its sha256 and decodes, and only with the
+ *      attempt's intact copy when the database exists (checked with the apps
+ *      stopped); it restores into a clean database in one transaction and
+ *      requires the dump's tables and a user; a failed createdb or restore
+ *      can be retried, and `back` returns to the database from before the
+ *      restore, also after a failed way back;
+ *   3. the state files are untrusted data: mode 600 of the owner, known
+ *      keys once, every value in its form, paths derived from the attempt id;
+ *   4. rotate-jwt refuses an exported JWT_SECRET and an .env without
  *      exactly one JWT_SECRET= line, writes a fresh value (mode 600) and
  *      passes only when Compose hands the cms that value; no secret in any
  *      output, also under bash -x;
- *   4. start needs apply and rotate-jwt of the same attempt (or the
- *      --env-only pair, refused while a database restore is unfinished)
- *      and the rotated secret still effective; it uses the attempt up;
- *   5. one step at a time per compose project (the deploy lock); the
- *      compose files are the project's (Traefik overlay or not), the same
- *      for every step of an attempt.
+ *   5. start needs apply and rotate-jwt of the same live attempt (or the
+ *      --env-only pair, refused while a restore holds the reservation) and
+ *      the rotated secret still effective; it ends the attempt and the
+ *      reservation, which prepare takes and cancel (only before apply)
+ *      releases;
+ *   6. one step at a time per compose project (the deploy lock); the
+ *      compose files are the ordered list of the project's web and cms
+ *      containers (overlays such as the cms legacy-zone file kept), known
+ *      files of the checkout, or RESTORE_COMPOSE_FILES, the same for every
+ *      step of an attempt.
  *
  * The fast sequences run the real script with docker and flock stubbed as
  * exported shell functions: the stub keeps a fake database (one line per
@@ -44,7 +55,7 @@ const SCRIPT = readFileSync(new URL("./restore-db.sh", import.meta.url), "utf8")
   /\r\n/g,
   "\n",
 );
-const TOOLS = ["flock", "openssl", "git", "sha256sum", "stat", "mktemp", "awk", "sed"];
+const TOOLS = ["flock", "openssl", "git", "sha256sum", "stat", "mktemp", "awk", "sed", "readlink"];
 const MODE: ShellMode | null = shellMode(TOOLS, { linux: true });
 const SLOW = process.env.SINNLOS_SLOW_SHELL_TESTS === "1";
 const SLOW_MODE: ShellMode | null = SLOW ? shellMode([...TOOLS, "docker"], { linux: true }) : null;
@@ -79,16 +90,23 @@ describe("restore-db.sh: the script itself", () => {
     );
     expect(SCRIPT).toContain('LOCK_FILE="${LOCK_DIR}/${PROJECT}.lock"');
     expect(SCRIPT).toContain('LOCK_DIR="${DEPLOY_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-deploy}"');
+    expect(SCRIPT).toContain('RESERVATION="${STATE_DIR}/${PROJECT}.reservation"');
   });
 
-  it("restores into a clean database in one transaction that stops at the first error", () => {
+  it("restores the staged dump into a clean database in one transaction that stops at the first error", () => {
     expect(SCRIPT).toContain(
       `'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'`,
     );
     expect(SCRIPT).toContain(
-      `'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction'`,
+      `'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' </dev/fd/7`,
     );
+    expect(SCRIPT).toContain('exec 7<"${stage}"');
     expect(SCRIPT).not.toMatch(/pg_restore[^\n]*--clean/);
+  });
+
+  it("reads its state files as data, never as code", () => {
+    expect(SCRIPT).not.toMatch(/^\s*(source|\.)\s/m);
+    expect(SCRIPT).toContain('printf -v "${prefix}${key}" \'%s\' "${value}"');
   });
 });
 
@@ -120,10 +138,16 @@ interface StepReport {
   startedJwtSum: string;
   /** "running" or "stopped". */
   apps: string;
-  /** Files in infra/backups. */
+  /** Entries of infra/backups. */
   backups: string[];
+  /** Staged dumps: "<dir> <dir mode> <file mode>". */
+  stages: string[];
   /** Archived attempt states (<project>.<attempt>.state). */
   archived: number;
+  /** Whether the reservation file exists. */
+  reserved: boolean;
+  /** The checkout ($REPO). */
+  checkout: string;
 }
 
 /** A fake pg_dump archive: FAKEDUMP, table lines, END (cut: no END). */
@@ -142,12 +166,18 @@ const HARNESS_STUBS = readFileSync(
   "utf8",
 ).replace(/\r\n/g, "\n");
 
+/** The config_files label of production's containers in the harness checkout. */
+const TRAEFIK_LABEL = "$REPO/infra/docker-compose.yml,$REPO/infra/docker-compose.traefik.yml";
+
 /**
  * Runs the steps in one bash process, in a fresh checkout ($REPO, a git
- * repo) with the real restore-db.sh, an infra/.env (JWT_SECRET=old-secret)
- * and a database of three tables (up_users 3, posts 5, rsvps 2). Fake dumps
- * in $T: good.dump (up_users, posts), cut.dump (good.dump without its end),
- * garbage.dump, grant.dump (fails to restore), nousers.dump.
+ * repo) with the real restore-db.sh, an infra/.env (JWT_SECRET=old-secret),
+ * empty compose files (base, Traefik overlay, cms legacy-zone overlay) and
+ * a database of three tables (up_users 3, posts 5, rsvps 2); web, cms and db
+ * containers carry the label of base + Traefik overlay. Fake dumps in $T:
+ * good.dump (up_users, posts), cut.dump (good.dump without its end),
+ * garbage.dump, grant.dump (fails to restore), nousers.dump, older.dump
+ * (up_users 2).
  */
 function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
   const script: string[] = [
@@ -161,7 +191,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     SCRIPT.trimEnd(),
     "RESTORE_DB_EOF",
     'chmod 755 "$REPO/infra/restore-db.sh"',
-    ': > "$REPO/infra/docker-compose.yml"; : > "$REPO/infra/docker-compose.traefik.yml"',
+    'for f in docker-compose.yml docker-compose.traefik.yml docker-compose.cms-legacy-tz.yml; do : > "$REPO/infra/$f"; done',
     "printf 'DATABASE_PASSWORD=pw\\nJWT_SECRET=old-secret\\nAUTH_SECRET=keep-me\\n' > \"$REPO/infra/.env\"",
     'G=(git -C "$REPO" -c user.name=restore-test -c user.email=restore-test@example.invalid -c commit.gpgsign=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)',
     '"${G[@]}" init -q && "${G[@]}" add -A && "${G[@]}" commit -q -m first',
@@ -174,8 +204,11 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
       extra: ["GRANT SELECT ON up_users TO walk_reader"],
     }),
     fakeDump("nousers.dump", ["notes 1", "tags 2"]),
+    fakeDump("older.dump", ["up_users 2"]),
     "STEP_CWD=",
-    "export T REPO STUB_EDGE=traefik STUB_STOP_FAIL= STUB_UP_FAIL= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+    `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+    'S="$REPO/.git/sinnlos-restore"',
     HARNESS_STUBS,
   ];
   steps.forEach((step, n) => {
@@ -193,7 +226,6 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
       'sed "s/^/@@OUT /" "$T/out"',
       'sed "s/^/@@ERR /" "$T/err"',
       'sed "s/^/@@CALL /" "$T/calls"',
-      'S="$REPO/.git/sinnlos-restore"',
       'if [[ -f "$S/infra.state" ]]; then sed "s/^/@@STATE /" "$S/infra.state"; fi',
       'if [[ -f "$S/infra.env-only.state" ]]; then sed "s/^/@@ENVONLY /" "$S/infra.env-only.state"; fi',
       'if [[ -d "$T/db" ]]; then echo "@@DBEXISTS"; sed "s/^/@@DB /" "$T/db/tables"; fi',
@@ -202,7 +234,10 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
       'echo "@@STARTED $(cat "$T/started-jwt" 2>/dev/null)"',
       'echo "@@APPS $(cat "$T/apps")"',
       'for f in "$REPO"/infra/backups/*; do if [[ -e "$f" ]]; then echo "@@BACKUP ${f##*/}"; fi; done',
+      'for f in "$REPO"/infra/backups/restore-*; do if [[ -d "$f" ]]; then echo "@@STAGE ${f##*/} $(stat -c %a "$f") $(stat -c %a "$f/dump" 2>/dev/null)"; fi; done',
       'echo "@@ARCHIVED $(ls "$S" 2>/dev/null | grep -c "^infra\\.[0-9].*\\.state$")"',
+      'if [[ -e "$S/infra.reservation" ]]; then echo "@@RESERVED 1"; else echo "@@RESERVED 0"; fi',
+      'echo "@@CHECKOUT $REPO"',
     );
   });
   script.push("");
@@ -227,7 +262,10 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
         startedJwtSum: "",
         apps: "",
         backups: [],
+        stages: [],
         archived: 0,
+        reserved: false,
+        checkout: "",
       };
       dbExists = false;
       reports.push(current);
@@ -255,7 +293,10 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     else if (tag === "@@STARTED") current.startedJwtSum = value;
     else if (tag === "@@APPS") current.apps = value;
     else if (tag === "@@BACKUP") current.backups.push(value);
+    else if (tag === "@@STAGE") current.stages.push(value);
     else if (tag === "@@ARCHIVED") current.archived = Number(value);
+    else if (tag === "@@RESERVED") current.reserved = value === "1";
+    else if (tag === "@@CHECKOUT") current.checkout = value;
   }
   expect(reports, res.stdout).toHaveLength(steps.length);
   return reports;
@@ -268,6 +309,10 @@ const sha256 = async (s: string) => {
 const dropped = (r: StepReport) => r.calls.some((c) => c.includes("dropdb"));
 const stopLine = (r: StepReport) => r.stderr.split("\n").find((l) => l.startsWith("STOP: ")) ?? "";
 const okLine = (r: StepReport) => r.stdout.split("\n").find((l) => l.startsWith("OK: ")) ?? "";
+/** The copy an attempt took of the database. */
+const copyOf = (r: StepReport, attempt: string) =>
+  `${r.checkout}/infra/backups/before-restore-${attempt}.dump`;
+const copies = (r: StepReport) => r.backups.filter((b) => b.startsWith("before-restore-"));
 
 const FAST = MODE !== null;
 const FAST_TITLE = FAST ? "" : ` (skipped: ${skipReason(TOOLS)})`;
@@ -291,60 +336,98 @@ describe.skipIf(!FAST)(`restore-db.sh: a good restore, step by step${FAST_TITLE}
     );
   }, 300_000);
 
-  it("prepare checks the dump, stops the apps and writes a new, checked copy; it drops nothing", () => {
+  it("prepare stages and checks the dump, reserves, stops the apps and writes a new, checked copy", () => {
     expect(r[0].status, r[0].stderr).toBe(0);
-    expect(okLine(r[0])).toMatch(
-      /^OK: attempt \d{8}T\d{6}Z-[0-9a-f]{4}: \/.*\/good\.dump holds 2 tables; web and cms stopped; the current database \(3 tables\) is saved in \/.*\/infra\/backups\/before-restore-\d{8}T\d{6}Z-[0-9a-f]{4}\.dump\. Next: infra\/restore-db\.sh apply$/,
+    const id = r[0].state.ATTEMPT;
+    expect(id).toMatch(/^\d{8}T\d{6}Z-[0-9a-f]{4}$/);
+    expect(okLine(r[0])).toBe(
+      `OK: attempt ${id}: ${r[0].state.SOURCE} holds 2 tables (staged in ${r[0].checkout}/infra/backups/restore-${id}); web and cms stopped; the current database (3 tables) is saved in ${copyOf(r[0], id)}. Next: infra/restore-db.sh apply`,
     );
+    expect(r[0].state.SOURCE).toMatch(/\/good\.dump$/);
     expect(r[0].apps).toBe("stopped");
+    expect(r[0].reserved).toBe(true);
     expect(dropped(r[0])).toBe(false);
     expect(r[0].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
-    expect(r[0].backups).toEqual([`before-restore-${r[0].state.ATTEMPT}.dump`]);
-    // The dump is checked in full (list and decode), and so is the copy.
+    expect(copies(r[0])).toEqual([`before-restore-${id}.dump`]);
+    // The staged copy: a mode-700 directory with a mode-600 file.
+    expect(r[0].stages).toEqual([`restore-${id} 700 600`]);
+    // The staged dump is checked in full (list and decode), and so is the copy.
     expect(r[0].calls.filter((c) => c.endsWith("exec -T db pg_restore --list"))).toHaveLength(2);
     expect(
       r[0].calls.filter((c) => c.endsWith("exec -T db pg_restore --file=/dev/null")),
     ).toHaveLength(2);
-    // The Traefik overlay of the project's containers is used.
-    expect(r[0].calls.find((c) => c.includes(" stop web cms"))).toMatch(
-      /^docker compose -p infra -f \/.*\/infra\/docker-compose\.yml -f \/.*\/infra\/docker-compose\.traefik\.yml stop web cms$/,
+    // The compose files of the project's containers, in their order.
+    expect(r[0].calls.find((c) => c.includes(" stop web cms"))).toBe(
+      `docker compose -p infra -f ${r[0].checkout}/infra/docker-compose.yml -f ${r[0].checkout}/infra/docker-compose.traefik.yml stop web cms`,
     );
   });
 
-  it("records the attempt on disk: dump and copy with their sha256 and table counts", () => {
+  it("records the attempt on disk: no path but the dump's source, sha256 and counts", () => {
     const s = r[0].state;
+    expect(Object.keys(s).sort()).toEqual(
+      [
+        "ATTEMPT",
+        "PROJECT",
+        "CHECKOUT",
+        "COMPOSE_FILES",
+        "SOURCE",
+        "DUMP_SHA256",
+        "DUMP_TABLES",
+        "SAFETY",
+        "SAFETY_SHA256",
+        "SAFETY_TABLES",
+        "ORIGIN_ATTEMPT",
+        "ORIGIN_SHA256",
+        "BACK_OF",
+        "PREPARED_AT",
+        "SUPERSEDED_AT",
+        "CANCELLED_AT",
+        "APPLY_STARTED_AT",
+        "APPLIED_AT",
+        "RESTORED_TABLES",
+        "USERS",
+        "ROTATED_AT",
+        "ROTATED_SUM",
+        "STARTED_AT",
+      ].sort(),
+    );
     expect(s.PROJECT).toBe("infra");
-    expect(s.EDGE).toBe("traefik");
-    expect(s.DUMP).toMatch(/\/good\.dump$/);
+    expect(s.COMPOSE_FILES).toBe(
+      `${r[0].checkout}/infra/docker-compose.yml,${r[0].checkout}/infra/docker-compose.traefik.yml`,
+    );
     expect(s.DUMP_SHA256).toMatch(/^[0-9a-f]{64}$/);
     expect(s.DUMP_TABLES).toBe("2");
-    expect(s.SAFETY).toMatch(new RegExp(`/infra/backups/before-restore-${s.ATTEMPT}\\.dump$`));
+    expect(s.SAFETY).toBe("yes");
     expect(s.SAFETY_SHA256).toMatch(/^[0-9a-f]{64}$/);
     expect(s.SAFETY_TABLES).toBe("3");
-    expect(s.ORIGIN).toBe(s.SAFETY);
+    expect(s.ORIGIN_ATTEMPT).toBe(s.ATTEMPT);
+    expect(s.ORIGIN_SHA256).toBe(s.SAFETY_SHA256);
     expect(s.PREPARED_AT).toMatch(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
     expect(s.APPLY_STARTED_AT).toBe("");
-    expect(r[1].stdout).toContain(
-      `attempt ${s.ATTEMPT} of compose project infra (traefik compose files`,
-    );
-    expect(r[1].stdout).toContain("next:      infra/restore-db.sh apply");
+    expect(r[1].stdout).toContain(`attempt ${s.ATTEMPT} of compose project infra (checkout`);
+    expect(r[1].stdout).toContain("next:      infra/restore-db.sh apply (or cancel)");
+    expect(r[1].stdout).toContain("reserved:  ");
   });
 
-  it("apply restores into a clean database and checks tables and users", () => {
+  it("apply restores the staged dump into a clean database and checks tables and users", () => {
     expect(r[2].status, r[2].stderr).toBe(0);
     expect(okLine(r[2])).toBe(
       `OK: attempt ${r[0].state.ATTEMPT}: restored 2 tables (the dump has 2) and 3 users into a clean database. Next: infra/restore-db.sh rotate-jwt`,
     );
     expect(r[2].db).toEqual(["up_users 3", "posts 5"]);
+    const stop = r[2].calls.findIndex((c) => c.endsWith(" stop web cms"));
+    const exists = r[2].calls.findIndex((c) => c.includes("-d postgres"));
     const drop = r[2].calls.findIndex((c) => c.includes("dropdb"));
     const restore = r[2].calls.findIndex((c) => c.includes("--single-transaction"));
-    const stop = r[2].calls.findIndex((c) => c.endsWith(" stop web cms"));
     expect(stop).toBeGreaterThanOrEqual(0);
-    expect(stop).toBeLessThan(drop);
+    // The database is asked for after the apps stopped, and before the drop.
+    expect(stop).toBeLessThan(exists);
+    expect(exists).toBeLessThan(drop);
     expect(drop).toBeLessThan(restore);
     expect(r[2].state.APPLIED_AT).not.toBe("");
     expect(r[2].state.RESTORED_TABLES).toBe("2");
     expect(r[2].state.USERS).toBe("3");
+    expect(r[2].reserved).toBe(true);
   });
 
   it("rotate-jwt writes one fresh JWT_SECRET (mode 600) that Compose hands the cms, and prints none", async () => {
@@ -361,12 +444,14 @@ describe.skipIf(!FAST)(`restore-db.sh: a good restore, step by step${FAST_TITLE}
     }
   });
 
-  it("start brings web and cms up with the rotated secret and uses the attempt up", async () => {
+  it("start brings web and cms up with the rotated secret and ends the attempt and the reservation", async () => {
     expect(r[4].status, r[4].stderr).toBe(0);
     expect(r[4].apps).toBe("running");
     expect(r[4].startedJwtSum).toBe(await sha256(r[3].jwt[0]));
     expect(r[4].calls).toContainEqual(expect.stringMatching(/ up -d --no-build web cms$/));
     expect(r[4].state.STARTED_AT).not.toBe("");
+    expect(r[4].reserved).toBe(false);
+    expect(r[4].stages).toEqual([]);
     expect(r[5].stdout).toContain("next:      nothing (done); another restore starts with prepare");
     expect(r[6].status).toBe(1);
     expect(r[7].status).toBe(1);
@@ -376,9 +461,11 @@ describe.skipIf(!FAST)(`restore-db.sh: a good restore, step by step${FAST_TITLE}
 
   it("back after a finished restore prepares the copy taken before it", () => {
     expect(r[8].status, r[8].stderr).toBe(0);
-    expect(r[8].state.DUMP).toBe(r[0].state.SAFETY);
+    expect(r[8].state.SOURCE).toBe(copyOf(r[8], r[0].state.ATTEMPT));
+    expect(r[8].state.DUMP_SHA256).toBe(r[0].state.SAFETY_SHA256);
     expect(r[8].state.DUMP_TABLES).toBe("3");
     expect(r[8].state.BACK_OF).toBe(r[0].state.ATTEMPT);
+    expect(r[8].reserved).toBe(true);
   });
 });
 
@@ -407,6 +494,7 @@ describe.skipIf(!FAST)(`restore-db.sh: dumps that must not be restored${FAST_TIT
       expect(report.calls.some((c) => c.includes(" stop "))).toBe(false);
       expect(report.backups).toEqual([]);
       expect(report.state).toEqual({});
+      expect(report.reserved).toBe(false);
     }
     expect(stopLine(r[0])).toMatch(
       /missing\.dump is missing, empty or not readable; nothing changed$/,
@@ -439,67 +527,173 @@ describe.skipIf(!FAST)(`restore-db.sh: dumps that must not be restored${FAST_TIT
 });
 
 describe.skipIf(!FAST)(
-  `restore-db.sh: the copy and the dump between prepare and apply${FAST_TITLE}`,
+  `restore-db.sh: the staged dump and the copy between prepare and apply${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { before: 'ln -s good.dump "$T/link.dump"', args: ["prepare", "link.dump"] },
+          // The path now leads to another readable dump, and the file it led to changes too.
+          /* 1 */ {
+            before: `ln -sfn older.dump "$T/link.dump"; ${fakeDump("good.dump", ["up_users 9"])}`,
+            args: ["apply"],
+          },
+          /* 2 */ { args: ["prepare", "older.dump"] },
+          /* 3 */ { before: 'printf x >> "$REPO"/infra/backups/restore-*/dump', args: ["apply"] },
+          /* 4 */ { args: ["prepare", "older.dump"] },
+          /* 5 */ { before: 'rm "$REPO"/infra/backups/before-restore-*.dump', args: ["apply"] },
+          /* 6 */ { args: ["prepare", "older.dump"] },
+          /* 7 */ {
+            before:
+              'for f in "$REPO"/infra/backups/before-restore-*.dump; do printf x >> "$f"; done',
+            args: ["apply"],
+          },
+          /* 8 */ { args: ["prepare", "older.dump"] },
+          /* 9 */ { before: 'STEP_CWD="$REPO/infra"', args: ["apply"] },
+          /* 10 */ { before: "STEP_CWD=; STUB_PGDUMP_FAIL=1", args: ["prepare", "older.dump"] },
+          /* 11 */ { before: "STUB_PGDUMP_FAIL=", args: ["status"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("restores the dump as staged: a swapped symlink and a rewritten file after prepare do nothing", () => {
+      // Before the review fix apply reopened the caller's path and restored
+      // whatever it led to then.
+      expect(r[0].state.SOURCE).toMatch(/\/good\.dump$/);
+      expect(r[1].status, r[1].stderr).toBe(0);
+      expect(r[1].db).toEqual(["up_users 3", "posts 5"]);
+    });
+
+    it("a staged dump that changed stops apply before the drop", () => {
+      expect(r[3].status).toBe(1);
+      expect(stopLine(r[3])).toContain(
+        "changed since prepare; nothing dropped (start again with prepare)",
+      );
+      expect(dropped(r[3])).toBe(false);
+    });
+
+    it("a deleted or changed copy stops apply before the drop", () => {
+      for (const n of [5, 7]) {
+        expect(r[n].status, `step ${n}`).toBe(1);
+        expect(stopLine(r[n])).toContain(
+          "is gone, changed or no longer decodes; nothing dropped (start again with prepare, which writes a new copy)",
+        );
+        expect(dropped(r[n])).toBe(false);
+      }
+      expect(r[7].db).toEqual(["up_users 3", "posts 5"]);
+    });
+
+    it("each prepare writes a new copy, ends the attempt before it and drops its staged dump", () => {
+      expect(new Set(copies(r[8])).size).toBe(copies(r[8]).length);
+      expect(r[8].archived).toBe(4);
+      expect(r[8].stages).toEqual([`restore-${r[8].state.ATTEMPT} 700 600`]);
+      // The state names no path to read but the source; another working directory works.
+      expect(r[9].status, r[9].stderr).toBe(0);
+    });
+
+    it("a failing pg_dump leaves no copy and no new attempt; the attempt before it is ended", () => {
+      expect(r[10].status).toBe(1);
+      expect(stopLine(r[10])).toBe(
+        "STOP: no usable copy of the current database (pg_dump or its check failed); web and cms are stopped; nothing dropped (the project is reserved: prepare again, or cancel)",
+      );
+      expect(copies(r[10])).toEqual(copies(r[9]));
+      expect(r[10].stages).toEqual([]);
+      expect(r[10].state.ATTEMPT).toBe(r[8].state.ATTEMPT);
+      expect(r[10].state.SUPERSEDED_AT).not.toBe("");
+      expect(r[10].reserved).toBe(true);
+      expect(r[11].stdout).toContain(`attempt ${r[8].state.ATTEMPT}`);
+      expect(r[11].stdout).toContain("ended:     ");
+    });
+  },
+);
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: a race between the last check and the restore${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { before: 'ln -s good.dump "$T/link.dump"', args: ["prepare", "link.dump"] },
+          // When the apps stop, after every check: the path given to prepare leads elsewhere.
+          /* 1 */ {
+            before: `STUB_ON_STOP='ln -sfn older.dump "$T/link.dump"'`,
+            args: ["apply"],
+          },
+          /* 2 */ { before: "STUB_ON_STOP=", args: ["prepare", "good.dump"] },
+          // … and the staged file itself is replaced by another dump.
+          /* 3 */ {
+            before: `STUB_ON_STOP='printf "FAKEDUMP\ntable up_users 1\nEND\n" > "$T/swap"; mv -f "$T/swap" "$REPO"/infra/backups/restore-*/dump'`,
+            args: ["apply"],
+          },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("restores the bytes it checked, whatever the dump's paths lead to by then", () => {
+      // Before the review fix apply checked the caller's path, then reopened
+      // it for pg_restore: here it would have restored older.dump.
+      expect(r[1].status, r[1].stderr).toBe(0);
+      expect(r[1].db).toEqual(["up_users 3", "posts 5"]);
+      // The staged dump is read through the descriptor its check opened.
+      expect(r[3].status, r[3].stderr).toBe(0);
+      expect(r[3].db).toEqual(["up_users 3", "posts 5"]);
+    });
+  },
+);
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: a later prepare ends the attempt before it, also when it fails${FAST_TITLE}`,
   () => {
     let r: StepReport[] = [];
     beforeAll(() => {
       r = restoreSteps(
         [
           /* 0 */ { args: ["prepare", "good.dump"] },
-          /* 1 */ { before: 'rm "$REPO"/infra/backups/before-restore-*.dump', args: ["apply"] },
-          /* 2 */ { args: ["prepare", "good.dump"] },
-          /* 3 */ {
-            before: 'printf x >> "$(ls "$REPO"/infra/backups/before-restore-*.dump)"',
-            args: ["apply"],
-          },
-          /* 4 */ { args: ["prepare", "good.dump"] },
-          /* 5 */ { before: 'echo "table extra 1" >> "$T/good.dump"', args: ["apply"] },
-          /* 6 */ {
-            before: fakeDump("good.dump", ["up_users 3", "posts 5"]),
-            args: ["prepare", "good.dump"],
-          },
-          /* 7 */ { before: 'STEP_CWD="$REPO/infra"', args: ["apply"] },
-          /* 8 */ { before: "STEP_CWD=; STUB_PGDUMP_FAIL=1", args: ["prepare", "good.dump"] },
-          /* 9 */ { before: "STUB_PGDUMP_FAIL=", args: ["status"] },
+          /* 1 */ { args: ["prepare", "missing.dump"] },
+          /* 2 */ { args: ["apply"] },
+          /* 3 */ { args: ["rotate-jwt"] },
+          /* 4 */ { args: ["start"] },
+          /* 5 */ { args: ["status"] },
+          /* 6 */ { args: ["prepare", "good.dump"] },
+          /* 7 */ { args: ["apply"] },
+          /* 8 */ { args: ["prepare", "cut.dump"] },
+          /* 9 */ { args: ["rotate-jwt"] },
+          /* 10 */ { args: ["back"] },
+          /* 11 */ { args: ["apply"] },
         ],
         MODE as ShellMode,
       );
     }, 300_000);
 
-    it("a deleted or changed copy stops apply before the drop", () => {
+    it("prepare A, then a failing prepare B: A can no longer be applied, rotated or started", () => {
+      // Before the review fix the failed prepare left A eligible, and apply restored it.
+      expect(r[0].status, r[0].stderr).toBe(0);
       expect(r[1].status).toBe(1);
-      expect(stopLine(r[1])).toContain(
-        "is gone or changed since prepare; nothing dropped (start again with prepare",
-      );
-      expect(dropped(r[1])).toBe(false);
-      expect(r[3].status).toBe(1);
-      expect(stopLine(r[3])).toContain("is gone or changed since prepare");
-      expect(dropped(r[3])).toBe(false);
-      expect(r[3].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
+      expect(r[1].state.ATTEMPT).toBe(r[0].state.ATTEMPT);
+      expect(r[1].state.SUPERSEDED_AT).not.toBe("");
+      expect(r[1].stages).toEqual([]);
+      for (const n of [2, 3, 4]) expect(r[n].status, `step ${n}`).toBe(1);
+      expect(stopLine(r[2])).toContain(`attempt ${r[0].state.ATTEMPT} was ended at `);
+      expect(dropped(r[2])).toBe(false);
+      expect(r[2].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
+      expect(r[4].apps).toBe("stopped");
+      expect(r[5].stdout).toContain("next:      infra/restore-db.sh prepare <dump> (or back)");
     });
 
-    it("a changed dump stops apply before the drop", () => {
-      expect(r[5].status).toBe(1);
-      expect(stopLine(r[5])).toContain("good.dump is gone or changed since prepare");
-      expect(dropped(r[5])).toBe(false);
-    });
-
-    it("each prepare writes a new copy and keeps the earlier ones", () => {
-      expect(r[6].backups).toHaveLength(3);
-      expect(new Set(r[6].backups).size).toBe(3);
-      expect(r[6].archived).toBe(3);
-      // The dump path is absolute in the state: another working directory finds it.
+    it("an applied attempt ended by a failing prepare cannot be rotated, but back still leads home", () => {
       expect(r[7].status, r[7].stderr).toBe(0);
-    });
-
-    it("a failing pg_dump leaves no copy and no attempt behind; the last attempt stays current", () => {
       expect(r[8].status).toBe(1);
-      expect(stopLine(r[8])).toBe(
-        "STOP: no usable copy of the current database (pg_dump or its check failed); web and cms are stopped, nothing dropped",
-      );
-      expect(r[8].backups).toHaveLength(3);
-      expect(r[8].state.ATTEMPT).toBe(r[6].state.ATTEMPT);
-      expect(r[9].stdout).toContain(`attempt ${r[6].state.ATTEMPT}`);
+      expect(r[9].status).toBe(1);
+      expect(stopLine(r[9])).toContain("apply did not pass for the current attempt");
+      expect(r[10].status, r[10].stderr).toBe(0);
+      // Attempt 6 began its apply and was not started: back goes to the copy before it.
+      expect(r[10].state.SOURCE).toBe(copyOf(r[10], r[6].state.ATTEMPT));
+      expect(r[11].status, r[11].stderr).toBe(0);
+      expect(r[11].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
     });
   },
 );
@@ -539,11 +733,12 @@ describe.skipIf(!FAST)(
       );
       expect(r[1].db).toBeNull();
       expect(r[2].stdout).toContain(
-        "next:      the apply did not pass, the database may be empty: apply again, or back",
+        "next:      the database may be empty or not yet checked: apply again, or back",
       );
       expect(r[3].status).toBe(1);
       expect(r[4].status).toBe(1);
       expect(r[4].apps).toBe("stopped");
+      // The database is missing now: no copy is needed to drop nothing.
       expect(r[5].status, r[5].stderr).toBe(0);
       expect(r[5].db).toEqual(["up_users 3", "posts 5"]);
       expect(r[7].status, r[7].stderr).toBe(0);
@@ -560,13 +755,13 @@ describe.skipIf(!FAST)(
       expect(r[9].apps).toBe("stopped");
       expect(r[10].status, r[10].stderr).toBe(0);
       expect(r[10].stdout).toContain(
-        `back: the database as it was before attempt ${r[8].state.ATTEMPT}, ${r[8].state.SAFETY}`,
+        `back: the database as it was before attempt ${r[8].state.ATTEMPT}, ${copyOf(r[8], r[8].state.ATTEMPT)}`,
       );
-      expect(r[10].state.DUMP).toBe(r[8].state.SAFETY);
+      expect(r[10].state.SOURCE).toBe(copyOf(r[8], r[8].state.ATTEMPT));
       expect(r[10].state.BACK_OF).toBe(r[8].state.ATTEMPT);
       // The way back copies the empty database, too, but keeps leading to attempt 8's copy.
       expect(r[10].state.SAFETY_TABLES).toBe("0");
-      expect(r[10].state.ORIGIN).toBe(r[8].state.SAFETY);
+      expect(r[10].state.ORIGIN_ATTEMPT).toBe(r[8].state.ATTEMPT);
     });
 
     it("a failed way back goes back again to the same copy, not to the copy of the empty database", () => {
@@ -574,8 +769,7 @@ describe.skipIf(!FAST)(
       // after a failed way back that is the empty database's.
       expect(r[11].status).toBe(1);
       expect(r[12].status, r[12].stderr).toBe(0);
-      expect(r[12].state.DUMP).toBe(r[8].state.SAFETY);
-      expect(r[12].state.DUMP).not.toBe(r[10].state.SAFETY);
+      expect(r[12].state.SOURCE).toBe(copyOf(r[8], r[8].state.ATTEMPT));
       expect(r[13].status, r[13].stderr).toBe(0);
       expect(r[13].db).toEqual(["up_users 3", "posts 5"]);
       expect(r[14].status, r[14].stderr).toBe(0);
@@ -584,6 +778,100 @@ describe.skipIf(!FAST)(
     });
   },
 );
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: no copy only for a database that is missing at apply${FAST_TITLE}`,
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = restoreSteps(
+        [
+          /* 0 */ { before: 'rm -rf "$T/db"', args: ["prepare", "good.dump"] },
+          // A database appears between prepare and apply.
+          /* 1 */ {
+            before: 'mkdir "$T/db"; printf \'up_users 7\\nrsvps 1\\n\' > "$T/db/tables"',
+            args: ["apply"],
+          },
+          /* 2 */ { before: 'rm -rf "$T/db"', args: ["apply"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("a database that exists at apply is dropped only with a copy prepare took", () => {
+      // Before the review fix SAFETY=none skipped every check before dropdb.
+      expect(r[0].status, r[0].stderr).toBe(0);
+      expect(r[0].stdout).toContain("there is nothing to copy");
+      expect(r[0].state.SAFETY).toBe("none");
+      expect(r[1].status).toBe(1);
+      expect(stopLine(r[1])).toBe(
+        "STOP: the database of project infra exists now, but prepare found none and took no copy of it: run infra/restore-db.sh prepare <dump> again (it copies the database first); nothing dropped",
+      );
+      expect(dropped(r[1])).toBe(false);
+      expect(r[1].db).toEqual(["up_users 7", "rsvps 1"]);
+      expect(r[2].status, r[2].stderr).toBe(0);
+    });
+  },
+);
+
+describe.skipIf(!FAST)(`restore-db.sh: a state file is data to check${FAST_TITLE}`, () => {
+  let r: StepReport[] = [];
+  beforeAll(() => {
+    const edit = (sed: string) => `sed -i '${sed}' "$S/infra.state"`;
+    r = restoreSteps(
+      [
+        /* 0 */ { args: ["prepare", "good.dump"] },
+        /* 1 */ {
+          before: `cp "$S/infra.state" "$T/saved"; ${edit("s/^SAFETY=.*/SAFETY=none/")}`,
+          args: ["apply"],
+        },
+        /* 2 */ {
+          before: `cp "$T/saved" "$S/infra.state"; ${edit("s/^SAFETY=.*/SAFETY=none/; s/^SAFETY_SHA256=.*/SAFETY_SHA256=/; s/^SAFETY_TABLES=.*/SAFETY_TABLES=/")}`,
+          args: ["apply"],
+        },
+        /* 3 */ {
+          before: `cp "$T/saved" "$S/infra.state"; echo 'DUMP=/etc/passwd' >> "$S/infra.state"`,
+          args: ["apply"],
+        },
+        /* 4 */ {
+          before: `cp "$T/saved" "$S/infra.state"; ${edit("s/^DUMP_SHA256=.*/DUMP_SHA256=xyz/")}`,
+          args: ["apply"],
+        },
+        /* 5 */ {
+          before: `cp "$T/saved" "$S/infra.state"; ${edit("s/^ATTEMPT=.*/ATTEMPT=..\\/..\\/x/")}`,
+          args: ["apply"],
+        },
+        /* 6 */ {
+          before: `cp "$T/saved" "$S/infra.state"; chmod 644 "$S/infra.state"`,
+          args: ["apply"],
+        },
+        /* 7 */ {
+          before: `chmod 600 "$S/infra.state"; mv "$S/infra.state" "$T/elsewhere"; ln -s "$T/elsewhere" "$S/infra.state"`,
+          args: ["status"],
+        },
+        /* 8 */ { before: `rm "$S/infra.state"; cp "$T/saved" "$S/infra.state"`, args: ["apply"] },
+      ],
+      MODE as ShellMode,
+    );
+  }, 300_000);
+
+  it("refuses a state file it did not write, before anything changes", () => {
+    expect(stopLine(r[1])).toContain("(bad: SAFETY)");
+    // A consistent SAFETY=none while the database exists is the missing-copy case.
+    expect(stopLine(r[2])).toContain("exists now, but prepare found none and took no copy");
+    expect(stopLine(r[3])).toContain("is not one this script wrote (line 'DUMP')");
+    expect(stopLine(r[4])).toContain("(bad: DUMP_SHA256)");
+    expect(stopLine(r[5])).toContain("(bad: ATTEMPT)");
+    expect(stopLine(r[6])).toContain("is not mode 600 and owned by uid");
+    expect(stopLine(r[7])).toContain("is not a regular file");
+    for (const n of [1, 2, 3, 4, 5, 6, 7]) {
+      expect(r[n].status, `step ${n}`).toBe(1);
+      expect(dropped(r[n]), `step ${n}`).toBe(false);
+      expect(r[n].db, `step ${n}`).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
+    }
+    expect(r[8].status, r[8].stderr).toBe(0);
+  });
+});
 
 describe.skipIf(!FAST)(
   `restore-db.sh: a new dump or back while an attempt is unfinished${FAST_TITLE}`,
@@ -611,11 +899,11 @@ describe.skipIf(!FAST)(
       expect(r[1].status, r[1].stderr).toBe(0);
       expect(r[2].status, r[2].stderr).toBe(0);
       expect(r[2].stdout).toContain(
-        `attempt ${r[0].state.ATTEMPT} did not finish; back from here goes to ${r[0].state.SAFETY}`,
+        `attempt ${r[0].state.ATTEMPT} did not finish; back from here goes to ${copyOf(r[0], r[0].state.ATTEMPT)} (the database before attempt ${r[0].state.ATTEMPT})`,
       );
-      expect(r[2].state.ORIGIN).toBe(r[0].state.SAFETY);
+      expect(r[2].state.ORIGIN_ATTEMPT).toBe(r[0].state.ATTEMPT);
       expect(r[3].status).toBe(1);
-      expect(r[4].state.DUMP).toBe(r[0].state.SAFETY);
+      expect(r[4].state.SOURCE).toBe(copyOf(r[0], r[0].state.ATTEMPT));
       expect(r[5].status, r[5].stderr).toBe(0);
       expect(r[5].db).toEqual(["up_users 3", "posts 5", "rsvps 2"]);
     });
@@ -730,10 +1018,72 @@ describe.skipIf(!FAST)(`restore-db.sh: JWT_SECRET${FAST_TITLE}`, () => {
   });
 });
 
+describe.skipIf(!FAST)(`restore-db.sh: the reservation and cancel${FAST_TITLE}`, () => {
+  let r: StepReport[] = [];
+  beforeAll(() => {
+    r = restoreSteps(
+      [
+        /* 0 */ { args: ["cancel"] },
+        /* 1 */ { args: ["prepare", "good.dump"] },
+        /* 2 */ { args: ["cancel"] },
+        /* 3 */ { args: ["apply"] },
+        /* 4 */ { args: ["prepare", "good.dump"] },
+        /* 5 */ { args: ["apply"] },
+        /* 6 */ { args: ["cancel"] },
+        /* 7 */ { before: "STUB_PGDUMP_FAIL=1", args: ["prepare", "good.dump"] },
+        /* 8 */ { before: "STUB_PGDUMP_FAIL=", args: ["cancel"] },
+        /* 9 */ { args: ["back"] },
+        /* 10 */ { args: ["apply"] },
+        /* 11 */ { args: ["rotate-jwt"] },
+        /* 12 */ { args: ["start"] },
+      ],
+      MODE as ShellMode,
+    );
+  }, 300_000);
+
+  it("cancel needs a reservation", () => {
+    expect(r[0].status).toBe(1);
+    expect(stopLine(r[0])).toBe(
+      "STOP: compose project infra has no restore reservation; nothing to cancel",
+    );
+  });
+
+  it("cancel before apply ends the attempt and the reservation, and drops or starts nothing", () => {
+    expect(r[1].reserved).toBe(true);
+    expect(r[2].status, r[2].stderr).toBe(0);
+    expect(okLine(r[2])).toContain(
+      `OK: restore of compose project infra cancelled (attempt ${r[1].state.ATTEMPT}): nothing was dropped or started, and infra/deploy.sh may deploy again. Web and cms stay as they are (prepare stopped them); to start them: docker compose -p infra -f ${r[1].checkout}/infra/docker-compose.yml -f ${r[1].checkout}/infra/docker-compose.traefik.yml up -d --no-build web cms`,
+    );
+    expect(r[2].reserved).toBe(false);
+    expect(r[2].stages).toEqual([]);
+    expect(r[2].state.CANCELLED_AT).not.toBe("");
+    expect(r[2].apps).toBe("stopped");
+    expect(r[2].calls.filter((c) => c.includes(" up ") || c.includes("dropdb"))).toEqual([]);
+    expect(r[3].status).toBe(1);
+    expect(stopLine(r[3])).toContain("was ended at ");
+  });
+
+  it("cancel refuses once apply has begun; a failed prepare keeps the reservation", () => {
+    expect(r[5].status, r[5].stderr).toBe(0);
+    expect(r[6].status).toBe(1);
+    expect(stopLine(r[6])).toContain("apply began at ");
+    expect(r[6].reserved).toBe(true);
+    expect(r[7].status).toBe(1);
+    expect(r[7].reserved).toBe(true);
+    // Attempt 4 began its apply: a failed prepare does not make it cancellable.
+    expect(r[8].status).toBe(1);
+    expect(r[9].status, r[9].stderr).toBe(0);
+    expect(r[12].status, r[12].stderr).toBe(0);
+    expect(r[12].reserved).toBe(false);
+  });
+});
+
 describe.skipIf(!FAST)(
-  `restore-db.sh: order, the env-only pair, the lock and the edge${FAST_TITLE}`,
+  `restore-db.sh: order, the env-only pair, the lock and the compose files${FAST_TITLE}`,
   () => {
     let r: StepReport[] = [];
+    const legacy =
+      "$REPO/infra/docker-compose.yml,$REPO/infra/docker-compose.traefik.yml,$REPO/infra/docker-compose.cms-legacy-tz.yml";
     beforeAll(() => {
       r = restoreSteps(
         [
@@ -751,20 +1101,30 @@ describe.skipIf(!FAST)(
           /* 11 */ { args: ["start"] },
           /* 12 */ { before: "STUB_LOCK_HELD=1", args: ["rotate-jwt"] },
           /* 13 */ {
-            before: "STUB_LOCK_HELD=",
+            before: `STUB_LOCK_HELD=; STUB_LABEL_WEB="${legacy}" STUB_LABEL_CMS="${legacy}"`,
             args: ["rotate-jwt"],
-            env: { RESTORE_EDGE: "caddy" },
           },
-          /* 14 */ { before: "STUB_EDGE=", args: ["rotate-jwt", "--env-only"] },
-          /* 15 */ { before: "STUB_EDGE=mixed", args: ["rotate-jwt", "--env-only"] },
-          /* 16 */ {
-            before: "STUB_EDGE=",
+          /* 14 */ { args: ["rotate-jwt", "--env-only"] },
+          /* 15 */ {
+            before:
+              'STUB_LABEL_WEB="$REPO/infra/docker-compose.yml,/tmp/cms-direct-start.yml" STUB_LABEL_CMS="$STUB_LABEL_WEB"',
             args: ["rotate-jwt", "--env-only"],
-            env: { RESTORE_EDGE: "caddy" },
           },
-          /* 17 */ { args: ["prepare"] },
-          /* 18 */ { args: ["rotate-jwt", "--now"] },
-          /* 19 */ { args: ["status"], env: { COMPOSE_PROJECT: "staging" } },
+          /* 16 */ {
+            before: `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="$REPO/infra/docker-compose.yml"`,
+            args: ["rotate-jwt", "--env-only"],
+          },
+          /* 17 */ {
+            before: "STUB_LABEL_WEB= STUB_LABEL_CMS= STUB_LABEL_DB=",
+            args: ["rotate-jwt", "--env-only"],
+          },
+          /* 18 */ {
+            args: ["rotate-jwt", "--env-only"],
+            env: { RESTORE_COMPOSE_FILES: "infra/docker-compose.yml" },
+          },
+          /* 19 */ { args: ["prepare"] },
+          /* 20 */ { args: ["rotate-jwt", "--now"] },
+          /* 21 */ { args: ["status"], env: { COMPOSE_PROJECT: "staging" } },
         ],
         MODE as ShellMode,
       );
@@ -776,8 +1136,6 @@ describe.skipIf(!FAST)(
       );
       expect(stopLine(r[1])).toContain("apply did not pass for the current attempt (none)");
       expect(stopLine(r[2])).toContain("rotate-jwt --env-only did not pass");
-      expect(r[7].status).toBe(1);
-      expect(r[11].status).toBe(1);
       for (const n of [0, 1, 2, 7, 11]) expect(r[n].status, `step ${n}`).toBe(1);
       expect(r[0].jwt).toEqual(["old-secret"]);
     });
@@ -791,12 +1149,12 @@ describe.skipIf(!FAST)(
       expect(r[5].status).toBe(1);
     });
 
-    it("start --env-only is refused while a database restore is unfinished", () => {
+    it("start --env-only is refused while a restore holds the reservation", () => {
       expect(r[8].status, r[8].stderr).toBe(0);
       expect(r[9].status, r[9].stderr).toBe(0);
       expect(r[10].status).toBe(1);
       expect(stopLine(r[10])).toContain(
-        `attempt ${r[6].state.ATTEMPT} of a database restore is not finished`,
+        `a database restore of compose project infra holds the reservation (attempt ${r[6].state.ATTEMPT})`,
       );
       expect(r[10].apps).toBe("stopped");
     });
@@ -809,30 +1167,47 @@ describe.skipIf(!FAST)(
       expect(r[12].calls).toEqual([]);
     });
 
-    it("the attempt keeps its compose files: another edge now is refused", () => {
+    it("an attempt keeps its compose files: others now are refused", () => {
       expect(r[13].status).toBe(1);
       expect(stopLine(r[13])).toContain(
-        "the attempt runs with the traefik compose files, but caddy is selected now",
+        `the attempt runs with the compose files ${r[6].state.COMPOSE_FILES}, but `,
       );
     });
 
-    it("without containers or with mixed ones the edge must be named; caddy uses the base file alone", () => {
-      expect(stopLine(r[14])).toContain(
-        "compose project infra has no containers: set RESTORE_EDGE=traefik or RESTORE_EDGE=caddy",
+    it("keeps every overlay of the running containers in their order, such as the cms legacy zone", () => {
+      // Before the review fix only the Traefik overlay was detected, and an
+      // up of a pre-repair cms would have dropped its legacy-zone file.
+      expect(r[14].status, r[14].stderr).toBe(0);
+      const c = r[14].checkout;
+      expect(r[14].envOnly.COMPOSE_FILES).toBe(
+        `${c}/infra/docker-compose.yml,${c}/infra/docker-compose.traefik.yml,${c}/infra/docker-compose.cms-legacy-tz.yml`,
       );
-      expect(stopLine(r[15])).toContain("were started with and without docker-compose.traefik.yml");
-      expect(r[16].status, r[16].stderr).toBe(0);
-      const config = r[16].calls.find((c) => c.includes(" config --format json cms"));
-      expect(config).toMatch(
-        /^docker compose -p infra -f \/\S*\/infra\/docker-compose\.yml config --format json cms$/,
+      expect(r[14].calls).toContainEqual(
+        `docker compose -p infra -f ${c}/infra/docker-compose.yml -f ${c}/infra/docker-compose.traefik.yml -f ${c}/infra/docker-compose.cms-legacy-tz.yml config --format json cms`,
+      );
+    });
+
+    it("refuses an unknown compose file, web and cms that differ, and containers that tell nothing", () => {
+      expect(stopLine(r[15])).toContain(
+        "were started with /tmp/cms-direct-start.yml, which is not a known compose file of ",
+      );
+      expect(stopLine(r[16])).toContain("were started with different compose files");
+      expect(stopLine(r[17])).toContain(
+        "do not tell their compose files (none, or several of one service): set RESTORE_COMPOSE_FILES",
+      );
+      for (const n of [15, 16, 17]) expect(r[n].status, `step ${n}`).toBe(1);
+      // Named explicitly, the files are used as named.
+      expect(r[18].status, r[18].stderr).toBe(0);
+      expect(r[18].calls).toContainEqual(
+        `docker compose -p infra -f ${r[18].checkout}/infra/docker-compose.yml config --format json cms`,
       );
     });
 
     it("usage errors exit 2; another compose project has its own (empty) state", () => {
-      expect(r[17].status).toBe(2);
-      expect(r[18].status).toBe(2);
-      expect(r[19].status).toBe(0);
-      expect(r[19].stdout).toMatch(/^no restore attempt of compose project staging \(/);
+      expect(r[19].status).toBe(2);
+      expect(r[20].status).toBe(2);
+      expect(r[21].status).toBe(0);
+      expect(r[21].stdout).toMatch(/^no restore attempt of compose project staging \(/);
     });
   },
 );
@@ -893,8 +1268,9 @@ describe.skipIf(!RUN_SLOW)(`restore-db.sh against Postgres 16${SLOW_TITLE}`, () 
     expect(one("refused.running")).toBe("cms db web ");
   });
 
-  it("restores an older dump over a newer database, rotates and starts with the new secret", () => {
+  it("restores an older dump over a newer database, rotates and starts with the new secret and every overlay", () => {
     expect(one("start.tables")).toBe("3");
+    expect(one("start.tz")).toBe("Europe/Berlin");
     for (const step of ["b.prepare", "b.apply", "b.rotate", "b.start"]) {
       expect(one(`${step}.rc`), `${step}: ${one(`${step}.err`)}`).toBe("0");
     }
@@ -902,8 +1278,17 @@ describe.skipIf(!RUN_SLOW)(`restore-db.sh against Postgres 16${SLOW_TITLE}`, () 
     expect(one("b.users")).toBe("3");
     expect(one("b.running")).toBe("cms db web ");
     expect(one("b.envsum")).not.toBe(one("start.envsum"));
-    // The running cms container holds the rotated secret.
+    // The running cms container holds the rotated secret, and its legacy-zone overlay.
     expect(one("b.cmssum")).toBe(one("b.envsum"));
+    expect(one("b.tz")).toBe("Europe/Berlin");
+  });
+
+  it("restores the staged dump although the path given to prepare leads elsewhere by then", () => {
+    for (const step of ["s.prepare", "s.apply", "s.rotate", "s.start"]) {
+      expect(one(`${step}.rc`), `${step}: ${one(`${step}.err`)}`).toBe("0");
+    }
+    // The symlink pointed at the dump that fails to restore when apply ran.
+    expect(one("s.tables")).toBe("2");
   });
 
   it("a failed createdb leaves no database and no start; apply again restores", () => {

@@ -1210,6 +1210,49 @@ describe.skipIf(!HAS_BASH)(
   },
 );
 
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh: a database restore in progress (infra/restore-db.sh's reservation)",
+  () => {
+    let r: StepReport[] = [];
+    const reserve =
+      'mkdir -p "$REPO/.git/sinnlos-restore"; printf "ATTEMPT=20261013T060000Z-abcd\nRESERVED_AT=2026-10-13T06:00:00Z\n" > "$REPO/.git/sinnlos-restore/infra.reservation"';
+    beforeAll(() => {
+      r = deploys([
+        /* 0 */ { before: reserve, args: ["--dry-run"] },
+        /* 1 */ {},
+        /* 2 */ { args: ["--check"] },
+        /* 3 */ { before: 'rm "$REPO/.git/sinnlos-restore/infra.reservation"' },
+        /* 4 */ { before: reserve, env: { RESTORE_STATE_DIR: "/nonexistent/restore-state" } },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("refuses a dry run and a deploy while restore-db.sh holds the reservation, before any backup or build", () => {
+      for (const report of [r[0], r[1]]) {
+        expect(report.status).toBe(1);
+        expect(report.stderr).toContain(
+          "ERROR: a database restore of compose project infra is in progress (",
+        );
+        expect(report.stderr).toContain("/.git/sinnlos-restore/infra.reservation).");
+        expect(report.stderr).toContain(
+          "infra/restore-db.sh cancel (only before its apply). Nothing was changed.",
+        );
+        expect(called(report, /compose .*(build|up)|backup-run|sudo/)).toEqual([]);
+        expect(report.stdout).not.toMatch(BACKED_UP);
+        expect(report.state).toEqual({});
+      }
+    });
+
+    it("leaves --check alone, deploys once the reservation is gone, and reads RESTORE_STATE_DIR", () => {
+      expect(r[2].status, r[2].stderr).toBe(0);
+      expect(r[3].status, r[3].stderr).toBe(0);
+      expect(r[3].stdout).toContain("restore reservation: none");
+      expect(tagOf(r[3])).toBeTruthy();
+      // The reservation in the clone's git dir does not count when the state dir is elsewhere.
+      expect(r[4].stdout).toContain("restore reservation: none");
+    });
+  },
+);
+
 describe("deploy.sh: parameters and state handling, statically (FX35)", () => {
   it("keeps today's defaults", () => {
     const lines = DEPLOY.split("\n");

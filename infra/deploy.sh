@@ -13,8 +13,9 @@
 #      and a DOMAIN every Traefik router can match: a bare host name, no
 #      placeholder, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL.
 #      Then the deploy checks (FX35): one deploy per compose project at a
-#      time (flock; each infra/restore-db.sh step holds the same lock), a
-#      clean checkout (no changed tracked file, and no
+#      time (flock; each infra/restore-db.sh step holds the same lock), no
+#      database restore in progress (its reservation), a clean checkout (no
+#      changed tracked file, and no
 #      untracked file where the images are built from), and the
 #      GitHub CI result of the commit (a warning, or a refusal with
 #      --require-green-ci). Fails before anything is touched.
@@ -71,6 +72,9 @@
 #   DEPLOY_STATE_DIR  <common git dir of the clone>/sinnlos-deploy (state, history,
 #                     lock; shared by its worktrees; a second clone deploying the
 #                     same project must point it at the same directory)
+#   RESTORE_STATE_DIR <common git dir of the clone>/sinnlos-restore: while
+#                     infra/restore-db.sh holds a reservation of the project there,
+#                     the deploy refuses (as infra/restore-db.sh reads it)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
 #   BACKUP_RUN        /usr/local/sbin/backup-run, run through `sudo -n`; when
 #                     set, the given command runs without sudo (tests)
@@ -1334,6 +1338,19 @@ else
   fi
   echo "  lock: ${LOCK_FILE}"
 fi
+
+# A database restore in progress (infra/restore-db.sh prepare, until its
+# start passed or cancel) reserves the project: a deploy now would start the
+# cms on a database that may be empty, or restored without its new
+# JWT_SECRET. Checked under the lock, which every restore step holds too.
+RESTORE_RESERVATION="${RESTORE_STATE_DIR:-${REPO_GIT_DIR}/sinnlos-restore}/${PROJECT}.reservation"
+if [[ -e "${RESTORE_RESERVATION}" || -L "${RESTORE_RESERVATION}" ]]; then
+  echo "ERROR: a database restore of compose project ${PROJECT} is in progress (${RESTORE_RESERVATION})." >&2
+  echo "       infra/restore-db.sh status shows it: finish it (apply, rotate-jwt, start), or end it with" >&2
+  echo "       infra/restore-db.sh cancel (only before its apply). Nothing was changed." >&2
+  exit 1
+fi
+echo "  restore reservation: none"
 
 # The images must be exactly the commit their tag names. GIT_OPTIONAL_LOCKS=0
 # keeps `git status` from refreshing the index (a dry run writes nothing).

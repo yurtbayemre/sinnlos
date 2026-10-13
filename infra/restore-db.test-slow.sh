@@ -9,7 +9,9 @@
 # the project and $T go on exit.
 : "${T:?}" "${REPO:?}"
 P="rs-restore-$$-${RANDOM}"
-C=(docker compose -p "${P}" -f "${REPO}/infra/docker-compose.yml")
+# As a pre-repair production host after a rollback: the cms runs with the
+# legacy-zone overlay, which every restore step must keep.
+C=(docker compose -p "${P}" -f "${REPO}/infra/docker-compose.yml" -f "${REPO}/infra/docker-compose.cms-legacy-tz.yml")
 cleanup() {
   "${C[@]}" down -v --remove-orphans >/dev/null 2>&1
   rm -rf "${T}"
@@ -43,6 +45,7 @@ services:
     command: ["sleep", "86400"]
 YML
 : >"${REPO}/infra/docker-compose.traefik.yml"
+printf 'services:\n  cms:\n    environment:\n      TZ: Europe/Berlin\n' >"${REPO}/infra/docker-compose.cms-legacy-tz.yml"
 printf 'DATABASE_PASSWORD=pw\nJWT_SECRET=old-secret\n' >"${REPO}/infra/.env"
 G=(git -C "${REPO}" -c user.name=restore-test -c user.email=restore-test@example.invalid
   -c commit.gpgsign=false -c init.defaultBranch=main -c core.hooksPath=/dev/null)
@@ -57,7 +60,7 @@ q() { docker exec -i "${P}-db-1" psql -X -q -tA -v ON_ERROR_STOP=1 -U sinnlos -d
 run() { # <name> <args...>
   local name="$1" rc
   shift
-  (cd "${T}" && COMPOSE_PROJECT="${P}" RESTORE_EDGE=caddy bash "${REPO}/infra/restore-db.sh" "$@") >"${T}/out" 2>"${T}/err"
+  (cd "${T}" && COMPOSE_PROJECT="${P}" bash "${REPO}/infra/restore-db.sh" "$@") >"${T}/out" 2>"${T}/err"
   rc=$?
   echo "@@${name}.rc ${rc}"
   sed "s/^/@@${name}.out /" "${T}/out"
@@ -69,6 +72,7 @@ facts() { # <name>
   echo "@@$1.running $(docker ps --filter "label=com.docker.compose.project=${P}" --format '{{.Label "com.docker.compose.service"}}' | sort | tr '\n' ' ')"
   echo "@@$1.envsum $(sed -n 's/^JWT_SECRET=//p' "${REPO}/infra/.env" | sha256sum | cut -c1-64)"
   echo "@@$1.cmssum $(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${P}-cms-1" | sed -n 's/^JWT_SECRET=//p' | sha256sum | cut -c1-64)"
+  echo "@@$1.tz $(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "${P}-cms-1" | sed -n 's/^TZ=//p')"
 }
 
 # v1: the dump's schema; v2 below: a newer release with a table that
@@ -115,6 +119,16 @@ run b.rotate rotate-jwt
 run b.start start
 facts b
 
+# S. the dump path leads elsewhere after prepare (a symlink swapped to the
+# dump whose restore fails): apply restores what prepare staged
+ln -s v1.dump "${T}/link.dump"
+run s.prepare prepare link.dump
+ln -sfn grant.dump "${T}/link.dump"
+run s.apply apply
+run s.rotate rotate-jwt
+run s.start start
+facts s
+
 # C. a createdb that fails after the drop (template1 in use), then apply again
 run c.prepare prepare v1.dump
 docker exec -d "${P}-db-1" psql -U sinnlos -d template1 -c "SELECT pg_sleep(60)"
@@ -139,12 +153,13 @@ facts d2
 # E. a compose file that pins the cms's JWT_SECRET, an exported JWT_SECRET,
 # and the env-only pair
 printf 'services:\n  cms:\n    environment:\n      JWT_SECRET: pinned-by-override\n' >"${REPO}/infra/docker-compose.traefik.yml"
-(cd "${T}" && COMPOSE_PROJECT="${P}" RESTORE_EDGE=traefik bash "${REPO}/infra/restore-db.sh" rotate-jwt --env-only) >"${T}/out" 2>"${T}/err"
+(cd "${T}" && COMPOSE_PROJECT="${P}" RESTORE_COMPOSE_FILES=infra/docker-compose.yml:infra/docker-compose.cms-legacy-tz.yml:infra/docker-compose.traefik.yml \
+  bash "${REPO}/infra/restore-db.sh" rotate-jwt --env-only) >"${T}/out" 2>"${T}/err"
 echo "@@e.pinned.rc $?"
 sed "s/^/@@e.pinned.err /" "${T}/err"
 : >"${REPO}/infra/docker-compose.traefik.yml"
 run e.rotate rotate-jwt --env-only
-(cd "${T}" && JWT_SECRET=old-secret COMPOSE_PROJECT="${P}" RESTORE_EDGE=caddy bash "${REPO}/infra/restore-db.sh" start --env-only) >"${T}/out" 2>"${T}/err"
+(cd "${T}" && JWT_SECRET=old-secret COMPOSE_PROJECT="${P}" bash "${REPO}/infra/restore-db.sh" start --env-only) >"${T}/out" 2>"${T}/err"
 echo "@@e.exported.rc $?"
 sed "s/^/@@e.exported.err /" "${T}/err"
 run e.start start --env-only
