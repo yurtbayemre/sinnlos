@@ -212,6 +212,7 @@ export function isAllowedUploadBody(body: unknown): boolean {
 
 /** The `fileInfo` keys core accepts (validation/content-api/upload.js); `name` is dropped. */
 const FILE_INFO_TEXT_KEYS = ["alternativeText", "caption"] as const;
+const FILE_INFO_KEYS: ReadonlySet<string> = new Set(["name", ...FILE_INFO_TEXT_KEYS, "focalPoint"]);
 
 type FileInfo = { alternativeText?: string | null; caption?: string | null; focalPoint?: unknown };
 
@@ -241,8 +242,7 @@ function normalizeOneFileInfo(raw: unknown): FileInfo | null {
     }
   }
   if (!isPlainObject(value)) return null;
-  const allowed = new Set<string>(["name", ...FILE_INFO_TEXT_KEYS, "focalPoint"]);
-  if (Object.keys(value).some((key) => !allowed.has(key))) return null;
+  if (Object.keys(value).some((key) => !FILE_INFO_KEYS.has(key))) return null;
   if (!isOptionalText(value.name)) return null;
   const info: FileInfo = {};
   for (const key of FILE_INFO_TEXT_KEYS) {
@@ -264,8 +264,9 @@ export function normalizeFileInfo(
   raw: unknown,
   fileCount: number,
 ): { malformed: true } | { malformed: false; value: FileInfo | FileInfo[] | undefined } {
-  if (raw === undefined || raw === null || raw === "")
+  if (raw === undefined || raw === null || raw === "") {
     return { malformed: false, value: undefined };
+  }
   const list = Array.isArray(raw) ? raw : [raw];
   if (list.length === 0 || list.length > Math.max(fileCount, 1)) return { malformed: true };
   if (!Array.isArray(raw) && fileCount > 1) return { malformed: true };

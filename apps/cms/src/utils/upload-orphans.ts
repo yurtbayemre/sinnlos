@@ -118,12 +118,14 @@ export async function linkedFileIds(
   return new Set(rows.map(Number));
 }
 
+/** A row linking a file (`files_related_mph`): its type and row id. */
+export interface FileLink {
+  relatedType: string;
+  relatedId: number;
+}
+
 /** The rows linking one file (`related_type`, `related_id`), for the delete trail. */
-export async function fileLinks(
-  strapi: any,
-  fileId: number,
-  trx: unknown,
-): Promise<Array<{ relatedType: string; relatedId: number }>> {
+export async function fileLinks(strapi: any, fileId: number, trx: unknown): Promise<FileLink[]> {
   const rows: Array<{ related_type: string; related_id: number }> = await links(strapi, trx)
     .where({ file_id: fileId })
     .select("related_type", "related_id");
@@ -137,6 +139,12 @@ export async function fileLinks(
  */
 export async function lockFileRow(strapi: any, fileId: number): Promise<void> {
   await strapi.db.queryBuilder(FILE_UID).select(["id"]).where({ id: fileId }).forUpdate().execute();
+}
+
+/** Locks one file row (lockFileRow) and re-reads it under the lock: the row, or null when gone. */
+export async function lockAndReadFile(strapi: any, fileId: number): Promise<any> {
+  await lockFileRow(strapi, fileId);
+  return strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
 }
 
 /** The media references a value names: row ids and documentIds. */
@@ -214,8 +222,7 @@ export async function resolveFileIds(strapi: any, references: MediaReferences): 
 export async function lockAttachableFiles(strapi: any, fileIds: number[]): Promise<boolean> {
   let attachable = true;
   for (const fileId of [...fileIds].sort((a, b) => a - b)) {
-    await lockFileRow(strapi, fileId);
-    const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+    const file = await lockAndReadFile(strapi, fileId);
     if (!file || isTombstoned(file)) attachable = false;
   }
   return attachable;
@@ -224,12 +231,15 @@ export async function lockAttachableFiles(strapi: any, fileIds: number[]): Promi
 export type ClaimOutcome =
   "removed" | "missing" | "unstamped" | "foreign" | "young" | "linked" | "removing" | "failed";
 
+/** Why a reservation leaves the file alone (decided before anything is written). */
+export type SkipOutcome = Exclude<ClaimOutcome, "removed" | "failed">;
+
 /** A reservation's rules: "claim", or why the file stays. */
 export type ReservationCheck = (
   file: any,
   linked: boolean,
   retrying: boolean,
-) => Exclude<ClaimOutcome, "removed" | "failed"> | "claim";
+) => SkipOutcome | "claim";
 
 /** The upload service's `remove(file)` of the reserved row runs inside this. */
 const reservedRemoval = new AsyncLocalStorage<number>();
@@ -256,10 +266,9 @@ export async function reserveRemoval(
   fileId: number,
   check: ReservationCheck = () => "claim",
   now: Date = new Date(),
-): Promise<{ file: any } | { outcome: Exclude<ClaimOutcome, "removed" | "failed"> }> {
+): Promise<{ file: any } | { outcome: SkipOutcome }> {
   return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
-    await lockFileRow(strapi, fileId);
-    const file = await strapi.db.query(FILE_UID).findOne({ where: { id: fileId } });
+    const file = await lockAndReadFile(strapi, fileId);
     if (!file) return { outcome: "missing" as const };
     const tombstone = tombstoneOf(file);
     if (tombstone && now.getTime() - tombstone.getTime() < TOMBSTONE_RETRY_MS) {
@@ -298,7 +307,7 @@ export function claimDecision(
   options: ClaimOptions,
   now: Date,
   retrying = false,
-): Exclude<ClaimOutcome, "removed" | "failed"> | "claim" {
+): SkipOutcome | "claim" {
   if (!file) return "missing";
   if (!retrying) {
     const owner = uploadedByOf(file);

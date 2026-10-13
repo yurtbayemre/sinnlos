@@ -106,11 +106,17 @@ import {
   sniffUpload,
   toFileArray,
   uploadProfileOf,
+  type SniffResult,
+  type UploadProfile,
 } from "../../utils/upload-guard";
-import { isReservedRemoval, reserveRemoval, runReservedRemoval } from "../../utils/upload-orphans";
+import {
+  FILE_UID,
+  isReservedRemoval,
+  reserveRemoval,
+  runReservedRemoval,
+} from "../../utils/upload-orphans";
 import type { RandomAccessFile } from "../../utils/upload-zip";
 
-const FILE_UID = "plugin::upload.file";
 /** Upload service webhook event, emitted once per persisted file row. */
 const MEDIA_CREATE_EVENT = "media.create";
 
@@ -318,7 +324,7 @@ async function stampUploader(
 async function checkFile(
   io: UploadIo,
   file: IncomingUploadFile,
-  profile: ReturnType<typeof uploadProfileOf>,
+  profile: UploadProfile,
 ): Promise<{ document: boolean }> {
   const name = file.originalFilename ?? file.name ?? "file";
   // formidable writes multipart files to a temp path before the controller
@@ -343,7 +349,7 @@ async function checkFile(
   } catch {
     throw fileRefusal("invalid");
   }
-  let result: Awaited<ReturnType<typeof sniffUpload>>;
+  let result: SniffResult;
   try {
     result = await sniffUpload(opened, profile);
   } finally {
@@ -367,12 +373,10 @@ async function reservedRemove<T>(
   file: DeletedFile,
   remove: (row: DeletedFile) => Promise<T>,
 ): Promise<T | null> {
-  if (typeof file?.id !== "number") return remove(file);
-  if (isReservedRemoval(file.id)) return remove(file);
+  if (typeof file?.id !== "number" || isReservedRemoval(file.id)) return remove(file);
   const reserved = await reserveRemoval(strapi, file.id);
   if (!("file" in reserved)) return null;
-  const fileId = file.id;
-  return runReservedRemoval(fileId, () => remove(reserved.file as DeletedFile));
+  return runReservedRemoval(file.id, () => remove(reserved.file as DeletedFile));
 }
 
 /**
@@ -413,7 +417,7 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
           "file deletes would go unrecorded (delete-audit tripwire).",
       );
     }
-    const factory = originalControllerFactory as Factory;
+    const controllerFactory = originalControllerFactory as Factory;
     const serviceFactory = originalServiceFactory as Factory;
 
     (plugin.services as Record<string, unknown>).upload = markWrapped(
@@ -434,7 +438,7 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
     plugin.controllers["content-api"] = markWrapped((deps: { strapi: UploadStrapi }) => {
       const strapi = deps?.strapi;
       assertStrapiShape(strapi);
-      const controller = factory(deps);
+      const controller = controllerFactory(deps);
       // Tripwire, controller instantiation (route composition at boot).
       assertControllerShape(controller);
 

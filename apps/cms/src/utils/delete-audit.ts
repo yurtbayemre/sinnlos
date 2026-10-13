@@ -52,6 +52,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { MODERATORS, hasRole } from "../bootstrap/roles";
 import { recordAuditEvent, resolveActor, type AuditActor, type AuditHost } from "./audit";
 import { getAuthoringScope, type AuditSource, type AuthoringScope } from "./document-lock";
+import type { FileLink } from "./upload-orphans";
 
 export const CLASSIFIED_UID = "api::classified.classified";
 export const UPLOAD_FILE_UID = "plugin::upload.file";
@@ -104,7 +105,7 @@ export type DeleteTarget =
       kind: "file";
       file: DeletedFile;
       /** The rows linking the file when it goes (`files_related_mph`). */
-      links?: ReadonlyArray<{ relatedType: string; relatedId: number }>;
+      links?: ReadonlyArray<FileLink>;
     };
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -148,14 +149,15 @@ function bytesOf(file: DeletedFile): number | null {
 function fileDetail(
   file: DeletedFile,
   related: DeleteAuditContext["related"],
-  links: ReadonlyArray<{ relatedType: string; relatedId: number }>,
+  links: ReadonlyArray<FileLink>,
 ): string {
   const parts = [`file ${String(file.id)}`];
   if (typeof file.mime === "string") parts.push(file.mime);
   const bytes = bytesOf(file);
   if (bytes !== null) parts.push(`${bytes} B`);
-  if (related) parts.push(`of ${related.uid} ${related.documentId}`);
-  else if (links.length > 0) {
+  if (related) {
+    parts.push(`of ${related.uid} ${related.documentId}`);
+  } else if (links.length > 0) {
     parts.push(`linked by ${links.map((l) => `${l.relatedType}#${l.relatedId}`).join(", ")}`);
   }
   return `${parts.join(", ")}: ${typeof file.name === "string" ? file.name : ""}`;

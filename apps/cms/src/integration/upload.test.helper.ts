@@ -7,20 +7,24 @@
  *     and without signature, a prefix, gaps, trailing bytes, a comment);
  *     `zipOffsets` tells where each header lies, so a case can patch bytes;
  *   - `contentTypesXml`, `minimalDocx`, `minimalXlsx`, `minimalPptx`,
- *     `minimalPdf`, `PNG_1PX`, `JPEG_HEAD`: the smallest files each rule
- *     accepts;
+ *     `minimalPdf`, `PNG_1PX` (`pngOfSize` pads it): the smallest files
+ *     each rule accepts;
+ *   - `memoryFile(bytes, size)`: bytes as the RandomAccessFile the rules
+ *     read through;
  *   - `OOXML_FIXTURES_DIR` and `ooxmlFixture(name)`: the real producer
  *     files of spike 11 (apps/cms/src/test/fixtures/ooxml, README there);
  *   - `uploadFiles(t, jwt, files, fields)`: POST /api/upload as the web
  *     sends it (multipart `files`, optional `fileInfo` and other fields).
  *
  * Named *.test.helper.ts: not a suite, not part of the cms build. Unit
- * suites import it too; it imports only types from the harness.
+ * suites import it too; it imports only types from the harness and the
+ * zip reader.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { crc32, deflateRawSync } from "node:zlib";
 
+import type { RandomAccessFile } from "../utils/upload-zip";
 import type { TestStrapi } from "./harness.test.helper";
 
 /** The spike-11 fixtures (real producer files; README.md names each producer). */
@@ -297,6 +301,11 @@ export const PNG_1PX = Buffer.from(
 /** A file padded to `size` bytes after a valid PNG (the image sniff reads the head only). */
 export function pngOfSize(size: number): Buffer {
   return Buffer.concat([PNG_1PX, Buffer.alloc(Math.max(0, size - PNG_1PX.length))]);
+}
+
+/** `bytes` as a RandomAccessFile; a larger `size` reads short past the bytes. */
+export function memoryFile(bytes: Uint8Array, size = bytes.length): RandomAccessFile {
+  return { size, read: async (position, length) => bytes.subarray(position, position + length) };
 }
 
 // ---------------------------------------------------------------------------
