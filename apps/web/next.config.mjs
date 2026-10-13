@@ -30,13 +30,23 @@ const nextConfig = {
   // a next/image consumer is ever added, scope remotePatterns to the Strapi
   // host (STRAPI_PUBLIC_URL, e.g. sinnlos.yurtbay.dev) plus localhost.
   experimental: {
-    // Marketplace ad photos travel through a Server Action (FormData →
-    // Strapi /api/upload with the session JWT; the browser never sees the
-    // JWT). Default limit is 1 MB — allow 4 images x 5 MB plus form
-    // overhead. Strapi enforces the real per-file limits server-side.
+    // Uploads travel through Server Actions (FormData → Strapi /api/upload
+    // with the session JWT; the browser never sees the JWT): marketplace ad
+    // photos (4 images x 5 MB) and, since batch 16, one document file of up
+    // to 20 MB (PDF and Office; @sinnlos/domain DOCUMENT_MAX_BYTES). The
+    // default limit is 1 MB; 22 MB leaves room for the multipart overhead.
+    // Strapi enforces the real per-file limits server-side (decision 06
+    // §E1, §E8).
     serverActions: {
       bodySizeLimit: "22mb",
     },
+    // The proxy (src/proxy.ts matches every path) buffers each request body
+    // up to this size before the action reads it; Next 16.4's default is
+    // 10 MB, and a larger body reaches the action CUT SHORT (a warning in
+    // the log, a broken multipart form for the user). Kept equal to the
+    // action limit above, so both edges let the same body through (batch
+    // 16 plan S8; next.config.test.ts pins the pair).
+    proxyClientMaxBodySize: "22mb",
   },
 };
 
