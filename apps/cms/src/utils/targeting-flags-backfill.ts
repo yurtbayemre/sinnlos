@@ -181,6 +181,11 @@ async function rowsWhere(
   }
 }
 
+/** The distinct documentIds of `rows`. */
+const documentIdsOf = (rows: readonly RowRef[]): string[] => [
+  ...new Set(rows.map((row) => row.documentId).filter(isName)),
+];
+
 /** The documentIds among `documentIds` with a row matching `where` (read in chunks). */
 async function documentsWhere(
   strapi: Pick<TargetingFlagsBackfillHost, "db">,
@@ -244,14 +249,12 @@ async function classifyAndUpdate(
   const restrictedEventDocuments = await documentsWhere(
     strapi,
     EVENT_UID,
-    [...new Set(unlinkedNullEvents.map((row) => row.documentId).filter(isName))],
+    documentIdsOf(unlinkedNullEvents),
     { notifyAudience: DEPARTMENTS },
   );
 
   const markedAnnouncements = await rowsWhere(strapi, ANNOUNCEMENT_UID, { retargetRequired: true });
-  const markedDocuments = [
-    ...new Set(markedAnnouncements.map((row) => row.documentId).filter(isName)),
-  ];
+  const markedDocuments = documentIdsOf(markedAnnouncements);
   const unmarkedTwins: number[] = [];
   for (let start = 0; start < markedDocuments.length; start += TARGETING_FLAGS_CHUNK) {
     const chunk = markedDocuments.slice(start, start + TARGETING_FLAGS_CHUNK);
