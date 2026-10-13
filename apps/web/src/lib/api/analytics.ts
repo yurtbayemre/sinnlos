@@ -9,13 +9,7 @@ import type { Comment } from "@/lib/types";
 
 /** The collections the content overview counts. */
 export type CountedCollection =
-  | "announcements"
-  | "events"
-  | "wiki-pages"
-  | "wiki-spaces"
-  | "documents"
-  | "polls"
-  | "comments";
+  "announcements" | "events" | "wiki-pages" | "wiki-spaces" | "documents" | "polls" | "comments";
 
 /** Aggregated search telemetry (issue #19). */
 export type SearchSummary = {

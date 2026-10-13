@@ -29,15 +29,7 @@ export type FilterPath = string | readonly (string | number)[];
 
 /** The Strapi filter operators this web sends. */
 export type FilterOperator =
-  | "$eq"
-  | "$ne"
-  | "$lt"
-  | "$lte"
-  | "$gt"
-  | "$gte"
-  | "$null"
-  | "$notNull"
-  | "$containsi";
+  "$eq" | "$ne" | "$lt" | "$lte" | "$gt" | "$gte" | "$null" | "$notNull" | "$containsi";
 
 /** Throws unless `part` is safe to write unencoded (see STRUCTURE_RE). */
 function structure(part: string): string {

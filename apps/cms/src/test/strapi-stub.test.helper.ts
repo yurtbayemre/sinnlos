@@ -87,9 +87,7 @@ type Direction = "asc" | "desc";
 export type SortDirection = Direction | "ASC" | "DESC";
 
 export type OrderBy =
-  | string
-  | Record<string, SortDirection>
-  | ReadonlyArray<string | Record<string, SortDirection>>;
+  string | Record<string, SortDirection> | ReadonlyArray<string | Record<string, SortDirection>>;
 
 /** Nested populate options, as the query engine takes them. */
 export interface PopulateOptions {

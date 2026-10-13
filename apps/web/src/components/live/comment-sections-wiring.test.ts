@@ -40,9 +40,8 @@ vi.mock("@/components/reactions/reaction-bar", () => ({
 }));
 vi.mock("@/components/comments/comment-thread", () => ({ CommentThread: () => null }));
 
-const { CommentSectionsProvider, LiveCommentSection } = await import(
-  "@/components/comments/live-comment-section"
-);
+const { CommentSectionsProvider, LiveCommentSection } =
+  await import("@/components/comments/live-comment-section");
 const { LiveEventsProvider } = await import("./live-events-provider");
 
 let browser: FakeBrowser;

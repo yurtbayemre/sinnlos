@@ -84,12 +84,7 @@ export const MAX_TOKEN_BYTES = 16 * 1024;
 
 /** The error codes of the exchange; the web maps them to /sign-in?error=entra_<code>. */
 export type ExchangeError =
-  | "unauthorized"
-  | "invalid"
-  | "account_exists"
-  | "not_assigned"
-  | "blocked"
-  | "unavailable";
+  "unauthorized" | "invalid" | "account_exists" | "not_assigned" | "blocked" | "unavailable";
 
 export interface ExchangeSuccess {
   jwt: string;

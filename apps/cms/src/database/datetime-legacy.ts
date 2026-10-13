@@ -246,11 +246,7 @@ export interface WriteStamp {
  *  - too-short: the empty stretch around θ is shorter than the offset.
  */
 export type GapFailure =
-  | "theta-future"
-  | "zone-not-ahead"
-  | "no-stamp-before"
-  | "no-stamp-after"
-  | "too-short";
+  "theta-future" | "zone-not-ahead" | "no-stamp-before" | "no-stamp-after" | "too-short";
 
 export interface GapCheck {
   /** θ as a naive UTC wall clock (NAIVE format) and as ISO-Z. */

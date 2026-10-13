@@ -161,9 +161,7 @@ export function pickDepartment(
 }
 
 export type ManagerSync =
-  | { kind: "set"; managerOid: string }
-  | { kind: "clear" }
-  | { kind: "keep" };
+  { kind: "set"; managerOid: string } | { kind: "clear" } | { kind: "keep" };
 
 /** 200: the manager's oid; 404: none; anything else keeps both fields. */
 export function decideManagerSync(result: GraphResult<string | null>): ManagerSync {

@@ -67,8 +67,7 @@ export interface EntraExchangeSuccess {
 }
 
 export type EntraExchangeResult =
-  | { ok: true; data: EntraExchangeSuccess }
-  | { ok: false; code: ExchangeErrorCode };
+  { ok: true; data: EntraExchangeSuccess } | { ok: false; code: ExchangeErrorCode };
 
 export interface ExchangeOptions {
   strapiUrl: string;

@@ -47,8 +47,8 @@ export const DEMO_SESSION: Session = Object.freeze({
  * The one exception is getViewer() (lib/viewer.ts, D-SESSION-01): the
  * caller's own identity, read-only and render-scoped like this session.
  */
-export const getSession = cache(
-  async (): Promise<Session | null> => (DEMO_MODE ? DEMO_SESSION : auth()),
+export const getSession = cache(async (): Promise<Session | null> =>
+  DEMO_MODE ? DEMO_SESSION : auth(),
 );
 
 /**

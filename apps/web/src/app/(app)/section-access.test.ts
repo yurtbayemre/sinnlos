@@ -77,9 +77,8 @@ vi.mock("next-intl/server", () => ({
   getFormatter: async () => ({ dateTime: () => "" }),
 }));
 
-const { SectionUnavailable, SectionUnavailablePage } = await import(
-  "@/components/section-unavailable"
-);
+const { SectionUnavailable, SectionUnavailablePage } =
+  await import("@/components/section-unavailable");
 const { AckBanner } = await import("@/components/dashboard/ack-banner");
 const { TrainingBanner } = await import("@/components/training/training-banner");
 const { LatestNews } = await import("@/components/dashboard/latest-news");

@@ -32,9 +32,7 @@ import {
 import type { GraphMe, GraphResult } from "./graph";
 
 export type RoleResolution =
-  | { kind: "role"; role: RoleType; via: string[] }
-  | { kind: "deny" }
-  | { kind: "unknown" };
+  { kind: "role"; role: RoleType; via: string[] } | { kind: "deny" } | { kind: "unknown" };
 
 export interface RoleResolutionInput {
   /** The `roles` claim of the verified ID token. */

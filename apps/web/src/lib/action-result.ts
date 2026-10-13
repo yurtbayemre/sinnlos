@@ -37,12 +37,7 @@ import { StrapiError } from "@/lib/strapi-error";
 
 /** The codes every action may answer (decision 06 §L3). */
 export type CommonCode =
-  | "forbidden"
-  | "notFound"
-  | "invalid"
-  | "conflict"
-  | "unavailable"
-  | "failed";
+  "forbidden" | "notFound" | "invalid" | "conflict" | "unavailable" | "failed";
 
 export type ActionResult<Code extends string = never, Data = undefined> =
   | { ok: true; data?: Data }
