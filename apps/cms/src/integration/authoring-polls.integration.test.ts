@@ -95,7 +95,7 @@ describe.each(testEngines())("authoring polls on %s", (engine) => {
     ).toBe(403);
   });
 
-  it("the web's createPoll payload (departments by row id, status=published) still creates", async () => {
+  it("the retired web createPoll's payload (departments by row id, status=published) still creates", async () => {
     const res = await t.api("editor", "/api/polls?status=published", {
       json: {
         data: {

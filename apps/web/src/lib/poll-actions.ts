@@ -1,131 +1,19 @@
 "use server";
 
+/**
+ * The readers' poll action: votePoll. Polls are created and edited in
+ * /manage since batch 15 (lib/manage/poll-actions.ts); the old createPoll
+ * and its /polls/new form are retired.
+ */
 import { refresh } from "next/cache";
-import {
-  actionFailure,
-  runCmsAction,
-  type ActionResult,
-  type CommonCode,
-} from "@/lib/action-result";
-import { appTimeZone } from "@/lib/app-time-zone";
-import { isDocumentId, parseEntryRef } from "@/lib/entry-id";
-import { pollClosesAtForDay } from "@/lib/poll-close";
-import { normalizeGuestAccess } from "@/lib/poll-guest-access";
-import { canCreatePolls } from "@/lib/roles";
+import { actionFailure, runCmsAction, type ActionResult } from "@/lib/action-result";
+import { parseEntryRef } from "@/lib/entry-id";
 import { strapi } from "@/lib/strapi";
-import { getViewer } from "@/lib/viewer";
-
-/** createPoll's own codes: the local checks before any request. */
-type CreatePollCode = "missingQuestion" | "tooFewOptions";
-
-/** Every code createPoll answers; the form shows polls.formError_<code>. */
-export type CreatePollErrorCode = CreatePollCode | CommonCode;
-
-export type CreatePollInput = {
-  question: string;
-  /** Plain option texts, one per answer — the JSON array shape the CMS
-   * stores is assembled here, the form never deals with it. */
-  options: string[];
-  /** yyyy-mm-dd from <input type="date">, empty = no closing date. */
-  closesAt: string;
-  anonymous: boolean;
-  /**
-   * The departments to restrict the poll to, by documentId (the v2 shape,
-   * decision 06 §B1) or by the numeric id of the single department row
-   * (decision 05; what today's form sends); empty = everyone.
-   */
-  departmentIds: ReadonlyArray<number | string>;
-  /** Guests see the poll (owner decision 2026-09-27); missing = hidden. */
-  visibleToGuests?: boolean;
-  /** Guests may vote; only together with visibleToGuests. */
-  guestsCanVote?: boolean;
-};
-
-/** An ActionResult (AC01): the local checks, then the common CMS mapping. */
-export type CreatePollResult = ActionResult<CreatePollCode>;
-
-export async function createPoll(input: CreatePollInput): Promise<CreatePollResult> {
-  // Poll creation is CMS-gated by global::is-admin-or-editor — mirror that
-  // here so non-privileged users get a clean error instead of a 403. The
-  // role is read fresh from the CMS (no render memo in a Server Action).
-  // A viewer without an id: /api/me could not be read (getViewer() answers
-  // ANONYMOUS_VIEWER during a CMS outage) or there is no session (only a
-  // crafted call, the form sits behind the sign-in). Nothing is sent either
-  // way; the outage is the case an author meets, so it answers
-  // "unavailable", not a missing permission. DEMO_VIEWER has an id, so the
-  // demo still answers "forbidden" without a request.
-  const viewer = await getViewer();
-  if (viewer.id === null) return actionFailure("unavailable");
-  if (!canCreatePolls(viewer.role)) return actionFailure("forbidden");
-
-  const question = input.question.trim();
-  if (!question) return actionFailure("missingQuestion");
-
-  // Trim, drop empties and dedupe — votes reference options by INDEX, so
-  // identical entries would be indistinguishable in the results.
-  const options = [...new Set(input.options.map((o) => o.trim()).filter(Boolean))];
-  if (options.length < 2) return actionFailure("tooFewOptions");
-
-  // "Closes on D" = D 23:59:59 in APP_TIME_ZONE (datetime contract), not in
-  // the zone this process happens to run in.
-  let closesAt: string | null = null;
-  if (input.closesAt) {
-    closesAt = pollClosesAtForDay(input.closesAt, appTimeZone());
-    if (!closesAt) return actionFailure("invalid");
-  }
-
-  // Department targeting (decision 02): only the departments are sent. The
-  // CMS derives the `audience` flag from them (batch 15: the v2 write rule
-  // refuses a client `audience`, decision 06 §B1.2) and keeps a poll whose
-  // departments are deleted later restricted (admins and editors only).
-  // A documentId or a positive row id of a single department row
-  // (decision 05); anything else is dropped before the request.
-  const departmentIds = [
-    ...new Set(
-      input.departmentIds.filter(
-        (id) => (typeof id === "number" && Number.isInteger(id) && id > 0) || isDocumentId(id),
-      ),
-    ),
-  ];
-
-  // Guest access (owner decision 2026-09-27): always sent, as strict
-  // booleans, hidden unless the author ticked it; guest voting only with
-  // visibility. The CMS decides per guest from these two fields.
-  const { visibleToGuests, guestsCanVote } = normalizeGuestAccess(input);
-
-  // runCmsAction lets strapi()'s redirect on an expired session
-  // (NEXT_REDIRECT) reach Next.js, so the author lands on
-  // /sign-in?expired=1 instead of a failure message (FX47).
-  // No refresh(): the form navigates to /polls right after this action, and
-  // that page reads the list uncached (D-DC01). Refreshing the current route
-  // (/polls/new) first would only re-render the form (FX20).
-  return runCmsAction<CreatePollCode>(
-    () =>
-      // A poll always publishes (the v2 authoring controller, decision 06
-      // §B3: `status` absent or `published`); the explicit status keeps
-      // this request valid on every cms since decision 02.
-      strapi<unknown>(`/api/polls?status=published`, {
-        method: "POST",
-        body: JSON.stringify({
-          data: {
-            question,
-            options,
-            closesAt,
-            anonymous: input.anonymous,
-            departments: departmentIds,
-            visibleToGuests,
-            guestsCanVote,
-          },
-        }),
-      }),
-    { label: "[polls] create" },
-  );
-}
 
 /**
- * Longest option text a vote carries. The poll form caps an answer at 120
- * characters; the admin panel has no cap, so this only bounds what a crafted
- * call can make the action forward.
+ * Longest option text a vote carries. The /manage poll form caps an answer at
+ * 200 characters, the admin panel not at all, so this only bounds what a
+ * crafted call can make the action forward.
  */
 const MAX_OPTION_TEXT = 10_000;
 

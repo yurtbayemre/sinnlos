@@ -5,45 +5,26 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StrapiError } from "@/lib/strapi-error";
 
 /**
- * createPoll (decision 02; batch 15 compatibility edit, plan S6): the
- * payload carries the departments only (documentIds, or the positive row
- * ids today's form sends) and never `audience`, which the v2 write rule
- * refuses and the CMS derives; a role that may not create polls is turned
- * away before any write (a viewer the CMS could not resolve answers
- * "unavailable" instead), and the action no longer refreshes or tags a
- * cache (D-DC01; the form navigates to /polls itself).
- * Guest access (owner decision 2026-09-27): `visibleToGuests` and
- * `guestsCanVote` are always sent as strict booleans, hidden by default,
- * guest voting only together with visibility.
- *
- * An expired session (strapi()'s redirect on 401) escapes the action
- * instead of becoming "failed" (FX47).
- *
  * votePoll addresses the poll by documentId (DA01) and carries the option
  * text the card showed (the cms refuses the vote when an edit moved it,
  * which answers its own code, pollOptionsChanged); a bad reference or
- * option text is "invalid" before any request. Both answer ActionResults
- * (AC01).
+ * option text is "invalid" before any request. It answers an ActionResult
+ * (AC01), and an expired session (strapi()'s redirect on 401) escapes the
+ * action instead of becoming "failed" (FX47). Polls are created in /manage
+ * since batch 15 (lib/manage/poll-actions.ts, tested in
+ * lib/manage/actions.test.ts); the old createPoll is gone.
  *
- * `@/lib/strapi`, `@/lib/viewer` and `next/cache` are mocked: only the
- * request the action builds matters here. `next/navigation` is the real
- * module, so the redirect error and unstable_rethrow are Next's own.
+ * `@/lib/strapi` and `next/cache` are mocked: only the request the action
+ * builds matters here. `next/navigation` is the real module, so the
+ * redirect error and unstable_rethrow are Next's own.
  */
 const strapiMock = vi.fn();
-const viewerMock = vi.fn();
 const refreshMock = vi.fn();
-const updateTagMock = vi.fn();
-const revalidateTagMock = vi.fn();
 
 vi.mock("@/lib/strapi", () => ({ strapi: (...args: unknown[]) => strapiMock(...args) }));
-vi.mock("@/lib/viewer", () => ({ getViewer: () => viewerMock() }));
-vi.mock("next/cache", () => ({
-  refresh: () => refreshMock(),
-  updateTag: (...args: unknown[]) => updateTagMock(...args),
-  revalidateTag: (...args: unknown[]) => revalidateTagMock(...args),
-}));
+vi.mock("next/cache", () => ({ refresh: () => refreshMock() }));
 
-const { createPoll, votePoll } = await import("./poll-actions");
+const { votePoll } = await import("./poll-actions");
 const { redirect } = await import("next/navigation");
 
 /** The error Next's redirect() throws (NEXT_REDIRECT digest). */
@@ -56,31 +37,10 @@ function captureRedirect(url: string): unknown {
   throw new Error("redirect() did not throw");
 }
 
-const input = (departmentIds: Array<number | string>) => ({
-  question: "Pizza or sushi?",
-  options: ["Pizza", "Sushi"],
-  closesAt: "",
-  anonymous: false,
-  departmentIds,
-});
-
-/** The `data` object of the one POST createPoll sent. */
-function sentData(): Record<string, unknown> {
-  expect(strapiMock).toHaveBeenCalledTimes(1);
-  const [path, init] = strapiMock.mock.calls[0] as [string, { method: string; body: string }];
-  expect(path).toBe("/api/polls?status=published");
-  expect(init.method).toBe("POST");
-  return (JSON.parse(init.body) as { data: Record<string, unknown> }).data;
-}
-
 beforeEach(() => {
   strapiMock.mockReset();
   strapiMock.mockResolvedValue({ data: { id: 1 } });
-  viewerMock.mockReset();
-  viewerMock.mockResolvedValue({ id: 1, displayName: "Ed", role: "editor", department: null });
   refreshMock.mockReset();
-  updateTagMock.mockReset();
-  revalidateTagMock.mockReset();
   vi.spyOn(console, "warn").mockImplementation(() => undefined);
   vi.spyOn(console, "error").mockImplementation(() => undefined);
 });
@@ -99,129 +59,6 @@ const cmsError = (status: number, message: string) =>
       error: { status, name: status === 400 ? "BadRequestError" : "Error", message, details: {} },
     }),
   );
-
-describe("createPoll", () => {
-  it("sends the chosen departments and never an audience flag (the CMS derives it)", async () => {
-    await expect(createPoll(input([3, 5]))).resolves.toEqual({ ok: true });
-    expect(sentData()).toMatchObject({ departments: [3, 5] });
-    expect(sentData()).not.toHaveProperty("audience");
-  });
-
-  it("sends departments by documentId as they come", async () => {
-    const eng = "k3m9x0000000000000000001";
-    const sales = "k3m9x0000000000000000002";
-    await createPoll(input([eng, sales, eng]));
-    expect(sentData()).toMatchObject({ departments: [eng, sales] });
-    expect(sentData()).not.toHaveProperty("audience");
-  });
-
-  it("sends no departments for everyone", async () => {
-    await createPoll(input([]));
-    expect(sentData()).toMatchObject({ departments: [] });
-    expect(sentData()).not.toHaveProperty("audience");
-  });
-
-  it("drops non-integer, non-positive, malformed and duplicate department ids", async () => {
-    await createPoll(input([2, 0, -4, 1.5, Number.NaN, 2, 7, "not an id", ""]));
-    expect(sentData()).toMatchObject({ departments: [2, 7] });
-  });
-
-  it("keeps the other fields as before", async () => {
-    await createPoll({ ...input([]), anonymous: true, options: [" A ", "B", "A", ""] });
-    expect(sentData()).toEqual({
-      question: "Pizza or sushi?",
-      options: ["A", "B"],
-      closesAt: null,
-      anonymous: true,
-      departments: [],
-      visibleToGuests: false,
-      guestsCanVote: false,
-    });
-  });
-
-  it("sends the poll hidden from guests unless the author opened it", async () => {
-    await createPoll(input([]));
-    expect(sentData()).toMatchObject({ visibleToGuests: false, guestsCanVote: false });
-  });
-
-  it("sends both guest switches as given when the poll is visible to guests", async () => {
-    await createPoll({ ...input([3]), visibleToGuests: true, guestsCanVote: false });
-    expect(sentData()).toMatchObject({ visibleToGuests: true, guestsCanVote: false });
-    strapiMock.mockClear();
-    await createPoll({ ...input([3]), visibleToGuests: true, guestsCanVote: true });
-    expect(sentData()).toMatchObject({ visibleToGuests: true, guestsCanVote: true });
-  });
-
-  it("forces guest voting off when the poll is not visible to guests", async () => {
-    await createPoll({ ...input([]), visibleToGuests: false, guestsCanVote: true });
-    expect(sentData()).toMatchObject({ visibleToGuests: false, guestsCanVote: false });
-  });
-
-  it("sends strict booleans only, whatever a crafted call passes", async () => {
-    const crafted = {
-      ...input([]),
-      visibleToGuests: "true",
-      guestsCanVote: 1,
-    } as unknown as Parameters<typeof createPoll>[0];
-    await createPoll(crafted);
-    const data = sentData();
-    expect(data.visibleToGuests).toBe(false);
-    expect(data.guestsCanVote).toBe(false);
-  });
-
-  it("turns a role that may not create polls away before any write", async () => {
-    for (const role of ["member", "guest", "department_head", null]) {
-      strapiMock.mockClear();
-      viewerMock.mockResolvedValue({ id: 2, displayName: "M", role, department: null });
-      await expect(createPoll(input([3])), String(role)).resolves.toEqual({
-        ok: false,
-        code: "forbidden",
-      });
-      expect(strapiMock).not.toHaveBeenCalled();
-    }
-  });
-
-  it("answers unavailable, not forbidden, when the viewer could not be read (CMS outage)", async () => {
-    // getViewer()'s ANONYMOUS_VIEWER: /api/me failed, so the role is unknown.
-    viewerMock.mockResolvedValue({ id: null, displayName: null, role: null, department: null });
-    await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code: "unavailable" });
-    expect(strapiMock).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    ["a 400", cmsError(400, "Invalid options"), "invalid"],
-    ["a 403", cmsError(403, "Forbidden"), "forbidden"],
-    ["a 500", cmsError(500, "Internal Server Error"), "unavailable"],
-    ["a network error", new TypeError("fetch failed"), "unavailable"],
-    ["an unexpected error", new Error("boom"), "failed"],
-  ])("answers %s as %s", async (_label, error, code) => {
-    strapiMock.mockRejectedValue(error);
-    await expect(createPoll(input([3]))).resolves.toEqual({ ok: false, code });
-  });
-
-  it("refuses a closing day that is no date before any request", async () => {
-    await expect(createPoll({ ...input([]), closesAt: "2026-02-31" })).resolves.toEqual({
-      ok: false,
-      code: "invalid",
-    });
-    expect(strapiMock).not.toHaveBeenCalled();
-  });
-
-  it("lets the expired-session redirect escape instead of answering failed (FX47)", async () => {
-    // What strapi() throws on a 401 with a token: the real redirect() error,
-    // checked by the real unstable_rethrow.
-    const expired = captureRedirect("/sign-in?expired=1");
-    strapiMock.mockRejectedValue(expired);
-    await expect(createPoll(input([3]))).rejects.toBe(expired);
-  });
-
-  it("neither refreshes nor tags a cache", async () => {
-    await createPoll(input([3]));
-    expect(refreshMock).not.toHaveBeenCalled();
-    expect(updateTagMock).not.toHaveBeenCalled();
-    expect(revalidateTagMock).not.toHaveBeenCalled();
-  });
-});
 
 describe("votePoll", () => {
   it("posts the option to the custom vote route and refreshes the page", async () => {
