@@ -27,6 +27,18 @@
       "type": "relation",
       "relation": "manyToOne",
       "target": "plugin::users-permissions.user"
-    }
+    },
+    "notifyAudience": {
+      "type": "enumeration",
+      "enum": ["all", "departments"],
+      "default": "all"
+    },
+    "ownerDepartment": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "publishAt": { "type": "datetime" },
+    "scheduleError": { "type": "string" }
   }
 }

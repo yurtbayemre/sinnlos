@@ -414,16 +414,18 @@ describe("org draft guard in register() (decision 05)", () => {
 });
 
 /**
- * Wiring test for the write-time audience guards (decision 02, Codex
- * review finding 1; utils/poll-audience-guard.ts; for documents and quick
- * links the batch 12 review B12-01, utils/department-audience-guard.ts):
- * register() hangs two Document Service middlewares onto
- * `strapi.documents`, one for polls and one for documents and quick links,
- * before any plugin bootstrap or our own bootstrap writes a row, and
- * refuses to boot without the registry. A third one guards user writes
- * (FX40, extensions/users-permissions/strapi-server.ts createUserWriteGuard).
+ * Wiring test for the Document Service middlewares
+ * (bootstrap/document-middlewares.ts, decision 06 §K): register() hangs them
+ * onto `strapi.documents` in slot order, before any plugin bootstrap or our
+ * own bootstrap writes a row, and refuses to boot without the registry.
+ * Among them the write-time audience guards (decision 02, Codex review
+ * finding 1; utils/poll-audience-guard.ts; for documents and quick links
+ * the batch 12 review B12-01, utils/department-audience-guard.ts) and the
+ * user write guard (FX40, extensions/users-permissions/strapi-server.ts
+ * createUserWriteGuard). Their order is pinned in
+ * bootstrap/document-middlewares.test.ts.
  */
-describe("audience guards in register() (decision 02, FX29 residual)", () => {
+describe("Document Service middlewares in register() (decision 06 §K)", () => {
   function guardHost(documents: unknown) {
     const stub = datetimeHost();
     const transaction = vi.fn(async (callback: () => Promise<unknown>) => callback());
@@ -496,7 +498,7 @@ describe("audience guards in register() (decision 02, FX29 residual)", () => {
 
   it("refuses to boot when strapi.documents.use is gone", async () => {
     await expect(lifecycle.register({ strapi: guardHost({}) })).rejects.toThrow(
-      /^\[poll-audience\] strapi\.documents\.use not found/,
+      /^\[document-middlewares\] strapi\.documents\.use not found/,
     );
   });
 });

@@ -39,8 +39,12 @@ const USER_UID = "plugin::users-permissions.user";
 const DRAFT_AND_PUBLISH: Readonly<Record<string, boolean>> = {
   "api::acknowledgement.acknowledgement": false,
   "api::announcement.announcement": true,
+  // Decision 06 §H: the append-only content activity trail.
+  "api::audit-event.audit-event": false,
   "api::classified.classified": false,
   "api::comment.comment": false,
+  // Decision 06 §G: one revision row per guarded document.
+  "api::content-version.content-version": false,
   "api::course.course": true,
   // Single-row org master data (invariant I-ORG): one row per document with
   // a stable id, which the numeric org-scope comparisons rely on. Guarded at

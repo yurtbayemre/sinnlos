@@ -36,14 +36,11 @@ vi.mock("./bootstrap/user-contact-sanitizer", () => ({
 vi.mock("./bootstrap/restricted-relation-guard", () => ({
   registerRestrictedRelationGuard: step("registerRestrictedRelationGuard"),
 }));
-vi.mock("./utils/poll-audience-guard", () => ({
-  registerPollAudienceGuard: step("registerPollAudienceGuard"),
+vi.mock("./bootstrap/document-middlewares", () => ({
+  registerDocumentMiddlewares: syncStep("registerDocumentMiddlewares"),
 }));
-vi.mock("./utils/department-audience-guard", () => ({
-  registerDepartmentAudienceGuard: syncStep("registerDepartmentAudienceGuard"),
-}));
-vi.mock("./extensions/users-permissions/strapi-server", () => ({
-  registerUserWriteGuard: syncStep("registerUserWriteGuard"),
+vi.mock("./bootstrap/document-indexes", () => ({
+  ensureDocumentIndexes: step("ensureDocumentIndexes"),
 }));
 vi.mock("./utils/live-events", () => ({
   registerLiveEventSubscriber: step("registerLiveEventSubscriber"),
@@ -82,7 +79,7 @@ beforeEach(() => {
 });
 
 describe("src/index.ts lifecycle order (B01)", () => {
-  it("register(): the org draft guard first, the Document Service guards last", async () => {
+  it("register(): the org draft guard first, the Document Service middlewares last", async () => {
     await lifecycle.register({ strapi });
     expect(calls).toEqual([
       "assertNoOrgDrafts",
@@ -92,16 +89,15 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "checkEntraConfig",
       "registerUserContactSanitizer",
       "registerRestrictedRelationGuard",
-      "registerPollAudienceGuard",
-      "registerDepartmentAudienceGuard",
-      "registerUserWriteGuard",
+      "registerDocumentMiddlewares",
     ]);
   });
 
-  it("bootstrap(): roles before the permission sync, the draft twins last", async () => {
+  it("bootstrap(): the document indexes before any write, the draft twins last", async () => {
     await lifecycle.bootstrap({ strapi });
     expect(calls).toEqual([
       "assertTimestamptzContract",
+      "ensureDocumentIndexes",
       "registerLiveEventSubscriber",
       "ensureRoles",
       "syncRolePermissions",
@@ -138,6 +134,12 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "ensureEntraIdentityIndex failed",
     );
     expect(calls).not.toContain("syncAuthProviders");
+  });
+
+  it("failing document indexes stop bootstrap() before any write", async () => {
+    failing.add("ensureDocumentIndexes");
+    await expect(lifecycle.bootstrap({ strapi })).rejects.toThrow("ensureDocumentIndexes failed");
+    expect(calls).toEqual(["assertTimestamptzContract", "ensureDocumentIndexes"]);
   });
 
   it("a failing org draft guard stops register() before anything else", async () => {
