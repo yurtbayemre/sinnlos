@@ -928,7 +928,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
 
   it("refuses while another deploy holds the lock", () => {
     expect(r[3].status).toBe(1);
-    expect(r[3].stderr).toContain("another infra/deploy.sh is running for compose project infra");
+    expect(r[3].stderr).toContain(
+      "another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra",
+    );
     expect(r[3].stdout).not.toMatch(BACKED_UP);
   });
 

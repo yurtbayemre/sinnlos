@@ -1542,9 +1542,9 @@ describe(
           `MANDATORY before the start below: infra-cms:${SHA} predates the token version of batch 13.`,
           "That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET",
           'stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, "Deploying batch 13",',
-          "Rollback R2 and R3 while the new cms still runs, then R4: a new value from",
-          "openssl rand -base64 48 on the one JWT_SECRET= line of /srv/infra/.env (AUTH_SECRET stays).",
-          "This script does not edit it. Every user is signed out once and signs in again.",
+          "Rollback R2 and R3 while the new cms still runs, then R4: /srv/infra/restore-db.sh rotate-jwt --env-only",
+          "(a new value on the one JWT_SECRET= line of /srv/infra/.env, checked against what Compose hands",
+          "the cms; AUTH_SECRET stays). This script does not do it. Every user is signed out once and signs in again.",
           `${COMPOSE_LINE} up -d --no-build web cms`,
         ]);
         expect(stderr).not.toContain("skip this step only if");
@@ -1568,7 +1568,7 @@ describe(
           `MANDATORY before the start below, unless infra-cms:${SHA} knows the token version of batch 13`,
           "(it could not be checked here: skip this step only if this prints 1 or more):",
           `docker run --rm --pull never --network none --entrypoint grep infra-cms:${SHA} -c tokenVersion ${SCHEMA}`,
-          "openssl rand -base64 48",
+          "R4: /srv/infra/restore-db.sh rotate-jwt --env-only",
           `${COMPOSE_LINE} up -d --no-build web cms`,
         ]);
       }
