@@ -175,7 +175,7 @@ export interface IntegrationStrapi {
   destroy(): Promise<void>;
   server: {
     listen(port: number, host: string, callback: () => void): unknown;
-    httpServer: { address(): AddressInfo | string | null };
+    httpServer: { address(): AddressInfo | string | null; keepAliveTimeout: number };
   };
 }
 
@@ -678,6 +678,14 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
   try {
     if (options.fixtures !== false) fixtures = await createFixtures(booted);
     await new Promise<void>((resolve) => booted.server.listen(0, "127.0.0.1", resolve));
+    // The suites' fetch (undici) keeps an idle connection about 4 s, Node's
+    // server closes one after 5 s (keepAliveTimeout). Both run on this
+    // process's event loop, which synchronous SQLite work can block for
+    // seconds: afterwards both timers are overdue, and the server may close
+    // a socket the client is reusing at that moment ("read ECONNRESET",
+    // seen once in CI after a long stretch without requests). A server that
+    // keeps idle sockets far longer leaves the closing to the client.
+    booted.server.httpServer.keepAliveTimeout = 120_000;
     const address = booted.server.httpServer.address();
     if (!address || typeof address === "string") throw new Error("[integration] no TCP address");
     baseUrl = `http://127.0.0.1:${address.port}`;
