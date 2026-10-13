@@ -39,7 +39,6 @@ import {
   AUTHORING_POPULATE,
   authoringGateOf,
   departmentAuthorOwns,
-  loadDocumentRows,
   type AuthoringGate,
   type AuthoringRow,
   type AuthoringRows,
@@ -945,6 +944,3 @@ export function authoringActionsFor(
 
   return actions;
 }
-
-/** Re-exported for the controllers' tests. */
-export { loadDocumentRows };

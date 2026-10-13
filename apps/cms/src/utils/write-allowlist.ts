@@ -1,17 +1,9 @@
 import { randomBytes } from "node:crypto";
 import {
-  ANNOUNCEMENT_DEPARTMENT_AUTHOR_FIELDS,
-  ANNOUNCEMENT_MODERATOR_FIELDS,
   DOCUMENT_CATEGORIES,
-  DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
-  DOCUMENT_MODERATOR_FIELDS,
-  EVENT_DEPARTMENT_AUTHOR_FIELDS,
-  EVENT_MODERATOR_FIELDS,
   MAX_POLL_OPTION_LENGTH,
   MAX_TARGET_DEPARTMENTS,
-  POLL_MODERATOR_FIELDS,
   QUICK_LINK_CATEGORIES,
-  QUICK_LINK_MODERATOR_FIELDS,
   checkBoolean,
   checkEnum,
   checkIconKey,
@@ -1473,23 +1465,3 @@ export function targetRowWhere(idParam: unknown): RelationRef | null {
   if (!hasTargetId(idParam)) return null;
   return parseRef(String(idParam));
 }
-
-/** The domain field lists the rules above must carry (pinned by write-allowlist.test.ts). */
-export const AUTHORING_FIELD_LISTS: Readonly<
-  Record<string, Readonly<Partial<Record<string, readonly string[]>>>>
-> = {
-  [ANNOUNCEMENT_UID]: {
-    moderator: ANNOUNCEMENT_MODERATOR_FIELDS,
-    departmentAuthor: ANNOUNCEMENT_DEPARTMENT_AUTHOR_FIELDS,
-  },
-  [EVENT_UID]: {
-    moderator: EVENT_MODERATOR_FIELDS,
-    departmentAuthor: EVENT_DEPARTMENT_AUTHOR_FIELDS,
-  },
-  [QUICK_LINK_UID]: { moderator: QUICK_LINK_MODERATOR_FIELDS },
-  [DOCUMENT_UID]: {
-    moderator: DOCUMENT_MODERATOR_FIELDS,
-    departmentAuthor: DOCUMENT_DEPARTMENT_AUTHOR_FIELDS,
-  },
-  [POLL_UID]: { moderator: POLL_MODERATOR_FIELDS },
-};
