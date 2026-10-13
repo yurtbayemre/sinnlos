@@ -1,9 +1,30 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { PG_URL } from "../database/pg-test-db.test.helper";
+import { requireCmsDependency } from "../database/strapi-knex.test.helper";
 import { ADMIN_ENV, contentManager } from "./admin-api.test.helper";
 import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
 import { holdTransaction, qualified, settle, type Settled } from "./pg-lock.test.helper";
-import { WIKI_PAGE, WIKI_SPACE, rowsOf, seedPage, seedSpace } from "./wiki.test.helper";
+import {
+  WIKI_PAGE,
+  WIKI_SPACE,
+  linkParentRaw,
+  rowsOf,
+  seedPage,
+  seedSpace,
+} from "./wiki.test.helper";
+
+interface PgResult {
+  command: string;
+  rows: Array<Record<string, unknown>>;
+}
+interface PgClient {
+  connect(): Promise<void>;
+  query(sql: string): Promise<PgResult | PgResult[]>;
+  end(): Promise<void>;
+}
 
 /**
  * The wiki checks (batch 16 plan S2, S15, §5 R10; lane 16B item 5) on
@@ -17,7 +38,9 @@ import { WIKI_PAGE, WIKI_SPACE, rowsOf, seedPage, seedSpace } from "./wiki.test.
  *     fails, nothing dangles), Codex's interleaving (a discard, an
  *     unpublish and a draft save: no loop is ever committed), and the
  *     department-delete interleaving of §5 R10 (exactly one transaction is
- *     aborted with 40P01, nothing half-written remains).
+ *     aborted with 40P01, nothing half-written remains); and the read-only
+ *     infra/diagnostics/wiki-parent-cycles.sql lists the seeded loop, the
+ *     page across spaces and the page without a space.
  * The content API's own refusals (author and moderator) are in
  * authoring-wiki-drafts.integration.test.ts.
  */
@@ -284,6 +307,72 @@ describe.each(testEngines())("wiki checks on %s", (engine) => {
       if (left === 0) expect(linked).toEqual([]);
       else expect(linked.map((row) => row.documentId)).toContain(p1.documentId);
       expect(await hasLoop(t)).toBe(false);
+    });
+
+    it("infra/diagnostics/wiki-parent-cycles.sql runs read-only and lists exactly the seeded rows", async () => {
+      // A legacy loop (raw), a parent in another space, a page without a space.
+      const loopA = await seedPage(t, { space: space.documentId });
+      const loopB = await seedPage(t, { space: space.documentId, parent: loopA.documentId });
+      const rowsA = await rowsOf(t, WIKI_PAGE, loopA.documentId);
+      const rowsB = await rowsOf(t, WIKI_PAGE, loopB.documentId);
+      for (const row of rowsA) {
+        const twin = rowsB.find(
+          (candidate) => (candidate.publishedAt == null) === (row.publishedAt == null),
+        );
+        await linkParentRaw(t, row.id, (twin as Row).id);
+      }
+      const across = await seedPage(t, { space: other.documentId, parent: loopA.documentId });
+      const homeless = await seedPage(t, {});
+
+      const { Client } = requireCmsDependency<{
+        Client: new (config: { connectionString: string }) => PgClient;
+      }>("pg");
+      const client = new Client({ connectionString: PG_URL });
+      await client.connect();
+      try {
+        await client.query(`SET search_path TO "${t.database.env.DATABASE_SCHEMA}"`);
+        const results = await client.query(
+          readFileSync(
+            join(
+              __dirname,
+              "..",
+              "..",
+              "..",
+              "..",
+              "infra",
+              "diagnostics",
+              "wiki-parent-cycles.sql",
+            ),
+            "utf8",
+          ),
+        );
+        const list = Array.isArray(results) ? results : [results];
+        expect(list[0].command).toBe("BEGIN");
+        expect(list[list.length - 1].command).toBe("ROLLBACK");
+        const [loops, crossSpace, withoutSpace, [summary]] = list
+          .filter((result) => result.command === "SELECT")
+          .map((result) => result.rows);
+        expect(loops.map((row) => row.document_id).sort()).toEqual(
+          [loopA.documentId, loopB.documentId].sort(),
+        );
+        expect(String(loops[0].path)).toContain(" -> ");
+        // The admin panel test above placed one more page across spaces.
+        expect(
+          crossSpace
+            .filter((row) => row.document_id === across.documentId)
+            .map((row) => row.status),
+        ).toEqual(["draft", "published"]);
+        expect(withoutSpace.map((row) => row.document_id)).toEqual([
+          homeless.documentId,
+          homeless.documentId,
+        ]);
+        expect(summary).toMatchObject({ check: "summary" });
+        expect(Number(summary.pages_on_loops)).toBe(2);
+        expect(Number(summary.rows_with_parent_in_other_space)).toBe(crossSpace.length);
+        expect(Number(summary.pages_without_space)).toBe(1);
+      } finally {
+        await client.end();
+      }
     });
   });
 });
