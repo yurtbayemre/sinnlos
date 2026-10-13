@@ -635,7 +635,29 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     create(params: Record<string, unknown>): Promise<DocumentEntry>;
     update(params: Record<string, unknown>): Promise<DocumentEntry | null>;
     findMany(params?: Record<string, unknown>): Promise<DocumentEntry[]>;
+    findOne(params: Record<string, unknown>): Promise<DocumentEntry | null>;
+    publish(params: Record<string, unknown>): Promise<{ entries: DocumentEntry[] }>;
+    unpublish(params: Record<string, unknown>): Promise<{ entries: DocumentEntry[] }>;
+    discardDraft(params: Record<string, unknown>): Promise<{ entries: DocumentEntry[] }>;
+    clone(
+      params: Record<string, unknown>,
+    ): Promise<{ documentId: string; entries: DocumentEntry[] }>;
+    delete(params: Record<string, unknown>): Promise<{ entries: unknown[] }>;
   }
+
+  /** What a Document Service middleware receives (C4). */
+  interface MiddlewareContext {
+    uid: string;
+    action: string;
+    params: Record<string, unknown>;
+    contentType: { uid: string };
+  }
+  type Middleware = (context: MiddlewareContext, next: () => Promise<unknown>) => Promise<unknown>;
+
+  /** createDocumentService's result: the factory plus `use` (strapi.documents). */
+  type DocumentServiceFactory = ((uid: string) => Documents) & {
+    use(middleware: Middleware): () => void;
+  };
 
   interface Localization {
     register(provider: unknown): void;
@@ -693,14 +715,28 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
   });
 
   async function documents(): Promise<{ docs: Documents; db: QueryEngine }> {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    return { docs: service(NOTE), db };
+  }
+
+  /**
+   * The real document service (@strapi/core createDocumentService) over the
+   * real query engine on SQLite, for `types`; `service.use` is
+   * `strapi.documents.use`.
+   */
+  async function documentService(
+    types: ReadonlyArray<{ uid: string }>,
+  ): Promise<{ service: DocumentServiceFactory; db: QueryEngine }> {
     const { transformContentTypesToModels } = requirePackageFile<{
       transformContentTypesToModels(contentTypes: unknown[], identifiers: unknown): unknown[];
     }>(coreDir(), "dist/utils/transform-content-types-to-models.js");
     engine = await openSqliteEngine((identifiers) =>
-      transformContentTypesToModels([NOTE_TYPE], identifiers),
+      transformContentTypesToModels([...types], identifiers),
     );
     const { db } = engine;
-    const contentTypes: Record<string, unknown> = { [NOTE]: NOTE_TYPE };
+    const contentTypes: Record<string, unknown> = Object.fromEntries(
+      types.map((type) => [type.uid, type]),
+    );
     const fake: Record<string, unknown> = {
       db,
       contentTypes,
@@ -730,9 +766,11 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     };
     vi.stubGlobal("strapi", fake);
     const { createDocumentService } = requirePackageFile<{
-      createDocumentService(strapi: unknown): (uid: string) => Documents;
+      createDocumentService(strapi: unknown): DocumentServiceFactory;
     }>(coreDir(), "dist/services/document-service/index.js");
-    return { docs: createDocumentService(fake)(NOTE), db };
+    const service = createDocumentService(fake);
+    fake.documents = service;
+    return { service, db };
   }
 
   it("asks i18n's provider through strapi.localization: only pluginOptions.i18n.localized localizes (draft-twins.ts)", async () => {
@@ -793,6 +831,219 @@ describe("@strapi/core document service over @strapi/database (SQLite)", () => {
     expect(rows.map(({ title, body }) => ({ title, body }))).toEqual([
       { title: "T", body: "B" },
       { title: "T2", body: null },
+    ]);
+  }, 30_000);
+
+  // -------------------------------------------------------------------------
+  // Batch 15 (decision 06 §D, §F, §G, §K), re-pinned on 5.57.0 (plan item 0):
+  // the document layer's middlewares (bootstrap/document-middlewares.ts),
+  // the lock (utils/document-lock.ts), schedule-clear, publish readiness and
+  // the audit recorder are built on these.
+
+  const TAG = "api::tag.tag";
+  const MEMO = "api::memo.memo";
+  const draftAndPublishType = (
+    uid: string,
+    singular: string,
+    plural: string,
+    attributes: Record<string, unknown>,
+  ) => ({
+    uid,
+    modelType: "contentType",
+    kind: "collectionType",
+    modelName: singular,
+    globalId: singular[0].toUpperCase() + singular.slice(1),
+    collectionName: plural,
+    info: { singularName: singular, pluralName: plural, displayName: singular },
+    options: { draftAndPublish: true },
+    attributes: {
+      ...attributes,
+      createdAt: { type: "datetime" },
+      updatedAt: { type: "datetime" },
+      publishedAt: { type: "datetime", configurable: false, writable: true, visible: false },
+      locale: { type: "string" },
+    },
+  });
+  const TAG_TYPE = draftAndPublishType(TAG, "tag", "tags", { title: { type: "string" } });
+  /** A memo links a tag (to-one), like lesson.course and wiki-page.parent. */
+  const MEMO_TYPE = draftAndPublishType(MEMO, "memo", "memos", {
+    title: { type: "string" },
+    body: { type: "text" },
+    tag: { type: "relation", relation: "manyToOne", target: TAG },
+  });
+
+  /** A recording middleware: `<name> <before|after> <action>`. */
+  const recorder =
+    (name: string, log: string[]): Middleware =>
+    async (context, next) => {
+      log.push(`${name} before ${context.action}`);
+      const result = await next();
+      log.push(`${name} after ${context.action}`);
+      return result;
+    };
+
+  const rowsOf = async (db: QueryEngine, uid: string, documentId: string) =>
+    (await db.query(uid).findMany({
+      where: { documentId },
+      orderBy: { id: "asc" },
+      populate: uid === MEMO ? { tag: { select: ["documentId"] } } : undefined,
+    })) as unknown as Array<DocumentEntry & { tag?: { documentId: string } | null }>;
+
+  it("C4: middlewares run in registration order, first registered outermost, with ONE context object {uid, contentType, action, params}", async () => {
+    const { service } = await documentService([NOTE_TYPE]);
+    const log: string[] = [];
+    const seen: MiddlewareContext[] = [];
+    service.use(async (context, next) => {
+      seen.push(context);
+      return recorder("first", log)(context, next);
+    });
+    service.use(async (context, next) => {
+      seen.push(context);
+      return recorder("second", log)(context, next);
+    });
+    await service(NOTE).create({ data: { title: "T" } });
+    expect(log).toEqual([
+      "first before create",
+      "second before create",
+      "second after create",
+      "first after create",
+    ]);
+    // The same object reaches every middleware of one action (the lock hands
+    // the audit recorder its revision through it, utils/document-lock.ts).
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBe(seen[1]);
+    expect(Object.keys(seen[0]).sort()).toEqual(["action", "contentType", "params", "uid"]);
+    expect(seen[0]).toMatchObject({ uid: NOTE, action: "create", contentType: { uid: NOTE } });
+  }, 30_000);
+
+  it("C4: the action runs with ctx.params as the middlewares leave it (schedule-clear edits data)", async () => {
+    const { service } = await documentService([NOTE_TYPE]);
+    service.use(async (context, next) => {
+      const data = context.params.data as Record<string, unknown>;
+      context.params.data = { ...data, body: "set by a middleware" };
+      return next();
+    });
+    const created = await service(NOTE).create({ data: { title: "T", body: "client" } });
+    expect(created).toMatchObject({ title: "T", body: "set by a middleware" });
+  }, 30_000);
+
+  it("C3: create and update with status 'published' publish inside the action, without a publish pass through the chain", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const actions: string[] = [];
+    service.use(async (context, next) => {
+      actions.push(context.action);
+      return next();
+    });
+    const created = await service(NOTE).create({ data: { title: "T" }, status: "published" });
+    expect(actions).toEqual(["create"]);
+    const createdRows = await rowsOf(db, NOTE, created.documentId);
+    expect(createdRows.map((row) => row.publishedAt === null)).toEqual([true, false]);
+    actions.length = 0;
+    await service(NOTE).update({
+      documentId: created.documentId,
+      data: { title: "T2" },
+      status: "published",
+    });
+    expect(actions).toEqual(["update"]);
+    const rows = await rowsOf(db, NOTE, created.documentId);
+    expect(rows.map((row) => row.title)).toEqual(["T2", "T2"]);
+  }, 30_000);
+
+  it("C28: a direct create or update without a status saves the draft only", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const draft = await service(NOTE).create({ data: { title: "D" } });
+    expect(await rowsOf(db, NOTE, draft.documentId)).toEqual([
+      expect.objectContaining({ title: "D", publishedAt: null }),
+    ]);
+    const published = await service(NOTE).create({ data: { title: "P" }, status: "published" });
+    await service(NOTE).update({ documentId: published.documentId, data: { title: "P2" } });
+    const rows = await rowsOf(db, NOTE, published.documentId);
+    expect(rows.map((row) => [row.title, row.publishedAt === null])).toEqual([
+      ["P2", true],
+      ["P", false],
+    ]);
+  }, 30_000);
+
+  it("C5/C8: an action joins the transaction a middleware opened and rolls back with it; inTransaction() tells", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const engineDb = db as unknown as { inTransaction(): boolean };
+    const inside: boolean[] = [];
+    service.use(async (context, next) =>
+      db.transaction(async () => {
+        inside.push(engineDb.inTransaction());
+        const result = await next();
+        if (context.action === "create") throw new Error("refused after the write");
+        return result;
+      }),
+    );
+    expect(engineDb.inTransaction()).toBe(false);
+    await expect(service(NOTE).create({ data: { title: "Rolled back" } })).rejects.toThrow(
+      "refused after the write",
+    );
+    expect(inside).toEqual([true]);
+    expect(await db.query(NOTE).count({})).toBe(0);
+  }, 30_000);
+
+  it("C29: `fields` takes scalar attributes only; a relation key throws", async () => {
+    const { service } = await documentService([TAG_TYPE, MEMO_TYPE]);
+    const created = await service(MEMO).create({ data: { title: "M" }, fields: ["title"] });
+    expect(created).toMatchObject({ title: "M" });
+    expect(created).not.toHaveProperty("body");
+    await expect(service(MEMO).create({ data: { title: "M" }, fields: ["tag"] })).rejects.toThrow(
+      errors.ValidationError,
+    );
+  }, 30_000);
+
+  it("C20: unpublish deletes the published rows; a discard afterwards deletes the whole document", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const created = await service(NOTE).create({ data: { title: "T" }, status: "published" });
+    const unpublished = await service(NOTE).unpublish({ documentId: created.documentId });
+    expect(unpublished.entries).toHaveLength(1);
+    expect(await rowsOf(db, NOTE, created.documentId)).toEqual([
+      expect.objectContaining({ publishedAt: null }),
+    ]);
+    const discarded = await service(NOTE).discardDraft({ documentId: created.documentId });
+    expect(discarded.entries).toEqual([]);
+    expect(await rowsOf(db, NOTE, created.documentId)).toEqual([]);
+  }, 30_000);
+
+  it("C23: publish silently drops a link to a target without a published row", async () => {
+    const { service, db } = await documentService([TAG_TYPE, MEMO_TYPE]);
+    const draftTag = await service(TAG).create({ data: { title: "draft-only tag" } });
+    const memo = await service(MEMO).create({
+      data: { title: "M", tag: draftTag.documentId },
+    });
+    await expect(service(MEMO).publish({ documentId: memo.documentId })).resolves.toBeDefined();
+    const [draft, published] = await rowsOf(db, MEMO, memo.documentId);
+    expect(draft.tag).toMatchObject({ documentId: draftTag.documentId });
+    expect(published.publishedAt).not.toBeNull();
+    expect(published.tag ?? null).toBeNull();
+    // With a published target the link survives the publish.
+    await service(TAG).publish({ documentId: draftTag.documentId });
+    await service(MEMO).publish({ documentId: memo.documentId });
+    const [, republished] = await rowsOf(db, MEMO, memo.documentId);
+    expect(republished.tag).toMatchObject({ documentId: draftTag.documentId });
+  }, 30_000);
+
+  it("C35: clone copies the draft and merges `data` over the copy (null included)", async () => {
+    const { service, db } = await documentService([NOTE_TYPE]);
+    const source = await service(NOTE).create({ data: { title: "Src", body: "keep?" } });
+    const actions: string[] = [];
+    service.use(async (context, next) => {
+      actions.push(context.action);
+      return next();
+    });
+    const cloned = await service(NOTE).clone({
+      documentId: source.documentId,
+      data: { body: null },
+    });
+    expect(actions).toEqual(["clone"]);
+    expect(cloned.documentId).not.toBe(source.documentId);
+    expect(await rowsOf(db, NOTE, cloned.documentId)).toEqual([
+      expect.objectContaining({ title: "Src", body: null, publishedAt: null }),
+    ]);
+    expect(await rowsOf(db, NOTE, source.documentId)).toEqual([
+      expect.objectContaining({ title: "Src", body: "keep?" }),
     ]);
   }, 30_000);
 });
