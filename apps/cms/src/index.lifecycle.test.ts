@@ -49,6 +49,9 @@ vi.mock("./bootstrap/sync-permissions", () => ({
   ensureRoles: step("ensureRoles"),
   syncRolePermissions: step("syncRolePermissions"),
 }));
+vi.mock("./bootstrap/hidden-type-permissions", () => ({
+  removeHiddenTypeWritePermissions: step("removeHiddenTypeWritePermissions"),
+}));
 vi.mock("./bootstrap/advanced-settings", () => ({
   syncAdvancedSettings: step("syncAdvancedSettings"),
 }));
@@ -104,6 +107,7 @@ describe("src/index.ts lifecycle order (B01)", () => {
       "registerLiveEventSubscriber",
       "ensureRoles",
       "syncRolePermissions",
+      "removeHiddenTypeWritePermissions",
       "syncAdvancedSettings",
       "ensureEntraIdentityIndex",
       "syncAuthProviders",

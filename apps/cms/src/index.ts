@@ -3,6 +3,7 @@ import { checkEntraConfig, reportEntraStatus, syncAuthProviders } from "./bootst
 import { ensureDocumentIndexes } from "./bootstrap/document-indexes";
 import { registerDocumentMiddlewares } from "./bootstrap/document-middlewares";
 import { ensureEntraIdentityIndex } from "./bootstrap/entra-identity-index";
+import { removeHiddenTypeWritePermissions } from "./bootstrap/hidden-type-permissions";
 import { registerRestrictedRelationGuard } from "./bootstrap/restricted-relation-guard";
 import { ensureRoles, syncRolePermissions } from "./bootstrap/sync-permissions";
 import { registerUserContactSanitizer } from "./bootstrap/user-contact-sanitizer";
@@ -119,6 +120,10 @@ export default {
     // Roles before the permission sync, which grants per role.
     await ensureRoles(strapi);
     await syncRolePermissions(strapi);
+    // Batch 15.1: no admin role keeps Content Manager writes on a type the
+    // panel hides (wiki revisions); Strapi's own cleanup can skip rows.
+    // Throws when the admin permission service is gone.
+    await removeHiddenTypeWritePermissions(strapi);
     await syncAdvancedSettings(strapi);
     // D-ENTRA-01 spec L, on every boot and whether Entra is on or off: the
     // (tenant, object id) unique index (a failure is logged, and fatal only

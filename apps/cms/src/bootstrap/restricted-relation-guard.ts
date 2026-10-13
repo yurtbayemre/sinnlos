@@ -1,5 +1,6 @@
 import {
-  RESTRICTED_RELATION_TARGETS,
+  CLOSED_RELATION_TARGETS,
+  NON_BYPASS_RELATION_TARGETS,
   guardRestrictedRelations,
   stripRestrictedRelationsFromOutput,
   type RelationModel,
@@ -65,7 +66,8 @@ export interface RestrictedRelationGuardHost {
  * wiki page anyway (wiki-visibility bypass). The role comes from the request
  * AsyncLocalStorage, as in registerUserContactSanitizer. Without a request
  * context the guard APPLIES (fail closed): nothing internal reads through
- * the content API.
+ * the content API. The bypass never covers CLOSED_RELATION_TARGETS (wiki
+ * revisions, batch 15.1): those are cut for every caller, on both sides.
  *
  * Fails loudly: if a Strapi upgrade moves `contentAPI.sanitize.query`, boot
  * throws instead of silently re-opening the side channel.
@@ -79,23 +81,22 @@ export function registerRestrictedRelationGuard(strapi: RestrictedRelationGuardH
     );
   }
 
-  const options = {
-    getModel: (uid: string) => strapi.getModel(uid),
-    rules: RESTRICTED_RELATION_TARGETS,
-  };
-  const bypass = () => hasRole(strapi.requestContext.get()?.state?.user, MODERATORS);
+  const getModel = (uid: string) => strapi.getModel(uid);
+  const closed = { getModel, rules: CLOSED_RELATION_TARGETS };
+  const restricted = { getModel, rules: NON_BYPASS_RELATION_TARGETS };
+  const optionsForCaller = () =>
+    hasRole(strapi.requestContext.get()?.state?.user, MODERATORS) ? closed : restricted;
 
   sanitize.query = async (query, schema, sanitizeOptions) => {
     const sanitized = pickContentApiQueryParams(
       await sanitizeQuery.call(sanitize, query, schema, sanitizeOptions),
       sanitizeOptions?.route,
     );
-    if (bypass()) return sanitized;
-    return guardRestrictedRelations(sanitized, schema, options);
+    return guardRestrictedRelations(sanitized, schema, optionsForCaller());
   };
 
   const factory = (schema: RelationModel) => (data: unknown) =>
-    bypass() ? data : stripRestrictedRelationsFromOutput(data, schema, options);
+    stripRestrictedRelationsFromOutput(data, schema, optionsForCaller());
   const current = strapi.sanitizers.get("content-api.output");
   strapi.sanitizers.set("content-api.output", [...current, factory]);
 }

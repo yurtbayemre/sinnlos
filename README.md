@@ -53,7 +53,8 @@ Further reading:
   server-sent events, with polling as the fallback.
 - **Wiki** spaces that are public or visible to selected roles, a
   department or a team. The cms keeps a snapshot of a page's previous text
-  whenever an edit changes it; the web does not show these revisions yet.
+  whenever an edit changes it; nobody reads these revisions through the API
+  (they can hold draft text), and the web does not show them yet.
 - **Departments and teams**, a **people directory** with org chart and
   _Direct reports_, and **celebrations** of work anniversaries and opt-in
   birthdays.
@@ -144,7 +145,7 @@ rules are in
 | `search-log`      | Anonymous search telemetry (term and result count, no user)                                                     |
 | `wiki-space`      | Namespace for wiki pages with its own visibility                                                                |
 | `wiki-page`       | Markdown page with tags, order, optional table of contents, parent page                                         |
-| `wiki-revision`   | Snapshot of a page's previous text, written when an edit changes it                                             |
+| `wiki-revision`   | Snapshot of a page's previous text, written when an edit changes it; no API route, hidden in the admin panel    |
 | _profile_         | Routes-only: `GET`/`PUT /api/me`, the self-service profile                                                      |
 | _entra-auth_      | Routes-only: `POST /api/auth/entra/exchange`, the server-to-server step of the Microsoft sign-in (404 when off) |
 
@@ -206,7 +207,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `team`            | CRUD         | R        | RU                | RU          | R        | —       | R               |
 | `wiki-space`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `wiki-page`       | CRUD         | CRUD     | CRU               | CRU         | RU       | R       | R               |
-| `wiki-revision`   | CRUD         | CRUD     | R                 | R           | R        | —       | R               |
+| `wiki-revision`   | —            | —        | —                 | —           | —        | —       | —               |
 
 <!-- permission-matrix:end -->
 

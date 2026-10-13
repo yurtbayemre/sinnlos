@@ -31,11 +31,6 @@ admin_role | detail wiki-pages S:page:draft | 404
 admin_role | detail wiki-pages S:page:public | 200
 admin_role | detail wiki-pages S:page:role-member | 200
 admin_role | detail wiki-pages S:page:team | 200
-admin_role | detail wiki-revisions S:rev:dept-eng | 200
-admin_role | detail wiki-revisions S:rev:dept-sales | 200
-admin_role | detail wiki-revisions S:rev:public | 200
-admin_role | detail wiki-revisions S:rev:role-member | 200
-admin_role | detail wiki-revisions S:rev:team | 200
 admin_role | detail wiki-spaces S:space:dept-eng | 200
 admin_role | detail wiki-spaces S:space:dept-sales | 200
 admin_role | detail wiki-spaces S:space:draft | 404
@@ -55,7 +50,6 @@ admin_role | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sal
 admin_role | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
 admin_role | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:no-target","reaction:heart@S:ann:retarget","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
 admin_role | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
-admin_role | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
 admin_role | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
 admin_role | thread comments S:ann:all | ["S:c:S:ann:all"]
 admin_role | thread comments S:ann:draft | ["S:c:S:ann:draft"]
@@ -122,11 +116,6 @@ editor | detail wiki-pages S:page:draft | 404
 editor | detail wiki-pages S:page:public | 200
 editor | detail wiki-pages S:page:role-member | 200
 editor | detail wiki-pages S:page:team | 200
-editor | detail wiki-revisions S:rev:dept-eng | 200
-editor | detail wiki-revisions S:rev:dept-sales | 200
-editor | detail wiki-revisions S:rev:public | 200
-editor | detail wiki-revisions S:rev:role-member | 200
-editor | detail wiki-revisions S:rev:team | 200
 editor | detail wiki-spaces S:space:dept-eng | 200
 editor | detail wiki-spaces S:space:dept-sales | 200
 editor | detail wiki-spaces S:space:draft | 404
@@ -146,7 +135,6 @@ editor | list polls | ["S:poll:all","S:poll:eng","S:poll:guests","S:poll:sales"]
 editor | list quick-links | ["S:ql:all","S:ql:eng","S:ql:sales"]
 editor | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:draft","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:no-target","reaction:heart@S:ann:retarget","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
 editor | list wiki-pages | ["S:page:dept-eng","S:page:dept-sales","S:page:public","S:page:role-member","S:page:team"]
-editor | list wiki-revisions | ["S:rev:dept-eng","S:rev:dept-sales","S:rev:public","S:rev:role-member","S:rev:team"]
 editor | list wiki-spaces | ["S:space:dept-eng","S:space:dept-sales","S:space:public","S:space:role-member","S:space:team"]
 editor | thread comments S:ann:all | ["S:c:S:ann:all"]
 editor | thread comments S:ann:draft | ["S:c:S:ann:draft"]
@@ -213,11 +201,6 @@ department_head | detail wiki-pages S:page:draft | 404
 department_head | detail wiki-pages S:page:public | 200
 department_head | detail wiki-pages S:page:role-member | 404
 department_head | detail wiki-pages S:page:team | 404
-department_head | detail wiki-revisions S:rev:dept-eng | 200
-department_head | detail wiki-revisions S:rev:dept-sales | 404
-department_head | detail wiki-revisions S:rev:public | 200
-department_head | detail wiki-revisions S:rev:role-member | 404
-department_head | detail wiki-revisions S:rev:team | 404
 department_head | detail wiki-spaces S:space:dept-eng | 200
 department_head | detail wiki-spaces S:space:dept-sales | 404
 department_head | detail wiki-spaces S:space:draft | 404
@@ -237,7 +220,6 @@ department_head | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
 department_head | list quick-links | ["S:ql:all","S:ql:eng"]
 department_head | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:eng","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
 department_head | list wiki-pages | ["S:page:dept-eng","S:page:public"]
-department_head | list wiki-revisions | ["S:rev:dept-eng","S:rev:public"]
 department_head | list wiki-spaces | ["S:space:dept-eng","S:space:public"]
 department_head | thread comments S:ann:all | ["S:c:S:ann:all"]
 department_head | thread comments S:ann:draft | []
@@ -304,11 +286,6 @@ team_lead | detail wiki-pages S:page:draft | 404
 team_lead | detail wiki-pages S:page:public | 200
 team_lead | detail wiki-pages S:page:role-member | 404
 team_lead | detail wiki-pages S:page:team | 200
-team_lead | detail wiki-revisions S:rev:dept-eng | 200
-team_lead | detail wiki-revisions S:rev:dept-sales | 404
-team_lead | detail wiki-revisions S:rev:public | 200
-team_lead | detail wiki-revisions S:rev:role-member | 404
-team_lead | detail wiki-revisions S:rev:team | 200
 team_lead | detail wiki-spaces S:space:dept-eng | 200
 team_lead | detail wiki-spaces S:space:dept-sales | 404
 team_lead | detail wiki-spaces S:space:draft | 404
@@ -328,7 +305,6 @@ team_lead | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
 team_lead | list quick-links | ["S:ql:all","S:ql:eng"]
 team_lead | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:team"]
 team_lead | list wiki-pages | ["S:page:dept-eng","S:page:public","S:page:team"]
-team_lead | list wiki-revisions | ["S:rev:dept-eng","S:rev:public","S:rev:team"]
 team_lead | list wiki-spaces | ["S:space:dept-eng","S:space:public","S:space:team"]
 team_lead | thread comments S:ann:all | ["S:c:S:ann:all"]
 team_lead | thread comments S:ann:draft | []
@@ -395,11 +371,6 @@ member | detail wiki-pages S:page:draft | 404
 member | detail wiki-pages S:page:public | 200
 member | detail wiki-pages S:page:role-member | 200
 member | detail wiki-pages S:page:team | 200
-member | detail wiki-revisions S:rev:dept-eng | 200
-member | detail wiki-revisions S:rev:dept-sales | 404
-member | detail wiki-revisions S:rev:public | 200
-member | detail wiki-revisions S:rev:role-member | 200
-member | detail wiki-revisions S:rev:team | 200
 member | detail wiki-spaces S:space:dept-eng | 200
 member | detail wiki-spaces S:space:dept-sales | 404
 member | detail wiki-spaces S:space:draft | 404
@@ -419,7 +390,6 @@ member | list polls | ["S:poll:all","S:poll:eng","S:poll:guests"]
 member | list quick-links | ["S:ql:all","S:ql:eng"]
 member | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:eng","reaction:heart@S:ann:eng-team","reaction:heart@S:ann:role-member","reaction:heart@S:ann:team","reaction:heart@S:ann:widened-draft","reaction:heart@S:page:dept-eng","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member","reaction:heart@S:page:team"]
 member | list wiki-pages | ["S:page:dept-eng","S:page:public","S:page:role-member","S:page:team"]
-member | list wiki-revisions | ["S:rev:dept-eng","S:rev:public","S:rev:role-member","S:rev:team"]
 member | list wiki-spaces | ["S:space:dept-eng","S:space:public","S:space:role-member","S:space:team"]
 member | thread comments S:ann:all | ["S:c:S:ann:all"]
 member | thread comments S:ann:draft | []
@@ -486,11 +456,6 @@ guest | detail wiki-pages S:page:draft | 404
 guest | detail wiki-pages S:page:public | 200
 guest | detail wiki-pages S:page:role-member | 404
 guest | detail wiki-pages S:page:team | 404
-guest | detail wiki-revisions S:rev:dept-eng | 403
-guest | detail wiki-revisions S:rev:dept-sales | 403
-guest | detail wiki-revisions S:rev:public | 403
-guest | detail wiki-revisions S:rev:role-member | 403
-guest | detail wiki-revisions S:rev:team | 403
 guest | detail wiki-spaces S:space:dept-eng | 404
 guest | detail wiki-spaces S:space:dept-sales | 404
 guest | detail wiki-spaces S:space:draft | 404
@@ -510,7 +475,6 @@ guest | list polls | ["S:poll:guests"]
 guest | list quick-links | ["S:ql:all"]
 guest | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
 guest | list wiki-pages | ["S:page:public"]
-guest | list wiki-revisions | 403
 guest | list wiki-spaces | ["S:space:public"]
 guest | thread comments S:ann:all | ["S:c:S:ann:all"]
 guest | thread comments S:ann:draft | []
@@ -577,11 +541,6 @@ authenticated | detail wiki-pages S:page:draft | 404
 authenticated | detail wiki-pages S:page:public | 200
 authenticated | detail wiki-pages S:page:role-member | 404
 authenticated | detail wiki-pages S:page:team | 404
-authenticated | detail wiki-revisions S:rev:dept-eng | 404
-authenticated | detail wiki-revisions S:rev:dept-sales | 404
-authenticated | detail wiki-revisions S:rev:public | 200
-authenticated | detail wiki-revisions S:rev:role-member | 404
-authenticated | detail wiki-revisions S:rev:team | 404
 authenticated | detail wiki-spaces S:space:dept-eng | 404
 authenticated | detail wiki-spaces S:space:dept-sales | 404
 authenticated | detail wiki-spaces S:space:draft | 404
@@ -601,7 +560,6 @@ authenticated | list polls | ["S:poll:all","S:poll:guests"]
 authenticated | list quick-links | ["S:ql:all"]
 authenticated | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:page:draft","reaction:heart@S:page:public"]
 authenticated | list wiki-pages | ["S:page:public"]
-authenticated | list wiki-revisions | ["S:rev:public"]
 authenticated | list wiki-spaces | ["S:space:public"]
 authenticated | thread comments S:ann:all | ["S:c:S:ann:all"]
 authenticated | thread comments S:ann:draft | []
@@ -668,11 +626,6 @@ sales_member | detail wiki-pages S:page:draft | 404
 sales_member | detail wiki-pages S:page:public | 200
 sales_member | detail wiki-pages S:page:role-member | 200
 sales_member | detail wiki-pages S:page:team | 404
-sales_member | detail wiki-revisions S:rev:dept-eng | 404
-sales_member | detail wiki-revisions S:rev:dept-sales | 200
-sales_member | detail wiki-revisions S:rev:public | 200
-sales_member | detail wiki-revisions S:rev:role-member | 200
-sales_member | detail wiki-revisions S:rev:team | 404
 sales_member | detail wiki-spaces S:space:dept-eng | 404
 sales_member | detail wiki-spaces S:space:dept-sales | 200
 sales_member | detail wiki-spaces S:space:draft | 404
@@ -692,7 +645,6 @@ sales_member | list polls | ["S:poll:all","S:poll:guests","S:poll:sales"]
 sales_member | list quick-links | ["S:ql:all","S:ql:sales"]
 sales_member | list reactions | ["reaction:heart@S:ann:all","reaction:heart@S:ann:role-member","reaction:heart@S:ann:sales","reaction:heart@S:page:dept-sales","reaction:heart@S:page:draft","reaction:heart@S:page:public","reaction:heart@S:page:role-member"]
 sales_member | list wiki-pages | ["S:page:dept-sales","S:page:public","S:page:role-member"]
-sales_member | list wiki-revisions | ["S:rev:dept-sales","S:rev:public","S:rev:role-member"]
 sales_member | list wiki-spaces | ["S:space:dept-sales","S:space:public","S:space:role-member"]
 sales_member | thread comments S:ann:all | ["S:c:S:ann:all"]
 sales_member | thread comments S:ann:draft | []
@@ -759,11 +711,6 @@ anonymous | detail wiki-pages S:page:draft | 403
 anonymous | detail wiki-pages S:page:public | 403
 anonymous | detail wiki-pages S:page:role-member | 403
 anonymous | detail wiki-pages S:page:team | 403
-anonymous | detail wiki-revisions S:rev:dept-eng | 403
-anonymous | detail wiki-revisions S:rev:dept-sales | 403
-anonymous | detail wiki-revisions S:rev:public | 403
-anonymous | detail wiki-revisions S:rev:role-member | 403
-anonymous | detail wiki-revisions S:rev:team | 403
 anonymous | detail wiki-spaces S:space:dept-eng | 403
 anonymous | detail wiki-spaces S:space:dept-sales | 403
 anonymous | detail wiki-spaces S:space:draft | 403
@@ -783,7 +730,6 @@ anonymous | list polls | 403
 anonymous | list quick-links | 403
 anonymous | list reactions | 403
 anonymous | list wiki-pages | 403
-anonymous | list wiki-revisions | 403
 anonymous | list wiki-spaces | 403
 anonymous | thread comments S:ann:all | 403
 anonymous | thread comments S:ann:draft | 403

@@ -5,9 +5,13 @@
     "singularName": "wiki-revision",
     "pluralName": "wiki-revisions",
     "displayName": "Wiki Revision",
-    "description": "Snapshot of a wiki page at a point in time"
+    "description": "Snapshot of a wiki page at a point in time. Written by the wiki-page lifecycle; hidden from the admin panel, no content-API route (batch 15.1)."
   },
   "options": { "draftAndPublish": true },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
   "attributes": {
     "page": {
       "type": "relation",

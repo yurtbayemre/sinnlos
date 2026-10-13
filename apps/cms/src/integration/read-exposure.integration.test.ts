@@ -14,7 +14,9 @@ import {
  * sanitizers and guards:
  *   - `?status=draft` on every draft & publish type answers with the
  *     published version only (FX06, §5.24), for every role without the
- *     admin_role/editor bypass; the bypass keeps draft reads;
+ *     admin_role/editor bypass; the bypass keeps draft reads. wiki-revision
+ *     stays in the table (draft & publish until batch 16) but has no route
+ *     for any role since batch 15.1 (wiki-revisions-closed.integration.test.ts);
  *   - relation side channels into hidden wiki pages are cut on every route
  *     (FX05): populate, filters, sort, nested populate and write responses;
  *   - contact fields are neither readable nor usable as a filter, sort or
@@ -33,6 +35,8 @@ interface DpType {
   field: string;
   /** Whether guest holds `find` on the type (the permission matrix). */
   guestReads: boolean;
+  /** False when the type has no content-API route at all (404 for everyone). */
+  routed?: false;
   /** Required data, with `label` in `field`. */
   data(label: string, slug: string): Params;
 }
@@ -102,6 +106,7 @@ function draftAndPublishTypes(deps: Dependencies): DpType[] {
       plural: "wiki-revisions",
       field: "summary",
       guestReads: false,
+      routed: false,
       data: (label) => ({ summary: label, page: deps.page.documentId }),
     },
     {
@@ -182,6 +187,18 @@ describe.each(testEngines())("read exposure on %s", (engine) => {
             published: Row;
             draftOnly: Row;
           };
+          if (type.routed === false) {
+            const path =
+              kind === "list"
+                ? `/api/${type.plural}`
+                : `/api/${type.plural}/${published.documentId}`;
+            const res = await t.api(role, `${path}?status=draft`);
+            expect({ type: type.plural, status: res.status }).toEqual({
+              type: type.plural,
+              status: 404,
+            });
+            continue;
+          }
           if (kind === "list") {
             const res = await t.api<{ data: Record<string, unknown>[] }>(
               role,
@@ -225,6 +242,13 @@ describe.each(testEngines())("read exposure on %s", (engine) => {
           "guest",
           `/api/${type.plural}?status=draft&pagination[pageSize]=100`,
         );
+        if (type.routed === false) {
+          expect({ type: type.plural, status: res.status }).toEqual({
+            type: type.plural,
+            status: 404,
+          });
+          continue;
+        }
         if (!type.guestReads) {
           expect({ type: type.plural, status: res.status }).toEqual({
             type: type.plural,
@@ -252,6 +276,13 @@ describe.each(testEngines())("read exposure on %s", (engine) => {
             role,
             `/api/${type.plural}?status=draft&pagination[pageSize]=100`,
           );
+          if (type.routed === false) {
+            expect({ type: type.plural, status: res.status }).toEqual({
+              type: type.plural,
+              status: 404,
+            });
+            continue;
+          }
           expect({ type: type.plural, status: res.status }).toEqual({
             type: type.plural,
             status: 200,

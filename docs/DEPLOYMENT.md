@@ -1389,6 +1389,19 @@ systemctl start docker
 >   after the deploy and fade as people reload; the runbooks' error
 >   filters print them, so count them as expected there.
 
+> **Deploying batch 15.1 (the wiki-revision read closure)?** One deploy of
+> cms and web with `infra/deploy.sh`, **once batch 15 runs**
+> (`TAG=8e86822300a0`) and before batch 16. No schema, no env, no
+> `JWT_SECRET` rotation, nobody signed out. `/api/wiki-revisions` loses its
+> route, no role keeps a wiki-revision grant (the first boot logs
+> `[bootstrap] revoked 18 obsolete permission(s)`), `wiki-page.revisions`
+> can no longer be populated or filtered by anyone, and the admin panel no
+> longer lists Wiki revision. Read-only checks before it: the batch 15
+> state, a clean checkout, `--check` and `--dry-run`, and the permission
+> diff (18 `EXTRA_IN_DB` rows). A rollback to batch 15 is a retag and
+> re-opens the revision reads. Follow
+> [Deploying batch 15.1](#deploying-batch-151-the-wiki-revision-read-closure).
+>
 > **Deploying batch 15 (2026-10-13)?** V2 authoring, phase 1: the document
 > layer, fail-closed department targeting, the v2 write model and the
 > `/manage` authoring pages (the four notes below) ship as **one deploy of
@@ -1892,6 +1905,238 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 15.1 (the wiki-revision read closure)
+
+Batch 15.1 (branch `fix/wiki-revision-reads-closed`, lane 16-0 of plan
+batch 16) closes the wiki-revision reads that batch 15 and every earlier
+release left open, and ships before the batch 16 lanes branch. A revision
+is the page body before an edit; whenever a page's draft differs from its
+published version, that body is draft text nobody published, and every
+staff role and `authenticated` could read it through `/api/wiki-revisions`,
+`populate=revisions` and filters through the relation; even a guest could
+test draft text through a filter inside a populate. After this release:
+
+- `/api/wiki-revisions` and `/api/wiki-revisions/:id` have no route (404
+  for every caller);
+- no role holds a wiki-revision grant: the boot revokes the **18 rows** a
+  batch 15 database holds (admin_role and editor all five actions;
+  department_head, team_lead, member and `authenticated` `find` and
+  `findOne`), and every role's five actions stay revoked at every boot;
+- `wiki-page.revisions` is closed for every caller, admin_role and editor
+  included: a populate comes back without it, and a filter or sort through
+  it answers 400 `Invalid key revisions`, also inside a populate
+  (`/api/wiki-spaces?populate[pages][filters][revisions][body]…`), which
+  Strapi 5.57 does not check by itself and the relation guard now does;
+- the Content Manager and the Content-Type Builder no longer list Wiki
+  revision, and nobody can create, change, publish or delete a revision in
+  the admin panel, super admins included. An admin role that holds Content
+  Manager read on Wiki revision can still open one by its URL, read-only:
+  the panel is the moderators' tool and shows every draft anyway (decision
+  06 question 9 lets moderators read history). The wiki page's form keeps
+  its empty _Revisions_ field, as on batch 15: it lists nothing and cannot
+  link one.
+
+Nothing else changes: the wiki-page lifecycle still writes a revision on
+every body change, page reads answer as before, and the web reads no
+revision (since FX24). Moderators lose the admin panel's list of revisions
+until batch 16 brings page history to the web.
+
+It is **one deploy** with `infra/deploy.sh`: both images build, the web
+image comes out identical, so only the cms container restarts. No schema change (the hidden
+`pluginOptions` add no column or table), no env, no edge change, **no
+`JWT_SECRET` rotation**, nobody is signed out. The first boot deletes rows
+in two places, both grants: the users-permissions sync deletes the 18
+`up_permissions` rows, and the admin roles lose their Content Manager
+`create`, `update`, `delete` and `publish` permissions on Wiki revision
+(`admin_permissions`; `read` stays, super admins are reset at every boot
+anyway). Strapi's own admin-permission cleanup deletes most of those; it
+pages while it deletes and can skip rows once there are more than 200, so a
+new boot step (`bootstrap/hidden-type-permissions.ts`) removes the rest. A
+rollback brings the 18 back, not the admin-role rows; nobody needs those. To take read away from an admin
+role as well, untick Wiki revision's Read in Settings → Administration
+panel → Roles (super admins always keep it).
+
+Set these on the host, in the checkout, for the checks below:
+
+```bash
+cd /home/bigemo/git/sinnlos
+COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)
+psql_db() { "${COMPOSE[@]}" exec -T db sh -c 'psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"' sh "$@"; }
+```
+
+**Before the deploy** (read-only)
+
+1. **Batch 15 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B15_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   B15_SHA="$(sed -n 's/^SHA=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B15_TAG} ${B15_SHA}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B15_TAG}" "infra-web:${B15_TAG}"
+   ```
+
+   `TAG=8e86822300a0`, `SHA=8e86822…`, `LIVE_SMOKE=passed`, and both
+   images exist. Keep `B15_TAG` and `B15_SHA` in this shell for the
+   rollback. Anything else: stop.
+
+2. **A clean checkout, fast-forwarded to the batch 15.1 merge:**
+
+   ```bash
+   git status --short        # no modified tracked file
+   git fetch origin && git merge --ff-only <the batch 15.1 merge commit>
+   git log -1 --oneline      # the batch 15.1 merge
+   git clean -n -d -- apps packages package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json
+   ```
+
+   The `git clean -n` dry run must print nothing.
+
+3. **The preflight, the plan and the backup permission:**
+   `infra/deploy.sh --check` (`Preflight OK`, the Traefik host line) and
+   `infra/deploy.sh --dry-run` (`lock: free`, the clean checkout at the
+   batch 15.1 commit, its CI result, the backup line, `last-known-good:
+   infra-{web,cms}:8e86822300a0`, `live-smoke: run`, and **no**
+   `MANDATORY` line). The backup permission as in
+   [Checking the backup permission](#checking-the-backup-permission-production).
+
+4. **The permission diff:** `git show "${B15_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`
+   (batch 15's file) is unchanged: only the two informational
+   `authenticated` rows. The checkout's own file
+   (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`) shows the same
+   plus exactly **18 `EXTRA_IN_DB` rows with `revoked_by_code` `t`**, all
+   `api::wiki-revision.wiki-revision.*`: five each for admin_role and
+   editor, `find` and `findOne` for department_head, team_lead, member and
+   `authenticated`. The first boot deletes them. A further wiki-revision
+   row (a grant ticked in the admin panel, a duplicate) is deleted too and
+   raises the count in step 5; note it.
+
+**Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
+`bigemo`. Note the pre-deploy generation its backup step names
+(`sinnlos/<YYYYMMDD>T<HHMMSS>Z-predeploy`). Expected: lock, the clean
+checkout, the CI line, the backup, last-known-good `8e86822300a0` kept,
+both images built, `up -d --no-build`, `Smoke check OK`, live-smoke
+passed, `Recording infra-{web,cms}:<batch 15.1 sha12>`, exit 0. A failure
+prints the rollback to `8e86822300a0`, with no `MANDATORY` step: report
+it; running it is the owner's decision (below).
+
+**After the deploy** (read-only)
+
+5. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\]|\[admin-permissions\]|Strapi started'
+   "${COMPOSE[@]}" logs --since 30m cms web | grep -iE 'error|\[locale\]|\[auth\] (sign-in failed|session update refused)|\[profile\] change password' | grep -vE ' refused: [0-9]{3} |CredentialsSignin'
+   ```
+
+   The state names the batch 15.1 commit (`LIVE_SMOKE=passed`). The cms
+   logs, on this first boot:
+   - `[bootstrap] revoked 18 obsolete permission(s)`;
+   - `[bootstrap] permission drift: none (report-only check of 142 managed
+     actions)`: the same 142 as batch 15, the five wiki-revision actions
+     are now managed as revocations;
+   - **no** `[bootstrap] granted …` line;
+   - possibly `[admin-permissions] removed N Content Manager write
+     permission(s) on hidden types: api::wiki-revision.wiki-revision`: the
+     rows Strapi's own cleanup skipped (no line is fine too);
+   - `Strapi started successfully`, then the `[cron] scheduled-publisher`
+     line every minute as before.
+
+   Stop line: `[admin-permissions] strapi.admin.services.permission.deleteByIds
+   not found …` (the cms does not start; nothing was changed; roll back).
+   Later boots log no `revoked` and no `[admin-permissions]` line (a
+   roll-forward after a rollback logs `revoked 18` again). A count above 18 means hand-made
+   wiki-revision grants were deleted as well (step 4 named them), one
+   below 18 that some of the rows were already gone; neither is a stop
+   line. The error filter prints only the expected lines of
+   [3.8](#38-updates) (the pg `DeprecationWarning`, the web's `Failed to
+   find Server Action` burst).
+
+6. **The permission diff** (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
+   only the two informational `authenticated` rows; no wiki-revision row
+   is left in `up_permissions`. Then the admin roles' grants on wiki
+   revisions:
+
+   ```bash
+   psql_db -X <<'SQL'
+   SELECT r.code, p.action, count(*) AS n
+     FROM admin_permissions p
+     JOIN admin_permissions_role_lnk l ON l.permission_id = p.id
+     JOIN admin_roles r ON r.id = l.role_id
+    WHERE p.subject = 'api::wiki-revision.wiki-revision'
+    GROUP BY r.code, p.action ORDER BY 1, 2;
+   SQL
+   ```
+
+   Only `plugin::content-manager.explorer.read` rows (`strapi-super-admin`
+   and whichever admin roles held read). Any `create`, `update`, `delete`
+   or `publish` row is a finding: report it.
+
+7. **The routes are gone:**
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' https://sinnlos.yurtbay.dev/api/wiki-revisions
+   curl -s -o /dev/null -w '%{http_code}\n' https://sinnlos.yurtbay.dev/api/wiki-revisions/1
+   curl -s -o /dev/null -w '%{http_code}\n' https://sinnlos.yurtbay.dev/api/events
+   ```
+
+   `404`, `404`, then `403` (the control: Strapi answers the anonymous
+   events read, so the cms router is there). Before the deploy the first
+   two answered `403`: the route existed and only the grant was missing.
+   The signed-in paths (every role, populate, filters, nested filters) are
+   pinned by `apps/cms/src/integration/wiki-revisions-closed.integration.test.ts`
+   on SQLite and Postgres 16.
+
+8. **In a browser (the owner):** the admin panel's Content Manager lists
+   no _Wiki Revision_; a wiki page still opens and saves there (each body
+   change still writes a revision, which nobody reads through the API); in
+   Settings → Administration panel → Roles, the Editor and Author roles
+   show only Read for Wiki revision, if anything; in Settings →
+   Users & Permissions plugin → Roles, no role has a _Wiki-revision_ action
+   ticked. As a member, `/wiki` and a page look as before.
+
+9. **+15 and +60 minutes:** no new error types in the cms and web logs,
+   no restarts (`docker inspect -f '{{.RestartCount}}' infra-cms-1
+   infra-web-1`), no 5xx.
+
+**Release note:** Old wiki revisions are no longer readable through the
+API (the web never showed them), and the admin panel no longer lists them;
+page history comes to the web in batch 16.
+
+**Rollback** (the owner's decision only; to the batch 15 images,
+`8e86822300a0`)
+
+No database step and **no `JWT_SECRET` rotation** (`deploy.sh`'s printed
+rollback shows no `MANDATORY` step). Retag both images (`B15_TAG` from
+step 1):
+
+```bash
+docker tag "infra-web:${B15_TAG}" infra-web:latest
+docker tag "infra-cms:${B15_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+Batch 15's boot logs `[bootstrap] granted 18 permission(s) across
+intranet roles` and the same drift line over 142 managed actions; its
+`prod-perm-diff.sql` (`git show "${B15_SHA}":infra/diagnostics/prod-perm-diff.sql | psql_db -X`)
+shows only the two informational rows again. **That re-opens the revision
+reads** (the route, the populate and the filters, for every staff role and
+`authenticated`), the exposure this release closes: keep the window short.
+Batch 15 lists Wiki revision in the admin panel again; the admin roles'
+write permissions on it stay deleted (super admins keep everything), which
+needs no action. The roll-forward is a normal `infra/deploy.sh`; it logs
+`revoked 18 obsolete permission(s)` again.
+
+**Rehearsal** (2026-10-13, local staging in Traefik mode, from the
+batch 15 tree): this section walked as written. Before the deploy, 13
+probes showed a draft-only marker, 7 match/miss oracles differed (one of
+them for a guest) and the nested sort answered 500; after it, none. The
+deploy took 57 s (cms boot 4.7 s; the web container was not recreated)
+and logged exactly the step 5 lines, with `removed 1` on the admin side.
+The rollback (6.9 s) logged `granted 18` and re-opened the reads; the
+roll-forward (20 s) logged `revoked 18` and closed them again. Spaces and
+pages answered byte-identically before and after for every role.
 
 #### Deploying batch 15 (2026-10-13)
 
