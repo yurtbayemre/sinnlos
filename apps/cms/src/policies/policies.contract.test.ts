@@ -924,3 +924,147 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// The v2 write-gate kinds (decision 06 §B2; batch 15 lane 15A)
+// ---------------------------------------------------------------------------
+
+describe("policy contract kind: moderator-write-gate (can-author on quick-link and poll)", () => {
+  const bodies: Record<string, unknown> = {
+    "api::quick-link.quick-link": { data: { label: "Payroll", url: "/payroll" } },
+    "api::poll.poll": { data: { question: "Lunch?", options: ["A", "B"] } },
+  };
+
+  it.each(Object.keys(bodies))(
+    "%s: moderators enforced, everyone else false, no bypass",
+    async (uid) => {
+      for (const type of ROLE_TYPES) {
+        const { strapi } = fixture();
+        const body = bodies[uid];
+        const ctx = policyContext({ id: USER_ID[type], role: roleOf(type) }, { body });
+        const outcome = await run("can-author", { uid }, ctx, strapi);
+        const moderator = (ADMIN_EDITOR as readonly string[]).includes(type);
+        expect(outcome, type).toEqual({ result: moderator });
+        // Enforced: the payload is the allowlist's copy (the caller field added).
+        const data = (ctx.request.body as { data: Record<string, unknown> }).data;
+        if (moderator) expect(data).not.toBe((body as { data: unknown }).data);
+      }
+    },
+  );
+
+  it.each(Object.keys(bodies))("%s: a route config without its uid gives no class", async (uid) => {
+    const { strapi } = fixture();
+    for (const config of [
+      undefined,
+      {},
+      { uid: "" },
+      { uid: 42 },
+      { uid: "api::wiki-page.wiki-page" },
+    ]) {
+      const ctx = policyContext(
+        { id: USER_ID.editor, role: roleOf("editor") },
+        { body: bodies[uid] },
+      );
+      expect(await run("can-author", config, ctx, strapi), JSON.stringify(config)).toEqual({
+        result: false,
+      });
+    }
+  });
+});
+
+describe("policy contract kind: department-author-write-gate (can-author on announcement, event, document)", () => {
+  const A = "api::announcement.announcement";
+  const head = { id: USER_ID.department_head, role: roleOf("department_head") };
+
+  /** The fixture plus department-owned and moderator rows. */
+  function owned() {
+    const { strapi, ids } = fixture();
+    const published = { status: "published" as const };
+    const mine = strapi.seedDocument(
+      A,
+      {
+        title: "Mine",
+        department: { id: 10 },
+        ownerDepartment: { id: 10 },
+        audience: "departments",
+      },
+      published,
+    );
+    const theirs = strapi.seedDocument(
+      A,
+      {
+        title: "Theirs",
+        department: { id: 11 },
+        ownerDepartment: { id: 11 },
+        audience: "departments",
+      },
+      published,
+    );
+    const moderators = strapi.seedDocument(A, { title: "Mod", department: { id: 10 } }, published);
+    const widened = strapi.seedDocument(
+      A,
+      { title: "Wide", department: null, ownerDepartment: { id: 10 }, audience: "all" },
+      published,
+    );
+    return { strapi, ids, mine, theirs, moderators, widened };
+  }
+
+  it("moderators enforced on any row; a department head only with a department and on an owned, in-scope row", async () => {
+    const world = owned();
+    const update = (user: StubUser, documentId: string) =>
+      run(
+        "can-author",
+        { uid: A },
+        policyContext(user, { params: { id: documentId }, body: { data: { title: "x" } } }),
+        world.strapi,
+      );
+    expect(await update(head, world.mine.documentId)).toEqual({ result: true });
+    for (const documentId of [
+      world.theirs.documentId,
+      world.moderators.documentId,
+      world.widened.documentId,
+    ]) {
+      expect(await update(head, documentId), documentId).toEqual({ result: false });
+    }
+    for (const type of ["admin_role", "editor"] as const) {
+      for (const row of [world.mine, world.theirs, world.moderators]) {
+        expect(
+          await update({ id: USER_ID[type], role: roleOf(type) }, row.documentId),
+          type,
+        ).toEqual({
+          result: true,
+        });
+      }
+    }
+    for (const type of ["team_lead", "member", "guest", "authenticated"] as const) {
+      expect(
+        await update({ id: USER_ID[type], role: roleOf(type) }, world.mine.documentId),
+        type,
+      ).toEqual({
+        result: false,
+      });
+    }
+    // A department_head without a department (the stranger's role swapped).
+    const loner = { id: USER_ID.editor, role: roleOf("department_head") };
+    expect(await update(loner, world.mine.documentId)).toEqual({ result: false });
+  });
+
+  it("a custom document action refuses with a 404, never a 403 or a 412", async () => {
+    const world = owned();
+    const outcome = await run(
+      "can-author",
+      { uid: A, intent: "editable" },
+      policyContext(head, { params: { id: world.theirs.documentId } }),
+      world.strapi,
+    );
+    expect("error" in outcome && outcome.error instanceof errors.NotFoundError).toBe(true);
+    expect(
+      await run(
+        "can-author",
+        { uid: A, intent: "editable" },
+        policyContext(head, { params: { id: world.mine.documentId } }),
+        world.strapi,
+      ),
+    ).toEqual({ result: true });
+  });
+});
