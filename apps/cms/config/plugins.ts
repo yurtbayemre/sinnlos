@@ -35,6 +35,13 @@ export function smtpTransportSecurity(port: number): { secure: boolean; requireT
   return { secure: implicitTls, requireTLS: !implicitTls };
 }
 
+/** The admin-panel macro backstop (see `upload` below). */
+export const OFFICE_MACRO_DENIED_TYPES = [
+  "application/vnd.ms-word.*macroenabled*",
+  "application/vnd.ms-excel.*macroenabled*",
+  "application/vnd.ms-powerpoint.*macroenabled*",
+] as const;
+
 export default ({ env }: { env: Env }) => ({
   "users-permissions": {
     config: {
@@ -65,6 +72,17 @@ export default ({ env }: { env: Env }) => ({
    *    The content-api route is further restricted to a JPEG/PNG/WebP
    *    allowlist in the upload extension; this deny list is the backstop
    *    that also covers admin-panel uploads.
+   *  - The Office macro backstop (deep-dive decision 06 §E1, owner amendment
+   *    2; batch 16 lane 16A): the three `*macroenabled*` patterns. Strapi
+   *    matches them case-insensitively, `*` as a wildcard, against the
+   *    declared type, the extension's type and file-type's guess from the
+   *    first 4100 bytes (upload-validation.contract.test.ts). So the panel
+   *    refuses a .docm/.dotm/.xlsm/.xltm/.xlam/.xlsb/.pptm/.potm/.ppsm by its
+   *    extension, and a renamed macro file only when file-type recognises it
+   *    in that window. A renamed .xlsb always passes (file-type answers
+   *    application/zip for it), and so does a renamed macro file whose
+   *    `[Content_Types].xml` lies beyond the window: the known limits. The
+   *    content-API profile (utils/upload-ooxml.ts) does not depend on this.
    */
   upload: {
     config: {
@@ -83,6 +101,7 @@ export default ({ env }: { env: Env }) => ({
           "application/x-elf",
           "application/x-mach-binary",
           "application/vnd.microsoft.portable-executable",
+          ...OFFICE_MACRO_DENIED_TYPES,
         ],
       },
     },
