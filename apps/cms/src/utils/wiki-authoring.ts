@@ -16,6 +16,7 @@ import {
   noQuery,
   payloadOf,
   resultDto,
+  revisionsOf,
   runDocumentMutation,
   withWikiEdit,
   type AuthoringContext,
@@ -23,16 +24,12 @@ import {
   type AuthoringHandler,
 } from "./authoring-controller";
 import { WIKI_PAGE_UID } from "./authoring-uids";
-import {
-  CONTENT_VERSION_UID,
-  etagOf,
-  runInAuthoringScope,
-  type AuthoringScope,
-} from "./document-lock";
+import { etagOf, runInAuthoringScope, type AuthoringScope } from "./document-lock";
 import { wikiGateExtrasOf } from "./wiki-gate";
 import {
   getRevision,
   listRevisions,
+  positiveId,
   restoreData,
   type RevisionListEntry,
   type WikiRevisionsHost,
@@ -78,16 +75,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
 
-const positiveInt = (value: unknown): number | null => {
-  const n =
-    typeof value === "number"
-      ? value
-      : typeof value === "string" && /^\d{1,9}$/.test(value)
-        ? Number(value)
-        : NaN;
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
-};
-
 /** A revision as the HTTP contract shows it (@sinnlos/domain WikiRevisionEntry). */
 function entryOf(entry: RevisionListEntry): WikiRevisionEntry {
   return {
@@ -100,21 +87,6 @@ function entryOf(entry: RevisionListEntry): WikiRevisionEntry {
     editor: entry.editor,
     restoredFrom: entry.restoredFrom,
   };
-}
-
-/** The revisions of every document of wiki-page (0 without a version row). */
-async function pageRevisions(strapi: WikiAuthoringHost): Promise<Map<string, number>> {
-  const rows = (await strapi.db.query(CONTENT_VERSION_UID).findMany({
-    where: { targetUid: WIKI_PAGE_UID },
-    select: ["targetDocumentId", "revision"],
-  })) as unknown[];
-  const revisions = new Map<string, number>();
-  for (const row of rows) {
-    if (!isRecord(row) || typeof row.targetDocumentId !== "string") continue;
-    const revision = Number(row.revision);
-    if (Number.isInteger(revision)) revisions.set(row.targetDocumentId, revision);
-  }
-  return revisions;
 }
 
 /** The actions, spread into the wiki-page controller next to authoringActions. */
@@ -168,7 +140,7 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
       const extras = wikiGateExtrasOf(gate);
       const visible = extras ? extras.visibleSpaceIds : new Set<number>();
       // Versions first, then the rows (authoring-controller.ts revisionsOf).
-      const revisions = await pageRevisions(strapi);
+      const revisions = await revisionsOf(strapi, WIKI_PAGE_UID);
       const populate = {
         space: { select: ["id", "documentId", "slug", "name"] },
       };
@@ -260,7 +232,7 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
     async revision(ctx) {
       const gate = gateFor(ctx, WIKI_PAGE_UID, "revision");
       noQuery(ctx.query);
-      const revisionId = positiveInt((ctx.params as Record<string, unknown>).revisionId);
+      const revisionId = positiveId((ctx.params as Record<string, unknown>).revisionId);
       const revision =
         revisionId === null
           ? null
@@ -284,7 +256,7 @@ export function wikiPageActions(instance: unknown): Record<string, AuthoringHand
         const extra = keys.filter((key) => key !== "revisionId");
         if (!isRecord(body) || extra.length > 0)
           refuseKeys(extra.length > 0 ? extra : ["revisionId"]);
-        const revisionId = positiveInt(body.revisionId);
+        const revisionId = positiveId(body.revisionId);
         if (revisionId === null) refuseKeys(["revisionId"]);
         // Another page's revision is indistinguishable from a missing one.
         const revision = await getRevision(strapi, gate.documentId as string, revisionId);

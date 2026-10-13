@@ -755,7 +755,7 @@ const chunks = <T>(items: readonly T[], size: number): T[][] => {
  * saw. A document created in between has no version here: 0, which no
  * stored revision matches.
  */
-async function revisionsOf(
+export async function revisionsOf(
   strapi: AuthoringControllerHost,
   uid: string,
 ): Promise<Map<string, number>> {
