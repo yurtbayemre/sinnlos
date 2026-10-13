@@ -10904,9 +10904,16 @@ missing and a truncated dump; `restore_prepare` run again with a failing
 older dump restored over a newer database and then the way back to the
 copy (whose table count differs); a dump without `up_users`; a
 `JWT_SECRET` exported in the shell; a Compose override that pins the cms's
-`JWT_SECRET`; a `.env` with two `JWT_SECRET=` lines; and a lost `.env`. No
-failure dropped anything without a fresh, readable copy, and none started
-the apps.
+`JWT_SECRET`; a `.env` with two `JWT_SECRET=` lines; and a lost `.env`.
+After the full-decode and copy recheck changes they were walked again with
+all of these plus: a dump cut off in its data whose table of contents still
+lists; the attempt's copy deleted, and truncated, after `restore_prepare`;
+a `createdb` that failed after the drop, then `restore_apply` retried; the
+old `JWT_SECRET` exported after `rotate_jwt` (`start_apps` refused until
+it was unset); `set -x` (`rotate_jwt` refused, the trace held no secret);
+and `set -e` in the shell before the setup (no STOP closed it). No failure
+dropped anything without a fresh, readable copy, and none started the
+apps.
 
 ### 7.2 Backup uploads volume
 
