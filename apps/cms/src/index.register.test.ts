@@ -158,7 +158,8 @@ describe("content-api.output sanitizer registration (issue #10 / F6)", () => {
  *     client query, and runs on the core's RESULT (after validateQuery),
  *   - a restricted filter becomes the core's own ValidationError (400),
  *   - the output backstop lands via get()+set() (never `.add`),
- *   - admin_role/editor bypass both; no request context = guard applies,
+ *   - admin_role/editor bypass both, except for the closed targets (wiki
+ *     revisions, batch 15.1); no request context = guard applies,
  *   - boot fails when the hook point is gone (no silent re-open),
  *   - register() installs it next to the contact sanitizer.
  */
@@ -180,9 +181,18 @@ describe("relation side-channel guard registration (FX05)", () => {
       department: { type: "relation", target: "api::department.department" },
     },
   };
+  const wikiPage: RelationModel = {
+    uid: WIKI_PAGE,
+    attributes: {
+      title: { type: "string" },
+      children: { type: "relation", target: WIKI_PAGE },
+      revisions: { type: "relation", target: "api::wiki-revision.wiki-revision" },
+    },
+  };
   const models: Record<string, RelationModel> = {
     [department.uid as string]: department,
     [USER_UID]: user,
+    [WIKI_PAGE]: wikiPage,
   };
 
   type RequestState = { state?: { user?: { role?: { type?: string } | null } | null } };
@@ -234,7 +244,7 @@ describe("relation side-channel guard registration (FX05)", () => {
     }
   });
 
-  it.each(["admin_role", "editor"])("hands %s the core's result untouched", async (role) => {
+  it.each(["admin_role", "editor"])("hands %s the FX05 relations untouched", async (role) => {
     const { strapi } = host(role);
     registerRestrictedRelationGuard(strapi);
     const out = await strapi.contentAPI.sanitize.query(
@@ -243,6 +253,33 @@ describe("relation side-channel guard registration (FX05)", () => {
     );
     expect(out.populate).toEqual({ pages: "true", teams: "true" });
   });
+
+  it.each(["admin_role", "editor", "member", undefined])(
+    "holds %s to the closed targets: wiki revisions on both sides (batch 15.1)",
+    async (role) => {
+      const { strapi } = host(role);
+      registerRestrictedRelationGuard(strapi);
+      const out = await strapi.contentAPI.sanitize.query(
+        { populate: { revisions: "true", children: "true" } },
+        wikiPage,
+      );
+      expect(out.populate).toEqual({ children: "true" });
+      // The filter inside a populate: the core never checks its scope.
+      await expect(
+        strapi.contentAPI.sanitize.query(
+          { populate: { children: { filters: { revisions: { body: { $startsWith: "D" } } } } } },
+          wikiPage,
+        ),
+      ).rejects.toThrow("Invalid key revisions at children.revisions");
+      const [backstop] = strapi.sanitizers.get("content-api.output") as Array<
+        (schema: RelationModel) => (data: unknown) => unknown
+      >;
+      expect(backstop(wikiPage)({ id: 1, revisions: [{ id: 2 }], children: [] })).toEqual({
+        id: 1,
+        children: [],
+      });
+    },
+  );
 
   it("turns a filter across a restricted relation into the core's 400", async () => {
     const { strapi } = host("member");

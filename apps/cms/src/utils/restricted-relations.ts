@@ -24,17 +24,28 @@ import { errors } from "@strapi/utils";
  *
  * The rule is per RELATION, not per route. `RESTRICTED_RELATION_TARGETS`
  * lists each filtered target with the only source types that may point at
- * it. Those are its own filter domain: wiki-space.pages, wiki-page.parent/
- * children and wiki-revision.page sit behind wiki-visibility at their roots.
- * Every other relation into the target is cut at any depth from any root.
+ * it. Those are its own filter domain: wiki-space.pages and wiki-page.parent/
+ * children sit behind wiki-visibility at their roots. Every other relation
+ * into the target is cut at any depth from any root.
  * A relation WITHOUT a static target (morph, e.g. the upload file's
  * `related`) counts as restricted: it may point anywhere.
  * routes.matrix.test.ts derives every such relation from the schemas and
  * fails when one is not covered.
  *
- * What happens to a restricted relation (for non admin_role/editor callers;
- * registerRestrictedRelationGuard in bootstrap/restricted-relation-guard.ts
- * decides the bypass):
+ * `CLOSED_RELATION_TARGETS` (batch 15.1) lists targets no content-API caller
+ * may reach through any relation, admin_role and editor included: wiki
+ * revisions, which hold the page body before each edit, draft text
+ * included. No role holds `wiki-revision.find`, so the core already drops a
+ * populate of `wiki-page.revisions` and refuses a root filter or sort
+ * through it; but it checks neither the filters nor the sort INSIDE a
+ * populate (@strapi/utils 5.57 traverse/query-populate.js skips those keys,
+ * validate/index.js validatePopulate passes no auth):
+ * `/api/wiki-spaces?populate[pages][filters][revisions][body][$startsWith]=…`
+ * answered with the pages whose revisions match, for every role.
+ *
+ * What happens to a restricted relation (closed targets for every caller,
+ * the rest for non admin_role/editor callers; registerRestrictedRelationGuard
+ * in bootstrap/restricted-relation-guard.ts decides the bypass):
  *   - populate: dropped with everything nested under it, in every shape the
  *     core accepts (@strapi/utils convert-query-params.js, @strapi/database
  *     populate/process.js): objects, counts, strings, comma lists, arrays,
@@ -97,17 +108,20 @@ export type RestrictedRelationRules = Readonly<Record<string, readonly string[]>
  *   - those writes always publish (enforceWriteAllowlist pins `status`, as
  *     the read policies do), so a write response populates published rows
  *     only and never the drafts the read routes hide,
- *   - wiki-space and wiki-revision writes are admin/editor-only.
+ *   - wiki-space writes are admin/editor-only; wiki-revision has no route.
  * admin/editor writes (content API and admin panel) are trusted to keep a
  * page's parent in its own space. routes.matrix.test.ts fails when a role
  * without the bypass gains a write route that could set one of these
  * relations outside the allowlist.
+ *
+ * wiki-revision is no trusted source any more (batch 15.1): it has no
+ * route, so no query starts there, and the only way into it,
+ * `wiki-page.revisions`, is closed (CLOSED_RELATION_TARGETS).
  */
 export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   "api::wiki-page.wiki-page": [
     "api::wiki-page.wiki-page", // parent / children
     "api::wiki-space.wiki-space", // pages
-    "api::wiki-revision.wiki-revision", // page
   ],
   // Poll department targeting (decision 02): poll-visibility narrows the
   // poll routes only. The one relation into poll, poll-vote.poll, has no
@@ -115,6 +129,21 @@ export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   // entry keeps it, and any relation added later, from handing out polls
   // outside their audience. No source is trusted.
   "api::poll.poll": [],
+};
+
+/**
+ * Targets closed for EVERY content-API caller, the admin_role/editor bypass
+ * included (see the header): no source is trusted. The admin panel does not
+ * go through the content API.
+ */
+export const CLOSED_RELATION_TARGETS: RestrictedRelationRules = {
+  "api::wiki-revision.wiki-revision": [],
+};
+
+/** The rules a caller without the admin_role/editor bypass is held to: both sets. */
+export const NON_BYPASS_RELATION_TARGETS: RestrictedRelationRules = {
+  ...RESTRICTED_RELATION_TARGETS,
+  ...CLOSED_RELATION_TARGETS,
 };
 
 export interface RestrictedRelationOptions {

@@ -3,6 +3,8 @@ import { join } from "node:path";
 import { errors } from "@strapi/utils";
 import { describe, expect, it } from "vitest";
 import {
+  CLOSED_RELATION_TARGETS,
+  NON_BYPASS_RELATION_TARGETS,
   RESTRICTED_RELATION_TARGETS,
   guardRestrictedRelations,
   isRestrictedRelation,
@@ -25,7 +27,10 @@ import {
  * in routes.matrix.test.ts.
  *
  * Wiring (the sanitize.query wrapper, the output sanitizer, the admin/editor
- * bypass) is pinned in index.register.test.ts.
+ * bypass) is pinned in index.register.test.ts. `guard` below runs with the
+ * rules of a caller without the bypass (NON_BYPASS_RELATION_TARGETS); the
+ * closed targets every caller is held to (wiki revisions, batch 15.1) have
+ * their own block at the end.
  */
 
 const SRC = join(__dirname, "..");
@@ -80,7 +85,7 @@ const MODELS: Record<string, RelationModel> = {
 
 const OPTIONS = {
   getModel: (uid: string) => MODELS[uid],
-  rules: RESTRICTED_RELATION_TARGETS,
+  rules: NON_BYPASS_RELATION_TARGETS,
 };
 
 const guard = (uid: string, query: Record<string, unknown>) =>
@@ -100,6 +105,17 @@ function expectRejected(uid: string, query: Record<string, unknown>, message: st
   expect(thrown).toBeInstanceOf(errors.ValidationError);
   expect((thrown as Error).message).toBe(message);
 }
+
+/** Every populatable, non-private attribute of wiki-page except `revisions`. */
+const PAGE_WITHOUT_REVISIONS = [
+  "space",
+  "parent",
+  "children",
+  "author",
+  "lastEditor",
+  "department",
+  "team",
+];
 
 /** Every populatable, non-private attribute except `pages`. */
 const DEPARTMENT_WITHOUT_PAGES = ["headerImage", "head", "members", "teams"];
@@ -134,13 +150,33 @@ describe("isRestrictedRelation", () => {
       [WIKI_SPACE, "pages"],
       [WIKI_PAGE, "parent"],
       [WIKI_PAGE, "children"],
-      [WIKI_REVISION, "page"],
     ];
     for (const [uid, name] of trusted) {
       expect(isRestrictedRelation(MODELS[uid], attr(uid, name), RESTRICTED_RELATION_TARGETS)).toBe(
         false,
       );
     }
+  });
+
+  it("trusts wiki-revision.page no more: the type has no route since batch 15.1", () => {
+    expect(
+      isRestrictedRelation(
+        MODELS[WIKI_REVISION],
+        attr(WIKI_REVISION, "page"),
+        RESTRICTED_RELATION_TARGETS,
+      ),
+    ).toBe(true);
+  });
+
+  it("closes wiki-page.revisions for every caller, and the closed rules cut nothing else", () => {
+    const revisions = attr(WIKI_PAGE, "revisions");
+    expect(isRestrictedRelation(MODELS[WIKI_PAGE], revisions, CLOSED_RELATION_TARGETS)).toBe(true);
+    expect(isRestrictedRelation(MODELS[WIKI_PAGE], revisions, NON_BYPASS_RELATION_TARGETS)).toBe(
+      true,
+    );
+    expect(
+      isRestrictedRelation(MODELS[DEPARTMENT], attr(DEPARTMENT, "pages"), CLOSED_RELATION_TARGETS),
+    ).toBe(false);
   });
 
   it("fails closed on morph relations and on a source without a uid", () => {
@@ -288,8 +324,8 @@ describe("guardRestrictedRelations — populate is stripped", () => {
       expect(populateOn(DEPARTMENT, { members: { populate: "*" } })).toEqual({
         members: { populate: "*" },
       });
-      // wiki-page's own parent/children are trusted.
-      expect(populateOn(WIKI_PAGE, "*")).toBe("*");
+      // wiki-space's own pages are trusted.
+      expect(populateOn(WIKI_SPACE, "*")).toBe("*");
     });
   });
 
@@ -335,15 +371,17 @@ describe("guardRestrictedRelations — populate is stripped", () => {
       ).toEqual({ pages: { populate: { department: { populate: {} } } } });
     });
 
-    it("wiki-page and wiki-revision keep the wiki domain's relations", () => {
-      // The web's page query (apps/web lib/strapi.ts wiki.page).
+    it("wiki-page keeps the wiki domain's relations, never its revisions", () => {
+      // The web's page query (apps/web lib/api/wiki.ts wikiPageBySlug).
       const web = {
-        author: "true",
-        lastEditor: "true",
-        space: "true",
-        revisions: { populate: { editor: "true" } },
+        author: { fields: ["displayName", "username"] },
+        lastEditor: { fields: ["displayName", "username"] },
+        space: { fields: ["name", "slug"] },
       };
       expect(populateOn(WIKI_PAGE, web)).toEqual(web);
+      expect(
+        populateOn(WIKI_PAGE, { ...web, revisions: { populate: { editor: "true" } } }),
+      ).toEqual(web);
       expect(populateOn(WIKI_PAGE, { parent: "true", children: "true" })).toEqual({
         parent: "true",
         children: "true",
@@ -351,9 +389,9 @@ describe("guardRestrictedRelations — populate is stripped", () => {
       expect(populateOn(WIKI_PAGE, { team: { populate: ["pages"] } })).toEqual({
         team: { populate: [] },
       });
-      expect(populateOn(WIKI_REVISION, { page: { populate: { space: "true" } } })).toEqual({
-        page: { populate: { space: "true" } },
-      });
+      // `*` names every relation but revisions; department/team are followable,
+      // their own `pages` is cut one level further down.
+      expect(populateOn(WIKI_PAGE, "*")).toEqual(PAGE_WITHOUT_REVISIONS);
     });
   });
 
@@ -526,5 +564,116 @@ describe("stripRestrictedRelationsFromOutput (backstop)", () => {
     expect(department).not.toHaveProperty("pages");
     expect(strip(DEPARTMENT, null)).toBeNull();
     expect(strip(DEPARTMENT, 42)).toBe(42);
+  });
+});
+
+/**
+ * Batch 15.1: wiki revisions hold the page body before each edit, draft text
+ * included, and no caller may reach them, admin_role and editor included.
+ * The core drops a populate of `revisions` and refuses a root filter or sort
+ * (no role holds `wiki-revision.find`), but checks neither the filters nor
+ * the sort inside a populate (@strapi/utils 5.57). These are the closed
+ * rules alone: what a caller WITH the bypass is held to.
+ */
+describe("closed targets bind every caller (CLOSED_RELATION_TARGETS)", () => {
+  const CLOSED = { getModel: (uid: string) => MODELS[uid], rules: CLOSED_RELATION_TARGETS };
+  const closedGuard = (uid: string, query: Record<string, unknown>) =>
+    guardRestrictedRelations(query, MODELS[uid], CLOSED);
+  const populate = (uid: string, value: unknown) => closedGuard(uid, { populate: value }).populate;
+
+  function expectClosed(uid: string, query: Record<string, unknown>, message: string) {
+    let thrown: unknown;
+    try {
+      closedGuard(uid, query);
+    } catch (err) {
+      thrown = err;
+    }
+    expect(thrown).toBeInstanceOf(errors.ValidationError);
+    expect((thrown as Error).message).toBe(message);
+  }
+
+  it("strips a populate of revisions in every shape, at any depth", () => {
+    expect(populate(WIKI_PAGE, { revisions: "true", space: "true" })).toEqual({ space: "true" });
+    expect(populate(WIKI_PAGE, { revisions: { count: "true" } })).toEqual({});
+    expect(populate(WIKI_PAGE, "revisions,space")).toEqual(["space"]);
+    expect(populate(WIKI_PAGE, ["revisions.editor", "author"])).toEqual(["author"]);
+    expect(populate(WIKI_PAGE, "*")).toEqual(PAGE_WITHOUT_REVISIONS);
+    expect(populate(WIKI_PAGE, { children: { populate: { revisions: "true" } } })).toEqual({
+      children: { populate: {} },
+    });
+    expect(populate(WIKI_SPACE, { pages: { populate: "*" } })).toEqual({
+      pages: { populate: PAGE_WITHOUT_REVISIONS },
+    });
+    expect(
+      populate(USER, { department: { populate: { pages: { populate: ["revisions"] } } } }),
+    ).toEqual({ department: { populate: { pages: { populate: [] } } } });
+  });
+
+  it("keeps what only the FX05 rules cut: the bypass still reads department.pages", () => {
+    const query = { populate: { pages: { populate: { space: "true" } } } };
+    expect(closedGuard(DEPARTMENT, query)).toEqual(query);
+    const filtered = { filters: { pages: { title: "x" } } };
+    expect(closedGuard(DEPARTMENT, filtered)).toBe(filtered);
+  });
+
+  it("rejects filters through revisions at the root, in $or and $not, and deep", () => {
+    expectClosed(
+      WIKI_PAGE,
+      { filters: { revisions: { body: { $startsWith: "Draft" } } } },
+      "Invalid key revisions",
+    );
+    expectClosed(
+      WIKI_PAGE,
+      { filters: { $or: [{ id: -1 }, { revisions: { body: { $startsWith: "D" } } }] } },
+      "Invalid key revisions",
+    );
+    expectClosed(
+      WIKI_PAGE,
+      { filters: { $not: { revisions: { id: { $null: true } } } } },
+      "Invalid key revisions",
+    );
+    expectClosed(
+      WIKI_SPACE,
+      { filters: { pages: { children: { revisions: { body: "x" } } } } },
+      "Invalid key revisions at pages.children.revisions",
+    );
+  });
+
+  it("rejects the filter and the sort nested in a populate, which the core does not check", () => {
+    expectClosed(
+      WIKI_SPACE,
+      { populate: { pages: { filters: { revisions: { body: { $startsWith: "D" } } } } } },
+      "Invalid key revisions at pages.revisions",
+    );
+    expectClosed(
+      WIKI_SPACE,
+      { populate: { pages: { sort: "revisions.body:asc" } } },
+      "Invalid key revisions at pages.revisions",
+    );
+    expectClosed(
+      DEPARTMENT,
+      {
+        populate: {
+          pages: { populate: { parent: { filters: { $or: [{ revisions: { id: 1 } }] } } } },
+        },
+      },
+      "Invalid key revisions at pages.parent.revisions",
+    );
+    expectClosed(WIKI_PAGE, { sort: { revisions: { body: "asc" } } }, "Invalid key revisions");
+  });
+
+  it("deletes revisions from every response entity (the output backstop)", () => {
+    const space = {
+      id: 1,
+      pages: [
+        {
+          id: 2,
+          revisions: [{ id: 3, body: "Draft" }],
+          children: [{ id: 4, revisions: { count: 1 } }],
+        },
+      ],
+    };
+    stripRestrictedRelationsFromOutput(space, MODELS[WIKI_SPACE], CLOSED);
+    expect(space).toEqual({ id: 1, pages: [{ id: 2, children: [{ id: 4 }] }] });
   });
 });
