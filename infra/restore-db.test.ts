@@ -208,7 +208,7 @@ function restoreSteps(steps: readonly Step[], mode: ShellMode): StepReport[] {
     fakeDump("older.dump", ["up_users 2"]),
     "STEP_CWD=",
     `STUB_LABEL_WEB="${TRAEFIK_LABEL}" STUB_LABEL_CMS="${TRAEFIK_LABEL}" STUB_LABEL_DB="${TRAEFIK_LABEL}"`,
-    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+    "export T REPO STUB_LABEL_WEB STUB_LABEL_CMS STUB_LABEL_DB STUB_STOP_FAIL= STUB_UP_FAIL= STUB_ON_STOP= STUB_RM_AS_USER= STUB_KILL_AFTER_STARTED= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
     'S="$REPO/.git/sinnlos-deploy/restore"',
     HARNESS_STUBS,
   ];
@@ -1159,6 +1159,105 @@ describe.skipIf(!FAST)(
       expect(b[3].reserved).toBe(true);
       expect(b[4].status).toBe(1);
       expect(b[4].apps).toBe("stopped");
+    });
+  },
+);
+
+describe.skipIf(!FAST)(
+  `restore-db.sh: a start whose cleanup did not finish is finished by start${FAST_TITLE}`,
+  () => {
+    let a: StepReport[] = [];
+    let b: StepReport[] = [];
+    beforeAll(() => {
+      const stage = '"$REPO"/infra/backups/restore-*';
+      a = restoreSteps(
+        [
+          /* 0 */ { args: ["prepare", "good.dump"] },
+          /* 1 */ { args: ["apply"] },
+          /* 2 */ { args: ["rotate-jwt"] },
+          // The staged dump cannot be removed (its directory is not writable).
+          /* 3 */ { before: `chmod 500 ${stage}; STUB_RM_AS_USER=1`, args: ["start"] },
+          /* 4 */ { args: ["cancel"] },
+          /* 5 */ { args: ["status"] },
+          /* 6 */ { before: `chmod 700 ${stage}; STUB_RM_AS_USER=`, args: ["start"] },
+          /* 7 */ { args: ["start"] },
+          /* 8 */ { args: ["prepare", "good.dump"] },
+          /* 9 */ { args: ["apply"] },
+          /* 10 */ { args: ["rotate-jwt"] },
+          // Interrupted right after STARTED_AT was saved.
+          /* 11 */ { before: "STUB_KILL_AFTER_STARTED=1", args: ["start"] },
+          /* 12 */ { before: "STUB_KILL_AFTER_STARTED=", args: ["start"] },
+        ],
+        MODE as ShellMode,
+      );
+      b = restoreSteps(
+        [
+          /* 0 */ { args: ["prepare", "good.dump"] },
+          /* 1 */ { args: ["apply"] },
+          /* 2 */ { args: ["rotate-jwt"] },
+          /* 3 */ { before: `chmod 500 ${stage}; STUB_RM_AS_USER=1`, args: ["start"] },
+          // A later prepare that fails after it reserved anew (the apps stop again).
+          /* 4 */ {
+            before: `chmod 700 ${stage}; STUB_RM_AS_USER=; STUB_PGDUMP_FAIL=1`,
+            args: ["prepare", "older.dump"],
+          },
+          /* 5 */ { before: "STUB_PGDUMP_FAIL=", args: ["start"] },
+          /* 6 */ { args: ["cancel"] },
+        ],
+        MODE as ShellMode,
+      );
+    }, 300_000);
+
+    it("a cleanup that fails after the apps started leaves a start that finishes it", () => {
+      // Before round 3 the attempt counted as started, start refused, and the
+      // unsafe mark made cancel refuse too: deploys stayed blocked.
+      expect(a[3].status).toBe(1);
+      expect(a[3].apps).toBe("running");
+      expect(a[3].state.STARTED_AT).not.toBe("");
+      expect(stopLine(a[3])).toContain("removing the staged dump ");
+      expect(stopLine(a[3])).toContain(
+        "its cleanup did not finish: fix the cause, then run infra/restore-db.sh start again, which finishes only the cleanup",
+      );
+      expect(a[3].reserved).toBe(true);
+      expect(a[4].status).toBe(1);
+      expect(a[5].stdout).toContain(`started:   ${a[3].state.STARTED_AT}`);
+      expect(a[6].status, a[6].stderr).toBe(0);
+      expect(okLine(a[6])).toContain(
+        `OK: attempt ${a[0].state.ATTEMPT} complete: web and cms were started at ${a[3].state.STARTED_AT}; its cleanup is finished now`,
+      );
+      // Only the cleanup: no compose call, the database and the containers untouched.
+      expect(a[6].calls).toEqual([]);
+      expect(a[6].reserved).toBe(false);
+      expect(a[6].stages).toEqual([]);
+      expect(a[7].status).toBe(1);
+    });
+
+    it("an interruption right after STARTED_AT was saved is finished by start", () => {
+      expect(a[11].status).toBe(143);
+      expect(stopLine(a[11])).toContain("STOP: start interrupted; ");
+      expect(a[11].state.STARTED_AT).not.toBe("");
+      expect(a[11].reserved).toBe(true);
+      expect(a[11].stages).toHaveLength(1);
+      expect(a[12].status, a[12].stderr).toBe(0);
+      expect(okLine(a[12])).toContain("its cleanup is finished now");
+      expect(a[12].calls).toEqual([]);
+      expect(a[12].reserved).toBe(false);
+      expect(a[12].stages).toEqual([]);
+    });
+
+    it("a reservation of a later prepare stays: only the started attempt's mark goes", () => {
+      expect(b[3].status).toBe(1);
+      expect(b[4].status).toBe(1);
+      expect(b[4].reservation.UNSAFE_ATTEMPT).toBe(b[0].state.ATTEMPT);
+      expect(b[5].status, b[5].stderr).toBe(0);
+      expect(b[5].stdout).toContain(
+        `the reservation belongs to attempt ${b[4].reservation.ATTEMPT} (a later prepare): it stays; the unsafe mark of attempt ${b[0].state.ATTEMPT} is gone`,
+      );
+      expect(b[5].reserved).toBe(true);
+      expect(b[5].reservation.UNSAFE_SINCE).toBe("");
+      // That prepare's apply never began: it can be cancelled.
+      expect(b[6].status, b[6].stderr).toBe(0);
+      expect(b[6].reserved).toBe(false);
     });
   },
 );

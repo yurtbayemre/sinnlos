@@ -1312,7 +1312,16 @@ describe.skipIf(!TWO_CLONE_MODE)(
           /* 0 */ { before: `${TWO_CLONES}\nrestore_step prepare good.dump` },
           /* 1 */ { before: "restore_step apply", args: ["--dry-run"] },
           /* 2 */ { before: "restore_step cancel" },
-          /* 3 */ { before: "restore_step rotate-jwt; restore_step start" },
+          // A start whose cleanup fails (the staged dump's directory is not writable) …
+          /* 3 */ {
+            before:
+              'restore_step rotate-jwt; chmod 500 "$A"/infra/backups/restore-*; export STUB_RM_AS_USER=1; restore_step start',
+          },
+          // … and its re-run, which finishes the cleanup.
+          /* 4 */ {
+            before:
+              'chmod 700 "$A"/infra/backups/restore-*; export STUB_RM_AS_USER=; restore_step start',
+          },
         ],
         TWO_CLONE_MODE as ShellMode,
       );
@@ -1334,13 +1343,16 @@ describe.skipIf(!TWO_CLONE_MODE)(
       }
     });
 
-    it("deploys from clone B once clone A's restore started the apps", () => {
+    it("still refuses after a start whose cleanup failed, and deploys once start finished it", () => {
       expect(r[3].calls.slice(0, 2)).toEqual([
         expect.stringMatching(/^restore rotate-jwt rc=0 OK: /),
-        expect.stringMatching(/^restore start rc=0 OK: /),
+        expect.stringMatching(/^restore start rc=1 STOP: removing the staged dump /),
       ]);
-      expect(r[3].status, r[3].stderr).toBe(0);
-      expect(r[3].stdout).toContain("restore reservation: none");
+      expect(r[3].status).toBe(1);
+      expect(r[3].stderr).toContain("a database restore of compose project infra is in progress");
+      expect(r[4].calls[0]).toMatch(/^restore start rc=0 OK: attempt \S+ complete: /);
+      expect(r[4].status, r[4].stderr).toBe(0);
+      expect(r[4].stdout).toContain("restore reservation: none");
     });
   },
 );

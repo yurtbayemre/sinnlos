@@ -15,7 +15,8 @@
 # the target lacks).
 # Switches: STUB_LABEL_WEB, STUB_LABEL_CMS, STUB_LABEL_DB (the compose
 # config_files label of that service's container; empty: none), STUB_STOP_FAIL,
-# STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop), STUB_PGDUMP_FAIL,
+# STUB_UP_FAIL, STUB_ON_STOP (bash run when web and cms stop),
+# STUB_RM_AS_USER, STUB_KILL_AFTER_STARTED (below), STUB_PGDUMP_FAIL,
 # STUB_CREATEDB_FAIL (dropdb runs, createdb fails), STUB_RESTORE_FAIL,
 # STUB_LOCK_HELD.
 : "${T:?}" "${REPO:?}"
@@ -189,4 +190,32 @@ docker() {
 
 flock() { [[ -z "${STUB_LOCK_HELD}" ]]; }
 
-export -f docker stub_db stub_effective_jwt flock
+# STUB_RM_AS_USER: rm behaves as for a user without root, also when the
+# tests run as root (the runner image), where a mode-500 directory does not
+# stop rm: a target that is, or lies in, a directory without write
+# permission is not removed.
+rm() {
+  local a d
+  if [[ -n "${STUB_RM_AS_USER:-}" ]]; then
+    for a in "$@"; do
+      if [[ "${a}" == -* ]]; then continue; fi
+      if [[ -d "${a}" ]]; then d="${a}"; else d="${a%/*}"; fi
+      if [[ -d "${d}" && "$(stat -c %a "${d}")" != [67]* ]]; then
+        echo "rm: cannot remove '${a}': Permission denied" >&2
+        return 1
+      fi
+    done
+  fi
+  command rm "$@"
+}
+
+# STUB_KILL_AFTER_STARTED: the script is interrupted (TERM) right after it
+# saved a state with STARTED_AT, before anything after that.
+mv() {
+  command mv "$@" || return
+  if [[ -n "${STUB_KILL_AFTER_STARTED:-}" && "${*: -1}" == *.state ]] && grep -q '^STARTED_AT=.' "${*: -1}"; then
+    kill -TERM "$$"
+  fi
+}
+
+export -f docker stub_db stub_effective_jwt flock rm mv

@@ -10722,6 +10722,7 @@ curl -s <URL>/api/polls/<poll-id>/results \
 | `live-smoke: FAIL — sign-in as … produced no session cookie (HTTP 302, redirect …error=CredentialsSignin…)` | Wrong password in the demo credentials file, or the account is blocked or locked. On an Entra-only instance live-smoke skips its sign-in steps by itself |
 | `infra/deploy.sh` stops with `ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra` | A deploy or a restore step of the same project runs (the lock goes with its process); let it finish, then re-run |
 | `infra/restore-db.sh` prints `STOP: …` (exit 1) or, with exit 3, `STOP: another infra/restore-db.sh step or infra/deploy.sh holds the lock …` | The step changed only what the line says; `infra/restore-db.sh status` shows the attempt and its next step ([Restoring a database dump](#restoring-a-database-dump)) |
+| `infra/restore-db.sh start` stops with `STOP: removing the staged dump … failed; web and cms run on the restored database … its cleanup did not finish` (or was interrupted after starting them) | The apps run with the new secret; only the cleanup is left. Fix the cause (for example the permissions of `infra/backups/restore-<attempt>`), then run `infra/restore-db.sh start` again: it finishes the cleanup and ends the reservation, and deploys work again ([Restoring a database dump](#restoring-a-database-dump)) |
 | `infra/deploy.sh` stops with `ERROR: a database restore of compose project infra is in progress (…/sinnlos-deploy/restore/infra.reservation)` | A restore (in this clone, or in another one with the same `DEPLOY_STATE_DIR`) holds the reservation from its `prepare` until its `start` passes: finish it (`infra/restore-db.sh status` names the next step), or end it with `infra/restore-db.sh cancel` (only while no `apply` has begun since the reservation was taken); then deploy. Nothing was changed |
 | `infra/deploy.sh` stops with `ERROR: the checkout … has changed tracked files` | Commit, stash or revert the listed files, then re-run; nothing was changed |
 | `infra/deploy.sh` prints `WARNING: CI is …` (or stops, with `--require-green-ci`) | GitHub has no green CI run for the checked-out commit yet: not pushed, still running, or failed. Dependabot's own update jobs on the commit do not count (since batch 13; before, they could make a green commit read `pending`) |
@@ -10816,7 +10817,12 @@ retried or failed step never leaves an old "passed" behind:
   `apply` and `rotate-jwt` passed for the same attempt and Compose still
   hands the cms the rotated secret (no `JWT_SECRET` exported since). It
   ends the attempt and the reservation and deletes the staged dump:
-  another restore starts with `prepare` again.
+  another restore starts with `prepare` again. Should that cleanup not
+  finish after the apps came up (the staged dump cannot be removed, or the
+  step is interrupted), `start` stops with that and the reservation stays;
+  running `start` again finishes only the cleanup (the staged dump, the
+  unsafe mark and the reservation), without touching the database or the
+  containers.
 
 `infra/restore-db.sh status` shows the current attempt (the dump and the
 copy with their sha256 and table counts, which steps passed and the next

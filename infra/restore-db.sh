@@ -37,7 +37,10 @@ set +x # first: never trace this script (rotate-jwt handles a secret), also unde
 #   infra/restore-db.sh start            after apply and rotate-jwt of the same attempt,
 #                                        with the rotated secret still the one Compose
 #                                        hands the cms: up -d --no-build web cms; ends
-#                                        the attempt and the reservation
+#                                        the attempt and the reservation. Run again
+#                                        after a start whose cleanup did not finish (a
+#                                        staged dump that could not be removed, an
+#                                        interruption), it finishes only that cleanup
 #   infra/restore-db.sh rotate-jwt --env-only
 #   infra/restore-db.sh start --env-only the same pair when only infra/.env was restored
 #                                        (the database is intact; refused while a
@@ -928,11 +931,57 @@ cmd_rotate_jwt() {
   fi
 }
 
+# After a start of the current attempt (STARTED_AT saved): its staged dump
+# goes, and so do its unsafe mark and the reservation, as far as they are
+# its own (a later prepare that failed may have reserved anew). Touches no
+# database and no container, so a start that stopped here (a cleanup that
+# failed, an interruption) is finished by running start again.
+finish_started() {
+  local stage
+  stage="$(stage_dir "${S_ATTEMPT}")"
+  PHASE_NOTE="web and cms run on the restored database with the rotated JWT_SECRET (attempt ${S_ATTEMPT}, started ${S_STARTED_AT}), but its cleanup did not finish: fix the cause, then run infra/restore-db.sh start again, which finishes only the cleanup"
+  if [[ -e "${stage}" || -L "${stage}" ]]; then
+    if ! rm -rf -- "${stage}" || [[ -e "${stage}" || -L "${stage}" ]]; then
+      stop "removing the staged dump ${stage} failed; ${PHASE_NOTE}"
+    fi
+  fi
+  if reserved; then
+    load_reservation
+    if [[ "${R_ATTEMPT}" == "${S_ATTEMPT}" ]]; then
+      if ! rm -f -- "${RESERVATION}" || reserved; then
+        stop "removing the reservation ${RESERVATION} failed; ${PHASE_NOTE}"
+      fi
+    elif [[ "${R_UNSAFE_ATTEMPT}" == "${S_ATTEMPT}" ]]; then
+      # The reservation is a later prepare's: only this attempt's mark goes.
+      R_UNSAFE_SINCE="" R_UNSAFE_ATTEMPT=""
+      save_reservation
+      note "the reservation belongs to attempt ${R_ATTEMPT} (a later prepare): it stays; the unsafe mark of attempt ${S_ATTEMPT} is gone"
+    fi
+  fi
+}
+
+# A started attempt whose cleanup is left: its staged dump, or a
+# reservation or an unsafe mark of its own.
+cleanup_left() {
+  local stage
+  [[ -n "${S_ATTEMPT}" && -n "${S_STARTED_AT}" ]] || return 1
+  stage="$(stage_dir "${S_ATTEMPT}")"
+  [[ -e "${stage}" || -L "${stage}" ]] && return 0
+  reserved || return 1
+  load_reservation
+  [[ "${R_ATTEMPT}" == "${S_ATTEMPT}" || "${R_UNSAFE_ATTEMPT}" == "${S_ATTEMPT}" ]]
+}
+
 cmd_start() {
   local effective sum
   take_lock
   PHASE_NOTE="web and cms not started"
   load_attempt
+  if ((!ENV_ONLY)) && cleanup_left; then
+    finish_started
+    ok "attempt ${S_ATTEMPT} complete: web and cms were started at ${S_STARTED_AT}; its cleanup is finished now (staged dump and reservation gone; database and containers untouched). Delete ${BACKUP_DIR}/before-restore-*.dump once the site works"
+    return 0
+  fi
   if ((ENV_ONLY)); then
     load_env_only
     if [[ -z "${E_ROTATED_SUM}" || -n "${E_STARTED_AT}" ]]; then
@@ -964,10 +1013,10 @@ cmd_start() {
     save_env_only
     ok "web and cms started with the rotated JWT_SECRET (infra/.env only)"
   else
+    PHASE_NOTE="web and cms run on the restored database with the rotated JWT_SECRET, but the attempt is not recorded as started: run infra/restore-db.sh start again"
     S_STARTED_AT="$(now)"
     save_attempt
-    rm -rf "$(stage_dir "${S_ATTEMPT}")"
-    rm -f "${RESERVATION}"
+    finish_started
     ok "attempt ${S_ATTEMPT} complete: web and cms started on the restored database with the rotated JWT_SECRET; the reservation is gone. Delete ${BACKUP_DIR}/before-restore-*.dump once the site works"
   fi
 }
