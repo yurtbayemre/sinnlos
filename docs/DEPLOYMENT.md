@@ -1915,6 +1915,150 @@ is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
 
+#### Upgrading to the document upload profile, the file claims and the delete trail (batch 16, lane 16A)
+
+Lane 16A of batch 16 (deep-dive decision 06 §E1-§E5, owner amendments 1
+and 2; plan `plan-batch-16.md` §3 16A; the owner's delete-audit request of
+2026-10-13) opens `POST /api/upload` to document files, makes every
+removal of an uploaded file go through one locked path, and records every
+ad and file delete. The integration's "Deploying batch 16" runbook carries
+it with the other lanes; on its own it is a cms-only change (`infra/deploy.sh`
+rebuilds both images; the web is unchanged).
+
+**What changes**
+
+- **Document uploads by content** (release note): moderators (admin_role,
+  editor) and department heads may upload **PDF, DOCX, XLSX and PPTX up to
+  20 MB** (one per request) and JPEG, PNG, WebP up to 5 MB; every other
+  role keeps the image profile (JPEG, PNG, WebP, 5 MB, up to 4 per
+  request). The cms decides the format from the bytes: a PDF that is also
+  a zip is refused, and Office files pass one Office Open XML rule that
+  refuses every macro-enabled (`.docm`, `.xlsm`, `.pptm`, …), template
+  (`.dotx`, `.xltx`, `.potx`), slideshow (`.ppsx`) and binary (`.xlsb`)
+  variant, renamed or not. The stored name and mime come from one table,
+  whatever the client sent (`fileInfo.name` is ignored). A document file
+  can only be attached to a document from batch 16's lane 16B on (until
+  then the content API refuses `document.file`), so an upload made in
+  between is swept by the janitor after 24 h, which is intended.
+- **Refusals carry codes** (contract K14): every refusal of
+  `POST /api/upload` is a 400 `ValidationError` with `details.keys` and,
+  for the file, `details.codes.file` (`fileType`, `fileTooLarge`,
+  `required`, `invalid`); a malformed `fileInfo` answers 400 with
+  `details.keys: ["fileInfo"]` (it was a 500); `?id=` stays 403; a body
+  above 50 MB stays 413. The web's marketplace flow is unaffected (it only
+  checks for a non-OK answer).
+- **The admin panel refuses macro-enabled Office files** (release note):
+  `deniedTypes` gains `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`.
+  The panel refuses `.docm`, `.dotm`, `.xlsm`, `.xltm`, `.xlam`, `.xlsb`,
+  `.pptm`, `.potm`, `.ppsm` by extension, and a renamed macro file when
+  file-type recognises it in the first 4100 bytes. **Known limit**
+  (release note, accepted by the owner: the panel is for moderators only):
+  a renamed `.xlsb` or `.xlam` (and a renamed macro file whose
+  `[Content_Types].xml` lies beyond those bytes) still passes the panel.
+- **One reservation before every removal.** The classified image cleanup,
+  `cleanup-uploads` and the uploads janitor (and, from 16B, the media
+  claims) remove a file only through `claimAndRemove`, and the admin Media
+  Library's deletes go through the same reservation: the file row is
+  locked and re-read (a file already gone or being removed is skipped, so
+  two overlapping deletes remove it once), tombstoned
+  (`provider_metadata.removing`) together with its audit row, and only then
+  removed. A removal that fails after its reservation leaves a tombstoned
+  row that nothing can attach; the next janitor run retries it once it is
+  10 minutes old and unlinked, an admin may delete it again after that.
+  Every write of an ad (also in the Content Manager) locks its image rows
+  and refuses one that is being removed (400, `images`).
+- **The janitor's scope grows** (release note): moderators' and department
+  heads' document uploads are stamped like ad images, so the 03:30
+  `uploads-janitor` sweeps them once they are unattached and older than
+  24 h. Admin-panel uploads are still never touched.
+- **The delete trail** (owner request): every ad delete (the author
+  through the web, a moderator's "Delete ad", the Content Manager, the
+  03:45 `classified-janitor`) and every file delete (an ad's images after
+  its delete, `cleanup-uploads`, the uploads janitor, the media claims, the
+  admin Media Library's single, bulk and folder deletes) writes one row in
+  `audit_events` (action `delete`, `target_uid`
+  `api::classified.classified` or `plugin::upload.file`): who (a user's id
+  with batch 15's class in `actor_class`: `author` for their own ad or
+  upload, `moderator` for an admin_role or editor removing someone else's,
+  the v2 authoring class (`moderator`, `departmentAuthor`) for a document
+  save; an admin's id; or `system`, without a class), from where
+  (`content-api`, `admin`, `cron`), and what (`detail`: a user's role type
+  as `role: <type>;`, then the ad's title, or the file's id, mime, size,
+  related ad or document, and name). No IP address, no token. An ad's row
+  commits with its delete. **For a file, the row records the removal
+  decision**: it commits with the reservation, right before the bytes go;
+  a failed byte removal is retried by the janitor, not recorded again. A
+  failing insert fails the delete. The audit-janitor keeps the rows 365
+  days (`AUDIT_RETENTION_DAYS`).
+- **No schema, no grants, no env, no `JWT_SECRET` rotation.** The
+  `media-claims` middleware is built but not registered (lane 16B wires
+  it).
+
+**Before the deploy (read-only)**
+
+```bash
+psql_db -X < infra/diagnostics/upload-census.sql
+```
+
+Expected on the owner's instance: the two demo PDFs, unstamped, **0
+janitor candidates**, no shared files, no legacy document files. A janitor
+candidate here would be swept at the next 03:30 run after the deploy, as
+it would have been before.
+
+**After the deploy**
+
+1. The cms boots without an `[upload-extension]` line (a tripwire there
+   means the Strapi internals changed: roll back).
+2. As an editor (a session token from the web or `POST /api/auth/local`):
+   `curl -F "files=@policy.pdf" -H "Authorization: Bearer <jwt>" <cms>/api/upload`
+   answers 201 with one element; the same with an `.xlsm` (also renamed
+   `.xlsx`) answers 400 with `"codes":{"file":"fileType"}`. As a member, a
+   PDF answers 400 `fileType`, a PNG 201.
+3. In the admin panel, an `.xlsm` upload is refused and an `.xlsx`
+   accepted.
+4. The next morning: `[uploads-janitor] swept N orphaned upload(s)` at
+   03:30 as before (N counts only stamped, unattached files older than
+   24 h); a line `[uploads] could not remove file <id> (tombstoned; the
+   janitor retries)` is a removal that failed after its claim: report it,
+   the next run retries.
+
+**The latest deletes** (read-only; who deleted which ad or file):
+
+```bash
+psql_db -X <<'SQL'
+BEGIN TRANSACTION READ ONLY;
+SELECT e.created_at,
+       e.target_uid,
+       e.target_document_id,
+       e.actor_kind,
+       e.actor_user_id,
+       u.username AS actor_username,
+       e.actor_admin_id,
+       e.actor_class,
+       e.source,
+       e.detail
+  FROM audit_events e
+  LEFT JOIN up_users u ON u.id = e.actor_user_id
+ WHERE e.action = 'delete'
+   AND e.target_uid IN ('api::classified.classified', 'plugin::upload.file')
+ ORDER BY e.created_at DESC, e.id DESC
+ LIMIT 50;
+ROLLBACK;
+SQL
+```
+
+An admin id resolves in `admin_users` (`SELECT id, firstname, lastname
+FROM admin_users WHERE id = …`). The output names users and file names:
+internal operational data, do not post it publicly.
+
+**Rollback** (to the image before 16A; the batch runbook covers the whole
+batch): a plain retag (`--no-build`), no database step, no `JWT_SECRET`
+rotation. The old wrapper refuses non-images for every role again; stored
+files stay. A tombstoned file (a removal that failed after its claim) is
+swept by the old janitor like any stamped orphan. The audit rows stay;
+the old image writes no new delete rows, and the panel accepts
+macro-enabled files again until the roll-forward.
+
 #### Deploying batch 15.2 (relation grants in populate filters and sort)
 
 Batch 15.2 (branch `fix/nested-populate-relation-grants`) ships after

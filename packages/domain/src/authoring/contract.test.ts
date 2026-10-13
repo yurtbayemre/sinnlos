@@ -68,6 +68,8 @@ describe("codes", () => {
         "visibilityTarget",
         "optionCount",
         "optionDuplicate",
+        "fileType",
+        "fileTooLarge",
       ].sort(),
     );
     expect([...AUTHORING_FORM_CODES]).toEqual(["neverPublished", "spaceNotEmpty"]);
@@ -81,7 +83,8 @@ describe("codes", () => {
     expect(FORM_KEY).toBe("_form");
     expect(STATUS_KEY).toBe("status");
     expect(isAuthoringCode("neverPublished")).toBe(true);
-    expect(isAuthoringCode("fileType")).toBe(false);
+    expect(isAuthoringCode("fileType")).toBe(true);
+    expect(isAuthoringCode("notACode")).toBe(false);
   });
 });
 

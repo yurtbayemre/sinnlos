@@ -1,82 +1,122 @@
 /**
- * Hardens the upload plugin's CONTENT-API endpoint (POST /api/upload),
- * which is the route employees hit when attaching photos to marketplace
- * ads. The admin panel's media library uses the separate admin routes and
- * controllers (`admin-upload`, …) and is NOT affected by this wrapper.
+ * Hardens the upload plugin's CONTENT-API endpoint (POST /api/upload) and
+ * records every file delete. The admin panel's media library uses the
+ * separate admin routes and controllers (`admin-upload`, …): its uploads are
+ * NOT checked here (config/plugins.ts `deniedTypes` binds them), its deletes
+ * are recorded (7 below).
  *
- * Enforced here (defense in depth on top of the users-permissions grant
- * `plugin::upload.content-api.upload`, which is only handed to
- * member/team_lead/department_head/editor/admin — never guest — and the
- * plugin-level `upload.security` config in config/plugins.ts). The pure
- * rules live in utils/upload-guard.ts (FX03):
+ * Enforced on POST /api/upload (defense in depth on top of the
+ * users-permissions grant `plugin::upload.content-api.upload`, held by the
+ * staff roles, never guest, and the plugin-level `upload.security` config).
+ * The pure rules live in utils/upload-guard.ts (FX03; deep-dive decision 06
+ * §E1 and owner amendment 2, batch 16 lane 16A):
  *
  *  1. Create-only: the core `upload` action doubles as replace/
  *     updateFileInfo when `?id=` is passed — with only the `upload`
  *     permission an employee could overwrite ANY existing media file
- *     (e.g. a company document's PDF). Rejected outright.
+ *     (e.g. a company document's PDF). Refused outright: 403.
  *  2. Body allowlist (FX03): only the multipart field `fileInfo` is
  *     accepted. Core validateUploadBody keeps unknown keys and
  *     formatFileInfo turns ref/refId/field into a files_related_mph link on
  *     ANY entry (someone else's ad, an avatar, a document's file) —
  *     bypassing is-classified-author, the classified image ownership check,
  *     MAX_IMAGES and every write grant. `path` would steer the provider.
- *     Any other key → 400.
- *  3. Max 4 files per request (one marketplace ad's worth).
- *  4. Per-file size limit of 5 MB (the global plugin sizeLimit stays
- *     higher so admin document uploads keep working).
- *  5. Strict image allowlist — JPEG/PNG/WebP only, verified by MAGIC
- *     BYTES read from the temp file, not the client-declared mimetype.
- *     No SVG (stored-XSS vector, CVE-2022-32114 lineage) and no GIF
- *     (decompression-bomb surface) on purpose.
- *  6. Canonical filename (FX03): the client mimetype is overwritten with
- *     the sniffed type AND `originalFilename` becomes `<basename>.<canonical
- *     ext>`. Core stores/serves by extension when it disagrees with the
- *     content (mime-validation.js:221-224), so without this a JPEG-magic
- *     `x.pdf` / `x.css` was stored and served as application/pdf / text/css.
- *  7. Uploader attribution: the caller's user id is persisted as
- *     provider_metadata.uploadedBy on every file this request created.
- *     The classified controller only accepts image ids whose uploadedBy
- *     matches the caller (admin/editor bypass), so nobody can attach
- *     foreign media ids to their own ad; pre-existing media has no
- *     uploadedBy and is rejected there automatically. Stamping runs
- *     finally-style over the files ALREADY PERSISTED (FX03): core uploads
- *     sequentially without rollback, so on a partial multi-file failure the
- *     earlier files must still be stamped, or the janitor (which only ever
- *     touches stamped files) could never collect them. Persisted files are
- *     collected per request via the upload service's `media.create` event
- *     inside an AsyncLocalStorage scope, plus ctx.body on success.
+ *     `fileInfo` is checked against core's schema and its `name` dropped
+ *     (core prefers it over the canonical file name); a malformed one
+ *     answers 400 `fileInfo` instead of core's 500 on bad JSON.
+ *  3. Two profiles by role (upload-guard.ts uploadProfileOf): moderators
+ *     and department heads may upload PDF, DOCX, XLSX, PPTX (20 MB, exactly
+ *     one such file per request) and images; everyone else images only
+ *     (JPEG/PNG/WebP, 5 MB, up to 4 files: one ad's worth).
+ *  4. The size is checked before any read (formidable's size, else
+ *     fs.stat), against the profile's cap; then the content decides the
+ *     format through one file handle (the head, a PDF's tail, a zip's
+ *     directory, headers and `[Content_Types].xml`; never the whole file).
+ *     No SVG (stored XSS), no GIF (decompression bombs), no macros.
+ *  5. Canonical mime and name (FX03): the client mimetype is overwritten
+ *     with the sniffed one and `originalFilename` becomes `<basename><ext>`
+ *     of the table (@sinnlos/domain uploads.ts). Core stores and serves by
+ *     extension when it disagrees with the content (mime-validation.js), so
+ *     without this a JPEG-magic `x.pdf` was stored as application/pdf.
+ *  6. Uploader attribution: the caller's user id is persisted as
+ *     provider_metadata.uploadedBy on every file this request created
+ *     (the classified controller and the media claims accept only the
+ *     caller's own files; the janitor sweeps only stamped files). Stamping
+ *     runs finally-style over the files ALREADY PERSISTED (FX03): core
+ *     uploads sequentially without rollback, so on a partial multi-file
+ *     failure the earlier files must still be stamped, or the janitor could
+ *     never collect them. Persisted files are collected per request via the
+ *     upload service's `media.create` event inside an AsyncLocalStorage
+ *     scope, plus ctx.body on success.
+ *
+ * ERRORS (contract K14): every refusal is a 400 `ValidationError` with
+ * `details.keys` and, for the file, `details.codes.file`: `fileType`,
+ * `fileTooLarge`, `required` (no file) or `invalid` (too many files, an
+ * uninspectable one, a name core refuses). The refusals core raises after
+ * the wrapper are mapped the same way (a type refusal, a faulty image, its
+ * size limit); everything else (storage, database) stays as core answers,
+ * a 5xx for operational failures.
+ *
+ *  7. File deletes: the upload SERVICE's `remove` is wrapped so that every
+ *     delete takes the one reservation of utils/upload-orphans.ts before
+ *     core deletes the bytes and then the row: the file row locked and
+ *     re-read (a file already gone or being removed is skipped, so two
+ *     overlapping deletes remove and record it once), a tombstone and the
+ *     delete's audit row (utils/delete-audit.ts) committed together. A
+ *     failing audit insert removes nothing; a failure after the reservation
+ *     leaves a tombstoned row no attach path takes, retried later. The
+ *     Media Library's single, bulk and folder deletes reserve here, without
+ *     the app's rules (an admin may delete any file); `claimAndRemove`
+ *     reserves with them and calls `remove` inside its reservation.
  *
  * Upgrade tripwire (FX03): the wrapper relies on Strapi internals — the
- * `content-api` controller being a factory, and its single `upload` action
- * dispatching to uploadFiles/replaceFile/updateFileInfo via `this`
- * (upstream: "TODO: split into multiple endpoints"). Both are asserted and
- * a mismatch THROWS: at plugin load for the factory, at controller
- * instantiation (route composition, i.e. still during boot) for the
- * methods. A Strapi upgrade that changes either fails the boot instead of
- * silently un-hardening the endpoint.
+ * `content-api` controller and the `upload` service being factories, the
+ * single `upload` action dispatching to uploadFiles/replaceFile/
+ * updateFileInfo via `this` (upstream: "TODO: split into multiple
+ * endpoints"), and the service's `remove(file)`. All are asserted and a
+ * mismatch THROWS during boot instead of silently un-hardening the
+ * endpoint or the trail.
  *
  * Strapi v5 plugin extension pattern: export default (plugin) => plugin.
- * The upload plugin registers its controllers as factories, so we wrap the
- * factory and patch the returned controller object — never assign methods
+ * The upload plugin registers controllers and services as factories, so we
+ * wrap the factory and patch the returned object — never assign methods
  * onto the factory itself (that is inert, see roadmap FX16).
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 import { open, stat } from "node:fs/promises";
 
 import {
+  UPLOAD_FILE_INFO_KEY,
+  UPLOAD_FILE_KEY,
+  UPLOAD_FORMAT_SPECS,
+  type AuthoringFieldCode,
+  type RoleHolder,
+} from "@sinnlos/domain";
+import { errors } from "@strapi/utils";
+
+import type { DeletedFile } from "../../utils/delete-audit";
+import {
   MAX_FILES_PER_REQUEST,
-  MAX_FILE_BYTES,
-  SNIFF_BYTES,
   canonicalFilename,
   createdFileIds,
   declaredSize,
-  exceedsSizeLimit,
-  isAllowedUploadBody,
-  sniffImageMime,
+  normalizeFileInfo,
+  profileMaxBytes,
+  refusedBodyKeys,
+  sniffUpload,
   toFileArray,
+  uploadProfileOf,
+  type SniffResult,
+  type UploadProfile,
 } from "../../utils/upload-guard";
+import {
+  FILE_UID,
+  isReservedRemoval,
+  reserveRemoval,
+  runReservedRemoval,
+} from "../../utils/upload-orphans";
+import type { RandomAccessFile } from "../../utils/upload-zip";
 
-const FILE_UID = "plugin::upload.file";
 /** Upload service webhook event, emitted once per persisted file row. */
 const MEDIA_CREATE_EVENT = "media.create";
 
@@ -105,10 +145,8 @@ export interface UploadContext {
     body?: unknown;
     files?: { files?: IncomingUploadFile | IncomingUploadFile[] } | null;
   };
-  state?: { user?: { id?: unknown } | null };
+  state?: { user?: ({ id?: unknown } & RoleHolder) | null };
   body?: unknown;
-  forbidden(message?: string): unknown;
-  badRequest(message?: string): unknown;
 }
 
 type UploadAction = (this: unknown, ctx: UploadContext) => Promise<unknown>;
@@ -120,35 +158,51 @@ export interface UploadStrapi {
     query(uid: string): {
       findOne(args: { where: { id: number } }): Promise<unknown>;
       update(args: { where: { id: number }; data: Record<string, unknown> }): Promise<unknown>;
+      create?(args: { data: Record<string, unknown> }): Promise<unknown>;
     };
+    transaction?<T>(callback: (scope: { trx: unknown }) => Promise<T>): Promise<T>;
   };
   eventHub: { on(event: string, listener: (payload?: unknown) => unknown): unknown };
   log: { error(message: string): void };
+  requestContext?: { get(): unknown } | null;
 }
 
-type ControllerFactory = (deps: { strapi: UploadStrapi }) => unknown;
+type Factory = (deps: { strapi: UploadStrapi }) => unknown;
 
 export interface UploadPlugin {
   controllers: Record<string, unknown>;
+  services?: Record<string, unknown>;
+}
+
+/** An open temp file: positional reads through one handle. */
+export interface OpenedUpload extends RandomAccessFile {
+  close(): Promise<void>;
 }
 
 /** File-system access, injectable for tests. */
 export interface UploadIo {
   stat(filePath: string): Promise<{ size: unknown }>;
-  /** Up to `bytes` bytes from the start of the file. */
-  readHead(filePath: string, bytes: number): Promise<Uint8Array>;
+  open(filePath: string): Promise<OpenedUpload>;
 }
 
 const nodeIo: UploadIo = {
   stat: (filePath) => stat(filePath),
-  async readHead(filePath, bytes) {
+  async open(filePath) {
     const handle = await open(filePath, "r");
     try {
-      const buf = Buffer.alloc(bytes);
-      const { bytesRead } = await handle.read(buf, 0, bytes, 0);
-      return buf.subarray(0, bytesRead);
-    } finally {
+      const { size } = await handle.stat();
+      return {
+        size,
+        async read(position, length) {
+          const buf = Buffer.alloc(length);
+          const { bytesRead } = await handle.read(buf, 0, length, position);
+          return buf.subarray(0, bytesRead);
+        },
+        close: () => handle.close(),
+      };
+    } catch (error) {
       await handle.close();
+      throw error;
     }
   },
 };
@@ -159,6 +213,56 @@ const persistedInRequest = new AsyncLocalStorage<Set<number>>();
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
+
+// ---------------------------------------------------------------------------
+// Refusals (K14).
+
+const FILE_MESSAGES: Partial<Record<AuthoringFieldCode, string>> = {
+  fileType: "This file type is not accepted",
+  fileTooLarge: "This file is too large",
+  required: "No file was uploaded",
+  invalid: "This file cannot be accepted",
+};
+
+/** 400 for the file: `details.keys: ["file"]`, `details.codes.file`. */
+export function fileRefusal(code: AuthoringFieldCode): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError(FILE_MESSAGES[code] ?? "Invalid file", {
+    keys: [UPLOAD_FILE_KEY],
+    codes: { [UPLOAD_FILE_KEY]: code },
+  });
+}
+
+/** 400 for refused multipart fields (no code: "invalid"). */
+function keysRefusal(keys: string[]): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError(`Invalid or disallowed data field(s): ${keys.join(", ")}`, {
+    keys,
+  });
+}
+
+/**
+ * Core's own refusals after the wrapper, in the K14 shape; anything else
+ * (storage, database, a bug) is returned unchanged.
+ */
+export function mapCoreUploadError(error: unknown): unknown {
+  if (!(error instanceof Error)) return error;
+  if (error.name === "PayloadTooLargeError") return fileRefusal("fileTooLarge");
+  if (error.name === "ValidationError") {
+    const details = (error as { details?: unknown }).details;
+    // validateUploadBody (yup) carries details.errors: the fileInfo schema.
+    return isRecord(details) && Array.isArray(details.errors)
+      ? keysRefusal([UPLOAD_FILE_INFO_KEY])
+      : fileRefusal("fileType");
+  }
+  if (error.name === "ApplicationError") {
+    if (error.message === "File is not a valid image") return fileRefusal("fileType");
+    if (error.message === "File name contains invalid characters") return fileRefusal("invalid");
+  }
+  if (error instanceof SyntaxError) return keysRefusal([UPLOAD_FILE_INFO_KEY]);
+  return error;
+}
+
+// ---------------------------------------------------------------------------
+// The wrapper.
 
 function assertControllerShape(controller: unknown): asserts controller is ContentApiController {
   const missing = isRecord(controller)
@@ -189,7 +293,7 @@ function assertStrapiShape(strapi: unknown): asserts strapi is UploadStrapi {
 
 /**
  * Merge `uploadedBy` into provider_metadata of every given file. Numeric
- * user ids only — the janitor and cleanup-uploads trust nothing else
+ * user ids only — the janitor and the claims trust nothing else
  * (utils/upload-orphans.ts uploadedByOf). Tries every id; throws the first
  * error afterwards so the caller decides whether to surface it.
  */
@@ -199,7 +303,7 @@ async function stampUploader(
   userId: unknown,
 ): Promise<void> {
   if (typeof userId !== "number") return;
-  const errors: unknown[] = [];
+  const failures: unknown[] = [];
   for (const id of fileIds) {
     try {
       const row = await strapi.db.query(FILE_UID).findOne({ where: { id } });
@@ -210,14 +314,94 @@ async function stampUploader(
         data: { provider_metadata: { ...metadata, uploadedBy: userId } },
       });
     } catch (error) {
-      errors.push(error);
+      failures.push(error);
     }
   }
-  if (errors.length > 0) throw errors[0];
+  if (failures.length > 0) throw failures[0];
+}
+
+/** Checks one file and canonicalises it, or throws its refusal. */
+async function checkFile(
+  io: UploadIo,
+  file: IncomingUploadFile,
+  profile: UploadProfile,
+): Promise<{ document: boolean }> {
+  const name = file.originalFilename ?? file.name ?? "file";
+  // formidable writes multipart files to a temp path before the controller
+  // runs; a file we cannot inspect is refused.
+  const filePath = file.filepath ?? file.path;
+  if (typeof filePath !== "string" || !filePath) throw fileRefusal("invalid");
+  // The size before any read. A missing/non-numeric `size` is NEVER waved
+  // through: fs.stat on the temp file, refused when even that fails.
+  let size = declaredSize(file.size);
+  if (size === null) {
+    try {
+      size = declaredSize((await io.stat(filePath)).size);
+    } catch {
+      size = null;
+    }
+    if (size === null) throw fileRefusal("invalid");
+  }
+  if (size > profileMaxBytes(profile)) throw fileRefusal("fileTooLarge");
+  let opened: OpenedUpload;
+  try {
+    opened = await io.open(filePath);
+  } catch {
+    throw fileRefusal("invalid");
+  }
+  let result: SniffResult;
+  try {
+    result = await sniffUpload(opened, profile);
+  } finally {
+    await opened.close().catch(() => undefined);
+  }
+  if (result.ok === false) throw fileRefusal(result.code);
+  const spec = UPLOAD_FORMAT_SPECS[result.format];
+  file.mimetype = spec.mime;
+  file.originalFilename = canonicalFilename(name, result.format);
+  return { document: spec.kind === "document" };
+}
+
+/**
+ * The upload service's `remove(file)` behind the reservation (7 in the
+ * header). Inside claimAndRemove's own reservation it removes at once;
+ * otherwise (the Media Library) it reserves first, without the app's
+ * rules, and answers null for a file that is gone or being removed.
+ */
+async function reservedRemove<T>(
+  strapi: UploadStrapi,
+  file: DeletedFile,
+  remove: (row: DeletedFile) => Promise<T>,
+): Promise<T | null> {
+  if (typeof file?.id !== "number" || isReservedRemoval(file.id)) return remove(file);
+  const reserved = await reserveRemoval(strapi, file.id);
+  if (!("file" in reserved)) return null;
+  return runReservedRemoval(file.id, () => remove(reserved.file as DeletedFile));
+}
+
+/**
+ * Marks the factories this extension installed. @strapi/upload exports its
+ * controllers and services as module-level objects, so a second Strapi in
+ * the same process (the integration harness boots one per engine) hands
+ * the extension the already wrapped factories: wrapping them again would
+ * run every check, and every delete's audit row, twice.
+ */
+const WRAPPED = Symbol.for("sinnlos.upload-extension.wrapped");
+
+const isWrapped = (factory: unknown): boolean =>
+  typeof factory === "function" &&
+  (factory as unknown as Record<symbol, unknown>)[WRAPPED] === true;
+
+function markWrapped<T extends object>(factory: T): T {
+  Object.defineProperty(factory, WRAPPED, { value: true });
+  return factory;
 }
 
 export function createUploadExtension(io: UploadIo = nodeIo) {
   return (plugin: UploadPlugin): UploadPlugin => {
+    if (isWrapped(plugin?.controllers?.["content-api"]) && isWrapped(plugin?.services?.upload)) {
+      return plugin;
+    }
     const originalControllerFactory = plugin?.controllers?.["content-api"];
     // Tripwire, plugin load: v5 registers the controller as a factory.
     if (typeof originalControllerFactory !== "function") {
@@ -226,12 +410,35 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
           "the POST /api/upload hardening cannot be applied (FX03 tripwire).",
       );
     }
-    const factory = originalControllerFactory as ControllerFactory;
+    const originalServiceFactory = plugin?.services?.upload;
+    if (typeof originalServiceFactory !== "function") {
+      throw new Error(
+        "[upload-extension] plugin.services.upload is not a service factory; " +
+          "file deletes would go unrecorded (delete-audit tripwire).",
+      );
+    }
+    const controllerFactory = originalControllerFactory as Factory;
+    const serviceFactory = originalServiceFactory as Factory;
 
-    plugin.controllers["content-api"] = (deps: { strapi: UploadStrapi }) => {
+    (plugin.services as Record<string, unknown>).upload = markWrapped(
+      (deps: { strapi: UploadStrapi }) => {
+        const service = serviceFactory(deps) as Record<string, unknown>;
+        const originalRemove = service?.remove;
+        if (typeof originalRemove !== "function") {
+          throw new Error(
+            "[upload-extension] the upload service no longer exposes remove(file) (delete-audit tripwire).",
+          );
+        }
+        service.remove = (file: DeletedFile) =>
+          reservedRemove(deps.strapi, file, (row) => originalRemove.call(service, row));
+        return service;
+      },
+    );
+
+    plugin.controllers["content-api"] = markWrapped((deps: { strapi: UploadStrapi }) => {
       const strapi = deps?.strapi;
       assertStrapiShape(strapi);
-      const controller = factory(deps);
+      const controller = controllerFactory(deps);
       // Tripwire, controller instantiation (route composition at boot).
       assertControllerShape(controller);
 
@@ -250,64 +457,37 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
       controller.upload = async function upload(this: unknown, ctx: UploadContext) {
         // 1. No replace / fileInfo update through the public API.
         if (ctx.query?.id !== undefined) {
-          return ctx.forbidden("Replacing existing files is not allowed via this endpoint");
+          throw new errors.ForbiddenError(
+            "Replacing existing files is not allowed via this endpoint",
+          );
         }
         // 2. Nothing but fileInfo in the body (no ref/refId/field/path).
-        if (!isAllowedUploadBody(ctx.request?.body)) {
-          return ctx.badRequest("Only files and fileInfo are accepted by this endpoint");
-        }
+        const refused = refusedBodyKeys(ctx.request?.body);
+        if (refused.length > 0) throw keysRefusal(refused);
 
         const files = toFileArray(ctx.request?.files?.files);
-        if (files.length === 0) {
-          return ctx.badRequest("No files provided");
-        }
-        // 3. Bounded batch size.
-        if (files.length > MAX_FILES_PER_REQUEST) {
-          return ctx.badRequest(`Too many files (max ${MAX_FILES_PER_REQUEST} per request)`);
-        }
+        if (files.length === 0) throw fileRefusal("required");
+        if (files.length > MAX_FILES_PER_REQUEST) throw fileRefusal("invalid");
 
+        const fileInfo = normalizeFileInfo(
+          isRecord(ctx.request?.body) ? ctx.request.body.fileInfo : undefined,
+          files.length,
+        );
+        if (fileInfo.malformed === true) throw keysRefusal([UPLOAD_FILE_INFO_KEY]);
+
+        // 3.-5. Profile, size, content, canonical mime and name.
+        const profile = uploadProfileOf(ctx.state?.user);
+        let documents = 0;
         for (const file of files) {
-          const name = file.originalFilename ?? file.name ?? "file";
-          // The temp path is needed for the size fallback AND the magic-byte
-          // sniff (formidable writes multipart files to a temp path before
-          // the controller runs) — a file we cannot inspect is rejected.
-          const filePath = file.filepath ?? file.path;
-          if (typeof filePath !== "string" || !filePath) {
-            return ctx.badRequest(`${name} could not be validated`);
-          }
-          // 4. Per-file size limit. A missing/non-numeric `size` is NEVER
-          //    waved through: fall back to fs.stat on the temp file and
-          //    reject when even that fails or yields no number.
-          let size = declaredSize(file.size);
-          if (size === null) {
-            try {
-              size = declaredSize((await io.stat(filePath)).size);
-            } catch {
-              size = null;
-            }
-            if (size === null) return ctx.badRequest(`${name} could not be validated`);
-          }
-          if (exceedsSizeLimit(size)) {
-            return ctx.badRequest(
-              `${name} exceeds the ${Math.floor(MAX_FILE_BYTES / (1024 * 1024))} MB limit`,
-            );
-          }
-          // 5. Magic-byte allowlist.
-          let sniffed: ReturnType<typeof sniffImageMime> = null;
-          try {
-            sniffed = sniffImageMime(await io.readHead(filePath, SNIFF_BYTES));
-          } catch {
-            sniffed = null;
-          }
-          if (!sniffed) {
-            return ctx.badRequest(`${name} is not an allowed image type (JPEG, PNG or WebP)`);
-          }
-          // 6. Stored mime, stored extension and content must agree.
-          file.mimetype = sniffed;
-          file.originalFilename = canonicalFilename(name, sniffed);
+          if ((await checkFile(io, file, profile)).document) documents += 1;
+        }
+        // A PDF or Office file travels alone (the web takes the sole result).
+        if (documents > 0 && files.length > 1) throw fileRefusal("invalid");
+        if (ctx.request) {
+          ctx.request.body = fileInfo.value === undefined ? {} : { fileInfo: fileInfo.value };
         }
 
-        // 7. Run the core upload inside a collection scope, then stamp every
+        // 6. Run the core upload inside a collection scope, then stamp every
         //    persisted file — also when the core failed half-way.
         const persisted = new Set<number>();
         let failure: { error: unknown } | null = null;
@@ -331,12 +511,12 @@ export function createUploadExtension(io: UploadIo = nodeIo) {
           // must not be reported as usable (the ad create would reject it).
           if (!failure) throw stampError;
         }
-        if (failure) throw failure.error;
+        if (failure) throw mapCoreUploadError(failure.error);
         return result;
       };
 
       return controller;
-    };
+    });
 
     return plugin;
   };

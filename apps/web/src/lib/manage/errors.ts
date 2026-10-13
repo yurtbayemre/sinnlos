@@ -16,6 +16,11 @@
  * cms list (@sinnlos/domain AUTHORING_CODES, contract K7) plus the web's
  * own WEB_FIELD_CODES has a text in en and de: infra/contracts.test.ts.
  * No Strapi message text ever reaches the UI (AC02).
+ *
+ * The upload codes (batch 16, contract K14): POST /api/upload refuses a
+ * file with `details.keys: ["file"]` and `fileType` or `fileTooLarge`
+ * (@sinnlos/domain uploads.ts); a body above 50 MB answers 413 before the
+ * cms reads it, which the upload helper maps to `fileTooLarge`.
  */
 import { AUTHORING_CODES, FORM_KEY, STATUS_KEY, type AuthoringCode } from "@sinnlos/domain";
 

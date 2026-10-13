@@ -20,7 +20,7 @@ const mocks = vi.hoisted(() => ({
   superCreate: vi.fn(async (_ctx: unknown) => ({ data: { id: 1 } })),
   superUpdate: vi.fn(async (_ctx: unknown) => ({ data: { id: 1 } })),
   superDelete: vi.fn(async (_ctx: unknown) => ({ data: null })),
-  removeUploadFile: vi.fn(async (_strapi: unknown, _file: unknown) => true),
+  claimAndRemove: vi.fn(async (_strapi: unknown, _id: number, _options?: unknown) => "removed"),
 }));
 
 vi.mock("@strapi/strapi", () => ({
@@ -37,10 +37,7 @@ vi.mock("@strapi/strapi", () => ({
 }));
 
 vi.mock("../../../utils/upload-orphans", () => ({
-  attachedFileIds: async () => new Set<number>(),
-  removeUploadFile: mocks.removeUploadFile,
-  uploadedByOf: (file: { provider_metadata?: { uploadedBy?: number } }) =>
-    file.provider_metadata?.uploadedBy ?? null,
+  claimAndRemove: mocks.claimAndRemove,
 }));
 
 const AUTHOR = { id: 5, role: { type: "member" } };
@@ -93,7 +90,7 @@ beforeEach(() => {
   mocks.superCreate.mockClear();
   mocks.superUpdate.mockClear();
   mocks.superDelete.mockClear();
-  mocks.removeUploadFile.mockClear();
+  mocks.claimAndRemove.mockClear();
 });
 
 describe("classified update/delete: numeric id or documentId, nothing else", () => {
@@ -156,18 +153,22 @@ describe("classified image ids", () => {
 
   it("cleanup-uploads refuses a file id beyond int4 or malformed, before the file lookup", async () => {
     for (const imageId of [...OUT_OF_RANGE.slice(0, 3), "abc", 1.5, 0, -1]) {
-      const { controller, ctx, findMany } = setup(undefined, { imageIds: [imageId] });
+      const { controller, ctx } = setup(undefined, { imageIds: [imageId] });
       await controller.cleanupUploads(ctx);
       expect(ctx.badRequest, String(imageId)).toHaveBeenCalledWith("Invalid file id");
-      expect(findMany).not.toHaveBeenCalled();
+      expect(mocks.claimAndRemove).not.toHaveBeenCalled();
     }
   });
 
-  it("cleanup-uploads still removes an own, unattached file", async () => {
-    const { controller, ctx } = setup(undefined, { imageIds: [IMAGE.id] });
+  it("cleanup-uploads hands each id to the locked removal, as the caller's own", async () => {
+    const { controller, ctx } = setup(undefined, { imageIds: [IMAGE.id, 4] });
+    mocks.claimAndRemove.mockResolvedValueOnce("removed").mockResolvedValueOnce("linked");
     await controller.cleanupUploads(ctx);
     expect(ctx.body).toEqual({ removed: 1 });
-    expect(mocks.removeUploadFile).toHaveBeenCalledOnce();
+    expect(mocks.claimAndRemove.mock.calls.map((call) => [call[1], call[2]])).toEqual([
+      [IMAGE.id, { ownerId: AUTHOR.id }],
+      [4, { ownerId: AUTHOR.id }],
+    ]);
   });
 });
 

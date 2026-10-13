@@ -5,7 +5,7 @@ import { MODERATORS, hasRole } from "../../../bootstrap/roles";
 import { clampExpiresAt } from "../../../utils/classified-expiry";
 import { isRowId } from "../../../utils/entry-id";
 import { findByRef, type EntryRow } from "../../../utils/policy-factories";
-import { attachedFileIds, removeUploadFile, uploadedByOf } from "../../../utils/upload-orphans";
+import { claimAndRemove } from "../../../utils/upload-orphans";
 
 /**
  * Classifieds are user-generated content created from the web app (not the
@@ -49,7 +49,11 @@ interface ClassifiedRow extends EntryRow {
  * are accepted here (admin_role/editor bypass for moderation edits).
  * Media without uploadedBy — avatars, documents, anything predating the
  * marketplace — is rejected automatically, so foreign media ids can never
- * be attached to an ad.
+ * be attached to an ad. One image may hang on several of the caller's ads.
+ *
+ * A file on its way out (a removal reserved it) is refused by the classified
+ * write lifecycle, which locks the image rows inside every write's
+ * transaction, from every source (content-types/classified/lifecycles.ts).
  */
 async function resolveImageIds(value: unknown, strapi: any, user: any): Promise<number[] | null> {
   if (value == null) return [];
@@ -205,7 +209,10 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
    * uploads like avatars/documents carry none and can never match), and
    * (c) has no relation left in files_related_mph (the same image may hang
    * on another of the caller's ads). Anything else is silently skipped —
-   * the endpoint is idempotent and safe to call with stale ids.
+   * the endpoint is idempotent and safe to call with stale ids. Each file
+   * goes through the one locked removal (utils/upload-orphans.ts
+   * claimAndRemove), which re-checks (a)-(c) under the file row's lock and
+   * records the delete.
    */
   async cleanupUploads(ctx) {
     const user = ctx.state.user;
@@ -223,16 +230,9 @@ export default factories.createCoreController(CLASSIFIED_UID, ({ strapi }) => ({
       if (!ids.includes(id)) ids.push(id);
     }
 
-    const files = await strapi.db
-      .query("plugin::upload.file")
-      .findMany({ where: { id: { $in: ids } } });
-    const stillAttached = await attachedFileIds(strapi, ids);
-
     let removed = 0;
-    for (const file of files) {
-      if (uploadedByOf(file) !== user.id) continue;
-      if (stillAttached.has(file.id)) continue;
-      if (await removeUploadFile(strapi, file)) removed += 1;
+    for (const id of ids) {
+      if ((await claimAndRemove(strapi, id, { ownerId: user.id })) === "removed") removed += 1;
     }
     ctx.body = { removed };
   },

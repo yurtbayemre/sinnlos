@@ -6,6 +6,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import lifecycles from "./lifecycles";
 
+// The delete trail writes into audit_events, a model this engine does not
+// load; its own tests are utils/delete-audit.test.ts and the integration suites.
+const audit = vi.hoisted(() => ({ rows: [] as unknown[] }));
+vi.mock("../../../../utils/delete-audit", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../../utils/delete-audit")>()),
+  recordDelete: async (_strapi: unknown, target: unknown) => {
+    audit.rows.push(target);
+  },
+}));
+
 /**
  * FX45 regression against Strapi's real query engine (@strapi/database
  * 5.55.1 on better-sqlite3, the local-dev database; a temp file, because the
@@ -17,7 +27,9 @@ import lifecycles from "./lifecycles";
  * connection its own transaction held until knex's acquireConnectionTimeout
  * (60 s in the app, 2 s here), failed open, and the ad's images stayed
  * behind. Now the scan joins the transaction: the delete is quick, and the
- * post-commit cleanup removes the images through the upload service.
+ * post-commit cleanup removes the images through the upload service, each
+ * through the one locked removal (claimAndRemove: the row lock, the
+ * tombstone, then remove) on this real engine.
  */
 
 const CLASSIFIED = "api::classified.classified";
@@ -122,6 +134,7 @@ beforeEach(async () => {
 
   removed.length = 0;
   errors.length = 0;
+  audit.rows.length = 0;
   restoreStrapi = (globalThis as { strapi?: unknown }).strapi;
   const engineRef = db;
   (globalThis as { strapi?: unknown }).strapi = {
@@ -199,6 +212,12 @@ describe("classified delete on SQLite (FX45)", () => {
     ).map((f) => f.id);
     // The admin upload is never touched; the image of the other ad stays.
     expect(left.sort()).toEqual([adminUpload, shared].sort());
+    // The ad's delete is recorded, and each removed image by its reservation.
+    expect(audit.rows).toEqual([
+      expect.objectContaining({ kind: "classified", title: "Bike" }),
+      expect.objectContaining({ kind: "file", file: expect.objectContaining({ id: photo }) }),
+      expect.objectContaining({ kind: "file", file: expect.objectContaining({ id: second }) }),
+    ]);
   });
 
   it("still works without an ambient transaction", async () => {

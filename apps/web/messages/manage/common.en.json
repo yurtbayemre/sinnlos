@@ -180,6 +180,8 @@
     "visibilityTarget": "Choose who may see it.",
     "optionCount": "A poll needs between 2 and 20 answers.",
     "optionDuplicate": "Two answers are the same.",
+    "fileType": "Upload a PDF, Word (.docx), Excel (.xlsx) or PowerPoint (.pptx) file, or a JPEG, PNG or WebP image. Files with macros, templates and slide shows are not accepted.",
+    "fileTooLarge": "This file is too large: up to 20 MB for PDF and Office files, 5 MB for images.",
     "neverPublished": "There is no published version to go back to, so the draft stays. Ask an editor to delete it if it is no longer needed.",
     "spaceNotEmpty": "This space still has pages.",
     "timeRepeated": "This time occurs twice on this day because of the clock change. Choose another time.",
