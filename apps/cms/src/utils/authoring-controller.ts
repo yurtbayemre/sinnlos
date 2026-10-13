@@ -691,7 +691,7 @@ function listStatusMatches(rows: AuthoringRows, status: ListStatus | undefined):
 
 function listRow(spec: AuthoringSpec, rows: AuthoringRows, revision: number): AuthoringListRow {
   const draft = rows.draft ?? ({} as AuthoringRow);
-  const owned = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(spec.uid);
+  const owned = DEPARTMENT_AUTHORED_UIDS.includes(spec.uid);
   return {
     documentId: rows.documentId,
     label: text(draft[spec.labelField]) ?? "",
@@ -836,7 +836,7 @@ export function authoringActionsFor(
 
     async authoringList(ctx) {
       const gate = gateFor(ctx, uid, "authoringList");
-      const owned = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid);
+      const owned = DEPARTMENT_AUTHORED_UIDS.includes(uid);
       const query = parseListQuery(ctx.query, owned && gate.roleClass === MODERATOR_CLASS);
       const documentsList = (await listDocuments(strapi, spec, gate, query)).filter((rows) =>
         listStatusMatches(rows, query.status),
@@ -888,60 +888,56 @@ export function authoringActionsFor(
     },
   };
 
+  /** A custom document action: no query, the gate's decision, then `run` (a lost class: 404). */
+  const documentAction =
+    (
+      intent: "publish" | "unpublish" | "discardDraft",
+      run: (scope: AuthoringScope, gate: AuthoringGate) => Promise<"deleted" | void>,
+    ): Action =>
+    async (ctx) => {
+      await answering(ctx, async () => {
+        noQuery(ctx.query);
+        const gate = gateFor(ctx, uid, intent);
+        await mutate(ctx, gate, 404, (scope) => run(scope, gate));
+      });
+    };
+
   if (spec.statusMode === "explicit") {
-    actions.publish = async (ctx) => {
-      await answering(ctx, async () => {
-        noQuery(ctx.query);
-        const gate = gateFor(ctx, uid, "publish");
-        await mutate(ctx, gate, 404, async (scope) => {
-          await documents().publish({ documentId: scope.documentId });
-        });
-      });
-    };
+    actions.publish = documentAction("publish", async (scope) => {
+      await documents().publish({ documentId: scope.documentId });
+    });
 
-    actions.unpublish = async (ctx) => {
-      await answering(ctx, async () => {
-        noQuery(ctx.query);
-        const gate = gateFor(ctx, uid, "unpublish");
-        await mutate(ctx, gate, 404, async (scope) => {
-          await documents().unpublish({ documentId: scope.documentId });
-        });
-      });
-    };
+    actions.unpublish = documentAction("unpublish", async (scope) => {
+      await documents().unpublish({ documentId: scope.documentId });
+    });
 
-    actions.discardDraft = async (ctx) => {
-      await answering(ctx, async () => {
-        noQuery(ctx.query);
-        const gate = gateFor(ctx, uid, "discardDraft");
-        await mutate(ctx, gate, 404, async (scope) => {
-          const documentId = scope.documentId as string;
-          if (gate.roleClass === DEPARTMENT_AUTHOR_CLASS) {
-            // Under the document's lock and after the token check
-            // (amendment row A1): a discard without a published row
-            // would delete the document, which department authors never
-            // do. A caller who lost the class learns nothing here.
-            const locked = await lockDocument(strapi, uid, documentId);
-            if (locked !== scope.expectedRevision || locked !== scope.observedRevision) {
-              const roleClass = scope.classify ? await scope.classify({ uid, documentId }) : null;
-              if (!roleClass) throw new ClassLost(404);
-              throw new RevisionStale(locked);
-            }
-            const published = await strapi.db
-              .query(uid)
-              .count({ where: { documentId, publishedAt: { $notNull: true } } });
-            if (published === 0) {
-              throw new errors.ValidationError("There is no published version to return to", {
-                keys: [FORM_KEY],
-                codes: { [FORM_KEY]: "neverPublished" },
-              });
-            }
-          }
-          await documents().discardDraft({ documentId });
-          const remaining = await strapi.db.query(uid).count({ where: { documentId } });
-          return remaining === 0 ? "deleted" : undefined;
-        });
-      });
-    };
+    actions.discardDraft = documentAction("discardDraft", async (scope, gate) => {
+      const documentId = scope.documentId as string;
+      if (gate.roleClass === DEPARTMENT_AUTHOR_CLASS) {
+        // Under the document's lock and after the token check
+        // (amendment row A1): a discard without a published row
+        // would delete the document, which department authors never
+        // do. A caller who lost the class learns nothing here.
+        const locked = await lockDocument(strapi, uid, documentId);
+        if (locked !== scope.expectedRevision || locked !== scope.observedRevision) {
+          const roleClass = scope.classify ? await scope.classify({ uid, documentId }) : null;
+          if (!roleClass) throw new ClassLost(404);
+          throw new RevisionStale(locked);
+        }
+        const published = await strapi.db
+          .query(uid)
+          .count({ where: { documentId, publishedAt: { $notNull: true } } });
+        if (published === 0) {
+          throw new errors.ValidationError("There is no published version to return to", {
+            keys: [FORM_KEY],
+            codes: { [FORM_KEY]: "neverPublished" },
+          });
+        }
+      }
+      await documents().discardDraft({ documentId });
+      const remaining = await strapi.db.query(uid).count({ where: { documentId } });
+      return remaining === 0 ? "deleted" : undefined;
+    });
   }
 
   return actions;
