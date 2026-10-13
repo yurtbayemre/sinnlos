@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { PG_URL } from "../database/pg-test-db.test.helper";
+import { requireCmsDependency } from "../database/strapi-knex.test.helper";
 import { ADMIN_ENV, contentManager } from "./admin-api.test.helper";
 import { storedRevision } from "./authoring.test.helper";
-import { createTestStrapi, testEngines, type TestStrapi } from "./harness.test.helper";
+import { createTestStrapi, testEngines, type Row, type TestStrapi } from "./harness.test.helper";
 import {
   WIKI_PAGE,
   WIKI_SPACE,
@@ -19,8 +23,21 @@ import {
  * 16: global::can-author with the moderator rule, always published, the
  * slug derived, the visibility with its target, `If-Match` on every change,
  * and a space with pages neither deleted (the content API) nor unpublished
- * (the admin panel): the wiki checks answer `_form: spaceNotEmpty`.
+ * (the admin panel): the wiki checks answer `_form: spaceNotEmpty`. The 52
+ * wiki grant rows of the batch: pruned (an older image) and re-created by
+ * the boot sync, no drift, and on Postgres the read-only
+ * infra/diagnostics/prod-perm-diff.sql finds nothing missing or extra.
  */
+
+interface PgResult {
+  command: string;
+  rows: Array<Record<string, unknown>>;
+}
+interface PgClient {
+  connect(): Promise<void>;
+  query(sql: string): Promise<PgResult | PgResult[]>;
+  end(): Promise<void>;
+}
 
 describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
   let t: TestStrapi;
@@ -178,5 +195,77 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
     expect(remove.status).toBe(400);
     const rows = await rowsOf(t, WIKI_SPACE, space.documentId);
     expect(rows.filter((row) => row.publishedAt != null)).toHaveLength(1);
+  });
+
+  it("the +52 wiki grants: an older image's prune and the roll-forward's sync, then no drift", async () => {
+    const PERMISSION = "plugin::users-permissions.permission";
+    const wikiActions = (await t.strapi.db.query(PERMISSION).findMany({
+      where: {
+        $or: [
+          { action: { $startsWith: "api::wiki-page.wiki-page." } },
+          { action: { $startsWith: "api::wiki-space.wiki-space." } },
+        ],
+      },
+      populate: { role: { select: ["type"] } },
+    })) as Row[];
+    const custom = wikiActions.filter(
+      (row) =>
+        !["find", "findOne", "create", "update", "delete"].includes(
+          String(row.action).split(".").pop() as string,
+        ),
+    );
+    expect(custom).toHaveLength(52);
+    // An image before 16B prunes these rows with their routes (C31); the
+    // roll-forward's boot sync re-creates exactly them.
+    await t.strapi.db
+      .query(PERMISSION)
+      .deleteMany({ where: { id: { $in: custom.map((row) => row.id) } } });
+    const lines: string[] = [];
+    const log = {
+      info: (message: string) => lines.push(message),
+      warn: (message: string) => lines.push(`warn ${message}`),
+    };
+    const host = t.strapi as unknown as Record<string, unknown>;
+    const { syncRolePermissions } = t.requireBuilt<{
+      syncRolePermissions(strapi: unknown): Promise<void>;
+    }>("src/bootstrap/sync-permissions");
+    await syncRolePermissions({ db: host.db, apis: host.apis, plugins: host.plugins, log });
+    expect(lines).toEqual([
+      "[bootstrap] granted 52 permission(s) across intranet roles",
+      "[bootstrap] permission drift: none (report-only check of 155 managed actions)",
+    ]);
+
+    if (engine !== "postgres") return;
+    // The read-only diff of infra/diagnostics (its psql meta-commands left out).
+    const { Client } = requireCmsDependency<{
+      Client: new (config: { connectionString: string }) => PgClient;
+    }>("pg");
+    const client = new Client({ connectionString: PG_URL });
+    await client.connect();
+    try {
+      await client.query(`SET search_path TO "${t.database.env.DATABASE_SCHEMA}"`);
+      const sql = readFileSync(
+        join(__dirname, "..", "..", "..", "..", "infra", "diagnostics", "prod-perm-diff.sql"),
+        "utf8",
+      )
+        .split("\n")
+        .filter((line) => !line.startsWith("\\"))
+        .join("\n");
+      const results = await client.query(sql);
+      const list = Array.isArray(results) ? results : [results];
+      const [diff, unknownRoles, orphans] = list
+        .filter((result) => result.command === "SELECT")
+        .map((result) => result.rows);
+      // Only the plugin's first-boot defaults may be informational.
+      expect(
+        diff.filter(
+          (row) => !(row.kind === "MISSING_IN_DB" && row.source === "plugin_default_first_boot"),
+        ),
+      ).toEqual([]);
+      expect(unknownRoles).toEqual([]);
+      expect(orphans).toEqual([]);
+    } finally {
+      await client.end();
+    }
   });
 });
