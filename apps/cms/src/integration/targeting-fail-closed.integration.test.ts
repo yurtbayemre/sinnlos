@@ -1,4 +1,10 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import { PG_URL } from "../database/pg-test-db.test.helper";
+import { requireCmsDependency } from "../database/strapi-knex.test.helper";
 
 import {
   ADMIN_ENV,
@@ -20,6 +26,7 @@ import {
   holdTransaction,
   qualified,
   settle,
+  testSchema,
   waitForLockWait,
   type Settled,
 } from "./pg-lock.test.helper";
@@ -59,6 +66,20 @@ interface Notify {
 }
 
 const START = "2027-03-01T09:00:00.000Z";
+
+/** One of infra/diagnostics/*.sql, as the owner pipes it into psql. */
+const diagnostic = (file: string) =>
+  readFileSync(join(__dirname, "..", "..", "..", "..", "infra", "diagnostics", file), "utf8");
+
+interface PgResult {
+  command: string;
+  rows: Array<Record<string, unknown>>;
+}
+interface PgClient {
+  connect(): Promise<void>;
+  query(sql: string): Promise<PgResult | PgResult[]>;
+  end(): Promise<void>;
+}
 
 describe.each(testEngines())("targeting fails closed on %s", (engine) => {
   let t: TestStrapi;
@@ -421,6 +442,128 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
       // The lock comes before the scan for the revision advance too: a gate
       // that saw the rows before the link fails its comparison.
       expect(await revision(ANNOUNCEMENT, created.documentId)).toBe(before + 1);
+    },
+  );
+
+  it.runIf(engine === "postgres")(
+    "the four read-only diagnostics run on the live schema and list exactly the seeded rows",
+    async () => {
+      // Seed what each file is about, on top of the rows of the cases above.
+      const legacy = await publish(ANNOUNCEMENT, {
+        title: "IT FC diag no target",
+        audience: "departments",
+      });
+      const unit = await department("FC Diag Dept");
+      const squad = await team("FC Diag Squad", t.fixtures.departments.engineering);
+      // Marked, with its team left: not a D-PT01 row.
+      const marked = await publish(ANNOUNCEMENT, {
+        title: "IT FC diag marked",
+        department: unit.documentId,
+        team: squad.documentId,
+      });
+      const flagOnly = await publish(EVENT, {
+        title: "IT FC diag event",
+        start: START,
+        departments: [unit.documentId],
+      });
+      expect((await panel.delete(DEPARTMENT, unit.documentId)).status).toBe(200);
+      const scheduled = await t.strapi.documents(ANNOUNCEMENT).create({
+        data: { title: "IT FC diag scheduled", publishAt: "2031-01-01T08:00:00.000Z" },
+      });
+      const withdrawing = await t.strapi.documents("api::quick-link.quick-link").create({
+        data: { label: "IT FC diag link", url: "https://example.test" },
+        status: "published",
+      });
+      await t.strapi.documents("api::quick-link.quick-link").update({
+        documentId: withdrawing.documentId,
+        data: { unpublishAt: "2031-02-01T08:00:00.000Z" },
+      });
+      const headless = await createUser(t, "department_head", null);
+
+      const { Client } = requireCmsDependency<{
+        Client: new (config: { connectionString: string }) => PgClient;
+      }>("pg");
+      const client = new Client({ connectionString: PG_URL });
+      await client.connect();
+      const run = async (file: string) => {
+        await client.query(`SET search_path TO "${testSchema(t)}"`);
+        const results = await client.query(diagnostic(file));
+        const list = Array.isArray(results) ? results : [results];
+        // Read-only: it opens a read-only transaction and rolls it back.
+        expect(list[0].command, file).toBe("BEGIN");
+        expect(list[list.length - 1].command, file).toBe("ROLLBACK");
+        return list.filter((result) => result.command === "SELECT").map((result) => result.rows);
+      };
+      try {
+        const [preflightSummary, preflightRows] = await run("announcement-audience-preflight.sql");
+        const legacyDocuments = new Set(preflightRows.map((row) => row.document_id));
+        expect(legacyDocuments.has(legacy.documentId)).toBe(true);
+        expect(legacyDocuments.has(marked.documentId)).toBe(false);
+        expect(Number(preflightSummary[0].documents)).toBe(legacyDocuments.size);
+        expect(
+          preflightRows
+            .filter((row) => row.document_id === legacy.documentId)
+            .map((row) => row.status),
+        ).toEqual(["published", "draft"]);
+
+        const [retargetSummary, markedRows, eventRows] = await run("announcement-retarget.sql");
+        expect(
+          markedRows
+            .filter((row) => row.document_id === marked.documentId)
+            .map((row) => [row.status, row.links_department, row.links_team]),
+        ).toEqual([
+          ["published", false, true],
+          ["draft", false, true],
+        ]);
+        expect(
+          eventRows
+            .filter((row) => row.document_id === flagOnly.documentId)
+            .map((row) => row.status),
+        ).toEqual(["published", "draft"]);
+        expect(Number(retargetSummary[0].flag_only_events)).toBe(
+          new Set(eventRows.map((row) => row.document_id)).size,
+        );
+
+        const [schedules] = await run("schedule-export.sql");
+        const byDocument = new Map(schedules.map((row) => [row.document_id, row]));
+        expect(byDocument.get(scheduled.documentId)).toMatchObject({
+          table_name: "announcements",
+          label: "IT FC diag scheduled",
+          published: false,
+          withdraw_by_hand: false,
+          unpublish_at: null,
+        });
+        expect(byDocument.get(withdrawing.documentId)).toMatchObject({
+          table_name: "quick_links",
+          label: "IT FC diag link",
+          publish_at: null,
+          published: true,
+          withdraw_by_hand: true,
+        });
+        expect(schedules).toHaveLength(2);
+
+        const [departments, mismatches] = await run("department-heads.sql");
+        const engineering = departments.find(
+          (row) => row.department_id === t.fixtures.departments.engineering.id,
+        );
+        expect(engineering).toMatchObject({ head_role: "department_head" });
+        expect(String(engineering?.department_heads)).toContain(
+          t.fixtures.users.department_head.username,
+        );
+        const kinds = (kind: string) =>
+          mismatches
+            .filter((row) => row.kind === kind)
+            .map((row) => row.username ?? row.department);
+        expect(kinds("department_head_without_department")).toContain(headless.username);
+        expect(kinds("department_without_head_role")).toContain(t.fixtures.departments.sales.name);
+        expect(kinds("head_without_role")).toEqual([]);
+        expect(kinds("head_of_other_department")).toEqual([]);
+        for (const row of [...departments, ...mismatches]) {
+          expect(Object.keys(row)).not.toContain("email");
+        }
+      } finally {
+        await client.end();
+      }
     },
   );
 });
