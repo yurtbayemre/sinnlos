@@ -916,14 +916,16 @@ export function authoringActionsFor(
     actions.discardDraft = documentAction("discardDraft", async (scope, gate) => {
       const documentId = scope.documentId as string;
       if (gate.roleClass === DEPARTMENT_AUTHOR_CLASS) {
-        // Under the document's lock and after the token check
-        // (amendment row A1): a discard without a published row
-        // would delete the document, which department authors never
-        // do. A caller who lost the class learns nothing here.
+        // Under the document's lock and after the lock's own checks, in
+        // its order (amendment row A1; K2 since 15B a3bfd5c: the class
+        // on every scoped mutation, then the tokens): a discard without
+        // a published row would delete the document, which department
+        // authors never do. A caller who lost the class learns nothing
+        // here, not even with current tokens.
         const locked = await lockDocument(strapi, uid, documentId);
+        const roleClass = scope.classify ? await scope.classify({ uid, documentId }) : null;
+        if (!roleClass) throw new ClassLost(404);
         if (locked !== scope.expectedRevision || locked !== scope.observedRevision) {
-          const roleClass = scope.classify ? await scope.classify({ uid, documentId }) : null;
-          if (!roleClass) throw new ClassLost(404);
           throw new RevisionStale(locked);
         }
         const published = await strapi.db

@@ -307,10 +307,13 @@ export function roleClassFor(
 }
 
 /**
- * The classifier the lock runs again under the lock on a mismatch (§G
- * mechanism step 3): re-reads the rows; no rows (the document is gone) or,
- * for a department author, a row out of their department's scope answers
- * null. The role and the department are not re-read (§G2 "not locked").
+ * The classifier the lock runs again under the lock (§G mechanism step 3),
+ * on every scoped mutation since 15B a3bfd5c (K2), so it stays cheap: a
+ * moderator's class depends on the role alone, so one count asks whether
+ * the document is still there; a department author's re-reads the rows,
+ * and a row out of their department's scope answers null. No draft (the
+ * document is gone) answers null for both. The role and the department are
+ * not re-read (§G2 "not locked").
  */
 export function scopeClassifier(
   strapi: Pick<WriteGateHost, "db">,
@@ -318,9 +321,14 @@ export function scopeClassifier(
   callerDepartment: CallerDepartment | null,
 ): ScopeClassifier {
   return async ({ uid, documentId }) => {
+    if (roleClass === MODERATOR_CLASS) {
+      const drafts = await strapi.db
+        .query(uid)
+        .count({ where: { documentId, publishedAt: { $null: true } } });
+      return drafts > 0 ? MODERATOR_CLASS : null;
+    }
     const rows = await loadDocumentRows(strapi, uid, documentId);
     if (!rows.draft) return null;
-    if (roleClass === MODERATOR_CLASS) return MODERATOR_CLASS;
     return departmentAuthorOwns(uid, rows, callerDepartment) ? DEPARTMENT_AUTHOR_CLASS : null;
   };
 }

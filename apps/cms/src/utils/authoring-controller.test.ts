@@ -465,6 +465,24 @@ describe("discard-draft", () => {
     expect((lost.body as { error: { details: unknown } }).error.details).toEqual({});
   });
 
+  it("a lost class answers 404 with current tokens too, before the discard rule (K2, 15B a3bfd5c)", async () => {
+    const { stub, host, calls } = harness();
+    seedRows(stub, "doc0000000000000000000a1", false);
+    lock.locked = 3;
+    const classify = vi.fn(async () => null);
+    const ctx = context(
+      gateFor({ intent: "discardDraft", roleClass: "departmentAuthor", classify }),
+      {
+        ifMatch: '"3"',
+      },
+    );
+    await authoringActionsFor(host, A).discardDraft?.(ctx);
+    expect(ctx.status).toBe(404);
+    expect((ctx.body as { error: { details: unknown } }).error.details).toEqual({});
+    expect(classify).toHaveBeenCalledTimes(1);
+    expect(calls).toEqual([]);
+  });
+
   it("a moderator's discard of a never-published document deletes it: 204", async () => {
     const { stub, host } = harness({
       onCall: (_call, s) => {
