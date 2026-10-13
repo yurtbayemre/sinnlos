@@ -13,7 +13,9 @@
 #      and a DOMAIN every Traefik router can match: a bare host name, no
 #      placeholder, the host of WEB_PUBLIC_URL and CMS_PUBLIC_URL.
 #      Then the deploy checks (FX35): one deploy per compose project at a
-#      time (flock), a clean checkout (no changed tracked file, and no
+#      time (flock; each infra/restore-db.sh step holds the same lock), no
+#      database restore in progress (its reservation), a clean checkout (no
+#      changed tracked file, and no
 #      untracked file where the images are built from), and the
 #      GitHub CI result of the commit (a warning, or a refusal with
 #      --require-green-ci). Fails before anything is touched.
@@ -68,8 +70,10 @@
 #                     and, next to project infra's containers,
 #                     DEPLOY_SEPARATE_EDGE=1 (a Traefik of its own)
 #   DEPLOY_STATE_DIR  <common git dir of the clone>/sinnlos-deploy (state, history,
-#                     lock; shared by its worktrees; a second clone deploying the
-#                     same project must point it at the same directory)
+#                     lock, and in restore/ infra/restore-db.sh's state and
+#                     reservation; shared by its worktrees; a second clone deploying
+#                     or restoring the same project must point it at the same
+#                     directory)
 #   DEPLOY_KEEP_TAGS  5 (SHA tags kept per image)
 #   BACKUP_RUN        /usr/local/sbin/backup-run, run through `sudo -n`; when
 #                     set, the given command runs without sudo (tests)
@@ -484,8 +488,9 @@ image_has_token_version() {
 # 13 (or later) revoked works again there. So every rollback to such a cms,
 # or to one that cannot be checked, rotates JWT_SECRET before it starts
 # (owner decision 2026-10-12; docs/DEPLOYMENT.md, "Deploying batch 13",
-# Rollback R2 to R4). Printed before the start commands, never done here:
-# the edit of infra/.env stays the operator's. $1 is the exit code of
+# Rollback R2 to R4; R4 is infra/restore-db.sh rotate-jwt --env-only).
+# Printed before the start commands, never done here: the edit of
+# infra/.env stays the operator's. $1 is the exit code of
 # image_has_token_version for the target cms image $2 (not 0).
 print_jwt_secret_rotation_hint() {
   local image="$2"
@@ -498,9 +503,9 @@ print_jwt_secret_rotation_hint() {
   fi
   echo "       That cms accepts every JWT a password change on this release revoked, as long as JWT_SECRET" >&2
   echo "       stays. Rotate it first (owner decision 2026-10-12): docs/DEPLOYMENT.md, \"Deploying batch 13\"," >&2
-  echo "       Rollback R2 and R3 while the new cms still runs, then R4: a new value from" >&2
-  echo "       openssl rand -base64 48 on the one JWT_SECRET= line of ${INFRA_DIR}/.env (AUTH_SECRET stays)." >&2
-  echo "       This script does not edit it. Every user is signed out once and signs in again." >&2
+  echo "       Rollback R2 and R3 while the new cms still runs, then R4: ${INFRA_DIR}/restore-db.sh rotate-jwt --env-only" >&2
+  echo "       (a new value on the one JWT_SECRET= line of ${INFRA_DIR}/.env, checked against what Compose hands" >&2
+  echo "       the cms; AUTH_SECRET stays). This script does not do it. Every user is signed out once and signs in again." >&2
 }
 
 # Poll guest access: the first boot of that release grants the guest role
@@ -1312,7 +1317,7 @@ if ((DRY_RUN)); then
   if [[ -r "${LOCK_FILE}" ]]; then
     exec 9<"${LOCK_FILE}"
     if ! flock -n 9; then
-      echo "ERROR: another infra/deploy.sh is running for compose project ${PROJECT} (lock ${LOCK_FILE})." >&2
+      echo "ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project ${PROJECT} (lock ${LOCK_FILE})." >&2
       exit 1
     fi
     exec 9<&-
@@ -1326,12 +1331,27 @@ else
   exec 9>>"${LOCK_FILE}"
   own_like_git_dir "${LOCK_FILE}"
   if ! flock -n 9; then
-    echo "ERROR: another infra/deploy.sh is running for compose project ${PROJECT} (lock ${LOCK_FILE})." >&2
+    echo "ERROR: another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project ${PROJECT} (lock ${LOCK_FILE})." >&2
     echo "       Nothing was changed. Let it finish, then re-run." >&2
     exit 1
   fi
   echo "  lock: ${LOCK_FILE}"
 fi
+
+# A database restore in progress (infra/restore-db.sh prepare, until its
+# start passed or cancel) reserves the project: a deploy now would start the
+# cms on a database that may be empty, or restored without its new
+# JWT_SECRET. Checked under the lock, which every restore step holds too;
+# it lies next to the lock (restore-db.sh keeps its state there), so a clone
+# that shares DEPLOY_STATE_DIR sees the other's restore.
+RESTORE_RESERVATION="${STATE_DIR}/restore/${PROJECT}.reservation"
+if [[ -e "${RESTORE_RESERVATION}" || -L "${RESTORE_RESERVATION}" ]]; then
+  echo "ERROR: a database restore of compose project ${PROJECT} is in progress (${RESTORE_RESERVATION})." >&2
+  echo "       infra/restore-db.sh status shows it: finish it (apply, rotate-jwt, start), or end it with" >&2
+  echo "       infra/restore-db.sh cancel (only before its apply). Nothing was changed." >&2
+  exit 1
+fi
+echo "  restore reservation: none"
 
 # The images must be exactly the commit their tag names. GIT_OPTIONAL_LOCKS=0
 # keeps `git status` from refreshing the index (a dry run writes nothing).

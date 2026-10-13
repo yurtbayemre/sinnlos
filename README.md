@@ -86,8 +86,9 @@ Further reading:
 │   ├── docker-compose.traefik.yml  production override (host Traefik instead of Caddy; needs DOMAIN)
 │   ├── deploy.sh                   production deploy (preflight, backup, build, smoke, SHA tags)
 │   ├── live-smoke.sh               end-to-end SSE pipeline probe (run by deploy.sh)
+│   ├── restore-db.sh               database restore in steps (clean database, new JWT_SECRET)
 │   ├── backup/pg-backup.sh         encrypted Postgres + uploads + .env backup
-│   ├── backup/restore-drill.sh     off-box restore of the newest dump into a throwaway Postgres 16
+│   ├── backup/restore-drill.sh     off-box restore of a backup into a throwaway Postgres 16 (GPG or age)
 │   ├── Caddyfile                   the bundled Caddy (standalone boxes, local full-stack runs)
 │   ├── readme-permissions.test.ts  pins the permission tables of this README to the cms
 │   └── .env.example
@@ -697,7 +698,10 @@ infra/deploy.sh --check      # validate infra/.env against the env contract, dep
 infra/deploy.sh --dry-run    # every deploy check, then the plan; changes nothing
 infra/deploy.sh              # the production deploy (see Deployment)
 infra/live-smoke.sh          # datetime check, then the SSE live pipeline end to end
+infra/restore-db.sh prepare <dump>   # a restore, step 1 of 4: then apply, rotate-jwt, start (see Deployment)
+infra/restore-db.sh status           # where the current restore attempt stands (cancel: end it before apply)
 infra/backup/restore-drill.sh --all <dir>  # off-box: restore the newest dump into a throwaway Postgres 16
+infra/backup/restore-drill.sh --generation <dir> --identity <age key>  # off-box: the same for a backup-run generation
 ```
 
 **CI** (`.github/workflows/ci.yml`) runs on every pull request and on

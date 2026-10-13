@@ -44,6 +44,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
+import { runBash, shellMode, skipReason, type ShellMode } from "./shell-runner.test.helper";
 
 const DEPLOY = readFileSync(new URL("./deploy.sh", import.meta.url), "utf8").replace(/\r\n/g, "\n");
 const HAS_BASH = spawnSync("bash", ["-c", "exit 0"]).status === 0;
@@ -123,7 +124,7 @@ const COMPOSE_JSON = composeJson(STUB_HOST);
  * was built or ran; STUB_UP_KEEP: `up` keeps the containers that exist, as
  * compose does for unchanged content). Every build is a new image id.
  */
-function deploys(steps: readonly Step[]): StepReport[] {
+function deploys(steps: readonly Step[], mode?: ShellMode): StepReport[] {
   const script: string[] = [
     "set -uo pipefail",
     'T="$(mktemp -d)"',
@@ -272,7 +273,11 @@ function deploys(steps: readonly Step[]): StepReport[] {
     );
   });
   script.push("");
-  const res = spawnSync("bash", ["-s"], { input: script.join("\n"), encoding: "utf8" });
+  // With a mode: natively or in the runner image (Linux file modes, as
+  // infra/restore-db.sh needs); else bash here, as every other sequence.
+  const res = mode
+    ? runBash(script.join("\n"), mode)
+    : spawnSync("bash", ["-s"], { input: script.join("\n"), encoding: "utf8" });
   expect(res.stderr, "harness stderr").toBe("");
   const reports: StepReport[] = [];
   let current: StepReport | null = null;
@@ -928,7 +933,9 @@ describe.skipIf(!RUN_SEQUENCES)("deploy.sh: checks, dry run and parameters (FX35
 
   it("refuses while another deploy holds the lock", () => {
     expect(r[3].status).toBe(1);
-    expect(r[3].stderr).toContain("another infra/deploy.sh is running for compose project infra");
+    expect(r[3].stderr).toContain(
+      "another infra/deploy.sh (or an infra/restore-db.sh step) is running for compose project infra",
+    );
     expect(r[3].stdout).not.toMatch(BACKED_UP);
   });
 
@@ -1204,6 +1211,148 @@ describe.skipIf(!HAS_BASH)(
         expect(results[conclusions.length + n], status).toMatch(/^pending: /),
       );
       expect(results.at(-1)).toMatch(/^green: 2 CI check\(s\)/);
+    });
+  },
+);
+
+describe.skipIf(!RUN_SEQUENCES)(
+  "deploy.sh: a database restore in progress (infra/restore-db.sh's reservation)",
+  () => {
+    let r: StepReport[] = [];
+    const reserve =
+      'mkdir -p "$REPO/.git/sinnlos-deploy/restore"; printf "ATTEMPT=20261013T060000Z-abcd\nRESERVED_AT=2026-10-13T06:00:00Z\n" > "$REPO/.git/sinnlos-deploy/restore/infra.reservation"';
+    beforeAll(() => {
+      r = deploys([
+        /* 0 */ { before: reserve, args: ["--dry-run"] },
+        /* 1 */ {},
+        /* 2 */ { args: ["--check"] },
+        /* 3 */ { before: 'rm "$REPO/.git/sinnlos-deploy/restore/infra.reservation"' },
+      ]);
+    }, SEQUENCE_BUDGET);
+
+    it("refuses a dry run and a deploy while restore-db.sh holds the reservation, before any backup or build", () => {
+      for (const report of [r[0], r[1]]) {
+        expect(report.status).toBe(1);
+        expect(report.stderr).toContain(
+          "ERROR: a database restore of compose project infra is in progress (",
+        );
+        expect(report.stderr).toContain("/.git/sinnlos-deploy/restore/infra.reservation).");
+        expect(report.stderr).toContain(
+          "infra/restore-db.sh cancel (only before its apply). Nothing was changed.",
+        );
+        expect(called(report, /compose .*(build|up)|backup-run|sudo/)).toEqual([]);
+        expect(report.stdout).not.toMatch(BACKED_UP);
+        expect(report.state).toEqual({});
+      }
+    });
+
+    it("leaves --check alone, and deploys once the reservation is gone", () => {
+      expect(r[2].status, r[2].stderr).toBe(0);
+      expect(r[3].status, r[3].stderr).toBe(0);
+      expect(r[3].stdout).toContain("restore reservation: none");
+      expect(tagOf(r[3])).toBeTruthy();
+    });
+  },
+);
+
+const RESTORE_DB = readFileSync(new URL("./restore-db.sh", import.meta.url), "utf8").replace(
+  /\r\n/g,
+  "\n",
+);
+const RESTORE_STUBS = readFileSync(
+  new URL("./restore-db.test-stubs.sh", import.meta.url),
+  "utf8",
+).replace(/\r\n/g, "\n");
+const TWO_CLONE_TOOLS = ["git", "flock", "stat", "sha256sum", "openssl", "readlink", "mktemp"];
+const TWO_CLONE_MODE: ShellMode | null = RUN_SEQUENCES
+  ? shellMode(TWO_CLONE_TOOLS, { linux: true })
+  : null;
+
+/**
+ * Two clones of the project, as DEPLOYMENT.md §3.6 allows: clone A restores
+ * with the real infra/restore-db.sh (docker stubbed as in restore-db.test.ts,
+ * over a fake database in $RS), clone B (the harness's $REPO) deploys with
+ * DEPLOY_STATE_DIR pointing at A's state dir, as a second clone must. The
+ * restore steps' results land in the step's calls ("restore <args> rc=<n>").
+ */
+const TWO_CLONES = [
+  'A="$T/clone-a"; RS="$T/rs"',
+  'git clone -q "$REPO" "$A"',
+  "cat > \"$A/infra/restore-db.sh\" <<'RESTORE_DB_EOF'",
+  RESTORE_DB.trimEnd(),
+  "RESTORE_DB_EOF",
+  "cat > \"$T/restore-stubs.sh\" <<'RESTORE_STUBS_EOF'",
+  RESTORE_STUBS.trimEnd(),
+  "RESTORE_STUBS_EOF",
+  "(umask 077; printf 'DATABASE_PASSWORD=pw\\nJWT_SECRET=old-secret\\n' > \"$A/infra/.env\")",
+  'mkdir -p "$RS/db"; printf "up_users 3\\nposts 5\\n" > "$RS/db/tables"; echo running > "$RS/apps"',
+  'printf "FAKEDUMP\\ntable up_users 3\\ntable posts 5\\nEND\\n" > "$RS/good.dump"',
+  "restore_step() {",
+  "  (",
+  '    T="$RS" REPO="$A" L="$A/infra/docker-compose.yml,$A/infra/docker-compose.traefik.yml"',
+  '    export T REPO STUB_LABEL_WEB="$L" STUB_LABEL_CMS="$L" STUB_LABEL_DB="$L" STUB_STOP_FAIL= STUB_UP_FAIL= \\',
+  "      STUB_ON_STOP= STUB_PGDUMP_FAIL= STUB_CREATEDB_FAIL= STUB_RESTORE_FAIL= STUB_LOCK_HELD=",
+  "    unset DEPLOY_STATE_DIR",
+  '    source "$RS/../restore-stubs.sh"',
+  '    cd "$RS" && bash "$A/infra/restore-db.sh" "$@"',
+  '  ) > "$RS/out" 2>&1',
+  '  echo "restore $* rc=$? $(grep -E \'^(OK|STOP):\' "$RS/out" | head -n 1 | cut -c1-60)" >> "$T/calls"',
+  "}",
+  // Clone B deploys with clone A's state dir: lock, state, and the restore's reservation.
+  'export DEPLOY_STATE_DIR="$A/.git/sinnlos-deploy"',
+].join("\n");
+
+describe.skipIf(!TWO_CLONE_MODE)(
+  `deploy.sh: a restore in another clone of the project blocks the deploy${TWO_CLONE_MODE ? "" : ` (skipped: ${skipReason(TWO_CLONE_TOOLS)})`}`,
+  () => {
+    let r: StepReport[] = [];
+    beforeAll(() => {
+      r = deploys(
+        [
+          /* 0 */ { before: `${TWO_CLONES}\nrestore_step prepare good.dump` },
+          /* 1 */ { before: "restore_step apply", args: ["--dry-run"] },
+          /* 2 */ { before: "restore_step cancel" },
+          // A start whose cleanup fails (the staged dump's directory is not writable) …
+          /* 3 */ {
+            before:
+              'restore_step rotate-jwt; chmod 500 "$A"/infra/backups/restore-*; export STUB_RM_AS_USER=1; restore_step start',
+          },
+          // … and its re-run, which finishes the cleanup.
+          /* 4 */ {
+            before:
+              'chmod 700 "$A"/infra/backups/restore-*; export STUB_RM_AS_USER=; restore_step start',
+          },
+        ],
+        TWO_CLONE_MODE as ShellMode,
+      );
+    }, SEQUENCE_BUDGET);
+
+    it("refuses to deploy from clone B between the restore steps of clone A", () => {
+      // Before round 2 the reservation lay in each clone's own git dir, so
+      // clone B saw none and deployed onto clone A's half-done restore.
+      expect(r[0].calls[0]).toMatch(/^restore prepare good\.dump rc=0 OK: attempt /);
+      expect(r[1].calls[0]).toMatch(/^restore apply rc=0 OK: /);
+      expect(r[2].calls[0]).toMatch(/^restore cancel rc=1 STOP: an apply began at /);
+      for (const report of [r[0], r[1], r[2]]) {
+        expect(report.status).toBe(1);
+        expect(report.stderr).toContain(
+          "ERROR: a database restore of compose project infra is in progress (",
+        );
+        expect(report.stderr).toContain("/clone-a/.git/sinnlos-deploy/restore/infra.reservation).");
+        expect(called(report, /compose .*(build|up)|backup-run|sudo/)).toEqual([]);
+      }
+    });
+
+    it("still refuses after a start whose cleanup failed, and deploys once start finished it", () => {
+      expect(r[3].calls.slice(0, 2)).toEqual([
+        expect.stringMatching(/^restore rotate-jwt rc=0 OK: /),
+        expect.stringMatching(/^restore start rc=1 STOP: removing the staged dump /),
+      ]);
+      expect(r[3].status).toBe(1);
+      expect(r[3].stderr).toContain("a database restore of compose project infra is in progress");
+      expect(r[4].calls[0]).toMatch(/^restore start rc=0 OK: attempt \S+ complete: /);
+      expect(r[4].status, r[4].stderr).toBe(0);
+      expect(r[4].stdout).toContain("restore reservation: none");
     });
   },
 );
