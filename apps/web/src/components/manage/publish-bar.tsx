@@ -92,11 +92,7 @@ export function PublishBar({
 
   const run = (kind: ConfirmKind) => {
     setConfirm(null);
-    if (kind === "publish") handlers.publish();
-    else if (kind === "saveAndPublish") handlers.saveAndPublish();
-    else if (kind === "unpublish") handlers.unpublish();
-    else if (kind === "discard") handlers.discard();
-    else handlers.delete();
+    handlers[kind]();
   };
 
   const publishBody = notifiesOnPublish(area)

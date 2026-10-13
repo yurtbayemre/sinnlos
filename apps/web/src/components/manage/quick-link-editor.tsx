@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { useTranslations } from "next-intl";
 import { ICON_KEYS, QUICK_LINK_CATEGORIES, type QuickLinkEditable } from "@sinnlos/domain";
 import type { AreaAccess } from "@/lib/manage/access";
@@ -73,15 +73,11 @@ export function QuickLinkEditor({
   const t = useTranslations("manage.quickLinks");
   const tc = useTranslations("manage.common");
   const tCategories = useTranslations("quickLinks.categories");
-  const toValues = useCallback(
-    (source: QuickLinkEditable) => quickLinkValuesFromEditable(source),
-    [],
-  );
   const item = useItemEditor<QuickLinkValues, QuickLinkEditable>({
     area: "quickLinks",
     formId: FORM_ID,
     editable,
-    toValues,
+    toValues: quickLinkValuesFromEditable,
     emptyValues: emptyQuickLinkValues(),
     fieldOrder: FIELD_ORDER,
     actions: ACTIONS,

@@ -10,7 +10,7 @@ import type { SaveInput } from "@/lib/manage/save";
 import type { ScheduleValues } from "@/lib/manage/values";
 import { useManageFlash } from "./flash";
 import type { PublishBarHandlers } from "./publish-bar";
-import { metaOf, useAuthoringEditor, type ItemMeta } from "./use-authoring-editor";
+import { metaOf, useAuthoringEditor } from "./use-authoring-editor";
 
 /**
  * One /manage editor's values and actions (deep-dive decision 06 §L3, §L4),
@@ -103,7 +103,7 @@ export function useItemEditor<V extends object, E extends EditableBase>({
 
   const editor = useAuthoringEditor({
     formId,
-    initialMeta: editable ? metaOf(editable as unknown as ItemMeta) : null,
+    initialMeta: editable ? metaOf(editable) : null,
     fieldOrder,
     source: editable,
     onReset,
@@ -139,12 +139,10 @@ export function useItemEditor<V extends object, E extends EditableBase>({
       if (!creating && !schedule && !dirty && (status === "draft" || !hasDrafts(area))) return;
       const intent = schedule
         ? "schedule"
-        : creating
-          ? status === "published"
-            ? "saveAndPublish"
-            : "create"
-          : status === "published"
-            ? "saveAndPublish"
+        : status === "published"
+          ? "saveAndPublish"
+          : creating
+            ? "create"
             : "saveDraft";
       run(
         intent,
