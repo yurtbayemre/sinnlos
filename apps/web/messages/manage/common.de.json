@@ -1,0 +1,234 @@
+{
+  "title": "Verwaltung",
+  "description": "Neuigkeiten, Termine, Umfragen und Schnellzugriffe schreiben, planen und veröffentlichen.",
+  "descriptionDepartmentAuthor": "Neuigkeiten und Termine für {department} schreiben und veröffentlichen.",
+  "back": "Verwaltung",
+  "landing": {
+    "contentSection": "Inhalte",
+    "reportsSection": "Berichte",
+    "adminSection": "Administration"
+  },
+  "areas": {
+    "announcements": {
+      "title": "Neuigkeiten",
+      "description": "Nachrichten für alle, eine Abteilung, ein Team oder bestimmte Rollen."
+    },
+    "events": {
+      "title": "Termine",
+      "description": "Termine im Kalender, auf Wunsch mit Zu- und Absagen."
+    },
+    "polls": {
+      "title": "Umfragen",
+      "description": "Fragen mit Antworten zum Abstimmen."
+    },
+    "quickLinks": {
+      "title": "Schnellzugriff",
+      "description": "Die Verknüpfungen auf der Übersicht aller."
+    }
+  },
+  "counts": {
+    "draft": "Entwürfe",
+    "scheduled": "Geplant",
+    "failed": "Planung fehlgeschlagen"
+  },
+  "status": {
+    "label": "Status",
+    "draft": "Entwurf",
+    "published": "Veröffentlicht",
+    "modified": "Änderungen offen",
+    "scheduled": "Geplant",
+    "scheduleFailed": "Planung fehlgeschlagen",
+    "department": "Abteilung: {name}",
+    "needsRetarget": "Zielgruppe neu festlegen",
+    "unsaved": "Ungespeicherte Änderungen"
+  },
+  "detail": {
+    "publishesOn": "Wird veröffentlicht am {date}",
+    "withdrawsOn": "Wird zurückgezogen am {date}",
+    "publishedOn": "Veröffentlicht seit {date}",
+    "savedOn": "Zuletzt gespeichert {date}",
+    "scheduleFailed": "Die geplante Veröffentlichung ist fehlgeschlagen: {reason}"
+  },
+  "scheduleErrors": {
+    "windowExpired": "ihr Zeitfenster war bei Fälligkeit schon abgelaufen",
+    "notPublishable": "der Entwurf ließ sich in diesem Zustand nicht veröffentlichen",
+    "retryExhausted": "das Intranet konnte ihn auch nach mehreren Versuchen nicht veröffentlichen",
+    "other": "das Intranet hat sie abgelehnt ({code})"
+  },
+  "list": {
+    "statusFilter": "Nach Status filtern",
+    "tabs": {
+      "all": "Alle",
+      "draft": "Entwürfe",
+      "published": "Veröffentlicht",
+      "modified": "Änderungen offen",
+      "scheduled": "Geplant",
+      "failed": "Planung fehlgeschlagen"
+    },
+    "ownerFilter": "Nach Eigentümer filtern",
+    "owners": {
+      "all": "Alle Eigentümer",
+      "department": "Abteilungen",
+      "moderators": "Redaktion und Admins"
+    },
+    "searchLabel": "Nach Titel suchen",
+    "searchPlaceholder": "Suchen…",
+    "search": "Suchen",
+    "clear": "Zurücksetzen",
+    "emptyFiltered": "Nichts entspricht diesen Filtern.",
+    "updated": "Aktualisiert {date}",
+    "by": "von {name}",
+    "pagination": "Seiten",
+    "previous": "Vorige Seite",
+    "next": "Nächste Seite",
+    "page": "Seite {page} von {pageCount}",
+    "total": "{count, plural, one {# Eintrag} other {# Einträge}}"
+  },
+  "actions": {
+    "saveDraft": "Entwurf speichern",
+    "saveAndPublish": "Speichern und veröffentlichen",
+    "publish": "Veröffentlichen",
+    "schedule": "Planen…",
+    "unpublish": "Zurückziehen",
+    "discard": "Änderungen verwerfen",
+    "delete": "Löschen",
+    "save": "Speichern",
+    "create": "Erstellen",
+    "closeNow": "Jetzt beenden",
+    "working": "Wird ausgeführt…",
+    "backToList": "Zurück zur Liste",
+    "toolbar": "Aktionen"
+  },
+  "confirm": {
+    "publishTitle": "Jetzt veröffentlichen?",
+    "publishNotifies": "Mit der Veröffentlichung wird die Zielgruppe sofort benachrichtigt.",
+    "publishBody": "Ab jetzt ist es für die Zielgruppe sichtbar.",
+    "publishConfirm": "Veröffentlichen",
+    "unpublishTitle": "Zurückziehen?",
+    "unpublishBody": "Niemand sieht es mehr. Der Entwurf bleibt erhalten, und Sie können ihn später erneut veröffentlichen.",
+    "unpublishConfirm": "Zurückziehen",
+    "discardTitle": "Änderungen verwerfen?",
+    "discardBody": "Der Entwurf kehrt zur veröffentlichten Fassung zurück. Alle Änderungen seitdem gehen verloren.",
+    "discardConfirm": "Änderungen verwerfen",
+    "deleteTitle": "Endgültig löschen?",
+    "deleteBody": "Alle Fassungen werden entfernt, mit ihren Kommentaren, Reaktionen und Rückmeldungen. Das lässt sich nicht rückgängig machen.",
+    "deleteConfirm": "Löschen",
+    "closeTitle": "Umfrage jetzt beenden?",
+    "closeBody": "Die Abstimmung endet sofort. Die Ergebnisse bleiben sichtbar.",
+    "closeConfirm": "Jetzt beenden"
+  },
+  "schedule": {
+    "title": "Planen",
+    "description": "Die Planung wird mit dem Entwurf gespeichert und gilt sofort, auch für einen veröffentlichten Eintrag.",
+    "publishAt": "Veröffentlichen am",
+    "unpublishAt": "Zurückziehen am",
+    "save": "Planung speichern",
+    "clear": "Planung entfernen",
+    "none": "Nicht geplant."
+  },
+  "conflict": {
+    "title": "Inzwischen geändert",
+    "body": "Jemand hat diesen Eintrag geändert, nachdem Sie ihn geöffnet haben, möglicherweise im Strapi-Adminbereich.",
+    "reload": "Neu laden",
+    "reloadHint": "Zeigt die aktuelle Fassung. Ihre Änderungen gehen verloren; kopieren Sie Ihren Text vorher, wenn Sie ihn brauchen.",
+    "copy": "Meinen Text kopieren",
+    "copied": "Ihr Text ist in der Zwischenablage.",
+    "copyFailed": "Das Kopieren hat nicht geklappt. Markieren Sie Ihren Text im Formular und kopieren Sie ihn selbst.",
+    "overwrite": "Überschreiben",
+    "overwriteHint": "Speichert Ihre Fassung über die aktuelle."
+  },
+  "success": {
+    "created": "Als Entwurf gespeichert.",
+    "createdPublished": "Erstellt und veröffentlicht.",
+    "draftSaved": "Entwurf gespeichert.",
+    "saved": "Gespeichert.",
+    "published": "Veröffentlicht.",
+    "unpublished": "Zurückgezogen.",
+    "discarded": "Änderungen verworfen.",
+    "deleted": "Gelöscht.",
+    "scheduled": "Planung gespeichert.",
+    "closed": "Die Umfrage ist beendet.",
+    "dismiss": "Ausblenden"
+  },
+  "failure": {
+    "forbidden": "Dazu sind Sie nicht (mehr) berechtigt. Laden Sie die Seite neu.",
+    "notFound": "Dieser Eintrag existiert nicht mehr, oder Sie können ihn nicht mehr bearbeiten.",
+    "invalid": "Bitte prüfen Sie die markierten Felder.",
+    "unshown": "Das Intranet hat einige Werte nicht angenommen. Laden Sie die Seite neu und versuchen Sie es erneut.",
+    "conflict": "Jemand hat diesen Eintrag inzwischen geändert.",
+    "unavailable": "Das Intranet ist gerade nicht erreichbar – bitte versuchen Sie es gleich noch einmal.",
+    "failed": "Das hat nicht geklappt. Laden Sie die Seite neu und versuchen Sie es erneut."
+  },
+  "errors": {
+    "invalid": "Dieser Wert wird nicht akzeptiert.",
+    "required": "Bitte füllen Sie dieses Feld aus.",
+    "tooLong": "Das ist zu lang.",
+    "invalidInstant": "Geben Sie ein gültiges Datum und eine gültige Uhrzeit ein.",
+    "invalidDate": "Geben Sie ein gültiges Datum ein.",
+    "invalidUrl": "Geben Sie eine Webadresse ein, die mit https:// oder http:// beginnt.",
+    "endBeforeStart": "Das Ende darf nicht vor dem Beginn liegen.",
+    "notMidnight": "Ein ganztägiger Termin beginnt und endet um Mitternacht; wählen Sie die Tage neu.",
+    "scheduleInPast": "Wählen Sie einen Zeitpunkt mindestens eine Minute in der Zukunft.",
+    "unpublishBeforePublish": "Das Zurückziehen muss nach der Veröffentlichung liegen.",
+    "expiresBeforePublish": "Die Neuigkeit liefe ab, bevor sie veröffentlicht wird. Verschieben Sie die Veröffentlichung oder den Ablauf.",
+    "ackDeadlineWithoutAck": "Eine Frist braucht „Lesebestätigung erforderlich“.",
+    "notPublishable": "Das wird benötigt, bevor der Eintrag veröffentlicht werden kann.",
+    "videoUrlNotYoutube": "Geben Sie die Adresse eines YouTube-Videos ein.",
+    "quizInvalid": "Das Quiz ist nicht gültig.",
+    "frozenAfterVotes": "Es wurde bereits abgestimmt, daher lässt sich das nicht mehr ändern.",
+    "visibilityTarget": "Wählen Sie, wer es sehen darf.",
+    "optionCount": "Eine Umfrage braucht 2 bis 20 Antworten.",
+    "optionDuplicate": "Zwei Antworten sind gleich.",
+    "neverPublished": "Es gibt keine veröffentlichte Fassung, zu der zurückgekehrt werden kann; der Entwurf bleibt. Bitten Sie die Redaktion, ihn zu löschen, wenn er nicht mehr gebraucht wird.",
+    "spaceNotEmpty": "Dieser Bereich enthält noch Seiten.",
+    "timeRepeated": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung zweimal. Wählen Sie eine andere Uhrzeit.",
+    "timeSkipped": "Diese Uhrzeit gibt es an diesem Tag wegen der Zeitumstellung nicht. Wählen Sie eine andere Uhrzeit."
+  },
+  "fields": {
+    "required": "Pflichtfeld",
+    "date": "Datum",
+    "time": "Uhrzeit",
+    "timeZone": "Uhrzeiten in {zone}."
+  },
+  "markdown": {
+    "mode": "Editoransicht",
+    "write": "Schreiben",
+    "preview": "Vorschau",
+    "counter": "{count} von {max} Zeichen",
+    "emptyPreview": "Noch nichts für die Vorschau.",
+    "hint": "Markdown: **fett**, _kursiv_, [Link](https://…), Listen mit „-“. HTML wird als Text angezeigt."
+  },
+  "targeting": {
+    "everyone": "Alle",
+    "noTeam": "Kein Team",
+    "noneAvailable": "Noch keine.",
+    "optionsFailed": "Abteilungen und Teams konnten nicht geladen werden, daher lässt sich die Zielgruppe gerade nicht ändern. Laden Sie die Seite neu, um es erneut zu versuchen.",
+    "optionsTruncated": "Nicht alle Abteilungen oder Teams konnten geladen werden; einige fehlen möglicherweise.",
+    "retargetNotice": "Zielgruppe neu festlegen: Eine Abteilung oder ein Team, für das dieser Eintrag gedacht war, wurde gelöscht. Nur Redaktion und Admins sehen ihn, und er benachrichtigt niemanden, bis Sie eine Zielgruppe bestätigen.",
+    "retargetConfirm": "Diese Zielgruppe beim Speichern bestätigen",
+    "roles": {
+      "admin_role": "Admins",
+      "editor": "Redaktion",
+      "department_head": "Abteilungsleitungen",
+      "team_lead": "Teamleitungen",
+      "member": "Mitarbeitende",
+      "guest": "Gäste"
+    }
+  },
+  "departmentAuthor": {
+    "department": "Abteilung",
+    "departmentHint": "Sie schreiben für Ihre eigene Abteilung; sie ist fest eingestellt.",
+    "eventVisibility": "Für alle im Kalender sichtbar; benachrichtigt Ihre Abteilung.",
+    "noDepartmentTitle": "Keine Abteilung zugeordnet",
+    "noDepartmentHint": "Sie können für Ihre Abteilung schreiben, sobald ein Admin Sie einer Abteilung zugeordnet hat.",
+    "ownItems": "Die Einträge Ihrer Abteilung."
+  },
+  "preview": {
+    "title": "Vorschau",
+    "description": "Der gespeicherte Entwurf, wie ihn die Zielgruppe sehen wird. Speichern aktualisiert die Vorschau.",
+    "unknownAuthor": "Unbekannt"
+  },
+  "editor": {
+    "unsavedHint": "Sie haben ungespeicherte Änderungen."
+  }
+}

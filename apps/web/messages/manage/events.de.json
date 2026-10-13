@@ -1,0 +1,56 @@
+{
+  "title": "Termine",
+  "description": "Termine planen und im Kalender veröffentlichen.",
+  "new": "Neuer Termin",
+  "newDescription": "Wird zuerst als Entwurf gespeichert; im Kalender erscheint er, sobald er veröffentlicht ist.",
+  "editTitle": "Termin bearbeiten",
+  "emptyTitle": "Noch keine Termine",
+  "emptyHint": "Planen Sie den ersten; er bleibt ein Entwurf, bis Sie ihn veröffentlichen.",
+  "sections": {
+    "content": "Inhalt",
+    "when": "Zeit",
+    "rsvp": "Rückmeldungen",
+    "notify": "Benachrichtigung"
+  },
+  "fields": {
+    "title": {
+      "label": "Titel"
+    },
+    "description": {
+      "label": "Beschreibung"
+    },
+    "allDay": {
+      "label": "Ganztägig"
+    },
+    "start": {
+      "label": "Beginnt",
+      "allDayLabel": "Erster Tag"
+    },
+    "end": {
+      "label": "Endet",
+      "allDayLabel": "Letzter Tag",
+      "hint": "Optional. Nur eine Uhrzeit endet am Tag des Beginns.",
+      "allDayHint": "Optional; leer für einen eintägigen Termin."
+    },
+    "location": {
+      "label": "Ort"
+    },
+    "url": {
+      "label": "Link",
+      "hint": "Optional, z. B. für den Videocall."
+    },
+    "rsvpEnabled": {
+      "label": "Rückmeldungen erbitten",
+      "hint": "Ausschalten behält die bisherigen Antworten und blendet die Antwortknöpfe aus."
+    },
+    "capacity": {
+      "label": "Plätze",
+      "hint": "Optional. Leer: unbegrenzt."
+    },
+    "departments": {
+      "label": "Abteilungen benachrichtigen",
+      "hint": "Jeder Termin ist für alle im Kalender sichtbar. Nur die gewählten Abteilungen werden benachrichtigt; keine gewählt: alle."
+    }
+  },
+  "capacityWarning": "{count, plural, one {# Person hat} other {# Personen haben}} bereits zugesagt; niemand wird entfernt."
+}

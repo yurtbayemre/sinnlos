@@ -1,0 +1,49 @@
+{
+  "title": "Announcements",
+  "description": "Write announcements, schedule them and publish them to their audience.",
+  "new": "New announcement",
+  "newDescription": "Saved as a draft first; nobody sees it until it is published.",
+  "editTitle": "Edit announcement",
+  "emptyTitle": "No announcements yet",
+  "emptyHint": "Write the first one; it stays a draft until you publish it.",
+  "sections": {
+    "content": "Content",
+    "audience": "Audience",
+    "audienceHint": "All the criteria you choose apply together. Nothing chosen: everyone who reads announcements.",
+    "confirmation": "Read confirmation"
+  },
+  "fields": {
+    "title": {
+      "label": "Title"
+    },
+    "body": {
+      "label": "Text"
+    },
+    "pinned": {
+      "label": "Pin to the top",
+      "hint": "Stays above every other announcement until it is unpinned."
+    },
+    "expiresAt": {
+      "label": "Expires",
+      "hint": "Readers no longer see it from this time on. Empty: it does not expire."
+    },
+    "department": {
+      "label": "Department"
+    },
+    "team": {
+      "label": "Team"
+    },
+    "audienceRoles": {
+      "label": "Roles",
+      "hint": "Only people with one of these roles. None chosen: every role."
+    },
+    "requiresAck": {
+      "label": "Requires read confirmation",
+      "hint": "Readers confirm that they have read it; the confirmation report shows who has not."
+    },
+    "ackDeadline": {
+      "label": "Confirm by",
+      "hint": "Optional."
+    }
+  }
+}

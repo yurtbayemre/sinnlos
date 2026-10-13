@@ -9,14 +9,32 @@
  * next-intl's strict arguments need a generated declaration
  * (createMessagesDeclaration) and allowArbitraryExtensions in the
  * tsconfig; not enabled. de.json must carry the same keys and the same
- * ICU arguments as en.json (checked by i18n/messages.test.ts).
+ * ICU arguments as en.json, and every messages/manage/<area>.de.json those
+ * of its .en.json (checked by i18n/messages.test.ts).
  */
 import type en from "../messages/en.json";
+import type manageAnnouncements from "../messages/manage/announcements.en.json";
+import type manageCommon from "../messages/manage/common.en.json";
+import type manageEvents from "../messages/manage/events.en.json";
+import type managePolls from "../messages/manage/polls.en.json";
+import type manageQuickLinks from "../messages/manage/quickLinks.en.json";
 import type { Locale as AppLocale } from "@/i18n/locale";
+
+/**
+ * The /manage namespaces: one file per area (messages/manage/<area>.<locale>.json,
+ * decision 06 §L7), merged under `manage.<area>` by i18n/messages.ts.
+ */
+interface ManageMessages {
+  common: typeof manageCommon;
+  announcements: typeof manageAnnouncements;
+  events: typeof manageEvents;
+  polls: typeof managePolls;
+  quickLinks: typeof manageQuickLinks;
+}
 
 declare module "next-intl" {
   interface AppConfig {
     Locale: AppLocale;
-    Messages: typeof en;
+    Messages: typeof en & { manage: ManageMessages };
   }
 }
