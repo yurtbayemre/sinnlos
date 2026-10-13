@@ -370,3 +370,52 @@ describe("createMediaClaims: the middleware", () => {
     ).rejects.toMatchObject({ details: { keys: ["file"] } });
   });
 });
+
+describe("payloadFileIds and the lock before the action", () => {
+  it("reads ids, { id }, lists and connect/set, per claimed field, ascending", async () => {
+    const { payloadFileIds } = await import("./media-claims");
+    expect([...payloadFileIds({ file: 7, title: 3 }, ["file"])]).toEqual([[7, "file"]]);
+    expect([...payloadFileIds({ file: { id: "9" } }, ["file"])]).toEqual([[9, "file"]]);
+    expect([...payloadFileIds({ file: { connect: [{ id: 5 }, 2] } }, ["file"])]).toEqual([
+      [2, "file"],
+      [5, "file"],
+    ]);
+    expect([...payloadFileIds({ file: { set: [{ id: 4 }] } }, ["file"])]).toEqual([[4, "file"]]);
+    expect([...payloadFileIds({ file: null }, ["file"])]).toEqual([]);
+    expect([...payloadFileIds({ file: "abc" }, ["file"])]).toEqual([]);
+    expect([...payloadFileIds(undefined, ["file"])]).toEqual([]);
+  });
+
+  it("locks the payload's files before the action and refuses a missing or tombstoned one", async () => {
+    const tombstoned = {
+      rows: { d1: [1] },
+      links: [] as ReturnType<typeof link>[],
+      files: {
+        11: {
+          id: 11,
+          mime: PDF,
+          provider_metadata: { uploadedBy: 7, removing: "2026-10-13T00:00:00Z" },
+        },
+      },
+      ctx: editor,
+    };
+    const { strapi, log } = makeStrapi(tombstoned);
+    const next = vi.fn(async () => ({ documentId: "d1" }));
+    await expect(
+      createMediaClaims(strapi)(
+        { uid: UID, action: "update", params: { documentId: "d1", data: { file: 11 } } },
+        next,
+      ),
+    ).rejects.toMatchObject({ details: { keys: ["file"] } });
+    expect(log).toEqual(["lock:11"]);
+    expect(next).not.toHaveBeenCalled();
+    const missing = makeStrapi({ ...tombstoned, files: {} });
+    await expect(
+      createMediaClaims(missing.strapi)(
+        { uid: UID, action: "update", params: { documentId: "d1", data: { file: 12 } } },
+        next,
+      ),
+    ).rejects.toMatchObject({ details: { keys: ["file"] } });
+    expect(next).not.toHaveBeenCalled();
+  });
+});
