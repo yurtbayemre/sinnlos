@@ -28,6 +28,11 @@
 -- fills a NULL notify_audience without a department link with 'all' at the
 -- first boot, before this runs.) Both only raise, so they need no revision
 -- advance (decision 06 §G "Rule").
+-- Each row carries `on_rollback` for the saved list: `hide_then_restore`
+-- on a published marked announcement (unpublish it for the window, R3;
+-- republish it after the roll-forward, R6f), `leave_alone` on a flag-only
+-- event (never publish or discard it on batch 14; R6a re-applies the
+-- flag), `none` on a draft row.
 -- The columns do not exist before batch 15: on a batch-14 schema this file
 -- fails with "column ... does not exist" and changes nothing.
 --
@@ -60,7 +65,8 @@ SELECT 'marked announcement' AS check,
          AS links_department,
        EXISTS (SELECT 1 FROM announcements_team_lnk t WHERE t.announcement_id = a.id)
          AS links_team,
-       a.published_at
+       a.published_at,
+       CASE WHEN a.published_at IS NULL THEN 'none' ELSE 'hide_then_restore' END AS on_rollback
   FROM announcements a
  WHERE a.retarget_required IS TRUE
  ORDER BY (a.published_at IS NULL), a.document_id, a.id;
@@ -71,7 +77,8 @@ SELECT 'flag-only event' AS check,
        CASE WHEN e.published_at IS NULL THEN 'draft' ELSE 'published' END AS status,
        e.title,
        e.start,
-       e.published_at
+       e.published_at,
+       'leave_alone' AS on_rollback
   FROM events e
  WHERE e.notify_audience = 'departments'
    AND NOT EXISTS (SELECT 1 FROM events_departments_lnk l WHERE l.event_id = e.id)

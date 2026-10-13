@@ -15,8 +15,12 @@
 --     < infra/diagnostics/announcement-audience-preflight.sql
 --
 -- Output: one summary row, then one row per announcement row (draft and
--- published apart) with its document_id, title and published_at. Titles
--- are content, not personal data; treat the output as internal anyway.
+-- published apart) with its document_id, title and published_at, and
+-- `on_rollback` for the saved list of a rollback to batch 14
+-- (DEPLOYMENT.md "Deploying batch 15", R2): `hide_then_restore` on a
+-- published row (unpublish it for the window, R3; republish it after the
+-- roll-forward, R6f), `none` on a draft row. Titles are content, not
+-- personal data; treat the output as internal anyway.
 --
 -- Pure SQL, no psql meta-commands: the integration suite
 -- targeting-fail-closed runs this file against Postgres 16 as it is.
@@ -40,7 +44,8 @@ SELECT 'd-pt01 row' AS check,
        CASE WHEN a.published_at IS NULL THEN 'draft' ELSE 'published' END AS status,
        a.title,
        a.published_at,
-       a.updated_at
+       a.updated_at,
+       CASE WHEN a.published_at IS NULL THEN 'none' ELSE 'hide_then_restore' END AS on_rollback
   FROM announcements a
  WHERE a.audience = 'departments'
    AND NOT EXISTS (SELECT 1 FROM announcements_department_lnk d WHERE d.announcement_id = a.id)

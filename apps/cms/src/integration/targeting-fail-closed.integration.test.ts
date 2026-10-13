@@ -785,26 +785,34 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
         expect(legacyDocuments.has(legacy.documentId)).toBe(true);
         expect(legacyDocuments.has(marked.documentId)).toBe(false);
         expect(Number(preflightSummary[0].documents)).toBe(legacyDocuments.size);
+        // on_rollback (the saved list of a rollback, DEPLOYMENT.md R2): hidden
+        // for the window, restored after the roll-forward.
         expect(
           preflightRows
             .filter((row) => row.document_id === legacy.documentId)
-            .map((row) => row.status),
-        ).toEqual(["published", "draft"]);
+            .map((row) => [row.status, row.on_rollback]),
+        ).toEqual([
+          ["published", "hide_then_restore"],
+          ["draft", "none"],
+        ]);
 
         const [retargetSummary, markedRows, eventRows] = await run("announcement-retarget.sql");
         expect(
           markedRows
             .filter((row) => row.document_id === marked.documentId)
-            .map((row) => [row.status, row.links_department, row.links_team]),
+            .map((row) => [row.status, row.links_department, row.links_team, row.on_rollback]),
         ).toEqual([
-          ["published", false, true],
-          ["draft", false, true],
+          ["published", false, true, "hide_then_restore"],
+          ["draft", false, true, "none"],
         ]);
         expect(
           eventRows
             .filter((row) => row.document_id === flagOnly.documentId)
-            .map((row) => row.status),
-        ).toEqual(["published", "draft"]);
+            .map((row) => [row.status, row.on_rollback]),
+        ).toEqual([
+          ["published", "leave_alone"],
+          ["draft", "leave_alone"],
+        ]);
         expect(Number(retargetSummary[0].flag_only_events)).toBe(
           new Set(eventRows.map((row) => row.document_id)).size,
         );
@@ -817,6 +825,7 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
           published: false,
           withdraw_by_hand: false,
           unpublish_at: null,
+          on_rollback: "pending_publish",
         });
         expect(byDocument.get(withdrawing.documentId)).toMatchObject({
           table_name: "quick_links",
@@ -824,6 +833,9 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
           publish_at: null,
           published: true,
           withdraw_by_hand: true,
+          // Withdrawn at its time (or early) and never restored after it
+          // (Codex review: R6f must not republish an elapsed withdrawal).
+          on_rollback: "final_withdrawal",
         });
         expect(schedules).toHaveLength(2);
 

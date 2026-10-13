@@ -2257,18 +2257,42 @@ psql_db -X -c "SELECT DISTINCT document_id, question FROM polls WHERE jsonb_arra
 ```
 
 - `schedule-export.sql`: per draft row `publish_at` and `unpublish_at`,
-  whether the document is published, and `withdraw_by_hand`;
-- the D-PT01 preflight;
+  whether the document is published, `withdraw_by_hand`, and `on_rollback`;
+- the D-PT01 preflight, with `on_rollback`;
 - `announcement-retarget.sql`: the `retargetRequired` announcements **and
-  the events restricted only by `notify_audience`**, per row;
+  the events restricted only by `notify_audience`**, per row, with
+  `on_rollback`;
 - the polls with more than 10 answers: batch 14 refuses every panel save
   and publish of them; leave them alone until the roll-forward.
 
+Each row's `on_rollback` is what the steps below do with it; keep the two
+kinds that R3 can unpublish apart:
+
+- `hide_then_restore` (published D-PT01 and `retargetRequired`
+  announcements): hidden for the window only. R3 unpublishes them, R6f
+  republishes them.
+- `final_withdrawal` (published documents and quick links with an
+  `unpublish_at`, the export's `withdraw_by_hand`): a scheduled withdrawal
+  batch 14 would miss. It is withdrawn at its `unpublish_at` (R5), or
+  early in R3 when the window is short, and it is **final**: once its
+  `unpublish_at` has passed it is never published again. After the
+  roll-forward the scheduler clears the leftover field (R6b) and a new
+  export no longer lists it; this saved list is the record.
+- `pending_publish` (a draft with `publish_at`): waits; R6b re-enters it if
+  a batch 14 write dropped it. `leave_alone` (the flag-only events): never
+  publish or discard them on batch 14; R6a re-applies the flag. `none` (a
+  draft row, or a withdrawal time on an unpublished item): nothing to do.
+
 R3. **Unpublish what must stay hidden on batch 14**, in `/manage` or the
-panel while batch 15 still runs: the preflight's announcements, the
-`retargetRequired` announcements, and, when the window is short, the items
-whose `unpublish_at` falls inside it. Do not publish or discard the
-flag-only events on batch 14 (each would notify everyone).
+panel while batch 15 still runs:
+- every `hide_then_restore` announcement (the preflight's and the
+  `retargetRequired` ones): hidden for the window, restored in R6f;
+- when the window is short, the `final_withdrawal` items whose
+  `unpublish_at` falls inside it: withdrawn early, and for good (never
+  restored once their `unpublish_at` has passed).
+
+Do not publish or discard the flag-only events (`leave_alone`) on batch 14
+(each would notify everyone).
 
 R4. **Retag both images** (`B14_TAG` from step 1, `9a5beb517529`):
 
@@ -2291,8 +2315,9 @@ roll-forward re-creates the 22.
 
 R5. **During the window** batch 14 runs no schedule: a due publish simply
 waits, and a published document or quick link whose exported
-`unpublish_at` falls due (`withdraw_by_hand`) stays visible. An editor
-unpublishes each such item in the admin panel at its time.
+`unpublish_at` falls due (`final_withdrawal`) stays visible. An editor
+unpublishes each such item in the admin panel at its time; that
+withdrawal is final.
 
 R6. **The roll-forward** is a normal `infra/deploy.sh` (it notes that the
 containers do not run the last-known-good images). Its boot logs `granted
@@ -2332,7 +2357,10 @@ authors again:
   scheduler clears the leftover field); one that fell due and was not done
   is done now; a publish that fell due is published by hand, or left to the
   scheduler if the draft kept `publish_at` (an item whose window ended
-  meanwhile gets `windowExpired` and notifies nobody).
+  meanwhile gets `windowExpired` and notifies nobody). A `final_withdrawal`
+  whose `unpublish_at` has passed stays unpublished: the scheduler only
+  clears its leftover field (`cleared` in its log line), after which the
+  current export no longer shows it; the saved list does.
 - **c. Owners.** An item whose owner department a batch 14 write dropped
   stays moderator-only for department heads until a moderator sets the
   owner again in the panel (it fails closed).
@@ -2340,8 +2368,15 @@ authors again:
   shows only the two informational rows again.
 - **e.** Writes on batch 14 advanced no revision: a web form opened before
   the rollback can pass its `If-Match` once (accepted).
-- **f.** Re-publish what R3 unpublished, once it is re-targeted or the
-  window is over; then lift the freeze.
+- **f.** Re-publish the `hide_then_restore` announcements R3 unpublished
+  (the marked ones come back moderator-only until re-targeted). **Never
+  re-publish a `final_withdrawal` item whose saved `unpublish_at` has
+  passed**, whether R3 withdrew it early or R5 at its time. One that R3
+  withdrew early and whose `unpublish_at` is still ahead may be
+  re-published, after `schedule-export.sql` lists that `unpublish_at` on
+  its draft again (re-enter it in the panel or `/manage` first if a batch
+  14 write dropped it), so the scheduler withdraws it on time. Then lift
+  the freeze.
 
 **Staging rehearsal:** the combined rehearsal of the batch (the batch 14
 image, then this one, on a production-like Postgres 16 with the rollback
@@ -2530,9 +2565,12 @@ and how to cover it:
    "Discard changes" in the panel except for step 3.
 3. **Nothing scheduled runs on batch 14.** A pending publish just waits.
    A published document or quick link whose exported `unpublish_at` falls
-   inside the rollback window stays published past it: an editor
-   withdraws it by hand in the panel at its time (or before the rollback,
-   when the window is short).
+   inside the rollback window (`on_rollback = final_withdrawal`) stays
+   published past it: an editor withdraws it by hand in the panel at its
+   time (or before the rollback, when the window is short). That
+   withdrawal is final: the item is never published again once its
+   `unpublish_at` has passed, also after the roll-forward's scheduler
+   cleared the leftover field.
 4. **What an old-image write loses.** A publish or "Discard changes" there
    rebuilds rows through the old model, which does not know the new
    columns: the rebuilt row comes back without `publish_at`,
@@ -2548,8 +2586,9 @@ and how to cover it:
      in the future and was lost is re-entered in the admin panel (a
      Document Service write, so the revision advances; never raw SQL); a
      withdrawal that fell due and was done by hand needs nothing (the
-     scheduler clears the leftover field); one that fell due and was not
-     done is done now; a publish that fell due is published by hand, or
+     scheduler clears the leftover field; the item stays unpublished, and
+     only the saved export still shows it was a final withdrawal); one
+     that fell due and was not done is done now; a publish that fell due is published by hand, or
      left to the scheduler if the draft kept `publish_at` (the
      expired-window rule applies);
    - a lost owner department fails closed: the item is moderator-only for
@@ -2735,8 +2774,11 @@ touches without `retarget_required` and `notify_audience` (NULL).
    neither row restricts, the backfill has already filled the NULL with
    "all" at the first boot. Both statements only raise, so they need no
    revision advance.
-4. Re-publish what step 2 unpublished, once it is re-targeted or the
-   window is over.
+4. Re-publish what step 2 unpublished (the announcements of the two
+   lists, `on_rollback = hide_then_restore`), once it is re-targeted or
+   the window is over. A document or quick link withdrawn for its
+   `unpublish_at` is not part of this: its withdrawal is final
+   ([Deploying batch 15](#deploying-batch-15-2026-10-13), R6f).
 
 **Residuals (accepted)**
 

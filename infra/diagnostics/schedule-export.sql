@@ -7,20 +7,27 @@
 --
 -- WHEN. Before a rollback to a batch-14 image, save the output off the host
 -- (DEPLOYMENT.md "Deploying batch 15", rollback step 2). Batch 14 runs no
--- schedule:
---   - a pending publish waits (safe);
---   - a published document or quick link whose unpublish_at falls due stays
---     published: an editor withdraws it by hand in the admin panel at its
---     time (every row with published = true and an unpublish_at before the
---     planned roll-forward);
---   - an old-image publish or "Discard changes" rewrites the draft without
---     these columns, so a draft can lose its publish_at or unpublish_at.
+-- schedule. Each row's `on_rollback` says what the rollback does with it:
+--   - `pending_publish`: a pending publish waits (safe); re-entered after
+--     the roll-forward if a batch-14 write dropped it;
+--   - `final_withdrawal` (= withdraw_by_hand: published, with an
+--     unpublish_at): a withdrawal batch 14 would miss. An editor withdraws
+--     it by hand at its time (R5), or before the rollback when the window
+--     is short (R3). It is FINAL: once its unpublish_at has passed it is
+--     never published again, also when the roll-forward's scheduler has
+--     cleared the leftover field and a later export no longer lists it;
+--     this saved list is the record (R6f);
+--   - `none`: not published, unpublish_at only; the roll-forward's
+--     scheduler clears the field.
+-- An old-image publish or "Discard changes" rewrites the draft without
+-- these columns, so a draft can lose its publish_at or unpublish_at.
 -- On the roll-forward compare this export with the drafts: re-enter a lost
 -- time that is still ahead through the admin panel or /manage (a Document
 -- Service write, so the revision advances; never raw SQL), withdraw what
 -- fell due and was not withdrawn, publish by hand what fell due (or leave it
 -- to the scheduler if the draft kept publish_at; the expired-window rule
--- applies).
+-- applies). Never republish a final_withdrawal row whose unpublish_at has
+-- passed.
 -- The columns do not exist before batch 15: on a batch-14 schema this file
 -- fails with "column ... does not exist" and changes nothing.
 --
@@ -79,7 +86,12 @@ WITH schedules AS (
 SELECT 'schedule' AS check, table_name, document_id, label, publish_at, unpublish_at,
        schedule_error, published,
        -- A withdrawal that batch 14 would miss: published, with a deadline.
-       (published AND unpublish_at IS NOT NULL) AS withdraw_by_hand
+       (published AND unpublish_at IS NOT NULL) AS withdraw_by_hand,
+       CASE
+         WHEN published AND unpublish_at IS NOT NULL THEN 'final_withdrawal'
+         WHEN publish_at IS NOT NULL THEN 'pending_publish'
+         ELSE 'none'
+       END AS on_rollback
   FROM schedules
  ORDER BY least(publish_at, unpublish_at) NULLS LAST, table_name, document_id;
 
