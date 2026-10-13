@@ -75,6 +75,7 @@ import {
   type RecipientScope,
   type RoleGrants,
   type ScopeStrapi,
+  withFreshAnnouncementFlags,
 } from "../utils/visible-ids";
 import {
   digestWindowStart,
@@ -307,14 +308,15 @@ async function loadAnnouncementWindow(
   const widest = new Date(Math.min(...starts));
   const latest = new Date(Math.max(...starts));
 
-  const rows = listOf<DigestAnnouncement>(
+  const window = {
+    $and: [
+      { publishedAt: { $gte: widest.toISOString(), $lt: now.toISOString() } },
+      notExpiredWhere(now),
+    ],
+  };
+  const loaded = listOf<DigestAnnouncement>(
     await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      where: {
-        $and: [
-          { publishedAt: { $gte: widest.toISOString(), $lt: now.toISOString() } },
-          notExpiredWhere(now),
-        ],
-      },
+      where: window,
       // `audience` and `retargetRequired`: the predicate's D-PT01 and marker.
       select: ["id", "documentId", "title", "audience", "retargetRequired", "publishedAt"],
       populate: {
@@ -326,6 +328,8 @@ async function loadAnnouncementWindow(
       orderBy: { publishedAt: "desc" },
     }),
   );
+  // The flags again, after the relations (utils/targeting-flags.ts).
+  const rows = await withFreshAnnouncementFlags(strapi, loaded, window);
   const documentIds = [
     ...new Set(rows.map((row) => row.documentId).filter((id): id is string => !!id)),
   ];

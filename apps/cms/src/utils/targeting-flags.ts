@@ -57,8 +57,8 @@ import {
  * from a payload that carries a targeting key.
  *
  * DELETE HOOKS (§D rule 13, amendment rows A2 and A3). Before the cascade,
- * inside the delete's transaction (the hook joins the Document Service's,
- * or opens one for a script's db-level delete):
+ * inside the delete's transaction (the hook joins the Document Service's;
+ * a delete outside any transaction is refused, see below):
  *   1. lock the deleted department or team rows `FOR UPDATE` on Postgres
  *      (no link to them can commit around the scan: an insert of a link
  *      row takes `FOR KEY SHARE` on the target row, so it either commits
@@ -75,6 +75,10 @@ import {
  *      targeting outside the Document Service;
  *   3. raise the flags and the marker on the linked rows.
  * A failing step fails the delete; a failed delete rolls everything back.
+ * A delete outside a transaction (a script's db-level delete) is refused:
+ * the query engine opens none around a lifecycle and its DELETE, so a
+ * transaction of the hook's own would commit, and release its locks,
+ * before the DELETE ran.
  * The flag writes are raw writes that only raise (§G "Rule"); the revision
  * advance covers the cascade's link removal.
  *
@@ -91,6 +95,16 @@ import {
  */
 
 export const TARGETING_FLAGS_LOG = "[targeting-flags]";
+
+/**
+ * Why a department or team delete outside a transaction is refused: the
+ * query engine opens none around a lifecycle and its DELETE, so the hook's
+ * locks would end before the delete (see the delete hooks below).
+ */
+export const OUTSIDE_TRANSACTION =
+  "refused outside a transaction: the locks, flags and revision advances must commit with " +
+  "the delete. Delete through the Document Service (admin panel, API) or inside " +
+  "strapi.db.transaction";
 
 /** documentIds per lookup, ids per UPDATE and link rows per page. */
 export const TARGETING_FLAGS_PAGE = 200;

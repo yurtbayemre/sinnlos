@@ -2,6 +2,7 @@ import { restrictRowsOfDeletedDepartments } from "../../../../utils/department-d
 import { flagPollsOfDeletedDepartments } from "../../../../utils/poll-department-delete";
 import {
   DEPARTMENT_LINKED_DOCUMENTS,
+  OUTSIDE_TRANSACTION,
   TARGETING_FLAGS_LOG,
   advanceRevisionsOf,
   documentsLinking,
@@ -49,10 +50,15 @@ import {
  * beforeDelete before the row delete and before deleteRelations
  * (entity-manager/index.js delete). beforeDeleteMany covers a script's
  * db-level deleteMany, whose link rows the foreign key cascade removes.
- * Everything runs in one transaction: the delete's own (the Document
- * Service wraps every delete in one, the hook joins it), or one the hook
- * opens for a db-level delete outside any. A failing step fails the
- * delete, and a failed delete rolls every flag and revision back.
+ * Everything runs in the delete's own transaction (the Document Service
+ * wraps every delete in one; the hook joins it). The query engine itself
+ * opens none around a lifecycle and its DELETE, so a db-level delete
+ * outside a transaction is REFUSED: a transaction of the hook's own would
+ * commit, and release the row locks, before the DELETE runs, and a link
+ * written in between would be cascaded away unflagged (Codex review of
+ * lane 15D). A script deletes through the Document Service or inside
+ * `strapi.db.transaction`. A failing step fails the delete, and a failed
+ * delete rolls every flag and revision back.
  *
  * Defence in depth: the write-time guards (utils/poll-audience-guard.ts,
  * utils/department-audience-guard.ts with utils/targeting-flags.ts) flag
@@ -75,6 +81,9 @@ const REFUSAL =
 async function keepTargetsRestricted(event: DeleteEvent): Promise<void> {
   const where = event.params?.where;
   const host = strapi as unknown as TargetingDeleteHost;
+  if (!host.db.inTransaction()) {
+    throw new Error(`${TARGETING_FLAGS_LOG} department delete: ${OUTSIDE_TRANSACTION}`);
+  }
   await host.db.transaction(async () => {
     const departmentIds = await lockMatchedRows(host, DEPARTMENT_UID, where);
     if (departmentIds.length === 0) return;

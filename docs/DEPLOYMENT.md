@@ -1868,7 +1868,10 @@ env, no compose or edge change.
   its next save instead of writing over it. The deletes are rare admin
   actions; a delete that races a save of a linked item on Postgres can be
   aborted by the database (deadlock), which leaves both unchanged: delete
-  again.
+  again. A department or team delete outside a transaction (a script's
+  `strapi.db.query(...).delete()`) is refused with
+  `[targeting-flags] … refused outside a transaction`; the admin panel and
+  the API always delete inside one.
 - **Every reader follows.** The announcement list and detail, the bell
   and the digest fan-out, comment and reaction threads, acknowledgements
   and the acknowledgement report all use the same rule

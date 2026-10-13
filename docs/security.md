@@ -710,7 +710,11 @@ Enforced by the cms for every reader and every notification:
   links away, the delete sets the flags and the marker on the rows that
   linked it and advances the revision of every announcement, event and
   document that linked it, so a form opened before the delete gets a
-  conflict or "not found" instead of writing over it. Nothing lowers a
+  conflict or "not found" instead of writing over it (a delete outside a
+  transaction, which only a script can make, is refused). Every reader
+  reads the flag and the marker once more after the targeting relations
+  and keeps the raised value, so a delete between those statements never
+  pairs the old marker with the new links. Nothing lowers a
   flag or the marker except an explicit re-target: in the admin panel, set
   Audience (or Notify audience) to `all` or clear Retarget required; a
   save that still links a target is flipped back to `departments`.

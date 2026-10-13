@@ -12,6 +12,7 @@ import {
   loadRoleGrants,
   loadUserScope,
   visibleWikiSpaceIds,
+  withFreshAnnouncementFlags,
 } from "./visible-ids";
 import type { UserScope } from "./visible-ids";
 
@@ -501,5 +502,54 @@ describe("the announcement recipient filter (FX19)", () => {
       teamIds: [2, 3],
     });
     expect(toAudienceScope(null)).toBeNull();
+  });
+});
+
+describe("withFreshAnnouncementFlags (a delete between the scalar and the relation reads)", () => {
+  const UID = "api::announcement.announcement";
+  const stubWith = (rows: Record<string, unknown>[]) =>
+    createStrapiStub({ tables: { [UID]: rows.map((row) => ({ ...row })) as never } });
+
+  it("raises the marker and the flag from the read after the relations", async () => {
+    // Committed now: the department is gone and the delete set the marker.
+    const strapi = stubWith([{ id: 1, audience: "departments", retargetRequired: true }]);
+    // What the caller read before the delete committed (scalars), next to
+    // the relations it read after (the department gone, the team left).
+    const torn = [{ id: 1, audience: "all", retargetRequired: false, team: { id: 30 } }];
+    const [row] = await withFreshAnnouncementFlags(strapi, torn, { id: { $in: [1] } });
+    expect(row).toMatchObject({
+      audience: "departments",
+      retargetRequired: true,
+      team: { id: 30 },
+    });
+  });
+
+  it("keeps what the first read raised when a re-target lowered it in between", async () => {
+    const strapi = stubWith([{ id: 1, audience: "all", retargetRequired: false }]);
+    const [row] = await withFreshAnnouncementFlags(
+      strapi,
+      [{ id: 1, audience: "departments", retargetRequired: true }],
+      {},
+    );
+    expect(row).toMatchObject({ audience: "departments", retargetRequired: true });
+  });
+
+  it("leaves a row the second read misses, and asks nothing for no rows", async () => {
+    const strapi = stubWith([]);
+    const rows = [{ id: 7, audience: "all", retargetRequired: false }];
+    expect(await withFreshAnnouncementFlags(strapi, rows, {})).toEqual(rows);
+    const calls = strapi.calls.length;
+    expect(await withFreshAnnouncementFlags(strapi, [], {})).toEqual([]);
+    expect(strapi.calls.length).toBe(calls);
+  });
+
+  it("reads only the flag columns, with the caller's where", async () => {
+    const strapi = stubWith([{ id: 1, audience: "all" }]);
+    await withFreshAnnouncementFlags(strapi, [{ id: 1 }], { id: 1 });
+    expect(strapi.calls[strapi.calls.length - 1]).toMatchObject({
+      method: "findMany",
+      uid: UID,
+      params: { where: { id: 1 }, select: ["id", "audience", "retargetRequired"] },
+    });
   });
 });

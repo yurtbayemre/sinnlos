@@ -1,4 +1,5 @@
 import {
+  OUTSIDE_TRANSACTION,
   TARGETING_FLAGS_LOG,
   TEAM_LINKED_DOCUMENTS,
   advanceRevisionsOf,
@@ -31,7 +32,7 @@ import {
  * are batch 16). The mechanics are the department hook's (api/department/
  * content-types/department/lifecycles.ts): beforeDelete for the Document
  * Service's per-row delete, beforeDeleteMany for a script's db-level one,
- * one transaction (the delete's, or the hook's own outside any), a failing
+ * the delete's own transaction (a delete outside one is refused), a failing
  * step fails the delete.
  */
 
@@ -45,6 +46,9 @@ const REFUSAL = "refusing to delete a team without keeping its announcements res
 
 async function keepTargetsRestricted(event: DeleteEvent): Promise<void> {
   const host = strapi as unknown as TargetingDeleteHost;
+  if (!host.db.inTransaction()) {
+    throw new Error(`${TARGETING_FLAGS_LOG} team delete: ${OUTSIDE_TRANSACTION}`);
+  }
   await host.db.transaction(async () => {
     const teamIds = await lockMatchedRows(host, TEAM_UID, event.params?.where);
     if (teamIds.length === 0) return;

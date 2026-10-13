@@ -371,6 +371,34 @@ describe("acknowledgement create: audience (FX27)", () => {
     expect(retargeted.ctx.badRequest).not.toHaveBeenCalled();
   });
 
+  it("re-reads the marker after the relations: a torn read answers the same 400", async () => {
+    // Committed: the team was deleted and the marker set; the lookup's
+    // scalars were read before, its relations after.
+    const tables = withTargeting({
+      audience: "departments",
+      department: { id: DEPT_SALES },
+      retargetRequired: true,
+    });
+    const { ctx } = setup(body, tables);
+    const torn = { ...tables["api::announcement.announcement"][0], retargetRequired: false };
+    const strapiQuery = vi.fn((uid: string) => ({
+      findOne: vi.fn(async (params: { where: Where }) =>
+        uid === "api::announcement.announcement"
+          ? torn
+          : ((tables[uid] ?? []).find((row) => matches(row, params.where)) ?? null),
+      ),
+      findMany: vi.fn(async () => tables[uid] ?? []),
+      create: vi.fn(async (params: { data: Row }) => ({ id: 100, ...params.data })),
+    }));
+    const controller = (
+      acknowledgementController as unknown as (deps: { strapi: unknown }) => {
+        create(ctx: unknown): Promise<unknown>;
+      }
+    )({ strapi: { db: { query: strapiQuery } } });
+    await controller.create(ctx);
+    expect(ctx.badRequest).toHaveBeenCalledWith(NOT_AVAILABLE);
+  });
+
   it("lets anyone acknowledge an untargeted announcement", async () => {
     const guest = { id: 12, role: { type: "guest" } };
     const { ctx } = await create(

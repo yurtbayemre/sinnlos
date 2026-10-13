@@ -34,6 +34,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** A hook call inside a transaction, as the Document Service's delete makes it. */
+const inDelete = (
+  hook: "beforeDelete" | "beforeDeleteMany",
+  where: Record<string, unknown> | null,
+): Promise<void> =>
+  (
+    globalThis as unknown as {
+      strapi: { db: { transaction<T>(callback: () => Promise<T>): Promise<T> } };
+    }
+  ).strapi.db.transaction(() => lifecycles[hook]({ params: { where } }));
+
 const ENG = 10;
 const PLATFORM = 30;
 const DATA = 31;
@@ -100,7 +111,7 @@ function setup(options: Parameters<typeof deleteHost>[1] = {}) {
   return host;
 }
 
-const deletePlatform = () => lifecycles.beforeDelete({ params: { where: { id: PLATFORM } } });
+const deletePlatform = () => inDelete("beforeDelete", { id: PLATFORM });
 
 describe("team delete", () => {
   it("marks exactly the announcements that targeted the team", async () => {
@@ -149,12 +160,20 @@ describe("team delete", () => {
 
   it("beforeDeleteMany without a where covers every team; a miss does nothing", async () => {
     const all = setup();
-    await lifecycles.beforeDeleteMany({ params: { where: null } });
+    await inDelete("beforeDeleteMany", null);
     expect(all.events).toContain(`advance ${ANNOUNCEMENT} ann-data`);
 
     const none = setup();
-    await lifecycles.beforeDelete({ params: { where: { id: 999 } } });
+    await inDelete("beforeDelete", { id: 999 });
     expect(none.events.filter((event) => !event.startsWith("read "))).toEqual([]);
+  });
+
+  it("refuses a delete outside a transaction, before any read or write", async () => {
+    const { events } = setup();
+    await expect(lifecycles.beforeDelete({ params: { where: { id: PLATFORM } } })).rejects.toThrow(
+      "[targeting-flags] team delete: refused outside a transaction",
+    );
+    expect(events).toEqual([]);
   });
 
   it("a failing marker write fails the delete", async () => {

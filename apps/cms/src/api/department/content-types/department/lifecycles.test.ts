@@ -48,6 +48,17 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+/** A hook call inside a transaction, as the Document Service's delete makes it. */
+const inDelete = (
+  hook: "beforeDelete" | "beforeDeleteMany",
+  where: Record<string, unknown> | null,
+): Promise<void> =>
+  (
+    globalThis as unknown as {
+      strapi: { db: { transaction<T>(callback: () => Promise<T>): Promise<T> } };
+    }
+  ).strapi.db.transaction(() => lifecycles[hook]({ params: { where } }));
+
 const ENG = 10;
 const SALES = 11;
 const PLATFORM = 30;
@@ -187,7 +198,7 @@ function setup(options: Parameters<typeof deleteHost>[1] = {}) {
   return { ...host, transaction };
 }
 
-const deleteEngineering = () => lifecycles.beforeDelete({ params: { where: { id: ENG } } });
+const deleteEngineering = () => inDelete("beforeDelete", { id: ENG });
 
 describe("department delete: what stays restricted", () => {
   it("marks the announcements that targeted the department, and only them", async () => {
@@ -269,7 +280,7 @@ describe("department delete: revisions (§D rule 13)", () => {
 
   it("does nothing when the delete matches no department", async () => {
     const { events, values } = setup();
-    await lifecycles.beforeDelete({ params: { where: { id: 999 } } });
+    await inDelete("beforeDelete", { id: 999 });
     expect(events.filter((event) => !event.startsWith("read "))).toEqual([]);
     expect(values(ANNOUNCEMENT, ["retargetRequired"]).map((row) => row[1])).toEqual([
       null,
@@ -283,7 +294,7 @@ describe("department delete: revisions (§D rule 13)", () => {
   it("both hooks take the delete's own where (moved from the poll and FX29 suites)", async () => {
     for (const hook of ["beforeDelete", "beforeDeleteMany"] as const) {
       const { values, events } = setup();
-      await lifecycles[hook]({ params: { where: { id: { $in: [SALES] } } } });
+      await inDelete(hook, { id: { $in: [SALES] } });
       expect(values(POLL, ["audience"]), hook).toEqual([[1, "all"]]);
       expect(values(QUICK_LINK, ["audience"]), hook).toEqual([[1, "all"]]);
       expect(values(EVENT, ["notifyAudience"]), hook).toEqual([
@@ -314,13 +325,25 @@ describe("department delete: revisions (§D rule 13)", () => {
 
   it("beforeDeleteMany without a where covers every department", async () => {
     const { events } = setup();
-    await lifecycles.beforeDeleteMany({ params: { where: null } });
+    await inDelete("beforeDeleteMany", null);
     expect(events).toContain(`advance ${ANNOUNCEMENT} ann-sales`);
     expect(events).toContain(`advance ${EVENT} ev-sales`);
   });
 });
 
 describe("department delete: one transaction, fail closed", () => {
+  it("refuses a delete outside a transaction, before any read or write", async () => {
+    const { events, values } = setup();
+    await expect(lifecycles.beforeDelete({ params: { where: { id: ENG } } })).rejects.toThrow(
+      "[targeting-flags] department delete: refused outside a transaction",
+    );
+    await expect(lifecycles.beforeDeleteMany({ params: { where: null } })).rejects.toThrow(
+      /refused outside a transaction/,
+    );
+    expect(events).toEqual([]);
+    expect(values(ANNOUNCEMENT, ["retargetRequired"]).every((row) => row[1] === null)).toBe(true);
+  });
+
   it("runs inside one transaction (joining the delete's)", async () => {
     const { transaction } = setup();
     await deleteEngineering();

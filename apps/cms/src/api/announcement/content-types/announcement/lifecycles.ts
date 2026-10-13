@@ -8,6 +8,7 @@ import {
   announcementRecipients,
   loadAllUserScopes,
   loadRoleGrants,
+  withFreshAnnouncementFlags,
 } from "../../../../utils/visible-ids";
 
 /** The lifecycle result of an announcement row (only what the fan-out reads). */
@@ -91,7 +92,11 @@ async function loadAnnouncementAudience(
     return { source: null, recipients: [], actorId: null };
   }
   const authorId: number | null = full.author?.id ?? null;
-  const recipients = announcementRecipients(full, scopes, grants.holders(ANNOUNCEMENT_FIND))
+  // The flag and the marker read again after the relations (batch 15): a
+  // department or team delete between the statements must not pair an old
+  // marker with the new links (utils/visible-ids.ts).
+  const [checked] = await withFreshAnnouncementFlags(strapi, [full], { id: full.id });
+  const recipients = announcementRecipients(checked, scopes, grants.holders(ANNOUNCEMENT_FIND))
     .map((scope) => scope.userId)
     .filter((id) => id !== authorId);
   return { source: full, recipients, actorId: authorId };

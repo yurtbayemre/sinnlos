@@ -573,3 +573,43 @@ describe("announcements that target nobody (D-PT01, retargetRequired; batch 15)"
     }
   });
 });
+
+describe("a department delete between the thread check's reads (batch 15)", () => {
+  it("re-reads the marker after the relations, for the list and the single check", async () => {
+    const UID = "api::announcement.announcement";
+    const PLATFORM_ID = 30;
+    const strapi = createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [
+          { id: 1, username: "eng", department: { id: 10 }, teams: [{ id: PLATFORM_ID }] },
+        ],
+        "api::team.team": [{ id: PLATFORM_ID, lead: null }],
+        [UID]: [
+          {
+            id: 1,
+            documentId: "ann-torn",
+            publishedAt: "2026-09-01T00:00:00.000Z",
+            audience: "departments",
+            team: { id: PLATFORM_ID },
+            retargetRequired: true,
+          },
+        ],
+      },
+    });
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      const inner = query(uid);
+      if (uid !== UID) return inner;
+      return {
+        ...inner,
+        findMany: async (params) => {
+          const rows = await inner.findMany(params);
+          return params?.populate ? rows.map((row) => ({ ...row, retargetRequired: false })) : rows;
+        },
+      };
+    };
+    const member = { id: 1, role: { type: "member" } };
+    expect((await visibleTargetAnchors(strapi, member)).announcement).toEqual([]);
+    await expect(isTargetVisible(strapi, "announcement", "ann-torn", member)).resolves.toBe(false);
+  });
+});

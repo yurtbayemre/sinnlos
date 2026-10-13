@@ -315,3 +315,43 @@ describe("fail-closed targeting (D-PT01 and the re-target marker, batch 15)", ()
     }
   });
 });
+
+describe("a department delete between the policy's reads (batch 15)", () => {
+  it("re-reads the marker after the relations: a torn read admits nobody", async () => {
+    const UID = "api::announcement.announcement";
+    // Committed: Engineering deleted, the marker set, the Frontend team left.
+    const strapi = createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [
+          {
+            id: 2,
+            username: "eng",
+            department: { id: 10 },
+            teams: [{ id: FRONTEND_TEAM }],
+            role: { id: MEMBER_ROLE, type: "member" },
+          },
+        ],
+        "api::team.team": [{ id: FRONTEND_TEAM, lead: null }],
+        [UID]: [
+          { id: 1, audience: "departments", team: { id: FRONTEND_TEAM }, retargetRequired: true },
+        ],
+      },
+    });
+    // The scalar select ran before the delete committed, the populate after.
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      const inner = query(uid);
+      if (uid !== UID) return inner;
+      return {
+        ...inner,
+        findMany: async (params) => {
+          const rows = await inner.findMany(params);
+          return params?.populate ? rows.map((row) => ({ ...row, retargetRequired: false })) : rows;
+        },
+      };
+    };
+    const ctx = policyContext({ id: 2, role: { type: "member" } });
+    await expect(announcementVisibility(ctx, undefined, { strapi })).resolves.toBe(true);
+    expect(ctx.request.query.filters).toEqual({ id: { $eq: -1 } });
+  });
+});

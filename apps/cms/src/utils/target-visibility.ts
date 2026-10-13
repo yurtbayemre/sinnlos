@@ -59,7 +59,12 @@ import { isAnnouncementExpired } from "./announcement-expiry";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 import type { PolicyStrapi } from "./policy-factories";
 import { fitsBindLimit } from "./policy-query";
-import { loadUserScope, toAudienceScope, visibleWikiSpaceIds } from "./visible-ids";
+import {
+  loadUserScope,
+  toAudienceScope,
+  visibleWikiSpaceIds,
+  withFreshAnnouncementFlags,
+} from "./visible-ids";
 
 /** A signed-in caller with a row id (the scope is loaded by it). */
 export interface CallerUser extends RoleHolder {
@@ -197,17 +202,18 @@ export async function visibleTargetAnchors(
   const raw = user ? await loadUserScope(strapi, user.id) : null;
   const audience = toAudienceScope(raw);
 
+  const published = { publishedAt: { $notNull: true } };
   const [announcementRows, spaceIds] = await Promise.all([
-    strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      where: { publishedAt: { $notNull: true } },
-      select: ANNOUNCEMENT_SELECT,
-      populate: ANNOUNCEMENT_POPULATE,
-    }),
+    strapi.db
+      .query(ANNOUNCEMENT_UID)
+      .findMany({ where: published, select: ANNOUNCEMENT_SELECT, populate: ANNOUNCEMENT_POPULATE })
+      // The flags again, after the relations (utils/targeting-flags.ts).
+      .then((rows) => withFreshAnnouncementFlags(strapi, listOf<AnnouncementRow>(rows), published)),
     visibleWikiSpaceIds(strapi, raw),
   ]);
 
   const now = new Date();
-  const announcement = [...publishedByAnchor(listOf<AnnouncementRow>(announcementRows)).entries()]
+  const announcement = [...publishedByAnchor(announcementRows).entries()]
     .filter(([, row]) => !isAnnouncementExpired(row, now) && isAnnouncementVisible(row, audience))
     .map(([anchor]) => anchor);
 
@@ -233,12 +239,17 @@ export async function isTargetVisible(
   user: CallerUser | null | undefined,
 ): Promise<boolean> {
   if (targetType === "announcement") {
-    const rows = listOf<AnnouncementRow>(
-      await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-        where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
-        select: ANNOUNCEMENT_SELECT,
-        populate: ANNOUNCEMENT_POPULATE,
-      }),
+    const where = { documentId: targetDocumentId, publishedAt: { $notNull: true } };
+    const rows = await withFreshAnnouncementFlags(
+      strapi,
+      listOf<AnnouncementRow>(
+        await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+          where,
+          select: ANNOUNCEMENT_SELECT,
+          populate: ANNOUNCEMENT_POPULATE,
+        }),
+      ),
+      where,
     );
     const row = publishedByAnchor(rows).get(targetDocumentId);
     if (!row) return false;
