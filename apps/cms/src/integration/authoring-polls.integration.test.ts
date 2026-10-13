@@ -3,7 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { ADMIN_ENV, contentManager, type ContentManager } from "./admin-api.test.helper";
 import { authoringApi, type AuthoringApi } from "./authoring.test.helper";
 import { createTestStrapi, testEngines, type TestStrapi } from "./harness.test.helper";
-import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  testSchema,
+  waitForLockWait,
+} from "./pg-lock.test.helper";
 
 /**
  * Polls through the v2 write model (deep-dive decision 06 §B1-§B3, §G2;
@@ -19,7 +25,13 @@ import { holdTransaction, qualified, settle, waitForLockWait } from "./pg-lock.t
  *     publish or a web save-and-publish of closesAt is refused and nothing
  *     moves; a save of closesAt on an unchanged poll passes;
  *   - a vote and an options change raced under the poll's lock end with
- *     one of them refused (Postgres).
+ *     one of them refused (Postgres);
+ *   - a voted poll keeps its published row, the freeze's baseline (Codex
+ *     review of 15A, finding 1): a panel unpublish, with or without
+ *     discarding the draft, is refused and moves nothing, so the panel's
+ *     and the web's options change after it stay refused; a poll without
+ *     votes unpublishes as before; a voted poll that lost its published row
+ *     before this release can no longer be published, from either side.
  */
 const POLL = "api::poll.poll";
 const P = "polls";
@@ -305,6 +317,164 @@ describe.each(testEngines())("authoring polls on %s", (engine) => {
         else expect(row?.options).toEqual(["A", "C"]);
       },
     );
+  });
+
+  describe("a voted poll keeps its published row (Codex review of 15A, finding 1)", () => {
+    const VOTE = "api::poll-vote.poll-vote";
+    const ballots = (documentId: string) =>
+      t.strapi.db.query(VOTE).count({ where: { poll: { documentId } } });
+    const rowsOf = (documentId: string) =>
+      t.strapi.db.query(POLL).findMany({
+        where: { documentId },
+        select: ["id", "publishedAt", "options", "anonymous"],
+        orderBy: { id: "asc" },
+      });
+    const voted = async (question: string) => {
+      const created = await api.create(
+        "editor",
+        P,
+        { question, options: ["A", "B"], anonymous: true },
+        null,
+      );
+      expect(created.status, created.text).toBe(201);
+      const documentId: string = created.body.data.documentId;
+      const vote = await t.api("member", `/api/polls/${documentId}/vote`, {
+        json: { optionIndex: 0, option: "A" },
+      });
+      expect(vote.status, vote.text).toBe(200);
+      return documentId;
+    };
+    // The read-only query of docs/DEPLOYMENT.md ("Upgrading to the v2 write
+    // model", before the deploy, step 3), verbatim.
+    const UNPUBLISHED_VOTED_POLLS = `SELECT DISTINCT p.document_id, p.question
+     FROM polls p
+     JOIN poll_votes_poll_lnk l ON l.poll_id = p.id
+    WHERE NOT EXISTS (SELECT 1 FROM polls q
+                       WHERE q.document_id = p.document_id
+                         AND q.published_at IS NOT NULL);`;
+    const unpublishedVotedPolls = async (): Promise<string[]> => {
+      type Row = { document_id: string };
+      if (engine === "postgres") {
+        const held = await holdTransaction(t);
+        try {
+          await held.raw(`SET LOCAL search_path TO "${testSchema(t)}"`);
+          const result = (await held.raw(UNPUBLISHED_VOTED_POLLS)) as { rows: Row[] };
+          return result.rows.map((row) => row.document_id);
+        } finally {
+          await held.rollback();
+        }
+      }
+      const knex = (
+        t.strapi.db as unknown as { connection: { raw(sql: string): Promise<unknown> } }
+      ).connection;
+      return ((await knex.raw(UNPUBLISHED_VOTED_POLLS)) as Row[]).map((row) => row.document_id);
+    };
+    const webChange = async (documentId: string) => {
+      const form = await api.editable("editor", P, documentId);
+      expect(form.status, form.text).toBe(200);
+      return api.update(
+        "editor",
+        P,
+        documentId,
+        { options: ["X", "Y"], anonymous: false },
+        { status: null, version: form.body.data.version },
+      );
+    };
+
+    it.each([false, true])(
+      "a panel unpublish (discardDraft %s) is refused and moves nothing; the change after it stays refused",
+      async (discardDraft) => {
+        const question = `Withdraw ${String(discardDraft)}?`;
+        const documentId = await voted(question);
+        const before = await rowsOf(documentId);
+        const res = await panel.unpublish(POLL, documentId, { discardDraft });
+        expect(res.status, res.text).toBe(400);
+        expect(res.body.error?.details).toEqual({ keys: ["_form"] });
+        expect(await rowsOf(documentId)).toEqual(before);
+        expect(await ballots(documentId)).toBe(1);
+        // The Content Manager: the change, then a publish.
+        const draft = await panel.update(POLL, documentId, {
+          question,
+          options: ["X", "Y"],
+          anonymous: false,
+        });
+        expect(draft.status).toBe(400);
+        expect(draft.body.error?.details).toMatchObject({
+          keys: ["anonymous", "options"],
+          codes: { anonymous: "frozenAfterVotes", options: "frozenAfterVotes" },
+        });
+        expect((await panel.publish(POLL, documentId)).status).toBe(200);
+        // The authoring controller: the web's save of the same change.
+        const web = await webChange(documentId);
+        expect(web.status).toBe(400);
+        expect(web.body.error?.details).toMatchObject({
+          codes: { anonymous: "frozenAfterVotes", options: "frozenAfterVotes" },
+        });
+        expect(await published(documentId)).toMatchObject({ options: ["A", "B"], anonymous: true });
+        expect(await ballots(documentId)).toBe(1);
+      },
+    );
+
+    it.each([false, true])(
+      "a poll without votes still unpublishes (discardDraft %s) and republishes with new options",
+      async (discardDraft) => {
+        const question = `Unvoted ${String(discardDraft)}?`;
+        const created = await api.create("editor", P, { question, options: ["A", "B"] }, null);
+        expect(created.status, created.text).toBe(201);
+        const documentId: string = created.body.data.documentId;
+        const res = await panel.unpublish(POLL, documentId, { discardDraft });
+        expect(res.status, res.text).toBe(200);
+        expect(await published(documentId)).toBeNull();
+        const draft = await panel.update(POLL, documentId, { question, options: ["X", "Y"] });
+        expect(draft.status, draft.text).toBe(200);
+        expect((await panel.publish(POLL, documentId)).status).toBe(200);
+        expect((await published(documentId))?.options).toEqual(["X", "Y"]);
+      },
+    );
+
+    it("a voted poll unpublished before this release can no longer be published, from either side", async () => {
+      const question = "Withdrawn before the release?";
+      const documentId = await voted(question);
+      expect(await unpublishedVotedPolls()).not.toContain(documentId);
+      // The unpublish the guard used to let through: the same Content
+      // Manager call, with the ballot count hidden from the guard once.
+      const votes = t.strapi.db.query(VOTE) as unknown as {
+        count(params: unknown): Promise<number>;
+      };
+      const count = votes.count;
+      votes.count = async () => {
+        votes.count = count;
+        return 0;
+      };
+      let res: Awaited<ReturnType<typeof panel.unpublish>>;
+      try {
+        res = await panel.unpublish(POLL, documentId, { discardDraft: true });
+      } finally {
+        votes.count = count;
+      }
+      expect(res.status, res.text).toBe(200);
+      expect(await published(documentId)).toBeNull();
+      // The ballot survives the unpublish (it now links the draft), and the
+      // deployment guide's query lists the poll.
+      expect(await ballots(documentId)).toBe(1);
+      expect(await unpublishedVotedPolls()).toContain(documentId);
+      // The web's save of the change, published by the poll's status mode.
+      const web = await webChange(documentId);
+      expect(web.status, web.text).toBe(400);
+      expect(web.body.error?.details).toEqual({ keys: ["_form"] });
+      // The Content Manager: a draft save reaches no voter; its publish is refused.
+      const draft = await panel.update(POLL, documentId, {
+        question,
+        options: ["X", "Y"],
+        anonymous: false,
+      });
+      expect(draft.status, draft.text).toBe(200);
+      const publish = await panel.publish(POLL, documentId);
+      expect(publish.status).toBe(400);
+      expect(publish.body.error?.details).toEqual({ keys: ["_form"] });
+      expect(await published(documentId)).toBeNull();
+      expect(await ballots(documentId)).toBe(1);
+    });
   });
 
   it("the list and the form read: moderators only, with hasVotes", async () => {

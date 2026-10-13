@@ -1893,7 +1893,13 @@ mirror the new grants.
   change, **also in the admin panel** (a publish of a draft with other
   options answers 400 `frozenAfterVotes`; set the options back to the
   published ones, or create a new poll). Votes take the poll's lock, so a
-  vote and an options change cannot both succeed.
+  vote and an options change cannot both succeed. The published row is
+  what the freeze compares with, so **a poll with a vote can no longer be
+  unpublished** (400, `details.keys: ["_form"]`, also "unpublish and
+  discard the draft" and the bulk unpublish; delete it or let it close),
+  and **a poll that already has votes but no published version can no
+  longer be published** (same 400; create a new poll). List the latter
+  before the deploy (step 3 below).
 - **Grants: +65 rows** (`prod-perm-diff.sql` and the permission snapshot
   change deliberately): the five authoring actions on announcement,
   event, quick-link and document and two on poll for admin_role and
@@ -1919,6 +1925,21 @@ mirror the new grants.
    no `MISSING_IN_DB` and no `EXTRA_IN_DB` rows besides the known ones.
 2. `infra/diagnostics/department-heads.sql` (lane 15D): every user with the
    `department_head` role and a department will be a department author.
+3. Unpublished polls with votes, which this release no longer lets anyone
+   publish again (their published answers are gone, so nothing tells
+   which answer a vote meant):
+
+   ```sql
+   SELECT DISTINCT p.document_id, p.question
+     FROM polls p
+     JOIN poll_votes_poll_lnk l ON l.poll_id = p.id
+    WHERE NOT EXISTS (SELECT 1 FROM polls q
+                       WHERE q.document_id = p.document_id
+                         AND q.published_at IS NOT NULL);
+   ```
+
+   Usually none. For each row: leave it unpublished, or delete it and
+   create a new poll.
 
 **After the deploy**
 

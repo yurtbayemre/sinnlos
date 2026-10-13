@@ -84,7 +84,8 @@ function host(initial: PollRow[] = [], options: { failUpdate?: boolean } = {}) {
 
   const strapi: PollAudienceGuardHost = {
     db: {
-      query: vi.fn(() => ({ findMany, updateMany })),
+      // No ballots: the vote freeze (its own block below) lets every action pass.
+      query: vi.fn(() => ({ findMany, updateMany, count: async () => 0 })),
       transaction: <T>(callback: () => Promise<T>) => transaction(callback) as Promise<T>,
     },
     log,
@@ -678,6 +679,50 @@ describe("vote freeze", () => {
       );
     }
     expect(frozenChanges("publish", {}, draft, null)).toEqual([]);
+  });
+
+  it("refuses to unpublish a voted poll, keeping its baseline; unpublishes one without votes", async () => {
+    const voted = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    expect(
+      await refusal(assertPollNotFrozen(voted.strapi, "unpublish", { documentId: "p1" })),
+    ).toEqual({ keys: ["_form"] });
+    expect(voted.events).toEqual(["count api::poll-vote.poll-vote"]);
+    const fresh = freezeHost([DRAFT_SAME, PUBLISHED], 0);
+    await expect(
+      assertPollNotFrozen(fresh.strapi, "unpublish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses to publish a voted poll without a published row, whatever the draft says", async () => {
+    const { strapi } = freezeHost([DRAFT_SAME], 1);
+    expect(await refusal(assertPollNotFrozen(strapi, "publish", { documentId: "p1" }))).toEqual({
+      keys: ["_form"],
+    });
+    expect(
+      await refusal(
+        assertPollNotFrozen(strapi, "update", {
+          documentId: "p1",
+          status: "published",
+          data: { options: ["X", "Y"], anonymous: false },
+        }),
+      ),
+    ).toEqual({ keys: ["_form"] });
+    // A draft-only save reaches no voter; without a vote anything passes.
+    await expect(
+      assertPollNotFrozen(strapi, "update", { documentId: "p1", data: { options: ["X", "Y"] } }),
+    ).resolves.toBeUndefined();
+    const unvoted = freezeHost([DRAFT_CHANGED], 0);
+    await expect(
+      assertPollNotFrozen(unvoted.strapi, "publish", { documentId: "p1" }),
+    ).resolves.toBeUndefined();
+  });
+
+  it("refuses the unpublish inside the guard, before the write", async () => {
+    const { strapi } = freezeHost([DRAFT_SAME, PUBLISHED], 1);
+    const guard = createPollAudienceGuard(strapi);
+    const next = vi.fn(async () => null);
+    await refusal(guard(context("unpublish", { documentId: "p1" }), next));
+    expect(next).not.toHaveBeenCalled();
   });
 
   it("runs inside the guard before the write, so a refusal writes nothing", async () => {

@@ -1,4 +1,4 @@
-import { samePollOptions } from "@sinnlos/domain";
+import { FORM_KEY, samePollOptions } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 
 import { parseAdminJsonField } from "./json-field";
@@ -106,9 +106,28 @@ import { POLL_AUDIENCE_DEPARTMENTS } from "./poll-audience";
  *     them differ: a voted poll must not collect a draft that can never be
  *     published;
  *   - `create` and `clone` start a new document (no votes), `discardDraft`
- *     leaves the published row as it is, `unpublish` removes it.
+ *     leaves the published row as it is.
  * A difference with a vote answers 400 `ValidationError` with
  * `details.keys` and `details.codes: frozenAfterVotes`; nothing is written.
+ *
+ * The published row is the freeze's only baseline, so a voted poll keeps
+ * it (Codex review of 15A, finding 1): the votes survive an unpublish
+ * (Strapi relinks them to the draft), and a poll republished without its
+ * published row was compared with nothing, so new options took over the
+ * old ballots' indexes. Hence, with a vote:
+ *   - `unpublish` is refused (400, `details.keys: ["_form"]`). The Content
+ *     Manager's "unpublish and discard the draft" runs discardDraft and
+ *     unpublish in one transaction, so the refusal undoes both. A voted
+ *     poll leaves the intranet by `delete` (the document and its rows go;
+ *     the ballots lose their poll and count nowhere) or by `closesAt`;
+ *   - a poll without a published row (one unpublished before this release)
+ *     can no longer be published at all (`publish`, or an `update` with
+ *     `status: 'published'`; the same 400): what its ballots were cast on
+ *     is unknown, and the draft is no baseline (it could differ from the
+ *     published row before the first vote). Draft-only updates still pass:
+ *     they reach no voter. docs/DEPLOYMENT.md lists such polls.
+ * The simplest fail-closed rule: a voted poll's baseline cannot go away,
+ * so no second, immutable copy of it is needed.
  * It runs under the poll's lock: the document lock (slot 2) holds the
  * poll's version row FOR UPDATE for the whole action, and the vote handler
  * (api/poll-vote/controllers/poll-vote.ts) takes the same lock before it
@@ -355,19 +374,48 @@ export function frozenChanges(
   return changed;
 }
 
+/** Every ballot of the poll `documentId` (through either row). */
+async function ballotsOf(
+  strapi: Pick<PollAudienceGuardHost, "db">,
+  documentId: string,
+): Promise<number> {
+  const votes = strapi.db.query(POLL_VOTE_UID);
+  if (typeof votes.count !== "function") {
+    throw new Error(`${POLL_AUDIENCE_GUARD_LOG} the vote freeze needs db.query().count`);
+  }
+  return votes.count({ where: { poll: { documentId } } });
+}
+
+/** Whether `action` makes the draft the published row (C3: also an update with status published). */
+function publishes(action: string, params: unknown): boolean {
+  if (action === "publish") return true;
+  return action === "update" && isRecord(params) && params.status === "published";
+}
+
+/** A refusal about the whole voted poll (`_form`, no code: "invalid"). */
+const votedPollRefusal = (message: string) =>
+  new errors.ValidationError(message, { keys: [FORM_KEY] });
+
 /**
- * Throws `frozenAfterVotes` when the action would change a frozen field of
- * a poll that has a vote (see THE VOTE FREEZE). Runs inside the action's
- * transaction, under the poll's lock (slot 2).
+ * Throws when the action would change a frozen field of a poll that has a
+ * vote (`frozenAfterVotes`), unpublish a voted poll, or publish a voted
+ * poll that lost its published row (`_form`; see THE VOTE FREEZE). Runs
+ * inside the action's transaction, under the poll's lock (slot 2).
  */
 export async function assertPollNotFrozen(
   strapi: Pick<PollAudienceGuardHost, "db">,
   action: string,
   params: unknown,
 ): Promise<void> {
-  if (action !== "publish" && action !== "update") return;
+  if (action !== "publish" && action !== "update" && action !== "unpublish") return;
   const documentId = isRecord(params) ? params.documentId : undefined;
   if (typeof documentId !== "string" || documentId === "") return;
+  if (action === "unpublish") {
+    if ((await ballotsOf(strapi, documentId)) === 0) return;
+    throw votedPollRefusal(
+      "This poll has votes: it can no longer be unpublished (delete it, or let it close)",
+    );
+  }
   const rows = await strapi.db.query(POLL_UID).findMany({
     where: { documentId },
     select: ["id", "publishedAt", "options", "anonymous"],
@@ -375,14 +423,15 @@ export async function assertPollNotFrozen(
   const list = (Array.isArray(rows) ? rows : []).filter(isRecord);
   const draft = list.find((row) => row.publishedAt == null) ?? null;
   const published = list.find((row) => row.publishedAt != null) ?? null;
+  if (!published) {
+    if (!publishes(action, params) || (await ballotsOf(strapi, documentId)) === 0) return;
+    throw votedPollRefusal(
+      "This poll has votes but no published version: it can no longer be published",
+    );
+  }
   const changed = frozenChanges(action, params, draft, published);
   if (changed.length === 0) return;
-  const votes = strapi.db.query(POLL_VOTE_UID);
-  if (typeof votes.count !== "function") {
-    throw new Error(`${POLL_AUDIENCE_GUARD_LOG} the vote freeze needs db.query().count`);
-  }
-  const ballots = await votes.count({ where: { poll: { documentId } } });
-  if (ballots === 0) return;
+  if ((await ballotsOf(strapi, documentId)) === 0) return;
   const keys = [...changed].sort();
   throw new errors.ValidationError(
     `This poll has votes: ${keys.join(" and ")} can no longer change`,
