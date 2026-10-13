@@ -727,18 +727,35 @@ query and output handling, and the other three are global middlewares
   `utils/restricted-relations.ts`): a relation into a visibility-filtered
   type is only followed from that type's own filter domain. It protects
   wiki pages (`department.pages`, `team.pages` and any chain that reaches
-  them, e.g. `/api/users?populate[department]…`) and polls (no trusted
-  source at all): such relations are dropped from `populate`, rejected with
-  a 400 in `filters`/`sort`, and deleted from responses. `admin_role` and
-  `editor` bypass it, except for the closed targets
-  (`CLOSED_RELATION_TARGETS`, batch 15.1): wiki revisions are cut the same
-  way for every caller. That matters for the filters and sort nested in a
-  populate (`/api/wiki-spaces?populate[pages][filters][revisions][body]…`):
-  Strapi 5.57 checks the caller's grant on a relation in root filters,
-  sort and populate, but not there. It wraps
+  them, e.g. `/api/users?populate[department]…`), polls and, since batch
+  15.2, comments (`comment.parent`/`replies`: comment-target-visibility
+  decides per target, and nothing keeps a parent on its reply's target) —
+  the last two with no trusted source at all: such relations are dropped
+  from `populate`, rejected with a 400 in `filters`/`sort`, and deleted
+  from responses. `admin_role` and `editor` bypass it, except for the
+  closed targets (`CLOSED_RELATION_TARGETS`, batch 15.1): wiki revisions
+  are cut the same way for every caller. It wraps
   `strapi.contentAPI.sanitize.query`, so it covers core, users-permissions
   and upload routes, reads and writes; the boot fails if that hook point
-  disappears after a Strapi upgrade.
+  or `strapi.auth.verify` disappears after a Strapi upgrade.
+- **Relations in populate filters and sort** (batch 15.2, same guard):
+  Strapi 5.57 refuses a root filter or sort through a relation whose
+  target the caller holds no `find` on (400 `Invalid key`), but never asks
+  for the `filters` and `sort` nested in a populate (`validatePopulate`
+  passes no auth; `sanitizePopulate` skips those keys). The guard applies
+  the root rule there: every relation a populate's `filters` or `sort`
+  follow, at any populate depth, through `$and`/`$or`/`$not` and in every
+  sort shape, needs the caller's `<target>.find`, asked as the core asks it
+  (`strapi.auth.verify` with the request's `auth`, i.e. the caller's
+  users-permissions role; anonymous callers have the `public` role). Else
+  the answer is the core's own 400, `Invalid key <relation> at <path>`,
+  whatever the value. No bypass: `admin_role` and `editor` are held to
+  their own grants. In practice guest cannot select or sort through
+  `department` or `team`, no role but `admin_role` through
+  `users-permissions.role` (`author.role`, `space.allowedRoles`,
+  `manager.role`), and nobody through `role.permissions`. Relations only,
+  as at the root: media, components and scalars are not grant-checked.
+  The web sends no populate filter or sort.
 - **Root query-key allowlist** (`utils/rest-query-params.ts`, same wrapper,
   every role): keys outside Strapi's REST parameters (`where`, `orderBy`,
   `select`, `groupBy`, `offset`, …) are dropped before any service sees
@@ -826,7 +843,7 @@ this is who sees and changes what, per type.
 | `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                            |
 | `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                 |
-| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                               |
+| `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator. `parent`/`replies` are not followed below the moderators (batch 15.2).                                                                                                                                                        |
 | `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
 | `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
 | `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows. |
@@ -1162,6 +1179,14 @@ reverse proxy.
   populate shape or root, every filter and sort through `revisions` (root,
   `$or`, deep, nested in a populate) refused or blind, the 18 batch-15
   rows revoked with the runbook's boot lines, and the admin panel's view.
+- `apps/cms/src/integration/nested-relation-grants.integration.test.ts`
+  (batch 15.2), on SQLite and Postgres 16: per role, every relation it may
+  not `find`, in a populate's filters and sort in several shapes, answers
+  400 whatever the value; nested filters through what the role reads
+  answer as before; comment parent/replies and the other row-level
+  targets; the web's four relation filters in their exact shapes.
+  `utils/restricted-relations.test.ts` checks the rule against the
+  permission matrix's own grants.
 - `pnpm test:integration` (`apps/cms/src/integration/`): the real cms per
   role over HTTP: removed routes, `?status=draft` on every draft & publish
   type, relation side channels, contact-field filters, guest polls, RSVP
