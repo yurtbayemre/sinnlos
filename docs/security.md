@@ -386,6 +386,23 @@ letters:
   `REVOKED_PERMISSIONS`); `routes.matrix.test.ts` pins every content-API
   route to its policies and cross-checks the grants against the routes that
   exist.
+- **Nobody reads wiki revisions** (batch 15.1). A revision is the page
+  body before an edit, so whenever a page's draft differs from its
+  published version it holds unpublished text. Up to batch 15 every staff
+  role and `authenticated` read them (`/api/wiki-revisions`,
+  `populate=revisions`, filters through the relation). Now
+  `/api/wiki-revisions` has no route at all (404), no role holds any of its
+  five actions (revoked for every role at boot; a batch-15 database loses
+  18 rows), and `wiki-page.revisions` is a closed relation for every
+  caller, `admin_role` and `editor` included: without a
+  `wiki-revision.find` grant Strapi drops a populate of it and refuses a
+  root filter or sort with 400, and the relation guard refuses the filter
+  and sort inside a populate, which Strapi does not check
+  ([Global guards](#global-guards)). The lifecycle still writes revisions;
+  the web reads none. The type is hidden from the Content Manager and the
+  Content-Type Builder; the admin roles keep only read on it (the
+  admin's boot cleanup drops their create, update, delete and publish
+  rows).
 - **Revocations must be listed.** The boot sync only ever adds rows, so
   removing an entry from the matrix revokes nothing on an existing
   database: obsolete pairs go into `REVOKED_PERMISSIONS`, which must stay
@@ -471,7 +488,7 @@ route in `apps/cms/src/api/*/routes/*.ts`.
   gets 403/404, never 412, and never the new revision.
 - `is-admin-or-editor`: delete of announcements, events, polls, documents
   and quick links (with `If-Match`); create, update and delete of wiki
-  spaces and wiki revisions; create and delete of departments and teams;
+  spaces; create and delete of departments and teams;
   wiki page delete; kudos delete; the search-log `summary` route.
 - `can-edit-department`: department update only by the `department_head`
   of that department, and only `description` and `color` (`#rrggbb`);
@@ -599,9 +616,9 @@ the cms refuses to boot until then.
 
 ### Read-side filters
 
-- `wiki-visibility`: wiki spaces, pages and revisions, by the space's
-  `visibility` (public, role, department or team); pages and revisions
-  inherit their space's.
+- `wiki-visibility`: wiki spaces and pages, by the space's `visibility`
+  (public, role, department or team); pages inherit their space's. Its
+  revision level has no route since batch 15.1.
 - `document-visibility`: documents without departments are company-wide;
   otherwise only the owning departments see them; a document whose
   `audience` is `departments` but whose departments are all gone is for
@@ -707,9 +724,15 @@ query and output handling, and the other three are global middlewares
   them, e.g. `/api/users?populate[department]…`) and polls (no trusted
   source at all): such relations are dropped from `populate`, rejected with
   a 400 in `filters`/`sort`, and deleted from responses. `admin_role` and
-  `editor` bypass it. It wraps `strapi.contentAPI.sanitize.query`, so it
-  covers core, users-permissions and upload routes, reads and writes; the
-  boot fails if that hook point disappears after a Strapi upgrade.
+  `editor` bypass it, except for the closed targets
+  (`CLOSED_RELATION_TARGETS`, batch 15.1): wiki revisions are cut the same
+  way for every caller. That matters for the filters and sort nested in a
+  populate (`/api/wiki-spaces?populate[pages][filters][revisions][body]…`):
+  Strapi 5.57 checks the caller's grant on a relation in root filters,
+  sort and populate, but not there. It wraps
+  `strapi.contentAPI.sanitize.query`, so it covers core, users-permissions
+  and upload routes, reads and writes; the boot fails if that hook point
+  disappears after a Strapi upgrade.
 - **Root query-key allowlist** (`utils/rest-query-params.ts`, same wrapper,
   every role): keys outside Strapi's REST parameters (`where`, `orderBy`,
   `select`, `groupBy`, `offset`, …) are dropped before any service sees
@@ -814,7 +837,7 @@ this is who sees and changes what, per type.
 | `search-log`      | Anonymous by design (term and result count, no user relation), write-only content API; aggregated, admin-only `/api/search-logs/summary`; 90-day retention (03:35 cron).                                                                                                                                                                                                                                                                                                                         |
 | `wiki-space`      | `visibility`: public, role (`allowedRoles`), department or team. Moderators write.                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `wiki-page`       | Inherits its space's visibility. Written as described under `can-edit-wiki` and the write allowlist.                                                                                                                                                                                                                                                                                                                                                                                             |
-| `wiki-revision`   | Inherits its page's visibility; not readable by `guest`. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only.                                                                                                                                                                                                                                                                                                                      |
+| `wiki-revision`   | No route and no grant for any role, and closed as a relation for every caller (batch 15.1): it can hold unpublished draft text. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only. Hidden in the admin panel.                                                                                                                                                                                                                    |
 | _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
 | _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
 
@@ -1127,6 +1150,12 @@ reverse proxy.
   its rollback, the admin-panel guard and the dropped `tokenVersion`;
   `apps/cms/src/utils/deploy-preflight.test.ts` covers the rollback hint's
   rotation step.
+- `apps/cms/src/integration/wiki-revisions-closed.integration.test.ts`:
+  every caller, `admin_role` and `editor` included, on SQLite and
+  Postgres 16: no `/api/wiki-revisions` route, no revision through any
+  populate shape or root, every filter and sort through `revisions` (root,
+  `$or`, deep, nested in a populate) refused or blind, the 18 batch-15
+  rows revoked with the runbook's boot lines, and the admin panel's view.
 - `pnpm test:integration` (`apps/cms/src/integration/`): the real cms per
   role over HTTP: removed routes, `?status=draft` on every draft & publish
   type, relation side channels, contact-field filters, guest polls, RSVP
