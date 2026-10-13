@@ -1,5 +1,5 @@
 /**
- * Upcoming birthdays and work anniversaries for GET /api/kudos/celebrations
+ * Upcoming birthdays and work anniversaries for GET /api/celebrations
  * (roadmap FX46; datetime contract, deep-dive decision 04, C7).
  *
  * Pure: users and "today" in, cards out. `today` is a calendar date in

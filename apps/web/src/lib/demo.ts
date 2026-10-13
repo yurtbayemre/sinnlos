@@ -23,6 +23,7 @@
  *   - a production server with DEMO_MODE=1 answers every page and route
  *     that reads the session with a 500 (auth.ts throws on its first load).
  */
+import type { SearchSummary } from "@/lib/api/analytics";
 import { appTimeZone } from "@/lib/app-time-zone";
 import {
   DEFAULT_APP_TIME_ZONE,
@@ -495,6 +496,22 @@ const celebrations = [
   { user: users.jonas, type: "birthday", date: dateOnly(2), daysUntil: 2 },
   { user: users.grace, type: "work-anniversary", years: 3, daysUntil: 9 },
 ] satisfies Celebration[];
+
+/** The admin search telemetry (/manage/analytics): 30 days of the demo's searches. */
+const searchLogSummary = {
+  windowDays: 30,
+  total: 42,
+  zeroResultCount: 5,
+  topTerms: [
+    { term: "vpn", count: 9, avgResults: 3 },
+    { term: "expenses", count: 6, avgResults: 2 },
+    { term: "onboarding", count: 4, avgResults: 5 },
+  ],
+  topZeroTerms: [
+    { term: "parking", count: 3 },
+    { term: "canteen menu", count: 2 },
+  ],
+} satisfies SearchSummary;
 
 const documents = [
   {
@@ -1045,6 +1062,7 @@ const ROUTES: [RegExp, Handler][] = [
   [/^\/api\/notifications$/, (p) => list(notifications, p)],
   [/^\/api\/comments$/, (p) => list(demoComments, p)],
   [/^\/api\/reactions$/, (p) => list(demoReactions, p)],
+  [/^\/api\/search-logs\/summary$/, () => searchLogSummary],
   [/^\/api\/users$/, (p) => userList(p)],
   [/^\/api\/users\/me$/, () => directory.find((u) => u.id === DEMO_USER_ID)],
   // An unknown id answers an empty body, like the users-permissions findOne.

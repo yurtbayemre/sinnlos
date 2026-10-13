@@ -1,0 +1,264 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadDashboard > CMS down: every count unknown, no links, no news, the banner 1`] = `
+{
+  "counts": {
+    "departments": {
+      "truncated": false,
+      "value": null,
+    },
+    "events": {
+      "truncated": false,
+      "value": null,
+    },
+    "news": {
+      "truncated": false,
+      "value": null,
+    },
+    "teams": {
+      "truncated": false,
+      "value": null,
+    },
+  },
+  "failed": true,
+  "latestNews": {
+    "failed": true,
+    "featured": null,
+    "rest": [],
+  },
+  "quickLinks": [],
+  "sections": {
+    "acks": true,
+    "kudos": true,
+    "news": true,
+    "org": true,
+    "training": true,
+  },
+  "truncated": false,
+}
+`;
+
+exports[`loadDashboard > partial failure: the failed tile is unknown (null), not 0; the rest stays 1`] = `
+{
+  "counts": {
+    "departments": {
+      "truncated": false,
+      "value": 3,
+    },
+    "events": {
+      "truncated": false,
+      "value": null,
+    },
+    "news": {
+      "truncated": false,
+      "value": 42,
+    },
+    "teams": {
+      "truncated": false,
+      "value": null,
+    },
+  },
+  "failed": true,
+  "latestNews": {
+    "failed": false,
+    "featured": {
+      "documentId": "doc-3",
+      "id": 3,
+      "pinned": true,
+      "title": "Item 3",
+    },
+    "rest": [
+      {
+        "documentId": "doc-1",
+        "id": 1,
+        "pinned": false,
+        "title": "Item 1",
+      },
+      {
+        "documentId": "doc-2",
+        "id": 2,
+        "pinned": false,
+        "title": "Item 2",
+      },
+      {
+        "documentId": "doc-4",
+        "id": 4,
+        "pinned": false,
+        "title": "Item 4",
+      },
+      {
+        "documentId": "doc-5",
+        "id": 5,
+        "pinned": false,
+        "title": "Item 5",
+      },
+    ],
+  },
+  "quickLinks": [
+    {
+      "category": "hr",
+      "id": 1,
+      "label": "Payroll",
+      "url": "https://pay.example.test",
+    },
+  ],
+  "sections": {
+    "acks": true,
+    "kudos": true,
+    "news": true,
+    "org": true,
+    "training": true,
+  },
+  "truncated": false,
+}
+`;
+
+exports[`loadDashboard > success: walk counts from the rows, feed counts from their totals 1`] = `
+{
+  "counts": {
+    "departments": {
+      "truncated": false,
+      "value": 3,
+    },
+    "events": {
+      "truncated": false,
+      "value": 17,
+    },
+    "news": {
+      "truncated": false,
+      "value": 42,
+    },
+    "teams": {
+      "truncated": false,
+      "value": 5,
+    },
+  },
+  "failed": false,
+  "latestNews": {
+    "failed": false,
+    "featured": {
+      "documentId": "doc-3",
+      "id": 3,
+      "pinned": true,
+      "title": "Item 3",
+    },
+    "rest": [
+      {
+        "documentId": "doc-1",
+        "id": 1,
+        "pinned": false,
+        "title": "Item 1",
+      },
+      {
+        "documentId": "doc-2",
+        "id": 2,
+        "pinned": false,
+        "title": "Item 2",
+      },
+      {
+        "documentId": "doc-4",
+        "id": 4,
+        "pinned": false,
+        "title": "Item 4",
+      },
+      {
+        "documentId": "doc-5",
+        "id": 5,
+        "pinned": false,
+        "title": "Item 5",
+      },
+    ],
+  },
+  "quickLinks": [
+    {
+      "category": "hr",
+      "id": 1,
+      "label": "Payroll",
+      "url": "https://pay.example.test",
+    },
+  ],
+  "sections": {
+    "acks": true,
+    "kudos": true,
+    "news": true,
+    "org": true,
+    "training": true,
+  },
+  "truncated": false,
+}
+`;
+
+exports[`loadDashboard > truncated: a walk cut at its cap is a lower bound (N+) 1`] = `
+{
+  "counts": {
+    "departments": {
+      "truncated": true,
+      "value": 4,
+    },
+    "events": {
+      "truncated": false,
+      "value": 17,
+    },
+    "news": {
+      "truncated": false,
+      "value": 42,
+    },
+    "teams": {
+      "truncated": false,
+      "value": 5,
+    },
+  },
+  "failed": false,
+  "latestNews": {
+    "failed": false,
+    "featured": {
+      "documentId": "doc-3",
+      "id": 3,
+      "pinned": true,
+      "title": "Item 3",
+    },
+    "rest": [
+      {
+        "documentId": "doc-1",
+        "id": 1,
+        "pinned": false,
+        "title": "Item 1",
+      },
+      {
+        "documentId": "doc-2",
+        "id": 2,
+        "pinned": false,
+        "title": "Item 2",
+      },
+      {
+        "documentId": "doc-4",
+        "id": 4,
+        "pinned": false,
+        "title": "Item 4",
+      },
+      {
+        "documentId": "doc-5",
+        "id": 5,
+        "pinned": false,
+        "title": "Item 5",
+      },
+    ],
+  },
+  "quickLinks": [
+    {
+      "category": "hr",
+      "id": 1,
+      "label": "Payroll",
+      "url": "https://pay.example.test",
+    },
+  ],
+  "sections": {
+    "acks": true,
+    "kudos": true,
+    "news": true,
+    "org": true,
+    "training": true,
+  },
+  "truncated": true,
+}
+`;

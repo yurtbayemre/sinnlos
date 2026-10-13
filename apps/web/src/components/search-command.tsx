@@ -263,6 +263,34 @@ export function createSearchScheduler({
   };
 }
 
+/** What focusReturnTarget needs of an element: whether it is still on the page. */
+export type FocusReturnCandidate = { readonly isConnected: boolean };
+
+/**
+ * Where focus goes when the palette closes. cmdk's Command.Dialog renders
+ * no Radix Dialog.Trigger, and Radix's modal Content returns focus only to
+ * that trigger, so focus used to fall to <body> after Escape, a click
+ * outside or ⌘K. Now it goes back to the element that had it when the
+ * palette opened (the topbar button, or wherever ⌘K was pressed), or to
+ * the topbar button when that element is gone (a re-render replaced it).
+ * Nothing moves when something else holds focus by then (`active` is
+ * neither <body> nor null). A selection navigates and restores nothing:
+ * focus starts on the new page as after any link.
+ */
+export function focusReturnTarget<T extends FocusReturnCandidate>({
+  opener,
+  trigger,
+  activeIsBody,
+}: {
+  opener: T | null;
+  trigger: T | null;
+  activeIsBody: boolean;
+}): T | null {
+  if (!activeIsBody) return null;
+  if (opener?.isConnected) return opener;
+  return trigger?.isConnected ? trigger : null;
+}
+
 /** cmdk filter over the item's title and subtitle (its `value` is the unique key). */
 function matchText(_value: string, search: string, keywords?: string[]): number {
   return defaultFilter ? defaultFilter((keywords ?? []).join(" "), search) : 1;
@@ -354,6 +382,42 @@ export function SearchCommand() {
     if (!open) schedulerRef.current?.flushLog();
   }, [open]);
 
+  // Focus return (focusReturnTarget). The opener is remembered before the
+  // dialog mounts (its focus scope moves focus into the input at once) and
+  // refocused in a 0 ms timer once the palette has closed; checked in
+  // headless Chrome: Escape, a click outside and ⌘K all land on the opener,
+  // nothing pulls focus back into the closing dialog. A selection clears
+  // the opener (it navigates; refocusing the old page could scroll it).
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const navigatingRef = useRef(false);
+  const openRef = useRef(open);
+  const rememberOpener = useCallback(() => {
+    const active = document.activeElement;
+    openerRef.current = active instanceof HTMLElement && active !== document.body ? active : null;
+  }, []);
+  useEffect(() => {
+    const wasOpen = openRef.current;
+    openRef.current = open;
+    if (open || !wasOpen) return;
+    if (navigatingRef.current) {
+      navigatingRef.current = false;
+      openerRef.current = null;
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      const active = document.activeElement;
+      const target = focusReturnTarget({
+        opener: openerRef.current,
+        trigger: triggerRef.current,
+        activeIsBody: active === null || active === document.body,
+      });
+      openerRef.current = null;
+      target?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [open]);
+
   const onQueryChange = useCallback((value: string) => {
     setQuery(value);
     schedulerRef.current?.query(value);
@@ -364,18 +428,20 @@ export function SearchCommand() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
+        if (!openRef.current) rememberOpener();
         setOpen((o) => !o);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  }, [rememberOpener]);
 
   const select = useCallback(
     (href: Route) => {
       // A selection is the strongest "this query settled" signal.
       schedulerRef.current?.flushLog();
       schedulerRef.current?.query("");
+      navigatingRef.current = true;
       setOpen(false);
       setQuery("");
       setResults(null);
@@ -416,9 +482,13 @@ export function SearchCommand() {
     <>
       {/* Trigger — icon-only on phones, full search-input look from sm up */}
       <button
+        ref={triggerRef}
         type="button"
         aria-label={tSearch("label")}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          rememberOpener();
+          setOpen(true);
+        }}
         className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border bg-muted/40 text-sm text-muted-foreground outline-none transition-colors hover:bg-muted/60 focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring sm:h-10 sm:w-full sm:max-w-xl sm:justify-start sm:pl-9 sm:pr-3"
       >
         <Search
@@ -432,8 +502,9 @@ export function SearchCommand() {
       </button>
 
       {/* Command palette as a real modal (issue #31): Command.Dialog wraps
-          Radix Dialog, which supplies the focus trap, Tab cycling, Escape,
-          outside-click close and focus restore to the trigger — the
+          Radix Dialog, which supplies the focus trap, Tab cycling, Escape
+          and outside-click close (focus restore is ours, see
+          focusReturnTarget: cmdk renders no Dialog.Trigger) — the
           previous hand-rolled portal announced aria-modal without making
           the background inert. Radix portals to <body>, which the repo
           requires anyway: the sticky topbar's backdrop-blur turns the

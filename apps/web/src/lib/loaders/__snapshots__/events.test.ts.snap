@@ -1,0 +1,224 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadEvents: list > CMS down: failed, no cards, no empty state 1`] = `
+{
+  "empty": false,
+  "failed": true,
+  "mode": "list",
+  "past": [],
+  "today": "2026-09-28",
+  "truncated": false,
+  "upcoming": [],
+}
+`;
+
+exports[`loadEvents: list > partial failure: summaries down hide the RSVP panels instead of showing zeros 1`] = `
+{
+  "empty": false,
+  "failed": true,
+  "mode": "list",
+  "past": [
+    {
+      "allDay": false,
+      "documentId": "evt--1",
+      "end": null,
+      "id": -1,
+      "location": "HQ",
+      "organizer": {
+        "displayName": "Ada",
+        "id": 3,
+      },
+      "start": "2026-09-20T08:00:00.000Z",
+      "title": "Event -1",
+    },
+  ],
+  "today": "2026-09-28",
+  "truncated": false,
+  "upcoming": [
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-1",
+        "end": null,
+        "id": 1,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "rsvpEnabled": true,
+        "start": "2026-09-28T08:00:00.000Z",
+        "title": "Event 1",
+      },
+      "rsvp": null,
+    },
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-2",
+        "end": null,
+        "id": 2,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "start": "2026-09-29T08:00:00.000Z",
+        "title": "Event 2",
+      },
+      "rsvp": null,
+    },
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-3",
+        "end": null,
+        "id": 3,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "rsvpEnabled": true,
+        "start": "2026-09-30T08:00:00.000Z",
+        "title": "Event 3",
+      },
+      "rsvp": null,
+    },
+  ],
+}
+`;
+
+exports[`loadEvents: list > success: upcoming with RSVP summaries where the caller may answer, past without 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "mode": "list",
+  "past": [
+    {
+      "allDay": false,
+      "documentId": "evt--1",
+      "end": null,
+      "id": -1,
+      "location": "HQ",
+      "organizer": {
+        "displayName": "Ada",
+        "id": 3,
+      },
+      "start": "2026-09-20T08:00:00.000Z",
+      "title": "Event -1",
+    },
+  ],
+  "today": "2026-09-28",
+  "truncated": false,
+  "upcoming": [
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-1",
+        "end": null,
+        "id": 1,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "rsvpEnabled": true,
+        "start": "2026-09-28T08:00:00.000Z",
+        "title": "Event 1",
+      },
+      "rsvp": {
+        "maybeCount": 2,
+        "myStatus": "yes",
+        "noCount": 0,
+        "yesCount": 1,
+        "yesNames": [
+          "Ada",
+        ],
+      },
+    },
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-2",
+        "end": null,
+        "id": 2,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "start": "2026-09-29T08:00:00.000Z",
+        "title": "Event 2",
+      },
+      "rsvp": null,
+    },
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-3",
+        "end": null,
+        "id": 3,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "rsvpEnabled": true,
+        "start": "2026-09-30T08:00:00.000Z",
+        "title": "Event 3",
+      },
+      "rsvp": {
+        "maybeCount": 0,
+        "myStatus": null,
+        "noCount": 0,
+        "yesCount": 0,
+        "yesNames": [],
+      },
+    },
+  ],
+}
+`;
+
+exports[`loadEvents: list > truncated: more upcoming events than the capped read holds 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "mode": "list",
+  "past": [
+    {
+      "allDay": false,
+      "documentId": "evt--1",
+      "end": null,
+      "id": -1,
+      "location": "HQ",
+      "organizer": {
+        "displayName": "Ada",
+        "id": 3,
+      },
+      "start": "2026-09-20T08:00:00.000Z",
+      "title": "Event -1",
+    },
+  ],
+  "today": "2026-09-28",
+  "truncated": true,
+  "upcoming": [
+    {
+      "event": {
+        "allDay": false,
+        "documentId": "evt-1",
+        "end": null,
+        "id": 1,
+        "location": "HQ",
+        "organizer": {
+          "displayName": "Ada",
+          "id": 3,
+        },
+        "start": "2026-09-28T08:00:00.000Z",
+        "title": "Event 1",
+      },
+      "rsvp": null,
+    },
+  ],
+}
+`;

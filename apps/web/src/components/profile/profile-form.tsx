@@ -194,7 +194,7 @@ export function ProfileForm({
         </p>
       )}
       {state.success && (
-        <p role="status" className="text-sm text-emerald-600 dark:text-emerald-400">
+        <p role="status" className="text-sm text-emerald-700 dark:text-emerald-400">
           {tProfile(PROFILE_FORM_MESSAGES[state.success])}
         </p>
       )}

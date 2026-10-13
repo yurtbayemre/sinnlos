@@ -9,7 +9,7 @@ import type { Team } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -22,12 +22,7 @@ export default async function TeamsPage() {
   const tCommon = await getTranslations("common");
   // A role without team.find (guest) gets no request (SH02).
   if (isReadDenied((await getViewer()).role, "teams")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   const { data, failed } = await tryFetch(() => api.teams.list(), "teams");
   const items = (data?.data ?? []) as Team[];
@@ -44,7 +39,7 @@ export default async function TeamsPage() {
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((team) => (
             <Link key={team.id} href={`/teams/${team.slug}`} className="focus-card group">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardHeader>
                   <div
                     aria-hidden="true"
@@ -52,7 +47,7 @@ export default async function TeamsPage() {
                   >
                     <Users2 className="h-4 w-4" />
                   </div>
-                  <CardTitle className="transition-colors group-hover:text-primary">
+                  <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                     {team.name}
                   </CardTitle>
                   <CardDescription>

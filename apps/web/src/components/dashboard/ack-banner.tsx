@@ -1,34 +1,19 @@
 import Link from "next/link";
 import { CheckCircle2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
-import { api } from "@/lib/strapi";
-import { computeOpenAcks, fetchMyAnnouncementAcks } from "@/lib/acknowledgements";
-import { tryFetch } from "@/lib/safe-fetch";
-import type { Acknowledgement, Announcement } from "@/lib/types";
+import { loadOpenAckCount } from "@/lib/loaders/announcements";
 
 /**
  * Dashboard banner listing how many mandatory (requiresAck) announcements
- * the current user has not confirmed yet. Server Component — both fetches
- * are per-user (the CMS announcement-visibility policy filters the list by
- * audience; the acks are the caller's own), like every strapi() read
- * uncached (D-DC01).
- * Renders nothing when everything is confirmed or a fetch fails (the
- * dashboard already shows a generic fetch-error banner).
+ * the current user has not confirmed yet (lib/loaders/announcements.ts
+ * loadOpenAckCount: the rule of the open section on /announcements).
+ * Server Component, per-user reads, uncached like every strapi() read
+ * (D-DC01). Renders nothing when everything is confirmed or a read failed
+ * (the dashboard already shows its CMS-down banner).
  */
 export async function AckBanner() {
-  const [announcementsResult, acksResult] = await Promise.all([
-    tryFetch(() => api.announcements.requiringAck(), "ack-banner"),
-    tryFetch(() => fetchMyAnnouncementAcks(), "ack-banner"),
-  ]);
-  if (announcementsResult.failed || acksResult.failed) return null;
-
-  // Same rule as the pinned "open confirmations" on /announcements
-  // (computeOpenAcks: requiresAck re-checked, matched on documentId).
-  const openCount = computeOpenAcks(
-    (announcementsResult.data?.data ?? []) as Announcement[],
-    (acksResult.data?.acks ?? []) as Acknowledgement[],
-  ).length;
-  if (openCount === 0) return null;
+  const { count: openCount } = await loadOpenAckCount();
+  if (!openCount) return null;
 
   const t = await getTranslations("dashboard");
 

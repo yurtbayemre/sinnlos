@@ -30,13 +30,16 @@ export default async function WikiHomePage() {
       {spaces.length === 0 ? (
         <EmptyState icon={BookOpen} title={t("emptySpacesTitle")} hint={t("emptySpacesHint")} />
       ) : (
-        <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        // grid-cols-1 and min-w-0: below sm a grid without a column template
+        // sizes its items by content (min-width: auto), so a long description
+        // behind `truncate` widened the card past a 360 px screen.
+        <div className="stagger grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {spaces.map((s) => {
             // DA02: the space's icon through the shared icon map (BookOpen otherwise).
             const Icon = ICONS[wikiSpaceIconName(s.icon)];
             return (
-              <Link key={s.id} href={`/wiki/${s.slug}`} className="focus-card group">
-                <Card className="card-lift h-full">
+              <Link key={s.id} href={`/wiki/${s.slug}`} className="focus-card group min-w-0">
+                <Card interactive className="card-lift h-full">
                   <CardHeader>
                     <div
                       aria-hidden="true"
@@ -44,7 +47,7 @@ export default async function WikiHomePage() {
                     >
                       <Icon className="h-4 w-4" />
                     </div>
-                    <CardTitle className="transition-colors group-hover:text-primary">
+                    <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                       {s.name}
                     </CardTitle>
                     <CardDescription className="flex items-center gap-1.5">

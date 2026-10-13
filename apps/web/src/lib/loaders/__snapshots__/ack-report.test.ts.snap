@@ -1,0 +1,232 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadAckReport > CMS down: the banner, no rows and no empty state 1`] = `
+{
+  "empty": false,
+  "failed": true,
+  "rows": [],
+  "truncated": false,
+}
+`;
+
+exports[`loadAckReport > partial failure: no team roster leaves only the team-scoped row unknown 1`] = `
+{
+  "empty": false,
+  "failed": true,
+  "rows": [
+    {
+      "ackDeadline": "2026-10-31",
+      "ackedCount": 2,
+      "audience": {
+        "department": null,
+        "roles": [],
+        "team": null,
+      },
+      "id": 1,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 67,
+      "targetTotal": 3,
+      "targetUnknown": false,
+      "title": "Code of conduct",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 1,
+      "audience": {
+        "department": "Engineering",
+        "roles": [],
+        "team": null,
+      },
+      "id": 2,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 50,
+      "targetTotal": 2,
+      "targetUnknown": false,
+      "title": "On-call rota",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 0,
+      "audience": {
+        "department": null,
+        "roles": [
+          "member",
+          "#9",
+        ],
+        "team": "#30",
+      },
+      "id": 3,
+      "openUsers": [],
+      "pct": 0,
+      "targetTotal": 0,
+      "targetUnknown": true,
+      "title": "Release freeze",
+    },
+  ],
+  "truncated": false,
+}
+`;
+
+exports[`loadAckReport > success: one row per mandatory announcement, rates over the eligible audience 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "rows": [
+    {
+      "ackDeadline": "2026-10-31",
+      "ackedCount": 2,
+      "audience": {
+        "department": null,
+        "roles": [],
+        "team": null,
+      },
+      "id": 1,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 67,
+      "targetTotal": 3,
+      "targetUnknown": false,
+      "title": "Code of conduct",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 1,
+      "audience": {
+        "department": "Engineering",
+        "roles": [],
+        "team": null,
+      },
+      "id": 2,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 50,
+      "targetTotal": 2,
+      "targetUnknown": false,
+      "title": "On-call rota",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 0,
+      "audience": {
+        "department": null,
+        "roles": [
+          "member",
+          "#9",
+        ],
+        "team": "#30",
+      },
+      "id": 3,
+      "openUsers": [
+        {
+          "id": 1,
+          "name": "User 1",
+        },
+        {
+          "id": 3,
+          "name": "User 3",
+        },
+      ],
+      "pct": 0,
+      "targetTotal": 2,
+      "targetUnknown": false,
+      "title": "Release freeze",
+    },
+  ],
+  "truncated": false,
+}
+`;
+
+exports[`loadAckReport > truncated: any input walk cut at its cap marks the report incomplete 1`] = `
+{
+  "empty": false,
+  "failed": false,
+  "rows": [
+    {
+      "ackDeadline": "2026-10-31",
+      "ackedCount": 2,
+      "audience": {
+        "department": null,
+        "roles": [],
+        "team": null,
+      },
+      "id": 1,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 67,
+      "targetTotal": 3,
+      "targetUnknown": false,
+      "title": "Code of conduct",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 1,
+      "audience": {
+        "department": "Engineering",
+        "roles": [],
+        "team": null,
+      },
+      "id": 2,
+      "openUsers": [
+        {
+          "id": 2,
+          "name": "user2",
+        },
+      ],
+      "pct": 50,
+      "targetTotal": 2,
+      "targetUnknown": false,
+      "title": "On-call rota",
+    },
+    {
+      "ackDeadline": null,
+      "ackedCount": 0,
+      "audience": {
+        "department": null,
+        "roles": [
+          "member",
+          "#9",
+        ],
+        "team": "#30",
+      },
+      "id": 3,
+      "openUsers": [
+        {
+          "id": 1,
+          "name": "User 1",
+        },
+        {
+          "id": 3,
+          "name": "User 3",
+        },
+      ],
+      "pct": 0,
+      "targetTotal": 2,
+      "targetUnknown": false,
+      "title": "Release freeze",
+    },
+  ],
+  "truncated": true,
+}
+`;

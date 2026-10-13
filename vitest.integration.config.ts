@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { defineConfig } from "vitest/config";
 
 /**
@@ -17,6 +18,12 @@ import { defineConfig } from "vitest/config";
  *     the `strapi` global, the compiled cms modules and the process
  *     listeners that `strapi.destroy()` removes (the harness puts them back)
  *     never leak between files.
+ *   - maxWorkers at most 8: on Postgres every file holds up to 5 connections
+ *     of its Strapi pool (the harness sets DATABASE_POOL_MIN=0 and
+ *     DATABASE_POOL_MAX=5) plus one admin knex connection for its schema,
+ *     so 18 files at once (one fork per core on a large machine) could pass
+ *     Postgres' default max_connections=100 ("sorry, too many clients
+ *     already"); 8 workers stay near 48. Fewer cores, fewer workers.
  *   - Budgets: a boot (schema sync, permission sync, fixtures) takes about
  *     15-40 s depending on the engine and the machine, in beforeAll
  *     (hookTimeout). A test that boots in its body (the harness contract,
@@ -32,6 +39,7 @@ export default defineConfig({
     globalSetup: ["apps/cms/src/integration/global-setup.test.helper.ts"],
     env: { TZ: "UTC" },
     pool: "forks",
+    maxWorkers: Math.max(1, Math.min(8, availableParallelism())),
     testTimeout: 60_000,
     hookTimeout: 300_000,
     teardownTimeout: 60_000,

@@ -15,6 +15,12 @@ const nextConfig = {
   typedRoutes: true,
   outputFileTracingRoot: path.join(__dirname, "../../"),
   devIndicators: false,
+  // Since Next 16.3, `next dev` writes apps/web/AGENTS.md and CLAUDE.md
+  // when it detects an AI coding agent (config-shared.d.ts `agentRules`,
+  // gated in server/lib/start-server.js). They would land as untracked
+  // files in every checkout that runs the dev server; the repo keeps its
+  // own docs instead.
+  agentRules: false,
   // Don't advertise the framework in responses.
   poweredByHeader: false,
   // NOTE: no `images` config — nothing renders through next/image. Avatars

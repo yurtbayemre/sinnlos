@@ -121,7 +121,7 @@ export function QuizBlock({
               <p
                 className={`text-xs ${
                   picked === q.correctIndex
-                    ? "text-emerald-600 dark:text-emerald-400"
+                    ? "text-emerald-700 dark:text-emerald-400"
                     : "text-red-600 dark:text-red-400"
                 }`}
               >
@@ -134,7 +134,7 @@ export function QuizBlock({
       {mode === "check" && (
         <div className="flex flex-wrap items-center gap-3 pt-1">
           {passed ? (
-            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+            <span className="inline-flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
               {t("quizAllCorrect")}
             </span>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STRIP_MARKDOWN_MAX_INPUT, safeInternalPath, stripMarkdown } from "./utils";
+import { STRIP_MARKDOWN_MAX_INPUT, displayNameOf, safeInternalPath, stripMarkdown } from "./utils";
 
 /**
  * `safeInternalPath` is the open-redirect guard for every ?from= value (the
@@ -252,5 +252,29 @@ describe("stripMarkdown", () => {
     ).toBe(
       "Hit ⌘K anywhere in the app to fuzzy search wiki pages, people and teams. Special filters: in:handbook, by:@grace, tag:runbook.",
     );
+  });
+});
+
+describe("displayNameOf (UI08: one display-name rule)", () => {
+  it("takes the display name, then the username, then the e-mail", () => {
+    expect(displayNameOf({ displayName: "Ada", username: "ada", email: "a@x" }, "?")).toBe("Ada");
+    expect(displayNameOf({ username: "ada", email: "a@x" }, "?")).toBe("ada");
+    expect(displayNameOf({ email: "a@x" }, "?")).toBe("a@x");
+  });
+
+  it("counts empty and blank values as missing", () => {
+    expect(displayNameOf({ displayName: "", username: "ada" }, "?")).toBe("ada");
+    expect(displayNameOf({ displayName: "   ", username: "", email: "a@x" }, "?")).toBe("a@x");
+    expect(displayNameOf({ displayName: "", username: " ", email: "" }, "?")).toBe("?");
+  });
+
+  it("gives the fallback for a missing user or one without any name field", () => {
+    expect(displayNameOf(null, "Unknown")).toBe("Unknown");
+    expect(displayNameOf(undefined, null)).toBeNull();
+    expect(displayNameOf({ displayName: null, username: null }, null)).toBeNull();
+  });
+
+  it("returns the name as stored (no trimming)", () => {
+    expect(displayNameOf({ displayName: " Ada Lovelace " }, "?")).toBe(" Ada Lovelace ");
   });
 });

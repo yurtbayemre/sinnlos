@@ -16,8 +16,11 @@
  * Who owns a user's role is per user (roleSource): null or 'manual' means
  * the intranet (every account that existed before, and every account an
  * admin re-roled), 'entra' means the sign-in keeps it in sync. An unknown
- * result (a Graph failure) never changes a role, so a 403, 429 or timeout
- * can never demote anyone.
+ * result never changes a role, so a 403, 429 or timeout can never demote
+ * anyone by itself. A Graph failure is unknown when a configured group
+ * check fails, or when /me fails and no app role or group matched; the
+ * signed app roles need no Graph call, so their match still applies when
+ * /me fails.
  */
 import { ROLE_PRIVILEGE_ORDER, type RoleType } from "../bootstrap/roles";
 import {

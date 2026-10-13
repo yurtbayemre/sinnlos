@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { useLocale, useTimeZone, useTranslations } from "next-intl";
 import { MessageCircle, Send, Trash2 } from "lucide-react";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { initials } from "@/lib/utils";
+import { displayNameOf, initials } from "@/lib/utils";
 import { isSharedErrorCode, startCmsAction, type CommonCode } from "@/lib/action-result";
 import { addComment, deleteComment } from "@/lib/comment-actions";
 import type { CommentTarget } from "@/lib/comment-target";
@@ -83,8 +83,7 @@ export function CommentThread({
       {comments.length > 0 && (
         <div className="space-y-3">
           {comments.map((c) => {
-            const name =
-              c.author?.displayName ?? c.author?.username ?? c.author?.email ?? tCommon("unknown");
+            const name = displayNameOf(c.author, tCommon("unknown"));
             const isOwner = currentUserId != null && c.author?.id === currentUserId;
             const deletable = isOwner && canDeleteOwn;
             return (

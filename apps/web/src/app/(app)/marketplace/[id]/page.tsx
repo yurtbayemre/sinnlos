@@ -14,13 +14,12 @@ import { AD_CATEGORY_LABELS } from "@/lib/classified-labels";
 import { classifiedToday, formatAdExpiry, isClassifiedExpired } from "@/lib/classified-shared";
 import { canDeleteAnyAd, canEditAnyAd, isReadDenied } from "@/lib/roles";
 import type { Classified } from "@/lib/types";
-import { initials } from "@/lib/utils";
+import { displayNameOf, initials } from "@/lib/utils";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DeleteClassified } from "@/components/marketplace/delete-classified";
 import { RenewButton } from "@/components/marketplace/renew-button";
-import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -56,12 +55,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
   // explanation instead of the error page (SH02). The same GET as
   // generateMetadata's is sent once per render (Next's fetch dedupe).
   if (isReadDenied(viewer.role, "marketplace")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} />;
   }
   const res = await api.classifieds.one(String(rowId));
 
@@ -100,7 +94,7 @@ export default async function ClassifiedDetailPage({ params }: Params) {
             ad.priceNegotiable ? ` ${t("negotiable")}` : ""
           }`;
 
-  const authorName = ad.author?.displayName ?? ad.author?.email ?? "—";
+  const authorName = displayNameOf(ad.author, "—");
 
   return (
     <div className="space-y-6">
@@ -187,7 +181,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">{t("sellerTitle")}</CardTitle>
+              <CardTitle as="h2" className="text-base">
+                {t("sellerTitle")}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center gap-3">
@@ -240,7 +236,9 @@ export default async function ClassifiedDetailPage({ params }: Params) {
           {canTakeDown && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">{t("moderationTitle")}</CardTitle>
+                <CardTitle as="h2" className="text-base">
+                  {t("moderationTitle")}
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">{t("moderationHint")}</p>

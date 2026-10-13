@@ -1,0 +1,133 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`loadPolls > CMS down: no results request, the banner, no empty state 1`] = `
+{
+  "active": [],
+  "closed": [],
+  "empty": false,
+  "failed": true,
+  "truncated": false,
+}
+`;
+
+exports[`loadPolls > partial failure: results down, no card, the banner, no empty state 1`] = `
+{
+  "active": [],
+  "closed": [],
+  "empty": false,
+  "failed": true,
+  "truncated": false,
+}
+`;
+
+exports[`loadPolls > success: active and closed cards by documentId; a poll the cms left out has none 1`] = `
+{
+  "active": [
+    {
+      "ref": "poll00000000000000000001",
+      "results": {
+        "canVote": true,
+        "counts": [
+          1,
+          1,
+        ],
+        "myVoteIndex": null,
+        "poll": {
+          "closesAt": null,
+          "documentId": "poll00000000000000000001",
+          "id": 1,
+          "options": [
+            "Yes",
+            "No",
+          ],
+          "question": "Question 1?",
+        },
+        "total": 2,
+      },
+    },
+  ],
+  "closed": [
+    {
+      "ref": "poll00000000000000000002",
+      "results": {
+        "canVote": true,
+        "counts": [
+          2,
+          1,
+        ],
+        "myVoteIndex": null,
+        "poll": {
+          "closesAt": "2026-09-27T12:00:00.000Z",
+          "documentId": "poll00000000000000000002",
+          "id": 2,
+          "options": [
+            "Yes",
+            "No",
+          ],
+          "question": "Question 2?",
+        },
+        "total": 3,
+      },
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "truncated": false,
+}
+`;
+
+exports[`loadPolls > truncated: the list holds the newest 20 of more 1`] = `
+{
+  "active": [
+    {
+      "ref": "poll00000000000000000001",
+      "results": {
+        "canVote": true,
+        "counts": [
+          1,
+          1,
+        ],
+        "myVoteIndex": null,
+        "poll": {
+          "closesAt": null,
+          "documentId": "poll00000000000000000001",
+          "id": 1,
+          "options": [
+            "Yes",
+            "No",
+          ],
+          "question": "Question 1?",
+        },
+        "total": 2,
+      },
+    },
+  ],
+  "closed": [
+    {
+      "ref": "poll00000000000000000002",
+      "results": {
+        "canVote": true,
+        "counts": [
+          2,
+          1,
+        ],
+        "myVoteIndex": null,
+        "poll": {
+          "closesAt": "2026-09-27T12:00:00.000Z",
+          "documentId": "poll00000000000000000002",
+          "id": 2,
+          "options": [
+            "Yes",
+            "No",
+          ],
+          "question": "Question 2?",
+        },
+        "total": 3,
+      },
+    },
+  ],
+  "empty": false,
+  "failed": false,
+  "truncated": true,
+}
+`;

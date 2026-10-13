@@ -10,7 +10,7 @@ import { stripHtml } from "@/lib/utils";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { PageHeader } from "@/components/page-header";
-import { SectionUnavailable } from "@/components/section-unavailable";
+import { SectionUnavailablePage } from "@/components/section-unavailable";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export async function generateMetadata() {
@@ -23,12 +23,7 @@ export default async function DepartmentsPage() {
   const tCommon = await getTranslations("common");
   // A role without department.find (guest) gets no request (SH02).
   if (isReadDenied((await getViewer()).role, "departments")) {
-    return (
-      <div className="space-y-6">
-        <PageHeader title={t("title")} description={t("description")} />
-        <SectionUnavailable />
-      </div>
-    );
+    return <SectionUnavailablePage title={t("title")} description={t("description")} />;
   }
   const { data, failed } = await tryFetch(() => api.departments.list(), "departments");
   const items = (data?.data ?? []) as Department[];
@@ -45,7 +40,7 @@ export default async function DepartmentsPage() {
         <div className="stagger grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((d) => (
             <Link key={d.id} href={`/departments/${d.slug}`} className="focus-card group">
-              <Card className="card-lift h-full">
+              <Card interactive className="card-lift h-full">
                 <CardHeader>
                   <div
                     aria-hidden="true"
@@ -54,7 +49,7 @@ export default async function DepartmentsPage() {
                       background: `linear-gradient(135deg, ${d.color ?? "#6366f1"}, ${d.color ?? "#818cf8"}88)`,
                     }}
                   />
-                  <CardTitle className="transition-colors group-hover:text-primary">
+                  <CardTitle as="h2" className="transition-colors group-hover:text-primary">
                     {d.name}
                   </CardTitle>
                   <CardDescription className="line-clamp-2">
