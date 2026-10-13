@@ -861,7 +861,9 @@ Enforced by the cms for every reader and every notification:
   transaction, which only a script can make, is refused). Every reader
   reads the flag and the marker once more after the targeting relations
   and keeps the raised value, so a delete between those statements never
-  pairs the old marker with the new links. Nothing lowers a
+  pairs the old marker with the new links; a row that second read no
+  longer finds (unpublished, republished or deleted in between) counts as
+  restricted. Nothing lowers a
   flag or the marker except an explicit re-target: in the admin panel, set
   Audience (or Notify audience) to `all` or clear Retarget required; a
   save that still links a target is flipped back to `departments`.

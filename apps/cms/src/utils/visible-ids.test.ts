@@ -534,10 +534,17 @@ describe("withFreshAnnouncementFlags (a delete between the scalar and the relati
     expect(row).toMatchObject({ audience: "departments", retargetRequired: true });
   });
 
-  it("leaves a row the second read misses, and asks nothing for no rows", async () => {
+  it("restricts a row the second read misses (gone or replaced in between), and asks nothing for no rows", async () => {
     const strapi = stubWith([]);
-    const rows = [{ id: 7, audience: "all", retargetRequired: false }];
-    expect(await withFreshAnnouncementFlags(strapi, rows, {})).toEqual(rows);
+    // Read before a team delete (scalars) and after it (relations), then
+    // unpublished before the re-read: the remaining department alone must
+    // not admit its members (Codex review of batch 15).
+    const rows = [
+      { id: 7, audience: "departments", retargetRequired: false, department: { id: 20 } },
+    ];
+    expect(await withFreshAnnouncementFlags(strapi, rows, {})).toEqual([
+      { id: 7, audience: "departments", retargetRequired: true, department: { id: 20 } },
+    ]);
     const calls = strapi.calls.length;
     expect(await withFreshAnnouncementFlags(strapi, [], {})).toEqual([]);
     expect(strapi.calls.length).toBe(calls);

@@ -70,6 +70,32 @@ interface Notify {
   __fanoutsSettledForTest(): Promise<void>;
 }
 
+type FlagRow = Row & { id: number; audience?: string | null; retargetRequired?: boolean | null };
+
+/** The read-side helpers of utils/visible-ids.ts and the shared predicate. */
+interface VisibleIds {
+  withFreshAnnouncementFlags(
+    strapi: unknown,
+    rows: FlagRow[],
+    where: Record<string, unknown>,
+  ): Promise<FlagRow[]>;
+  loadUserScope(strapi: unknown, userId: number): Promise<unknown>;
+  loadAllUserScopes(strapi: unknown): Promise<Array<{ userId: number }>>;
+  loadRoleGrants(
+    strapi: unknown,
+    actions: readonly string[],
+  ): Promise<{ holders(action: string): ReadonlySet<number> }>;
+  toAudienceScope(scope: unknown): unknown;
+  announcementRecipients(
+    announcement: FlagRow,
+    scopes: Array<{ userId: number }>,
+    readers: ReadonlySet<number>,
+  ): Array<{ userId: number }>;
+}
+interface AnnouncementAudience {
+  isAnnouncementVisible(announcement: FlagRow, scope: unknown): boolean;
+}
+
 const START = "2027-03-01T09:00:00.000Z";
 
 /** One of infra/diagnostics/*.sql, as the owner pipes it into psql. */
@@ -343,6 +369,79 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
     await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
     expect(await notified(created.documentId)).toEqual([inSquad.id]);
   });
+
+  it.each(["unpublish", "republish"] as const)(
+    "a team delete between the scalar and the relation reads, then the %s before the re-read: fails closed (Codex review)",
+    async (between) => {
+      const ids = t.requireBuilt<VisibleIds>("src/utils/visible-ids");
+      const { isAnnouncementVisible } = t.requireBuilt<AnnouncementAudience>(
+        "src/utils/announcement-audience",
+      );
+      const unit = await department(`FC Torn ${between} Dept`);
+      const squad = await team(`FC Torn ${between} Squad`, unit);
+      const inSquad = await member(unit, [squad]);
+      const departmentOnly = await member(unit);
+      const created = await publish(ANNOUNCEMENT, {
+        title: `IT FC torn read, ${between}`,
+        department: unit.documentId,
+        team: squad.documentId,
+      });
+      expect(await notified(created.documentId)).toEqual([inSquad.id]);
+
+      // The engine's two statements of one read, with the delete between:
+      // the scalars before it (marker false) ...
+      const scalars = (await t.strapi.db.query(ANNOUNCEMENT).findOne({
+        where: { documentId: created.documentId, publishedAt: { $notNull: true } },
+        select: ["id", "audience", "retargetRequired"],
+      })) as FlagRow;
+      expect(scalars.retargetRequired).not.toBe(true);
+      const res = await panel.delete(TEAM, squad.documentId);
+      expect(res.status, res.text).toBe(200);
+      // ... the relations after it (the team gone, the department left).
+      const relations = (await t.strapi.db.query(ANNOUNCEMENT).findOne({
+        where: { id: scalars.id },
+        select: ["id"],
+        populate: {
+          department: { select: ["id"] },
+          team: { select: ["id"] },
+          audienceRoles: { select: ["id"] },
+        },
+      })) as Row;
+      expect(relations.team ?? null).toBeNull();
+      const torn: FlagRow = {
+        ...scalars,
+        department: relations.department,
+        team: relations.team ?? null,
+        audienceRoles: relations.audienceRoles,
+      };
+      const scope = ids.toAudienceScope(await ids.loadUserScope(t.strapi, departmentOnly.id));
+      // Taken as it is, the torn row admits the rest of the department.
+      expect(isAnnouncementVisible(torn, scope)).toBe(true);
+
+      // The published row is gone (unpublish) or replaced (republish: a new
+      // row id) before the flags are read again.
+      if (between === "unpublish") {
+        await t.strapi.documents(ANNOUNCEMENT).unpublish({ documentId: created.documentId });
+      } else {
+        await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
+      }
+      const [checked] = await ids.withFreshAnnouncementFlags(t.strapi, [torn], { id: torn.id });
+      expect(checked.retargetRequired).toBe(true);
+      expect(isAnnouncementVisible(checked, scope)).toBe(false);
+      // The fan-out's audience of that row: nobody (the announcement
+      // lifecycle reads it this way, utils/visible-ids.ts).
+      const grants = await ids.loadRoleGrants(t.strapi, [`${ANNOUNCEMENT}.find`]);
+      const recipients = ids.announcementRecipients(
+        checked,
+        await ids.loadAllUserScopes(t.strapi),
+        grants.holders(`${ANNOUNCEMENT}.find`),
+      );
+      expect(recipients.map((recipient) => recipient.userId)).toEqual([]);
+      // And nobody got the announcement but the team member of the first publish.
+      expect(await notified(created.documentId)).toEqual([inSquad.id]);
+      expect(await readStatus(departmentOnly.caller, created.documentId)).toBe(404);
+    },
+  );
 
   it("department plus team (A3): deleting the department keeps the team's outsiders out", async () => {
     const unit = await department("FC Dept Del Dept");

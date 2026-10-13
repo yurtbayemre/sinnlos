@@ -366,7 +366,10 @@ export interface AnnouncementFlagRow {
  * Re-reads `audience` and `retargetRequired` of the announcement rows that
  * match `where`, AFTER the caller loaded `rows` with their targeting
  * relations, and returns `rows` with each value raised to what either read
- * says (a row the second read misses keeps its first values).
+ * says. A row the second read misses comes back restricted
+ * (`retargetRequired: true`): it is gone or was replaced (an unpublish, a
+ * republish, a delete) after the first read, so its relations may already
+ * show a department or team delete whose marker the first read predates.
  *
  * WHY. The query engine selects a row's scalars and then loads each
  * populated relation with a statement of its own. Under Read Committed a
@@ -378,9 +381,16 @@ export interface AnnouncementFlagRow {
  * so it sees the delete whenever they do, and the marker is raised. An
  * explicit re-target (the only thing that lowers) committing between the
  * reads is caught by the first read, which still says restricted. Taking
- * the raised value of either read only ever restricts. (Relations read by
- * separate populate statements can still disagree with each other during a
- * concurrent re-target, as before batch 15; that never involves a delete.)
+ * the raised value of either read only ever restricts. A row the second
+ * read cannot see any more has no fresh marker to raise from, so it fails
+ * closed (Codex review of batch 15: a team delete between the scalar and
+ * the relation reads, then an unpublish before the re-read, handed the
+ * fan-out the old `false` with the team already gone, and the rest of the
+ * department was notified). The callers treat it like any other
+ * restricted row: not listed, not readable, nobody notified. (Relations
+ * read by separate populate statements can still disagree with each other
+ * during a concurrent re-target, as before batch 15; that never involves a
+ * delete.)
  *
  * Every announcement predicate caller in the cms runs its rows through this:
  * the read policy, the comment and reaction target checks, the digest, the
@@ -405,7 +415,7 @@ export async function withFreshAnnouncementFlags<T extends AnnouncementFlagRow>(
   }
   return rows.map((row) => {
     const now = fresh.get(row.id);
-    if (!now) return row;
+    if (!now) return { ...row, retargetRequired: true };
     return {
       ...row,
       audience:
