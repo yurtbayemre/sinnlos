@@ -1875,7 +1875,12 @@ required env, no grant, no route, no edge change.
     lifecycle, e.g. the lesson checks), clears Publish at and logs
     `[scheduler] <type> <documentId> failed: <code>`; a passing failure
     (a lock timeout, a lost connection) is retried every minute and
-    becomes `retryExhausted` after the fifth. The next save of the draft
+    becomes `retryExhausted` after the fifth. A withdrawal that fails for
+    good clears Unpublish at and also a pending Publish at (an update is
+    never published over a withdrawal that did not happen); while a
+    withdrawal is retried, a pending update of that item waits. The error
+    details in the log and the audit trail name the error class, a database
+    code and field names, never a message. The next save of the draft
     clears the error. After a publish the panel shows **Published**, not
     Modified.
   - `CRON_ENABLED=0` stops it with the other tasks; nothing scheduled
