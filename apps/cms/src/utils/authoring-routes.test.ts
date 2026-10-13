@@ -7,7 +7,14 @@ import {
   AUTHORING_STATUS_MODES,
   AUTHORING_TYPES,
   DEPARTMENT_AUTHORED_TYPES,
+  WIKI_FIELDS,
+  WIKI_PAGE_INTENTS,
+  WIKI_PATHS,
+  WIKI_SPACE_INTENTS,
   authoringRoute,
+  wikiPageRoute,
+  wikiSpaceRoute,
+  type AuthoringRoute,
   type AuthoringType,
 } from "@sinnlos/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -57,9 +64,14 @@ async function customRoutes(uid: string): Promise<CustomRoute[]> {
   return mod.default.routes;
 }
 
+const WIKI_SPACE = "api::wiki-space.wiki-space";
+const WIKI_PAGE = "api::wiki-page.wiki-page";
+
 describe("the authoring route table (K7) = the cms routes", () => {
   it("covers exactly the authored uids, with the schemas' plural names", () => {
-    expect(AUTHORING_TYPES.map((type) => UID_OF[type]).sort()).toEqual([...AUTHORED_UIDS].sort());
+    expect([...AUTHORING_TYPES.map((type) => UID_OF[type]), WIKI_SPACE, WIKI_PAGE].sort()).toEqual(
+      [...AUTHORED_UIDS].sort(),
+    );
     for (const type of AUTHORING_TYPES) {
       const schema = JSON.parse(
         readFileSync(
@@ -107,5 +119,50 @@ describe("the authoring route table (K7) = the cms routes", () => {
     expect(DEPARTMENT_AUTHORED_TYPES.map((type) => UID_OF[type]).sort()).toEqual(
       [...DEPARTMENT_AUTHORED_UIDS].sort(),
     );
+  });
+});
+
+describe("the wiki route table (K18) = the cms routes", () => {
+  const custom = (intents: readonly string[]) =>
+    intents.filter((intent) => !["create", "update", "delete"].includes(intent));
+
+  it.each([
+    [WIKI_SPACE, "wikiSpace", WIKI_SPACE_INTENTS, wikiSpaceRoute],
+    [WIKI_PAGE, "wikiPage", WIKI_PAGE_INTENTS, wikiPageRoute],
+  ] as const)(
+    "%s serves every custom intent at the domain's method and path",
+    async (uid, type, intents, route) => {
+      const schema = JSON.parse(
+        readFileSync(
+          join(API_DIR, apiName(uid), "content-types", apiName(uid), "schema.json"),
+          "utf8",
+        ),
+      ) as { info: { pluralName: string } };
+      expect(WIKI_PATHS[type]).toBe(schema.info.pluralName);
+      const routes = await customRoutes(uid);
+      const wanted = custom(intents);
+      expect(routes.map((entry) => entry.handler).sort(), uid).toEqual(
+        wanted.map((intent) => `${uid}.${intent}`).sort(),
+      );
+      for (const intent of wanted) {
+        const entry = routes.find((candidate) => candidate.handler === `${uid}.${intent}`);
+        const expected: AuthoringRoute = (route as (intent: string) => AuthoringRoute)(intent);
+        expect(entry?.method, `${uid} ${intent}`).toBe(expected.method);
+        expect(entry?.path, `${uid} ${intent}`).toBe(expected.path.replace(":documentId", ":id"));
+      }
+    },
+  );
+
+  it("agrees on the status modes and the classes", () => {
+    expect(AUTHORING_SPECS[WIKI_SPACE].statusMode).toBe("alwaysPublished");
+    expect(AUTHORING_SPECS[WIKI_PAGE].statusMode).toBe("explicit");
+    for (const action of ["create", "update"] as const) {
+      expect(writeClassesFor(WIKI_SPACE, action)).toEqual(
+        Object.keys(WIKI_FIELDS.wikiSpace[action]).sort(),
+      );
+      expect(writeClassesFor(WIKI_PAGE, action)).toEqual(
+        Object.keys(WIKI_FIELDS.wikiPage[action]).sort(),
+      );
+    }
   });
 });

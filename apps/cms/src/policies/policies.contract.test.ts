@@ -54,6 +54,12 @@ import {
  *      custom document action (publish, unpublish, discardDraft, editable)
  *      a refusal is a thrown NotFoundError (404, like a hidden findOne),
  *      on the generic create/update and the list a plain false.
+ *   6. The wiki-page row gate (global::can-edit-wiki rebuilt in batch 16,
+ *      kind `row-write-gate`): no bypass; moderators enforced on every
+ *      page, the page's author, the head of its department and the lead of
+ *      its team on their pages (in a space they read), everyone else false;
+ *      a route config without the wiki-page uid gives no class; a custom
+ *      page action refuses with a 404.
  */
 
 type PolicyFn = (ctx: StubPolicyContext, config: unknown, deps: { strapi: StrapiStub }) => unknown;
@@ -311,13 +317,15 @@ type Kind =
   | "role-gate"
   | "write-allowlist"
   | "moderator-write-gate"
-  | "department-author-write-gate";
+  | "department-author-write-gate"
+  | "row-write-gate";
 
 /** Kinds whose payload refusal is the allowlist's 400 (a ValidationError). */
 const WRITE_GATE_KINDS: readonly Kind[] = [
   "write-allowlist",
   "moderator-write-gate",
   "department-author-write-gate",
+  "row-write-gate",
 ];
 const isWriteGate = (kind: Kind) => WRITE_GATE_KINDS.includes(kind);
 
@@ -332,6 +340,8 @@ interface ContractCase {
   pinsStatus: boolean;
   /** How this case refuses, when it differs from the contract's (can-author's custom actions: 404). */
   refusal?: "false" | "forbidden" | "notFound";
+  /** false: a route the owner's role does not hold (a moderators-only list); the positive branch skips it. */
+  owner?: boolean;
 }
 
 interface PolicyContract {
@@ -520,10 +530,28 @@ const CONTRACTS: Record<string, PolicyContract> = {
     cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
     ownRequest: (ids) => ({ params: { id: ids.team }, body: { data: { description: "x" } } }),
   },
+  // The wiki-page row gate (batch 16): no bypass. The moderator class is
+  // role-only, so the moderators' list passes them without a read.
   "can-edit-wiki": {
-    kind: "write-allowlist",
+    kind: "row-write-gate",
     anonymous: "deny",
-    cases: [{ bypass: ADMIN_EDITOR, injectsFilter: false, pinsStatus: false }],
+    cases: [
+      { config: { uid: WIKI_PAGE }, bypass: [], injectsFilter: false, pinsStatus: false },
+      {
+        config: { uid: WIKI_PAGE, intent: "authoringList" },
+        bypass: ADMIN_EDITOR,
+        injectsFilter: false,
+        pinsStatus: false,
+        owner: false,
+      },
+      ...(["editable", "publish", "revisions"] as const).map((intent) => ({
+        config: { uid: WIKI_PAGE, intent },
+        bypass: [] as RoleType[],
+        injectsFilter: false,
+        pinsStatus: false,
+        refusal: "notFound" as const,
+      })),
+    ],
     ownRequest: (ids) => ({ params: { id: ids.pageOwn }, body: { data: { title: "Renamed" } } }),
   },
   // v2 write gate (batch 15): no bypass. The moderator class is role-only,
@@ -900,8 +928,8 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
       const { ids } = fixture();
       const type = OWN_CALLER[name] ?? "member";
       const own = contract.ownRequest?.(ids) ?? {};
-      for (const { config, bypass } of contract.cases) {
-        if (bypass.includes(type)) continue;
+      for (const { config, bypass, owner } of contract.cases) {
+        if (bypass.includes(type) || owner === false) continue;
         const decoy = { filters: "DECOY" };
         const ctx = policyContext(
           { id: USER_ID[type], role: roleOf(type) },
@@ -911,12 +939,18 @@ describe.each(Object.keys(CONTRACTS).sort())("policy contract: %s", (name) => {
         const sent = body?.data;
         expect(await run(name, config, ctx)).toEqual({ result: true });
         expect(ctx.query).toBe(decoy);
+        const intent = (config as { intent?: unknown } | undefined)?.intent;
         if (contract.kind === "write-allowlist") {
           // The allowlist pins the write to published on the REAL query and
           // replaces the payload with the checked copy.
           expect(ctx.request.query.status).toBe("published");
           expect(body?.data).not.toBe(sent);
           expect(body?.data).toEqual(sent);
+        } else if (contract.kind === "row-write-gate" && intent === undefined) {
+          // The same for a row class's generic update, with lastEditor the caller.
+          expect(ctx.request.query.status).toBe("published");
+          expect(body?.data).not.toBe(sent);
+          expect(body?.data).toEqual({ ...(sent as object), lastEditor: USER_ID[type] });
         } else {
           expect(ctx.request.query).toEqual(CLIENT_QUERY);
         }
@@ -1066,5 +1100,74 @@ describe("policy contract kind: department-author-write-gate (can-author on anno
         world.strapi,
       ),
     ).toEqual({ result: true });
+  });
+});
+
+describe("policy contract kind: row-write-gate (can-edit-wiki on wiki pages)", () => {
+  const PAGE_CONFIG = { uid: WIKI_PAGE };
+  const caller = (type: RoleType) => ({ id: USER_ID[type], role: roleOf(type) });
+
+  it("moderators enforced on every page, the author on theirs, everyone else false", async () => {
+    const { strapi, ids } = fixture();
+    const update = (user: StubUser, id: string) =>
+      run(
+        "can-edit-wiki",
+        PAGE_CONFIG,
+        policyContext(user, { params: { id }, body: { data: { title: "x" } } }),
+        strapi,
+      );
+    for (const type of ["admin_role", "editor"] as const) {
+      for (const id of [ids.pageOwn, ids.pageForeign]) {
+        expect(await update(caller(type), id), `${type} ${id}`).toEqual({ result: true });
+      }
+    }
+    expect(await update(caller("member"), ids.pageOwn)).toEqual({ result: true });
+    expect(await update(caller("member"), ids.pageForeign)).toEqual({ result: false });
+    // The head of the own page's department (10) and the lead of its team (30).
+    expect(await update(caller("department_head"), ids.pageOwn)).toEqual({ result: true });
+    expect(await update(caller("team_lead"), ids.pageOwn)).toEqual({ result: true });
+    for (const type of ["guest", "authenticated"] as const) {
+      expect(await update(caller(type), ids.pageOwn), type).toEqual({ result: false });
+    }
+    const stranger = { id: STRANGER, role: roleOf("member") };
+    expect(await update(stranger, ids.pageOwn)).toEqual({ result: false });
+  });
+
+  it("moderators' payloads are checked: no bypass", async () => {
+    const { strapi, ids } = fixture();
+    const outcome = await run(
+      "can-edit-wiki",
+      PAGE_CONFIG,
+      policyContext(caller("editor"), {
+        params: { id: ids.pageOwn },
+        body: { data: { title: "x", author: STRANGER } },
+      }),
+      strapi,
+    );
+    expect("error" in outcome && outcome.error instanceof errors.ValidationError).toBe(true);
+  });
+
+  it("a route config without the wiki-page uid gives no class", async () => {
+    const { strapi, ids } = fixture();
+    for (const config of [undefined, {}, { uid: "" }, { uid: "api::wiki-space.wiki-space" }]) {
+      const ctx = policyContext(caller("editor"), {
+        params: { id: ids.pageOwn },
+        body: { data: { title: "x" } },
+      });
+      expect(await run("can-edit-wiki", config, ctx, strapi), JSON.stringify(config)).toEqual({
+        result: false,
+      });
+    }
+  });
+
+  it("a custom page action refuses with a 404, never a 403", async () => {
+    const { strapi, ids } = fixture();
+    const outcome = await run(
+      "can-edit-wiki",
+      { uid: WIKI_PAGE, intent: "editable" },
+      policyContext(caller("member"), { params: { id: ids.pageForeign } }),
+      strapi,
+    );
+    expect("error" in outcome && outcome.error instanceof errors.NotFoundError).toBe(true);
   });
 });

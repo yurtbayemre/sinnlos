@@ -4,6 +4,7 @@ import {
   MAX_POLL_OPTION_LENGTH,
   MAX_TARGET_DEPARTMENTS,
   QUICK_LINK_CATEGORIES,
+  WIKI_SPACE_VISIBILITIES,
   checkBoolean,
   checkEnum,
   checkIconKey,
@@ -38,6 +39,7 @@ import {
   DEPARTMENT_UID as DEPARTMENT,
   TEAM_UID as TEAM,
   WIKI_PAGE_UID as WIKI_PAGE,
+  WIKI_SPACE_UID as WIKI_SPACE,
 } from "./authoring-uids";
 import { parseRowId } from "./entry-id";
 import { isPlainDate, zonedDateKey, zonedDayStart } from "./plain-date";
@@ -70,13 +72,14 @@ import { appTimeZone } from "./time";
  * policy enforces which (type, action, classes), and that every write route
  * a role holds on these types goes through one.
  *
- * THE BYPASS ENDS ON FIVE TYPES (batch 15). Announcement, event, quick-link,
- * document and poll are written through global::can-author and the
- * authoring controller (utils/write-gate.ts, utils/authoring-controller.ts):
- * admin_role and editor are the `moderator` class there, so their payloads
- * are checked like everyone's. WRITE_BYPASS_ROLES is left only for the
- * FX07 gates of wiki pages, departments and teams (batches 16 and 17 move
- * them).
+ * THE BYPASS ENDS ON THE AUTHORED TYPES. Announcement, event, quick-link,
+ * document and poll (batch 15) and wiki-space (batch 16) are written
+ * through global::can-author and the authoring controller (utils/
+ * write-gate.ts, utils/authoring-controller.ts), wiki pages through the
+ * rebuilt global::can-edit-wiki (utils/wiki-gate.ts, batch 16): admin_role
+ * and editor are the `moderator` class there, so their payloads are
+ * checked like everyone's. WRITE_BYPASS_ROLES is left only for the FX07
+ * gates of departments and teams (batch 17 moves them).
  *
  * For every class:
  *   - every payload key must be listed for the class, otherwise the request
@@ -143,6 +146,7 @@ import { appTimeZone } from "./time";
 export const DEPARTMENT_UID = DEPARTMENT;
 export const TEAM_UID = TEAM;
 export const WIKI_PAGE_UID = WIKI_PAGE;
+export const WIKI_SPACE_UID = WIKI_SPACE;
 export const POLL_UID = "api::poll.poll";
 
 /** The role class of admin_role/editor on the authored types (§B1.1). */
@@ -152,10 +156,11 @@ export const DEPARTMENT_AUTHOR_CLASS = "departmentAuthor";
 
 /**
  * Roles that skip the allowlist entirely on the FX07 gates that still have
- * a bypass (wiki page, department, team: batches 16 and 17 rebuild them):
- * the MODERATORS of the role vocabulary (bootstrap/roles.ts). The write
- * policies check them with `hasRole(user, WRITE_BYPASS_ROLES)`. On the five
- * phase-1 types there is no bypass: moderators are the `moderator` class.
+ * a bypass (department, team: batch 17 rebuilds them): the MODERATORS of
+ * the role vocabulary (bootstrap/roles.ts). The write policies check them
+ * with `hasRole(user, WRITE_BYPASS_ROLES)`. On the authored types (the five
+ * phase-1 types, wiki spaces and wiki pages) there is no bypass: moderators
+ * are the `moderator` class.
  */
 export const WRITE_BYPASS_ROLES: readonly RoleType[] = MODERATORS;
 
@@ -569,18 +574,122 @@ const WIKI_PAGE_CONTENT = {
   order: value(valueChecks.int32),
 };
 
+/** The edit note: stripped by the controller and handed to the revision lifecycle. */
+const REVISION_SUMMARY: ControllerField = { kind: "controller", check: valueChecks.nullableText };
+
 /**
- * Updating a page. `space` is create-only: moving a page between spaces is
- * an admin/editor action. `parent` must be a visible page of the page's own
- * space (never the page itself or one of its descendants).
+ * Updating a page as its author, the head of its department or the lead of
+ * its team (can-edit-wiki's row classes). `space` is create-only: moving a
+ * page between spaces stays in the admin panel. `parent` must be a visible
+ * page of the page's own space; when it CHANGES, neither the page itself
+ * nor one of its descendants (an early refusal; the wiki checks refuse any
+ * parent loop a write adds under the structure lock, utils/wiki-checks.ts).
+ * `lastEditor` is the caller.
  */
 const WIKI_PAGE_EDIT: WriteRule = {
   fields: {
     ...WIKI_PAGE_CONTENT,
     parent: toOne("wikiParent"),
-    // Stripped and handed to the revision lifecycle by the controller.
-    revisionSummary: { kind: "controller", check: valueChecks.nullableText },
+    revisionSummary: REVISION_SUMMARY,
   },
+  callerFields: ["lastEditor"],
+};
+
+/**
+ * A page created by a department head or team lead (class `author`). The
+ * `space` must be one the caller can READ, `parent` a readable page of
+ * that space. Visibility, not a separate edit right, is the bar: the schema
+ * has no per-space editor list, a new page only lands where its author can
+ * already read (so none of its relations reaches a hidden row), and what a
+ * page says in a shared space is a moderation matter (moderators delete
+ * pages).
+ */
+const WIKI_PAGE_AUTHOR_CREATE: WriteRule = {
+  fields: {
+    ...WIKI_PAGE_CONTENT,
+    space: toOne("wikiSpace", { required: true }),
+    parent: toOne("wikiParent"),
+  },
+  callerFields: ["author", "lastEditor"],
+  derivedFields: { slug: uniqueSlugFrom("title") },
+};
+
+/**
+ * Wiki pages for moderators (§J2, batch 16): the content, `space` on create
+ * (any space with a published row), `parent` in the page's space (a draft
+ * parent too; publishing needs it published, utils/publish-readiness.ts),
+ * department and team, the schedule (`publishAt`, a minute ahead; the page
+ * must be publishable) and the edit note. No space move and no slug edit:
+ * both stay in the admin panel (a move needs the page's whole subtree).
+ */
+const WIKI_PAGE_MODERATOR_COMMON = {
+  parent: toOne("wikiParent"),
+  department: toOne("department"),
+  team: toOne("team"),
+  publishAt: value(checkNullableInstant),
+  revisionSummary: REVISION_SUMMARY,
+};
+
+const WIKI_PAGE_MODERATOR_CREATE: WriteRule = {
+  // Rule order is check order: `parent` needs the `space` resolved first.
+  fields: {
+    ...WIKI_PAGE_CONTENT,
+    space: toOne("wikiSpace", { required: true }),
+    ...WIKI_PAGE_MODERATOR_COMMON,
+  },
+  callerFields: ["author", "lastEditor"],
+  derivedFields: { slug: uniqueSlugFrom("title") },
+  crossCheck: scheduledCrossCheck,
+  readinessWhenScheduled: true,
+};
+
+const WIKI_PAGE_MODERATOR_UPDATE: WriteRule = {
+  fields: { ...WIKI_PAGE_CONTENT, ...WIKI_PAGE_MODERATOR_COMMON },
+  callerFields: ["lastEditor"],
+  crossCheck: scheduledCrossCheck,
+  readinessWhenScheduled: true,
+};
+
+/** The target attribute each wiki-space visibility needs (§B6; visible-ids.ts reads them). */
+const WIKI_SPACE_VISIBILITY_TARGETS: Readonly<Record<string, string>> = {
+  role: "allowedRoles",
+  department: "department",
+  team: "team",
+};
+
+/**
+ * A space's visibility needs its target (§B1.2 crossCheck): `role` some
+ * allowed roles, `department` a department, `team` a team; the refusal
+ * (`visibilityTarget`) lands on the missing target. Checked only when the
+ * payload carries the visibility or a target, so a space whose department a
+ * delete removed does not block an unrelated save.
+ */
+const wikiSpaceCrossCheck: CrossCheck = (merged, carried) => {
+  if (!carriesAny(carried, ["visibility", ...Object.values(WIKI_SPACE_VISIBILITY_TARGETS)])) {
+    return {};
+  }
+  const target = WIKI_SPACE_VISIBILITY_TARGETS[String(merged.visibility)];
+  if (!target || linked(merged[target])) return {};
+  return { [target]: "visibilityTarget" satisfies AuthoringFieldCode };
+};
+
+/**
+ * Wiki spaces (moderators; §J1, §B3: always published). Name, icon (an icon
+ * key or null), description, visibility with its target (allowed roles as
+ * role types, department, team). The slug is derived from the name on
+ * create and stays fixed; `pages` is the inverse side and never written.
+ */
+const WIKI_SPACE_MODERATOR: WriteRule = {
+  fields: {
+    name: value(checkRequiredString),
+    icon: value(checkIconKey),
+    description: value(checkMarkdown),
+    visibility: value(enumOf(WIKI_SPACE_VISIBILITIES)),
+    allowedRoles: roleTypes(ROLE_PRIVILEGE_ORDER),
+    department: toOne("department"),
+    team: toOne("team"),
+  },
+  crossCheck: wikiSpaceCrossCheck,
 };
 
 /**
@@ -781,8 +890,8 @@ const POLL_RULES = { moderator: withCreate(POLL_MODERATOR, "author", false) };
  *     move would need the page's whole subtree to follow it.
  *   - wiki `slug` stays server-derived (uniqueSlugFrom); editable slugs
  *     need uniqueness that is scoped to what the caller can read.
- *   - drafts for wiki authors: dedicated draft actions with a fixed
- *     response (batch 16), never a lifted status pin.
+ * Wiki authors draft through dedicated actions with a fixed response
+ * (createDraft, saveDraft; batch 16), never through a lifted status pin.
  */
 export const WRITE_ALLOWLIST = {
   [DEPARTMENT_UID]: {
@@ -806,31 +915,25 @@ export const WRITE_ALLOWLIST = {
   },
   [WIKI_PAGE_UID]: {
     create: {
-      // Any non-guest holding the create grant (department_head, team_lead).
-      // `space` must be a space the caller can READ, `parent` a readable page
-      // of that space. Visibility, not a separate edit right, is the bar:
-      // the schema has no per-space editor list, a new page only lands where
-      // its author can already read (so none of its relations reaches a
-      // hidden row), and what a page says in a shared space is a moderation
-      // matter (admins and editors delete pages).
-      author: {
-        fields: {
-          ...WIKI_PAGE_CONTENT,
-          space: toOne("wikiSpace", { required: true }),
-          parent: toOne("wikiParent"),
-        },
-        callerFields: ["author", "lastEditor"],
-        derivedFields: { slug: uniqueSlugFrom("title") },
-      },
+      // department_head and team_lead (the create grant), and moderators.
+      author: WIKI_PAGE_AUTHOR_CREATE,
+      moderator: WIKI_PAGE_MODERATOR_CREATE,
     },
     update: {
-      // can-edit-wiki's row gate: page author, head of the page's
-      // department, lead of the page's team. lastEditor is forced by the
-      // wiki-page controller for every caller.
+      // can-edit-wiki's row classes (domain wiki-edit.ts): the page's
+      // author, the head of its department, the lead of its team; and
+      // moderators on every page.
       author: WIKI_PAGE_EDIT,
       departmentHead: WIKI_PAGE_EDIT,
       teamLead: WIKI_PAGE_EDIT,
+      moderator: WIKI_PAGE_MODERATOR_UPDATE,
     },
+  },
+  [WIKI_SPACE_UID]: {
+    create: {
+      moderator: { ...WIKI_SPACE_MODERATOR, derivedFields: { slug: uniqueSlugFrom("name") } },
+    },
+    update: { moderator: WIKI_SPACE_MODERATOR },
   },
   [ANNOUNCEMENT_UID]: {
     create: {
@@ -873,8 +976,9 @@ export const WRITE_ALLOWLIST = {
 } as const satisfies WriteAllowlist;
 
 /**
- * Every attribute of the five phase-1 types that NO class may write, with
- * the reason (§B1.7 attribute coverage). write-allowlist.test.ts walks each
+ * Every attribute of the authored types (the five phase-1 types, wiki
+ * pages and wiki spaces) that NO class may write, with the reason (§B1.7
+ * attribute coverage). write-allowlist.test.ts walks each
  * schema: an attribute is either a field of some class's rule or listed
  * here, never both, so a new schema attribute fails the test until it is
  * reviewed. The core validator no longer runs on these routes.
@@ -906,6 +1010,18 @@ export const REFUSED_ATTRIBUTES: Readonly<Record<string, Readonly<Record<string,
   [POLL_UID]: {
     audience: "derived targeting flag (derivedFromMerged, contract K10)",
     author: "ownership: the caller, set on create (callerFields)",
+  },
+  [WIKI_PAGE_UID]: {
+    slug: "derived from the title on create (uniqueSlugFrom); fixed afterwards",
+    children: "inverse side of `parent`: a page names its own parent",
+    revisions: "the history: written by the wiki-page lifecycle, read through the history actions",
+    author: "ownership: the caller, set on create (callerFields)",
+    lastEditor: "the caller of every save (callerFields)",
+    scheduleError: "scheduler bookkeeping (§D rule 7)",
+  },
+  [WIKI_SPACE_UID]: {
+    slug: "derived from the name on create (uniqueSlugFrom); fixed afterwards",
+    pages: "inverse side of `wiki-page.space`: a page names its space on create",
   },
 };
 
@@ -1335,6 +1451,10 @@ export async function applyWriteRule(
     const keys = Object.keys(crossCodes).filter((key) => crossCodes[key] !== undefined);
     if (keys.length > 0) refuseKeys(keys, crossCodes);
   }
+  const accepted = { ...out };
+  const derived = Object.fromEntries(
+    Object.entries(rule.derivedFields ?? {}).map(([field, derive]) => [field, derive(accepted)]),
+  );
   if (
     rule.readinessWhenScheduled &&
     carried.has("publishAt") &&
@@ -1342,16 +1462,15 @@ export async function applyWriteRule(
     merged.publishAt !== undefined
   ) {
     if (!env.readiness) missingCheck("readiness", "publishBlockers");
-    const blockers = await env.readiness(merged);
+    // The derived values are part of what will be stored (a wiki page's
+    // required slug on create).
+    const blockers = await env.readiness({ ...merged, ...derived });
     if (blockers.length > 0) {
       refuseKeys(blockers, Object.fromEntries(blockers.map((key) => [key, "notPublishable"])));
     }
   }
 
-  const accepted = { ...out };
-  for (const [field, derive] of Object.entries(rule.derivedFields ?? {})) {
-    out[field] = derive(accepted);
-  }
+  Object.assign(out, derived);
   for (const [field, derivation] of Object.entries(rule.derivedFromMerged ?? {})) {
     if (carriesAny(carried, derivation.when)) out[field] = derivation.derive(merged);
   }

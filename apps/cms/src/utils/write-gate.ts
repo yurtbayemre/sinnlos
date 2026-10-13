@@ -1,3 +1,4 @@
+import type { WikiEditorClass } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import { DEPARTMENT_AUTHOR_ROLES, MODERATORS, STAFF_ROLES, hasRole } from "../bootstrap/roles";
 import {
@@ -7,6 +8,8 @@ import {
   DOCUMENT_UID,
   EVENT_UID,
   QUICK_LINK_UID,
+  WIKI_PAGE_UID,
+  WIKI_SPACE_UID,
 } from "./authoring-uids";
 import {
   authoringChecks,
@@ -30,9 +33,11 @@ import {
 /**
  * The v2 write gate (deep-dive decision 06 §B2, §N1, §N3, §N8; batch 15
  * plan item 4): global::can-author (policies/can-author.ts) on every
- * authoring route of announcement, event, quick-link, document and poll,
- * configured with the route's `{ uid }` and, for the custom actions, its
- * `intent`. In order:
+ * authoring route of announcement, event, quick-link, document, poll and
+ * (batch 16) wiki-space, configured with the route's `{ uid }` and, for the
+ * custom actions, its `intent`. Wiki pages have their own gate on the same
+ * loader, allowlist and scope, global::can-edit-wiki (utils/wiki-gate.ts),
+ * so this one gives no class on the wiki-page uid. In order:
  *
  *   1. no signed-in user, one without a numeric id, a route without a uid
  *      of AUTHORED_UIDS or an unknown intent: no class;
@@ -76,7 +81,20 @@ import {
  */
 
 export type GateIntent =
-  "create" | "update" | "publish" | "unpublish" | "discardDraft" | "editable" | "authoringList";
+  | "create"
+  | "update"
+  | "publish"
+  | "unpublish"
+  | "discardDraft"
+  | "editable"
+  | "authoringList"
+  // The wiki-page actions (utils/wiki-gate.ts).
+  | "createDraft"
+  | "myDrafts"
+  | "saveDraft"
+  | "revisions"
+  | "revision"
+  | "restore";
 
 const DOCUMENT_INTENTS: readonly GateIntent[] = [
   "update",
@@ -114,7 +132,8 @@ export interface AuthoringRows {
 export interface AuthoringGate {
   uid: string;
   intent: GateIntent;
-  roleClass: AuthoringRoleClass;
+  /** can-author's classes, or a wiki page's (moderator, author, departmentHead, teamLead). */
+  roleClass: AuthoringRoleClass | WikiEditorClass;
   callerId: number;
   callerDepartment: CallerDepartment | null;
   /** Document intents only. */
@@ -159,6 +178,20 @@ export const AUTHORING_POPULATE: Readonly<Record<string, Record<string, unknown>
   [POLL_UID]: {
     departments: DEPARTMENT_REF,
     author: { select: ["id", "displayName", "username"] },
+  },
+  [WIKI_SPACE_UID]: {
+    allowedRoles: { select: ["id", "documentId", "type"] },
+    department: DEPARTMENT_REF,
+    team: { select: ["id", "documentId", "name"] },
+  },
+  // The row classes read author, department and the team's lead
+  // (@sinnlos/domain wiki-edit.ts); the form reads space and parent.
+  [WIKI_PAGE_UID]: {
+    author: { select: ["id", "displayName", "username"] },
+    department: DEPARTMENT_REF,
+    team: { select: ["id", "documentId", "name"], populate: { lead: { select: ["id"] } } },
+    space: { select: ["id", "documentId", "slug", "name"] },
+    parent: { select: ["id", "documentId"] },
   },
 };
 
@@ -347,7 +380,7 @@ export function normaliseRow(row: AuthoringRow | null): Record<string, unknown> 
   if (!row) return null;
   const out: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(row)) {
-    if (key === "audienceRoles") {
+    if (key === "audienceRoles" || key === "allowedRoles") {
       out[key] = Array.isArray(value)
         ? value
             .map((role) => (isRecord(role) ? role.type : null))
@@ -423,7 +456,8 @@ export function writeGate() {
     const caller = identifiedCaller(policyContext.state?.user);
     const uid = typeof config?.uid === "string" ? config.uid : null;
     // A route without its uid (or an unknown one) is a wiring bug: refuse.
-    if (!intent || !caller || !uid || !AUTHORED_UIDS.includes(uid)) {
+    // Wiki pages are global::can-edit-wiki's (utils/wiki-gate.ts).
+    if (!intent || !caller || !uid || !AUTHORED_UIDS.includes(uid) || uid === WIKI_PAGE_UID) {
       return refuse(intent);
     }
     const roleClass = roleClassFor(caller, uid);

@@ -545,15 +545,263 @@ describe("authoringList", () => {
 });
 
 describe("the action set per type", () => {
-  it("gives polls no publish, unpublish or discard", () => {
+  it("gives polls and wiki spaces (always published) no publish, unpublish or discard", () => {
     const { host } = harness();
     for (const uid of Object.keys(AUTHORING_SPECS)) {
       const actions = authoringActionsFor(host, uid);
-      const publishes = uid !== POLL;
+      const publishes = uid !== POLL && uid !== "api::wiki-space.wiki-space";
       expect(typeof actions.publish === "function", uid).toBe(publishes);
       expect(typeof actions.unpublish === "function", uid).toBe(publishes);
       expect(typeof actions.discardDraft === "function", uid).toBe(publishes);
     }
-    expect(() => authoringActionsFor(host, "api::wiki-page.wiki-page")).toThrow();
+    expect(Object.keys(AUTHORING_SPECS)).toContain("api::wiki-page.wiki-page");
+    expect(() => authoringActionsFor(host, "api::wiki-revision.wiki-revision")).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The wiki (batch 16, lane 16B) and editable.authorName (S13)
+
+const SPACE = "api::wiki-space.wiki-space";
+const WIKI = "api::wiki-page.wiki-page";
+const PAGE_DOC = "page0000000000000000000a";
+const SPACE_DOC = "spce0000000000000000000a";
+
+const pageRow = (overrides: Record<string, unknown> = {}) => ({
+  id: 1,
+  documentId: PAGE_DOC,
+  title: "Handbook",
+  slug: "handbook-1a2b3c4d",
+  body: "# Hi",
+  summary: null,
+  tags: ["hr", 3],
+  tocEnabled: null,
+  order: 2,
+  publishedAt: null,
+  updatedAt: "2026-10-01T10:00:00.000Z",
+  publishAt: null,
+  scheduleError: null,
+  author: { id: 5, displayName: "Ada" },
+  department: { id: 10, documentId: "dept000000000000000000ab" },
+  team: null,
+  space: { id: 20, documentId: SPACE_DOC, slug: "hand", name: "Handbook space" },
+  parent: { id: 9, documentId: "prnt0000000000000000000a" },
+  ...overrides,
+});
+
+describe("the wiki in the authoring controller", () => {
+  it("answers a wiki-page form in the write shape, the moderator fields for moderators only", async () => {
+    const { host } = harness();
+    const rows = { documentId: PAGE_DOC, draft: pageRow(), published: null };
+    for (const roleClass of ["author", "departmentHead", "moderator"] as const) {
+      const ctx = context(
+        gateFor({ uid: WIKI, intent: "editable", roleClass, documentId: PAGE_DOC, rows }),
+      );
+      await authoringActionsFor(host, WIKI).editable(ctx);
+      const data = (ctx.body as { data: Record<string, unknown> }).data;
+      expect(data, roleClass).toMatchObject({
+        documentId: PAGE_DOC,
+        roleClass,
+        authorName: "Ada",
+        title: "Handbook",
+        slug: "handbook-1a2b3c4d",
+        tags: ["hr"],
+        tocEnabled: true,
+        order: 2,
+        space: { documentId: SPACE_DOC, slug: "hand", name: "Handbook space" },
+        parent: "prnt0000000000000000000a",
+        canDiscardUnpublished: roleClass !== "departmentHead",
+      });
+      for (const key of ["department", "team", "publishAt", "scheduleError"]) {
+        expect(key in data, `${roleClass} ${key}`).toBe(roleClass === "moderator");
+      }
+    }
+  });
+
+  it("names the author on every type's form (S13), null for quick links", async () => {
+    const { host } = harness();
+    const author = { id: 5, displayName: "", username: "ada" };
+    const draft = {
+      id: 1,
+      documentId: "doc0000000000000000000a1",
+      title: "T",
+      publishedAt: null,
+      updatedAt: "2026-10-01T10:00:00.000Z",
+      author,
+      organizer: author,
+      uploadedBy: author,
+    };
+    for (const [uid, expected] of [
+      [A, "ada"],
+      ["api::event.event", "ada"],
+      ["api::document.document", "ada"],
+      ["api::quick-link.quick-link", null],
+    ] as const) {
+      const ctx = context(
+        gateFor({
+          uid,
+          intent: "editable",
+          rows: { documentId: draft.documentId, draft, published: null },
+        }),
+      );
+      await authoringActionsFor(host, uid).editable(ctx);
+      expect((ctx.body as { data: { authorName: unknown } }).data.authorName, uid).toBe(expected);
+    }
+  });
+
+  it("answers a wiki-space form with its page count and a lost visibility target", async () => {
+    const { stub, host } = harness();
+    stub.tables[WIKI] = [
+      { id: 1, documentId: "pga000000000000000000000", space: { id: 20 }, publishedAt: null },
+      { id: 2, documentId: "pga000000000000000000000", space: { id: 21 }, publishedAt: "x" },
+      { id: 3, documentId: "pgb000000000000000000000", space: { id: 20 }, publishedAt: null },
+    ];
+    stub.tables[SPACE] = [
+      { id: 20, documentId: SPACE_DOC, publishedAt: null },
+      { id: 21, documentId: SPACE_DOC, publishedAt: "x" },
+    ];
+    const draft = {
+      id: 20,
+      documentId: SPACE_DOC,
+      name: "Ops",
+      slug: "ops-12345678",
+      icon: "book",
+      description: null,
+      visibility: "department",
+      department: null,
+      team: null,
+      allowedRoles: [],
+      publishedAt: null,
+      updatedAt: "2026-10-01T10:00:00.000Z",
+    };
+    const ctx = context(
+      gateFor({
+        uid: SPACE,
+        intent: "editable",
+        documentId: SPACE_DOC,
+        rows: { documentId: SPACE_DOC, draft, published: null },
+      }),
+    );
+    await authoringActionsFor(host, SPACE).editable(ctx);
+    expect((ctx.body as { data: unknown }).data).toMatchObject({
+      name: "Ops",
+      slug: "ops-12345678",
+      icon: "book",
+      visibility: "department",
+      allowedRoles: [],
+      department: null,
+      needsRetarget: true,
+      pageCount: 2,
+      authorName: null,
+    });
+  });
+
+  it("takes `space` on the wiki-page list and no status on the wiki-space list", () => {
+    expect(parseListQuery({ space: SPACE_DOC, status: "draft" }, { space: true })).toEqual({
+      page: 1,
+      status: "draft",
+      space: SPACE_DOC,
+    });
+    for (const [query, keys] of [
+      [{ space: "x y" }, { space: true }],
+      [{ space: SPACE_DOC }, {}],
+      [{ status: "draft" }, { status: false }],
+    ] as const) {
+      expect(
+        () => parseListQuery(query as Record<string, unknown>, keys),
+        JSON.stringify(query),
+      ).toThrow(errors.ValidationError);
+    }
+  });
+
+  it("answers wiki writes with the slug, a page with its space's slug", async () => {
+    const { stub, host } = harness({
+      onCall: (call) => {
+        if (call.scope) call.scope.committedRevision = 2;
+        return { documentId: PAGE_DOC };
+      },
+    });
+    stub.tables[WIKI] = [
+      {
+        id: 1,
+        documentId: PAGE_DOC,
+        slug: "handbook-1a2b3c4d",
+        publishedAt: null,
+        updatedAt: "2026-10-01T10:00:00.000Z",
+        publishAt: null,
+        scheduleError: null,
+        space: { id: 20 },
+      },
+    ];
+    stub.tables[SPACE] = [{ id: 20, documentId: SPACE_DOC, slug: "hand", publishedAt: null }];
+    const ctx = context(gateFor({ uid: WIKI, roleClass: "author", documentId: PAGE_DOC }), {
+      query: { status: "published" },
+      ifMatch: '"1"',
+      body: { data: { title: "x", revisionSummary: "note" } },
+    });
+    await authoringActionsFor(host, WIKI).update(ctx);
+    expect((ctx.body as { data: unknown }).data).toEqual({
+      documentId: PAGE_DOC,
+      version: "2",
+      status: "draft",
+      publishedAt: null,
+      publishAt: null,
+      scheduleError: null,
+      slug: "handbook-1a2b3c4d",
+      spaceSlug: "hand",
+    });
+  });
+
+  it("a wiki page without a published row: its author and moderators discard (delete), the others get 404 under the lock", async () => {
+    for (const [roleClass, outcome] of [
+      ["departmentHead", 404],
+      ["teamLead", 404],
+      ["author", 204],
+      ["moderator", 204],
+    ] as const) {
+      lock.locked = 3;
+      lock.calls.length = 0;
+      const { stub, host, calls } = harness({
+        onCall: (_call, s) => {
+          s.tables[WIKI] = [];
+          return { documentId: PAGE_DOC, entries: [] };
+        },
+      });
+      stub.tables[WIKI] = [pageRow()];
+      const ctx = context(
+        gateFor({
+          uid: WIKI,
+          intent: "discardDraft",
+          roleClass,
+          documentId: PAGE_DOC,
+          classify: async () => roleClass,
+        }),
+        { ifMatch: '"3"' },
+      );
+      await authoringActionsFor(host, WIKI).discardDraft?.(ctx);
+      expect(ctx.status, roleClass).toBe(outcome);
+      expect(calls.length, roleClass).toBe(outcome === 204 ? 1 : 0);
+      // Decided under the lock for the classes that may not delete.
+      expect(lock.calls.length, roleClass).toBe(outcome === 404 ? 1 : 0);
+    }
+  });
+
+  it("lets a department head discard a page that has a published row", async () => {
+    lock.locked = 3;
+    const { stub, host, calls } = harness();
+    stub.tables[WIKI] = [pageRow(), pageRow({ id: 2, publishedAt: "2026-10-01T10:00:00.000Z" })];
+    const ctx = context(
+      gateFor({
+        uid: WIKI,
+        intent: "discardDraft",
+        roleClass: "departmentHead",
+        documentId: PAGE_DOC,
+        classify: async () => "departmentHead",
+      }),
+      { ifMatch: '"3"' },
+    );
+    await authoringActionsFor(host, WIKI).discardDraft?.(ctx);
+    expect(ctx.status).toBe(200);
+    expect(calls.map((call) => call.action)).toEqual(["discardDraft"]);
   });
 });

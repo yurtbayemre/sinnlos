@@ -9,6 +9,7 @@ import {
   EVENT_MODERATOR_FIELDS,
   POLL_MODERATOR_FIELDS,
   QUICK_LINK_MODERATOR_FIELDS,
+  WIKI_FIELDS,
 } from "@sinnlos/domain";
 import { errors } from "@strapi/utils";
 import { describe, expect, it, vi } from "vitest";
@@ -23,6 +24,7 @@ import {
   SLUG_BASE_MAX_LENGTH,
   TEAM_UID,
   WIKI_PAGE_UID,
+  WIKI_SPACE_UID,
   WRITE_ALLOWLIST,
   applyWriteRule,
   enforceWriteAllowlist,
@@ -680,6 +682,10 @@ describe("WRITE_ALLOWLIST", () => {
         [...content, "parent", "revisionSummary"].sort(),
       );
       expect(writeRuleFor(WIKI_PAGE_UID, "update", roleClass)?.derivedFields).toBeUndefined();
+      // lastEditor is the caller of every save.
+      expect(writeRuleFor(WIKI_PAGE_UID, "update", roleClass)?.callerFields).toEqual([
+        "lastEditor",
+      ]);
     }
     expect(writeRuleFor(WIKI_PAGE_UID, "create", "author")?.callerFields).toEqual([
       "author",
@@ -688,11 +694,27 @@ describe("WRITE_ALLOWLIST", () => {
     expect(
       Object.keys(writeRuleFor(WIKI_PAGE_UID, "create", "author")?.derivedFields ?? {}),
     ).toEqual(["slug"]);
+    // Moderators (batch 16): department, team, the schedule; space on create only.
+    expect(fieldsOf(WIKI_PAGE_UID, "create", MODERATOR_CLASS)).toEqual(
+      [...content, "department", "parent", "publishAt", "revisionSummary", "space", "team"].sort(),
+    );
+    expect(fieldsOf(WIKI_PAGE_UID, "update", MODERATOR_CLASS)).toEqual(
+      [...content, "department", "parent", "publishAt", "revisionSummary", "team"].sort(),
+    );
+    expect(fieldsOf(WIKI_SPACE_UID, "create", MODERATOR_CLASS)).toEqual(
+      ["allowedRoles", "department", "description", "icon", "name", "team", "visibility"].sort(),
+    );
+    expect(writeClassesFor(WIKI_SPACE_UID, "update")).toEqual([MODERATOR_CLASS]);
+    expect(
+      Object.keys(writeRuleFor(WIKI_SPACE_UID, "create", MODERATOR_CLASS)?.derivedFields ?? {}),
+    ).toEqual(["slug"]);
+    expect(writeRuleFor(WIKI_SPACE_UID, "update", MODERATOR_CLASS)?.derivedFields).toBeUndefined();
     expect(Object.keys(table).sort()).toEqual(
       [
         DEPARTMENT_UID,
         TEAM_UID,
         WIKI_PAGE_UID,
+        WIKI_SPACE_UID,
         "api::announcement.announcement",
         "api::event.event",
         "api::quick-link.quick-link",
@@ -700,6 +722,32 @@ describe("WRITE_ALLOWLIST", () => {
         "api::poll.poll",
       ].sort(),
     );
+  });
+
+  it("carries exactly the @sinnlos/domain wiki field lists per class (K18)", () => {
+    for (const [uid, type] of [
+      [WIKI_SPACE_UID, "wikiSpace"],
+      [WIKI_PAGE_UID, "wikiPage"],
+    ] as const) {
+      for (const action of ["create", "update"] as const) {
+        const byClass = WIKI_FIELDS[type][action] as Record<string, readonly string[]>;
+        expect(writeClassesFor(uid, action), `${uid} ${action}`).toEqual(
+          Object.keys(byClass).sort(),
+        );
+        for (const [roleClass, fields] of Object.entries(byClass)) {
+          expect(fieldsOf(uid, action, roleClass), `${uid} ${action} ${roleClass}`).toEqual(
+            [...fields].sort(),
+          );
+        }
+      }
+    }
+  });
+
+  it("the wiki moderator create rule checks space before parent", () => {
+    const fields = Object.keys(
+      writeRuleFor(WIKI_PAGE_UID, "create", MODERATOR_CLASS)?.fields ?? {},
+    );
+    expect(fields.indexOf("space")).toBeLessThan(fields.indexOf("parent"));
   });
 
   it("the wiki create rule checks space before parent", () => {
@@ -773,9 +821,14 @@ describe("WRITE_ALLOWLIST", () => {
           it("no client-written field is unique (a clash would reveal hidden rows)", () => {
             // Strapi checks uid/unique attributes on publish against every
             // published row of the type, including rows the caller cannot
-            // read. Such attributes belong in derivedFields.
+            // read. Such attributes belong in derivedFields. The one
+            // exception: a wiki space's `name` for moderators, who read
+            // every space (wiki-visibility bypasses them), so a clash
+            // reveals nothing to them.
             const unique = Object.keys(rule.fields).filter(
-              (name) => attributes[name]?.type === "uid" || attributes[name]?.unique === true,
+              (name) =>
+                (attributes[name]?.type === "uid" || attributes[name]?.unique === true) &&
+                !(uid === WIKI_SPACE_UID && roleClass === MODERATOR_CLASS && name === "name"),
             );
             expect(unique).toEqual([]);
           });
@@ -821,7 +874,8 @@ const EVENT = "api::event.event";
 const QUICK_LINK = "api::quick-link.quick-link";
 const DOCUMENT = "api::document.document";
 const POLL = "api::poll.poll";
-const V2_UIDS = [ANNOUNCEMENT, EVENT, QUICK_LINK, DOCUMENT, POLL];
+/** The authored types the attribute-coverage pin walks (the wiki since batch 16). */
+const V2_UIDS = [ANNOUNCEMENT, EVENT, QUICK_LINK, DOCUMENT, POLL, WIKI_SPACE_UID, WIKI_PAGE_UID];
 
 const ENG_DOC = "deng00000000000000000000";
 const SALES_DOC = "dsal00000000000000000000";

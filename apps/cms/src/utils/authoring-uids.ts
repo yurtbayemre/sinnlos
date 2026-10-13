@@ -4,8 +4,8 @@
  * gate asks "is this uid one of mine" here instead of naming uids itself:
  *
  *   - AUTHORED_UIDS: written through the v2 authoring gate (§A, §B). Batch
- *     15 moves the five phase-1 types; batch 16 adds wiki-space and
- *     wiki-page, batch 17 course and lesson.
+ *     15 moved the five phase-1 types, batch 16 wiki-space and wiki-page;
+ *     batch 17 adds course and lesson.
  *   - DEPARTMENT_AUTHORED_UIDS: the types a department author writes for
  *     their own department (amendment 1, §N2), with `ownerDepartment`.
  *   - SCHEDULED_UIDS: the types with `publishAt` and `scheduleError` (§D);
@@ -37,13 +37,20 @@ export const DEPARTMENT_UID = "api::department.department";
 export const TEAM_UID = "api::team.team";
 const POLL = "api::poll.poll";
 
-/** Written through the v2 authoring gate (batch 15: the phase-1 types). */
+/**
+ * Written through the v2 authoring gate: the phase-1 types (batch 15) and
+ * the wiki (batch 16). Wiki spaces go through global::can-author like the
+ * phase-1 types; wiki pages through global::can-edit-wiki, the row gate of
+ * utils/wiki-gate.ts on the same loader, allowlist and controller.
+ */
 export const AUTHORED_UIDS: readonly string[] = [
   ANNOUNCEMENT_UID,
   EVENT_UID,
   QUICK_LINK_UID,
   DOCUMENT_UID,
   POLL,
+  WIKI_SPACE_UID,
+  WIKI_PAGE_UID,
 ];
 
 /** Department authors write these for their own department (amendment 1). */
