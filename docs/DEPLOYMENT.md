@@ -1914,14 +1914,23 @@ with the batch runbook):
 
 - Retag both images (`--no-build`); no database step and no `JWT_SECRET`
   rotation.
-- On the old image's boot users-permissions deletes the grants of the 22
-  custom actions its controllers lack; department_head's six core
-  `create`/`update` rows stay as unused rows (the drift line may list
-  them). The roll-forward's permission sync re-creates the custom grants.
+- On the old image's boot users-permissions deletes **one** permission row
+  per action its controllers lack (`syncPermissions` deletes by action,
+  one row each; in the rehearsal: admin_role's 22 authoring rows), so the
+  editor's 22 and department_head's 15 authoring rows stay behind as dead
+  rows (no route serves them), and department_head's six core
+  `create`/`update` rows stay too (the old image's drift line lists those
+  six). `prod-perm-diff.sql` of the old release then shows these 43 rows as
+  `EXTRA_IN_DB`. The roll-forward's permission sync re-creates the 22
+  deleted rows (`granted 22 permission(s)`) and the diff is empty again.
   Run `prod-perm-diff.sql` after both steps.
 - On the old image admin_role/editor payloads are open again and polls
-  accept 10 answers at most: a poll saved with 11 to 20 answers keeps them,
-  but the old lifecycle refuses the next save of its options in the panel.
+  accept 10 answers at most: a poll saved with 11 to 20 answers keeps them
+  and its votes, but the old lifecycle refuses every panel save and every
+  publish of it (the publish re-runs the check on the stored options).
+  List such polls before a rollback
+  (`SELECT DISTINCT document_id, question FROM polls WHERE jsonb_array_length(options) > 10`)
+  and leave them alone until the roll-forward.
 - The web of this release keeps working against the old cms for polls
   (it no longer sends `audience`; the old guard sets it from the
   departments); roll back both images together anyway.
