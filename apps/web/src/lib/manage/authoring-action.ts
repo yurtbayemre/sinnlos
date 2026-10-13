@@ -13,7 +13,7 @@ import { isDocumentId } from "@/lib/entry-id";
 import { capabilitiesFor, type AuthoringVerb } from "@/lib/roles";
 import { getViewer, type Viewer } from "@/lib/viewer";
 import { areaAccess, canDo, lacksDepartment, type AreaAccess } from "./access";
-import { AREA_TYPE, type ManageArea } from "./areas";
+import { AREA_TYPE, type ManageArea, type TypedArea } from "./areas";
 import type { PayloadContext } from "./payload";
 
 /**
@@ -106,7 +106,7 @@ export function validReference(documentId: unknown, version: unknown): documentI
  * false (a refresh would first re-render the page the author leaves).
  */
 export function authoringWrite(
-  area: ManageArea,
+  area: TypedArea,
   intent: AuthoringWriteIntent,
   request: AuthoringWriteRequest,
   { refreshPage }: { refreshPage: boolean },
@@ -152,7 +152,7 @@ export const TRANSITION_VERB: Readonly<
  * form navigates to the list).
  */
 export async function transitionItem(
-  area: ManageArea,
+  area: TypedArea,
   intent: keyof typeof TRANSITION_VERB,
   documentId: unknown,
   version: unknown,

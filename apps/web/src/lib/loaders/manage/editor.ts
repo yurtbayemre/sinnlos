@@ -1,6 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import type {
   AnnouncementEditable,
+  DocumentEditable,
   EditableBase,
   EventEditable,
   PollEditable,
@@ -10,7 +11,7 @@ import { fetchEditable } from "@/lib/api/manage/authoring";
 import { rsvpSummaries } from "@/lib/api/events";
 import { isDocumentId } from "@/lib/entry-id";
 import { rsvpSummaryMap } from "@/lib/event-rsvp";
-import { AREA_TYPE, type ManageArea } from "@/lib/manage/areas";
+import { AREA_TYPE, type TypedArea } from "@/lib/manage/areas";
 import { tryFetch } from "@/lib/safe-fetch";
 import { StrapiError } from "@/lib/strapi-error";
 
@@ -32,18 +33,20 @@ import { StrapiError } from "@/lib/strapi-error";
  * session is never swallowed.
  */
 
-export type EditableOf<A extends ManageArea> = A extends "announcements"
+export type EditableOf<A extends TypedArea> = A extends "announcements"
   ? AnnouncementEditable
   : A extends "events"
     ? EventEditable
     : A extends "polls"
       ? PollEditable
-      : QuickLinkEditable;
+      : A extends "documents"
+        ? DocumentEditable
+        : QuickLinkEditable;
 
 export type EditorLoad<T extends EditableBase> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };
 
-export async function loadEditable<A extends ManageArea>(
+export async function loadEditable<A extends TypedArea>(
   area: A,
   documentId: string,
 ): Promise<EditorLoad<EditableOf<A>>> {

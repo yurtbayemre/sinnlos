@@ -7,7 +7,7 @@ import {
   type AuthoringPagination,
 } from "@sinnlos/domain";
 import { fetchAuthoringList, type AuthoringListQuery } from "@/lib/api/manage/authoring";
-import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type ManageArea } from "@/lib/manage/areas";
+import { AREA_TYPE, hasDrafts, SCHEDULE_FIELDS, type TypedArea } from "@/lib/manage/areas";
 import { tryFetch } from "@/lib/safe-fetch";
 
 /**
@@ -24,7 +24,7 @@ import { tryFetch } from "@/lib/safe-fetch";
  */
 
 /** The status tabs of an area, "all" first. */
-export function statusTabs(area: ManageArea): ("all" | AuthoringListStatusFilter)[] {
+export function statusTabs(area: TypedArea): ("all" | AuthoringListStatusFilter)[] {
   if (!hasDrafts(area)) return [];
   const tabs: ("all" | AuthoringListStatusFilter)[] = ["all", "draft", "published", "modified"];
   if (SCHEDULE_FIELDS[area].length > 0) tabs.push("scheduled", "failed");
@@ -50,7 +50,7 @@ const first = (value: string | string[] | undefined): string =>
  * announcements and events).
  */
 export function parseListFilters(
-  area: ManageArea,
+  area: TypedArea,
   params: ListSearchParams,
   { ownerFilter }: { ownerFilter: boolean },
 ): ListFilters {
@@ -87,7 +87,7 @@ const NO_PAGES: AuthoringPagination = {
 
 /** One page of the area's authoring list. */
 export async function loadManageList(
-  area: ManageArea,
+  area: TypedArea,
   filters: ListFilters,
 ): Promise<ManageListView> {
   const query: AuthoringListQuery = {

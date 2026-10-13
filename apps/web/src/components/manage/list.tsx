@@ -10,7 +10,13 @@ import type {
 } from "@sinnlos/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { formatInstant } from "@/lib/date-format";
-import { AREA_PATH, areaItemPath, hasDrafts, type ManageArea } from "@/lib/manage/areas";
+import {
+  AREA_PATH,
+  areaItemPath,
+  hasDrafts,
+  type ManageArea,
+  type TypedArea,
+} from "@/lib/manage/areas";
 import type { ListFilters } from "@/lib/loaders/manage/list";
 import { cn } from "@/lib/utils";
 import { inputClass } from "./form-controls";
@@ -137,7 +143,7 @@ export function AuthoringList({
   rows,
   showOwner,
 }: {
-  area: ManageArea;
+  area: TypedArea;
   rows: AuthoringListRow[];
   showOwner: boolean;
 }) {

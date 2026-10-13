@@ -105,15 +105,21 @@ describe("the /manage shell", () => {
 });
 
 describe("the landing", () => {
-  it("an editor: the four area tiles, no reports and no Strapi links", async () => {
+  it("an editor: the six area tiles, no reports and no Strapi links", async () => {
     const tree = elements(await ManagePage());
-    expect(hrefs(tree)).toEqual(
-      expect.arrayContaining([
+    expect(
+      hrefs(tree)
+        .filter((href) => href.startsWith("/manage/"))
+        .sort(),
+    ).toEqual(
+      [
         "/manage/announcements",
         "/manage/events",
         "/manage/polls",
         "/manage/quick-links",
-      ]),
+        "/manage/documents",
+        "/manage/wiki",
+      ].sort(),
     );
     expect(hrefs(tree)).not.toContain("/manage/analytics");
     expect(hrefs(tree).some((href) => href.includes("/admin"))).toBe(false);
@@ -128,11 +134,24 @@ describe("the landing", () => {
     expect(hrefs(tree).some((href) => href.includes("/admin/content-manager"))).toBe(true);
   });
 
-  it("a department head: announcements and events only (no documents tile before 16C)", async () => {
+  it("a department head: announcements, events and documents only (§L1), never the wiki", async () => {
     viewerRef.current = viewer("department_head", ENG);
     const tree = elements(await ManagePage());
     const areas = hrefs(tree).filter((href) => href.startsWith("/manage/"));
-    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/events"]);
+    expect(areas.sort()).toEqual(["/manage/announcements", "/manage/documents", "/manage/events"]);
+    // Their counts come from their own lists; the wiki's page list is never asked.
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    expect(paths.some((path) => path.startsWith("/api/documents/authoring"))).toBe(true);
+    expect(paths.some((path) => path.startsWith("/api/wiki-"))).toBe(false);
+  });
+
+  it("the wiki tile counts the wiki's pages (drafts, scheduled, failed)", async () => {
+    await ManagePage();
+    const paths = strapiMock.mock.calls.map(([path]) => String(path));
+    for (const status of ["draft", "scheduled", "failed"]) {
+      expect(paths).toContain(`/api/wiki-pages/authoring?status=${status}`);
+      expect(paths).toContain(`/api/documents/authoring?status=${status}`);
+    }
   });
 
   it("a department head without a department: the explanation, no request (§N1)", async () => {

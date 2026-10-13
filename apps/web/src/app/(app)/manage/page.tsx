@@ -6,6 +6,7 @@ import {
   CalendarDays,
   ClipboardCheck,
   ExternalLink,
+  FileText,
   GraduationCap,
   Link2,
   Lock,
@@ -42,6 +43,8 @@ const AREA_ICONS: Readonly<Record<ManageArea, LucideIcon>> = {
   events: CalendarDays,
   polls: Vote,
   quickLinks: Link2,
+  documents: FileText,
+  wiki: BookOpen,
 };
 
 const ROLE_COLORS = [
@@ -92,8 +95,9 @@ const QUICK_LINK_META = [
  * attention (drafts, scheduled, failed schedules; lib/loaders/manage/
  * landing.ts). The reports (analytics, read confirmations, training) and
  * the Strapi admin links and roles stay admin-only. A department author
- * sees announcements and events only (no documents tile before 16C, §N7),
- * and without a department the explanation instead (§N1).
+ * sees announcements, events and documents (§L1, §N7: their three areas;
+ * the wiki tile needs `author.wikiSpaces`, moderators only), and without a
+ * department the explanation instead (§N1).
  */
 export default async function ManagePage() {
   const { viewer, capabilities } = await manageGate();

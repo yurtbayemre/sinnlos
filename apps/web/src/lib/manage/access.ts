@@ -16,7 +16,7 @@
  */
 import type { AuthoringRoleClass } from "@sinnlos/domain";
 import type { AuthoringScope, AuthoringVerb, Capabilities } from "@/lib/roles";
-import { MANAGE_AREAS, type ManageArea } from "./areas";
+import { AREA_CAPABILITY, MANAGE_AREAS, type ManageArea } from "./areas";
 
 /** The verbs of the capability model, in the order the publish bar uses them. */
 const VERB_ORDER: readonly AuthoringVerb[] = [
@@ -38,10 +38,13 @@ export interface AreaAccess {
   roleClass: AuthoringRoleClass;
 }
 
-/** The viewer's access to `area`, or null when the role authors nothing there. */
+/**
+ * The viewer's access to `area` (its capability area, AREA_CAPABILITY: the
+ * wiki reads `wikiSpaces`), or null when the role authors nothing there.
+ */
 export function areaAccess(capabilities: Capabilities, area: ManageArea): AreaAccess | null {
-  const verbs = capabilities.author[area];
-  const scope = capabilities.authorScope[area];
+  const verbs = capabilities.author[AREA_CAPABILITY[area]];
+  const scope = capabilities.authorScope[AREA_CAPABILITY[area]];
   if (!verbs || verbs.size === 0 || scope === null) return null;
   return {
     area,
