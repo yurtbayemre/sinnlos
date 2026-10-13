@@ -841,7 +841,9 @@ writers all pass them, and the cms refuses to boot when
   that already exists blocks no other save and can be repaired. A space
   that any page links can be neither deleted nor unpublished
   (`spaceNotEmpty`): the admin panel's unpublish used to drop its pages'
-  space links. `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
+  space links; a discard of a space's draft is refused when it would take
+  an unpublished page out of the space (Strapi re-links only pages with a
+  published version). `infra/diagnostics/wiki-parent-cycles.sql` lists loops,
   cross-space parents and pages without a space, read-only.
 - **Publish readiness** (`utils/publish-readiness.ts`): a publish of a
   scheduled type needs the fields the published validation requires, and
