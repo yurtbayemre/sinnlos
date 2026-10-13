@@ -1389,6 +1389,15 @@ systemctl start docker
 >   after the deploy and fade as people reload; the runbooks' error
 >   filters print them, so count them as expected there.
 
+> **Deploying batch 15.2 (relation grants in populate filters and sort)?**
+> One deploy with `infra/deploy.sh`, **once batch 15.1 runs**. No schema, no
+> env, no permission change, no `JWT_SECRET` rotation, nobody signed out.
+> A relation followed in a populate's `filters` or `sort` needs the
+> caller's `find` grant on its target (else the core's 400 `Invalid key`),
+> for every caller, and `comment.parent`/`replies` are cut below the
+> moderators. The web sends neither. A rollback to 15.1 is a retag. Follow
+> [Deploying batch 15.2](#deploying-batch-152-relation-grants-in-populate-filters-and-sort).
+>
 > **Deploying batch 15.1 (the wiki-revision read closure)?** One deploy of
 > cms and web with `infra/deploy.sh`, **once batch 15 runs**
 > (`TAG=8e86822300a0`) and before batch 16. No schema, no env, no
@@ -1905,6 +1914,193 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Deploying batch 15.2 (relation grants in populate filters and sort)
+
+Batch 15.2 (branch `fix/nested-populate-relation-grants`) ships after
+batch 15.1 and before the batch 16 lanes. Batch 15.1 closed the filters and
+sort nested in a populate for wiki revisions only; the gap is general:
+Strapi 5.57 refuses a root filter or sort through a relation whose target
+the caller may not `find`, but never asks inside a populate. Guest could
+select wiki pages by their department or team, and every role below
+admin_role could select or sort users by their role
+(`populate[author][filters][role][type][$eq]=admin_role`). After this
+release:
+
+- a relation followed inside a populate's `filters` or `sort` (any depth,
+  `$and`/`$or`/`$not`, every sort shape) needs the caller's
+  `<target>.find`, for every caller, admin_role and editor included; else
+  the answer is the core's own 400 `Invalid key <relation> at <path>`,
+  whatever the value;
+- `comment.parent` and `comment.replies` are cut below the moderators like
+  `poll-vote.poll`: dropped from `populate`, 400 in filters and sort,
+  deleted from responses. Comment visibility is per target, and a parent
+  link written before FX04 or in the admin panel could point at a comment
+  under a hidden announcement or wiki page.
+
+Nothing the web sends changes: it uses no populate filter or sort and
+neither comment relation; its four root relation filters (the wiki page by
+space slug, notifications by recipient, own reactions and own ads by
+author) are pinned per role by
+`apps/cms/src/integration/nested-relation-grants.integration.test.ts`.
+
+It is **one deploy** with `infra/deploy.sh`; the web has no change, so its
+image should come out identical and only the cms container restart. No
+schema change, no env, no edge change, **no permission change**, **no
+`JWT_SECRET` rotation**, nobody is signed out.
+
+Set `COMPOSE` and `psql_db` as in
+[Deploying batch 15.1](#deploying-batch-151-the-wiki-revision-read-closure)
+(where its comments say "the batch 15.1 merge", read "the batch 15.2
+merge").
+
+**Before the deploy** (read-only)
+
+1. **Batch 15.1 runs, and its images are the rollback target:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   B151_TAG="$(sed -n 's/^TAG=//p' .git/sinnlos-deploy/infra.state)"
+   echo "${B151_TAG}"
+   docker image inspect --format '{{.Id}}' "infra-cms:${B151_TAG}" "infra-web:${B151_TAG}"
+   ```
+
+   `TAG=` the batch 15.1 sha12 (`1d0b11788693` if 15.1 shipped from its
+   merge commit), `LIVE_SMOKE=passed`, both images exist. Keep `B151_TAG`
+   in this shell for the rollback. Batch 15 (`8e86822300a0`) still
+   running: deploy 15.1 first.
+
+2. **A clean checkout, fast-forwarded to the batch 15.2 merge:** as step 2
+   of 15.1 (`git status --short` empty, `git merge --ff-only`, the
+   `git clean -n -d` dry run prints nothing).
+
+3. **The preflight and the plan:** `infra/deploy.sh --check` (`Preflight
+   OK`) and `infra/deploy.sh --dry-run` (`lock: free`, the batch 15.2
+   commit, its CI result, the backup line, `last-known-good:
+   infra-{web,cms}:<B151_TAG>`, `live-smoke: run`, **no** `MANDATORY`
+   line).
+
+4. **The permission diff** (`psql_db -X < infra/diagnostics/prod-perm-diff.sql`):
+   only the two informational `authenticated` rows. 15.2 changes no grant,
+   so the file is the same as 15.1's.
+
+**Deploy** (the owner's go in the VPS session): `infra/deploy.sh` as
+`bigemo`, as for 15.1: lock, clean checkout, CI line, backup,
+last-known-good `<B151_TAG>` kept, both images built, `up -d --no-build`,
+`Smoke check OK`, live-smoke passed, `Recording infra-{web,cms}:<batch 15.2
+sha12>`, exit 0. A failure prints the rollback to `<B151_TAG>`, with no
+`MANDATORY` step: report it.
+
+**After the deploy** (read-only)
+
+5. **The state and the boot lines:**
+
+   ```bash
+   cat .git/sinnlos-deploy/infra.state
+   "${COMPOSE[@]}" logs --since 30m cms | grep -E '\[bootstrap\]|\[admin-permissions\]|\[restricted-relations\]|Strapi started'
+   ```
+
+   The state names the batch 15.2 commit (`LIVE_SMOKE=passed`). No
+   permission change is expected; confirm it in the log:
+   - `[bootstrap] permission drift: none (report-only check of 142 managed
+     actions)`, as on 15.1;
+   - **no** `[bootstrap] granted …`, **no** `[bootstrap] revoked …` and
+     **no** `[admin-permissions]` line;
+   - `Strapi started successfully`, then the `[cron] scheduled-publisher`
+     line every minute.
+
+   Stop line: `[restricted-relations] strapi.auth.verify not found —
+   refusing to boot without the populate grant check` (the cms does not
+   start; nothing was changed; roll back). The error filter of 15.1 step 5
+   prints only the expected lines.
+
+6. **The permission diff** again: only the two informational rows.
+
+7. **The rule, as the smoke account** (it signs in inside the cms
+   container, like the RSVP check of the 5.55.1 upgrade; the account is not
+   admin_role):
+
+   ```bash
+   SMOKE_EMAIL=casey.jones@sinnlos.local
+   SMOKE_PASSWORD="$(grep "^${SMOKE_EMAIL}[[:space:]]" "${PASSWORDS_FILE:-/home/bigemo/.sinnlos-env-backup/demo-account-passwords.txt}" | awk '{print $2}' | head -1)"
+   SMOKE_PASSWORD="$SMOKE_PASSWORD" docker exec -i -e SMOKE_PASSWORD infra-cms-1 node --input-type=module - "$SMOKE_EMAIL" <<'NODE'
+   const [identifier] = process.argv.slice(2);
+   const base = "http://127.0.0.1:1337";
+   const login = await fetch(`${base}/api/auth/local`, {
+     method: "POST",
+     headers: { "content-type": "application/json" },
+     body: JSON.stringify({ identifier, password: process.env.SMOKE_PASSWORD }),
+   });
+   const { jwt, user } = await login.json();
+   if (!jwt) throw new Error(`sign-in failed: HTTP ${login.status}`);
+   const get = (path) => fetch(`${base}${path}`, { headers: { authorization: `Bearer ${jwt}` } });
+   const probe = (value) =>
+     get(`/api/wiki-pages?populate[author][filters][role][type][$eq]=${value}&pagination[pageSize]=1`);
+   const hit = await probe("admin_role");
+   const miss = await probe("ZZNOMATCH");
+   const hitText = await hit.text();
+   const blind = hitText === (await miss.text()) ? "blind" : "DIFFERS";
+   console.log("role filter in a populate:", hit.status, blind, JSON.parse(hitText).error?.message);
+   console.log("plain populate:", (await get("/api/wiki-pages?populate[author][fields][0]=username&pagination[pageSize]=1")).status);
+   const comments = await (await get("/api/comments?populate[parent]=true&pagination[pageSize]=100")).json();
+   console.log("comment parent keys:", comments.data.filter((row) => "parent" in row).length);
+   console.log("notifications:", (await get(`/api/notifications?filters[recipient][id][$eq]=${user.id}&pagination[pageSize]=1`)).status);
+   NODE
+   ```
+
+   Expected: `role filter in a populate: 400 blind Invalid key role at
+   author.role`, `plain populate: 200`, `comment parent keys: 0`,
+   `notifications: 200`. Before the deploy the first line answered 200
+   (blind or different, depending on the first page's author); only the
+   400 after the deploy is the check. Every role
+   and shape is pinned by the integration suite on SQLite and Postgres 16.
+
+8. **In a browser (the owner, as a member and as a guest):** the
+   notification bell, `/wiki` and a wiki page, `/announcements` with its
+   comments and reactions, and the marketplace's own ads (member) look as
+   before.
+
+9. **+15 and +60 minutes:** no new error types, no restarts, no 5xx, as
+   for 15.1.
+
+**Release note:** none for users; nothing the web shows changes.
+
+**Known residual (Strapi 5.57):** a sort through a relation inside a
+populate (`populate[pages][sort]=department.name:asc`) answers 500 with a
+SQL error in the cms log for callers that hold the target's `find`; 15.2
+turns it into 400 only where the grant is missing. Nothing leaks, and the
+web sends no such sort; a line from it in step 5's error filter is someone
+sending that request by hand. Batch 16 refuses every relation sort inside a
+populate.
+
+**Rehearsal** (2026-10-13, local staging in Traefik mode, from 1d0b117):
+this section walked as written. Before the deploy, populate filters
+through department, team and role gave different results for matching and
+non-matching values, and `populate=parent` showed a comment on a hidden
+announcement to every role, guests included; after it, each answered 400
+(or lost the key) where the role lacks the grant, and the granted paths and
+the web's own queries returned identical counts. The deploy took 85 s (cms
+boot 7.5 s, the web image unchanged); the rollback 6.9 s re-opened every
+probe; the roll-forward 27 s closed them again.
+
+**Rollback** (the owner's decision only; to the batch 15.1 images,
+`<B151_TAG>`)
+
+No database step and **no `JWT_SECRET` rotation**. Retag both images
+(`B151_TAG` from step 1):
+
+```bash
+docker tag "infra-web:${B151_TAG}" infra-web:latest
+docker tag "infra-cms:${B151_TAG}" infra-cms:latest
+"${COMPOSE[@]}" up -d --no-build web cms
+```
+
+The 15.1 boot logs the same drift line over 142 managed actions and no
+`granted`/`revoked` line; the permission diff stays at the two
+informational rows. That re-opens what this release closes (filters and
+sort inside a populate through relations the caller may not `find`, and
+`comment.parent`/`replies` below the moderators); wiki revisions stay
+closed (15.1). The roll-forward is a normal `infra/deploy.sh`.
 
 #### Deploying batch 15.1 (the wiki-revision read closure)
 

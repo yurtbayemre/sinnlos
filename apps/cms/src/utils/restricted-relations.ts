@@ -43,6 +43,18 @@ import { errors } from "@strapi/utils";
  * `/api/wiki-spaces?populate[pages][filters][revisions][body][$startsWith]=…`
  * answered with the pages whose revisions match, for every role.
  *
+ * Grants inside populate (batch 15.2): the gap above is not specific to
+ * wiki revisions. At the root the core refuses a filter or sort through a
+ * relation whose target the caller holds no `find` on; inside a populate it
+ * never asks, so `/api/wiki-spaces?populate[pages][filters][department]
+ * [name][$eq]=…` let guest (no `department.find`) select through
+ * departments, and `populate[author][filters][role][type][$eq]=admin_role`
+ * let every role below admin_role probe users' roles. The walk reports each
+ * relation a populate's `filters` or `sort` follow (`onPopulateQueryRelation`,
+ * at any depth, through `$and`/`$or`/`$not`), and the guard refuses the first
+ * one whose target the caller cannot `find` (assertPopulateQueryGrants),
+ * with the core's root answer. Every caller, admin_role and editor included.
+ *
  * What happens to a restricted relation (closed targets for every caller,
  * the rest for non admin_role/editor callers; registerRestrictedRelationGuard
  * in bootstrap/restricted-relation-guard.ts decides the bypass):
@@ -129,6 +141,17 @@ export const RESTRICTED_RELATION_TARGETS: RestrictedRelationRules = {
   // entry keeps it, and any relation added later, from handing out polls
   // outside their audience. No source is trusted.
   "api::poll.poll": [],
+  // Comment target visibility (#28, batch 15.2): comment-target-visibility
+  // narrows the comment routes per TARGET (targetType + targetDocumentId),
+  // and nothing keeps comment.parent/replies on one target: the content API
+  // never writes them (FX04 builds the create payload without them), but a
+  // create before FX04 could point `parent` at any comment, and the admin
+  // panel still can. Such a link handed out a comment under a hidden
+  // announcement or wiki page through `populate[parent]`, and filters and
+  // sort through it were an oracle on its body. The web uses neither
+  // relation. No source is trusted; admin_role and editor read every
+  // comment anyway (the policy's bypass) and keep both.
+  "api::comment.comment": [],
 };
 
 /**
@@ -146,10 +169,27 @@ export const NON_BYPASS_RELATION_TARGETS: RestrictedRelationRules = {
   ...CLOSED_RELATION_TARGETS,
 };
 
+/**
+ * A relation that a populate's `filters` or `sort` follow: its target, and
+ * the key and path that the core's `Invalid key` names.
+ */
+export interface PopulateQueryRelation {
+  target: string;
+  key: string;
+  path: string;
+}
+
 export interface RestrictedRelationOptions {
   /** Resolve a model uid to its schema (strapi.getModel); may return undefined. */
   getModel: (uid: string) => RelationModel | undefined;
   rules: RestrictedRelationRules;
+  /**
+   * Called in walk order for every relation with a static target that a
+   * populate's `filters` or `sort` follow and the rules let through, at any
+   * populate and filter depth. Root filters and sort are not reported: the
+   * core checks their grants itself (validateQuery's throwRestrictedRelations).
+   */
+  onPopulateQueryRelation?: (relation: PopulateQueryRelation) => void;
 }
 
 const POPULATABLE_TYPES = new Set(["relation", "media", "component", "dynamiczone"]);
@@ -186,8 +226,9 @@ export function guardRestrictedRelations(
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
 ): Record<string, unknown> {
-  assertFilters(query.filters, model, options, "");
-  assertSort(query.sort, model, options, "");
+  // Root filters and sort: the core already checked their grants.
+  assertFilters(query.filters, model, options, "", undefined);
+  assertSort(query.sort, model, options, "", undefined);
   if (query.populate === undefined) return query;
   return { ...query, populate: stripPopulate(query.populate, model, options, "") };
 }
@@ -205,6 +246,27 @@ export function stripRestrictedRelationsFromOutput<T>(
 ): T {
   visitOutput(data, model, options, new WeakSet<object>());
   return data;
+}
+
+/**
+ * The core's root rule, applied to the relations a populate's filters and
+ * sort follow (batch 15.2, collected through `onPopulateQueryRelation`):
+ * throws the core's `Invalid key` 400 for the first one, in walk order,
+ * whose target the caller holds no `find` on. `canFind` is asked once per
+ * target. A 400 rather than a dropped clause, as for the restricted
+ * relations: the answer stays a function of the query shape alone.
+ */
+export async function assertPopulateQueryGrants(
+  relations: readonly PopulateQueryRelation[],
+  canFind: (target: string) => Promise<boolean>,
+): Promise<void> {
+  // The first refusal throws, so every target seen so far was granted.
+  const granted = new Set<string>();
+  for (const { target, key, path } of relations) {
+    if (granted.has(target)) continue;
+    if (!(await canFind(target))) throwInvalidKey(key, path);
+    granted.add(target);
+  }
 }
 
 /** Mirrors @strapi/utils validate/utils.js throwInvalidKey (same 400, same text). */
@@ -263,14 +325,37 @@ function expandWildcard(model: RelationModel | undefined, options: RestrictedRel
 // filters and sort: reject
 // ---------------------------------------------------------------------------
 
+/** Receives the relations a populate's filters and sort follow; absent at the root. */
+type RelationVisit = RestrictedRelationOptions["onPopulateQueryRelation"];
+
+/**
+ * Rejects `attr` under the rules, else reports it to `visit` when it is a
+ * relation with a static target (a morph relation has none and is
+ * restricted anyway).
+ */
+function checkRelation(
+  model: RelationModel | undefined,
+  attr: RelationAttribute,
+  options: RestrictedRelationOptions,
+  key: string,
+  at: string,
+  visit: RelationVisit,
+): void {
+  if (isRestrictedRelation(model, attr, options.rules)) throwInvalidKey(key, at);
+  if (visit && attr.type === "relation" && attr.target) {
+    visit({ target: attr.target, key, path: at });
+  }
+}
+
 function assertFilters(
   filters: unknown,
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
   path: string,
+  visit: RelationVisit,
 ): void {
   if (Array.isArray(filters)) {
-    for (const item of filters) assertFilters(item, model, options, path);
+    for (const item of filters) assertFilters(item, model, options, path, visit);
     return;
   }
   if (!isPlainObject(filters)) return;
@@ -280,13 +365,13 @@ function assertFilters(
       // Operators ($and/$or/$not, but also value operators) and any other
       // non-attribute key: the core walks their operand on the SAME model
       // (@strapi/utils traverse/query-filters.js), so this walk does too.
-      assertFilters(value, model, options, path);
+      assertFilters(value, model, options, path, visit);
       continue;
     }
     const at = joinPath(path, key);
-    if (isRestrictedRelation(model, attr, options.rules)) throwInvalidKey(key, at);
+    checkRelation(model, attr, options, key, at, visit);
     const nested = nestedModel(attr, options);
-    if (nested) assertFilters(value, nested, options, at);
+    if (nested) assertFilters(value, nested, options, at, visit);
   }
 }
 
@@ -295,16 +380,17 @@ function assertSort(
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
   path: string,
+  visit: RelationVisit,
 ): void {
   if (typeof sort === "string") {
     // "title:asc,teams.name:desc" — the order suffix is not part of the path.
     for (const token of sort.split(",")) {
-      assertSortPath(token.split(":")[0].trim().split("."), model, options, path);
+      assertSortPath(token.split(":")[0].trim().split("."), model, options, path, visit);
     }
     return;
   }
   if (Array.isArray(sort)) {
-    for (const item of sort) assertSort(item, model, options, path);
+    for (const item of sort) assertSort(item, model, options, path, visit);
     return;
   }
   if (!isPlainObject(sort)) return;
@@ -313,9 +399,9 @@ function assertSort(
     const attr = model?.attributes?.[key];
     if (!attr) continue;
     const at = joinPath(path, key);
-    if (isRestrictedRelation(model, attr, options.rules)) throwInvalidKey(key, at);
+    checkRelation(model, attr, options, key, at, visit);
     const nested = nestedModel(attr, options);
-    if (nested && typeof value !== "string") assertSort(value, nested, options, at);
+    if (nested && typeof value !== "string") assertSort(value, nested, options, at, visit);
   }
 }
 
@@ -324,6 +410,7 @@ function assertSortPath(
   model: RelationModel | undefined,
   options: RestrictedRelationOptions,
   path: string,
+  visit: RelationVisit,
 ): void {
   let current = model;
   let at = path;
@@ -331,7 +418,7 @@ function assertSortPath(
     const attr = current?.attributes?.[segment];
     if (!attr) return;
     at = joinPath(at, segment);
-    if (isRestrictedRelation(current, attr, options.rules)) throwInvalidKey(segment, at);
+    checkRelation(current, attr, options, segment, at, visit);
     current = nestedModel(attr, options);
   }
 }
@@ -458,9 +545,11 @@ function stripNested(
   const nested = nestedModel(attr, options);
   if (Array.isArray(sub)) return stripPopulate(sub, nested, options, path);
   if (!isPlainObject(sub)) return sub;
-  // populate[teams][filters|sort] run against the NESTED model.
-  assertFilters(sub.filters, nested, options, path);
-  assertSort(sub.sort, nested, options, path);
+  // populate[teams][filters|sort] run against the NESTED model; the core
+  // checks no grant there, so each relation they follow is reported.
+  const visit = options.onPopulateQueryRelation;
+  assertFilters(sub.filters, nested, options, path, visit);
+  assertSort(sub.sort, nested, options, path, visit);
   if (!("populate" in sub)) return sub;
   return { ...sub, populate: stripPopulate(sub.populate, nested, options, path) };
 }

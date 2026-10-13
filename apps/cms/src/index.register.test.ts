@@ -69,10 +69,17 @@ const fullUser = () => ({
   microsoftOid: "oid-ada-123",
 });
 
+/** A request's `auth` as the users-permissions strategy builds it: an ability over scopes. */
+const authWith = (...scopes: string[]) => ({
+  strategy: { name: "users-permissions" },
+  ability: { can: (scope: string) => scopes.includes(scope) },
+});
+
 /**
  * The Strapi slice the datetime guard touches in register(): log, hooks,
  * dialect; plus the Document Service middleware registry the poll audience
- * guard hangs onto.
+ * guard hangs onto, and the auth service the relation guard asks for grants
+ * inside populate (batch 15.2).
  */
 function datetimeHost() {
   const hooks = new Map<string, Array<(context: unknown) => Promise<void>>>();
@@ -81,6 +88,16 @@ function datetimeHost() {
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     db: { dialect: { client: "sqlite" } },
     documents: { use: vi.fn() },
+    // users-permissions' verify (strategies/users-permissions.js): the
+    // request's ability decides; no auth or no ability, no grant.
+    auth: {
+      verify: vi.fn(async (auth: unknown, config: { scope: string }) => {
+        const ability = (auth as { ability?: { can(scope: string): boolean } } | undefined)
+          ?.ability;
+        if (!ability) throw new errors.UnauthorizedError();
+        if (!ability.can(config.scope)) throw new errors.ForbiddenError();
+      }),
+    },
     hook: (name: string) => ({
       register: (handler: (context: unknown) => Promise<void>) => {
         hooks.set(name, [...(hooks.get(name) ?? []), handler]);
@@ -160,13 +177,18 @@ describe("content-api.output sanitizer registration (issue #10 / F6)", () => {
  *   - the output backstop lands via get()+set() (never `.add`),
  *   - admin_role/editor bypass both, except for the closed targets (wiki
  *     revisions, batch 15.1); no request context = guard applies,
- *   - boot fails when the hook point is gone (no silent re-open),
+ *   - inside a populate, filters and sort follow only relations whose
+ *     target the caller may `find`, asked through `strapi.auth.verify` with
+ *     the request's `auth` (batch 15.2), for every caller,
+ *   - boot fails when a hook point is gone (no silent re-open),
  *   - register() installs it next to the contact sanitizer.
  */
 describe("relation side-channel guard registration (FX05)", () => {
   const WIKI_PAGE = "api::wiki-page.wiki-page";
+  const DEPARTMENT = "api::department.department";
+  const ROLE = "plugin::users-permissions.role";
   const department: RelationModel = {
-    uid: "api::department.department",
+    uid: DEPARTMENT,
     attributes: {
       name: { type: "string" },
       teams: { type: "relation", target: "api::team.team" },
@@ -178,7 +200,8 @@ describe("relation side-channel guard registration (FX05)", () => {
     attributes: {
       username: { type: "string" },
       password: { type: "password", private: true },
-      department: { type: "relation", target: "api::department.department" },
+      department: { type: "relation", target: DEPARTMENT },
+      role: { type: "relation", target: ROLE },
     },
   };
   const wikiPage: RelationModel = {
@@ -186,6 +209,8 @@ describe("relation side-channel guard registration (FX05)", () => {
     attributes: {
       title: { type: "string" },
       children: { type: "relation", target: WIKI_PAGE },
+      author: { type: "relation", target: USER_UID },
+      department: { type: "relation", target: DEPARTMENT },
       revisions: { type: "relation", target: "api::wiki-revision.wiki-revision" },
     },
   };
@@ -292,6 +317,85 @@ describe("relation side-channel guard registration (FX05)", () => {
     await expect(query).rejects.toThrow("Invalid key pages");
   });
 
+  describe("grants inside populate (batch 15.2)", () => {
+    /** A filter through department, and a sort through author.role, nested in a populate. */
+    const throughDepartment = () => ({
+      populate: { children: { filters: { department: { name: { $eq: "Eng" } } } } },
+    });
+    const throughRole = () => ({
+      populate: { children: { sort: "title:asc,author.role.type:desc" } },
+    });
+    const READS = [`${WIKI_PAGE}.find`, `${USER_UID}.find`];
+
+    it.each(["admin_role", "editor", "member", "guest", undefined])(
+      "refuses %s a relation it may not find, with the core's 400; the grant lets it through",
+      async (role) => {
+        const { strapi } = host(role);
+        registerRestrictedRelationGuard(strapi);
+        const readsOnly = authWith(...READS);
+        const without = strapi.contentAPI.sanitize.query(throughDepartment(), wikiPage, {
+          auth: readsOnly,
+        });
+        await expect(without).rejects.toBeInstanceOf(errors.ValidationError);
+        await expect(without).rejects.toThrow("Invalid key department at children.department");
+        await expect(
+          strapi.contentAPI.sanitize.query(throughRole(), wikiPage, { auth: readsOnly }),
+        ).rejects.toThrow("Invalid key role at children.author.role");
+
+        const granted = authWith(...READS, `${DEPARTMENT}.find`, `${ROLE}.find`);
+        for (const query of [throughDepartment(), throughRole()]) {
+          await expect(
+            strapi.contentAPI.sanitize.query(query, wikiPage, { auth: granted }),
+          ).resolves.toEqual({ ...query, locale: "sanitized-by-core" });
+        }
+      },
+    );
+
+    it("asks strapi.auth.verify with the request's auth and `<target>.find`, once per target", async () => {
+      const { strapi } = host("member");
+      registerRestrictedRelationGuard(strapi);
+      const auth = authWith(...READS, `${DEPARTMENT}.find`);
+      await strapi.contentAPI.sanitize.query(
+        {
+          populate: {
+            children: {
+              filters: { $or: [{ department: { name: "a" } }, { department: { name: "b" } }] },
+              sort: { author: { username: "asc" } },
+            },
+          },
+        },
+        wikiPage,
+        { auth },
+      );
+      expect(strapi.auth.verify.mock.calls).toEqual([
+        [auth, { scope: `${DEPARTMENT}.find` }],
+        [auth, { scope: `${USER_UID}.find` }],
+      ]);
+    });
+
+    it("leaves root filters and sort to the core, and asks nothing without a nested query", async () => {
+      const { strapi } = host("guest");
+      registerRestrictedRelationGuard(strapi);
+      const query = {
+        filters: { department: { name: "x" } },
+        sort: "author.role.type:asc",
+        populate: { children: { populate: { author: "true" } }, department: "true" },
+      };
+      await expect(
+        strapi.contentAPI.sanitize.query(query, wikiPage, { auth: authWith() }),
+      ).resolves.toEqual({ ...query, locale: "sanitized-by-core" });
+      expect(strapi.auth.verify).not.toHaveBeenCalled();
+    });
+
+    it("fails closed without auth (no controller passes none)", async () => {
+      const { strapi } = host("admin_role");
+      registerRestrictedRelationGuard(strapi);
+      await expect(strapi.contentAPI.sanitize.query(throughDepartment(), wikiPage)).rejects.toThrow(
+        "Invalid key department at children.department",
+      );
+    });
+  });
+
   /**
    * Final review C1-RAW-WHERE: the core sanitizer keeps unknown root keys,
    * and users-permissions/upload hand them to strapi.db.query. A raw
@@ -373,6 +477,16 @@ describe("relation side-channel guard registration (FX05)", () => {
     expect(() =>
       registerRestrictedRelationGuard({ ...strapi, contentAPI: { sanitize: {} } }),
     ).toThrow(/FX05/);
+  });
+
+  it("refuses to boot when strapi.auth.verify is gone (batch 15.2)", () => {
+    const { strapi } = host("member");
+    expect(() => registerRestrictedRelationGuard({ ...strapi, auth: undefined })).toThrow(
+      /strapi\.auth\.verify not found/,
+    );
+    expect(() => registerRestrictedRelationGuard({ ...strapi, auth: {} })).toThrow(
+      /populate grant check/,
+    );
   });
 
   it("register() installs the guard next to the contact sanitizer", async () => {
