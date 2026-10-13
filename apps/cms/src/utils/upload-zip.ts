@@ -166,11 +166,12 @@ const END_SIGNATURE = Uint8Array.of(0x50, 0x4b, 0x05, 0x06);
  * among them) search the whole file for the end record, so padding after
  * an appended zip must not hide it: the file is scanned from start to end
  * in 64 KiB reads (never held whole in memory; a PDF is capped at 20 MB).
- * An end-record signature counts when it is followed by a ZIP64 locator
- * before it, or when it names at least one entry and a central directory
- * signature stands where it says the directory starts (its size before the
- * record: where readers look, also for an archive with data before it).
- * A random signature in compressed PDF data does not meet that.
+ * An end-record signature counts when a ZIP64 locator stands right before
+ * it, or when a central directory signature stands where a reader would
+ * look for the directory: its size before the record (an archive with data
+ * before it), or at the offset it names. Its entry count is not trusted
+ * (JSZip reads the directory whatever the count says; Codex round 3). A
+ * random signature in compressed PDF data does not meet that.
  */
 export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> {
   if (file.size < END_RECORD_BYTES) return false;
@@ -185,11 +186,13 @@ export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> 
           const locator = await readExactly(file, position - 20, 4);
           if (u32(locator, 0) === SIG_ZIP64_LOCATOR) return true;
         }
-        const entries = u16(bytes, at + 10);
         const directorySize = u32(bytes, at + 12);
-        const directoryStart = position - directorySize;
-        if (entries > 0 && directorySize >= CENTRAL_RECORD_BYTES && directoryStart >= 0) {
-          const signature = await readExactly(file, directoryStart, 4);
+        const directoryOffset = u32(bytes, at + 16);
+        const starts = [position - directorySize, directoryOffset].filter(
+          (start) => start >= 0 && start + CENTRAL_RECORD_BYTES <= position,
+        );
+        for (const start of starts) {
+          const signature = await readExactly(file, start, 4);
           if (u32(signature, 0) === SIG_CENTRAL) return true;
         }
       }

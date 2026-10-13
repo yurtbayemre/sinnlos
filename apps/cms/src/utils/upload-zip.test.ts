@@ -318,6 +318,21 @@ describe("hasZipEndRecord (the PDF polyglot refusal)", () => {
     expect(await hasZipEndRecord(fileOf(pdf))).toBe(true);
   });
 
+  it("does not trust the end record's entry count or directory size (Codex round 3)", async () => {
+    const zip = Buffer.from(minimalDocx());
+    const end = zip.length - 22;
+    const zeroCount = Buffer.from(zip);
+    zeroCount.writeUInt16LE(0, end + 8);
+    zeroCount.writeUInt16LE(0, end + 10);
+    expect(await hasZipEndRecord(fileOf(Buffer.concat([minimalPdf(), zeroCount])))).toBe(true);
+    // A wrong directory size, a directory offset relative to the file.
+    const pdf = minimalPdf();
+    const shifted = Buffer.from(zip);
+    shifted.writeUInt32LE(0, end + 12);
+    shifted.writeUInt32LE(zip.readUInt32LE(end + 16) + pdf.length, end + 16);
+    expect(await hasZipEndRecord(fileOf(Buffer.concat([pdf, shifted])))).toBe(true);
+  });
+
   it("does not take a lone end-record signature in PDF data for a zip", async () => {
     const lone = Buffer.alloc(22);
     lone.writeUInt32LE(0x06054b50, 0);
