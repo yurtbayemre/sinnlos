@@ -213,41 +213,59 @@ manifest_plain_sha() {  # <manifest> <component>
   awk -v key="plain.$2.sha256" 'index($0, key "=") == 1 { print substr($0, length(key) + 2); exit }' "$1"
 }
 
+# backup-run names every file of a generation like this (its own contract);
+# anything else is refused before it reaches a command line.
+GEN_NAME_RE='^[a-z0-9][a-z0-9._-]*$'
+
+# Names from an archive or a file, for the terminal: control characters
+# (escape sequences included) shown as '?'.
+printable() { LC_ALL=C sed 's/[^[:print:]]/?/g'; }
+
 # backup-verify's check: COMPLETE names the directory; MANIFEST lists every
 # other file of the generation with a matching sha256, and nothing else.
+# Sets LISTED (file name -> 1).
+declare -A LISTED=()
 verify_generation() {  # <dir>
-  local dir="$1" gen="${1##*/}" complete_gen line sum file listed=() name
+  local dir="$1" gen="${1##*/}" complete_gen line sum file name count=0
   [[ -f "$dir/COMPLETE" ]] ||
     fail "$gen has no COMPLETE: the backup run did not finish this generation; do not use it"
   read -r complete_gen _ <"$dir/COMPLETE" || true
   [[ "$complete_gen" == "$gen" ]] ||
-    fail "COMPLETE of $gen names '${complete_gen}', not this directory: a copied or mixed-up generation"
+    fail "COMPLETE of $gen names '$(printable <<<"${complete_gen}")', not this directory: a copied or mixed-up generation"
   [[ -f "$dir/MANIFEST" ]] || fail "$gen has no MANIFEST"
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^([0-9a-f]{64})\ [\ *](.+)$ ]] || continue
     sum="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"
-    [[ "$file" != */* && "$file" != .* && "$file" != MANIFEST && "$file" != COMPLETE ]] ||
-      fail "MANIFEST of $gen lists '$file', which is no file of a generation"
-    [[ -f "$dir/$file" ]] || fail "$file is in MANIFEST but missing from $gen"
+    if ! [[ "$file" =~ $GEN_NAME_RE ]] || [[ "$file" == MANIFEST || "$file" == COMPLETE ]]; then
+      fail "MANIFEST of $gen lists '$(printable <<<"${file}")', which is no file name of a backup-run generation"
+    fi
+    [[ -z "${LISTED[$file]:-}" ]] || fail "MANIFEST of $gen lists $file twice"
+    [[ -f "$dir/$file" && ! -L "$dir/$file" ]] || fail "$file is in MANIFEST but missing from $gen"
     [[ "$(sha256sum <"$dir/$file" | cut -d' ' -f1)" == "$sum" ]] ||
       fail "$file does not match its sha256 in MANIFEST: changed or damaged since the backup"
-    listed+=("$file")
+    LISTED[$file]=1
+    count=$((count + 1))
   done <"$dir/MANIFEST"
-  ((${#listed[@]})) || fail "MANIFEST of $gen lists no file"
+  ((count)) || fail "MANIFEST of $gen lists no file"
   for file in "$dir"/* "$dir"/.[!.]*; do
-    [[ -e "$file" ]] || continue
+    [[ -e "$file" || -L "$file" ]] || continue
     name="${file##*/}"
     [[ "$name" != MANIFEST && "$name" != COMPLETE ]] || continue
-    [[ " ${listed[*]} " == *" $name "* ]] || fail "$name is in $gen but not in its MANIFEST"
+    [[ -n "${LISTED[$name]:-}" ]] ||
+      fail "$(printable <<<"${name}") is in $gen but not in its MANIFEST"
   done
-  say "generation $gen: COMPLETE, and ${#listed[@]} file(s) match MANIFEST"
+  say "generation $gen: COMPLETE, and ${count} file(s) match MANIFEST"
 }
 
 drill_generation() {
-  local dir="${GENERATION%/}" gen file comp want got components=() names entry keys files=0
+  local dir gen file comp want got names envs keys files=0 roles
   local day tod taken
-  [[ -d "$dir" ]] || fail "$GENERATION is not a directory"
+  local -A have=()
+  [[ -d "$GENERATION" ]] || fail "$GENERATION is not a directory"
   [[ -f "$IDENTITY" && -r "$IDENTITY" ]] || fail "the identity file $IDENTITY is missing or not readable"
+  # Absolute paths: nothing below can start with a dash.
+  dir="$(cd "$GENERATION" && pwd)"
+  IDENTITY="$(cd "$(dirname "$IDENTITY")" && pwd)/$(basename "$IDENTITY")"
   gen="${dir##*/}"
   if [[ "$gen" =~ ^([0-9]{8})T([0-9]{6})Z-(daily|predeploy)$ ]]; then
     day="${BASH_REMATCH[1]}" tod="${BASH_REMATCH[2]}"
@@ -258,24 +276,26 @@ drill_generation() {
     say "generation $gen (not named <YYYYMMDD>T<HHMMSS>Z-<daily|predeploy>)"
   fi
   verify_generation "$dir"
-  say "manifest: $(grep -E '^(service|kind|created_at|db_image|db_pg_dump_version)=' "$dir/MANIFEST" | tr '\n' ' ')"
+  say "manifest: $(grep -E '^(service|kind|created_at|db_image|db_pg_dump_version)=' "$dir/MANIFEST" | printable | tr '\n' ' ')"
 
-  for file in "$dir"/*.zst.age; do
-    [[ -e "$file" ]] || continue
-    comp="${file##*/}"
-    comp="${comp%.zst.age}"
+  # Every component MANIFEST vouches for (their names checked above), in a
+  # fixed order.
+  while IFS= read -r file; do
+    [[ "$file" == *.zst.age ]] || continue
+    comp="${file%.zst.age}"
     want="$(manifest_plain_sha "$dir/MANIFEST" "$comp")"
-    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || fail "MANIFEST has no plain.$comp.sha256 for ${file##*/}"
-    age -d -i "$IDENTITY" "$file" | zstd -d -q -c >"$WORK/$comp" ||
-      fail "could not decrypt ${file##*/} with $IDENTITY (not an identity of its recipients, or a damaged file)"
+    [[ "$want" =~ ^[0-9a-f]{64}$ ]] || fail "MANIFEST has no plain.$comp.sha256 for $file"
+    age -d -i "$IDENTITY" "$dir/$file" | zstd -d -q -c >"$WORK/$comp" ||
+      fail "could not decrypt $file with $IDENTITY (not an identity of its recipients, or a damaged file)"
     got="$(sha256sum <"$WORK/$comp" | cut -d' ' -f1)"
     [[ "$got" == "$want" ]] ||
-      fail "the plaintext of ${file##*/} does not match plain.$comp.sha256 of MANIFEST: not what was backed up"
+      fail "the plaintext of $file does not match plain.$comp.sha256 of MANIFEST: not what was backed up"
     say "$comp: decrypted, $(wc -c <"$WORK/$comp") bytes, matches MANIFEST"
-    components+=("$comp")
-  done
+    have[$comp]=1
+  done < <(printf '%s\n' "${!LISTED[@]}" | LC_ALL=C sort)
+  # The four of a sinnlos generation, each by its exact name.
   for comp in db.dump db-globals.sql uploads.tar config.tar; do
-    [[ " ${components[*]} " == *" $comp "* ]] || fail "$gen has no $comp.zst.age: an incomplete sinnlos generation"
+    [[ -n "${have[$comp]:-}" && -f "$WORK/$comp" ]] || fail "$gen has no $comp.zst.age: an incomplete sinnlos generation"
   done
 
   start_postgres
@@ -285,8 +305,13 @@ drill_generation() {
     fail "db.dump did not restore (the error above)"
   report_tables
 
-  say "db-globals.sql: $(grep -c '^CREATE ROLE' "$WORK/db-globals.sql" || true) role(s) (not applied: only a new Postgres container needs them)"
-  # Names only (awk reads the whole listing: no early pipe close under pipefail).
+  roles="$(awk '/^CREATE ROLE/ { n++ } END { print n + 0 }' "$WORK/db-globals.sql")" ||
+    fail "db-globals.sql could not be read"
+  say "db-globals.sql: ${roles} role(s) (not applied: only a new Postgres container needs them)"
+  # The archives are listed, never extracted by a member name: no name from
+  # an archive reaches a command line (a member called --checkpoint-action=…
+  # would be an option there). awk reads each whole listing, so no early
+  # pipe close under pipefail.
   names="$(tar -tf "$WORK/uploads.tar" | awk '!/\/$/')" || fail "uploads.tar is no tar archive"
   files="$(awk 'END { print NR }' <<<"$names")"
   [[ -n "$names" ]] || files=0
@@ -295,20 +320,17 @@ drill_generation() {
   else
     say "uploads.tar: ${files} file(s)"
   fi
-  awk 'NR <= 20 && $0 != "" { print "  " $0 }' <<<"$names"
+  awk 'NR <= 20 && $0 != "" { print "  " $0 }' <<<"$names" | printable
   names="$(tar -tf "$WORK/config.tar")" || fail "config.tar is no tar archive"
   say "config.tar:"
-  keys=""
-  while IFS= read -r entry; do
-    [[ -n "$entry" ]] || continue
-    if [[ "$entry" == *.env || "$entry" == .env ]]; then
-      keys="$(tar -xOf "$WORK/config.tar" "$entry" | awk '/^[A-Z][A-Z0-9_]*=/ { n++ } END { print n + 0 }')"
-      say "  $entry (${keys} key(s), values not shown)"
-    else
-      say "  $entry"
-    fi
-  done <<<"$names"
-  [[ -n "$keys" ]] || fail "config.tar holds no .env"
+  printable <<<"$names" | awk '$0 != "" { print "restore-drill:   " $0 }'
+  # Its .env files, picked by our own pattern and read to stdout together:
+  # only their key count is shown.
+  envs="$(awk '/\.env$/ { n++ } END { print n + 0 }' <<<"$names")"
+  ((envs > 0)) || fail "config.tar holds no .env"
+  keys="$(tar -xOf "$WORK/config.tar" --wildcards -- '*.env' | awk '/^[A-Z][A-Z0-9_]*=/ { n++ } END { print n + 0 }')" ||
+    fail "the .env of config.tar could not be read"
+  say "config.tar: ${envs} .env file(s), ${keys} key(s) (values not shown)"
   finish "generation $gen"
 }
 

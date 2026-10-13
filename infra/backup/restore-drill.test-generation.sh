@@ -26,6 +26,22 @@ make_plain() { # <dir>
   rm -rf "${root}"
 }
 
+# A hostile config.tar in <dir>: the .env, a member whose name is a GNU tar
+# option that runs `touch drill-proof.env` in the working directory, and
+# filler beyond 10 records so that a checkpoint fires (Codex review of PR
+# #68, finding 1).
+make_hostile_config() { # <dir>
+  local dir="$1" root
+  root="$(mktemp -d)"
+  mkdir -p "${root}/home/bigemo/git/sinnlos/infra"
+  printf 'JWT_SECRET=drill-secret-value\nAPP_KEYS=a,b\n' >"${root}/home/bigemo/git/sinnlos/infra/.env"
+  : >"${root}/--checkpoint-action=exec=touch drill-proof.env"
+  head -c 300000 /dev/zero >"${root}/filler.bin"
+  tar -cf "${dir}/config.tar" -C "${root}" -- home/bigemo/git/sinnlos/infra/.env \
+    "--checkpoint-action=exec=touch drill-proof.env" filler.bin
+  rm -rf "${root}"
+}
+
 # A generation of the four components in <plain dir>; each one goes through
 # the caller's `encrypt` (stdin to stdout: zstd, then age).
 make_generation() { # <generation dir> <plain dir>

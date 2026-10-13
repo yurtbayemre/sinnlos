@@ -266,6 +266,8 @@ const GENERATION_FIXTURE = readFileSync(
 interface GenerationReport extends DrillReport {
   /** Entries left in the drill's TMPDIR after the run (the decrypted plaintext). */
   left: number;
+  /** drill-proof.env files under the harness dir (a tar option that ran). */
+  proof: number;
   /** The pg_restore command line and what it read (stubbed docker). */
   restoreCall: string;
   restored: string;
@@ -277,16 +279,19 @@ interface GenerationReport extends DrillReport {
  * zstd and docker stubbed: an "encrypted" component is the line
  * AGE-TO:key-one and then its plaintext (zstd is cat), and age -d -i <file>
  * decrypts only with an identity file holding key-one ($d/key.txt; $d/
- * wrong.txt holds key-two). `mutate` runs after the generation is built.
+ * wrong.txt holds key-two). `plain` runs on the plaintext components before
+ * the generation is built, `mutate` after. The drill runs in $d/cwd;
+ * `proof` says whether a drill-proof.env appeared anywhere under $d.
  */
-function drillGeneration(mutate: string, identity = "key.txt"): GenerationReport {
+function drillGeneration(mutate: string, identity = "key.txt", plain = ""): GenerationReport {
   const script = [
     "set -uo pipefail",
     'd="$(mktemp -d)"',
     "trap 'rm -rf \"$d\"' EXIT",
     GENERATION_FIXTURE,
-    'mkdir -p "$d/plain" "$d/tmp"',
+    'mkdir -p "$d/plain" "$d/tmp" "$d/cwd"',
     'make_plain "$d/plain"',
+    plain,
     "printf 'PGDMP a fake custom-format dump\\n' > \"$d/plain/db.dump\"",
     'echo key-one > "$d/key.txt"; echo key-two > "$d/wrong.txt"; export d',
     'encrypt() { echo "AGE-TO:key-one"; cat; }',
@@ -321,11 +326,12 @@ function drillGeneration(mutate: string, identity = "key.txt"): GenerationReport
     "cat > \"$d/restore-drill.sh\" <<'RESTORE_DRILL_EOF'",
     SCRIPT.trimEnd(),
     "RESTORE_DRILL_EOF",
-    `TMPDIR="$d/tmp" bash "$d/restore-drill.sh" --generation "$G" --identity "$d/${identity}" --name drill-stub > "$d/out" 2> "$d/err"; rc=$?`,
+    `(cd "$d/cwd" && TMPDIR="$d/tmp" bash "$d/restore-drill.sh" --generation "$G" --identity "$d/${identity}" --name drill-stub > "$d/out" 2> "$d/err" < /dev/null); rc=$?`,
     'echo "STATUS $rc"',
     'sed "s/^/OUT /" "$d/out"',
     'sed "s/^/ERR /" "$d/err"',
     'echo "LEFT $(find "$d/tmp" -mindepth 1 | wc -l)"',
+    'echo "PROOF $(find "$d" -name drill-proof.env | wc -l)"',
     'if [[ -f "$d/restore-call" ]]; then sed "s/^/CALL /" "$d/restore-call"; sed "s/^/RESTORED /" "$d/restored"; fi',
     "",
   ].join("\n");
@@ -342,6 +348,7 @@ function drillGeneration(mutate: string, identity = "key.txt"): GenerationReport
     stdout: pick("OUT"),
     stderr: pick("ERR"),
     left: Number(pick("LEFT")),
+    proof: Number(pick("PROOF")),
     restoreCall: pick("CALL"),
     restored: pick("RESTORED"),
   };
@@ -367,8 +374,9 @@ describe.skipIf(!HAS_BASH)(
       expect(run.stdout).toContain("restore-drill: db-globals.sql: 1 role(s) (not applied");
       expect(run.stdout).toContain("restore-drill: uploads.tar: 2 file(s)");
       expect(run.stdout).toContain("  ./avatars/a.png");
+      expect(run.stdout).toContain("restore-drill:   home/bigemo/git/sinnlos/infra/.env");
       expect(run.stdout).toContain(
-        "restore-drill:   home/bigemo/git/sinnlos/infra/.env (2 key(s), values not shown)",
+        "restore-drill: config.tar: 1 .env file(s), 2 key(s) (values not shown)",
       );
       expect(run.stdout).toContain(
         "restore-drill: OK — generation 20261012T180345Z-predeploy restored: 2 tables, 7 rows, 4 user(s)",
@@ -376,6 +384,44 @@ describe.skipIf(!HAS_BASH)(
       // No value of the .env, and no plaintext left behind.
       expect(run.stdout + run.stderr).not.toMatch(/drill-secret-value|drill-db-password/);
       expect(run.left).toBe(0);
+    });
+
+    it("never hands an archive member's name to tar: a member named like an option stays a name", () => {
+      // The drill before the review fix ran `tar -xOf config.tar "$entry"`
+      // for every member ending in .env, so this member became
+      // --checkpoint-action=exec=touch drill-proof.env and ran.
+      const run = drillGeneration("", "key.txt", 'make_hostile_config "$d/plain"');
+      expect(run.status, run.stderr).toBe(0);
+      expect(run.proof).toBe(0);
+      expect(run.stdout).toContain(
+        "restore-drill:   --checkpoint-action=exec=touch drill-proof.env",
+      );
+      expect(run.stdout).toContain(
+        "restore-drill: config.tar: 2 .env file(s), 2 key(s) (values not shown)",
+      );
+      expect(run.stdout + run.stderr).not.toContain("drill-secret-value");
+    });
+
+    it("takes component names by backup-run's own rule and requires each component exactly", () => {
+      // Before the review fix "db-globals.sql extra" passed a space-joined
+      // membership check for db-globals.sql, and the missing file's grep
+      // failure was swallowed: the drill said OK.
+      const run = drillGeneration(
+        [
+          'mv "$G/db-globals.sql.zst.age" "$G/db-globals.sql extra.zst.age"',
+          "sed -i 's/^plain\\.db-globals\\.sql\\./plain.db-globals.sql extra./; s/ \\([ *]\\)db-globals\\.sql\\.zst\\.age$/ \\1db-globals.sql extra.zst.age/' \"$G/MANIFEST\"",
+        ].join("\n"),
+      );
+      expect(run.status).toBe(1);
+      expect(run.stderr).toContain(
+        "restore-drill: FAIL — MANIFEST of 20261012T180345Z-predeploy lists 'db-globals.sql extra.zst.age', which is no file name of a backup-run generation",
+      );
+      expect(run.restoreCall).toBe("");
+      const option = drillGeneration(
+        'cp "$G/db.dump.zst.age" "$G/-rf.zst.age"; (cd "$G" && sha256sum -- -rf.zst.age) >> "$G/MANIFEST"',
+      );
+      expect(option.status).toBe(1);
+      expect(option.stderr).toContain("lists '-rf.zst.age', which is no file name");
     });
 
     it("fails on a changed file (its sha256 in MANIFEST) before decrypting anything", () => {
@@ -512,7 +558,7 @@ describe.skipIf(!RUN_SLOW)(
         "restore-drill: OK — generation 20261012T180345Z-predeploy restored: 2 tables, 7 rows, 4 user(s)",
       );
       expect(one("good.out")).toContain(
-        "home/bigemo/git/sinnlos/infra/.env (2 key(s), values not shown)",
+        "restore-drill: config.tar: 1 .env file(s), 2 key(s) (values not shown)",
       );
       expect(one("good.out")).not.toContain("drill-secret-value");
       expect(one("good.left")).toBe("0");
