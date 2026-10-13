@@ -233,6 +233,15 @@ verify_generation() {  # <dir>
   [[ "$complete_gen" == "$gen" ]] ||
     fail "COMPLETE of $gen names '$(printable <<<"${complete_gen}")', not this directory: a copied or mixed-up generation"
   [[ -f "$dir/MANIFEST" ]] || fail "$gen has no MANIFEST"
+  # MANIFEST (backup-run's format): "# " comment lines, key=value lines
+  # (generation= and service= checked here), plain.<component>.bytes and
+  # .sha256, then "<sha256>  <file>" lines for every other file.
+  name="$(awk 'index($0, "generation=") == 1 { print substr($0, 12); exit }' "$dir/MANIFEST")"
+  [[ -z "$name" || "$name" == "$gen" ]] ||
+    fail "MANIFEST of $gen names generation '$(printable <<<"${name}")': a copied or mixed-up generation"
+  name="$(awk 'index($0, "service=") == 1 { print substr($0, 9); exit }' "$dir/MANIFEST")"
+  [[ -z "$name" || "$name" == sinnlos ]] ||
+    fail "MANIFEST of $gen is a backup of service '$(printable <<<"${name}")', not sinnlos"
   while IFS= read -r line || [[ -n "$line" ]]; do
     [[ "$line" =~ ^([0-9a-f]{64})\ [\ *](.+)$ ]] || continue
     sum="${BASH_REMATCH[1]}" file="${BASH_REMATCH[2]}"

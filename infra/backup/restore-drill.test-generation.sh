@@ -43,28 +43,46 @@ make_hostile_config() { # <dir>
 }
 
 # A generation of the four components in <plain dir>; each one goes through
-# the caller's `encrypt` (stdin to stdout: zstd, then age).
+# the caller's `encrypt` (stdin to stdout: zstd, then age). MANIFEST and
+# COMPLETE mirror a real production generation of 2026-10-13 line for line
+# (the "# " comments, the em dash included, the key order, format=, two
+# recipients, config_git_head, bytes and sha256 per component, the sha256sum
+# block with two spaces); the recipients and the commit are synthetic, and
+# created_at is the time in the generation's name.
+SYNTHETIC_RECIPIENTS="age1qpzry9x8gf2tvdw0s3jn54khce6mua7lqpzry9x8gf2tvdw0s3jn54khce,age1l7aum6echk45nj3s0wdvt2fg8x9yrzpql7aum6echk45nj3s0wdvt2fg8x"
+SYNTHETIC_COMMIT="0123456789abcdef0123456789abcdef01234567"
 make_generation() { # <generation dir> <plain dir>
-  local gen="$1" plain="$2" c
+  local gen="$1" plain="$2" name="${1##*/}" c created="2026-10-12T18:03:45Z" sum
+  if [[ "${name}" =~ ^([0-9]{4})([0-9]{2})([0-9]{2})T([0-9]{2})([0-9]{2})([0-9]{2})Z- ]]; then
+    created="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}T${BASH_REMATCH[4]}:${BASH_REMATCH[5]}:${BASH_REMATCH[6]}Z"
+  fi
   mkdir -p "${gen}"
   {
+    echo "# srv-prod-01 backup generation — docs/backup.md in srv-prod-01-ops"
     echo "service=sinnlos"
-    echo "generation=${gen##*/}"
-    echo "kind=${gen##*-}"
-    echo "host=drill-test"
-    echo "created_at=2026-10-12T18:03:45Z"
+    echo "generation=${name}"
+    echo "kind=${name##*-}"
+    echo "host=srv-prod-01"
+    echo "created_at=${created}"
     echo "encrypted=yes"
     echo "format=<name>.zst.age is <name> compressed with zstd, then encrypted with age"
+    echo "age_recipients=${SYNTHETIC_RECIPIENTS}"
     echo "db_image=postgres:16-alpine"
     echo "db_pg_dump_version=16.15"
+    echo "config_git_head=${SYNTHETIC_COMMIT}"
+    echo "# plaintext of each file, after age -d | zstd -d:"
   } >"${gen}/MANIFEST"
   for c in config.tar db.dump db-globals.sql uploads.tar; do
     encrypt <"${plain}/${c}" >"${gen}/${c}.zst.age"
     echo "plain.${c}.bytes=$(wc -c <"${plain}/${c}" | tr -d ' ')" >>"${gen}/MANIFEST"
     echo "plain.${c}.sha256=$(sha256sum <"${plain}/${c}" | cut -d' ' -f1)" >>"${gen}/MANIFEST"
   done
-  (cd "${gen}" && sha256sum -- *.zst.age) >>"${gen}/MANIFEST"
-  echo "${gen##*/} 2026-10-12T18:03:50Z" >"${gen}/COMPLETE"
+  echo "# sha256 of every other file in this generation, relative to it:" >>"${gen}/MANIFEST"
+  for c in config.tar db.dump db-globals.sql uploads.tar; do
+    sum="$(sha256sum <"${gen}/${c}.zst.age" | cut -d' ' -f1)"
+    printf '%s  %s\n' "${sum}" "${c}.zst.age" >>"${gen}/MANIFEST"
+  done
+  echo "${name} ${created}" >"${gen}/COMPLETE"
 }
 
 # Rewrites the sha256sum line of <file> in MANIFEST after a deliberate change.

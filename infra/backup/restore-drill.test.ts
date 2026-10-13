@@ -484,6 +484,20 @@ describe.skipIf(!HAS_BASH)(
       expect(run.left).toBe(0);
     });
 
+    it("fails when MANIFEST names another generation or another service", () => {
+      const other = drillGeneration(
+        'sed -i "s/^generation=.*/generation=20261011T040000Z-daily/" "$G/MANIFEST"',
+      );
+      expect(other.status).toBe(1);
+      expect(other.stderr).toContain(
+        "MANIFEST of 20261012T180345Z-predeploy names generation '20261011T040000Z-daily': a copied or mixed-up generation",
+      );
+      const service = drillGeneration('sed -i "s/^service=.*/service=other/" "$G/MANIFEST"');
+      expect(service.status).toBe(1);
+      expect(service.stderr).toContain("is a backup of service 'other', not sinnlos");
+      expect(other.restoreCall + service.restoreCall).toBe("");
+    });
+
     it("fails on a generation without one of the four sinnlos components", () => {
       const run = drillGeneration(
         'rm "$G/config.tar.zst.age"; sed -i "/config\\.tar/d" "$G/MANIFEST"',
@@ -495,6 +509,80 @@ describe.skipIf(!HAS_BASH)(
     });
   },
 );
+
+/**
+ * The MANIFEST of a real production generation (sinnlos, 20261013T020031Z-
+ * daily, sent from the host on 2026-10-13), masked: every sha256, recipient,
+ * commit, size, generation name and time replaced by a placeholder. No value
+ * of that generation is in this repository; the fixture's own MANIFEST,
+ * masked the same way, must be this, line for line.
+ */
+const REAL_MANIFEST_SHAPE = `# srv-prod-01 backup generation — docs/backup.md in srv-prod-01-ops
+service=sinnlos
+generation=<generation>
+kind=<kind>
+host=srv-prod-01
+created_at=<time>
+encrypted=yes
+format=<name>.zst.age is <name> compressed with zstd, then encrypted with age
+age_recipients=<age-recipient>,<age-recipient>
+db_image=postgres:16-alpine
+db_pg_dump_version=16.15
+config_git_head=<commit>
+# plaintext of each file, after age -d | zstd -d:
+plain.config.tar.bytes=<bytes>
+plain.config.tar.sha256=<sha256>
+plain.db.dump.bytes=<bytes>
+plain.db.dump.sha256=<sha256>
+plain.db-globals.sql.bytes=<bytes>
+plain.db-globals.sql.sha256=<sha256>
+plain.uploads.tar.bytes=<bytes>
+plain.uploads.tar.sha256=<sha256>
+# sha256 of every other file in this generation, relative to it:
+<sha256>  config.tar.zst.age
+<sha256>  db.dump.zst.age
+<sha256>  db-globals.sql.zst.age
+<sha256>  uploads.tar.zst.age
+`;
+
+const maskGeneration = (text: string) =>
+  text
+    .replace(/[0-9a-f]{64}/g, "<sha256>")
+    .replace(/age1[a-z0-9]{58}(?![a-z0-9])/g, "<age-recipient>")
+    .replace(/^config_git_head=[0-9a-f]{40}$/m, "config_git_head=<commit>")
+    .replace(/\d{8}T\d{6}Z-(daily|predeploy)/g, "<generation>")
+    .replace(/\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ/g, "<time>")
+    .replace(/^kind=(daily|predeploy)$/m, "kind=<kind>")
+    .replace(/^(plain\.[a-z0-9._-]+\.bytes)=\d+$/gm, "$1=<bytes>");
+
+describe.skipIf(!HAS_BASH)("restore-drill.sh --generation: the format of backup-run", () => {
+  it("the fixture writes MANIFEST and COMPLETE in the shape of a real production generation", () => {
+    const script = [
+      "set -uo pipefail",
+      'd="$(mktemp -d)"',
+      "trap 'rm -rf \"$d\"' EXIT",
+      GENERATION_FIXTURE,
+      'make_plain "$d/plain"',
+      "printf 'PGDMP\\n' > \"$d/plain/db.dump\"",
+      'encrypt() { echo "AGE-TO:key-one"; cat; }',
+      'G="$d/gen/20261013T020031Z-daily"',
+      'make_generation "$G" "$d/plain"',
+      'cat "$G/MANIFEST"',
+      'echo "@@COMPLETE $(cat "$G/COMPLETE")"',
+      "",
+    ].join("\n");
+    const res = spawnSync("bash", ["-s"], { input: script, encoding: "utf8" });
+    expect(res.stderr, "harness stderr").toBe("");
+    const [manifest, complete] = res.stdout.split("@@COMPLETE ");
+    expect(maskGeneration(manifest)).toBe(REAL_MANIFEST_SHAPE);
+    expect(maskGeneration(complete)).toBe("<generation> <time>\n");
+    // created_at and COMPLETE carry the time of the generation's name.
+    expect(manifest).toContain("created_at=2026-10-13T02:00:31Z");
+    expect(complete).toBe("20261013T020031Z-daily 2026-10-13T02:00:31Z\n");
+    // Synthetic recipients and commit, not a host's.
+    expect(manifest).toContain("config_git_head=0123456789abcdef0123456789abcdef01234567");
+  });
+});
 
 describe("restore-drill.sh --generation: arguments", () => {
   const usage = (args: string[]) =>
