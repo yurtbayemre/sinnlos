@@ -1942,8 +1942,9 @@ rebuilds both images; the web is unchanged).
   `deniedTypes` gains `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`.
   The panel refuses `.docm`, `.dotm`, `.xlsm`, `.xltm`, `.xlam`, `.xlsb`,
   `.pptm`, `.potm`, `.ppsm` by extension, and a renamed macro file when
-  file-type recognises it in the first 4100 bytes. **Known limit:** a
-  renamed `.xlsb` or `.xlam` (and a renamed macro file whose
+  file-type recognises it in the first 4100 bytes. **Known limit**
+  (release note, accepted by the owner: the panel is for moderators only):
+  a renamed `.xlsb` or `.xlam` (and a renamed macro file whose
   `[Content_Types].xml` lies beyond those bytes) still passes the panel.
 - **One reservation before every removal.** The classified image cleanup,
   `cleanup-uploads` and the uploads janitor (and, from 16B, the media
@@ -1968,13 +1969,18 @@ rebuilds both images; the web is unchanged).
   admin Media Library's single, bulk and folder deletes) writes one row in
   `audit_events` (action `delete`, `target_uid`
   `api::classified.classified` or `plugin::upload.file`): who (a user's id
-  and role type in `actor_class`, an admin's id, or `system`), from where
-  (`content-api`, `admin`, `cron`), and what (`detail`: the ad's title; the
-  file's id, mime, size, related ad or document, and name). No IP address,
-  no token. An ad's row commits with its delete, a file's with its
-  reservation right before the bytes go (a retried removal records nothing
-  new); a failing insert fails the delete. The audit-janitor keeps the rows
-  365 days (`AUDIT_RETENTION_DAYS`).
+  with batch 15's class in `actor_class`: `author` for their own ad or
+  upload, `moderator` for an admin_role or editor removing someone else's,
+  the v2 authoring class (`moderator`, `departmentAuthor`) for a document
+  save; an admin's id; or `system`, without a class), from where
+  (`content-api`, `admin`, `cron`), and what (`detail`: a user's role type
+  as `role: <type>;`, then the ad's title, or the file's id, mime, size,
+  related ad or document, and name). No IP address, no token. An ad's row
+  commits with its delete. **For a file, the row records the removal
+  decision**: it commits with the reservation, right before the bytes go;
+  a failed byte removal is retried by the janitor, not recorded again. A
+  failing insert fails the delete. The audit-janitor keeps the rows 365
+  days (`AUDIT_RETENTION_DAYS`).
 - **No schema, no grants, no env, no `JWT_SECRET` rotation.** The
   `media-claims` middleware is built but not registered (lane 16B wires
   it).

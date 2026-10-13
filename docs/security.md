@@ -1105,12 +1105,15 @@ the sniffed format>` and the mime the table's (core stores and serves by
   delete (the image cleanup, `cleanupUploads`, the uploads janitor, the
   media claims, the admin Media Library's single, bulk and folder deletes)
   writes one append-only `audit_events` row (`utils/delete-audit.ts`): the
-  actor (user id and role, admin id, or system), the source (`content-api`,
-  `admin`, `cron`), the ad's documentId and title or the file's id, mime,
-  size, related document and name. No IP address, no token, no request
-  data. The insert is never caught: a failing insert fails the delete. A
-  file's row is written with its reservation, right before the bytes go; a
-  removal that fails after it is retried, not recorded again.
+  actor (user id, admin id, or system) with batch 15's class (`author` for
+  one's own ad or upload, `moderator` for someone else's, or the v2
+  authoring class; none for admins and janitors), the source
+  (`content-api`, `admin`, `cron`), and in `detail` a user's role type, the
+  ad's title or the file's id, mime, size, related document and name. No IP
+  address, no token, no request data. The insert is never caught: a
+  failing insert fails the delete. For a file the row records the removal
+  decision: it commits with the reservation, right before the bytes go; a
+  failed byte removal is retried by the janitor, not recorded again.
 - **Admin-panel backstop:** `security.deniedTypes` (`config/plugins.ts`)
   adds `application/vnd.ms-{word,excel,powerpoint}.*macroenabled*`. Strapi
   matches them against the declared type, the extension's type and
