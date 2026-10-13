@@ -372,18 +372,28 @@ describe("createMediaClaims: the middleware", () => {
 });
 
 describe("payloadFileIds and the lock before the action", () => {
-  it("reads ids, { id }, lists and connect/set, per claimed field, ascending", async () => {
+  it("reads every reference shape per claimed field, documentIds resolved, ascending", async () => {
     const { payloadFileIds } = await import("./media-claims");
-    expect([...payloadFileIds({ file: 7, title: 3 }, ["file"])]).toEqual([[7, "file"]]);
-    expect([...payloadFileIds({ file: { id: "9" } }, ["file"])]).toEqual([[9, "file"]]);
-    expect([...payloadFileIds({ file: { connect: [{ id: 5 }, 2] } }, ["file"])]).toEqual([
+    const strapi = {
+      db: {
+        query: () => ({
+          findMany: async ({ where }: { where: { documentId: { $in: string[] } } }) =>
+            where.documentId.$in.includes("doc8") ? [{ id: 8 }] : [],
+        }),
+      },
+    };
+    const ids = async (data: unknown) => [...(await payloadFileIds(strapi, data, ["file"]))];
+    expect(await ids({ file: 7, title: 3 })).toEqual([[7, "file"]]);
+    expect(await ids({ file: { id: "9" } })).toEqual([[9, "file"]]);
+    expect(await ids({ file: { connect: [{ id: 5 }, 2] } })).toEqual([
       [2, "file"],
       [5, "file"],
     ]);
-    expect([...payloadFileIds({ file: { set: [{ id: 4 }] } }, ["file"])]).toEqual([[4, "file"]]);
-    expect([...payloadFileIds({ file: null }, ["file"])]).toEqual([]);
-    expect([...payloadFileIds({ file: "abc" }, ["file"])]).toEqual([]);
-    expect([...payloadFileIds(undefined, ["file"])]).toEqual([]);
+    expect(await ids({ file: { set: [{ documentId: "doc8" }] } })).toEqual([[8, "file"]]);
+    expect(await ids({ file: "doc8" })).toEqual([[8, "file"]]);
+    expect(await ids({ file: "unknown-doc" })).toEqual([]);
+    expect(await ids({ file: null })).toEqual([]);
+    expect(await ids(undefined)).toEqual([]);
   });
 
   it("locks the payload's files before the action and refuses a missing or tombstoned one", async () => {

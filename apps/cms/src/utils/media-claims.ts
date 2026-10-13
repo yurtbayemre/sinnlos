@@ -14,9 +14,10 @@
  * BEFORE the action, runs the action, and reads them AFTER it, in the same
  * transaction; the decision is taken on what was written, not on the
  * payload's shape.
- *   - LOCK FIRST: every file id the payload names on a claimed field (an
- *     id, `{ id }`, a list, `connect`/`set`) is locked (`FOR UPDATE`,
- *     ascending ids) BEFORE the action. The action's link insert takes a key
+ *   - LOCK FIRST: every file the payload names on a claimed field (an id,
+ *     a documentId, `{ id }`, `{ documentId }`, a list, `connect`/`set`;
+ *     documentIds resolved to row ids) is locked (`FOR UPDATE`, ascending
+ *     ids) BEFORE the action. The action's link insert takes a key
  *     share on the file row (the foreign key); two transactions that both
  *     inserted and then asked for the row lock would deadlock (Postgres
  *     40P01). File rows come last in the lock order (§5 R10): the document's
@@ -61,6 +62,8 @@ import {
   fileLinks,
   isTombstoned,
   lockFileRow,
+  mediaReferences,
+  resolveFileIds,
   uploadedByOf,
 } from "./upload-orphans";
 import { refuseKeys } from "./write-allowlist";
@@ -125,31 +128,24 @@ async function documentLinks(
 }
 
 /**
- * The file ids a payload names on the claimed fields (id → field), in
- * ascending id order: numbers, numeric strings, `{ id }`, lists, and
- * `connect`/`set` lists. Anything else is ignored here; the after-read
- * still catches what was written.
+ * The file ids a payload names on the claimed fields (id → field, ascending
+ * ids): every media reference shape Strapi 5.57 accepts (utils/
+ * upload-orphans.ts mediaReferences), documentIds resolved to row ids.
+ * Anything else is ignored here; the after-read still catches what was
+ * written.
  */
-export function payloadFileIds(data: unknown, fields: readonly string[]): Map<number, string> {
+export async function payloadFileIds(
+  strapi: MediaClaimsHost,
+  data: unknown,
+  fields: readonly string[],
+): Promise<Map<number, string>> {
   const ids = new Map<number, string>();
-  const visit = (value: unknown, field: string, depth: number): void => {
-    if (depth > 3 || value === null || value === undefined) return;
-    if (typeof value === "number" || typeof value === "string") {
-      const id = Number(value);
-      if (Number.isInteger(id) && id > 0 && id <= 2147483647 && !ids.has(id)) ids.set(id, field);
-      return;
+  if (!isRecord(data)) return ids;
+  for (const field of fields) {
+    for (const id of await resolveFileIds(strapi, mediaReferences(data[field]))) {
+      if (!ids.has(id)) ids.set(id, field);
     }
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, field, depth + 1);
-      return;
-    }
-    if (isRecord(value)) {
-      if ("id" in value) visit(value.id, field, depth + 1);
-      if ("connect" in value) visit(value.connect, field, depth + 1);
-      if ("set" in value) visit(value.set, field, depth + 1);
-    }
-  };
-  if (isRecord(data)) for (const field of fields) visit(data[field], field, 0);
+  }
   return new Map([...ids].sort((a, b) => a[0] - b[0]));
 }
 
@@ -207,7 +203,7 @@ export function createMediaClaims(strapi: MediaClaimsHost) {
     return strapi.db.transaction(async ({ trx }: { trx: unknown }) => {
       const sourceId = action === "create" ? null : documentIdOf(context.params);
       const params = isRecord(context.params) ? context.params : {};
-      for (const [fileId, field] of payloadFileIds(params.data, fields)) {
+      for (const [fileId, field] of await payloadFileIds(strapi, params.data, fields)) {
         await lockFileRow(strapi, fileId);
         // A file that is gone or on its way out: refused before the action
         // writes a link to it (the claim's tombstone, then its delete).
