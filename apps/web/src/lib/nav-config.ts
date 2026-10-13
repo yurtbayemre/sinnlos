@@ -12,9 +12,9 @@
  *     role that could not be read keeps it: the page then asks the CMS,
  *     which decides, and an outage shows its error banner instead of a
  *     shrunken nav that the persistent layout would keep until a reload;
- *   - /manage follows capabilitiesFor(role).manage, fail-closed: admin_role
- *     only until batch 15 opens the shell to moderators and department
- *     authors (decision 06 §L1). It replaces the plan's `adminOnly` flag.
+ *   - /manage follows capabilitiesFor(role).manage, fail-closed: since
+ *     batch 15 the moderators and the department authors (admin_role only
+ *     before; decision 06 §L1). It replaces the plan's `adminOnly` flag.
  * The nav is UX only: every page gates itself, and the CMS decides.
  */
 import type { Route } from "next";

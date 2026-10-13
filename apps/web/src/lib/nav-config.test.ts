@@ -97,11 +97,14 @@ describe("navItemsFor", () => {
     "/marketplace",
   ];
 
-  it("gives an admin every entry, /manage included", () => {
-    expect(hrefs("admin_role")).toEqual(NAV_ITEMS.map((item) => item.href));
-  });
+  it.each(["admin_role", "editor", "department_head"])(
+    "gives %s every entry, /manage included (batch 15)",
+    (role) => {
+      expect(hrefs(role)).toEqual(NAV_ITEMS.map((item) => item.href));
+    },
+  );
 
-  it.each(["editor", "department_head", "team_lead", "member", "authenticated"])(
+  it.each(["team_lead", "member", "authenticated"])(
     "gives %s every section but /manage",
     (role) => {
       expect(hrefs(role)).toEqual(

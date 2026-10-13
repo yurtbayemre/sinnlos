@@ -22,8 +22,8 @@
  * (approved 2026-09-29, with the additive `authorScope`): the shape is
  * fixed, the values per batch are in §L1 and §L2. Batch 15 (lane 15A) set
  * the authoring values (moderators: publish, unpublish and discard; the
- * department authors' "ownDepartment" areas); `manage` stays admin_role
- * only until lane 15C opens /manage.
+ * department authors' "ownDepartment" areas), and lane 15C opened the
+ * /manage shell (`manage`) to moderators and department authors.
  */
 import {
   AUTHENTICATED,
@@ -282,7 +282,7 @@ export const AUTHORING_AREAS: readonly AuthoringArea[] = [
 ];
 
 export interface Capabilities {
-  /** The /manage shell: admin_role until batch 15 opens it (§L1); then moderators and department authors. */
+  /** The /manage shell (§L1): moderators and department authors since batch 15 (admin_role before). */
   manage: boolean;
   author: Readonly<Record<AuthoringArea, ReadonlySet<AuthoringVerb>>>;
   /** Amendment 1: null exactly when author[area] is empty. */
@@ -399,7 +399,9 @@ export function capabilitiesFor(role: Role): Capabilities {
     authorScope[area] = verbs.size === 0 ? null : moderator ? "any" : "ownDepartment";
   }
   return {
-    manage: admin,
+    // The /manage shell (§L1, §N7): every role that authors an area. A
+    // department author's pages still need the viewer's department (§N1).
+    manage: moderator || departmentAuthor,
     author: Object.freeze(author),
     authorScope: Object.freeze(authorScope),
     wikiPages: {
