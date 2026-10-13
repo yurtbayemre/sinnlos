@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { isWallTimeError } from "@sinnlos/domain";
 import { addDaysToKey, instantEpochMs, zonedDateKey, zonedWallTimeToInstant } from "./plain-date";
 import { instantMsOrNull, parsePlainDate, wallTimeToInstant, zonedDateOf } from "./time";
 
@@ -117,5 +118,61 @@ describe("time.ts and plain-date.ts agree", () => {
         }
       }
     }
+  });
+
+  /**
+   * 'reject' mode (deep-dive decision 06 §L4): the web's authoring forms
+   * refuse a typed time that a clock change repeats or skips
+   * (zonedWallTimeToInstant(..., "reject") throws a WallTimeError); the cms
+   * refuses exactly the same inputs (Temporal's "reject" throws a
+   * RangeError) and agrees on every other one.
+   */
+  it("on 'reject' mode: the same wall times refused, the same instants otherwise", () => {
+    const outcome = (convert: () => Date, isRefusal: (error: unknown) => boolean) => {
+      try {
+        return convert().toISOString();
+      } catch (error) {
+        if (isRefusal(error)) return "refused";
+        throw error;
+      }
+    };
+    let refused = 0;
+    for (const zone of ZONES) {
+      for (const key of DATES) {
+        for (const time of WALL_TIMES) {
+          const web = outcome(
+            () => zonedWallTimeToInstant(key, time, zone, "reject"),
+            isWallTimeError,
+          );
+          const cms = outcome(
+            () => wallTimeToInstant(parsePlainDate(key), time, zone, "reject"),
+            (error) => error instanceof RangeError,
+          );
+          expect(web, `${key} ${time} ${zone}`).toBe(cms);
+          if (web === "refused") refused++;
+        }
+      }
+    }
+    // The table holds DST days in several zones, so both kinds occur.
+    expect(refused).toBeGreaterThan(4);
+  });
+
+  it.each([
+    // The cases decision 06 §L4 names: Berlin's fall back and spring
+    // forward (S9.7), and a southern-hemisphere pair.
+    ["2026-10-25", "02:30", "Europe/Berlin", "repeated"],
+    ["2027-03-28", "02:30", "Europe/Berlin", "skipped"],
+    ["2026-09-27", "02:30", "Pacific/Auckland", "skipped"],
+    ["2027-04-04", "02:30", "Pacific/Auckland", "repeated"],
+  ] as const)("refuses %s %s in %s (%s) in both modules", (key, time, zone, kind) => {
+    expect(() => wallTimeToInstant(parsePlainDate(key), time, zone, "reject")).toThrow(RangeError);
+    let caught: unknown = null;
+    try {
+      zonedWallTimeToInstant(key, time, zone, "reject");
+    } catch (error) {
+      caught = error;
+    }
+    expect(isWallTimeError(caught)).toBe(true);
+    expect((caught as { kind?: string }).kind).toBe(kind);
   });
 });

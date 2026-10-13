@@ -1,0 +1,234 @@
+{
+  "title": "Manage",
+  "description": "Write, schedule and publish announcements, events, polls and quick links.",
+  "descriptionDepartmentAuthor": "Write and publish announcements and events for {department}.",
+  "back": "Manage",
+  "landing": {
+    "contentSection": "Content",
+    "reportsSection": "Reports",
+    "adminSection": "Administration"
+  },
+  "areas": {
+    "announcements": {
+      "title": "Announcements",
+      "description": "News for everyone, a department, a team or certain roles."
+    },
+    "events": {
+      "title": "Events",
+      "description": "Dates in the calendar, with RSVP if you like."
+    },
+    "polls": {
+      "title": "Polls",
+      "description": "Questions with answers to vote on."
+    },
+    "quickLinks": {
+      "title": "Quick links",
+      "description": "The shortcuts on everyone’s dashboard."
+    }
+  },
+  "counts": {
+    "draft": "Drafts",
+    "scheduled": "Scheduled",
+    "failed": "Schedule failed"
+  },
+  "status": {
+    "label": "Status",
+    "draft": "Draft",
+    "published": "Published",
+    "modified": "Changes pending",
+    "scheduled": "Scheduled",
+    "scheduleFailed": "Schedule failed",
+    "department": "Department: {name}",
+    "needsRetarget": "Needs re-targeting",
+    "unsaved": "Unsaved changes"
+  },
+  "detail": {
+    "publishesOn": "Publishes on {date}",
+    "withdrawsOn": "Withdraws on {date}",
+    "publishedOn": "Published since {date}",
+    "savedOn": "Last saved {date}",
+    "scheduleFailed": "The scheduled publication failed: {reason}"
+  },
+  "scheduleErrors": {
+    "windowExpired": "its time window had already ended when it was due",
+    "notPublishable": "the draft could not be published as it stood",
+    "retryExhausted": "the intranet could not publish it after several attempts",
+    "other": "the intranet refused it ({code})"
+  },
+  "list": {
+    "statusFilter": "Filter by status",
+    "tabs": {
+      "all": "All",
+      "draft": "Drafts",
+      "published": "Published",
+      "modified": "Changes pending",
+      "scheduled": "Scheduled",
+      "failed": "Schedule failed"
+    },
+    "ownerFilter": "Filter by owner",
+    "owners": {
+      "all": "All owners",
+      "department": "Departments",
+      "moderators": "Editors and admins"
+    },
+    "searchLabel": "Search by title",
+    "searchPlaceholder": "Search…",
+    "search": "Search",
+    "clear": "Clear",
+    "emptyFiltered": "Nothing matches these filters.",
+    "updated": "Updated {date}",
+    "by": "by {name}",
+    "pagination": "Pages",
+    "previous": "Previous page",
+    "next": "Next page",
+    "page": "Page {page} of {pageCount}",
+    "total": "{count, plural, one {# item} other {# items}}"
+  },
+  "actions": {
+    "saveDraft": "Save draft",
+    "saveAndPublish": "Save and publish",
+    "publish": "Publish",
+    "schedule": "Schedule…",
+    "unpublish": "Unpublish",
+    "discard": "Discard changes",
+    "delete": "Delete",
+    "save": "Save",
+    "create": "Create",
+    "closeNow": "Close now",
+    "working": "Working…",
+    "backToList": "Back to the list",
+    "toolbar": "Actions"
+  },
+  "confirm": {
+    "publishTitle": "Publish now?",
+    "publishNotifies": "Publishing notifies the audience now.",
+    "publishBody": "Readers see it from now on.",
+    "publishConfirm": "Publish",
+    "unpublishTitle": "Unpublish?",
+    "unpublishBody": "Readers no longer see it. The draft stays, and you can publish it again later.",
+    "unpublishConfirm": "Unpublish",
+    "discardTitle": "Discard the changes?",
+    "discardBody": "The draft goes back to the published version. Every change since then is lost.",
+    "discardConfirm": "Discard changes",
+    "deleteTitle": "Delete for good?",
+    "deleteBody": "Every version is removed, together with its comments, reactions and responses. This cannot be undone.",
+    "deleteConfirm": "Delete",
+    "closeTitle": "Close the poll now?",
+    "closeBody": "Voting ends at once. The results stay visible.",
+    "closeConfirm": "Close now"
+  },
+  "schedule": {
+    "title": "Schedule",
+    "description": "The schedule is saved with the draft and takes effect at once, also for a published item.",
+    "publishAt": "Publish on",
+    "unpublishAt": "Withdraw on",
+    "save": "Save schedule",
+    "clear": "Remove the schedule",
+    "none": "Not scheduled."
+  },
+  "conflict": {
+    "title": "Changed in the meantime",
+    "body": "Someone changed this item after you opened it, possibly in the Strapi admin panel.",
+    "reload": "Reload",
+    "reloadHint": "Shows the current version. Your changes are lost; copy your text first if you need it.",
+    "copy": "Copy my text",
+    "copied": "Your text is on the clipboard.",
+    "copyFailed": "Copying did not work. Select your text in the form and copy it yourself.",
+    "overwrite": "Overwrite",
+    "overwriteHint": "Saves the fields you changed over the current version; everything else keeps the other changes."
+  },
+  "success": {
+    "created": "Saved as a draft.",
+    "createdPublished": "Created and published.",
+    "draftSaved": "Draft saved.",
+    "saved": "Saved.",
+    "published": "Published.",
+    "unpublished": "Unpublished.",
+    "discarded": "Changes discarded.",
+    "deleted": "Deleted.",
+    "scheduled": "Schedule saved.",
+    "closed": "The poll is closed.",
+    "dismiss": "Dismiss"
+  },
+  "failure": {
+    "forbidden": "You may not do this, or no longer. Reload the page.",
+    "notFound": "This item no longer exists, or you can no longer edit it.",
+    "invalid": "Please check the marked fields.",
+    "unshown": "The intranet did not accept some values. Reload the page and try again.",
+    "conflict": "Someone changed this item in the meantime.",
+    "unavailable": "The intranet cannot be reached right now — please try again in a moment.",
+    "failed": "That did not work. Reload the page and try again."
+  },
+  "errors": {
+    "invalid": "This value is not accepted.",
+    "required": "Please fill in this field.",
+    "tooLong": "This is too long.",
+    "invalidInstant": "Enter a valid date and time.",
+    "invalidDate": "Enter a valid date.",
+    "invalidUrl": "Enter a web address that starts with https:// or http://.",
+    "endBeforeStart": "The end must not be before the start.",
+    "notMidnight": "An all-day event starts and ends at midnight; choose the days again.",
+    "scheduleInPast": "Choose a time at least one minute from now.",
+    "unpublishBeforePublish": "The withdrawal must come after the publication.",
+    "expiresBeforePublish": "The announcement would expire before it is published. Move the publication or the expiry.",
+    "ackDeadlineWithoutAck": "A deadline needs “Requires read confirmation”.",
+    "notPublishable": "This is needed before the item can be published.",
+    "videoUrlNotYoutube": "Enter a YouTube video address.",
+    "quizInvalid": "The quiz is not valid.",
+    "frozenAfterVotes": "Someone has voted, so this can no longer change.",
+    "visibilityTarget": "Choose who may see it.",
+    "optionCount": "A poll needs between 2 and 20 answers.",
+    "optionDuplicate": "Two answers are the same.",
+    "neverPublished": "There is no published version to go back to, so the draft stays. Ask an editor to delete it if it is no longer needed.",
+    "spaceNotEmpty": "This space still has pages.",
+    "timeRepeated": "This time occurs twice on this day because of the clock change. Choose another time.",
+    "timeSkipped": "This time does not exist on this day because of the clock change. Choose another time."
+  },
+  "fields": {
+    "required": "required",
+    "date": "Date",
+    "time": "Time",
+    "timeZone": "Times are in {zone}."
+  },
+  "markdown": {
+    "mode": "Editor view",
+    "write": "Write",
+    "preview": "Preview",
+    "counter": "{count, number} of {max, number} characters",
+    "emptyPreview": "Nothing to preview yet.",
+    "hint": "Markdown: **bold**, _italic_, [link](https://…), lists with “-”. HTML is shown as text."
+  },
+  "targeting": {
+    "everyone": "Everyone",
+    "noTeam": "No team",
+    "noneAvailable": "None yet.",
+    "optionsFailed": "The departments and teams could not be loaded, so the audience cannot be changed right now. Reload the page to try again.",
+    "optionsTruncated": "Not every department or team could be loaded; some may be missing.",
+    "retargetNotice": "Needs re-targeting: a department or team this item was meant for was deleted. Only editors and admins see it, and it notifies nobody, until you confirm an audience.",
+    "retargetConfirm": "Confirm this audience when saving",
+    "roles": {
+      "admin_role": "Admins",
+      "editor": "Editors",
+      "department_head": "Department heads",
+      "team_lead": "Team leads",
+      "member": "Members",
+      "guest": "Guests"
+    }
+  },
+  "departmentAuthor": {
+    "department": "Department",
+    "departmentHint": "You write for your own department; it is set for you.",
+    "eventVisibility": "Visible to everyone in the calendar; notifies your department.",
+    "noDepartmentTitle": "No department assigned",
+    "noDepartmentHint": "You can write for your department once an administrator has assigned you to one.",
+    "ownItems": "Your department’s items."
+  },
+  "preview": {
+    "title": "Preview",
+    "description": "The saved version as readers will see it. Save to update the preview.",
+    "unknownAuthor": "Unknown"
+  },
+  "editor": {
+    "unsavedHint": "You have unsaved changes."
+  }
+}

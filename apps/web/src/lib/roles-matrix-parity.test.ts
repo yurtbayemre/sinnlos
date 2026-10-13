@@ -393,10 +393,14 @@ describe("capabilitiesFor = the cms grants (decision 06 §L2)", () => {
     expect(org.editTeam).toBe(scope(A.team));
   });
 
-  it.each(MATRIX_ROLES)("%s: manage and the reports follow the admin page gates (§L1)", (role) => {
+  it.each(MATRIX_ROLES)("%s: manage and the reports follow the page gates (§L1)", (role) => {
     const caps = capabilitiesFor(role);
     const admin = roles.isAdmin(role);
-    expect(caps.manage).toBe(admin);
+    // The /manage shell opens exactly to the roles that author an area,
+    // MODERATORS and DEPARTMENT_AUTHOR_ROLES (batch 15, §L1, §N7): a
+    // capability is what the cms grants, so no role gets an empty shell.
+    expect(caps.manage).toBe(AUTHORING_AREAS.some((area) => caps.author[area].size > 0));
+    expect(caps.manage).toBe(MODERATORS.includes(role) || DEPARTMENT_AUTHOR_ROLES.includes(role));
     expect(caps.reports.analytics).toBe(holds(role, "api::search-log.search-log.summary"));
     expect(caps.reports.acknowledgements).toBe(holds(role, "plugin::users-permissions.role.find"));
     expect(caps.reports.training).toBe(admin);

@@ -283,11 +283,11 @@ describe("capabilitiesFor", () => {
     }
   });
 
-  it("opens /manage and the reports to admin_role only (§L1: until batch 15)", () => {
+  it("opens /manage to moderators and department heads, the reports to admin_role only (§L1)", () => {
     for (const role of ALL_ROLES) {
       const caps = capabilitiesFor(role);
       const admin = role === "admin_role";
-      expect(caps.manage, role).toBe(admin);
+      expect(caps.manage, role).toBe(["admin_role", "editor", "department_head"].includes(role));
       expect(caps.reports, role).toEqual({
         analytics: admin,
         acknowledgements: admin,
@@ -331,8 +331,8 @@ describe("capabilitiesFor", () => {
       expect(head.author[area as "announcements"].has("schedule"), area).toBe(false);
       expect(head.author[area as "announcements"].has("delete"), area).toBe(false);
     }
-    // /manage stays admin-only until lane 15C opens it.
-    expect(head.manage).toBe(false);
+    // Lane 15C opened /manage to them (§L1, §N7).
+    expect(head.manage).toBe(true);
   });
 
   it("hands out a fresh, frozen object per call", () => {

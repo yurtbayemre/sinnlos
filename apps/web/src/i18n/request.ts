@@ -1,6 +1,7 @@
 import { getRequestConfig } from "next-intl/server";
 import { appTimeZone } from "@/lib/app-time-zone";
 import { getUserLocale } from "./locale";
+import { loadMessages } from "./messages";
 
 /**
  * next-intl's per-request config. `timeZone` is APP_TIME_ZONE (datetime
@@ -11,12 +12,16 @@ import { getUserLocale } from "./locale";
  * useFormatter()/useTimeZone() in client components agree with the server
  * render. Without it next-intl falls back to the process zone, which is UTC
  * in the container.
+ *
+ * `messages` is the language's whole catalog: messages/<locale>.json plus
+ * the /manage area files under `manage.<area>` (i18n/messages.ts, decision
+ * 06 §L7).
  */
 export default getRequestConfig(async () => {
   const locale = await getUserLocale();
   return {
     locale,
     timeZone: appTimeZone(),
-    messages: (await import(`../../messages/${locale}.json`)).default,
+    messages: await loadMessages(locale),
   };
 });

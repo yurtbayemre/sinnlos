@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ICON_KEYS } from "@sinnlos/domain";
 
 import { ICONS, isIconName } from "./icon-map";
 
@@ -33,5 +34,18 @@ describe("isIconName", () => {
     ]) {
       expect(isIconName(name), name).toBe(false);
     }
+  });
+});
+
+/**
+ * The icon names an author may store (@sinnlos/domain ICON_KEYS, contract
+ * K7; the cms allowlist accepts only these, the /manage quick-link form
+ * offers only these) must all render: the map has every one of them (batch
+ * 15 plan S14). The map may hold more (the wiki spaces' icons).
+ */
+describe("ICONS covers the shared ICON_KEYS (S14)", () => {
+  it("renders every name an author may store", () => {
+    const missing = ICON_KEYS.filter((key) => !isIconName(key));
+    expect(missing).toEqual([]);
   });
 });

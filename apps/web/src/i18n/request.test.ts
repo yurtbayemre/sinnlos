@@ -17,6 +17,8 @@ vi.mock("./locale", () => ({ getUserLocale: () => localeMock() }));
 const { default: requestConfig } = await import("./request");
 const en = (await import("../../messages/en.json")).default;
 const de = (await import("../../messages/de.json")).default;
+const manageCommonDe = (await import("../../messages/manage/common.de.json")).default;
+const manageEventsEn = (await import("../../messages/manage/events.en.json")).default;
 
 const load = () => requestConfig({ requestLocale: Promise.resolve(undefined) });
 
@@ -54,8 +56,22 @@ describe("i18n request config", () => {
     localeMock.mockResolvedValue("de");
     const config = await load();
     expect(config.locale).toBe("de");
-    expect(config.messages).toEqual(de);
+    expect(config.messages).toMatchObject(de);
     localeMock.mockResolvedValue("en");
-    expect((await load()).messages).toEqual(en);
+    expect((await load()).messages).toMatchObject(en);
+  });
+
+  it("merges the /manage area files under manage.<area> (decision 06 §L7)", async () => {
+    localeMock.mockResolvedValue("de");
+    const messages = (await load()).messages as Record<string, unknown>;
+    expect(Object.keys(messages).sort()).toEqual([...Object.keys(de), "manage"].sort());
+    const manage = messages.manage as Record<string, unknown>;
+    expect(Object.keys(manage).sort()).toEqual(
+      ["announcements", "common", "events", "polls", "quickLinks"].sort(),
+    );
+    expect(manage.common).toEqual(manageCommonDe);
+    localeMock.mockResolvedValue("en");
+    const english = (await load()).messages as { manage: Record<string, unknown> };
+    expect(english.manage.events).toEqual(manageEventsEn);
   });
 });

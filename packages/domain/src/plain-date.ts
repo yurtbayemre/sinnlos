@@ -234,14 +234,71 @@ export function formatPlainDate(
 }
 
 /**
+ * How zonedWallTimeToInstant treats a wall time that a DST change repeats or
+ * skips, named like Temporal's disambiguation:
+ *  - 'compatible' (the default): a repeated time gives the earlier instant,
+ *    a skipped one moves forward by the gap;
+ *  - 'reject': both throw a WallTimeError, so a form that lets a person type
+ *    a time of day can ask for another one instead of guessing (deep-dive
+ *    decision 06 §L4: the authoring forms).
+ */
+export type WallTimeDisambiguation = "compatible" | "reject";
+
+/** Why a wall time has no single instant: the clock shows it twice, or never. */
+export type WallTimeErrorKind = "repeated" | "skipped";
+
+/**
+ * A wall time that 'reject' mode refuses: `kind` says whether a DST change
+ * repeats it (fall back: two instants) or skips it (spring forward: none).
+ * The cms's Temporal wallTimeToInstant(..., "reject") throws a RangeError
+ * for exactly these inputs (time-parity.test.ts).
+ */
+export class WallTimeError extends RangeError {
+  readonly kind: WallTimeErrorKind;
+  readonly date: string;
+  readonly time: string;
+  readonly timeZone: string;
+
+  constructor(kind: WallTimeErrorKind, date: string, time: string, timeZone: string) {
+    super(
+      kind === "repeated"
+        ? `The wall time ${date} ${time} occurs twice in ${timeZone} (clock change)`
+        : `The wall time ${date} ${time} does not exist in ${timeZone} (clock change)`,
+    );
+    this.name = "WallTimeError";
+    this.kind = kind;
+    this.date = date;
+    this.time = time;
+    this.timeZone = timeZone;
+  }
+}
+
+/** True for a WallTimeError (also one from another copy of this module). */
+export function isWallTimeError(error: unknown): error is WallTimeError {
+  return (
+    error instanceof WallTimeError ||
+    (error instanceof Error &&
+      error.name === "WallTimeError" &&
+      ((error as { kind?: unknown }).kind === "repeated" ||
+        (error as { kind?: unknown }).kind === "skipped"))
+  );
+}
+
+/**
  * The instant at which the wall clock in `timeZone` shows `time` ('HH:mm' or
  * 'HH:mm:ss') on calendar day `key`. DST is resolved like Temporal's
- * 'compatible' disambiguation: a repeated wall time (fall back) gives the
- * earlier instant, a skipped one (spring forward) moves forward by the gap.
- * Mirrors the cms's time.ts wallTimeToInstant() for Intl-only callers
+ * disambiguation `mode`: 'compatible' (the default) gives the earlier
+ * instant of a repeated wall time (fall back) and moves a skipped one
+ * (spring forward) forward by the gap; 'reject' throws a WallTimeError for
+ * both. Mirrors the cms's time.ts wallTimeToInstant() for Intl-only callers
  * (time-parity.test.ts).
  */
-export function zonedWallTimeToInstant(key: string, time: string, timeZone: string): Date {
+export function zonedWallTimeToInstant(
+  key: string,
+  time: string,
+  timeZone: string,
+  mode: WallTimeDisambiguation = "compatible",
+): Date {
   if (!isPlainDate(key)) throw new RangeError(`Not a calendar date (YYYY-MM-DD): ${key}`);
   const clock = WALL_TIME_RE.exec(time);
   if (!clock) throw new RangeError(`Not a wall time (HH:mm or HH:mm:ss): ${time}`);
@@ -259,12 +316,25 @@ export function zonedWallTimeToInstant(key: string, time: string, timeZone: stri
   // day before and a day after are the only two candidates.
   const offsetBefore = offsetMsAt(wallAsUtc - DAY_MS, timeZone);
   const offsetAfter = offsetMsAt(wallAsUtc + DAY_MS, timeZone);
-  const candidates = [wallAsUtc - offsetBefore, wallAsUtc - offsetAfter].filter(
+  const candidates = [...new Set([wallAsUtc - offsetBefore, wallAsUtc - offsetAfter])].filter(
     (candidate) => candidate + offsetMsAt(candidate, timeZone) === wallAsUtc,
   );
+  if (mode === "reject" && candidates.length !== 1) {
+    throw new WallTimeError(candidates.length > 1 ? "repeated" : "skipped", key, time, timeZone);
+  }
   if (candidates.length > 0) return new Date(Math.min(...candidates));
   // The wall time does not exist (spring forward): shift it by the gap.
   return new Date(wallAsUtc - offsetBefore);
+}
+
+/**
+ * The wall-clock time of day ('HH:mm') an instant shows in `timeZone`: the
+ * time half of a form's date and time inputs, next to zonedDateKey for the
+ * date half (decision 06 §L4: "display: zonedDateKey plus HH:mm").
+ */
+export function zonedTimeOfDay(instant: Date | string, timeZone: string): string {
+  const wall = wallClockAt(toEpochMs(instant), timeZone);
+  return `${pad(wall.hour)}:${pad(wall.minute)}`;
 }
 
 /**

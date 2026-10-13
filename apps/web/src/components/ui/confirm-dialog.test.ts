@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NextIntlClientProvider } from "next-intl";
 import { describe, expect, it, vi } from "vitest";
 import en from "../../../messages/en.json";
-import { ConfirmDialog, ModalDialog } from "./confirm-dialog";
+import { CONFIRM_TONE_CLASS, ConfirmDialog, ModalDialog } from "./confirm-dialog";
 
 /**
  * The Radix-based dialogs (UI07), server-rendered. The trigger is Radix's
@@ -52,5 +52,31 @@ describe("ConfirmDialog / ModalDialog on the server", () => {
       createElement(ModalDialog, { open: true, onOpenChange: vi.fn(), title: "Give kudos" }),
     );
     expect(html).toBe("");
+  });
+});
+
+describe("ConfirmDialog tone (batch 15, decision 06 §L5)", () => {
+  it("keeps the destructive red as the default, so the existing callers are unchanged", () => {
+    expect(CONFIRM_TONE_CLASS.destructive).toContain("bg-destructive");
+    expect(CONFIRM_TONE_CLASS.destructive).toContain("text-destructive-foreground");
+  });
+
+  it("gives a question that destroys nothing the primary colour", () => {
+    expect(CONFIRM_TONE_CLASS.default).toContain("bg-primary");
+    expect(CONFIRM_TONE_CLASS.default).not.toContain("destructive");
+  });
+
+  it("renders the closed trigger the same with either tone", () => {
+    const props = {
+      open: false,
+      onOpenChange: vi.fn(),
+      trigger,
+      title: "Publish?",
+      confirmLabel: "Publish",
+      onConfirm: vi.fn(),
+    };
+    expect(render(createElement(ConfirmDialog, { ...props, tone: "default" }))).toBe(
+      render(createElement(ConfirmDialog, props)),
+    );
   });
 });

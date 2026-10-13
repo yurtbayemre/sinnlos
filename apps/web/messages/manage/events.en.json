@@ -1,0 +1,56 @@
+{
+  "title": "Events",
+  "description": "Plan events, schedule them and publish them to the calendar.",
+  "new": "New event",
+  "newDescription": "Saved as a draft first; it appears in the calendar once it is published.",
+  "editTitle": "Edit event",
+  "emptyTitle": "No events yet",
+  "emptyHint": "Plan the first one; it stays a draft until you publish it.",
+  "sections": {
+    "content": "Content",
+    "when": "When",
+    "rsvp": "Responses",
+    "notify": "Notification"
+  },
+  "fields": {
+    "title": {
+      "label": "Title"
+    },
+    "description": {
+      "label": "Description"
+    },
+    "allDay": {
+      "label": "All day"
+    },
+    "start": {
+      "label": "Starts",
+      "allDayLabel": "First day"
+    },
+    "end": {
+      "label": "Ends",
+      "allDayLabel": "Last day",
+      "hint": "Optional. A time alone ends on the start day.",
+      "allDayHint": "Optional; empty for a one-day event."
+    },
+    "location": {
+      "label": "Location"
+    },
+    "url": {
+      "label": "Link",
+      "hint": "Optional, e.g. the video call."
+    },
+    "rsvpEnabled": {
+      "label": "Ask for responses",
+      "hint": "Turning it off keeps the answers given so far and hides the response buttons."
+    },
+    "capacity": {
+      "label": "Places",
+      "hint": "Optional. Empty: no limit."
+    },
+    "departments": {
+      "label": "Notify departments",
+      "hint": "Every event is visible to everyone in the calendar. Only the chosen departments are notified; none chosen: everyone."
+    }
+  },
+  "capacityWarning": "{count, plural, one {# person has} other {# people have}} already accepted; nobody is removed."
+}

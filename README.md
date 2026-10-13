@@ -796,7 +796,10 @@ Roles and access:
       a department head can change their own department's description; a
       department member sees the announcements and wiki spaces targeted at
       their department
-- [ ] An admin sees the _Admin_ link and `/manage`; an editor sees
+- [ ] An admin and an editor see the _Manage_ link and `/manage` with the
+      announcement, event, poll and quick-link areas (an admin also the
+      reports); a department head with a department sees _Manage_ with
+      announcements and events of their department only; an editor sees
       _New poll_; a guest sees no RSVP controls and no _New ad_ button
 - [ ] A guest's navigation has no Announcements, Departments, Teams, Kudos,
       Marketplace or Training; opening one of them by URL shows _Not

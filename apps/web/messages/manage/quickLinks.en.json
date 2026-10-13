@@ -1,0 +1,38 @@
+{
+  "title": "Quick links",
+  "description": "The shortcuts on the dashboard: add, order, schedule and withdraw them.",
+  "new": "New quick link",
+  "newDescription": "Saved as a draft first; it appears on the dashboard once it is published.",
+  "editTitle": "Edit quick link",
+  "emptyTitle": "No quick links yet",
+  "emptyHint": "Add the first shortcut; it stays a draft until you publish it.",
+  "sections": {
+    "link": "Link",
+    "audience": "Audience"
+  },
+  "fields": {
+    "label": {
+      "label": "Label"
+    },
+    "url": {
+      "label": "Address",
+      "hint": "A web address (https://…) or a path on the intranet, such as /wiki/handbook.",
+      "invalidUrl": "Enter a web address that starts with https:// or http://, or a path on the intranet such as /wiki/handbook."
+    },
+    "icon": {
+      "label": "Icon",
+      "none": "No icon"
+    },
+    "category": {
+      "label": "Category"
+    },
+    "order": {
+      "label": "Order",
+      "hint": "0 to 10000; lower numbers come first."
+    },
+    "departments": {
+      "label": "Show to departments",
+      "hint": "Only members of the chosen departments see it; editors and admins always do. None chosen: everyone."
+    }
+  }
+}

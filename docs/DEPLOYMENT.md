@@ -2414,6 +2414,116 @@ touches without `retarget_required` and `notify_audience` (NULL).
   re-apply SQL restored a both-rows-lost marker and event flag (2 rows
   each), where an `IS NULL` guard would have matched no event row.
 
+#### Upgrading to the /manage authoring pages (batch 15, lane 15C)
+
+This release (branch `feat/v2-authoring-web-p1`, on lane 15A's contracts
+commit `3fd84d8`, with lane 15A's write model merged for its rehearsal)
+changes the web only. It needs the cms of lanes 15B, 15D and 15A (the
+authoring routes, the revision lock, the grants), so it ships with them as
+one deploy: follow _Deploying batch 15_ once the integration writes it.
+What users notice:
+
+- **`/manage` opens to editors and department heads** (decision 06 §L1).
+  The navigation entry reads _Manage_ (_Verwaltung_) and appears for
+  `admin_role`, `editor` and `department_head`. The landing has one tile
+  per area the role writes in, with how many drafts, scheduled items and
+  failed schedules it holds (a count the cms could not deliver reads "–",
+  never 0). Admins keep the reports (analytics, read confirmations,
+  training) and the Strapi admin links below.
+- **Announcements, events, polls and quick links are written in the
+  web.** Each area has a list (status tabs, a title search, pages of 25,
+  for moderators an owner filter), a _New_ page and an edit page with a
+  preview of the saved version. Buttons: _Save draft_, _Publish_ (or _Save
+  and publish_ with unsaved changes), _Schedule…_, _Unpublish_, _Discard
+  changes_ (only while a published version exists and the draft differs)
+  and _Delete_, each shown only when the role holds it and asking first
+  where it changes what readers see; publishing an announcement or an
+  event says that it notifies the audience now. The texts (Markdown) have
+  _Write_ and _Preview_ tabs; HTML stays text.
+- **Dates and times** are typed as a date and a time in the business zone
+  (`APP_TIME_ZONE`, named under every pair). A time that a clock change
+  repeats or skips (for example 2027-03-28 02:30 or 2027-10-31 02:30 in
+  Europe/Berlin) is refused with "This time occurs twice / does not exist
+  on this day because of the clock change", never guessed. An all-day
+  event is saved from its first and last day.
+- **Somebody changed it meanwhile.** When the item changed after the form
+  was opened (another tab, another author, the admin panel, the
+  scheduler), a save answers with a dialog: _Reload_ (with _Copy my text_
+  first) or _Overwrite_ with the current version. An update sends only the
+  fields the author changed, so _Overwrite_ keeps the other author's
+  changes to the rest; the form then shows the item as it now is. _Save
+  draft_ stays disabled until something changed.
+- **Department heads** (with a department) write announcements and events
+  for their own department: the department is shown, not chosen; the team
+  picker lists that department's teams; no _Pinned_, read confirmation,
+  _Schedule…_ or _Delete_; _Discard changes_ only with a published
+  version. Events say "Visible to everyone in the calendar; notifies your
+  department." A department head without a department sees an explanation
+  instead of the forms. Their list holds their department's items only.
+- **Polls** are created at `/manage/polls/new` (`/polls/new` redirects
+  there), take 2 to 20 answers of up to 200 characters, can be edited
+  after creation (the answers and the anonymity lock at the first vote)
+  and close at once with _Close now_.
+
+**Configuration:** none. No `.env`, compose, schema, permission or Traefik
+change in this lane; the message catalogs gain `messages/manage/*.json`
+(they ship in the web image).
+
+**Deploy (as part of batch 15):**
+
+1. **Before (read-only):** `infra/deploy.sh --check` and `--dry-run`.
+2. **Deploy:** `infra/deploy.sh` (both images; this lane changes the web).
+3. **After: as an editor.** `/manage` shows four tiles. Create a draft
+   announcement, publish it (the confirmation says it notifies), check
+   it on `/announcements` as a member, unpublish it, delete it. Open
+   _Schedule…_ and type 02:30 on the next clock-change day: it is refused.
+4. **After: as a department head** (if there is one with a department):
+   `/manage` shows _Announcements_ and _Events_ only; a new announcement
+   shows the department read-only and has no _Pinned_; the list holds
+   only that department's items.
+5. **After: `/polls/new`** lands on `/manage/polls/new`.
+6. **After: logs.** Refusals are warnings (`[manage-announcements] update
+   refused: 412 …`), outages and web bugs errors; a `428` is always a web
+   bug and should never appear:
+
+   ```bash
+   "${COMPOSE[@]}" logs --since 30m web | grep -E '\[manage-[a-zA-Z]+\]'
+   ```
+
+**Rollback:** with batch 15: both images back to batch 14 (the
+integration's runbook covers the cms side). This lane alone has no data to
+undo: the web writes only through the cms's authoring routes.
+
+**Rehearsal (2026-10-13, lane 15C):** unit suite, typecheck (apps and
+tests), lint and `next build` passed. End to end against a real cms (the
+worktree's Strapi 5.57 build on a throwaway Postgres 16 container with the
+demo seed and lane 15A merged; the web with `next start`; host Playwright
+with Chromium), 66 checks passed: an editor's create, save and publish
+read by a member; a second tab's save then this tab's save opens the
+conflict dialog, _Copy my text_, _Overwrite_ (the form then shows the
+other tab's untouched title) and _Reload_ work; a
+Content Manager save between load and save gives the same dialog; the
+schedule refuses 2027-03-28 and 2027-10-31 02:30 Berlin and stores
+09:00 as `08:00Z`; discard, unpublish (the member no longer reads it) and
+delete; a refused field takes the focus and is described by its error; a
+department head's landing has two tiles, their form has no moderator-only
+field, their list hides an editor's Engineering item and its URL shows the
+not-found page; crafted requests with the head's token (`pinned`,
+another department, `publishAt`, `DELETE`, a discard after an unpublish)
+are refused (400 with the key, 403, `_form` `neverPublished`); a head
+without a department and a member get no form; `/polls/new` redirects; a
+poll's answers lock after a vote and _Close now_ closes it; an all-day
+event across 2027-10-31 is stored as local midnights; the capacity warning;
+a quick link refuses `//evil.example`, and its schedule refuses an end
+before the start. Every `/manage` page at 360 and 1280 px, light and dark,
+English and German, has no horizontal scroll; the Markdown tabs follow
+the arrow keys, and the publish and Schedule… dialogs return the focus on
+Escape. Two review rounds (Codex, and a second reading) were fixed before
+the final run: Overwrite and the schedule dialog after a conflict, empty
+draft saves, the focus targets, the input shape of the save actions.
+Screenshots: the lane's scratch directory. Not exercised: a screen-reader
+pass (NVDA or VoiceOver) and the scheduler actually publishing.
+
 #### Deploying batch 14 (2026-10-13)
 
 Batch 14 (branch `batch/14`: `batch/13` plus plan batch 9) ships in one

@@ -1,0 +1,49 @@
+{
+  "title": "Neuigkeiten",
+  "description": "Neuigkeiten schreiben, planen und für ihre Zielgruppe veröffentlichen.",
+  "new": "Neue Neuigkeit",
+  "newDescription": "Wird zuerst als Entwurf gespeichert; niemand sieht sie, bis sie veröffentlicht ist.",
+  "editTitle": "Neuigkeit bearbeiten",
+  "emptyTitle": "Noch keine Neuigkeiten",
+  "emptyHint": "Schreiben Sie die erste; sie bleibt ein Entwurf, bis Sie sie veröffentlichen.",
+  "sections": {
+    "content": "Inhalt",
+    "audience": "Zielgruppe",
+    "audienceHint": "Alle gewählten Kriterien gelten zusammen. Nichts gewählt: alle, die Neuigkeiten lesen.",
+    "confirmation": "Lesebestätigung"
+  },
+  "fields": {
+    "title": {
+      "label": "Titel"
+    },
+    "body": {
+      "label": "Text"
+    },
+    "pinned": {
+      "label": "Oben anheften",
+      "hint": "Steht über allen anderen Neuigkeiten, bis sie wieder gelöst wird."
+    },
+    "expiresAt": {
+      "label": "Läuft ab",
+      "hint": "Ab diesem Zeitpunkt sieht sie niemand mehr. Leer: läuft nicht ab."
+    },
+    "department": {
+      "label": "Abteilung"
+    },
+    "team": {
+      "label": "Team"
+    },
+    "audienceRoles": {
+      "label": "Rollen",
+      "hint": "Nur Personen mit einer dieser Rollen. Keine gewählt: alle Rollen."
+    },
+    "requiresAck": {
+      "label": "Lesebestätigung erforderlich",
+      "hint": "Die Leserinnen und Leser bestätigen das Lesen; der Bericht zeigt, wer noch fehlt."
+    },
+    "ackDeadline": {
+      "label": "Bestätigen bis",
+      "hint": "Optional."
+    }
+  }
+}
