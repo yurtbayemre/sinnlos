@@ -5,9 +5,9 @@
     "singularName": "wiki-revision",
     "pluralName": "wiki-revisions",
     "displayName": "Wiki Revision",
-    "description": "Snapshot of a wiki page at a point in time. Written by the wiki-page lifecycle; hidden from the admin panel, no content-API route (batch 15.1)."
+    "description": "One recorded state of a wiki page (decision 06 §J3, DA03): an after-image of a draft save, a cutover baseline, or a legacy before-image. Written by the wiki-page lifecycle and the boot backfill; hidden from the admin panel, no content-API route (batch 15.1)."
   },
-  "options": { "draftAndPublish": true },
+  "options": { "draftAndPublish": false },
   "pluginOptions": {
     "content-manager": { "visible": false },
     "content-type-builder": { "visible": false }
@@ -19,12 +19,18 @@
       "target": "api::wiki-page.wiki-page",
       "inversedBy": "revisions"
     },
+    "pageDocumentId": { "type": "string" },
+    "title": { "type": "string" },
     "body": { "type": "richtext" },
+    "pageSummary": { "type": "text" },
     "summary": { "type": "text" },
+    "kind": { "type": "enumeration", "enum": ["before", "after", "baseline"] },
     "editor": {
       "type": "relation",
       "relation": "oneToOne",
       "target": "plugin::users-permissions.user"
-    }
+    },
+    "adminEditorId": { "type": "integer" },
+    "restoredFrom": { "type": "integer" }
   }
 }
