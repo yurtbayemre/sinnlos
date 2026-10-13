@@ -47,7 +47,12 @@ import {
  *     republish;
  *   - the thread of a restricted announcement answers like a missing
  *     target;
- *   - on Postgres, a link committed while the delete runs is marked too.
+ *   - the boot backfill (lane 15B) restores a legacy row's flag, so an
+ *     unlink and republish notifies nobody; and its twin rule restores a
+ *     flag or marker the batch-14 image's "Discard changes" lost, so the
+ *     roll-forward's republish keeps the item restricted;
+ *   - on Postgres, a link committed while the delete runs is marked too,
+ *     and the four read-only diagnostics list exactly the seeded rows.
  * Writes go through the Document Service in-process and the admin panel's
  * Content Manager; reads over HTTP as the users they concern.
  */
@@ -396,6 +401,155 @@ describe.each(testEngines())("targeting fails closed on %s", (engine) => {
     expect(await readStatus(salesMember, created.documentId)).toBe(200);
     expect(await notified(created.documentId)).toContain(salesMemberId);
     expect(await notified(created.documentId)).toContain(insider.id);
+  });
+
+  // ---------------------------------------------------------------------------
+  // The boot backfill (lane 15B, utils/targeting-flags-backfill.ts) and what
+  // a republish then notifies: the end of the legacy-unlink case (decision 06
+  // §N10, moved here from 15B's suite, plan S4) and of the batch-14 discard
+  // regression (plan review finding 1).
+
+  interface Backfill {
+    backfillTargetingFlags(strapi: unknown): Promise<unknown>;
+  }
+
+  /** The roll-forward's first boot: the targeting-flag backfill. */
+  const backfill = () =>
+    t.requireBuilt<Backfill>("src/utils/targeting-flags-backfill").backfillTargetingFlags(t.strapi);
+
+  /** A raw column write on rows of `documentId` (as an old image or raw SQL leaves them). */
+  const rawSet = async (
+    uid: string,
+    documentId: string,
+    data: Params,
+    which: "draft" | "both" = "both",
+  ) => {
+    const rows = await t.strapi.db.query(uid).findMany({
+      where: { documentId },
+      select: ["id", "publishedAt"],
+    });
+    for (const row of rows) {
+      if (which === "draft" && row.publishedAt != null) continue;
+      await t.strapi.db.query(uid).update({ where: { id: row.id }, data });
+    }
+  };
+
+  it("legacy unlink: an event whose flag the backfill restored notifies nobody once its departments are removed", async () => {
+    const unit = await department("FC Legacy Event Dept");
+    const insider = await member(unit);
+    const event = await publish(EVENT, {
+      title: "IT FC legacy event",
+      start: START,
+      departments: [unit.documentId],
+    });
+    expect(await notified(event.documentId)).toEqual([insider.id]);
+    // The pre-upgrade state: the column came up NULL on both rows.
+    await rawSet(EVENT, event.documentId, { notifyAudience: null });
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, null],
+      [true, null],
+    ]);
+    await backfill();
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    // Its departments removed in the admin panel, then republished: before
+    // the backfill and the fan-out rule, the whole company was notified.
+    const res = await panel.publish(EVENT, event.documentId, { departments: [] });
+    expect(res.status, res.text).toBe(200);
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    expect(await notified(event.documentId)).toEqual([insider.id]);
+  });
+
+  it("legacy unlink: an 'all' announcement with a department link stays restricted once unlinked", async () => {
+    const unit = await department("FC Legacy Ann Dept");
+    const insider = await member(unit);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC legacy announcement",
+      department: unit.documentId,
+    });
+    expect(await notified(created.documentId)).toEqual([insider.id]);
+    // The pre-upgrade state: Audience 'all' next to the link.
+    await rawSet(ANNOUNCEMENT, created.documentId, { audience: "all" });
+    await backfill();
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", false],
+      [true, "departments", false],
+    ]);
+    const res = await panel.publish(ANNOUNCEMENT, created.documentId, { department: null });
+    expect(res.status, res.text).toBe(200);
+    for (const caller of [insider.caller, salesMember, "member"] as Caller[]) {
+      expect(await readStatus(caller, created.documentId), String(caller)).toBe(404);
+    }
+    expect(await notified(created.documentId)).toEqual([insider.id]);
+  });
+
+  it("batch-14 discard, roll-forward, republish: the twin rule keeps the event restricted, nobody is notified", async () => {
+    const unit = await department("FC Twin Event Dept");
+    const insider = await member(unit);
+    const event = await publish(EVENT, {
+      title: "IT FC twin event",
+      start: START,
+      departments: [unit.documentId],
+    });
+    expect((await panel.delete(DEPARTMENT, unit.documentId)).status).toBe(200);
+    // Restricted only by its flag, on both rows.
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    // The batch-14 image's "Discard changes" rebuilds the draft from the
+    // published row through a model without notify_audience: NULL.
+    await rawSet(EVENT, event.documentId, { notifyAudience: null }, "draft");
+    await backfill();
+    // The twin rule: the draft takes 'departments' from its published twin
+    // (a per-row rule alone would have written 'all').
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    await t.strapi.documents(EVENT).publish({ documentId: event.documentId });
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    expect(await notified(event.documentId)).toEqual([insider.id]);
+  });
+
+  it("batch-14 discard, roll-forward, republish: the twin rule keeps the marker, a member gets 404", async () => {
+    const unit = await department("FC Twin Ann Dept");
+    const squad = await team("FC Twin Ann Squad", t.fixtures.departments.engineering);
+    const inSquad = await member(t.fixtures.departments.sales, [squad]);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC twin announcement",
+      department: unit.documentId,
+      team: squad.documentId,
+    });
+    expect((await panel.delete(DEPARTMENT, unit.documentId)).status).toBe(200);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    // The old image's discard: the draft comes back without the marker.
+    await rawSet(ANNOUNCEMENT, created.documentId, { retargetRequired: null }, "draft");
+    await backfill();
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    // The team survived: without the marker its Sales member would read
+    // the announcement and be notified of the republish.
+    expect(await readStatus(inSquad.caller, created.documentId)).toBe(404);
+    expect(await notified(created.documentId)).toEqual([]);
   });
 
   it.runIf(engine === "postgres")(
