@@ -88,6 +88,12 @@ const DEPARTMENT_AUTHOR_WRITES: CrudAction[] = ["find", "findOne", "create", "up
  * `can-edit-wiki`, which also keeps them to pages in spaces they can
  * read). `guest` is strict read-only on wiki content.
  *
+ * No role holds any wiki-revision grant (batch 15.1, decision 06 §B4): a
+ * revision holds the page body before an edit, draft text included, and
+ * the grant was also what let a caller populate or filter
+ * `wiki-page.revisions`. The router is `only: []` and the rows are revoked
+ * for every role (REMOVED_CORE_ACTIONS below).
+ *
  * Checked against the routers and controllers by `routes.matrix.test.ts`
  * (roadmap S01), with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS.
  */
@@ -127,7 +133,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": ALL_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
-    "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   },
   editor: {
     // No update/delete: acknowledgements are immutable read receipts —
@@ -161,7 +166,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": ALL_ACTIONS,
     "api::wiki-page.wiki-page": ALL_ACTIONS,
-    "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   },
   department_head: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
@@ -189,7 +193,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "create", "update"],
-    "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   team_lead: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
@@ -212,7 +215,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": [...READ_ACTIONS, "update"],
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "create", "update"],
-    "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   member: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
@@ -237,7 +239,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": [...READ_ACTIONS, "update"],
-    "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
   /**
    * `guest` is read-only on content (it writes only search telemetry, and
@@ -329,7 +330,6 @@ export const PERMISSION_MATRIX: Record<
     "api::team.team": READ_ACTIONS,
     "api::wiki-space.wiki-space": READ_ACTIONS,
     "api::wiki-page.wiki-page": READ_ACTIONS,
-    "api::wiki-revision.wiki-revision": READ_ACTIONS,
   },
 };
 
@@ -461,13 +461,21 @@ export const USER_UID = "plugin::users-permissions.user";
  *     through the aggregated /polls/:id/results),
  *   - notification create/update: rows are written by the CMS lifecycles
  *     only, and the core PUT had no policy at all,
- *   - comment/kudos/reaction update, lesson-progress update/delete.
+ *   - comment/kudos/reaction update, lesson-progress update/delete,
+ *   - wiki-revision, every action (batch 15.1, decision 06 §J3 "Generic
+ *     routes"): the reads served the page body before each edit, draft
+ *     text included, to every staff role and `authenticated`, and with
+ *     `find` a caller could also populate or filter `wiki-page.revisions`.
+ *     A batch-15 database holds 18 of these rows (admin_role and editor
+ *     all five actions, department_head, team_lead, member and
+ *     `authenticated` find/findOne); the boot deletes them.
  * Their permission rows are revoked for EVERY role below: a removed route
  * leaves its row behind (users-permissions only prunes rows of vanished
  * controller actions), and a revocation without a row costs nothing.
  */
 const REMOVED_CORE_ACTIONS: Partial<Record<ContentTypeUid, CrudAction[]>> = {
   "api::poll-vote.poll-vote": ALL_ACTIONS,
+  "api::wiki-revision.wiki-revision": ALL_ACTIONS,
   "api::notification.notification": ["create", "update"],
   "api::comment.comment": ["update"],
   "api::kudos.kudos": ["update"],

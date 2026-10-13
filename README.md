@@ -53,7 +53,8 @@ Further reading:
   server-sent events, with polling as the fallback.
 - **Wiki** spaces that are public or visible to selected roles, a
   department or a team. The cms keeps a snapshot of a page's previous text
-  whenever an edit changes it; the web does not show these revisions yet.
+  whenever an edit changes it; nobody reads these revisions through the API
+  (they can hold draft text), and the web does not show them yet.
 - **Departments and teams**, a **people directory** with org chart and
   _Direct reports_, and **celebrations** of work anniversaries and opt-in
   birthdays.
@@ -206,7 +207,7 @@ Content types: `C` = create, `R` = find + findOne, `U` = update,
 | `team`            | CRUD         | R        | RU                | RU          | R        | —       | R               |
 | `wiki-space`      | CRUD         | CRUD     | R                 | R           | R        | R       | R               |
 | `wiki-page`       | CRUD         | CRUD     | CRU               | CRU         | RU       | R       | R               |
-| `wiki-revision`   | CRUD         | CRUD     | R                 | R           | R        | —       | R               |
+| `wiki-revision`   | —            | —        | —                 | —           | —        | —       | —               |
 
 <!-- permission-matrix:end -->
 

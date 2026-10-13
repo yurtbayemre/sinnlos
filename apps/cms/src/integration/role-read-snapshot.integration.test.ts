@@ -21,9 +21,11 @@ import {
  * Labels, not ids: numeric ids and documentIds differ per boot, so every row
  * is reported by the marker text the seed wrote (titles, names, bodies) or,
  * for rows without text, by the label of the document it anchors to. Rows
- * without a marker (the announcement fan-out's notifications, lifecycle
- * revisions) are left out, so the snapshot does not depend on when a
- * post-commit task ran.
+ * without a marker (the announcement fan-out's notifications) are left out,
+ * so the snapshot does not depend on when a post-commit task ran.
+ *
+ * Wiki revisions left the snapshot in batch 15.1: no role has a route to
+ * them any more (wiki-revisions-closed.integration.test.ts).
  */
 
 const SNAPSHOT = "../__snapshots__/role-read-snapshot.txt";
@@ -75,7 +77,6 @@ const LISTS: Record<string, Endpoint> = {
   "quick-links": { path: "/api/quick-links", label: text("label", "S:ql:") },
   "wiki-spaces": { path: "/api/wiki-spaces", label: text("name", "S:space:") },
   "wiki-pages": { path: "/api/wiki-pages", label: text("title", "S:page:") },
-  "wiki-revisions": { path: "/api/wiki-revisions", label: text("summary", "S:rev:") },
   polls: { path: "/api/polls", label: text("question", "S:poll:") },
   courses: { path: "/api/courses", label: text("title", "S:course:") },
   lessons: { path: "/api/lessons", label: text("title", "S:lesson:") },
@@ -228,10 +229,9 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     departments: [sales.documentId],
   });
 
-  // Wiki: one space per visibility, a page and a revision in each.
+  // Wiki: one space per visibility, a page in each.
   const SPACE = "api::wiki-space.wiki-space";
   const PAGE = "api::wiki-page.wiki-page";
-  const REVISION = "api::wiki-revision.wiki-revision";
   const spaces: [string, Params][] = [
     ["public", { visibility: "public" }],
     ["role-member", { visibility: "role", allowedRoles: [memberRole.documentId] }],
@@ -252,10 +252,6 @@ async function seed(t: TestStrapi): Promise<Seeded> {
       space: space.documentId,
     });
     pages.push(page);
-    await create(REVISION, "wiki-revisions", `S:rev:${key}`, {
-      summary: `S:rev:${key}`,
-      page: page.documentId,
-    });
   }
   await create(
     SPACE,

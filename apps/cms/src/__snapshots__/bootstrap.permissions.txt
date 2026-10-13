@@ -110,11 +110,6 @@ admin_role|api::wiki-page.wiki-page.delete
 admin_role|api::wiki-page.wiki-page.find
 admin_role|api::wiki-page.wiki-page.findOne
 admin_role|api::wiki-page.wiki-page.update
-admin_role|api::wiki-revision.wiki-revision.create
-admin_role|api::wiki-revision.wiki-revision.delete
-admin_role|api::wiki-revision.wiki-revision.find
-admin_role|api::wiki-revision.wiki-revision.findOne
-admin_role|api::wiki-revision.wiki-revision.update
 admin_role|api::wiki-space.wiki-space.create
 admin_role|api::wiki-space.wiki-space.delete
 admin_role|api::wiki-space.wiki-space.find
@@ -179,8 +174,6 @@ authenticated|api::team.team.find
 authenticated|api::team.team.findOne
 authenticated|api::wiki-page.wiki-page.find
 authenticated|api::wiki-page.wiki-page.findOne
-authenticated|api::wiki-revision.wiki-revision.find
-authenticated|api::wiki-revision.wiki-revision.findOne
 authenticated|api::wiki-space.wiki-space.find
 authenticated|api::wiki-space.wiki-space.findOne
 authenticated|plugin::users-permissions.auth.changePassword
@@ -273,8 +266,6 @@ department_head|api::wiki-page.wiki-page.create
 department_head|api::wiki-page.wiki-page.find
 department_head|api::wiki-page.wiki-page.findOne
 department_head|api::wiki-page.wiki-page.update
-department_head|api::wiki-revision.wiki-revision.find
-department_head|api::wiki-revision.wiki-revision.findOne
 department_head|api::wiki-space.wiki-space.find
 department_head|api::wiki-space.wiki-space.findOne
 department_head|plugin::upload.content-api.upload
@@ -384,11 +375,6 @@ editor|api::wiki-page.wiki-page.delete
 editor|api::wiki-page.wiki-page.find
 editor|api::wiki-page.wiki-page.findOne
 editor|api::wiki-page.wiki-page.update
-editor|api::wiki-revision.wiki-revision.create
-editor|api::wiki-revision.wiki-revision.delete
-editor|api::wiki-revision.wiki-revision.find
-editor|api::wiki-revision.wiki-revision.findOne
-editor|api::wiki-revision.wiki-revision.update
 editor|api::wiki-space.wiki-space.create
 editor|api::wiki-space.wiki-space.delete
 editor|api::wiki-space.wiki-space.find
@@ -492,8 +478,6 @@ member|api::team.team.findOne
 member|api::wiki-page.wiki-page.find
 member|api::wiki-page.wiki-page.findOne
 member|api::wiki-page.wiki-page.update
-member|api::wiki-revision.wiki-revision.find
-member|api::wiki-revision.wiki-revision.findOne
 member|api::wiki-space.wiki-space.find
 member|api::wiki-space.wiki-space.findOne
 member|plugin::upload.content-api.upload
@@ -565,8 +549,6 @@ team_lead|api::wiki-page.wiki-page.create
 team_lead|api::wiki-page.wiki-page.find
 team_lead|api::wiki-page.wiki-page.findOne
 team_lead|api::wiki-page.wiki-page.update
-team_lead|api::wiki-revision.wiki-revision.find
-team_lead|api::wiki-revision.wiki-revision.findOne
 team_lead|api::wiki-space.wiki-space.find
 team_lead|api::wiki-space.wiki-space.findOne
 team_lead|plugin::upload.content-api.upload

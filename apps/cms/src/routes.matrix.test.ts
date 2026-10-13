@@ -14,7 +14,11 @@ import {
   requirePackageFile,
   strapiPackageDir,
 } from "./test/sqlite-engine.test.helper";
-import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
+import {
+  CLOSED_RELATION_TARGETS,
+  RESTRICTED_RELATION_TARGETS,
+  isRestrictedRelation,
+} from "./utils/restricted-relations";
 import { AUTHORED_UIDS, DEPARTMENT_AUTHORED_UIDS } from "./utils/authoring-uids";
 import {
   DEPARTMENT_AUTHOR_CLASS,
@@ -414,11 +418,7 @@ const GOLDEN: Record<string, PolicySpec[]> = {
   "api::wiki-page.wiki-page.update": ["global::can-edit-wiki"],
   "api::wiki-page.wiki-page.delete": ADMIN_OR_EDITOR,
 
-  "api::wiki-revision.wiki-revision.find": wiki("revision"),
-  "api::wiki-revision.wiki-revision.findOne": wiki("revision"),
-  "api::wiki-revision.wiki-revision.create": ADMIN_OR_EDITOR,
-  "api::wiki-revision.wiki-revision.update": ADMIN_OR_EDITOR,
-  "api::wiki-revision.wiki-revision.delete": ADMIN_OR_EDITOR,
+  // api::wiki-revision.wiki-revision: no route (batch 15.1, S01 v2 rule 4).
 
   "api::wiki-space.wiki-space.find": wiki("space"),
   "api::wiki-space.wiki-space.findOne": wiki("space"),
@@ -596,17 +596,19 @@ const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: reado
  * Authored types (decision 06 §A) whose moderator payloads are still open:
  * admin_role/editor bypass their FX07 gate or write them through
  * is-admin-or-editor. Batch 16 rebuilds the wiki gates (wiki-page,
- * wiki-space, wiki-revision), batch 17 the department and team gates; the
- * set shrinks to empty. Every other authored type with a moderator
- * create/update route enforces the `moderator` class (S01 v2 rule 1).
+ * wiki-space), batch 17 the department and team gates; the set shrinks to
+ * empty. wiki-revision left it in batch 15.1: it has no route at all (rule
+ * 4). Every other authored type with a moderator create/update route
+ * enforces the `moderator` class (S01 v2 rule 1).
  */
 const KNOWN_OPEN_PAYLOADS = new Set<string>([
   "api::wiki-page.wiki-page",
   "api::wiki-space.wiki-space",
-  "api::wiki-revision.wiki-revision",
   "api::department.department",
   "api::team.team",
 ]);
+
+const WIKI_REVISION = "api::wiki-revision.wiki-revision";
 
 /** The authored types of decision 06 §A (phase 1 through 3). */
 const AUTHORED_TYPES_V2 = [
@@ -1066,9 +1068,10 @@ describe("route → policy matrix (S01)", async () => {
       );
     });
 
-    it("wiki-space and wiki-revision writes stay with admin_role/editor", () => {
-      const writes = ["api::wiki-space.wiki-space", "api::wiki-revision.wiki-revision"].flatMap(
-        (uid) => [...WRITE_ACTIONS, "delete"].map((write) => `${uid}.${write}`),
+    // wiki-revision has no route at all (S01 v2 rule 4).
+    it("wiki-space writes stay with admin_role/editor", () => {
+      const writes = [...WRITE_ACTIONS, "delete"].map(
+        (write) => `api::wiki-space.wiki-space.${write}`,
       );
       expect(writes.filter((action) => restrictedHolders(action).length > 0)).toEqual([]);
     });
@@ -1171,6 +1174,55 @@ describe("route → policy matrix (S01)", async () => {
           if (entry.kind === "custom") expect(config?.intent, entry.action).toBe(action);
           else expect(config?.intent, entry.action).toBeUndefined();
         }
+      }
+    });
+
+    /**
+     * Batch 15.1 (decision 06 §J3 "Generic routes", §B4): a revision holds
+     * the page body before an edit, draft text included. No route, no grant
+     * for any role (a batch-15 database holds 18 rows, revoked at boot), and
+     * every relation into the type is closed for every caller, admin_role
+     * and editor included: without `find` the core drops a populate and
+     * refuses a root filter or sort, the guard the filter and sort nested in
+     * a populate, which the core does not check.
+     */
+    it("rule 4: wiki-revision exposes no route and is revoked for every role", () => {
+      expect([...routes.keys()].filter((action) => action.startsWith(`${WIKI_REVISION}.`))).toEqual(
+        [],
+      );
+      for (const role of matrixRoles) {
+        expect(
+          [...effectiveGrants(role)].filter((action) => action.startsWith(`${WIKI_REVISION}.`)),
+          role,
+        ).toEqual([]);
+        for (const action of CORE_ACTIONS) {
+          expect(REVOKED_PERMISSIONS[role] ?? [], `${role}: ${action}`).toContain(
+            `${WIKI_REVISION}.${action}`,
+          );
+        }
+      }
+      expect(
+        computeDesiredGrants().filter((grant) => grant.action.startsWith(`${WIKI_REVISION}.`)),
+      ).toEqual([]);
+    });
+
+    it("rule 4: every relation into wiki-revision is closed for every caller", () => {
+      const models = new Map(schemas);
+      models.set(
+        "plugin::users-permissions.user",
+        JSON.parse(readFileSync(USER_SCHEMA_FILE, "utf8")) as ContentTypeSchema,
+      );
+      const into = [...models].flatMap(([source, schema]) =>
+        Object.entries(schema.attributes)
+          .filter(([, def]) => def.type === "relation" && def.target === WIKI_REVISION)
+          .map(([attr, def]) => ({ path: `${source}.${attr}`, source, def })),
+      );
+      expect(into.map(({ path }) => path)).toEqual(["api::wiki-page.wiki-page.revisions"]);
+      expect(CLOSED_RELATION_TARGETS[WIKI_REVISION]).toEqual([]);
+      for (const { path, source, def } of into) {
+        expect(isRestrictedRelation({ uid: source }, def, CLOSED_RELATION_TARGETS), path).toBe(
+          true,
+        );
       }
     });
 
