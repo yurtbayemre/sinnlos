@@ -1847,7 +1847,9 @@ What users notice:
   was opened (another tab, another author, the admin panel, the
   scheduler), a save answers with a dialog: _Reload_ (with _Copy my text_
   first) or _Overwrite_ with the current version. An update sends only the
-  fields the author changed.
+  fields the author changed, so _Overwrite_ keeps the other author's
+  changes to the rest; the form then shows the item as it now is. _Save
+  draft_ stays disabled until something changed.
 - **Department heads** (with a department) write announcements and events
   for their own department: the department is shown, not chosen; the team
   picker lists that department's teams; no _Pinned_, read confirmation,
@@ -1893,9 +1895,10 @@ undo: the web writes only through the cms's authoring routes.
 tests), lint and `next build` passed. End to end against a real cms (the
 worktree's Strapi 5.57 build on a throwaway Postgres 16 container with the
 demo seed and lane 15A merged; the web with `next start`; host Playwright
-with Chromium), 64 checks passed: an editor's create, save and publish
+with Chromium), 66 checks passed: an editor's create, save and publish
 read by a member; a second tab's save then this tab's save opens the
-conflict dialog, _Copy my text_, _Overwrite_ and _Reload_ work; a
+conflict dialog, _Copy my text_, _Overwrite_ (the form then shows the
+other tab's untouched title) and _Reload_ work; a
 Content Manager save between load and save gives the same dialog; the
 schedule refuses 2027-03-28 and 2027-10-31 02:30 Berlin and stores
 09:00 as `08:00Z`; discard, unpublish (the member no longer reads it) and
@@ -1911,7 +1914,10 @@ event across 2027-10-31 is stored as local midnights; the capacity warning;
 a quick link refuses `//evil.example`, and its schedule refuses an end
 before the start. Every `/manage` page at 360 and 1280 px, light and dark,
 English and German, has no horizontal scroll; the Markdown tabs follow
-the arrow keys and the publish dialog returns the focus on Escape.
+the arrow keys, and the publish and Schedule… dialogs return the focus on
+Escape. Two review rounds (Codex, and a second reading) were fixed before
+the final run: Overwrite and the schedule dialog after a conflict, empty
+draft saves, the focus targets, the input shape of the save actions.
 Screenshots: the lane's scratch directory. Not exercised: a screen-reader
 pass (NVDA or VoiceOver) and the scheduler actually publishing.
 
