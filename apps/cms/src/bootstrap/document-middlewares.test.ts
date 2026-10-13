@@ -67,6 +67,7 @@ describe("Document Service middleware slots (K6)", () => {
       "document-lock",
       "poll-audience-guard",
       "department-audience-guard",
+      "wiki-checks",
       "schedule-clear",
       "publish-readiness",
       "media-claims",

@@ -1,0 +1,295 @@
+import { FORM_KEY } from "@sinnlos/domain";
+import { errors } from "@strapi/utils";
+
+import { WIKI_PAGE_UID, WIKI_SPACE_UID } from "./authoring-uids";
+import { MUTATING_ACTIONS, type DocumentLockHost } from "./document-lock";
+import { relationLinkTable } from "./targeting-flags";
+import { lockWikiStructure } from "./wiki-structure-lock";
+import { refuseKeys } from "./write-allowlist";
+
+/**
+ * The wiki checks (deep-dive plan batch 16, S2 and S15; lane 16B item 5):
+ * Document Service middleware slot 4 (bootstrap/document-middlewares.ts),
+ * inside the document lock's transaction, for EVERY source (content API,
+ * Content Manager single and bulk, the scheduler, boot writers).
+ *
+ * PARENT LOOPS. Every mutating wiki-page action (create, update, clone,
+ * publish, unpublish, discardDraft, delete) takes the wiki structure lock
+ * (utils/wiki-structure-lock.ts), reads the DOCUMENT-LEVEL parent graph
+ * (every row's parent link, both ends mapped to their documentId and
+ * de-duplicated: the graph a reader walks), runs the action, and reads it
+ * again. For every edge `u → v` (u's parent is v) the action ADDED, it
+ * refuses when u is reachable from v afterwards: a loop through the new
+ * edge. The refusal is a 400 `ValidationError` with `details.keys:
+ * ["parent"]` and `details.codes.parent = "parentCycle"`, and the whole
+ * action rolls back.
+ *   - Why every action: publish and discard re-create the incoming
+ *     self-referential links of OTHER pages (@strapi/core 5.57
+ *     document-service repository.js, utils/self-referential-relations.js),
+ *     so they can add edges, and a concurrent parent change could close a
+ *     loop with them.
+ *   - Why an edge diff: removed and unchanged edges never refuse, so a
+ *     diamond (a page whose draft and published rows have different
+ *     parents that meet again), two twins with one parent, a loop that
+ *     existed before (legacy, or the admin panel of an older batch) and
+ *     the repair of such a loop all pass. Payload shapes never need
+ *     parsing (the panel's connect/disconnect/set, the API's set): the
+ *     check reads what was written.
+ *   - The whole edge set is read, because an action can add edges of other
+ *     pages; at intranet scale that is a few hundred link rows, read twice
+ *     under the lock, and the walk is in memory.
+ *
+ * THE PAGE'S SPACE. A create, update or clone whose payload names a space
+ * must leave the page's draft linked to one: a space deleted between the
+ * write's checks and its insert (both now under the structure lock) answers
+ * `invalid` on `space`.
+ *
+ * NON-EMPTY SPACES (S15). A wiki-space `delete`, `unpublish`, and a
+ * `discardDraft` of a space without a published row (it deletes the
+ * space), take the structure lock and refuse with `_form: spaceNotEmpty`
+ * while any page row links any row of the space: a space's pages would
+ * otherwise lose their space (a panel unpublish deletes the published row,
+ * its pages' links cascade, and a republish does not re-link them).
+ *
+ * LOCK ORDER (K21): the document's own version row (slot 2) first, then the
+ * structure row; nothing here locks a document row afterwards.
+ */
+
+export const WIKI_CHECKS_LOG = "[wiki-checks]";
+
+/** The wiki-space actions that can remove the space's rows. */
+const SPACE_ACTIONS: readonly string[] = ["delete", "unpublish", "discardDraft"];
+
+/** The page actions whose payload can name a space. */
+const SPACE_PAYLOAD_ACTIONS: readonly string[] = ["create", "update", "clone"];
+
+/** The slice of the Strapi instance the checks use (own members first: they resolve first). */
+export type WikiChecksHost = {
+  db: {
+    query(uid: string): {
+      findOne(params: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+      findMany(params: Record<string, unknown>): Promise<unknown>;
+      count(params: Record<string, unknown>): Promise<number>;
+    };
+  };
+} & DocumentLockHost;
+
+/** What @strapi/core hands a Document Service middleware (C4). */
+export interface WikiChecksContext {
+  uid?: string;
+  action?: string;
+  params?: unknown;
+}
+
+type Middleware = (context: WikiChecksContext, next: () => Promise<unknown>) => Promise<unknown>;
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const listOf = (rows: unknown): unknown[] => (Array.isArray(rows) ? rows : []);
+
+const isDocumentId = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const rowId = (value: unknown): number | null => {
+  const id = typeof value === "string" && /^\d+$/.test(value) ? Number(value) : value;
+  return typeof id === "number" && Number.isSafeInteger(id) ? id : null;
+};
+
+// ---------------------------------------------------------------------------
+// The edge diff (pure).
+
+/** A document-level parent edge: `child`'s parent is `parent` (documentIds). */
+export type ParentEdge = readonly [child: string, parent: string];
+
+const keyOf = ([child, parent]: ParentEdge) => `${child}\u0000${parent}`;
+
+/** The edges of `after` that `before` does not hold (de-duplicated). */
+export function addedEdges(
+  before: Iterable<ParentEdge>,
+  after: Iterable<ParentEdge>,
+): ParentEdge[] {
+  const known = new Set([...before].map(keyOf));
+  const added = new Map<string, ParentEdge>();
+  for (const edge of after) {
+    const key = keyOf(edge);
+    if (!known.has(key)) added.set(key, edge);
+  }
+  return [...added.values()];
+}
+
+/**
+ * The first of `added` that lies on a loop of `edges` (its child is
+ * reachable from its parent along parent edges), or null. A self-edge is a
+ * loop. The walk is in memory and visits each document once per edge.
+ */
+export function loopThrough(
+  edges: Iterable<ParentEdge>,
+  added: readonly ParentEdge[],
+): ParentEdge | null {
+  const parents = new Map<string, Set<string>>();
+  for (const [child, parent] of edges) {
+    const set = parents.get(child) ?? new Set<string>();
+    set.add(parent);
+    parents.set(child, set);
+  }
+  for (const edge of added) {
+    const [child, parent] = edge;
+    const seen = new Set<string>([parent]);
+    const stack = [parent];
+    while (stack.length > 0) {
+      const node = stack.pop() as string;
+      if (node === child) return edge;
+      for (const next of parents.get(node) ?? []) {
+        if (!seen.has(next)) {
+          seen.add(next);
+          stack.push(next);
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/** Whether a page payload points the page at a space (any Strapi relation shape naming a target). */
+export function namesSpace(data: unknown): boolean {
+  if (!isRecord(data) || !("space" in data)) return false;
+  const value = data.space;
+  if (value === null || value === undefined) return false;
+  if (typeof value === "number" || typeof value === "string") return true;
+  if (Array.isArray(value)) return value.length > 0;
+  if (!isRecord(value)) return false;
+  if ("id" in value || "documentId" in value) return true;
+  const named = (list: unknown) => (Array.isArray(list) ? list.length > 0 : list != null);
+  return named(value.set) || named(value.connect);
+}
+
+// ---------------------------------------------------------------------------
+// The reads (inside the action's transaction: the query engine joins it).
+
+/** The `parentCycle` refusal (key `parent`). */
+export function parentCycleError(): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError("A page cannot be placed below itself or one of its subpages", {
+    keys: ["parent"],
+    codes: { parent: "parentCycle" },
+  });
+}
+
+/** The `spaceNotEmpty` refusal (key `_form`). */
+export function spaceNotEmptyError(): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError("This space still has pages", {
+    keys: [FORM_KEY],
+    codes: { [FORM_KEY]: "spaceNotEmpty" },
+  });
+}
+
+const REFUSAL = "the wiki checks refuse the write";
+
+/** Every document-level parent edge of the wiki. */
+export async function readParentEdges(strapi: WikiChecksHost): Promise<ParentEdge[]> {
+  const link = relationLinkTable(strapi, WIKI_PAGE_UID, "parent", REFUSAL);
+  const links = listOf(
+    await strapi.db.query(link.uid).findMany({ select: [link.rowColumn, link.targetColumn] }),
+  );
+  if (links.length === 0) return [];
+  const pages = listOf(
+    await strapi.db.query(WIKI_PAGE_UID).findMany({ select: ["id", "documentId"] }),
+  );
+  const documentOf = new Map<number, string>();
+  for (const page of pages) {
+    if (isRecord(page) && typeof page.id === "number" && isDocumentId(page.documentId)) {
+      documentOf.set(page.id, page.documentId);
+    }
+  }
+  const edges = new Map<string, ParentEdge>();
+  for (const row of links) {
+    if (!isRecord(row)) continue;
+    const child = documentOf.get(rowId(row[link.rowColumn]) ?? -1);
+    const parent = documentOf.get(rowId(row[link.targetColumn]) ?? -1);
+    if (!child || !parent) continue;
+    const edge: ParentEdge = [child, parent];
+    edges.set(keyOf(edge), edge);
+  }
+  return [...edges.values()];
+}
+
+/** Whether any page row links any row of the space `documentId`. */
+export async function spaceHasPages(strapi: WikiChecksHost, documentId: string): Promise<boolean> {
+  const spaceRows = listOf(
+    await strapi.db.query(WIKI_SPACE_UID).findMany({ where: { documentId }, select: ["id"] }),
+  )
+    .map((row) => (isRecord(row) ? rowId(row.id) : null))
+    .filter((id): id is number => id !== null);
+  if (spaceRows.length === 0) return false;
+  const link = relationLinkTable(strapi, WIKI_PAGE_UID, "space", REFUSAL);
+  const count = await strapi.db
+    .query(link.uid)
+    .count({ where: { [link.targetColumn]: { $in: spaceRows } } });
+  return count > 0;
+}
+
+/** Whether the draft row of page `documentId` links a space. */
+async function draftHasSpace(strapi: WikiChecksHost, documentId: string): Promise<boolean> {
+  const draft = await strapi.db.query(WIKI_PAGE_UID).findOne({
+    where: { documentId, publishedAt: { $null: true } },
+    select: ["id"],
+    populate: { space: { select: ["id"] } },
+  });
+  return isRecord(draft) && isRecord(draft.space);
+}
+
+/** The document an action writes (create and clone: the new one, from the result). */
+function writtenDocumentId(action: string, params: Record<string, unknown>, result: unknown) {
+  if (action === "create" || action === "clone") {
+    return isRecord(result) && isDocumentId(result.documentId) ? result.documentId : null;
+  }
+  return isDocumentId(params.documentId) ? params.documentId : null;
+}
+
+// ---------------------------------------------------------------------------
+// The middleware.
+
+/** The wiki-checks Document Service middleware (see the module comment). */
+export function createWikiChecks(strapi: WikiChecksHost): Middleware {
+  return async (context, next) => {
+    const uid = context.uid;
+    const action = context.action ?? "";
+    const params = isRecord(context.params) ? context.params : {};
+
+    if (uid === WIKI_PAGE_UID && MUTATING_ACTIONS.includes(action)) {
+      return strapi.db.transaction(async () => {
+        await lockWikiStructure(strapi);
+        const before = await readParentEdges(strapi);
+        const result = await next();
+        const after = await readParentEdges(strapi);
+        const loop = loopThrough(after, addedEdges(before, after));
+        if (loop) throw parentCycleError();
+        if (SPACE_PAYLOAD_ACTIONS.includes(action) && namesSpace(params.data)) {
+          const documentId = writtenDocumentId(action, params, result);
+          if (!documentId || !(await draftHasSpace(strapi, documentId))) refuseKeys(["space"]);
+        }
+        return result;
+      });
+    }
+
+    if (uid === WIKI_SPACE_UID && SPACE_ACTIONS.includes(action)) {
+      const documentId = params.documentId;
+      if (!isDocumentId(documentId)) return next();
+      return strapi.db.transaction(async () => {
+        // A discard with a published row rebuilds the draft and removes
+        // nothing a page links to for good.
+        if (action === "discardDraft") {
+          const published = await strapi.db
+            .query(WIKI_SPACE_UID)
+            .count({ where: { documentId, publishedAt: { $notNull: true } } });
+          if (published > 0) return next();
+        }
+        await lockWikiStructure(strapi);
+        if (await spaceHasPages(strapi, documentId)) throw spaceNotEmptyError();
+        return next();
+      });
+    }
+
+    return next();
+  };
+}

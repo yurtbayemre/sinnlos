@@ -14,6 +14,7 @@ import {
 } from "../utils/poll-audience-guard";
 import { createPublishReadiness, type PublishReadinessHost } from "../utils/publish-readiness";
 import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
+import { createWikiChecks, type WikiChecksHost } from "../utils/wiki-checks";
 
 /**
  * Every Document Service middleware of the app, registered in one place and
@@ -35,7 +36,10 @@ import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
  *   3b. department/targeting guard (`createDepartmentAudienceGuard`): the
  *      document and quick-link flag, and from 15D the announcement and
  *      event targeting flags;
- *   4. (batch 16B: the wiki checks);
+ *   4. wiki checks (utils/wiki-checks.ts, batch 16): the wiki structure
+ *      lock on every wiki-page mutation and on a space's delete, unpublish
+ *      and deleting discard; parent loops refused (the edge diff), a space
+ *      with pages neither deleted nor unpublished;
  *   5. schedule-clear (§D rule 6);
  *   6. publish readiness (§G2);
  *   7. media claims (§E3, §E4; utils/media-claims.ts, lane 16A): a newly
@@ -102,6 +106,10 @@ export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMid
     { slot: "document-lock", middleware: createDocumentLock(strapi) },
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
+    {
+      slot: "wiki-checks",
+      middleware: createWikiChecks(strapi as unknown as WikiChecksHost) as DocumentMiddleware,
+    },
     { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
     { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
     { slot: "media-claims", middleware: createMediaClaims(strapi) },
@@ -122,8 +130,8 @@ export function registerDocumentMiddlewares(strapi: DocumentMiddlewaresRegistrat
   if (!documents || typeof documents.use !== "function") {
     throw new Error(
       `${DOCUMENT_MIDDLEWARES_LOG} strapi.documents.use not found — refusing to boot without the ` +
-        "Document Service middlewares (datetime guard, document lock, audience guards, schedule, " +
-        "readiness, media claims, audit, user write guard)",
+        "Document Service middlewares (datetime guard, document lock, audience guards, wiki " +
+        "checks, schedule, readiness, media claims, audit, user write guard)",
     );
   }
   for (const { middleware } of documentMiddlewares(strapi)) documents.use(middleware);

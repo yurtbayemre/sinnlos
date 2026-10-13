@@ -397,7 +397,10 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
   it("a parent cycle among scheduled wiki pages waits out the dependency limit, then ends in notPublishable (Codex review)", async () => {
     // The admin panel and the Document Service let a draft's parent point
     // back at its own child; both pages waited for each other forever. The
-    // wait is bounded now (DEPENDENCY_WAIT_MINUTES, 60).
+    // wait is bounded now (DEPENDENCY_WAIT_MINUTES, 60). Since batch 16 the
+    // wiki checks refuse a write that closes the loop (parentCycle, for
+    // every writer), so the loop here is one left from before (an older
+    // panel, raw SQL): its link row is written raw.
     const base = Date.now();
     const slug = (name: string) => `it-cycle-${name}-${base}`;
     const due = new Date(base - 60_000).toISOString();
@@ -407,9 +410,37 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
     const b = await t.strapi.documents(WIKI_PAGE).create({
       data: { title: "Cycle B", slug: slug("b"), parent: a.documentId, publishAt: due },
     });
-    await t.strapi
-      .documents(WIKI_PAGE)
-      .update({ documentId: a.documentId, data: { parent: b.documentId } });
+    await expect(
+      t.strapi
+        .documents(WIKI_PAGE)
+        .update({ documentId: a.documentId, data: { parent: b.documentId } }),
+    ).rejects.toThrow(/below itself/);
+    const join = (
+      (t.strapi.db as unknown as { metadata: { get(uid: string): unknown } }).metadata.get(
+        WIKI_PAGE,
+      ) as {
+        attributes: Record<
+          string,
+          {
+            joinTable: {
+              name: string;
+              joinColumn: { name: string };
+              inverseJoinColumn: { name: string };
+            };
+          }
+        >;
+      }
+    ).attributes.parent.joinTable;
+    await (
+      t.strapi.db as unknown as {
+        getConnection(table: string): { insert(row: Record<string, unknown>): Promise<unknown> };
+      }
+    )
+      .getConnection(join.name)
+      .insert({
+        [join.joinColumn.name]: (await draftOf(WIKI_PAGE, a.documentId))?.id,
+        [join.inverseJoinColumn.name]: (await draftOf(WIKI_PAGE, b.documentId))?.id,
+      });
     const attempts = newAttempts();
     const within = await scheduler.runScheduledPublishing(t.strapi, new Date(base), attempts);
     for (const page of [a, b]) {
