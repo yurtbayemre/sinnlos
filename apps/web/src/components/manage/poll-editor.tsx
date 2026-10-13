@@ -335,9 +335,7 @@ export function PollEditor({
                   type="button"
                   variant="outline"
                   disabled={disabled}
-                  onClick={(event) => {
-                    editor.invokerRef.current = event.currentTarget;
-                  }}
+                  onClick={(event) => editor.rememberInvoker(event.currentTarget)}
                 >
                   {editor.running === "close" ? tc("actions.working") : tc("actions.closeNow")}
                 </Button>
@@ -361,9 +359,7 @@ export function PollEditor({
                   type="button"
                   variant="destructive"
                   disabled={disabled}
-                  onClick={(event) => {
-                    editor.invokerRef.current = event.currentTarget;
-                  }}
+                  onClick={(event) => editor.rememberInvoker(event.currentTarget)}
                 >
                   {editor.running === "delete" ? tc("actions.working") : tc("actions.delete")}
                 </Button>

@@ -298,11 +298,17 @@ export function useAuthoringEditor<Source extends object | null>({
     );
   }, [conflict, run, requestReset]);
 
+  /** Records the control that opens a confirmation (the conflict dialog's focus target). */
+  const rememberInvoker = useCallback((element: HTMLElement) => {
+    invokerRef.current = element;
+  }, []);
+
   return {
     meta,
     setMeta,
     overwrite,
     invokerRef,
+    rememberInvoker,
     pending: busy,
     running,
     fieldErrors,

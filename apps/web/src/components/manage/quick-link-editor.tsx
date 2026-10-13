@@ -231,7 +231,7 @@ export function QuickLinkEditor({
           blocked={editor.meta === null && optionsFailed}
           running={editor.running}
           handlers={item.handlers}
-          invokerRef={editor.invokerRef}
+          onInvoke={editor.rememberInvoker}
         >
           <BackToList area="quickLinks" />
         </PublishBar>

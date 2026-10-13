@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type ReactNode, type RefObject } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -47,7 +47,7 @@ export function PublishBar({
   blocked = false,
   running,
   handlers,
-  invokerRef,
+  onInvoke,
   children,
 }: {
   area: ManageArea;
@@ -65,10 +65,11 @@ export function PublishBar({
   running: EditorIntent | null;
   handlers: PublishBarHandlers;
   /**
-   * Set to the button that opens a confirmation: the confirmation's own
-   * button unmounts, so a conflict dialog after it returns the focus here.
+   * Called with the button that opens a confirmation or the Schedule…
+   * dialog: those dialogs' own buttons unmount, so a conflict dialog after
+   * them returns the focus here.
    */
-  invokerRef?: RefObject<HTMLElement | null>;
+  onInvoke?: (element: HTMLElement) => void;
   /** More controls at the end (the back link). */
   children?: ReactNode;
 }) {
@@ -119,9 +120,7 @@ export function PublishBar({
           type="button"
           variant={variant}
           disabled={pending || (blocked && kind === "saveAndPublish")}
-          onClick={(event) => {
-            if (invokerRef) invokerRef.current = event.currentTarget;
-          }}
+          onClick={(event) => onInvoke?.(event.currentTarget)}
         >
           {text}
         </Button>
@@ -175,7 +174,7 @@ export function PublishBar({
           variant="outline"
           disabled={pending || blocked}
           onClick={(event) => {
-            if (invokerRef) invokerRef.current = event.currentTarget;
+            onInvoke?.(event.currentTarget);
             handlers.schedule();
           }}
         >
