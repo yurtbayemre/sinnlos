@@ -78,7 +78,13 @@ export interface ReportUser {
   blocked?: boolean;
 }
 
-/** A mandatory announcement plus every field its targeting depends on. */
+/**
+ * A mandatory announcement plus every field its targeting depends on,
+ * including `audience` and `retargetRequired` (inherited): the REST read
+ * narrows no fields, so both arrive with the row, and an announcement that
+ * targets nobody (D-PT01, or the re-target marker after a department or
+ * team delete) counts an empty audience, as the CMS notifies nobody of it.
+ */
 export interface ReportAnnouncement extends AnnouncementAudience {
   id: number;
   documentId?: string;

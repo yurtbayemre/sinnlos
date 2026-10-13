@@ -183,6 +183,19 @@ async function seed(t: TestStrapi): Promise<Seeded> {
   });
   // The draft drops the department; the published row stays Engineering-only.
   await docs(ANN).update({ documentId: annWidened.documentId, data: { department: null } });
+  // Batch 15 (lane 15D), fail closed: "departments" without a department or
+  // a team (D-PT01), and the re-target marker a department or team delete
+  // sets while a criterion remains. Admins and editors read both, nobody
+  // else, and their threads answer like a missing target.
+  const annNoTarget = await create(ANN, "announcements", "S:ann:no-target", {
+    title: "S:ann:no-target",
+    audience: "departments",
+  });
+  const annRetarget = await create(ANN, "announcements", "S:ann:retarget", {
+    title: "S:ann:retarget",
+    department: engineering.documentId,
+    retargetRequired: true,
+  });
 
   // Documents and quick links: company-wide or per department.
   const DOC = "api::document.document";
@@ -328,6 +341,8 @@ async function seed(t: TestStrapi): Promise<Seeded> {
     annEngTeam,
     annDraft,
     annWidened,
+    annNoTarget,
+    annRetarget,
   ];
   const targets: Seeded["targets"] = [
     ...announcements.map((row) => ({

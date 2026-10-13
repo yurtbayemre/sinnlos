@@ -74,6 +74,15 @@ const GUARDED_RAW_WRITERS: Readonly<Record<string, { rule: GuardRule; writes: st
       "announcement audience and event notifyAudience on linked rows, NULL event rows, and the " +
       "twin rule for notifyAudience and retargetRequired",
   },
+  "utils/targeting-flags.ts": {
+    rule: "raises a flag only",
+    writes:
+      "announcement audience and event notifyAudience on linked rows (the write-time guard, " +
+      "inside the document lock), and before a department or team delete the announcement " +
+      "audience + retargetRequired and the event notifyAudience; the delete hooks first lock and " +
+      "advance (lockDocument, advanceRevision) every announcement, event and document linking " +
+      "the deleted row, ascending (§D rule 13)",
+  },
   "seed-demo.ts": {
     rule: "boot seed of a fresh database",
     writes:
@@ -89,7 +98,8 @@ const OTHER_RAW_WRITERS: Readonly<Record<string, string>> = {
     "classifieds through the Document Service (super.create, update, delete)",
   "api/comment/content-types/comment/lifecycles.ts": "notifications",
   "api/department/content-types/department/lifecycles.ts":
-    "comment only: the flags go through department-delete-restrict.ts and poll-department-delete.ts",
+    "comment only: the flags and revisions go through targeting-flags.ts, " +
+    "department-delete-restrict.ts and poll-department-delete.ts",
   "api/department/controllers/department.ts":
     "department writes only through the Document Service (super.update)",
   "api/event-rsvp/controllers/event-rsvp.ts": "RSVPs",

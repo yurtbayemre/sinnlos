@@ -73,10 +73,11 @@ import { DEPARTMENTS_AUDIENCE } from "./policy-factories";
  *     through unchanged if the delete rolled back.
  * A deadlock with a concurrent edit aborts one of the two transactions,
  * which fails closed either way. SQLite runs one transaction at a time on
- * its single connection, so it needs (and has) no lock. Without a
- * surrounding transaction (a script's db-level delete) the lock ends with
- * its own statement; the admin panel and the content API always delete
- * through the Document Service, which opens one.
+ * its single connection, so it needs (and has) no lock. Since batch 15 the
+ * department lifecycles refuse a delete outside a transaction (a script's
+ * db-level delete), whose lock would end before the DELETE; the admin panel
+ * and the content API always delete through the Document Service, which
+ * opens one.
  */
 
 export const DEPARTMENT_DELETE_LOG = "[department-delete]";

@@ -1384,6 +1384,15 @@ systemctl start docker
 > needs the schedule export first. Follow
 > [Upgrading to the authoring document layer (batch 15, lane 15B)](#upgrading-to-the-authoring-document-layer-batch-15-lane-15b).
 
+> **Deploying fail-closed department targeting (batch 15, lane 15D)?**
+> Only with batch 15 (it reads lane 15B's columns). An announcement whose
+> audience is "departments" without a department or team, or whose
+> department or team was deleted (`retargetRequired`), becomes visible to
+> admins and editors only and notifies nobody; an event without its
+> departments notifies nobody. Run the read-only D-PT01 preflight and the
+> department-heads report first. Follow
+> [Upgrading to fail-closed department targeting (batch 15, lane 15D)](#upgrading-to-fail-closed-department-targeting-batch-15-lane-15d).
+
 > **Deploying batch 14 (2026-10-13)?** The page loaders and UI kit, the
 > README and security docs and the documentation pass ship as one normal
 > deploy of cms and web with `infra/deploy.sh`, **once batch 13 runs**.
@@ -2087,6 +2096,178 @@ image):**
   tables of announcements and events; on an intranet's row counts that
   should stay within seconds. The batch rehearsal times it on a restored
   backup-run generation.
+
+#### Upgrading to fail-closed department targeting (batch 15, lane 15D)
+
+Lane 15D of batch 15 (branch `feat/v2-authoring-cms-targeting-fail-closed`,
+on lane 15B's document layer) makes department targeting fail closed for
+announcements and events (decision 06 §B6, §N9). It changes the cms; the
+web's acknowledgement report follows on its own (it reads the same rule).
+It ships **only with batch 15**: it reads the columns and the boot
+backfill of lane 15B (`announcements.retarget_required`,
+`events.notify_audience`), so it is never deployed without 15B, and
+"Deploying batch 15" is the runbook. No schema of its own, no grant, no
+env, no compose or edge change.
+
+**What changes (release notes 8 and 9)**
+
+- **Release note 8 (D-PT01).** An announcement whose audience is
+  "departments" but that has neither a department nor a team is visible to
+  admins and editors only until they re-target it, and it notifies nobody
+  (before, it was company-wide, and a republish notified everyone). The
+  preflight below counts these announcements; put the count in the release
+  note. In the admin panel, linking a department or a team now sets the
+  announcement's Audience to "departments", and removing the links no
+  longer makes it company-wide: set Audience to "all" explicitly. This also
+  holds for items created before the upgrade (the boot backfill sets the
+  flag on every announcement that links a department or team). The same
+  holds for an event's Notify audience: every event that links a
+  department gets "departments", and an event whose departments are all
+  removed (or deleted) notifies nobody when it is published, instead of the
+  whole company; set Notify audience to "all" to notify everyone again.
+  Events stay readable in everyone's calendar, as before.
+- **Release note 9 (`retargetRequired`).** Deleting a department or a team
+  makes every announcement that targeted it visible to admins and editors
+  only, even when another criterion (a team, the department, audience
+  roles) remains, until they re-target it: "Needs re-targeting" in
+  `/manage` (lane 15C), the Retarget required field in the admin panel.
+  Before, a department-plus-team announcement whose department was deleted
+  reached the team's members in other departments, and one whose team was
+  deleted reached the whole department. Re-target in the panel by setting
+  the department, team or roles and clearing Retarget required, or in
+  `/manage` (the save clears it with any change to the targeting).
+- **Deletes take more locks.** A department or team delete now also locks
+  the department or team rows on Postgres and advances the revision of
+  every announcement, event and document that linked it (its department,
+  departments, owner department or team), before the delete removes the
+  links. A web form opened on one of them before the delete gets a
+  conflict (or, for a department head who lost the item, "not found") on
+  its next save instead of writing over it. The deletes are rare admin
+  actions; a delete that races a save of a linked item on Postgres can be
+  aborted by the database (deadlock), which leaves both unchanged: delete
+  again. A department or team delete outside a transaction (a script's
+  `strapi.db.query(...).delete()`) is refused with
+  `[targeting-flags] … refused outside a transaction`; the admin panel and
+  the API always delete inside one.
+- **Every reader follows.** The announcement list and detail, the bell
+  and the digest fan-out, comment and reaction threads, acknowledgements
+  and the acknowledgement report all use the same rule
+  (`packages/domain/src/audience.ts`): a restricted announcement is not in
+  a member's list, its detail and its thread answer like a missing item,
+  nobody gets it in a digest, and the report counts no audience for it.
+
+**Log lines**
+
+- At the first boot (lane 15B's backfill):
+  `[targeting-flags] announcements: audience 'departments' on N row(s) that link a department or team, retargetRequired from the twin on 0; events: notifyAudience 'departments' on N row(s) …, 'all' on N`.
+  Later boots log nothing when nothing changed.
+- On a save that links a target: `[targeting-flags] announcement <action>: set the audience of N announcement row(s) to 'departments' (they link a target)`
+  (and the same for `event … notifyAudience`).
+- On a delete: `[targeting-flags] department delete: advanced the revision of N announcement/event/document(s); marked N announcement row(s) 'retargetRequired' and flagged N event row(s) …`
+  and `[targeting-flags] team delete: …`, next to the existing
+  `[poll-audience]` and `[department-delete]` lines.
+- On a publish of a restricted event: `[notifications] event <documentId> notifies nobody: notifyAudience is 'departments' without a department (re-target it)` (a warning, by design).
+
+**Before the deploy (read-only, the owner)**
+
+1. Run the D-PT01 preflight on production (it works on the batch-14
+   schema and changes nothing):
+
+   ```bash
+   docker exec -i infra-db-1 sh -c 'psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB"' \
+     < infra/diagnostics/announcement-audience-preflight.sql
+   ```
+
+   The summary's `published_documents` is the number of announcements
+   members stop seeing; the rows name them. For each one: re-target it in
+   the admin panel (link a department or a team), set its Audience to
+   "all" if it is meant for everyone, or accept that it becomes
+   admins'/editors' only. Expected on production: 0 or a handful.
+2. Run `infra/diagnostics/department-heads.sql` the same way and align the
+   department heads in the admin panel (the role `department_head` and the
+   user's department). After the deploy every `department_head` user with a
+   department can author announcements and events for it (lane 15A).
+
+**After the deploy**
+
+1. The backfill line above, and no `[targeting-flags] could not backfill`
+   error (that one stops the boot on purpose; fix the cause and start
+   again, or roll back).
+2. Run the preflight again: the listed announcements now answer 404 to a
+   member and 200 to an editor.
+3. `infra/diagnostics/announcement-retarget.sql` runs (the columns exist
+   now) and lists nothing until a department or team is deleted.
+
+**Rollback (with "Deploying batch 15")**
+
+The batch-14 image knows neither D-PT01, the marker nor
+`notify_audience`. While it runs, the D-PT01 announcements and the marked
+ones are readable by their remaining criteria (company-wide when none is
+left), and an event restricted only by its flag notifies everyone on its
+next publish. An old-image publish or "Discard changes" rewrites the rows it
+touches without `retarget_required` and `notify_audience` (NULL).
+
+1. Freeze authoring, then **save off the host** the output of
+   `announcement-audience-preflight.sql`, `announcement-retarget.sql` and
+   `schedule-export.sql` (lane 15B's schedules).
+2. Unpublish what must stay hidden during the window: the preflight's rows
+   and the marked announcements. Do not publish or discard the flag-only
+   events of `announcement-retarget.sql` on the old image.
+3. On the roll-forward the boot backfill's twin rule restores a value one
+   row of a document lost from the other row. For documents in the saved
+   lists where both rows lost it, re-apply it with the guarded raise-only
+   SQL in the header of `announcement-retarget.sql`. For events the guard
+   is `notify_audience IS DISTINCT FROM 'departments'`, not `IS NULL`: when
+   neither row restricts, the backfill has already filled the NULL with
+   "all" at the first boot. Both statements only raise, so they need no
+   revision advance.
+4. Re-publish what step 2 unpublished, once it is re-targeted or the
+   window is over.
+
+**Residuals (accepted)**
+
+- An admin-panel form opened before a department or team delete still
+  holds Retarget required as loaded (off) and saves it back; the admin
+  panel is not revision-checked (decision 06 §G, "the reverse direction").
+  After a delete, reload open panel forms of the affected announcements;
+  `announcement-retarget.sql` shows what is marked.
+- A link written outside the Document Service (raw SQL, an old image) after
+  a delete's scan gets its flag on the next save but no revision advance.
+
+**Rehearsal (2026-10-13, Postgres 16, demo seed; `main` 9a5829c, then this lane on 15B)**
+
+- On the batch-14 image: an announcement with Audience "departments" and no
+  target (1), an event for Engineering (2), an announcement for Engineering
+  plus a team of it (3), one for the team only (4), a document and a quick
+  link for Engineering (5), and an event for Design (6). On batch 14 item 1
+  was readable by every member and its publish notified all 15 users. The
+  preflight listed exactly item 1 (both rows); `department-heads.sql` ran;
+  the two batch-15-only files stopped with "column … does not exist".
+- Upgrade: the backfill raised 2 announcement rows (item 4, Audience "all"
+  next to its team) and 4 event rows (items 2 and 6), and filled 12 NULL
+  event rows with "all". Item 1 answered 404 to every member, 200 to an
+  editor.
+- Team deleted in the panel: items 3 and 4 marked on both rows, their
+  revisions advanced (0 → 1), every member 404, editor 200; their
+  republish created 0 notifications.
+- Engineering deleted in the panel: 4 revisions advanced (item 3, the
+  event, the document, and the demo's Engineering announcement, which was
+  marked); the event's republish logged "notifies nobody" and created 0
+  notifications; the document and the quick link were readable by editors
+  only.
+- Item 6 (seeded on batch 14, flag NULL until the backfill): its
+  departments removed in the panel and republished: 0 notifications.
+- The four diagnostics matched the data (preflight 4 documents after the
+  deletes, `announcement-retarget.sql` 3 marked announcements and 2
+  flag-only events, the schedule export with a scheduled draft and a link
+  to withdraw).
+- Rollback to the batch-14 image: items 1, 3 and 4 readable by every
+  member again (as warned). "Discard changes" on the event there left its
+  draft with `notify_audience` NULL. Roll forward: the backfill restored it
+  from the published row ("on 1 from the twin"), and the republish created
+  0 notifications; items 1, 3 and 4 were moderator-only again. The guarded
+  re-apply SQL restored a both-rows-lost marker and event flag (2 rows
+  each), where an `IS NULL` guard would have matched no event row.
 
 #### Deploying batch 14 (2026-10-13)
 

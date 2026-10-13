@@ -1,5 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
-import departmentLifecycles from "../api/department/content-types/department/lifecycles";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEPARTMENT_DELETE_PAGE,
   DEPARTMENT_SCOPED_TYPES,
@@ -373,24 +372,6 @@ describe("restrictRowsOfDeletedDepartments (FX29 residual)", () => {
   });
 });
 
-describe("department delete lifecycles", () => {
-  const globals = globalThis as { strapi?: unknown };
-  const previous = globals.strapi;
-  afterEach(() => {
-    globals.strapi = previous;
-  });
-
-  it("restrict polls, documents and quick links before a delete and a deleteMany", async () => {
-    for (const hook of ["beforeDelete", "beforeDeleteMany"] as const) {
-      const { strapi, flagged } = host({
-        departments: [1, 2],
-        rows: { [DOCUMENT]: ROWS, [QUICK_LINK]: ROWS, [POLL]: ROWS },
-      });
-      globals.strapi = strapi;
-      await departmentLifecycles[hook]({ params: { where: { id: { $in: [2] } } } });
-      expect(flagged(DOCUMENT), hook).toEqual([3, 4, 6]);
-      expect(flagged(QUICK_LINK), hook).toEqual([3, 4, 6]);
-      expect(flagged(POLL), hook).toEqual([3, 4, 6]);
-    }
-  });
-});
+// The department delete lifecycles, which call this hook in one transaction
+// with the announcement, event and revision steps, have their own suite since
+// batch 15: api/department/content-types/department/lifecycles.test.ts.

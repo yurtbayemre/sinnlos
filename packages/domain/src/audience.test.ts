@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  AUDIENCE_DEPARTMENTS,
+  announcementNeedsRetarget,
+  eventNeedsRetarget,
   isAnnouncementTargetedTo,
+  scopedNeedsRetarget,
   teamIdsByUser,
   type AnnouncementTargeting,
   type AudienceScope,
@@ -75,10 +79,110 @@ describe("isAnnouncementTargetedTo", () => {
       expect(isAnnouncementTargetedTo(a, engineer)).toBe(true);
     });
 
-    it("does not restrict when audience=departments has no department linked", () => {
-      // Documented edge case: there is no department to restrict TO.
-      const a = announcement({ audience: "departments" });
-      expect(isAnnouncementTargetedTo(a, designer)).toBe(true);
+    it("treats a linked department without an id as matching nobody", () => {
+      // An unknown target fails closed instead of dropping the criterion.
+      const a = { department: {} } as unknown as AnnouncementTargeting;
+      expect(isAnnouncementTargetedTo(a, engineer)).toBe(false);
+      expect(isAnnouncementTargetedTo(a, null)).toBe(false);
+    });
+  });
+
+  describe("D-PT01: restricted without a department or a team", () => {
+    const everyone = [engineer, designer, { teamIds: [] }, null];
+
+    it("targets nobody when audience=departments links neither", () => {
+      for (const a of [
+        announcement({ audience: "departments" }),
+        announcement({ audience: "departments", department: null, team: null }),
+        announcement({ audience: "departments", department: null, team: null, audienceRoles: [] }),
+      ]) {
+        for (const scope of everyone) expect(isAnnouncementTargetedTo(a, scope)).toBe(false);
+      }
+    });
+
+    it("targets nobody even when audience roles remain", () => {
+      // Roles narrow; they are no department or team to restrict TO.
+      const a = announcement({ audience: "departments", audienceRoles: [{ id: MEMBER_ROLE }] });
+      for (const scope of everyone) expect(isAnnouncementTargetedTo(a, scope)).toBe(false);
+    });
+
+    it("keeps an audience=departments announcement with a team only for that team", () => {
+      const a = announcement({ audience: "departments", team: { id: FRONTEND_TEAM } });
+      expect(isAnnouncementTargetedTo(a, engineer)).toBe(true);
+      expect(isAnnouncementTargetedTo(a, designer)).toBe(false);
+    });
+
+    it("leaves audience=all (or no flag) without targets company-wide", () => {
+      for (const a of [
+        announcement({ audience: "all" }),
+        announcement({ audience: null }),
+        announcement({}),
+      ]) {
+        for (const scope of everyone) expect(isAnnouncementTargetedTo(a, scope)).toBe(true);
+      }
+    });
+  });
+
+  describe("the retargetRequired marker (amendment row A3)", () => {
+    const everyone = [
+      engineer,
+      designer,
+      { ...engineer, roleId: TEAM_LEAD_ROLE },
+      { roleId: MEMBER_ROLE, departmentId: DESIGN, teamIds: [FRONTEND_TEAM] },
+      null,
+    ];
+
+    it("targets nobody, whatever criteria remain", () => {
+      for (const a of [
+        // department plus team, the department deleted: the team remains
+        announcement({
+          audience: "departments",
+          team: { id: FRONTEND_TEAM },
+          retargetRequired: true,
+        }),
+        // department plus team, the team deleted: the department remains
+        announcement({
+          audience: "departments",
+          department: { id: ENGINEERING },
+          retargetRequired: true,
+        }),
+        // department plus roles, the department deleted: the roles remain
+        announcement({
+          audience: "departments",
+          audienceRoles: [{ id: MEMBER_ROLE }],
+          retargetRequired: true,
+        }),
+        // even a company-wide flag with nothing left
+        announcement({ audience: "all", retargetRequired: true }),
+      ]) {
+        for (const scope of everyone) expect(isAnnouncementTargetedTo(a, scope)).toBe(false);
+      }
+    });
+
+    it("without the marker the remaining criterion would have admitted them", () => {
+      // The widening the marker prevents: a Design member of the Frontend
+      // team reads a department-plus-team announcement whose department was
+      // deleted, and every Engineering member one whose team was deleted.
+      const teamLeft = announcement({ audience: "departments", team: { id: FRONTEND_TEAM } });
+      expect(
+        isAnnouncementTargetedTo(teamLeft, {
+          roleId: MEMBER_ROLE,
+          departmentId: DESIGN,
+          teamIds: [FRONTEND_TEAM],
+        }),
+      ).toBe(true);
+      const departmentLeft = announcement({
+        audience: "departments",
+        department: { id: ENGINEERING },
+      });
+      expect(isAnnouncementTargetedTo(departmentLeft, { ...engineer, teamIds: [] })).toBe(true);
+    });
+
+    it("reads false and null as no marker", () => {
+      const a = announcement({ department: { id: ENGINEERING } });
+      for (const retargetRequired of [false, null, undefined]) {
+        expect(isAnnouncementTargetedTo({ ...a, retargetRequired }, engineer)).toBe(true);
+      }
     });
   });
 
@@ -183,6 +287,102 @@ describe("isAnnouncementTargetedTo", () => {
       }
       const leadsOnly = announcement({ audienceRoles: [{ id: TEAM_LEAD_ROLE }] });
       expect(isAnnouncementTargetedTo(leadsOnly, { ...engineer, roleId: ADMIN_ROLE })).toBe(false);
+    });
+  });
+});
+
+describe("needsRetarget helpers (contract K9)", () => {
+  it("names the restricting flag value", () => {
+    expect(AUDIENCE_DEPARTMENTS).toBe("departments");
+  });
+
+  describe("announcementNeedsRetarget", () => {
+    it("is true for the marker, whatever is linked", () => {
+      expect(announcementNeedsRetarget({ retargetRequired: true })).toBe(true);
+      expect(
+        announcementNeedsRetarget({
+          audience: "departments",
+          department: { id: ENGINEERING },
+          team: { id: FRONTEND_TEAM },
+          retargetRequired: true,
+        }),
+      ).toBe(true);
+    });
+
+    it("is true for D-PT01 (departments without a department or a team)", () => {
+      expect(announcementNeedsRetarget({ audience: "departments" })).toBe(true);
+      expect(
+        announcementNeedsRetarget({ audience: "departments", department: null, team: null }),
+      ).toBe(true);
+    });
+
+    it("is false while a department or a team is linked, in any row shape", () => {
+      expect(
+        announcementNeedsRetarget({ audience: "departments", department: { id: ENGINEERING } }),
+      ).toBe(false);
+      expect(
+        announcementNeedsRetarget({ audience: "departments", team: { documentId: "t" } }),
+      ).toBe(false);
+    });
+
+    it("is false for a company-wide announcement", () => {
+      expect(announcementNeedsRetarget({ audience: "all" })).toBe(false);
+      expect(announcementNeedsRetarget({ audience: null, retargetRequired: false })).toBe(false);
+      expect(announcementNeedsRetarget({})).toBe(false);
+    });
+
+    it("agrees with the predicate: every announcement it flags targets nobody", () => {
+      const rows: AnnouncementTargeting[] = [
+        { audience: "departments" },
+        { audience: "departments", audienceRoles: [{ id: MEMBER_ROLE }] },
+        { audience: "all", department: { id: ENGINEERING }, retargetRequired: true },
+        { audience: "departments", team: { id: FRONTEND_TEAM }, retargetRequired: true },
+      ];
+      for (const row of rows) {
+        expect(announcementNeedsRetarget(row)).toBe(true);
+        for (const scope of [engineer, designer, null]) {
+          expect(isAnnouncementTargetedTo(row, scope)).toBe(false);
+        }
+      }
+    });
+  });
+
+  describe("scopedNeedsRetarget (document, quick link, poll)", () => {
+    it("is true when restricted without a department", () => {
+      expect(scopedNeedsRetarget({ audience: "departments" })).toBe(true);
+      expect(scopedNeedsRetarget({ audience: "departments", departments: [] })).toBe(true);
+      expect(scopedNeedsRetarget({ audience: "departments", departments: null })).toBe(true);
+    });
+
+    it("is false while a department is linked, or when company-wide", () => {
+      expect(scopedNeedsRetarget({ audience: "departments", departments: [{ id: DESIGN }] })).toBe(
+        false,
+      );
+      expect(scopedNeedsRetarget({ audience: "departments", departments: ["a1b2"] })).toBe(false);
+      expect(scopedNeedsRetarget({ audience: "all", departments: [] })).toBe(false);
+      expect(scopedNeedsRetarget({ audience: null })).toBe(false);
+      expect(scopedNeedsRetarget({})).toBe(false);
+    });
+  });
+
+  describe("eventNeedsRetarget", () => {
+    it("is true when notifyAudience=departments has no department left", () => {
+      expect(eventNeedsRetarget({ notifyAudience: "departments" })).toBe(true);
+      expect(eventNeedsRetarget({ notifyAudience: "departments", departments: [] })).toBe(true);
+    });
+
+    it("is false while a department is linked, or when it notifies everyone", () => {
+      expect(
+        eventNeedsRetarget({ notifyAudience: "departments", departments: [{ id: DESIGN }] }),
+      ).toBe(false);
+      expect(eventNeedsRetarget({ notifyAudience: "all", departments: [] })).toBe(false);
+      // NULL reads as "all" (rows written before the column existed).
+      expect(eventNeedsRetarget({ notifyAudience: null })).toBe(false);
+      expect(eventNeedsRetarget({})).toBe(false);
+    });
+
+    it("ignores the announcement-style audience key", () => {
+      expect(eventNeedsRetarget({ audience: "departments" } as never)).toBe(false);
     });
   });
 });

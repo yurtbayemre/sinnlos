@@ -1,3 +1,5 @@
+import { eventNeedsRetarget } from "@sinnlos/domain";
+
 import {
   publishedRowWhere,
   scheduleSourceFanout,
@@ -46,9 +48,17 @@ export default {
  * read grant, which guest holds) and who are not blocked; the organizer is
  * excluded. Runs after the commit (LF02) and re-reads the document's
  * current published row, like the announcement fan-out: departments,
- * organizer and title come from it. A row that cannot
- * be re-read has unknown targeting: nobody is notified (fail-closed; before
- * FX19 it notified everyone).
+ * `notifyAudience`, organizer and title come from it (no select: every
+ * scalar). A row that cannot be re-read has unknown targeting: nobody is
+ * notified (fail-closed; before FX19 it notified everyone).
+ *
+ * "Departments" without a department notifies nobody (batch 15, decision 06
+ * §N9; @sinnlos/domain eventNeedsRetarget): `notifyAudience` says the event
+ * was meant for some departments, but none is left (a department delete
+ * cascaded the links away, or they were removed in the admin panel). Until
+ * batch 15 such an event, republished or published on a schedule, notified
+ * the whole company. It stays readable calendar-wide, like every event. A
+ * NULL `notifyAudience` (rows written before the column) reads as "all".
  */
 async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>> {
   const [full, scopes, grants] = await Promise.all([
@@ -66,11 +76,19 @@ async function loadEventAudience(ev: EventRow): Promise<SourceAudience<EventRow>
     return { source: null, recipients: [], actorId: null };
   }
 
+  const organizerId: number | null = full.organizer?.id ?? null;
+  if (eventNeedsRetarget(full)) {
+    strapi.log.warn(
+      `[notifications] event ${full.documentId ?? ev.id} notifies nobody: notifyAudience is ` +
+        "'departments' without a department (re-target it)",
+    );
+    return { source: full, recipients: [], actorId: organizerId };
+  }
+
   const departmentIds = new Set<number>(
     (full.departments ?? []).map((department: { id: number }) => department.id),
   );
   const readers = grants.holders(EVENT_FIND);
-  const organizerId: number | null = full.organizer?.id ?? null;
   const recipients = scopes
     .filter(
       (scope) =>
