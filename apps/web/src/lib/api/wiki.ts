@@ -29,7 +29,27 @@ export type WikiPageDetail = Omit<WikiPage, "author" | "lastEditor" | "space"> &
   author?: WikiByline | null;
   lastEditor?: WikiByline | null;
   space?: Pick<WikiSpace, "id" | "name" | "slug"> | null;
+  /**
+   * The ids the Edit button's row rule reads (@sinnlos/domain
+   * classifyWikiEditor, K17): the page's department and its team's lead.
+   * Missing (not null) when the caller's role cannot read the relation
+   * (the cms drops a populate it may not see): the button then falls back
+   * to the role's capability and the editor's `editable` decides.
+   */
+  department?: { id: number; name?: string } | null;
+  team?: { id: number; name?: string; lead?: { id: number } | null } | null;
 };
+
+/** A published page of a space as the parent picker lists it. */
+export interface WikiParentRow {
+  id: number;
+  documentId: string;
+  title: string;
+  slug: string;
+  order?: number | null;
+  /** Missing when the populate was dropped; null at the top level. */
+  parent?: { documentId: string } | null;
+}
 
 /**
  * Walks every page (issue #26): without a pageSize the wiki index stopped
@@ -82,7 +102,9 @@ export function wikiSpaceBySlug(slug: string): Promise<StrapiListResponse<WikiSp
  * No revisions (FX24): every view used to transfer the full body of every
  * historical revision, and none was rendered. The byline needs the author's
  * and last editor's names only; `id` tells them apart. The page's own
- * fields (not limited) carry `tocEnabled` and `tags` (DA02).
+ * fields (not limited) carry `tocEnabled` and `tags` (DA02). The page's
+ * department and its team's lead are read for the Edit button's row rule
+ * (batch 16, K17): names only, the ids are what the rule compares.
  */
 export function wikiPageBySlug(
   spaceSlug: string,
@@ -96,7 +118,54 @@ export function wikiPageBySlug(
         .filter("slug", "$eq", pageSlug)
         .populateFields("author", ["displayName", "username"])
         .populateFields("lastEditor", ["displayName", "username"])
-        .populateFields("space", ["name", "slug"]),
+        .populateFields("space", ["name", "slug"])
+        .populateFields("department", ["name"])
+        .populateFields("team", ["name"])
+        .populateFields(["team", "lead"], ["displayName"]),
     ),
+  );
+}
+
+/**
+ * A page's documentId by its slugs (the published page the reader sees):
+ * the wiki editor and the history resolve their page with it when the URL
+ * carries no `?doc=`. Title only; no body.
+ */
+export function wikiPageRef(
+  spaceSlug: string,
+  pageSlug: string,
+): Promise<StrapiListResponse<Pick<WikiPage, "id" | "documentId" | "title" | "slug">>> {
+  return strapi<StrapiListResponse<Pick<WikiPage, "id" | "documentId" | "title" | "slug">>>(
+    withQuery(
+      "/api/wiki-pages",
+      strapiQuery()
+        .filter(["space", "slug"], "$eq", spaceSlug)
+        .filter("slug", "$eq", pageSlug)
+        .fields(["title", "slug"]),
+    ),
+  );
+}
+
+/**
+ * The published pages of a space with their parents, for the wiki editor's
+ * parent picker (§J2: a parent is a page of the same space the caller can
+ * read; the cms checks it again and refuses a loop with `parentCycle`).
+ * Walks every page, like the index (issue #26); 20 pages x 100.
+ */
+export function listWikiParentRows(spaceSlug: string): Promise<WalkResult<WikiParentRow>> {
+  return walkAllPages<WikiParentRow>(
+    (page) =>
+      strapi<StrapiListResponse<WikiParentRow>>(
+        withQuery(
+          "/api/wiki-pages",
+          strapiQuery()
+            .filter(["space", "slug"], "$eq", spaceSlug)
+            .fields(["title", "slug", "order"])
+            .populateFields("parent", ["slug"])
+            .sort(["title:asc", "id:asc"])
+            .page(page, 100),
+        ),
+      ),
+    { maxPages: 20, label: "wiki parents" },
   );
 }

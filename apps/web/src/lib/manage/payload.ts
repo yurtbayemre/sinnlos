@@ -92,19 +92,23 @@ export type BuiltPayload =
   | { ok: true; data: Record<string, unknown> }
   | { ok: false; fields: Record<string, ManageErrorCode> };
 
-/** One payload key: the inputs it reads and how it is converted. */
-interface FieldRule<V extends object> {
+/**
+ * One payload key: the inputs it reads and how it is converted. `C` is the
+ * context the conversion reads (PayloadContext for the K7 types; the wiki
+ * builders bring their own, lib/manage/wiki-payload.ts).
+ */
+export interface FieldRule<V extends object, C = PayloadContext> {
   key: string;
   inputs: readonly (keyof V)[];
   /** The inputs the field reads for these values, when that depends on them (default `inputs`). */
   inputsOf?: (values: V) => readonly (keyof V)[];
-  convert(values: V, ctx: PayloadContext): Converted<unknown>;
+  convert(values: V, ctx: C): Converted<unknown>;
   /** Whether two values of one input are the same (default: scalars, lists as sets). */
   same?: (a: unknown, b: unknown) => boolean;
 }
 
 /** Lists of ids are sets: a different order is no change. */
-function sameValue(a: unknown, b: unknown): boolean {
+export function sameValue(a: unknown, b: unknown): boolean {
   if (Array.isArray(a) && Array.isArray(b)) {
     if (a.length !== b.length) return false;
     const left = [...a].map(String).sort();
@@ -115,25 +119,31 @@ function sameValue(a: unknown, b: unknown): boolean {
 }
 
 /** A converted field from a domain check of the value as it is. */
-function checked(value: unknown, check: FieldCheck): Converted<unknown> {
+export function checked(value: unknown, check: FieldCheck): Converted<unknown> {
   const code = check(value);
   return code ? { code } : { value };
 }
 
 /** Trimmed text, or null when blank. */
-const textOrNull = (value: string): string | null => (value.trim() === "" ? null : value.trim());
+export const textOrNull = (value: string): string | null =>
+  value.trim() === "" ? null : value.trim();
 
-function buildFields<V extends object>(
-  type: AuthoringType,
-  rules: readonly FieldRule<V>[],
+/**
+ * The payload keys of `rules` that `allowed` admits and that changed
+ * against `initial` (every one on a create), converted; the `targeting`
+ * keys travel together, when one of them changed or `retarget` asks for
+ * them (see the header). Refused conversions land in `fields`.
+ */
+export function collectFields<V extends object, C>(
+  allowed: ReadonlySet<string>,
+  targeting: ReadonlySet<string>,
+  rules: readonly FieldRule<V, C>[],
   values: V,
   initial: V | null,
-  ctx: PayloadContext,
+  ctx: C & { mode: "create" | "update"; retarget?: boolean },
 ): { data: Record<string, unknown>; fields: Record<string, ManageErrorCode> } {
-  const allowed = new Set(AUTHORING_FIELDS[type][ctx.roleClass] ?? []);
-  const targeting = new Set(TARGETING_KEYS[type]);
   const base = ctx.mode === "create" ? null : initial;
-  const changed = (rule: FieldRule<V>) =>
+  const changed = (rule: FieldRule<V, C>) =>
     base === null ||
     (rule.inputsOf?.(values) ?? rule.inputs).some(
       (input) => !(rule.same ?? sameValue)(values[input], base[input]),
@@ -151,6 +161,24 @@ function buildFields<V extends object>(
     if ("code" in converted) fields[rule.key] = converted.code;
     else data[rule.key] = converted.value;
   }
+  return { data, fields };
+}
+
+function buildFields<V extends object>(
+  type: AuthoringType,
+  rules: readonly FieldRule<V>[],
+  values: V,
+  initial: V | null,
+  ctx: PayloadContext,
+): { data: Record<string, unknown>; fields: Record<string, ManageErrorCode> } {
+  const { data, fields } = collectFields(
+    new Set(AUTHORING_FIELDS[type][ctx.roleClass] ?? []),
+    new Set(TARGETING_KEYS[type]),
+    rules,
+    values,
+    initial,
+    ctx,
+  );
   if (ctx.needsRetarget === true && ctx.retarget !== true && widensToEveryone(type, data)) {
     fields[TARGETING_KEYS[type][0]] = "confirmAudience";
   }
@@ -170,7 +198,7 @@ export function widensToEveryone(type: AuthoringType, data: Record<string, unkno
   return Array.isArray(data.departments) && data.departments.length === 0;
 }
 
-const done = (
+export const done = (
   data: Record<string, unknown>,
   fields: Record<string, ManageErrorCode>,
 ): BuiltPayload => (Object.keys(fields).length > 0 ? { ok: false, fields } : { ok: true, data });

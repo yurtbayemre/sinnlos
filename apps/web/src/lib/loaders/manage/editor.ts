@@ -2,7 +2,6 @@ import { unstable_rethrow } from "next/navigation";
 import type {
   AnnouncementEditable,
   DocumentEditable,
-  EditableBase,
   EventEditable,
   PollEditable,
   QuickLinkEditable,
@@ -43,7 +42,7 @@ export type EditableOf<A extends TypedArea> = A extends "announcements"
         ? DocumentEditable
         : QuickLinkEditable;
 
-export type EditorLoad<T extends EditableBase> =
+export type EditorLoad<T> =
   { state: "ok"; editable: T } | { state: "notFound" } | { state: "failed" };
 
 export async function loadEditable<A extends TypedArea>(

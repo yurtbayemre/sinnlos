@@ -1,3 +1,195 @@
 {
-  "title": "Wiki"
+  "title": "Wiki",
+  "description": "The wiki's spaces: who reads each one, and the drafts and schedules of its pages. Pages are written in the wiki itself.",
+  "new": "New space",
+  "newDescription": "A space collects pages and decides who reads them. Its pages are written in the wiki.",
+  "editTitle": "Edit space",
+  "emptyTitle": "No spaces yet",
+  "emptyHint": "Create the first space; its pages are written in the wiki.",
+  "sections": {
+    "space": "Space",
+    "readers": "Who reads it"
+  },
+  "visibility": {
+    "public": "Everyone",
+    "role": "Certain roles",
+    "department": "One department",
+    "team": "One team"
+  },
+  "fields": {
+    "name": {
+      "label": "Name",
+      "hint": "The space's address is made from the name when the space is created and does not change."
+    },
+    "icon": {
+      "label": "Icon",
+      "none": "Default (book)"
+    },
+    "description": {
+      "label": "Description"
+    },
+    "visibility": {
+      "label": "Who reads it",
+      "hint": "Editors and admins read every space.",
+      "confirmAudience": "This would show the space to everyone. Tick “Confirm this audience when saving” to do that, or choose who reads it."
+    },
+    "allowedRoles": {
+      "label": "Roles",
+      "visibilityTarget": "Choose at least one role."
+    },
+    "department": {
+      "label": "Department",
+      "choose": "Choose a department",
+      "visibilityTarget": "Choose the department that reads the space."
+    },
+    "team": {
+      "label": "Team",
+      "choose": "Choose a team",
+      "visibilityTarget": "Choose the team that reads the space."
+    },
+    "_form": {
+      "spaceNotEmpty": "This space still has pages, so it cannot be deleted. Move or delete its pages first."
+    }
+  },
+  "list": {
+    "pages": "{count, plural, =0 {No pages} one {# page} other {# pages}}",
+    "address": "Address: /wiki/{slug}"
+  },
+  "space": {
+    "description": "Every page of this space, drafts and schedules included.",
+    "newPage": "New page",
+    "edit": "Edit space",
+    "open": "Open in the wiki",
+    "pagesTitle": "Pages",
+    "treeLabel": "Pages of {space}",
+    "emptyTitle": "No pages yet",
+    "emptyHint": "Write the first page in the wiki.",
+    "truncated": "Not every page could be loaded; some may be missing from the tree.",
+    "editPage": "Edit {title}",
+    "viewPage": "View {title}",
+    "history": "History of {title}",
+    "untitled": "(untitled)",
+    "deleteHasPages": "This space has {count, plural, one {# page} other {# pages}}. It can be deleted only when it is empty.",
+    "deleteBody": "The space is removed for good. This cannot be undone."
+  },
+  "editor": {
+    "newTitle": "New page",
+    "newDescription": "In {space}. Save draft keeps the page unpublished; Publish shows it to everyone who reads the space.",
+    "editTitle": "Edit page",
+    "inSpace": "In {space}",
+    "sections": {
+      "content": "Content",
+      "placement": "Place in the space",
+      "responsibility": "Department and team",
+      "note": "Change note"
+    },
+    "fields": {
+      "title": {
+        "label": "Title"
+      },
+      "summary": {
+        "label": "Summary",
+        "hint": "One or two sentences under the title and in the space's list of pages."
+      },
+      "body": {
+        "label": "Text"
+      },
+      "tags": {
+        "label": "Tags",
+        "hint": "Separate them with commas, for example: onboarding, laptop. Up to 20.",
+        "invalid": "Up to 20 tags.",
+        "tooLong": "A tag can have up to 100 characters."
+      },
+      "tocEnabled": {
+        "label": "Show a table of contents",
+        "hint": "Lists the text's headings above it."
+      },
+      "order": {
+        "label": "Order",
+        "hint": "0 to 10000; lower numbers come first in the space."
+      },
+      "parent": {
+        "label": "Parent page",
+        "none": "None (top level)",
+        "hint": "The page is listed below its parent. Published pages of this space can be parents.",
+        "current": "The current parent (not published)",
+        "notPublishable": "The parent page is not published. Publish it first, or choose another parent."
+      },
+      "department": {
+        "label": "Department",
+        "hint": "Its head may edit the page.",
+        "none": "No department"
+      },
+      "team": {
+        "label": "Team",
+        "hint": "Its lead may edit the page.",
+        "none": "No team"
+      },
+      "revisionSummary": {
+        "label": "Change note",
+        "hint": "What you changed, for the page's history. Optional."
+      },
+      "space": {
+        "invalid": "This space no longer exists, or you can no longer write in it.",
+        "required": "This space no longer exists, or you can no longer write in it."
+      }
+    },
+    "parentsFailed": "The pages of this space could not be loaded, so the parent cannot be changed right now. Reload the page to try again.",
+    "parentsTruncated": "Not every page of this space could be loaded; some may be missing from the list.",
+    "viewPage": "View page",
+    "history": "History",
+    "backToSpace": "Back to {space}",
+    "deleteDraft": "Delete draft",
+    "deleteDraftTitle": "Delete this draft?",
+    "deleteDraftBody": "The page has never been published, so the draft is deleted for good.",
+    "deleteDraftConfirm": "Delete draft",
+    "noSpace": "The page's space no longer exists."
+  },
+  "drafts": {
+    "title": "My drafts",
+    "description": "Your wiki pages with changes that are not published yet.",
+    "emptyTitle": "No drafts",
+    "emptyHint": "Pages you save as a draft are listed here until they are published.",
+    "inSpace": "in {space}",
+    "updated": "Saved {date}",
+    "noSpace": "space deleted",
+    "untitled": "(untitled)"
+  },
+  "history": {
+    "title": "History",
+    "description": "Every saved version of “{title}”, newest first. Restoring a version publishes it as a new version; nothing is lost.",
+    "backToPage": "Back to the page",
+    "backToEditor": "Edit page",
+    "listLabel": "Versions",
+    "emptyTitle": "No versions yet",
+    "emptyHint": "Each save of the page adds a version here.",
+    "kinds": {
+      "after": "Saved",
+      "baseline": "State at the upgrade",
+      "before": "State before an edit (older format)"
+    },
+    "editorAdmin": "Admin panel",
+    "editorNone": "Not recorded",
+    "by": "by {name}",
+    "note": "Note: {note}",
+    "restoredFrom": "Restores version #{id}",
+    "version": "Version #{id}",
+    "show": "Show",
+    "showLabel": "Show version #{id}",
+    "shown": "Shown below",
+    "untitled": "(no title recorded)",
+    "previewTitle": "Version #{id}",
+    "previewLegacy": "This older entry holds only the text from before an edit. Restoring it gives the page this text and keeps its current title and summary.",
+    "previewNotFound": "This version does not belong to the page, or it no longer exists.",
+    "previewFailed": "This version could not be loaded.",
+    "hide": "Hide",
+    "emptyBody": "This version has no text.",
+    "restore": "Restore this version",
+    "restoreTitle": "Restore this version?",
+    "restoreBody": "The page gets this version's title, summary and text and is published at once. The history keeps every version.",
+    "restoreBodyLegacy": "The page gets this version's text and keeps its current title and summary. It is published at once. The history keeps every version.",
+    "restoreConfirm": "Restore and publish",
+    "restored": "Version restored and published.",
+    "pagination": "Pages of the history"
+  }
 }

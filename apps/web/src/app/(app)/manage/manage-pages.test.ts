@@ -7,7 +7,7 @@ import { DocumentEditor } from "@/components/manage/document-editor";
 import { EventEditor } from "@/components/manage/event-editor";
 import { ManageFlashProvider } from "@/components/manage/flash";
 import { ManageListPage } from "@/components/manage/list-page";
-import { NoDepartmentExplanation } from "@/components/manage/page-parts";
+import { ManagePageHeader, NoDepartmentExplanation } from "@/components/manage/page-parts";
 import { StatCount } from "@/components/ui/stat-tile";
 import { StrapiError } from "@/lib/strapi-error";
 import type { Viewer } from "@/lib/viewer";
@@ -46,6 +46,10 @@ const { default: NewPollRedirect } = await import("../polls/new/page");
 const { default: DocumentsPage } = await import("./documents/page");
 const { default: NewDocumentPage } = await import("./documents/new/page");
 const { default: EditDocumentPage } = await import("./documents/[documentId]/page");
+const { default: ManageWikiPage } = await import("./wiki/page");
+const { default: NewWikiSpacePage } = await import("./wiki/new/page");
+const { default: ManageWikiSpacePage } = await import("./wiki/[space]/page");
+const { default: EditWikiSpacePage } = await import("./wiki/[space]/edit/page");
 
 const ENG = { id: 3, documentId: "deptengineering000000000", name: "Engineering", slug: "eng" };
 const DOC = "annc00000000000000000001";
@@ -327,6 +331,81 @@ describe("the documents area (batch 16, lane 16C)", () => {
       viewerRef.current = viewer(role);
       expect(await redirectOf(() => NewDocumentPage())).toBe("/");
     }
+  });
+});
+
+describe("the wiki area (batch 16, lane 16C)", () => {
+  const SPACE = "spce00000000000000000001";
+  const searchParams = Promise.resolve({});
+
+  it("department heads go back to /manage; members, team leads and guests home", async () => {
+    viewerRef.current = viewer("department_head", ENG);
+    expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/manage");
+    expect(await redirectOf(() => NewWikiSpacePage())).toBe("/manage");
+    expect(
+      await redirectOf(() => ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) })),
+    ).toBe("/manage");
+    for (const role of ["member", "team_lead", "guest"]) {
+      viewerRef.current = viewer(role);
+      expect(await redirectOf(() => ManageWikiPage({ searchParams }))).toBe("/");
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a moderator's list reads the spaces' authoring list; an outage is the banner", async () => {
+    const tree = elements(await ManageWikiPage({ searchParams: Promise.resolve({ q: "hr" }) }));
+    expect(strapiMock).toHaveBeenCalledWith("/api/wiki-spaces/authoring?q=hr");
+    const header = tree.find((el) => el.type === ManagePageHeader);
+    expect((header?.props.action as { href: string }).href).toBe("/manage/wiki/new");
+    strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
+    const failed = elements(await ManageWikiPage({ searchParams }));
+    expect(failed.some((el) => el.type === FetchErrorBanner)).toBe(true);
+    expect(failed.some((el) => el.type === EmptyState)).toBe(false);
+  });
+
+  it("a space the cms does not know is the not-found page, on the tree and the form", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(404, "Not Found", ""));
+    for (const render of [
+      () => ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }),
+      () => EditWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }),
+    ]) {
+      await expect(render()).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+    }
+  });
+
+  it("a space's tree links a new page in the wiki and the space's form", async () => {
+    strapiMock.mockImplementation(async (path: string) =>
+      path.endsWith("/editable")
+        ? {
+            data: {
+              documentId: SPACE,
+              version: "2",
+              status: "published",
+              publishedAt: null,
+              updatedAt: null,
+              roleClass: "moderator",
+              name: "Handbook",
+              slug: "handbook",
+              icon: null,
+              description: null,
+              visibility: "public",
+              allowedRoles: [],
+              department: null,
+              team: null,
+              needsRetarget: false,
+              pageCount: 0,
+            },
+          }
+        : page([]),
+    );
+    const tree = elements(await ManageWikiSpacePage({ params: Promise.resolve({ space: SPACE }) }));
+    const header = tree.find((el) => el.type === ManagePageHeader);
+    expect((header?.props.action as { href: string }).href).toBe("/wiki/handbook/new");
+    expect(hrefs(tree)).toEqual(
+      expect.arrayContaining([`/manage/wiki/${SPACE}/edit`, "/wiki/handbook"]),
+    );
+    expect(strapiMock).toHaveBeenCalledWith(`/api/wiki-pages/authoring?space=${SPACE}`);
+    expect(tree.some((el) => el.type === EmptyState)).toBe(true);
   });
 });
 
