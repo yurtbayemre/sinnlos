@@ -210,7 +210,7 @@ export interface ControllerField {
 /** Names of the async to-one relation checks the FX07 wiki gate supplies. */
 export type RelationCheckName = "wikiSpace" | "wikiParent";
 
-/** Names of the async to-one relation checks the v2 write gate supplies (utils/authoring-checks.ts). */
+/** Names of the to-one relation checks the v2 write gate supplies (utils/authoring-checks.ts). */
 export type AuthoringRelationCheckName =
   "department" | "team" | "callerDepartment" | "teamOfCallerDepartment";
 

@@ -1366,6 +1366,14 @@ systemctl start docker
 > database, one transaction, the check, and a fresh `JWT_SECRET` before
 > the cms starts.
 
+> **Upgrading to the v2 write model (batch 15, lane 15A)?** Content-API
+> writes of announcements, events, quick links, documents and polls go
+> through `global::can-author` and need `?status=` and `If-Match` (admin and
+> editor payloads are checked too); department heads author for their own
+> department; polls allow 20 answers and freeze after the first vote, also
+> in the admin panel; +65 grant rows; deploy cms and web together. Follow
+> [Upgrading to the v2 write model (batch 15, lane 15A)](#upgrading-to-the-v2-write-model-batch-15-lane-15a).
+
 > **Deploying batch 14 (2026-10-13)?** The page loaders and UI kit, the
 > README and security docs and the documentation pass ship as one normal
 > deploy of cms and web with `infra/deploy.sh`, **once batch 13 runs**.
@@ -1810,6 +1818,113 @@ zero-downtime restart: compose recreates the changed containers, so the site
 is degraded while the new cms boots. For the manual production-safe sequence
 (and rollback), see the
 [update procedure](#74-update-procedure-production-safe).
+
+#### Upgrading to the v2 write model (batch 15, lane 15A)
+
+Lane 15A of batch 15 (deep-dive decision 06 §A-§C, §N; the batch's
+"Deploying batch 15" runbook carries it with lanes 15B, 15D and 15C) closes
+the admin/editor payload bypass on announcements, events, quick links,
+documents and polls, and lets department heads author for their own
+department. It ships cms and web together (`infra/deploy.sh`, both images):
+the web's poll form sends the new payload, and the web's capability values
+mirror the new grants.
+
+**What changes**
+
+- **Content-API writes of the five types go through one gate.**
+  `global::can-author` and the authoring controller replace the core
+  create and update; admin_role and editor are the `moderator` class of
+  the field allowlist, so their payloads are checked like everyone's
+  (release note 1). A payload key the class may not write (Strapi keys,
+  `author`, `audience`, `retargetRequired`, `ownerDepartment`,
+  `scheduleError`, `document.file` until batch 16, an unknown key) answers
+  `400 Invalid or disallowed data field(s): <keys>`; a refused value adds
+  `details.codes`. A create or update needs `?status=draft` or
+  `?status=published` (polls: none, or `published`); every other query key
+  answers 400. The answer is a fixed DTO
+  (`{ documentId, version, status, publishedAt, … }`) with an `ETag`.
+- **Updates, publish, unpublish, discard-draft and delete need
+  `If-Match: "<version>"`** (release note 4): 428 without it, 412 with
+  `details.current` when someone changed the item in between (the admin
+  panel, the scheduler or another tab included).
+- **New routes** per type: `POST /api/<plural>/:id/publish`, `/unpublish`,
+  `/discard-draft`, `GET /api/<plural>/authoring` (the /manage list) and
+  `GET /api/<plural>/:id/editable` (the form read); polls only the last
+  two. Delete stays admin_role/editor.
+- **Authors are no longer notified of their own posts** (release note 2):
+  the author or organiser is the caller on create, and the lifecycles
+  leave them out.
+- **Department authors** (release note 7): a `department_head` with a
+  department in their user record creates, edits, publishes, unpublishes
+  and discards announcements, events and documents of their own department
+  (pinned on the server; no schedule, delete, pinning or acknowledgement;
+  a discard needs a published version). There is no web UI before lane 15C,
+  and `/manage` stays admin-only until then. **Every `department_head` with
+  a department can author after the deploy:** run
+  `infra/diagnostics/department-heads.sql` first and align the roles and
+  departments in the admin panel (lane 15D ships the query).
+- **Polls** (release note 6, the poll part): up to **20** answers for
+  every writer (was 10), at most 200 characters each through the content
+  API; once a poll has a vote, its options and anonymity can no longer
+  change, **also in the admin panel** (a publish of a draft with other
+  options answers 400 `frozenAfterVotes`; set the options back to the
+  published ones, or create a new poll). Votes take the poll's lock, so a
+  vote and an options change cannot both succeed.
+- **Grants: +65 rows** (`prod-perm-diff.sql` and the permission snapshot
+  change deliberately): the five authoring actions on announcement,
+  event, quick-link and document and two on poll for admin_role and
+  editor (44 rows), `create`/`update` and the five actions on
+  announcement, event and document for department_head (21 rows). No
+  `role.find` for editor or department_head. No schema, no env, no compose
+  or edge change.
+
+**Who is affected**
+
+- **Scripts or integrations** that write these five types through the
+  content API with an editor or admin token must send `?status=`,
+  `If-Match` on every change (read it from `GET …/:id/editable` or the last
+  answer's `ETag`), department and role targets as documentIds and role
+  types, and no `audience`, `author`, `organizer` or `uploadedBy`. The web
+  of this release is the only caller in the repository and does that.
+- **The admin panel** keeps working as before, except the poll freeze and
+  the 20-answer bound above; it bypasses the content-API gate.
+
+**Before the deploy (read-only)**
+
+1. `psql_db -X < infra/diagnostics/prod-perm-diff.sql`: the baseline shows
+   no `MISSING_IN_DB` and no `EXTRA_IN_DB` rows besides the known ones.
+2. `infra/diagnostics/department-heads.sql` (lane 15D): every user with the
+   `department_head` role and a department will be a department author.
+
+**After the deploy**
+
+1. The boot line of the permission sync adds the 65 rows; the drift line
+   says `permission drift: none`.
+2. `prod-perm-diff.sql` shows no differences against the new snapshot.
+3. As an editor (a session token from the web or `POST /api/auth/local`):
+   `GET /api/announcements/authoring` answers 200 with `data` and
+   `meta.pagination`; as a member it answers 403. A `PUT
+   /api/announcements/<documentId>?status=draft` without `If-Match`
+   answers 428.
+4. In the web, `/polls/new` still creates a poll, with and without
+   departments.
+
+**Rollback** (to the images before 15A, i.e. 15B and 15D, or further back
+with the batch runbook):
+
+- Retag both images (`--no-build`); no database step and no `JWT_SECRET`
+  rotation.
+- On the old image's boot users-permissions deletes the grants of the 22
+  custom actions its controllers lack; department_head's six core
+  `create`/`update` rows stay as unused rows (the drift line may list
+  them). The roll-forward's permission sync re-creates the custom grants.
+  Run `prod-perm-diff.sql` after both steps.
+- On the old image admin_role/editor payloads are open again and polls
+  accept 10 answers at most: a poll saved with 11 to 20 answers keeps them,
+  but the old lifecycle refuses the next save of its options in the panel.
+- The web of this release keeps working against the old cms for polls
+  (it no longer sends `audience`; the old guard sets it from the
+  departments); roll back both images together anyway.
 
 #### Deploying batch 14 (2026-10-13)
 

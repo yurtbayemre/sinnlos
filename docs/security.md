@@ -346,6 +346,21 @@ letters:
   [write allowlist](#field-level-write-allowlist) (description, plus colour
   on the head's own department); wiki page `C`/`U` by `can-edit-wiki` and
   the same allowlist.
+- **Department authors (batch 15).** `department_head` holds `C` and `U` on
+  announcements, events and documents, plus the five authoring actions
+  (`publish`, `unpublish`, `discardDraft`, `authoringList`, `editable`) on
+  the same three types. `global::can-author` admits the role only with a
+  `user.department` and only on items that department owns
+  (`ownerDepartment`) and targets ([below](#field-level-write-allowlist));
+  there is no `delete` grant, and no authoring grant on quick links, polls,
+  wiki spaces or training.
+- **The authoring actions (batch 15).** Moderators hold `publish`,
+  `unpublish`, `discardDraft`, `authoringList` and `editable` on
+  announcements, events, quick links and documents, and `authoringList`
+  and `editable` on polls (a poll publishes at create and closes through
+  `closesAt`). Never `guest` or `authenticated`. Neither editors nor
+  department heads hold `role.find`: audience roles are written as role
+  types and resolved on the server.
 - **Courses and lessons** have no content-API write routes at all
   (`only: ["find", "findOne"]`); authoring happens in the Strapi admin.
 - **`search-log`** is write-only telemetry: no content-API route lists raw
@@ -423,15 +438,37 @@ letters:
 
 ## Route policies
 
-Policies live in `apps/cms/src/policies/` (21 files) and are attached per
+Policies live in `apps/cms/src/policies/` (22 files) and are attached per
 route in `apps/cms/src/api/*/routes/*.ts`.
 
 ### Write-side guards
 
-- `is-admin-or-editor`: create, update and delete of announcements,
-  events, polls, documents, quick links, wiki spaces and wiki revisions;
-  create and delete of departments and teams; wiki page delete; kudos
-  delete; the search-log `summary` route.
+- `can-author` (batch 15, decision 06 §B2): create and update of
+  announcements, events, quick links, documents and polls, and their
+  authoring actions (publish, unpublish, discard-draft, the `/authoring`
+  list and the `/:id/editable` form read), configured per route with
+  `{ uid }` (and the action's `intent`). `admin_role` and `editor` are the
+  `moderator` class: **no bypass**, their payloads go through the
+  allowlist below like everyone's. A `department_head` with a
+  `user.department` is the `departmentAuthor` class on announcements,
+  events and documents, on an existing item only when every row of it
+  (draft and published) is owned by that department and lies in its
+  scope: announcement `department` = theirs, `team` null or one of theirs,
+  audience roles staff role types only; event and document `departments`
+  = exactly theirs. Everyone else, and every item outside that scope,
+  gets 403 on the generic create/update and on the list, and 404 on the
+  custom actions (like a hidden findOne, so the answer says nothing about
+  the item). Before it reads any row the gate reads the document's
+  revision, and the document lock accepts the write only when the locked
+  revision still equals it as well as the client's `If-Match`; on a
+  mismatch the lock asks the gate's classifier again on the rows under
+  the lock, so a caller whose class went away in between (a moderator
+  widened the item, the department was deleted, the head was demoted)
+  gets 403/404, never 412, and never the new revision.
+- `is-admin-or-editor`: delete of announcements, events, polls, documents
+  and quick links (with `If-Match`); create, update and delete of wiki
+  spaces and wiki revisions; create and delete of departments and teams;
+  wiki page delete; kudos delete; the search-log `summary` route.
 - `can-edit-department`: department update only by the `department_head`
   of that department, and only `description` and `color` (`#rrggbb`);
   `admin_role` and `editor` bypass.
@@ -461,10 +498,68 @@ route in `apps/cms/src/api/*/routes/*.ts`.
 ### Field-level write allowlist
 
 The write policies decide _whether_ a caller may write a row and in which
-role class (head, lead, author, …);
-`apps/cms/src/utils/write-allowlist.ts` decides _what_ a caller without the
-`admin_role`/`editor` bypass may send (FX07). It is the single place those
-payload rules live:
+role class (head, lead, author, moderator, department author, …);
+`apps/cms/src/utils/write-allowlist.ts` decides _what_ that class may send
+(FX07). It is the single place those payload rules live. Since batch 15 it
+also holds the `admin_role`/`editor` payloads on announcements, events,
+quick links, documents and polls (the `moderator` class); the bypass is
+left only on the wiki, department and team gates until batches 16 and 17
+rebuild them.
+
+The v2 authoring rules (batch 15, decision 06 §B1):
+
+- **Exact keys per class.** The fields each class may send are listed in
+  `@sinnlos/domain` (`authoring/fields.ts`) and pinned equal to the rules.
+  Department authors get no `pinned`, `requiresAck`, `ackDeadline`,
+  `publishAt` or `unpublishAt`. Never writable by anyone: the targeting
+  flags (`audience`, `notifyAudience`, `retargetRequired`), ownership
+  (`author`, `organizer`, `uploadedBy`, `ownerDepartment`), `scheduleError`
+  and, until batch 16, `document.file`. A test walks every schema
+  attribute of the five types: each is a field of some class or listed in
+  `REFUSED_ATTRIBUTES` with its reason.
+- **Values have codes.** A refused value answers its key in
+  `details.keys` and, where the check names a reason, a code in
+  `details.codes` (`tooLong`, `invalidInstant`, `invalidUrl`,
+  `endBeforeStart`, `notMidnight`, `scheduleInPast`,
+  `unpublishBeforePublish`, `expiresBeforePublish`, `optionCount`,
+  `frozenAfterVotes`, … : `@sinnlos/domain` `authoring/codes.ts`). A
+  relation, role or media value that does not resolve, is foreign or lies
+  outside the caller's department answers its key and **no code**, exactly
+  like a malformed one: no existence oracle.
+- **Relations and roles.** To-one relations and to-many lists are resolved
+  to documentIds and written as a full replacement; audience roles are
+  role types (`member`, `team_lead`, …) resolved to the users-permissions
+  roles on the server, `public` and `authenticated` refused.
+- **Targeting never widens implicitly.** `audience` (announcement, poll,
+  document, quick link) and the event's `notifyAudience` are re-derived
+  ("departments" iff a target is linked) only when the payload carries a
+  targeting key; an announcement's `retargetRequired` marker is lowered
+  only by a payload that carries `department`, `team` or `audienceRoles`.
+  A department author's targeting is pinned to their department (set on
+  create when missing; `null`, `[]`, another department or its team are
+  refused), and their creates set `ownerDepartment` to it.
+- **Server-set fields.** The author, organizer or uploader is the caller
+  on create (which also keeps authors out of their own notifications).
+- **Cross checks** run over the stored draft overlaid with the payload:
+  end after start, an all-day event's local midnights in `APP_TIME_ZONE`,
+  the schedule order, an acknowledgement deadline only with
+  `requiresAck`, and early publish readiness when `publishAt` is set.
+- **Polls.** 2 to 20 answers, unique after trimming (every writer, the
+  poll lifecycle); at most 200 characters each through the content API.
+  Once a poll has a vote, its options and anonymity can no longer change:
+  compared with the published row, refused early here and again under
+  the poll's lock at the write ([Poll department targeting](#poll-department-targeting)).
+- **No client query on writes.** The authoring controller refuses every
+  query key but `status`, takes the status explicitly per type
+  (announcements, events, quick links and documents need `draft` or
+  `published`; polls always publish), writes through the Document Service
+  and answers a fixed DTO (`documentId`, `version`, `status`,
+  `publishedAt`, the schedule fields) with `ETag: "<version>"`. Updates and
+  the custom actions need `If-Match` (428 without it, 412 with the current
+  revision when stale). A department author's discard of an item without
+  a published version answers 400 `neverPublished` instead of deleting it.
+
+The FX07 rules of the other gates:
 
 - A department head may write `description` and `color` of their own
   department; a team lead, or the head of the team's department, the
@@ -483,7 +578,9 @@ payload rules live:
   suffix, and these writes always publish (`?status=draft` is pinned away).
 - `routes.matrix.test.ts` fails when a write route that a non-bypass role
   holds on these types, or on any relation into the wiki, skips the
-  allowlist.
+  allowlist, and when a create or update a moderator holds on an authored
+  type is not enforced for the `moderator` class (`KNOWN_OPEN_PAYLOADS`
+  lists the wiki, department and team gates that still bypass).
 
 The web has no write path for wiki pages, departments or teams; these rules
 govern direct API calls. Department-head and team-lead rights compare
@@ -694,7 +791,17 @@ Enforced by the cms, not only in the UI:
   (`apps/cms/src/utils/poll-audience-guard.ts`), and deleting a department
   sets it on every poll that still has the department. To open a
   restricted poll to everyone, remove its departments **and** set Audience
-  to `all`.
+  to `all` (in the web, an explicit departments change; the content API
+  derives Audience from it and refuses a client `audience` since batch 15).
+- **Options and anonymity freeze at the first vote** (batch 15). A vote
+  stores an option index and may be anonymous, so once a poll has a vote,
+  no writer (web, content API, admin panel) can publish other options or
+  another anonymity: the poll guard compares what a publish, a Save and
+  publish or a draft save that carries them would write with the
+  currently **published** row (votes are cast on it) and refuses with
+  `frozenAfterVotes`. It runs under the poll's document lock, which the
+  vote handler takes before it reads, checks and inserts, so a vote and an
+  options change sent at the same moment cannot both succeed.
 - Where it is enforced: the `poll-visibility` read policy (list and
   detail), the custom `vote`/`results` actions and the batched
   `GET /api/poll-results`, all through `apps/cms/src/utils/poll-audience.ts`.
