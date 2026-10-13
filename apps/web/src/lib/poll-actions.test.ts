@@ -309,6 +309,9 @@ describe("votePoll", () => {
       join(__dirname, "../../../cms/src/api/poll-vote/controllers/poll-vote.ts"),
       "utf8",
     );
-    expect(controller).toContain('ctx.badRequest("Poll options changed")');
+    // The vote's refusal under the poll's lock (batch 15) answers it with
+    // ctx.badRequest(message) after the transaction.
+    expect(controller).toContain('{ kind: "badRequest", message: "Poll options changed" }');
+    expect(controller).toContain("ctx.badRequest(outcome.message)");
   });
 });

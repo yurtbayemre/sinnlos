@@ -55,6 +55,17 @@ vi.mock("../../../utils/poll-ballots", async (importOriginal) => ({
   countPollBallots: vi.fn(),
 }));
 
+/** What the vote handler did, in order: the lock, the poll reads, the vote queries. */
+const trace = vi.hoisted(() => ({ events: [] as string[] }));
+
+vi.mock("../../../utils/document-lock", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../utils/document-lock")>()),
+  lockDocument: vi.fn(async (_strapi: unknown, uid: string, documentId: string) => {
+    trace.events.push(`lock ${uid} ${documentId}`);
+    return 0;
+  }),
+}));
+
 vi.mock("@strapi/strapi", () => ({
   factories: {
     createCoreController:
@@ -333,14 +344,17 @@ function setup(options: {
     id: 100 + i,
     ...row,
   }));
+  trace.events.length = 0;
   const pollFindOne = vi.fn(async ({ where }: { where: Where }) => {
+    trace.events.push("poll");
     failLikePostgres(where);
     return POLLS.find((row) => matches(row, where)) ?? null;
   });
   const votes = {
-    findOne: vi.fn(
-      async ({ where }: { where: Where }) => votesTable.find((row) => matches(row, where)) ?? null,
-    ),
+    findOne: vi.fn(async ({ where }: { where: Where }) => {
+      trace.events.push("votes.findOne");
+      return votesTable.find((row) => matches(row, where)) ?? null;
+    }),
     findMany: vi.fn(
       async ({
         where,
@@ -357,6 +371,7 @@ function setup(options: {
       },
     ),
     create: vi.fn(async ({ data }: { data: VoteRow }) => {
+      trace.events.push("votes.create");
       votesTable.push({ id: CREATED_ID, ...data }, ...(options.concurrent ?? []));
       if (options.deletedBeforeReadback) {
         votesTable.splice(
@@ -378,8 +393,13 @@ function setup(options: {
       async ({ where }: { where: { id: number } }) => USERS.find((u) => u.id === where.id) ?? null,
     ),
   };
+  const transaction = vi.fn(async (callback: () => Promise<unknown>) => {
+    trace.events.push("transaction");
+    return callback();
+  });
   const strapi = {
     db: {
+      transaction,
       query: vi.fn((uid: string) => {
         if (uid === "api::poll.poll") return { findOne: pollFindOne };
         if (uid === "plugin::users-permissions.user") return users;
@@ -420,7 +440,7 @@ function setup(options: {
     forbidden: vi.fn(),
     send: vi.fn(),
   };
-  return { controller, ctx, pollFindOne, votes, votesTable, countBallots };
+  return { controller, ctx, pollFindOne, votes, votesTable, countBallots, transaction };
 }
 
 /** The ctx error spies a handler must NOT have touched on the happy path. */
@@ -720,6 +740,38 @@ describe("vote", () => {
     const { controller, ctx, votes } = setup({ id: OPEN.id, user: EDITOR_OUTSIDE });
     await controller.vote(ctx);
     expect(votes.create).toHaveBeenCalledOnce();
+  });
+});
+
+describe("vote: under the poll's lock (decision 06 §G2, batch 15 plan item 8)", () => {
+  it("takes the poll's document lock first, then reads the poll again and checks and inserts", async () => {
+    const { controller, ctx } = setup({
+      id: TWIN_DOCUMENT_ID,
+      user: ENGINEER,
+      body: { optionIndex: 0 },
+    });
+    await controller.vote(ctx);
+    expect(trace.events).toEqual([
+      "poll",
+      "transaction",
+      `lock api::poll.poll ${TWIN_DOCUMENT_ID}`,
+      "poll",
+      "votes.findOne",
+      "votes.create",
+    ]);
+  });
+
+  it("never locks a poll the caller cannot see (no version row for a crafted id)", async () => {
+    for (const id of [DRAFT.id, "k3m9x0000000000000000099", ENG_ONLY.id]) {
+      const { controller, ctx, transaction } = setup({ id, user: DESIGNER });
+      await controller.vote(ctx);
+      expect(ctx.notFound, String(id)).toHaveBeenCalled();
+      expect(transaction, String(id)).not.toHaveBeenCalled();
+      expect(
+        trace.events.filter((event) => event.startsWith("lock")),
+        String(id),
+      ).toEqual([]);
+    }
   });
 });
 
