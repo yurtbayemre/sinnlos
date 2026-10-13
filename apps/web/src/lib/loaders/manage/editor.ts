@@ -27,9 +27,17 @@ import { StrapiError } from "@/lib/strapi-error";
  * a 403 (no grant) are both `notFound`: the page shows the not-found page
  * and says nothing about whether the item exists. Known limitation: the
  * not-found page is streamed after the layout, so the web's status is 200,
- * not 404 (the cms itself answers 404). Anything else that fails is
- * `failed` (the banner, no form); the sign-in redirect of an expired
- * session is never swallowed.
+ * not 404 (the cms itself answers 404). The same holds for every authoring
+ * page of batch 16 (/manage/documents/[documentId], /manage/wiki/[space]
+ * and its edit page, the wiki editor and history; lib/loaders/manage/
+ * wiki.ts): the batch-16 spike (plan S14) put the existence check into a
+ * blocking generateMetadata with a request-memoized loader shared with the
+ * page, on a production build, and the missing item still answered 200,
+ * for browsers (streamed metadata) and for HTML-limited bots (blocking
+ * metadata) alike, behind (app)/loading.tsx; so question 18's default
+ * stands (no app-wide change). Anything else that fails is `failed` (the
+ * banner, no form); the sign-in redirect of an expired session is never
+ * swallowed.
  */
 
 export type EditableOf<A extends TypedArea> = A extends "announcements"
