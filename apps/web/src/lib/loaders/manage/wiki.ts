@@ -317,20 +317,23 @@ export async function loadWikiParentOptions(
 // The two authoring routes inside the readers' slug namespace
 
 /**
- * Whether the space has a published page with the slug `new`, which the
- * route /wiki/[space]/new shadows (lib/manage/wiki-paths.ts): without the
- * authoring marker that route shows the page. A failed read answers false
- * (the authoring page, as before).
+ * Whether an address without the authoring marker belongs to the readers
+ * (lib/manage/wiki-paths.ts): /wiki/[space]/new when the space has a
+ * published page with the slug `new`, /wiki/drafts when a readable space
+ * has the slug `drafts`. Only a lookup that SUCCEEDED and found nothing
+ * hands the address to the authoring page; a failed one keeps it with the
+ * readers, whose page reads again and shows its own error and retry
+ * (Codex review, round 2), never an unrelated form.
  */
 export async function shadowedWikiPage(spaceSlug: string): Promise<boolean> {
   const result = await tryFetch(() => wikiPageRef(spaceSlug, "new"), "manage-wiki");
-  return (result.data?.data?.length ?? 0) > 0;
+  return result.failed || (result.data?.data?.length ?? 0) > 0;
 }
 
-/** Whether a readable space has the slug `drafts`, which /wiki/drafts shadows. */
+/** The same for /wiki/drafts and a space with the slug `drafts`. */
 export async function shadowedWikiSpace(): Promise<boolean> {
   const result = await tryFetch(() => wikiSpaceBySlug("drafts"), "manage-wiki");
-  return (result.data?.data?.length ?? 0) > 0;
+  return result.failed || (result.data?.data?.length ?? 0) > 0;
 }
 
 // ---------------------------------------------------------------------------

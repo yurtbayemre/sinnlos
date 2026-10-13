@@ -309,6 +309,20 @@ describe("the two routes inside the readers' slug namespace (Codex review)", () 
     expect(paths().some((path) => path.includes("filters[slug][$eq]=new"))).toBe(false);
   });
 
+  it("a failed lookup keeps the unmarked address with the readers (their page shows the error)", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(502, "Bad Gateway", ""));
+    viewerRef.current = viewer("team_lead");
+    const page = elements(
+      await NewWikiPagePage({
+        params: Promise.resolve({ space: "handbook" }),
+        searchParams: search(),
+      }),
+    );
+    expect(page[0]?.type).toBe(WikiReaderPage);
+    const drafts = elements(await WikiDraftsPage({ searchParams: search() }));
+    expect(drafts[0]?.type).toBe(WikiSpaceReaderPage);
+  });
+
   it("/wiki/drafts without ?mine=1 shows a space whose slug is `drafts`", async () => {
     strapiMock.mockImplementation(async (path: string) =>
       path.includes("filters[slug][$eq]=drafts") ? list([{ ...SPACE, slug: "drafts" }]) : list(),
