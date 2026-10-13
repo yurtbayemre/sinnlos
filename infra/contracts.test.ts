@@ -26,6 +26,7 @@ import {
 import { NO_GUEST_ACCESS, normalizeGuestAccess } from "../apps/web/src/lib/poll-guest-access";
 import { CHANNEL_RE, LIVE_TARGET_TYPES } from "../apps/web/src/lib/live-contract";
 import { ALL_EMOJIS } from "../apps/web/src/lib/reaction-summary";
+import { MANAGE_ERROR_CODES, WEB_FIELD_CODES } from "../apps/web/src/lib/manage/errors";
 import { ANNOUNCEMENT_READER_ROLES } from "../apps/web/src/lib/roles";
 import {
   youtubeEmbedUrl,
@@ -85,7 +86,12 @@ import type {
  *   6. the web search's contact-field roles against the cms's (FX22). The
  *      web role predicates and capabilities (lib/roles.ts, SH02) are pinned
  *      against PERMISSION_MATRIX / CUSTOM_ACTION_GRANTS by
- *      apps/web/src/lib/roles-matrix-parity.test.ts.
+ *      apps/web/src/lib/roles-matrix-parity.test.ts;
+ *   7. the v2 authoring error contract (decision 06 §B1.4, §B5, §L7; batch
+ *      15 contract K7): the codes the cms answers in details.codes
+ *      (@sinnlos/domain AUTHORING_CODES) are exactly the web's code map
+ *      without its own reject-mode codes, and every code and every
+ *      CommonCode a /manage form shows has a text in en and de.
  * Constants a module does not export are read from the source file; a
  * declaration that moves fails loudly, and the move updates this file.
  * A KNOWN gap is asserted as it is today, so closing it fails here too and
@@ -940,5 +946,58 @@ describe("web search CONTACT_SEARCH_ROLES = the cms contact-field roles (FX22)",
     );
     expect(sorted(web)).toEqual(sorted(PRIVILEGED_ROLE_TYPES));
     expect(web.every((role) => MATRIX_ROLES.includes(role))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. The v2 authoring error contract (K7; decision 06 §B5, §L7)
+// ---------------------------------------------------------------------------
+
+describe("authoring error codes: the cms list = the web code map, with texts in en and de", () => {
+  type Catalog = { [key: string]: string | Catalog };
+  const manageCatalog = (locale: string): Catalog =>
+    JSON.parse(
+      readFileSync(
+        join(ROOT, "apps", "web", "messages", "manage", `common.${locale}.json`),
+        "utf8",
+      ),
+    ) as Catalog;
+  const text = (catalog: Catalog, path: string): unknown =>
+    path.split(".").reduce<unknown>((node, part) => (node as Catalog | undefined)?.[part], catalog);
+
+  it("maps exactly the cms's codes, plus the web's own reject-mode codes", async () => {
+    const { AUTHORING_CODES, AUTHORING_FIELD_CODES, AUTHORING_FORM_CODES } =
+      await import("../packages/domain/src/authoring/codes");
+    expect(
+      sorted(
+        MANAGE_ERROR_CODES.filter((code) => !(WEB_FIELD_CODES as readonly string[]).includes(code)),
+      ),
+    ).toEqual(sorted(AUTHORING_CODES));
+    expect(sorted(AUTHORING_CODES)).toEqual(
+      sorted([...AUTHORING_FIELD_CODES, ...AUTHORING_FORM_CODES]),
+    );
+    // The web's own codes never collide with a cms code.
+    for (const code of WEB_FIELD_CODES) {
+      expect((AUTHORING_CODES as readonly string[]).includes(code), code).toBe(false);
+    }
+  });
+
+  it.each(["en", "de"])("every code and every CommonCode has a text in %s", (locale) => {
+    const catalog = manageCatalog(locale);
+    const missing = [
+      ...MANAGE_ERROR_CODES.map((code) => `errors.${code}`),
+      ...["forbidden", "notFound", "invalid", "conflict", "unavailable", "failed", "unshown"].map(
+        (code) => `failure.${code}`,
+      ),
+    ].filter((path) => {
+      const value = text(catalog, path);
+      return typeof value !== "string" || value.trim() === "";
+    });
+    expect(missing).toEqual([]);
+  });
+
+  it("has no text for a code that does not exist (a renamed code leaves no stale text)", () => {
+    const errors = text(manageCatalog("en"), "errors") as Catalog;
+    expect(sorted(Object.keys(errors))).toEqual(sorted(MANAGE_ERROR_CODES));
   });
 });
