@@ -20,6 +20,7 @@ import { enforceSecretGuard } from "./utils/env-guard";
 import { registerLiveEventSubscriber } from "./utils/live-events";
 import { assertNoOrgDrafts } from "./utils/org-dp-guard";
 import { backfillPollAudience } from "./utils/poll-audience-backfill";
+import { backfillTargetingFlags } from "./utils/targeting-flags-backfill";
 
 /**
  * Strapi application lifecycle: a thin orchestrator (roadmap B01). The
@@ -141,6 +142,14 @@ export default {
     // the cms does not start (utils/department-audience-backfill.ts).
     // Before the demo seed and the draft-twin repair, like the poll one.
     await backfillDepartmentAudience(strapi);
+    // Decision 06 §N9 (amendment row A5): announcement `audience` and event
+    // `notifyAudience` raised on every row that links a target, NULL event
+    // rows set, and the twin rule after a rollback (a NULL notifyAudience or
+    // retargetRequired takes the other row's restricting value). Raise
+    // only; one transaction; THROWS on error, so the cms does not start
+    // (utils/targeting-flags-backfill.ts). Before the seed and the draft
+    // twins, so a cloned draft copies the repaired value.
+    await backfillTargetingFlags(strapi);
     await seedAdminUser(strapi);
     // FX13 review: SMTP set without DIGEST_FROM / PUBLIC_WEB_URL (the owner
     // defaults are gone) → say so at boot, not only at the 07:30 run.

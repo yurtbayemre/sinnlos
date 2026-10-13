@@ -2,12 +2,17 @@ import {
   createUserWriteGuard,
   type TokenVersionStrapi,
 } from "../extensions/users-permissions/strapi-server";
+import { createAuditRecorder, type AuditHost } from "../utils/audit";
 import { createDepartmentAudienceGuard } from "../utils/department-audience-guard";
+import { createDocumentLock, type DocumentLockMiddlewareHost } from "../utils/document-lock";
+import { createOffsetlessDatetimeGuard } from "../utils/offsetless-datetime-guard";
 import {
   createPollAudienceGuard,
   type DocumentMiddleware,
   type PollAudienceGuardHost,
 } from "../utils/poll-audience-guard";
+import { createPublishReadiness, type PublishReadinessHost } from "../utils/publish-readiness";
+import { createScheduleClear, type ScheduleClearHost } from "../utils/schedule";
 
 /**
  * Every Document Service middleware of the app, registered in one place and
@@ -66,7 +71,12 @@ export const DOCUMENT_MIDDLEWARE_SLOTS = [
 export type DocumentMiddlewareSlot = (typeof DOCUMENT_MIDDLEWARE_SLOTS)[number];
 
 /** The slice of the Strapi instance the middlewares use. */
-export type DocumentMiddlewaresHost = PollAudienceGuardHost & TokenVersionStrapi;
+export type DocumentMiddlewaresHost = PollAudienceGuardHost &
+  TokenVersionStrapi &
+  DocumentLockMiddlewareHost &
+  ScheduleClearHost &
+  PublishReadinessHost &
+  AuditHost;
 
 /** register() also needs `strapi.documents.use`. */
 export type DocumentMiddlewaresRegistrationHost = DocumentMiddlewaresHost & {
@@ -85,8 +95,13 @@ export interface SlottedMiddleware {
  */
 export function documentMiddlewares(strapi: DocumentMiddlewaresHost): SlottedMiddleware[] {
   const slotted: SlottedMiddleware[] = [
+    { slot: "offsetless-datetime-guard", middleware: createOffsetlessDatetimeGuard() },
+    { slot: "document-lock", middleware: createDocumentLock(strapi) },
     { slot: "poll-audience-guard", middleware: createPollAudienceGuard(strapi) },
     { slot: "department-audience-guard", middleware: createDepartmentAudienceGuard(strapi) },
+    { slot: "schedule-clear", middleware: createScheduleClear(strapi) },
+    { slot: "publish-readiness", middleware: createPublishReadiness(strapi) },
+    { slot: "audit-recorder", middleware: createAuditRecorder(strapi) },
     { slot: "user-write-guard", middleware: createUserWriteGuard(strapi) },
   ];
   return slotted.sort(
