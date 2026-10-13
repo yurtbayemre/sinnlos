@@ -272,6 +272,16 @@ export function useAuthoringEditor<Source extends object | null>({
   );
 
   /**
+   * A failure of a step the form ran itself before its save (the upload of
+   * a file): the alert above the actions, which takes the focus.
+   */
+  const fail = useCallback((code: CommonCode | "unshown") => {
+    setFieldErrors({});
+    setFailure({ kind: "common", code });
+    setFocusRequest({ field: null });
+  }, []);
+
+  /**
    * "Overwrite" in the conflict dialog: the same call with the cms's
    * current version. The call sends only the fields this form changed, so
    * the other author's changes to the rest stay; afterwards the form
@@ -317,6 +327,7 @@ export function useAuthoringEditor<Source extends object | null>({
     alertRef,
     run,
     refuse,
+    fail,
     clearConflict: () => setConflict(null),
     requestReset,
   };

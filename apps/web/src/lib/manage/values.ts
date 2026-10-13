@@ -15,6 +15,8 @@ import {
   MAX_TARGET_DEPARTMENTS,
   MAX_POLL_OPTIONS,
   type AnnouncementEditable,
+  type DocumentEditable,
+  type EditableMedia,
   type EventEditable,
   type PollEditable,
   type QuickLinkEditable,
@@ -69,6 +71,21 @@ export interface QuickLinkValues {
   /** 0..10000 as typed. */
   order: string;
   departments: string[];
+}
+
+export interface DocumentValues {
+  title: string;
+  /** Plain text (the library shows it as written). */
+  description: string;
+  category: string;
+  /** The departments that see it (documentIds); none: everyone. */
+  departments: string[];
+  /**
+   * The file the document links: the stored one (from `editable`), one the
+   * form uploaded for this save (lib/manage/upload.ts), or none. Only its
+   * `id` is sent; the rest is for the form's display.
+   */
+  file: EditableMedia | null;
 }
 
 export interface PollValues {
@@ -128,6 +145,10 @@ export function emptyEventValues(departments: string[] = []): EventValues {
 
 export function emptyQuickLinkValues(): QuickLinkValues {
   return { label: "", url: "", icon: "", category: "tools", order: "0", departments: [] };
+}
+
+export function emptyDocumentValues(departments: string[] = []): DocumentValues {
+  return { title: "", description: "", category: "other", departments, file: null };
 }
 
 export function emptyPollValues(): PollValues {
@@ -195,6 +216,16 @@ export function quickLinkValuesFromEditable(editable: QuickLinkEditable): QuickL
     category: editable.category ?? "tools",
     order: String(editable.order ?? 0),
     departments: [...(editable.departments ?? [])],
+  };
+}
+
+export function documentValuesFromEditable(editable: DocumentEditable): DocumentValues {
+  return {
+    title: editable.title ?? "",
+    description: editable.description ?? "",
+    category: editable.category ?? "other",
+    departments: [...(editable.departments ?? [])],
+    file: editable.file ? { ...editable.file } : null,
   };
 }
 
@@ -297,6 +328,31 @@ export function coerceQuickLinkValues(raw: unknown): QuickLinkValues {
     category: str(r.category).trim(),
     order: str(r.order),
     departments: idList(r.departments),
+  };
+}
+
+/** A file value from the client: a positive integer id (the rest is display only), or null. */
+function fileValue(value: unknown): EditableMedia | null {
+  if (!isRecord(value)) return null;
+  const id = value.id;
+  if (typeof id !== "number" || !Number.isInteger(id) || id <= 0) return null;
+  return {
+    id,
+    name: str(value.name),
+    mime: str(value.mime),
+    size: typeof value.size === "number" && Number.isFinite(value.size) ? value.size : 0,
+    url: str(value.url),
+  };
+}
+
+export function coerceDocumentValues(raw: unknown): DocumentValues {
+  const r = isRecord(raw) ? raw : {};
+  return {
+    title: str(r.title),
+    description: str(r.description),
+    category: str(r.category).trim(),
+    departments: idList(r.departments),
+    file: fileValue(r.file),
   };
 }
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FetchErrorBanner } from "@/components/fetch-error";
 import { EmptyState } from "@/components/empty-state";
 import { AnnouncementEditor } from "@/components/manage/announcement-editor";
+import { DocumentEditor } from "@/components/manage/document-editor";
 import { EventEditor } from "@/components/manage/event-editor";
 import { ManageFlashProvider } from "@/components/manage/flash";
 import { ManageListPage } from "@/components/manage/list-page";
@@ -42,6 +43,9 @@ const { default: AnnouncementsPage } = await import("./announcements/page");
 const { default: NewEventPage } = await import("./events/new/page");
 const { default: EditAnnouncementPage } = await import("./announcements/[documentId]/page");
 const { default: NewPollRedirect } = await import("../polls/new/page");
+const { default: DocumentsPage } = await import("./documents/page");
+const { default: NewDocumentPage } = await import("./documents/new/page");
+const { default: EditDocumentPage } = await import("./documents/[documentId]/page");
 
 const ENG = { id: 3, documentId: "deptengineering000000000", name: "Engineering", slug: "eng" };
 const DOC = "annc00000000000000000001";
@@ -263,6 +267,66 @@ describe("create and edit pages", () => {
         .map(([path]) => path)
         .some((p) => String(p).startsWith("/api/departments")),
     ).toBe(false);
+  });
+});
+
+describe("the documents area (batch 16, lane 16C)", () => {
+  const DOCUMENT = "docu00000000000000000001";
+
+  it("is the generic list page", () => {
+    const tree = elements(DocumentsPage({ searchParams: Promise.resolve({}) }));
+    expect(tree[0]?.type).toBe(ManageListPage);
+    expect(tree[0]?.props.area).toBe("documents");
+  });
+
+  it("a moderator's list has the owner filter; a department head's asks the cms for theirs", async () => {
+    await ManageListPage({
+      area: "documents",
+      searchParams: Promise.resolve({ owner: "department" }),
+    });
+    expect(strapiMock).toHaveBeenLastCalledWith("/api/documents/authoring?owner=department");
+    viewerRef.current = viewer("department_head", ENG);
+    await ManageListPage({
+      area: "documents",
+      searchParams: Promise.resolve({ owner: "department" }),
+    });
+    // A department author has no owner filter: the cms scopes the list.
+    expect(strapiMock).toHaveBeenLastCalledWith("/api/documents/authoring");
+  });
+
+  it("a department head's new document: their department pinned, no department list read", async () => {
+    viewerRef.current = viewer("department_head", ENG);
+    const tree = elements(await NewDocumentPage());
+    const editor = tree.find((el) => el.type === DocumentEditor);
+    expect(editor?.props.ownDepartment).toEqual(ENG);
+    expect((editor?.props.access as { roleClass: string }).roleClass).toBe("departmentAuthor");
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a department head without a department gets the explanation on the new and edit pages", async () => {
+    viewerRef.current = viewer("department_head", null);
+    for (const tree of [
+      elements(await NewDocumentPage()),
+      elements(await EditDocumentPage({ params: Promise.resolve({ documentId: DOCUMENT }) })),
+    ]) {
+      expect(tree.some((el) => el.type === NoDepartmentExplanation)).toBe(true);
+      expect(tree.some((el) => el.type === DocumentEditor)).toBe(false);
+    }
+    expect(strapiMock).not.toHaveBeenCalled();
+  });
+
+  it("a document the cms hides answers the not-found page", async () => {
+    strapiMock.mockRejectedValue(new StrapiError(404, "Not Found", ""));
+    await expect(
+      EditDocumentPage({ params: Promise.resolve({ documentId: DOCUMENT }) }),
+    ).rejects.toMatchObject({ digest: expect.stringContaining("404") });
+  });
+
+  it("members, team leads and guests are sent home; the area itself refuses them", async () => {
+    for (const role of ["member", "team_lead", "guest"]) {
+      viewerRef.current = viewer(role);
+      expect(await redirectOf(() => NewDocumentPage())).toBe("/");
+    }
   });
 });
 

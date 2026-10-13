@@ -32,6 +32,7 @@
  */
 import {
   AUTHORING_FIELDS,
+  DOCUMENT_CATEGORIES,
   QUICK_LINK_CATEGORIES,
   MAX_POLL_OPTION_LENGTH,
   TARGETING_KEYS,
@@ -63,6 +64,7 @@ import {
 import type { ManageErrorCode } from "./errors";
 import type {
   AnnouncementValues,
+  DocumentValues,
   EventValues,
   PollValues,
   QuickLinkValues,
@@ -354,6 +356,63 @@ export function buildQuickLinkPayload(
   ctx: PayloadContext,
 ): BuiltPayload {
   const { data, fields } = buildFields("quickLink", QUICK_LINK_RULES, values, initial, ctx);
+  return done(data, fields);
+}
+
+// ---------------------------------------------------------------------------
+// Document
+
+/** The id of a file value (null without a file). */
+const fileId = (file: unknown): number | null => (file as DocumentValues["file"])?.id ?? null;
+
+const DOCUMENT_RULES: readonly FieldRule<DocumentValues>[] = [
+  { key: "title", inputs: ["title"], convert: (v) => checked(v.title.trim(), checkRequiredString) },
+  {
+    key: "description",
+    inputs: ["description"],
+    convert: (v) => checked(v.description.trim() === "" ? null : v.description, checkMarkdown),
+  },
+  {
+    key: "category",
+    inputs: ["category"],
+    convert: (v) => checked(v.category, checkEnum(DOCUMENT_CATEGORIES)),
+  },
+  {
+    key: "departments",
+    inputs: ["departments"],
+    // A department author's document is for their department, pinned (§N4).
+    convert: (v, ctx) => ({
+      value:
+        ctx.roleClass === "departmentAuthor"
+          ? ctx.ownDepartment
+            ? [ctx.ownDepartment]
+            : []
+          : [...v.departments],
+    }),
+  },
+  {
+    key: "file",
+    inputs: ["file"],
+    // The file row id (§E6): a new upload attaches it, the stored id keeps
+    // it. Only a different id is a change, so an untouched file (another
+    // author's, a legacy one) is never sent again.
+    same: (a, b) => fileId(a) === fileId(b),
+    convert: (v) => ({ value: fileId(v.file) }),
+  },
+];
+
+/**
+ * A document's payload. The file is a row id from POST /api/upload
+ * (lib/manage/upload.ts), uploaded before the save; the cms checks that a
+ * newly attached file is the caller's own fresh upload (§E2, the media
+ * claims of §E3). A create without a file sends `file: null`.
+ */
+export function buildDocumentPayload(
+  values: DocumentValues,
+  initial: DocumentValues | null,
+  ctx: PayloadContext,
+): BuiltPayload {
+  const { data, fields } = buildFields("document", DOCUMENT_RULES, values, initial, ctx);
   return done(data, fields);
 }
 
