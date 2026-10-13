@@ -30,11 +30,13 @@
 --     summary, page or editor, or that carries a value in a batch-16 column.
 --     The page is compared by page DOCUMENT, never by row id (a twin links
 --     the page's draft row, its published row both page rows): the twin's
---     link must name the published row's anchor, its page_document_id where
---     set (on 15.1 a discard and an unpublish of the page can leave the
---     published revision without page links), else its links; a twin
---     without any page link (its page row went) differs in nothing kept.
---     Each is listed; the README has the two manual resolutions;
+--     link must name a page the published row belongs to, through its
+--     page_document_id (on 15.1 a discard and an unpublish of the page can
+--     leave the published revision without page links) or through its own
+--     links (a panel clone of the page moves the revisions' links to the
+--     clone, the anchor stays); a twin without any page link (its page row
+--     went) differs in nothing kept. Each is listed; the README has the two
+--     manual resolutions;
 --   - DELETES the identical twins (the draft row and its link rows): the
 --     ones a rollback's boot cloned from every revision (one per revision,
 --     through discardDraft, which knows none of the batch-16 columns);
@@ -137,8 +139,8 @@ BEGIN
            concat_ws(', ',
              CASE WHEN d.body IS DISTINCT FROM pub.body THEN 'body' END,
              CASE WHEN d.summary IS DISTINCT FROM pub.summary THEN 'summary' END,
-             CASE WHEN dp.docs IS DISTINCT FROM coalesce(to_jsonb(pub) ->> 'page_document_id', pp.docs)
-                   AND dp.docs IS NOT NULL THEN 'page' END,
+             CASE WHEN dp.docs IS NOT NULL AND dp.docs IS DISTINCT FROM pp.docs
+                   AND dp.docs IS DISTINCT FROM (to_jsonb(pub) ->> 'page_document_id') THEN 'page' END,
              CASE WHEN de.users IS DISTINCT FROM pe.users THEN 'editor' END,
              CASE WHEN jsonb_strip_nulls(to_jsonb(d) - ARRAY['id', 'document_id', 'body', 'summary',
                          'created_at', 'updated_at', 'published_at', 'created_by_id', 'updated_by_id',

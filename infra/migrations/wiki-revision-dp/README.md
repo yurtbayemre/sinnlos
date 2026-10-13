@@ -39,16 +39,19 @@ A fresh install needs nothing.
     The boot backfill then marks it `before` (a legacy row) and anchors it.
   - **identical twin**: its published row has the same `body` and `summary`
     and the same editor (users by id), the draft's batch-16 columns are NULL,
-    and its page link names the page **document** the published row belongs
-    to. A rollback's boot makes exactly this, and `migrate.sql` **deletes** it
-    with its link rows.
+    and its page link names a page the published row belongs to. A
+    rollback's boot makes exactly this, and `migrate.sql` **deletes** it with
+    its link rows.
     - **Pages are compared by document, never by row id.** A twin links the
       page's draft row, while its published row links the draft row and,
       after a publish, the published row too (spike 5 S5.7).
-    - **The published row's page is its `page_document_id`** where it has one
-      (every revision of batch 16), else the pages its links reach. On 15.1, a
-      discard and an unpublish of the page can leave the published revision
-      without page links while its twin keeps one.
+    - **The published row belongs to its `page_document_id`** (every revision
+      of batch 16) **and to the pages its own links reach.** Both count,
+      because Strapi changes the links in two cases while the anchor stays:
+      - on 15.1, a discard and an unpublish of the page can leave the
+        published revision without page links while its twin keeps one;
+      - a panel "Duplicate" of a page moves the revisions' page links to the
+        copy.
     - **A twin without any page link** (its page row was deleted) differs in
       nothing that is kept.
   - **divergent twin**: anything else with a published row. `migrate.sql`

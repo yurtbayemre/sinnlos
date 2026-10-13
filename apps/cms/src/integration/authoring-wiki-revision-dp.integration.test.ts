@@ -35,9 +35,10 @@ import { untilPoolIdle } from "./pool-idle.test.helper";
  *   3. a rollback to batch 15.1 and forward: one identical twin per revision
  *      as 15.1's boot makes them (C26: a draft with the same content, its
  *      page link to the page's DRAFT row, the batch-16 columns NULL), and
- *      two edits on 15.1 (before-images, a draft-only page change), and a
- *      discard plus unpublish there that leaves the published revisions of a
- *      page without page links (Codex review). The
+ *      two edits on 15.1 (before-images, a draft-only page change); a clone
+ *      on batch 16 that moved a page's revision links to the copy, and a
+ *      discard plus unpublish on 15.1 that left the published revisions of a
+ *      page without page links (Codex review, both rounds). The
  *      deploy.sh probe counts the twins (so the deploy is refused), the boot
  *      refuses, the preflight classifies them, migrate.sql refuses outside
  *      one transaction and with another session connected, then deletes
@@ -484,6 +485,27 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
     it(
       "3a. a rollback to 15.1: its twins make deploy.sh's probe refuse and the boot refuse",
       async () => {
+        // On batch 16, a panel-style clone of Two: Strapi 5.57 moves the page
+        // links of Two's revisions to the copy, their anchors stay (Codex
+        // review, round 2). Their twins then link the copy.
+        const live = await boot();
+        const pages = live.strapi.documents(PAGE) as unknown as {
+          clone(params: Record<string, unknown>): Promise<{ documentId: string }>;
+        };
+        const copy = await pages.clone({
+          documentId: pageTwo,
+          data: { title: "Two (copy)", slug: "it-two-copy" },
+        });
+        await stop();
+        const [moved] = await sql<{ n: string }>(
+          `SELECT count(*) AS n FROM wiki_revisions r
+             JOIN wiki_revisions_page_lnk l ON l.wiki_revision_id = r.id
+             JOIN wiki_pages p ON p.id = l.wiki_page_id
+            WHERE r.page_document_id = ? AND p.document_id = ?`,
+          [pageTwo, copy.documentId],
+        );
+        expect(Number(moved.n)).toBeGreaterThan(0);
+
         beforeRollback = await snapshot();
         await asBeforeBatch16({ forgetSchema: false });
         twins = await rollbackTwins();
@@ -585,14 +607,15 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
         const perPage = await sql<{ page_document_id: string; n: string }>(
           "SELECT page_document_id, count(*) AS n FROM wiki_revisions GROUP BY 1 ORDER BY 1",
         );
-        const was = (page: string) =>
-          beforeRollback.filter((row) => row.page_document_id === page).length;
+        const expected: Record<string, number> = {};
+        for (const row of beforeRollback) {
+          const page = String(row.page_document_id);
+          expected[page] = (expected[page] ?? 0) + 1;
+        }
+        expected[pageTwo] += 3;
         expect(
           Object.fromEntries(perPage.map((row) => [row.page_document_id, Number(row.n)])),
-        ).toEqual({
-          [pageOne]: was(pageOne),
-          [pageTwo]: was(pageTwo) + 3,
-        });
+        ).toEqual(expected);
       },
       BOOT_BUDGET,
     );
@@ -617,9 +640,31 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
         );
         twins.push(twin.id);
       }
+      // A twin with the same content, moved by raw SQL to a page its
+      // published row has nothing to do with: still divergent.
+      const [anchored] = await sql<{ id: number; document_id: string; body: string }>(
+        `SELECT id, document_id, body FROM wiki_revisions
+          WHERE page_document_id = ? AND published_at IS NOT NULL ORDER BY id LIMIT 1`,
+        [pageOne],
+      );
+      const [moved] = await sql<{ id: number }>(
+        `INSERT INTO wiki_revisions (document_id, body, summary, created_at, updated_at, published_at)
+         SELECT document_id, body, summary, created_at, updated_at, NULL FROM wiki_revisions WHERE id = ?
+         RETURNING id`,
+        [anchored.id],
+      );
+      await sql(
+        "INSERT INTO wiki_revisions_page_lnk (wiki_revision_id, wiki_page_id, wiki_revision_ord) VALUES (?, ?, 1)",
+        [moved.id, await draftRowOf(pageTwo)],
+      );
+      await sql(
+        `INSERT INTO wiki_revisions_editor_lnk (wiki_revision_id, user_id)
+         SELECT ?::int, user_id FROM wiki_revisions_editor_lnk WHERE wiki_revision_id = ?`,
+        [moved.id, anchored.id],
+      );
       const before = await snapshot();
       const section = preflight();
-      expect(section("R1")).toEqual(["divergent twin|2"]);
+      expect(section("R1")).toEqual(["divergent twin|3"]);
 
       const stopped = await migrate();
       expect(stopped.status).not.toBe(0);
@@ -629,6 +674,9 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
           `id ${twin} (document ${sources[index].document_id}, differs in body`,
         );
       }
+      expect(stopped.stderr).toContain(
+        `id ${moved.id} (document ${anchored.document_id}, differs in page)`,
+      );
       expect(await snapshot()).toEqual(before);
 
       // The README's SQL, as the operator runs it: choice 1 for the first, choice 2 for the second.
@@ -639,6 +687,7 @@ describe.skipIf(!PG_URL || !PSQL_READY)(
       await sessionsGone();
       run(readmeBlock("-- Choice 1"), twins[0]);
       run(readmeBlock("-- Choice 2"), twins[1]);
+      run(readmeBlock("-- Choice 1"), moved.id);
       const kept = await sql<{ document_id: string; published: boolean; page: number | null }>(
         `SELECT r.document_id, r.published_at IS NOT NULL AS published,
                 (SELECT count(*)::int FROM wiki_revisions_page_lnk l WHERE l.wiki_revision_id = r.id) AS page
