@@ -318,7 +318,7 @@ function sameFrozen(field: FrozenField, a: unknown, b: unknown): boolean {
   return samePollOptions(a, b);
 }
 
-/** The value an update writes into a frozen field (admin JSON text parsed), or "skip". */
+/** The value an update writes into a frozen field (admin JSON text parsed), or null to skip it. */
 function written(field: FrozenField, raw: unknown): { value: unknown } | null {
   if (field !== "options") return { value: raw };
   const parsed = parseAdminJsonField(raw);

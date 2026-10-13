@@ -1,11 +1,5 @@
 import { errors } from "@strapi/utils";
-import {
-  DEPARTMENT_AUTHOR_ROLES,
-  MODERATORS,
-  STAFF_ROLES,
-  hasRole,
-  type RoleType,
-} from "../bootstrap/roles";
+import { DEPARTMENT_AUTHOR_ROLES, MODERATORS, STAFF_ROLES, hasRole } from "../bootstrap/roles";
 import {
   ANNOUNCEMENT_UID,
   AUTHORED_UIDS,
@@ -91,12 +85,12 @@ const DOCUMENT_INTENTS: readonly GateIntent[] = [
   "discardDraft",
   "editable",
 ];
-const CUSTOM_INTENTS: readonly GateIntent[] = [
+/** The custom document actions: no class answers 404 there, like a hidden findOne. */
+const CUSTOM_DOCUMENT_INTENTS: readonly GateIntent[] = [
   "publish",
   "unpublish",
   "discardDraft",
   "editable",
-  "authoringList",
 ];
 
 export type AuthoringRoleClass = typeof MODERATOR_CLASS | typeof DEPARTMENT_AUTHOR_CLASS;
@@ -275,7 +269,7 @@ export function departmentAuthorOwns(
   rows: AuthoringRows,
   department: CallerDepartment | null,
 ): boolean {
-  if (!department || !(DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)) return false;
+  if (!department || !DEPARTMENT_AUTHORED_UIDS.includes(uid)) return false;
   if (!rows.draft) return false;
   return [rows.draft, rows.published]
     .filter((row): row is AuthoringRow => row !== null)
@@ -306,10 +300,7 @@ export function roleClassFor(
   uid: string,
 ): AuthoringRoleClass | null {
   if (hasRole(user, MODERATORS)) return MODERATOR_CLASS;
-  if (
-    hasRole(user, DEPARTMENT_AUTHOR_ROLES as readonly RoleType[]) &&
-    (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)
-  ) {
+  if (hasRole(user, DEPARTMENT_AUTHOR_ROLES) && DEPARTMENT_AUTHORED_UIDS.includes(uid)) {
     return DEPARTMENT_AUTHOR_CLASS;
   }
   return null;
@@ -406,7 +397,7 @@ function intentOf(config: WriteGateConfig | undefined, idParam: unknown): GateIn
 
 /** No class: false on the generic routes and the list, 404 on a custom document action. */
 function refuse(intent: GateIntent | null): false {
-  if (intent !== null && intent !== "authoringList" && CUSTOM_INTENTS.includes(intent)) {
+  if (intent !== null && CUSTOM_DOCUMENT_INTENTS.includes(intent)) {
     throw new errors.NotFoundError("Not Found");
   }
   return false;
@@ -424,7 +415,7 @@ export function writeGate() {
     const caller = identifiedCaller(policyContext.state?.user);
     const uid = typeof config?.uid === "string" ? config.uid : null;
     // A route without its uid (or an unknown one) is a wiring bug: refuse.
-    if (!intent || !caller || !uid || !(AUTHORED_UIDS as readonly string[]).includes(uid)) {
+    if (!intent || !caller || !uid || !AUTHORED_UIDS.includes(uid)) {
       return refuse(intent);
     }
     const roleClass = roleClassFor(caller, uid);
