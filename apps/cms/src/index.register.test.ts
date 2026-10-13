@@ -435,7 +435,12 @@ describe("Document Service middlewares in register() (decision 06 §K)", () => {
       db: {
         ...stub.db,
         transaction,
-        query: () => ({ findMany: async () => [], updateMany: async () => ({ count: 0 }) }),
+        // No rows and no ballots (the poll guard's vote freeze counts them).
+        query: () => ({
+          findMany: async () => [],
+          updateMany: async () => ({ count: 0 }),
+          count: async () => 0,
+        }),
       },
       getModel: () => undefined,
       requestContext: { get: () => undefined },
