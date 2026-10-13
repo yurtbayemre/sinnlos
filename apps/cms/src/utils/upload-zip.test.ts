@@ -172,6 +172,20 @@ describe("the one accepted zip layout (amendment row A6)", () => {
     }
   });
 
+  it("refuses an Info-ZIP Unicode Path field, which gives readers another name (Codex round 2)", async () => {
+    const alias = Buffer.from("word/vbaProject.bin", "utf8");
+    const unicodePath = Buffer.alloc(4 + 5 + alias.length);
+    unicodePath.writeUInt16LE(0x7075, 0);
+    unicodePath.writeUInt16LE(5 + alias.length, 2);
+    unicodePath.writeUInt8(1, 4);
+    alias.copy(unicodePath, 9);
+    const entries = [
+      ...docxEntries(),
+      { name: "word/harmless.bin", data: "x", extra: unicodePath },
+    ];
+    expect(await refusal(buildZip(entries))).toBe("Unicode Path extra field");
+  });
+
   it("refuses every ZIP64 marker", async () => {
     const { bytes, offsets } = buildZipWithOffsets(docxEntries());
     expect(await refusal(patched(bytes, offsets.end + 10, (b) => b.writeUInt16LE(0xffff, 0)))).toBe(
@@ -279,6 +293,41 @@ describe("readEntry: one bounded entry", () => {
 });
 
 describe("hasZipEndRecord (the PDF polyglot refusal)", () => {
+  it("finds a zip hidden behind more padding than the tail window (Codex round 2)", async () => {
+    const padded = Buffer.concat([
+      minimalPdf(),
+      minimalDocx(),
+      Buffer.alloc(70_000, 0x20),
+      Buffer.from("%%EOF\n"),
+    ]);
+    const file = fileOf(padded);
+    expect(await hasZipEndRecord(file)).toBe(true);
+    // Read in bounded chunks, never the whole file at once.
+    expect(Math.max(...file.reads.map((read) => read.length))).toBeLessThanOrEqual(64 * 1024 + 21);
+  });
+
+  it("finds an end record that straddles two reads", async () => {
+    const zip = minimalDocx();
+    const lead = Buffer.alloc(64 * 1024 - (zip.length - 22) - 10, 0x20);
+    const pdf = Buffer.concat([
+      Buffer.from("%PDF-1.4\n"),
+      lead.subarray(9),
+      zip,
+      Buffer.alloc(100_000, 0x20),
+    ]);
+    expect(await hasZipEndRecord(fileOf(pdf))).toBe(true);
+  });
+
+  it("does not take a lone end-record signature in PDF data for a zip", async () => {
+    const lone = Buffer.alloc(22);
+    lone.writeUInt32LE(0x06054b50, 0);
+    lone.writeUInt16LE(3, 10);
+    lone.writeUInt32LE(100, 12);
+    expect(await hasZipEndRecord(fileOf(Buffer.concat([minimalPdf(), lone, minimalPdf()])))).toBe(
+      false,
+    );
+  });
+
   it("finds an appended zip, also behind trailing bytes", async () => {
     const pdf = minimalPdf();
     expect(await hasZipEndRecord(fileOf(pdf))).toBe(false);

@@ -33,12 +33,14 @@
  * LIMITS (the scanner's, not the reader machine's): the end record is
  * searched in the last 64 KiB + 22 bytes only; at most 5 000 entries and
  * 1 MiB of central directory; ZIP64 (any 0xFFFF/0xFFFFFFFF marker, a ZIP64
- * extra field, end record or locator), multi-disk archives and encrypted
- * entries (flag bits 0, 6 and 13) are refused. One entry at a time is read
- * (readEntry), at most 64 KiB compressed and 256 KiB inflated, checked
- * against its CRC-32. Every read goes through `RandomAccessFile`: the head,
- * the tail window, the directory, every local header and descriptor, and
- * the one entry. Never the whole file.
+ * extra field, end record or locator), multi-disk archives, encrypted
+ * entries (flag bits 0, 6 and 13) and Info-ZIP Unicode Path fields (an
+ * alternative name) are refused. One entry at a time is read (readEntry),
+ * at most 64 KiB compressed and 256 KiB inflated, checked against its
+ * CRC-32. Every read goes through `RandomAccessFile`: the head, the tail
+ * window, the directory, every local header and descriptor, and the one
+ * entry. Never the whole file (the PDF polyglot scan, hasZipEndRecord,
+ * reads a PDF from start to end in 64 KiB reads).
  *
  * Every refusal throws ZipRefusal; the caller turns any error into a
  * refusal of the upload (an unexpected exception is a refusal too).
@@ -76,6 +78,8 @@ const END_RECORD_BYTES = 22;
 const CENTRAL_RECORD_BYTES = 46;
 const LOCAL_HEADER_BYTES = 30;
 const ZIP64_EXTRA_ID = 0x0001;
+/** Info-ZIP Unicode Path: an alternative name some readers prefer. */
+const UNICODE_PATH_EXTRA_ID = 0x7075;
 /** Bit 0 encrypted, bit 6 strong encryption, bit 13 masked local headers. */
 const ENCRYPTION_FLAGS = 0x0001 | 0x0040 | 0x2000;
 const DATA_DESCRIPTOR_FLAG = 0x0008;
@@ -131,8 +135,6 @@ interface EndRecordCandidate {
   position: number;
   /** The record and its comment end exactly at the end of the file. */
   endsAtEof: boolean;
-  /** The record and its comment fit inside the file. */
-  fits: boolean;
 }
 
 interface TailWindow {
@@ -149,21 +151,52 @@ async function readTail(file: RandomAccessFile): Promise<TailWindow> {
   for (let i = bytes.length - END_RECORD_BYTES; i >= 0; i--) {
     if (u32(bytes, i) !== SIG_END) continue;
     const end = start + i + END_RECORD_BYTES + u16(bytes, i + 20);
-    candidates.push({ position: start + i, endsAtEof: end === file.size, fits: end <= file.size });
+    candidates.push({ position: start + i, endsAtEof: end === file.size });
   }
   return { start, bytes, candidates };
 }
 
+/** Bytes per read of the polyglot scan. */
+const SCAN_CHUNK_BYTES = 64 * 1024;
+const END_SIGNATURE = Uint8Array.of(0x50, 0x4b, 0x05, 0x06);
+
 /**
- * Whether the file carries a zip end record a zip reader could take: one
- * whose comment fits inside the file (the PDF polyglot refusal, §E1).
- * Stricter than "ends exactly at the end": trailing bytes after an
- * appended zip do not hide it.
+ * Whether a zip archive hides anywhere in the file (the PDF polyglot
+ * refusal, §E1, amendment row A6; Codex round 2). Some readers (JSZip
+ * among them) search the whole file for the end record, so padding after
+ * an appended zip must not hide it: the file is scanned from start to end
+ * in 64 KiB reads (never held whole in memory; a PDF is capped at 20 MB).
+ * An end-record signature counts when it is followed by a ZIP64 locator
+ * before it, or when it names at least one entry and a central directory
+ * signature stands where it says the directory starts (its size before the
+ * record: where readers look, also for an archive with data before it).
+ * A random signature in compressed PDF data does not meet that.
  */
 export async function hasZipEndRecord(file: RandomAccessFile): Promise<boolean> {
   if (file.size < END_RECORD_BYTES) return false;
-  const tail = await readTail(file);
-  return tail.candidates.some((candidate) => candidate.fits);
+  for (let start = 0; start < file.size; start += SCAN_CHUNK_BYTES) {
+    const length = Math.min(SCAN_CHUNK_BYTES + END_RECORD_BYTES - 1, file.size - start);
+    const bytes = await readExactly(file, start, length);
+    let at = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf(END_SIGNATURE);
+    while (at >= 0 && at < SCAN_CHUNK_BYTES) {
+      if (at + END_RECORD_BYTES <= bytes.length) {
+        const position = start + at;
+        if (position >= 20) {
+          const locator = await readExactly(file, position - 20, 4);
+          if (u32(locator, 0) === SIG_ZIP64_LOCATOR) return true;
+        }
+        const entries = u16(bytes, at + 10);
+        const directorySize = u32(bytes, at + 12);
+        const directoryStart = position - directorySize;
+        if (entries > 0 && directorySize >= CENTRAL_RECORD_BYTES && directoryStart >= 0) {
+          const signature = await readExactly(file, directoryStart, 4);
+          if (u32(signature, 0) === SIG_CENTRAL) return true;
+        }
+      }
+      at = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.length).indexOf(END_SIGNATURE, at + 1);
+    }
+  }
+  return false;
 }
 
 /** The ASCII-case-folded name (OPC compares part names that way). */
@@ -187,7 +220,12 @@ function checkName(bytes: Uint8Array): { name: string; isDirectory: boolean } {
   return { name, isDirectory };
 }
 
-/** Walks an extra field; refuses a malformed one and any ZIP64 record. */
+/**
+ * Walks an extra field; refuses a malformed one, any ZIP64 record, and an
+ * Info-ZIP Unicode Path field (0x7075): readers that honour it see another
+ * name than the one this reader checked (Codex round 2: a VBA part named
+ * harmlessly in the raw name and `word/vbaProject.bin` in the field).
+ */
 function checkExtraField(extra: Uint8Array): void {
   let at = 0;
   while (at < extra.length) {
@@ -196,6 +234,7 @@ function checkExtraField(extra: Uint8Array): void {
     const size = u16(extra, at + 2);
     if (at + 4 + size > extra.length) throw new ZipRefusal("malformed extra field");
     if (id === ZIP64_EXTRA_ID) throw new ZipRefusal("ZIP64 extra field");
+    if (id === UNICODE_PATH_EXTRA_ID) throw new ZipRefusal("Unicode Path extra field");
     at += 4 + size;
   }
 }
