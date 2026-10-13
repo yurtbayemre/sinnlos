@@ -44,12 +44,19 @@ import { refuseKeys } from "./write-allowlist";
  * write's checks and its insert (both now under the structure lock) answers
  * `invalid` on `space`.
  *
- * NON-EMPTY SPACES (S15). A wiki-space `delete`, `unpublish`, and a
- * `discardDraft` of a space without a published row (it deletes the
- * space), take the structure lock and refuse with `_form: spaceNotEmpty`
- * while any page row links any row of the space: a space's pages would
- * otherwise lose their space (a panel unpublish deletes the published row,
- * its pages' links cascade, and a republish does not re-link them).
+ * NON-EMPTY SPACES (S15). A wiki-space `delete`, `unpublish` and
+ * `discardDraft` take the structure lock. A delete, an unpublish and a
+ * discard of a space without a published row (it deletes the space) refuse
+ * with `_form: spaceNotEmpty` while any page row links any row of the
+ * space: a space's pages would otherwise lose their space (a panel
+ * unpublish deletes the published row, its pages' links cascade, and a
+ * republish does not re-link them). A discard of a space WITH a published
+ * row rebuilds the draft row from it, and Strapi 5.57 re-links only the
+ * pages that have a published version (Codex review of lane 16B,
+ * reproduced on both engines): a draft-only page would lose its space,
+ * and with it its author's access. So every page row that linked the space
+ * before must link it after, else the discard refuses (`spaceNotEmpty`)
+ * and rolls back.
  *
  * LOCK ORDER (K21): the document's own version row (slot 2) first, then the
  * structure row; nothing here locks a document row afterwards.
@@ -213,19 +220,43 @@ export async function readParentEdges(strapi: WikiChecksHost): Promise<ParentEdg
   return [...edges.values()];
 }
 
-/** Whether any page row links any row of the space `documentId`. */
-export async function spaceHasPages(strapi: WikiChecksHost, documentId: string): Promise<boolean> {
+/** The page rows (ids) that link any row of the space `documentId`. */
+export async function pageRowsInSpace(
+  strapi: WikiChecksHost,
+  documentId: string,
+): Promise<number[]> {
   const spaceRows = listOf(
     await strapi.db.query(WIKI_SPACE_UID).findMany({ where: { documentId }, select: ["id"] }),
   )
     .map((row) => (isRecord(row) ? rowId(row.id) : null))
     .filter((id): id is number => id !== null);
-  if (spaceRows.length === 0) return false;
+  if (spaceRows.length === 0) return [];
   const link = relationLinkTable(strapi, WIKI_PAGE_UID, "space", REFUSAL);
-  const count = await strapi.db
-    .query(link.uid)
-    .count({ where: { [link.targetColumn]: { $in: spaceRows } } });
-  return count > 0;
+  const links = listOf(
+    await strapi.db
+      .query(link.uid)
+      .findMany({ where: { [link.targetColumn]: { $in: spaceRows } }, select: [link.rowColumn] }),
+  );
+  return [
+    ...new Set(
+      links
+        .map((row) => (isRecord(row) ? rowId(row[link.rowColumn]) : null))
+        .filter((id): id is number => id !== null),
+    ),
+  ].sort((a, b) => a - b);
+}
+
+/** Whether any page row links any row of the space `documentId`. */
+export async function spaceHasPages(strapi: WikiChecksHost, documentId: string): Promise<boolean> {
+  return (await pageRowsInSpace(strapi, documentId)).length > 0;
+}
+
+/** The refusal of a space discard that would take pages out of the space. */
+export function spaceDiscardError(): InstanceType<typeof errors.ValidationError> {
+  return new errors.ValidationError(
+    "Discarding this space's draft would take its unpublished pages out of the space",
+    { keys: [FORM_KEY], codes: { [FORM_KEY]: "spaceNotEmpty" } },
+  );
 }
 
 /** Whether the draft row of page `documentId` links a space. */
@@ -276,15 +307,21 @@ export function createWikiChecks(strapi: WikiChecksHost): Middleware {
       const documentId = params.documentId;
       if (!isDocumentId(documentId)) return next();
       return strapi.db.transaction(async () => {
-        // A discard with a published row rebuilds the draft and removes
-        // nothing a page links to for good.
+        await lockWikiStructure(strapi);
         if (action === "discardDraft") {
           const published = await strapi.db
             .query(WIKI_SPACE_UID)
             .count({ where: { documentId, publishedAt: { $notNull: true } } });
-          if (published > 0) return next();
+          if (published > 0) {
+            // The draft is rebuilt from the published row: every page row
+            // that linked the space must still link it afterwards.
+            const before = await pageRowsInSpace(strapi, documentId);
+            const result = await next();
+            const after = new Set(await pageRowsInSpace(strapi, documentId));
+            if (before.some((id) => !after.has(id))) throw spaceDiscardError();
+            return result;
+          }
         }
-        await lockWikiStructure(strapi);
         if (await spaceHasPages(strapi, documentId)) throw spaceNotEmptyError();
         return next();
       });

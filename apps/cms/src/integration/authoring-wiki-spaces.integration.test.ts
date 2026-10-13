@@ -197,6 +197,38 @@ describe.each(testEngines())("authoring wiki spaces on %s", (engine) => {
     expect(rows.filter((row) => row.publishedAt != null)).toHaveLength(1);
   });
 
+  it("the admin panel's discard of a space refuses to take an unpublished page out of it (Codex review)", async () => {
+    const panel = await contentManager(t);
+    const space = await seedSpace(t);
+    const draftOnly = await seedPage(t, { space: space.documentId }, "draft");
+    await t.strapi.documents(WIKI_SPACE).update({
+      documentId: space.documentId,
+      data: { description: "a draft change" },
+    });
+    const refused = await panel.discard(WIKI_SPACE, space.documentId);
+    expect(refused.status).toBe(400);
+    expect(refused.text).toContain("take its unpublished pages out of the space");
+    const pageRows = (await t.strapi.db.query(WIKI_PAGE).findMany({
+      where: { documentId: draftOnly.documentId },
+      populate: { space: { select: ["documentId"] } },
+    })) as Row[];
+    expect(
+      pageRows.map((row) => (row.space as { documentId?: string } | null)?.documentId),
+    ).toEqual([space.documentId]);
+    // With only published pages the discard keeps every link and passes.
+    const other = await seedSpace(t);
+    const published = await seedPage(t, { space: other.documentId });
+    await t.strapi.documents(WIKI_SPACE).update({
+      documentId: other.documentId,
+      data: { description: "a draft change" },
+    });
+    const ok = await panel.discard(WIKI_SPACE, other.documentId);
+    expect(ok.status, ok.text).toBe(200);
+    for (const row of await rowsOf(t, WIKI_PAGE, published.documentId)) {
+      expect((row.space as { documentId?: string } | null)?.documentId).toBe(other.documentId);
+    }
+  });
+
   it("the +52 wiki grants: an older image's prune and the roll-forward's sync, then no drift", async () => {
     const PERMISSION = "plugin::users-permissions.permission";
     const wikiActions = (await t.strapi.db.query(PERMISSION).findMany({

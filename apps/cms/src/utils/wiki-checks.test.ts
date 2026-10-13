@@ -327,13 +327,28 @@ describe("createWikiChecks", () => {
       expect(details, action).toEqual({ keys: ["_form"], codes: { _form: "spaceNotEmpty" } });
     }
     expect(events).not.toContain("action");
-    // The published row exists: a discard rebuilds the draft, no lock, no refusal.
+    // The published row exists: a discard rebuilds the draft under the lock;
+    // it passes while every page row keeps its space link.
     events.length = 0;
     await checks({ uid: SPACE, action: "discardDraft", params: { documentId: "s1" } }, async () => {
       events.push("action");
       return null;
     });
-    expect(events).toEqual(["action"]);
+    expect(events).toEqual(["lock", "action"]);
+  });
+
+  it("refuses a space discard that takes a draft-only page out of the space (Codex review)", async () => {
+    const state = world();
+    const checks = createWikiChecks(fakeHost(state));
+    // Strapi 5.57 rebuilds the space's draft row and re-links only pages
+    // with a published version: the draft-only page c (row 5) loses its link.
+    const details = await refusal(
+      checks({ uid: SPACE, action: "discardDraft", params: { documentId: "s1" } }, async () => {
+        state.space = state.space.filter((link) => link.page !== 5);
+        return null;
+      }),
+    );
+    expect(details).toEqual({ keys: ["_form"], codes: { _form: "spaceNotEmpty" } });
   });
 
   it("lets an empty space go, under the lock", async () => {

@@ -438,4 +438,43 @@ describe.each(testEngines())("authoring wiki drafts on %s", (engine) => {
       });
     }
   });
+  it("KNOWN (Strapi 5.57): a discard of a page drops the parent link of its draft-only subpages; they keep their space and author", async () => {
+    // Strapi rebuilds the discarded page's draft row and re-links only the
+    // subpages with a published version. The subpage loses its place in the
+    // tree (an edge removed: never a loop) but stays in its space and
+    // editable by its author, who sets the parent again. A space discard
+    // that would take pages out of the space is refused instead
+    // (wiki-checks.ts, authoring-wiki-spaces).
+    const parent = await wiki.createPage("department_head", {
+      title: "IT Known Parent",
+      space: open.documentId,
+    });
+    const child = await wiki.createDraft("team_lead", {
+      title: "IT Known Child",
+      space: open.documentId,
+      parent: parent.body.data.documentId,
+    });
+    expect(child.status, child.text).toBe(201);
+    const saved = await wiki.saveDraft(
+      "department_head",
+      parent.body.data.documentId,
+      { title: "IT Known Parent v2" },
+      parent.body.data.version,
+    );
+    const discarded = await wiki.action(
+      "department_head",
+      parent.body.data.documentId,
+      "discard-draft",
+      saved.body.data.version,
+    );
+    expect(discarded.status, discarded.text).toBe(200);
+    expect(await parentsOf(t, child.body.data.documentId)).toEqual([null]);
+    const form = await wiki.editable<{ space: { documentId: string } }>(
+      "team_lead",
+      "wiki-pages",
+      child.body.data.documentId,
+    );
+    expect(form.status).toBe(200);
+    expect(form.body.data.space.documentId).toBe(open.documentId);
+  });
 });
