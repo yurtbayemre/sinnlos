@@ -18,7 +18,14 @@
  * Role keys and role lists are typed by the vocabulary in bootstrap/roles.ts
  * (B02), so a misspelt role fails `tsc` instead of a boot warning.
  */
-import { ADMIN, AUTHENTICATED, STAFF_ROLES, type MatrixRoleType } from "./roles";
+import {
+  ADMIN,
+  AUTHENTICATED,
+  DEPARTMENT_AUTHOR_ROLES,
+  MODERATORS,
+  STAFF_ROLES,
+  type MatrixRoleType,
+} from "./roles";
 
 /**
  * Intranet content types. We grant explicit permissions on each
@@ -54,6 +61,8 @@ export type CrudAction = "find" | "findOne" | "create" | "update" | "delete";
 
 const READ_ACTIONS: CrudAction[] = ["find", "findOne"];
 const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delete"];
+/** A department author's grants on the department-authored types (no delete). */
+const DEPARTMENT_AUTHOR_WRITES: CrudAction[] = ["find", "findOne", "create", "update"];
 
 /**
  * Permission matrix per role. Reads are granted broadly; writes are
@@ -67,7 +76,13 @@ const ALL_ACTIONS: CrudAction[] = ["find", "findOne", "create", "update", "delet
  * manage; the `can-edit-department`, `can-edit-team` and
  * `can-edit-wiki` policies still scope those updates to their own
  * department/team/authored pages, and to the fields in
- * utils/write-allowlist.ts (FX07).
+ * utils/write-allowlist.ts (FX07). Since batch 15 `department_head` also
+ * creates and updates announcements, events and documents, which
+ * `global::can-author` scopes to the head's own department (§N).
+ *
+ * On announcement, event, quick-link, document and poll the moderators'
+ * create and update no longer bypass anything: global::can-author holds
+ * them to the allowlist's `moderator` rule (FX07, batch 15).
  *
  * `member` can update wiki pages they authored (gated by
  * `can-edit-wiki`, which also keeps them to pages in spaces they can
@@ -150,12 +165,17 @@ export const PERMISSION_MATRIX: Record<
   },
   department_head: {
     "api::acknowledgement.acknowledgement": ["find", "findOne", "create"],
-    "api::announcement.announcement": READ_ACTIONS,
+    // Department authors (decision 06 amendment 1, §N): create and update
+    // their own department's announcements, events and documents. The
+    // write gate (global::can-author) admits the role only with a
+    // user.department and only on rows that department owns and targets;
+    // no delete (is-admin-or-editor stays on it).
+    "api::announcement.announcement": DEPARTMENT_AUTHOR_WRITES,
     "api::classified.classified": ALL_ACTIONS,
     "api::comment.comment": [...READ_ACTIONS, "create", "delete"],
     "api::department.department": [...READ_ACTIONS, "update"],
-    "api::document.document": READ_ACTIONS,
-    "api::event.event": READ_ACTIONS,
+    "api::document.document": DEPARTMENT_AUTHOR_WRITES,
+    "api::event.event": DEPARTMENT_AUTHOR_WRITES,
     "api::event-rsvp.event-rsvp": [...READ_ACTIONS, "create", "update"],
     "api::kudos.kudos": ["find", "findOne", "create"],
     "api::notification.notification": [...READ_ACTIONS, "delete"],
@@ -320,7 +340,37 @@ export const PERMISSION_MATRIX: Record<
  * Each entry lists the roles that may call the action. `*` = every role
  * in PERMISSION_MATRIX (including `authenticated`).
  */
+/**
+ * The v2 authoring actions (decision 06 §B3, §B4; batch 15 lane 15A), on
+ * the custom routes of api/<type>/routes/00-authoring.ts: publish,
+ * unpublish, discardDraft, authoringList and editable on the draft &
+ * publish types, authoringList and editable on poll. global::can-author
+ * decides the class and the row on each request. Moderators on all five
+ * types; department authors (DEPARTMENT_AUTHOR_ROLES) on announcement,
+ * event and document. Never guest or `authenticated`
+ * (routes.matrix.test.ts pins both).
+ */
+const AUTHORING_ACTIONS = ["publish", "unpublish", "discardDraft", "authoringList", "editable"];
+const POLL_AUTHORING_ACTIONS = ["authoringList", "editable"];
+const DEPARTMENT_AUTHORS: readonly MatrixRoleType[] = [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES];
+
+const authoringGrants = (
+  uid: string,
+  actions: readonly string[],
+  roles: readonly MatrixRoleType[],
+): Record<string, readonly MatrixRoleType[]> =>
+  Object.fromEntries(actions.map((action) => [`${uid}.${action}`, roles]));
+
+export const AUTHORING_ACTION_GRANTS: Readonly<Record<string, readonly MatrixRoleType[]>> = {
+  ...authoringGrants("api::announcement.announcement", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
+  ...authoringGrants("api::event.event", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
+  ...authoringGrants("api::document.document", AUTHORING_ACTIONS, DEPARTMENT_AUTHORS),
+  ...authoringGrants("api::quick-link.quick-link", AUTHORING_ACTIONS, MODERATORS),
+  ...authoringGrants("api::poll.poll", POLL_AUTHORING_ACTIONS, MODERATORS),
+};
+
 export const CUSTOM_ACTION_GRANTS: Record<string, readonly MatrixRoleType[] | "*"> = {
+  ...AUTHORING_ACTION_GRANTS,
   "api::event.event.ics": "*",
   // The RSVP summary for the events list (FX21): exactly the roles that
   // hold event-rsvp find in the matrix above. Never guest: guests read the

@@ -7,7 +7,7 @@ import {
   REVOKED_PERMISSIONS,
   computeDesiredGrants,
 } from "./bootstrap/permission-matrix";
-import { ADMIN, MODERATORS } from "./bootstrap/roles";
+import { ADMIN, DEPARTMENT_AUTHOR_ROLES, MODERATORS } from "./bootstrap/roles";
 import { knownActions, unknownActions } from "./bootstrap/sync-permissions";
 import {
   cmsPackageDir,
@@ -15,7 +15,15 @@ import {
   strapiPackageDir,
 } from "./test/sqlite-engine.test.helper";
 import { RESTRICTED_RELATION_TARGETS, isRestrictedRelation } from "./utils/restricted-relations";
-import { WRITE_ALLOWLIST, isWriteBypassRole, type WriteAllowlist } from "./utils/write-allowlist";
+import { AUTHORED_UIDS, DEPARTMENT_AUTHORED_UIDS } from "./utils/authoring-uids";
+import {
+  DEPARTMENT_AUTHOR_CLASS,
+  MODERATOR_CLASS,
+  WRITE_ALLOWLIST,
+  isWriteBypassRole,
+  writeClassesFor,
+  type WriteAllowlist,
+} from "./utils/write-allowlist";
 
 /**
  * Route → policy golden matrix and grant cross-check (roadmap S01).
@@ -260,6 +268,22 @@ function splitAction(action: string): [string, string] {
 // ---------------------------------------------------------------------------
 
 const ADMIN_OR_EDITOR = ["global::is-admin-or-editor"];
+/** The v2 write gate on a core create/update (batch 15): the route's uid. */
+const canAuthor = (uid: string) => [{ name: "global::can-author", config: { uid } }];
+/** The v2 write gate on a custom authoring action: the route's uid and intent. */
+const canAuthorAction = (uid: string, intent: string) => [
+  { name: "global::can-author", config: { uid, intent } },
+];
+const ANNOUNCEMENT = "api::announcement.announcement";
+const EVENT = "api::event.event";
+const QUICK_LINK = "api::quick-link.quick-link";
+const DOCUMENT = "api::document.document";
+const POLL = "api::poll.poll";
+/** The custom routes of api/<type>/routes/00-authoring.ts, by intent. */
+const authoringRoutes = (uid: string, intents: readonly string[]) =>
+  Object.fromEntries(intents.map((intent) => [`${uid}.${intent}`, canAuthorAction(uid, intent)]));
+const DP_INTENTS = ["publish", "unpublish", "discardDraft", "authoringList", "editable"] as const;
+const POLL_INTENTS = ["authoringList", "editable"] as const;
 const wiki = (level: string) => [{ name: "global::wiki-visibility", config: { level } }];
 const training = (level: string) => [{ name: "global::training-visibility", config: { level } }];
 
@@ -272,9 +296,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::announcement.announcement.find": ["global::announcement-visibility"],
   "api::announcement.announcement.findOne": ["global::announcement-visibility"],
-  "api::announcement.announcement.create": ADMIN_OR_EDITOR,
-  "api::announcement.announcement.update": ADMIN_OR_EDITOR,
+  "api::announcement.announcement.create": canAuthor(ANNOUNCEMENT),
+  "api::announcement.announcement.update": canAuthor(ANNOUNCEMENT),
   "api::announcement.announcement.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(ANNOUNCEMENT, DP_INTENTS),
 
   "api::classified.classified.find": [],
   "api::classified.classified.findOne": [],
@@ -308,15 +333,17 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::document.document.find": ["global::document-visibility"],
   "api::document.document.findOne": ["global::document-visibility"],
-  "api::document.document.create": ADMIN_OR_EDITOR,
-  "api::document.document.update": ADMIN_OR_EDITOR,
+  "api::document.document.create": canAuthor(DOCUMENT),
+  "api::document.document.update": canAuthor(DOCUMENT),
   "api::document.document.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(DOCUMENT, DP_INTENTS),
 
   "api::event.event.find": ["global::published-only"],
   "api::event.event.findOne": ["global::published-only"],
-  "api::event.event.create": ADMIN_OR_EDITOR,
-  "api::event.event.update": ADMIN_OR_EDITOR,
+  "api::event.event.create": canAuthor(EVENT),
+  "api::event.event.update": canAuthor(EVENT),
   "api::event.event.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(EVENT, DP_INTENTS),
   "api::event.event.ics": [],
 
   "api::event-rsvp.event-rsvp.find": ["global::event-rsvp-own-rows"],
@@ -347,9 +374,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::poll.poll.find": ["global::poll-visibility"],
   "api::poll.poll.findOne": ["global::poll-visibility"],
-  "api::poll.poll.create": ADMIN_OR_EDITOR,
-  "api::poll.poll.update": ADMIN_OR_EDITOR,
+  "api::poll.poll.create": canAuthor(POLL),
+  "api::poll.poll.update": canAuthor(POLL),
   "api::poll.poll.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(POLL, POLL_INTENTS),
   // WD04: canSeePoll per poll in the controller, like the single results.
   "api::poll.poll.batchResults": [],
 
@@ -361,9 +389,10 @@ const GOLDEN: Record<string, PolicySpec[]> = {
 
   "api::quick-link.quick-link.find": ["global::quick-link-visibility"],
   "api::quick-link.quick-link.findOne": ["global::quick-link-visibility"],
-  "api::quick-link.quick-link.create": ADMIN_OR_EDITOR,
-  "api::quick-link.quick-link.update": ADMIN_OR_EDITOR,
+  "api::quick-link.quick-link.create": canAuthor(QUICK_LINK),
+  "api::quick-link.quick-link.update": canAuthor(QUICK_LINK),
   "api::quick-link.quick-link.delete": ADMIN_OR_EDITOR,
+  ...authoringRoutes(QUICK_LINK, DP_INTENTS),
 
   "api::reaction.reaction.find": ["global::comment-target-visibility"],
   "api::reaction.reaction.findOne": ["global::comment-target-visibility"],
@@ -519,13 +548,77 @@ const KNOWN_RELATION_LEAKS = new Set<string>([]);
 // through a named relation check.
 // ---------------------------------------------------------------------------
 
-/** The policy that calls enforceWriteAllowlist() for each allowlist entry. */
-const WRITE_ALLOWLIST_ENFORCERS: Record<string, string> = {
-  "api::department.department.update": "global::can-edit-department",
-  "api::team.team.update": "global::can-edit-team",
-  "api::wiki-page.wiki-page.create": "global::can-edit-wiki",
-  "api::wiki-page.wiki-page.update": "global::can-edit-wiki",
+/**
+ * The policy that calls enforceWriteAllowlist() for each allowlist entry,
+ * with the role classes it enforces (batch 15 plan S10: action → { policy,
+ * classes }). The classes must be exactly the allowlist's for that
+ * (uid, action).
+ */
+const WRITE_ALLOWLIST_ENFORCERS: Record<string, { policy: string; classes: readonly string[] }> = {
+  "api::department.department.update": { policy: "global::can-edit-department", classes: ["head"] },
+  "api::team.team.update": { policy: "global::can-edit-team", classes: ["departmentHead", "lead"] },
+  "api::wiki-page.wiki-page.create": { policy: "global::can-edit-wiki", classes: ["author"] },
+  "api::wiki-page.wiki-page.update": {
+    policy: "global::can-edit-wiki",
+    classes: ["author", "departmentHead", "teamLead"],
+  },
+  "api::announcement.announcement.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::announcement.announcement.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::event.event.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::event.event.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::document.document.create": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::document.document.update": {
+    policy: "global::can-author",
+    classes: ["departmentAuthor", "moderator"],
+  },
+  "api::quick-link.quick-link.create": { policy: "global::can-author", classes: ["moderator"] },
+  "api::quick-link.quick-link.update": { policy: "global::can-author", classes: ["moderator"] },
+  "api::poll.poll.create": { policy: "global::can-author", classes: ["moderator"] },
+  "api::poll.poll.update": { policy: "global::can-author", classes: ["moderator"] },
 };
+
+/**
+ * Authored types (decision 06 §A) whose moderator payloads are still open:
+ * admin_role/editor bypass their FX07 gate or write them through
+ * is-admin-or-editor. Batch 16 rebuilds the wiki gates (wiki-page,
+ * wiki-space, wiki-revision), batch 17 the department and team gates; the
+ * set shrinks to empty. Every other authored type with a moderator
+ * create/update route enforces the `moderator` class (S01 v2 rule 1).
+ */
+const KNOWN_OPEN_PAYLOADS = new Set<string>([
+  "api::wiki-page.wiki-page",
+  "api::wiki-space.wiki-space",
+  "api::wiki-revision.wiki-revision",
+  "api::department.department",
+  "api::team.team",
+]);
+
+/** The authored types of decision 06 §A (phase 1 through 3). */
+const AUTHORED_TYPES_V2 = [
+  ...AUTHORED_UIDS,
+  "api::wiki-space.wiki-space",
+  "api::wiki-page.wiki-page",
+  "api::wiki-revision.wiki-revision",
+  "api::course.course",
+  "api::lesson.lesson",
+  "api::department.department",
+  "api::team.team",
+];
 
 describe("route → policy matrix (S01)", async () => {
   const { routes, controllerMethods, schemas } = await load();
@@ -690,6 +783,15 @@ describe("route → policy matrix (S01)", async () => {
         }
       }
       expect(checked).toContain("/event-rsvps/summary");
+      expect(checked).toEqual(
+        expect.arrayContaining([
+          "/announcements/authoring",
+          "/events/authoring",
+          "/quick-links/authoring",
+          "/documents/authoring",
+          "/polls/authoring",
+        ]),
+      );
       expect(misordered).toEqual([]);
     });
 
@@ -849,9 +951,9 @@ describe("route → policy matrix (S01)", async () => {
     const enforcedBy = (action: string) =>
       policiesOf(action)
         .map(policyName)
-        .includes(WRITE_ALLOWLIST_ENFORCERS[action] ?? "");
+        .includes(WRITE_ALLOWLIST_ENFORCERS[action]?.policy ?? "");
 
-    it("every allowlist entry has a live route whose policy enforces it", () => {
+    it("every allowlist entry has a live route whose policy enforces it, for exactly its classes", () => {
       const entries = Object.entries(allowlist).flatMap(([uid, actions]) =>
         Object.keys(actions ?? {}).map((write) => `${uid}.${write}`),
       );
@@ -859,6 +961,10 @@ describe("route → policy matrix (S01)", async () => {
       for (const action of entries) {
         expect(routes.get(action)?.kind, action).toBe("core");
         expect(enforcedBy(action), action).toBe(true);
+        const [uid, write] = splitAction(action);
+        expect([...WRITE_ALLOWLIST_ENFORCERS[action].classes].sort(), action).toEqual(
+          writeClassesFor(uid, write as "create" | "update"),
+        );
       }
     });
 
@@ -893,10 +999,18 @@ describe("route → policy matrix (S01)", async () => {
       }
     });
 
+    // The FX07 gates pin status=published; global::can-author leaves the
+    // status to the authoring controller, which takes it explicitly per
+    // type, refuses every other query key and answers a fixed DTO (no
+    // populate on a write response; authoring-controller.test.ts), so its
+    // routes must be overridden by that controller.
     for (const action of draftWrites) {
-      it(`${action} publishes for [${restrictedHolders(action).join(", ")}] (status pinned)`, () => {
+      it(`${action} is enforced for [${restrictedHolders(action).join(", ")}] (status pinned or explicit)`, () => {
         expect(action in WRITE_ALLOWLIST_ENFORCERS, `${action} allowlist entry`).toBe(true);
         expect(enforcedBy(action), `${action} policy`).toBe(true);
+        if (WRITE_ALLOWLIST_ENFORCERS[action].policy === "global::can-author") {
+          expect(isOverridden(action), `${action} authoring controller`).toBe(true);
+        }
       });
     }
 
@@ -974,6 +1088,151 @@ describe("route → policy matrix (S01)", async () => {
         }
       });
     }
+  });
+
+  describe("v2 authoring (decision 06, batch 15)", () => {
+    const writes = ["create", "update"] as const;
+    const NEVER = ["guest", "authenticated"];
+
+    it("rule 1: every create/update a moderator holds on an authored type enforces the moderator class", () => {
+      const open: string[] = [];
+      for (const uid of AUTHORED_TYPES_V2) {
+        for (const write of writes) {
+          const action = `${uid}.${write}`;
+          if (!routes.has(action)) continue;
+          const moderators = (matrixGrants.get(action) ?? []).filter((role) =>
+            (MODERATORS as readonly string[]).includes(role),
+          );
+          if (moderators.length === 0) continue;
+          const enforcer = WRITE_ALLOWLIST_ENFORCERS[action];
+          const enforced =
+            enforcer !== undefined &&
+            enforcer.classes.includes(MODERATOR_CLASS) &&
+            policiesOf(action).map(policyName).includes(enforcer.policy);
+          if (KNOWN_OPEN_PAYLOADS.has(uid)) {
+            if (!enforced) open.push(uid);
+          } else {
+            expect(enforced, action).toBe(true);
+          }
+        }
+      }
+      // KNOWN_OPEN_PAYLOADS has no stale entry: each still has an open write.
+      expect([...new Set(open)].sort()).toEqual([...KNOWN_OPEN_PAYLOADS].sort());
+    });
+
+    it("the bypass ends on the five phase-1 types: no route of theirs is is-admin-or-editor but delete", () => {
+      for (const uid of AUTHORED_UIDS) {
+        for (const write of writes) {
+          expect(policiesOf(`${uid}.${write}`).map(policyName), `${uid}.${write}`).toEqual([
+            "global::can-author",
+          ]);
+        }
+        expect(policiesOf(`${uid}.delete`).map(policyName), `${uid}.delete`).toEqual([
+          "global::is-admin-or-editor",
+        ]);
+        // delete is the authoring controller's (If-Match), not the core's.
+        expect(isOverridden(`${uid}.delete`), `${uid}.delete`).toBe(true);
+      }
+    });
+
+    it("rule 2: every authoring custom action goes to exactly its roles, never guest or authenticated", () => {
+      const expected: Record<string, readonly string[]> = {};
+      for (const uid of AUTHORED_UIDS) {
+        const intents = uid === POLL ? POLL_INTENTS : DP_INTENTS;
+        const roles = (DEPARTMENT_AUTHORED_UIDS as readonly string[]).includes(uid)
+          ? [...MODERATORS, ...DEPARTMENT_AUTHOR_ROLES]
+          : [...MODERATORS];
+        for (const intent of intents) expected[`${uid}.${intent}`] = roles;
+      }
+      const authoringCustom = [...routes.values()].filter(
+        (entry) =>
+          entry.kind === "custom" &&
+          (entry.config.policies ?? []).some((spec) => policyName(spec) === "global::can-author"),
+      );
+      expect(authoringCustom.map((entry) => entry.action).sort()).toEqual(
+        Object.keys(expected).sort(),
+      );
+      for (const [action, roles] of Object.entries(expected)) {
+        const grant = CUSTOM_ACTION_GRANTS[action];
+        expect(grant, action).not.toBe("*");
+        expect([...(grant as readonly string[])].sort(), action).toEqual([...roles].sort());
+        for (const role of NEVER)
+          expect(effectiveGrants(role).has(action), `${role} ${action}`).toBe(false);
+      }
+    });
+
+    it("every global::can-author route carries its own uid (and a custom route its intent)", () => {
+      for (const entry of routes.values()) {
+        for (const spec of entry.config.policies ?? []) {
+          if (policyName(spec) !== "global::can-author") continue;
+          const config = typeof spec === "string" ? undefined : spec.config;
+          const [uid, action] = splitAction(entry.action);
+          expect(config?.uid, entry.action).toBe(uid);
+          if (entry.kind === "custom") expect(config?.intent, entry.action).toBe(action);
+          else expect(config?.intent, entry.action).toBeUndefined();
+        }
+      }
+    });
+
+    it("rule 5: no role.find for editor or department_head", () => {
+      for (const role of ["editor", "department_head"]) {
+        expect(effectiveGrants(role).has("plugin::users-permissions.role.find"), role).toBe(false);
+      }
+    });
+
+    it("rule 7: department_head holds exactly the department-author grants", () => {
+      // Actions every role holds ("*": the event's ICS download, poll results) are not authoring.
+      const grants = new Set(
+        [...effectiveGrants("department_head")].filter(
+          (action) => CUSTOM_ACTION_GRANTS[action] !== "*",
+        ),
+      );
+      for (const uid of DEPARTMENT_AUTHORED_UIDS) {
+        const held = [...grants]
+          .filter((action) => action.startsWith(`${uid}.`))
+          .map((action) => splitAction(action)[1])
+          .sort();
+        expect(held, uid).toEqual(
+          [
+            "authoringList",
+            "create",
+            "discardDraft",
+            "editable",
+            "find",
+            "findOne",
+            "publish",
+            "unpublish",
+            "update",
+          ].sort(),
+        );
+      }
+      for (const uid of [
+        QUICK_LINK,
+        POLL,
+        "api::wiki-space.wiki-space",
+        "api::course.course",
+        "api::lesson.lesson",
+      ]) {
+        const authoring = [...grants].filter(
+          (action) =>
+            action.startsWith(`${uid}.`) && !["find", "findOne"].includes(splitAction(action)[1]),
+        );
+        expect(authoring, uid).toEqual([]);
+      }
+      // The department-author class is admitted by global::can-author only.
+      for (const [action, enforcer] of Object.entries(WRITE_ALLOWLIST_ENFORCERS)) {
+        if (enforcer.classes.includes(DEPARTMENT_AUTHOR_CLASS)) {
+          expect(enforcer.policy, action).toBe("global::can-author");
+        }
+      }
+      const withClass = Object.entries(WRITE_ALLOWLIST_ENFORCERS)
+        .filter(([, enforcer]) => enforcer.classes.includes(DEPARTMENT_AUTHOR_CLASS))
+        .map(([action]) => action)
+        .sort();
+      expect(withClass).toEqual(
+        DEPARTMENT_AUTHORED_UIDS.flatMap((uid) => [`${uid}.create`, `${uid}.update`]).sort(),
+      );
+    });
   });
 
   describe("fixed holes (regressions)", () => {
