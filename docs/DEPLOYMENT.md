@@ -10678,7 +10678,10 @@ stops at the first error.
 The steps are four shell functions, defined once by the setup block and
 then called one by one in the **same** shell (on the owner's host as
 `bigemo`). Each prints `OK:` or `STOP:` and returns non-zero on a stop;
-none uses `exit`, so a pasted block never closes your shell. Each step
+none uses `exit`, and the setup turns errexit and tracing off (`set +ex`),
+so a pasted block never closes your shell and never prints the secret. A
+dump counts as readable only when the whole archive decodes
+(`pg_restore --file=/dev/null`), not just its table of contents. Each step
 clears its own result and the results of the steps after it before it
 does anything, and a result belongs to one **attempt** (one call of
 `restore_prepare`), so a retried or failed step can never leave an old
@@ -10687,12 +10690,14 @@ does anything, and a result belongs to one **attempt** (one call of
 - `restore_prepare <dump>` starts a new attempt: it reads the dump (at
   least one table), stops web and cms, and writes a **new** copy of the
   current database under a name that has not existed before
-  (`infra/backups/before-restore-<attempt>.dump`, checked with
-  `pg_restore --list`); it drops nothing;
+  (`infra/backups/before-restore-<attempt>.dump`, checked the same
+  way); it drops nothing;
 - `restore_apply` runs only after `restore_prepare` passed for this
   attempt: it reads the dump again (the table count it compares with is
-  the one of the dump it restores), makes sure web and cms are stopped,
-  drops and recreates the database, restores in one transaction, and
+  the one of the dump it restores), checks that the attempt's copy is
+  still there and readable, makes sure web and cms are stopped, drops
+  (`--if-exists`, so a retry after a failed `createdb` works) and
+  recreates the database, restores in one transaction, and
   checks that the database holds the dump's tables and at least one user
   (both check queries must succeed); a failed `restore_apply` may be run
   again within the attempt;
@@ -10701,9 +10706,12 @@ does anything, and a result belongs to one **attempt** (one call of
   shell (Compose would prefer it to `infra/.env`), writes a fresh value,
   and checks, by checksum and without printing it, that `infra/.env` and
   the value Compose actually hands the cms (`compose config`) are the new
-  one, with `infra/.env` mode 600 and exactly one `JWT_SECRET=` line;
+  one, with `infra/.env` mode 600 and exactly one `JWT_SECRET=` line; it
+  refuses to run while tracing (`set -x`) is on;
 - `start_apps` starts web and cms only when `restore_apply` and
-  `rotate_jwt` both passed for the same, current attempt, and ends the
+  `rotate_jwt` both passed for the same, current attempt and Compose
+  still hands the cms the rotated secret (no `JWT_SECRET` exported since),
+  and ends the
   attempt: another restore starts again with `restore_prepare`.
 
 **Setup** (defines the functions; changes nothing):
@@ -10712,12 +10720,19 @@ does anything, and a result belongs to one **attempt** (one call of
 cd /home/bigemo/git/sinnlos      # the owner's host; elsewhere your checkout, e.g. /opt/sinnlos
 COMPOSE=(docker compose -p infra -f infra/docker-compose.yml -f infra/docker-compose.traefik.yml)   # Caddy box: without the second -f
 umask 077
-RESTORE_ATTEMPT= RESTORE_READY= RESTORE_OK= ROTATED= RESTORE_DUMP= RESTORE_SAFETY=
+set +ex          # no errexit (a STOP must not close this shell), no tracing (rotate_jwt handles the secret)
+RESTORE_ATTEMPT= RESTORE_READY= RESTORE_OK= ROTATED= ROTATED_SUM= RESTORE_DUMP= RESTORE_SAFETY=
 
-_dump_tables() {  # the tables a dump holds; fails unless it is readable
+_dump_tables() {  # the tables a dump holds; fails unless the whole archive decodes
   local n
   n="$(set -o pipefail; "${COMPOSE[@]}" exec -T db pg_restore --list < "$1" | awk '$4 == "TABLE" && $5 != "DATA"' | wc -l)" || return 1
+  # --list reads only the table of contents; a dump cut off in its data still lists
+  "${COMPOSE[@]}" exec -T db pg_restore --file=/dev/null < "$1" || return 1
   printf '%s\n' "$n"
+}
+
+_effective_jwt_sum() {  # checksum of the JWT_SECRET Compose hands the cms; never prints it
+  (set -o pipefail; "${COMPOSE[@]}" config --format json | grep -o '"JWT_SECRET": *"[^"]*"' | sed 's/^"JWT_SECRET": *"//; s/"$//' | sha256sum)
 }
 
 restore_prepare() {
@@ -10748,10 +10763,14 @@ restore_apply() {
   if ! n="$(_dump_tables "$RESTORE_DUMP")" || [ "$n" -le 0 ]; then
     echo "STOP: $RESTORE_DUMP is no longer readable; nothing dropped"; return 1
   fi
+  if [ ! -s "$RESTORE_SAFETY" ] || ! _dump_tables "$RESTORE_SAFETY" > /dev/null; then
+    echo "STOP: the copy $RESTORE_SAFETY is gone or no longer readable; nothing dropped (start again with restore_prepare)"; return 1
+  fi
   if ! "${COMPOSE[@]}" stop web cms; then
     echo "STOP: web and cms did not stop; nothing dropped"; return 1
   fi
-  if ! "${COMPOSE[@]}" exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'; then
+  # --if-exists: a retry after a drop whose createdb failed still gets its database back
+  if ! "${COMPOSE[@]}" exec -T db sh -c 'dropdb -U "$POSTGRES_USER" --if-exists --force "$POSTGRES_DB" && createdb -U "$POSTGRES_USER" "$POSTGRES_DB"'; then
     echo "STOP: dropping or creating the database failed; the copy is $RESTORE_SAFETY"; return 1
   fi
   if ! "${COMPOSE[@]}" exec -T db sh -c 'pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --no-owner --exit-on-error --single-transaction' < "$RESTORE_DUMP"; then
@@ -10775,8 +10794,9 @@ SQL
 }
 
 rotate_jwt() {
-  ROTATED=
+  ROTATED= ROTATED_SUM=
   local target new new_sum file_sum effective_sum
+  case "$-" in *x*) echo "STOP: tracing (set -x) is on and would print the new secret: set +x, then rotate_jwt again"; return 1 ;; esac
   if [ "${1:-}" = --env-only ]; then
     target=env-only
   elif [ -n "$RESTORE_ATTEMPT" ] && [ "$RESTORE_OK" = "$RESTORE_ATTEMPT" ]; then
@@ -10799,12 +10819,12 @@ rotate_jwt() {
   fi
   new=
   file_sum="$(sed -n 's/^JWT_SECRET=//p' infra/.env | sha256sum)"
-  effective_sum="$(set -o pipefail; "${COMPOSE[@]}" config --format json | grep -o '"JWT_SECRET": *"[^"]*"' | sed 's/^"JWT_SECRET": *"//; s/"$//' | sha256sum)"
+  effective_sum="$(_effective_jwt_sum)"
   if [ "$(stat -c %a infra/.env)" != 600 ] || [ "$(grep -c '^JWT_SECRET=' infra/.env)" != 1 ] \
     || [ "$file_sum" != "$new_sum" ] || [ "$effective_sum" != "$new_sum" ]; then
     echo "STOP: the new JWT_SECRET is not the one the cms would get (infra/.env mode or lines, or a Compose override); do not start the apps"; return 1
   fi
-  ROTATED="$target"
+  ROTATED="$target" ROTATED_SUM="$new_sum"
   echo "OK: JWT_SECRET rotated: infra/.env 600 with one new JWT_SECRET line, and Compose hands the cms that value"
 }
 
@@ -10815,6 +10835,10 @@ start_apps() {
     fi
   elif [ -z "$RESTORE_ATTEMPT" ] || [ "$RESTORE_OK" != "$RESTORE_ATTEMPT" ] || [ "$ROTATED" != "$RESTORE_ATTEMPT" ]; then
     echo "STOP: web and cms not started (attempt ${RESTORE_ATTEMPT:-none}: restored ${RESTORE_OK:-no}, rotated ${ROTATED:-no})"; return 1
+  fi
+  # the secret the cms gets right now must still be the rotated one (no JWT_SECRET exported since)
+  if [ -n "${JWT_SECRET+set}" ] || [ -z "$ROTATED_SUM" ] || [ "$(_effective_jwt_sum)" != "$ROTATED_SUM" ]; then
+    echo "STOP: the cms would not get the rotated JWT_SECRET (unset JWT_SECRET in this shell, or rotate_jwt again); web and cms not started"; return 1
   fi
   RESTORE_READY=   # the attempt is used up: another restore starts with restore_prepare
   "${COMPOSE[@]}" up -d --no-build web cms
