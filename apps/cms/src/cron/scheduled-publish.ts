@@ -39,7 +39,26 @@ import {
  * SCHEDULE_BATCH per run (the next minute takes the rest). The selection
  * reads the due DRAFT rows (rule 2: the draft holds the schedule) through
  * the partial indexes, and each document's revision `r`, outside any
- * transaction. Then ONE transaction per document:
+ * transaction.
+ *
+ * DEPENDENCIES. A lesson needs its course published, a wiki page its parent
+ * (publish readiness). The publish selection passes over a draft whose
+ * course or parent is itself unpublished and due (it waits for that one),
+ * so it never fills the batch in front of the course or parent it waits
+ * for: those come later in the order when their own time is later, and
+ * would otherwise never be reached while enough children are due (50 child
+ * pages scheduled before their parent kept the parent out of every batch,
+ * and the children's retries ran out). Courses are walked before lessons,
+ * so a due course is published before the lesson pass selects. A child
+ * passed over is published the minute after its course or parent (one
+ * level of a chain per minute). Up to PUBLISH_MAX_PAGES pages of
+ * PUBLISH_PAGE rows are read until SCHEDULE_BATCH actionable drafts are
+ * found. A refusal at publish time whose course or parent became due after
+ * the selection is a wait, not a failure: it costs no retry attempt (the
+ * course or parent runs on its own and either publishes, or fails for good
+ * and loses its schedule, which ends the wait).
+ *
+ * Then ONE transaction per document:
  *   1. lock the document (utils/document-lock.ts lockDocument) and re-read:
  *      the revision must still be `r` and the draft still due; otherwise
  *      skip (a save, a manual action or another runner came first, also in
@@ -95,12 +114,13 @@ import {
  *     keeps its deadline, above) raw, advances the revision and writes
  *     `scheduleFailed`;
  *   - transient (lock or serialisation failures, a lost connection,
- *     SQLITE_BUSY, anything unknown), and a readiness refusal whose course
- *     or parent is itself due this minute (a child page sorted before its
- *     parent): the schedule stays and the next minute retries; the
- *     SCHEDULE_TRANSIENT_ATTEMPTS-th failure for the same (uid, documentId,
- *     r, pass) in this process is recorded as `retryExhausted`. A restart
- *     forgets the count (only adds retries).
+ *     SQLITE_BUSY, anything unknown): the schedule stays and the next
+ *     minute retries; the SCHEDULE_TRANSIENT_ATTEMPTS-th failure for the
+ *     same (uid, documentId, r, pass) in this process is recorded as
+ *     `retryExhausted`. A restart forgets the count (only adds retries);
+ *   - a readiness refusal whose course or parent is itself unpublished and
+ *     due (DEPENDENCIES above): the schedule stays, the next minute tries
+ *     again, and no attempt is counted.
  * Each recorded failure logs `[scheduler] <uid> <documentId> failed: <code>`.
  * Details (in the audit row and the logs) name the error class, a driver
  * code and field names, never an error message: a database error's message
@@ -174,19 +194,107 @@ const isDocumentId = (value: unknown): value is string =>
 const UNPUBLISH_PAGE = 200;
 const UNPUBLISH_MAX_PAGES = 10;
 
-/** The due publishes: draft rows with publishAt passed, ordered and bounded (rule 4). */
+/** Rows per page of the publish selection of a type with dependencies, and pages per run. */
+const PUBLISH_PAGE = 200;
+const PUBLISH_MAX_PAGES = 10;
+
+/** The readiness targets of a type (lesson → course, wiki page → parent page). */
+const READINESS_TARGETS: Readonly<Record<string, { key: string; target: string }>> = {
+  [LESSON_UID]: { key: "course", target: COURSE_UID },
+  [WIKI_PAGE_UID]: { key: "parent", target: WIKI_PAGE_UID },
+};
+
+const linkedDocumentId = (row: Record<string, unknown>, key: string): string | null => {
+  const linked = row[key] as { documentId?: unknown } | null | undefined;
+  return linked && isDocumentId(linked.documentId) ? linked.documentId : null;
+};
+
+/**
+ * Of `targetIds` (documentIds of `targetUid`), those that wait for their own
+ * publish: no published row, and a draft whose publishAt has passed.
+ */
+async function dueUnpublishedTargets(
+  strapi: ScheduledPublishStrapi,
+  targetUid: string,
+  targetIds: readonly string[],
+  now: Date,
+): Promise<Set<string>> {
+  if (targetIds.length === 0) return new Set();
+  const query = strapi.db.query(targetUid);
+  const published = new Set(
+    (
+      await query.findMany({
+        where: { documentId: { $in: [...targetIds] }, publishedAt: { $notNull: true } },
+        select: ["documentId"],
+      })
+    ).map((row) => row.documentId),
+  );
+  const unpublished = targetIds.filter((id) => !published.has(id));
+  if (unpublished.length === 0) return new Set();
+  return new Set(
+    (
+      await query.findMany({
+        where: {
+          documentId: { $in: unpublished },
+          publishedAt: null,
+          publishAt: { $notNull: true, $lte: now },
+        },
+        select: ["documentId"],
+      })
+    )
+      .map((row) => row.documentId)
+      .filter(isDocumentId),
+  );
+}
+
+/**
+ * The due publishes (rule 4): draft rows with publishAt passed, ordered and
+ * bounded. For a type with a readiness target, a draft whose course or
+ * parent is unpublished and due is passed over and never fills the page
+ * (see DEPENDENCIES in the module comment).
+ */
 async function duePublishes(
   strapi: ScheduledPublishStrapi,
   uid: string,
   now: Date,
 ): Promise<string[]> {
-  const rows = await strapi.db.query(uid).findMany({
-    where: { publishedAt: null, publishAt: { $notNull: true, $lte: now } },
-    select: ["id", "documentId", "publishAt"],
-    orderBy: [{ publishAt: "asc" }, { id: "asc" }],
-    limit: SCHEDULE_BATCH,
-  });
-  return rows.map((row) => row.documentId).filter(isDocumentId);
+  const query = strapi.db.query(uid);
+  const where = { publishedAt: null, publishAt: { $notNull: true, $lte: now } };
+  const orderBy = [{ publishAt: "asc" }, { id: "asc" }];
+  const readiness = READINESS_TARGETS[uid];
+  if (!readiness) {
+    const rows = await query.findMany({
+      where,
+      select: ["id", "documentId", "publishAt"],
+      orderBy,
+      limit: SCHEDULE_BATCH,
+    });
+    return rows.map((row) => row.documentId).filter(isDocumentId);
+  }
+  const actionable: string[] = [];
+  for (let page = 0; page < PUBLISH_MAX_PAGES && actionable.length < SCHEDULE_BATCH; page += 1) {
+    const rows = await query.findMany({
+      where,
+      select: ["id", "documentId", "publishAt"],
+      populate: { [readiness.key]: { select: ["documentId"] } },
+      orderBy,
+      offset: page * PUBLISH_PAGE,
+      limit: PUBLISH_PAGE,
+    });
+    const targets = [
+      ...new Set(rows.map((row) => linkedDocumentId(row, readiness.key)).filter(isDocumentId)),
+    ];
+    const waiting = await dueUnpublishedTargets(strapi, readiness.target, targets, now);
+    for (const row of rows) {
+      if (!isDocumentId(row.documentId)) continue;
+      const target = linkedDocumentId(row, readiness.key);
+      if (target !== null && waiting.has(target)) continue;
+      actionable.push(row.documentId);
+      if (actionable.length >= SCHEDULE_BATCH) break;
+    }
+    if (rows.length < PUBLISH_PAGE) break;
+  }
+  return actionable;
 }
 
 /**
@@ -409,17 +517,11 @@ export async function recordScheduleFailure(
   });
 }
 
-/** The readiness targets of a type (lesson → course, wiki page → parent page). */
-const READINESS_TARGETS: Readonly<Record<string, { key: string; target: string }>> = {
-  [LESSON_UID]: { key: "course", target: COURSE_UID },
-  [WIKI_PAGE_UID]: { key: "parent", target: WIKI_PAGE_UID },
-};
-
 /**
- * Whether a readiness refusal names a target that is itself due in this
- * minute (a child page sorted before its parent, a lesson beyond the
- * course's batch): then it is retried like a transient failure instead of
- * dropping the schedule.
+ * Whether a readiness refusal names a target that is itself unpublished and
+ * due (it became due after the selection, or lies beyond the course's
+ * batch): then the draft waits for it, without a counted attempt, instead
+ * of dropping the schedule.
  */
 async function blockedByDueTarget(
   strapi: ScheduledPublishStrapi,
@@ -435,13 +537,9 @@ async function blockedByDueTarget(
     where: { documentId, publishedAt: null },
     populate: { [readiness.key]: { select: ["documentId"] } },
   });
-  const linked = draft?.[readiness.key] as { documentId?: unknown } | null | undefined;
-  if (!linked || !isDocumentId(linked.documentId)) return false;
-  const target = await strapi.db.query(readiness.target).findOne({
-    where: { documentId: linked.documentId, publishedAt: null },
-    select: ["id", "publishAt"],
-  });
-  return target !== null && isDue(target.publishAt, now);
+  const linked = draft ? linkedDocumentId(draft, readiness.key) : null;
+  if (linked === null) return false;
+  return (await dueUnpublishedTargets(strapi, readiness.target, [linked], now)).has(linked);
 }
 
 const clockOf = (time: Date | ScheduleClock): ScheduleClock =>
@@ -479,11 +577,19 @@ export async function runScheduledDocument(
     const failure = classifyScheduleFailure(error);
     // A withdrawal already deferred once goes straight back into its backoff.
     const deferred = pass === "unpublish" && attempts.withdrawalFailures(uid, documentId) > 0;
-    const retry =
-      !deferred &&
-      (failure.kind === "transient" ||
-        (pass === "publish" &&
-          (await blockedByDueTarget(strapi, uid, documentId, error, clock()))));
+    // A course or parent that is due itself: wait for it, no attempt counted.
+    if (
+      pass === "publish" &&
+      failure.kind === "permanent" &&
+      (await blockedByDueTarget(strapi, uid, documentId, error, clock()))
+    ) {
+      strapi.log.warn(
+        `${SCHEDULER_LOG} ${key} publish waits for its course or parent, which is due itself`,
+      );
+      result.retrying.push(key);
+      return;
+    }
+    const retry = !deferred && failure.kind === "transient";
     let code: ScheduleErrorCode;
     if (retry) {
       if (!attempts.fail(uid, documentId, r, pass)) {

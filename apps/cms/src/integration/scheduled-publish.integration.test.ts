@@ -21,6 +21,9 @@ const ANNOUNCEMENT = "api::announcement.announcement";
 const QUICK_LINK = "api::quick-link.quick-link";
 const COURSE = "api::course.course";
 const LESSON = "api::lesson.lesson";
+const WIKI_PAGE = "api::wiki-page.wiki-page";
+/** SCHEDULE_BATCH of utils/schedule.ts: due drafts per type and run. */
+const SCHEDULE_BATCH = 50;
 const NOTIFICATION = "api::notification.notification";
 
 interface RunResult {
@@ -308,6 +311,49 @@ describe.each(testEngines())("scheduled publishing on %s", (engine) => {
       (await rows(LESSON, lesson.documentId)).filter((row) => row.publishedAt != null),
     ).toEqual([]);
   });
+
+  it("more due child pages than a batch, scheduled before their parent, do not starve it (Codex review)", async () => {
+    // Before: the children filled every batch, readiness refused each (the
+    // parent unpublished), the parent never ran, and the fifth retry cleared
+    // every child's schedule (retryExhausted).
+    const base = Date.now();
+    const slug = (name: string) => `it-sched-${name}-${base}`;
+    const parent = await t.strapi.documents(WIKI_PAGE).create({
+      data: { title: "Scheduled parent", slug: slug("parent"), publishAt: ago(1_000) },
+    });
+    const children: string[] = [];
+    for (let index = 0; index <= SCHEDULE_BATCH; index += 1) {
+      const child = await t.strapi.documents(WIKI_PAGE).create({
+        data: {
+          title: `Scheduled child ${index}`,
+          slug: slug(`child-${index}`),
+          parent: parent.documentId,
+          publishAt: ago(120_000),
+        },
+      });
+      children.push(child.documentId);
+    }
+    const attempts = new (t.requireBuilt<Schedule>("src/utils/schedule").TransientAttempts)();
+    const now = new Date();
+    const first = await scheduler.runScheduledPublishing(t.strapi, now, attempts);
+    expect(first.published).toContain(key(WIKI_PAGE, parent.documentId));
+    expect(first.retrying).toEqual([]);
+    expect(first.failed).toEqual([]);
+    for (let minute = 0; minute < 3; minute += 1) {
+      await scheduler.runScheduledPublishing(t.strapi, now, attempts);
+    }
+    for (const documentId of children) {
+      const all = await rows(WIKI_PAGE, documentId);
+      expect(
+        all.filter((row) => row.publishedAt != null),
+        documentId,
+      ).toHaveLength(1);
+      expect(await draftOf(WIKI_PAGE, documentId)).toMatchObject({
+        publishAt: null,
+        scheduleError: null,
+      });
+    }
+  }, 300_000);
 
   it("the expired window: publishAt and expiresAt both passed during a stop: nothing published, nobody notified", async () => {
     const documentId = await scheduledAnnouncement("Expired while down", {

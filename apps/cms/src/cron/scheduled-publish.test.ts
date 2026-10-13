@@ -19,6 +19,7 @@ import {
 import { createPublishReadiness, type PublishReadinessHost } from "../utils/publish-readiness";
 import {
   SCHEDULE_BATCH,
+  SCHEDULE_TRANSIENT_ATTEMPTS,
   TransientAttempts,
   createScheduleClear,
   type ScheduleClearHost,
@@ -387,17 +388,95 @@ describe("withdrawals and pending updates (review findings)", () => {
     expect(result.unpublished).toEqual([`${QUICK_LINK} ${link.documentId}`]);
   }, 60_000);
 
-  it("a child page due with its parent is retried, not failed, when it sorts first", async () => {
+  it("a child page due with its parent waits for it: passed over, then published the next minute", async () => {
     const WIKI = "api::wiki-page.wiki-page";
     const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: PAST } });
     const child = await docs(WIKI).create({
       data: { title: "Child", parent: parent.documentId, publishAt: EARLIER },
     });
     const first = await run();
-    expect(first.retrying).toEqual([`${WIKI} ${child.documentId}`]);
+    expect(first.retrying).toEqual([]);
     expect(first.published).toEqual([`${WIKI} ${parent.documentId}`]);
     const second = await run();
     expect(second.published).toEqual([`${WIKI} ${child.documentId}`]);
+  });
+});
+
+describe("dependencies (a course or parent page due itself)", () => {
+  const WIKI = "api::wiki-page.wiki-page";
+
+  it("more due children than a batch, scheduled before their parent, do not starve it", async () => {
+    // Codex review of batch 15: the children filled every batch, the
+    // parent never ran, and the fifth retry dropped every child's schedule.
+    const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: PAST } });
+    const children: string[] = [];
+    for (let index = 0; index <= SCHEDULE_BATCH; index += 1) {
+      const child = await docs(WIKI).create({
+        data: { title: `Child ${index}`, parent: parent.documentId, publishAt: EARLIER },
+      });
+      children.push(child.documentId);
+    }
+    const attempts = new TransientAttempts();
+    const first = await run(NOW, attempts);
+    expect(first.published).toEqual([`${WIKI} ${parent.documentId}`]);
+    expect([first.retrying, first.failed]).toEqual([[], []]);
+    const second = await run(NOW, attempts);
+    expect(second.published).toHaveLength(SCHEDULE_BATCH);
+    const third = await run(NOW, attempts);
+    expect(third.published).toHaveLength(1);
+    for (const documentId of children) {
+      const [draft, published] = await rows(WIKI, documentId);
+      expect([draft.scheduleError, draft.publishAt, published?.published]).toEqual([
+        null,
+        null,
+        true,
+      ]);
+    }
+    expect(await run(NOW, attempts)).toEqual(emptyResult());
+  }, 120_000);
+
+  it("a refusal whose parent became due after the selection waits without a counted attempt", async () => {
+    const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: PAST } });
+    const child = await docs(WIKI).create({
+      data: { title: "Child", parent: parent.documentId, publishAt: EARLIER },
+    });
+    const attempts = new TransientAttempts();
+    const revision = await readRevision(strapi, WIKI, child.documentId);
+    for (let attempt = 0; attempt <= SCHEDULE_TRANSIENT_ATTEMPTS; attempt += 1) {
+      const result = emptyResult();
+      await runScheduledDocument(
+        strapi,
+        WIKI,
+        child.documentId,
+        "publish",
+        NOW,
+        attempts,
+        result,
+        revision,
+      );
+      expect(result.retrying).toEqual([`${WIKI} ${child.documentId}`]);
+    }
+    expect(attempts.size).toBe(0);
+    expect((await rows(WIKI, child.documentId))[0]).toMatchObject({
+      publishAt: expect.anything(),
+      scheduleError: null,
+    });
+    // The parent runs; then the child publishes.
+    expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${parent.documentId}`]);
+    expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${child.documentId}`]);
+  });
+
+  it("a child whose parent is not due fails for good (notPublishable), as before", async () => {
+    const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: FUTURE } });
+    const child = await docs(WIKI).create({
+      data: { title: "Child", parent: parent.documentId, publishAt: PAST },
+    });
+    const result = await run();
+    expect(result.failed).toEqual([`${WIKI} ${child.documentId}`]);
+    expect((await rows(WIKI, child.documentId))[0]).toMatchObject({
+      publishAt: null,
+      scheduleError: "notPublishable",
+    });
   });
 });
 

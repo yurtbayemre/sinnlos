@@ -2398,6 +2398,10 @@ required env, no grant, no route, no edge change.
     `[scheduler] <type> <documentId> failed: <code>`; a passing failure
     (a lock timeout, a lost connection) is retried every minute and
     becomes `retryExhausted` after the fifth.
+  - A lesson whose course, or a wiki page whose parent, is itself
+    scheduled and due waits for it: the run passes it over (it never fills
+    the batch in front of its course or parent) and publishes it the
+    minute after; such a wait costs no retry.
   - A withdrawal is never given up. One that fails for good sets Schedule
     error and logs `[scheduler] <type> <documentId> failed: <code>; the
     withdrawal stays pending, next attempt after <time>`, but keeps
