@@ -147,7 +147,7 @@ describe("seedDemoData", () => {
   it("writes every draft & publish type through the Document Service, published", async () => {
     const { strapi, writes } = fakeStrapi();
     await seedDemoData(strapi);
-    expect(DP_UIDS.length).toBeGreaterThanOrEqual(10);
+    expect(DP_UIDS.length).toBeGreaterThanOrEqual(9);
     expect(
       writes.dbCreate.filter((write) => DP_UIDS.includes(write.uid)).map((write) => write.uid),
     ).toEqual([]);

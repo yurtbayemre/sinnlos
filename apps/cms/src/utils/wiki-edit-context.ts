@@ -1,17 +1,28 @@
 /**
- * Request-scoped bridge between the wiki-page REST controller and the
- * db-level lifecycle hooks, which have no access to ctx.state.
+ * Request-scoped bridge between the wiki-page write paths and the db-level
+ * lifecycle hooks, which have no access to ctx.state (contract K16 of
+ * batch 16).
  *
- * The controller wraps the core update in `wikiEditContext.run(...)`;
- * everything awaited inside — including the beforeUpdate lifecycle that
- * snapshots wiki revisions — can then read the authenticated editor and
- * the optional revision summary via `wikiEditContext.getStore()`.
+ * The write paths wrap the Document Service call in
+ * `wikiEditContext.run(...)`; everything awaited inside, including the
+ * wiki-page lifecycle that records the after-image of a draft save
+ * (api/wiki-page/content-types/wiki-page/lifecycles.ts), reads the store
+ * through `wikiEditContext.getStore()`:
+ *   - `editorId`: the users-permissions user who saves (the history's
+ *     editor); panel saves carry none and are attributed through the
+ *     admin user in `data.updatedBy` instead;
+ *   - `revisionSummary`: the optional edit note, stored as the revision's
+ *     `summary` (the API calls it `changeSummary`);
+ *   - `restoredFrom`: the id of the revision a restore brings back. A save
+ *     with it is always recorded, even when its content equals the latest
+ *     snapshot, and the new revision names it.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
 
 export interface WikiEditContext {
   editorId?: number;
   revisionSummary?: string;
+  restoredFrom?: number;
 }
 
 export const wikiEditContext = new AsyncLocalStorage<WikiEditContext>();
