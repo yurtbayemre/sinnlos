@@ -27,6 +27,11 @@ import type {
  *   - `department`, `team`, `departments`: any department or team. They are
  *     single rows since decision 05 and every staff member reads them, so
  *     naming one reveals nothing a moderator cannot read anyway;
+ *   - every to-one check here takes exactly one target or a clear (null):
+ *     a disconnect or a shape that names nothing (`{ connect: [] }`) is
+ *     refused, so a targeting key in a payload always says where the item
+ *     points afterwards (a no-op could otherwise skip the department pin on
+ *     create and still re-derive the audience flag);
  *   - `callerDepartment` (to-one) and `callerDepartments` (to-many): exactly
  *     the department author's own department; `null`, `[]`, another
  *     department or a second one are refused (§N4);
@@ -120,11 +125,12 @@ function toOneCheck(
   strapi: AuthoringChecksHost,
   uid: string,
   accept: (row: Row) => boolean = () => true,
-  { allowClear = true, allowDisconnect = true, populate }: ToOneOptions = {},
+  { allowClear = true, allowDisconnect = true, requireTarget = false, populate }: ToOneOptions = {},
 ): RelationCheck {
   return async (input): Promise<ResolvedToOne | null> => {
     if (input.target === null && !allowClear) return null;
     if (input.disconnect.length > 0 && !allowDisconnect) return null;
+    if (input.target === undefined && requireTarget) return null;
     let target: string | null | undefined = input.target === null ? null : undefined;
     if (input.target) {
       const row = await rowOf(strapi, uid, input.target, populate);
@@ -144,6 +150,8 @@ function toOneCheck(
 interface ToOneOptions {
   allowClear?: boolean;
   allowDisconnect?: boolean;
+  /** Refuse a shape that names no target (a no-op such as `{ connect: [] }`). */
+  requireTarget?: boolean;
   populate?: object;
 }
 
@@ -219,6 +227,9 @@ export async function pollHasVotes(
   return count > 0;
 }
 
+/** The authoring to-one shape: one target or null, never a disconnect or a no-op. */
+const EXACTLY_ONE_OR_CLEAR: ToOneOptions = { allowDisconnect: false, requireTarget: true };
+
 /** Every check of the authoring rules, bound to one request. */
 export function authoringChecks(
   strapi: AuthoringChecksHost,
@@ -245,14 +256,14 @@ export function authoringChecks(
   const documentId = context.documentId;
   return {
     relationChecks: {
-      department: toOneCheck(strapi, DEPARTMENT_UID),
-      team: toOneCheck(strapi, TEAM_UID),
+      department: toOneCheck(strapi, DEPARTMENT_UID, undefined, EXACTLY_ONE_OR_CLEAR),
+      team: toOneCheck(strapi, TEAM_UID, undefined, EXACTLY_ONE_OR_CLEAR),
       callerDepartment: mine
-        ? toOneCheck(strapi, DEPARTMENT_UID, isMine, { allowClear: false, allowDisconnect: false })
+        ? toOneCheck(strapi, DEPARTMENT_UID, isMine, { ...EXACTLY_ONE_OR_CLEAR, allowClear: false })
         : refuse,
       teamOfCallerDepartment: mine
         ? toOneCheck(strapi, TEAM_UID, inMine, {
-            allowDisconnect: false,
+            ...EXACTLY_ONE_OR_CLEAR,
             populate: { department: { select: ["id"] } },
           })
         : refuse,

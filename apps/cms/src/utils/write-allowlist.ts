@@ -1246,6 +1246,8 @@ export async function applyWriteRule(
 
   // To-one relations, in rule order; the first refusal answers alone.
   const resolved: Record<string, ResolvedToOne> = {};
+  /** Relation keys whose input named no target (a no-op): not a re-target. */
+  const noTarget = new Set<string>();
   for (const [key, spec] of Object.entries(rule.fields)) {
     const input = relationInputs.get(key);
     if (spec.kind !== "relation" || !input) continue;
@@ -1259,6 +1261,7 @@ export async function applyWriteRule(
     const relation = toStrapiRelation(result);
     if (relation !== OMIT) out[key] = relation;
     if (result.target !== undefined) mergedPart[key] = result.target;
+    else noTarget.add(key);
   }
 
   // To-many lists (full replacement), role types and media.
@@ -1321,7 +1324,10 @@ export async function applyWriteRule(
     }
   }
 
-  const carried = new Set(Object.keys(payload));
+  // What the payload explicitly sets. A relation shape that names no
+  // target (a disconnect, `{ connect: [] }`) does not say where the item
+  // points, so it never counts as a re-target (contract K10).
+  const carried = new Set(Object.keys(payload).filter((key) => !noTarget.has(key)));
   const merged: Record<string, unknown> = { ...(env.existing ?? {}), ...mergedPart };
   if (rule.crossCheck) {
     const crossCodes = rule.crossCheck(merged, carried, env);

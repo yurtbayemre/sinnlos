@@ -320,7 +320,11 @@ describe("update", () => {
     const lostCtx = context(gateFor({}), { query: { status: "draft" }, ifMatch: '"3"' });
     await authoringActionsFor(lost.host, A).update(lostCtx);
     expect(lostCtx.status).toBe(403);
-    expect((lostCtx.body as { error: { details: unknown } }).error.details).toEqual({});
+    // Byte-identical to the gate's refusal (Strapi's PolicyError).
+    expect(lostCtx.body).toEqual({
+      data: null,
+      error: { status: 403, name: "PolicyError", message: "Policy Failed", details: {} },
+    });
   });
 
   it("refuses a request the gate did not admit (a route wired without can-author)", async () => {

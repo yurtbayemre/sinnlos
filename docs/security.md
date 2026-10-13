@@ -527,7 +527,10 @@ The v2 authoring rules (batch 15, decision 06 §B1):
   outside the caller's department answers its key and **no code**, exactly
   like a malformed one: no existence oracle.
 - **Relations and roles.** To-one relations and to-many lists are resolved
-  to documentIds and written as a full replacement; audience roles are
+  to documentIds and written as a full replacement (a to-one targeting key
+  takes exactly one target or `null`; a disconnect or an empty shape such
+  as `{ connect: [] }` is refused, so it can neither skip a department
+  author's pin nor count as a re-target); audience roles are
   role types (`member`, `team_lead`, …) resolved to the users-permissions
   roles on the server, `public` and `authenticated` refused.
 - **Targeting never widens implicitly.** `audience` (announcement, poll,

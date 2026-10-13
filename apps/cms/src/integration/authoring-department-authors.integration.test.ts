@@ -321,6 +321,42 @@ describe.each(testEngines())("authoring: department authors on %s", (engine) => 
       expect(guest.body.error?.details).toEqual({ keys: ["audienceRoles"] });
     });
 
+    it("refuses shapes that name no department (no-op connect, disconnect): never company-wide", async () => {
+      for (const department of [
+        { connect: [] },
+        { disconnect: [] },
+        { connect: [], disconnect: [] },
+      ]) {
+        const res = await api.create(
+          "department_head",
+          "announcements",
+          { title: "Sneaky", department },
+          "published",
+        );
+        expect(res.status, JSON.stringify(department)).toBe(400);
+        expect(res.body.error?.details).toEqual({ keys: ["department"] });
+      }
+      const team = await api.create(
+        "department_head",
+        "announcements",
+        { title: "Sneaky team", team: { connect: [] } },
+        "published",
+      );
+      expect(team.status).toBe(400);
+      expect(
+        await t.strapi.db.query(A).count({ where: { title: { $startsWith: "Sneaky" } } }),
+      ).toBe(0);
+      // A moderator's no-op targeting shape is refused too: it re-targets nothing.
+      const moderator = await api.update(
+        "editor",
+        "announcements",
+        item.documentId,
+        { department: { connect: [] } },
+        { version: item.version },
+      );
+      expect(moderator.status).toBe(400);
+    });
+
     it("refuses pinned, requiresAck, publishAt and ownerDepartment with their keys; DELETE is 403", async () => {
       for (const data of [
         { pinned: true },
@@ -734,8 +770,10 @@ describe.each(testEngines())("authoring: department authors on %s", (engine) => 
       const outcome = await save;
       expect(outcome.ok).toBe(true);
       const answer = outcome.ok ? outcome.value : null;
-      // The generic PUT answers a lost class with 403 (§B5), never 412.
+      // The generic PUT answers a lost class with 403 (§B5), never 412, and
+      // with the gate's own body (no hint that the class went away late).
       expect(answer?.status).toBe(403);
+      expect(answer?.body.error).toMatchObject({ name: "PolicyError", message: "Policy Failed" });
       expect(answer?.body.error?.details ?? {}).not.toHaveProperty("current");
       const rows = await rowsOf(A, id);
       for (const row of rows) expect(row.title).toBe("Bound");

@@ -155,6 +155,29 @@ describe("relations", () => {
   });
 });
 
+describe("no-op and disconnect shapes (security review, batch 15)", () => {
+  it("every authoring to-one check needs one target or a clear: { connect: [] } and disconnects are refused", async () => {
+    const { relationChecks } = checks(world());
+    const noOp = to(undefined, []);
+    const disconnect = to(undefined, [{ id: ENG.id }]);
+    for (const name of [
+      "department",
+      "team",
+      "callerDepartment",
+      "teamOfCallerDepartment",
+    ] as const) {
+      expect(await relationChecks[name]?.(noOp, {}), `${name} no-op`).toBeNull();
+      expect(await relationChecks[name]?.(disconnect, {}), `${name} disconnect`).toBeNull();
+    }
+    // A clear stays possible where the rule allows one.
+    expect(await relationChecks.team?.(to(null), {})).toEqual({ target: null, disconnect: [] });
+    expect(await relationChecks.teamOfCallerDepartment?.(to(null), {})).toEqual({
+      target: null,
+      disconnect: [],
+    });
+  });
+});
+
 describe("role types", () => {
   it("resolves intranet role types to their role documentIds, in order; refuses the rest", async () => {
     const { roleTypesCheck } = checks(world());

@@ -1323,6 +1323,21 @@ describe("v2 targeting flags: derived from stored + payload, never widened impli
     ).toMatchObject({ audience: "departments" });
   });
 
+  it("a relation shape that names no target is no re-target: nothing is derived (K10)", async () => {
+    const noOp: RelationCheck = async () => ({ target: undefined, disconnect: [] });
+    const env = v2Env({
+      relationChecks: { department: noOp, team: noOp },
+      existing: {
+        department: null,
+        team: "team-x",
+        audience: "departments",
+        retargetRequired: true,
+      },
+    });
+    expect(await applyWriteRule({ department: { connect: [] } }, announcement, env)).toEqual({});
+    expect(await applyWriteRule({ team: { disconnect: [] } }, announcement, env)).toEqual({});
+  });
+
   it("lowers the retargetRequired marker on audienceRoles too, without touching audience", async () => {
     const out = await applyWriteRule(
       { audienceRoles: ["member"] },

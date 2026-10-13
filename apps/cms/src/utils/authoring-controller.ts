@@ -233,6 +233,17 @@ const ms = (value: unknown): number | null => {
 
 /** The Strapi error envelope of a lock refusal (428, 412 with details.current, 403/404). */
 function sendLockError(ctx: AuthoringContext, error: DocumentLockError): void {
+  if (error instanceof ClassLost && error.status === 403) {
+    // Byte-identical to the gate's own refusal on the generic PUT (Strapi's
+    // PolicyError for a false policy): a class lost under the lock answers
+    // like a class the gate never found.
+    ctx.status = 403;
+    ctx.body = {
+      data: null,
+      error: { status: 403, name: "PolicyError", message: "Policy Failed", details: {} },
+    };
+    return;
+  }
   ctx.status = error.status;
   ctx.body = {
     data: null,
