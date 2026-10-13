@@ -67,7 +67,11 @@ beforeEach(async () => {
     minimalType(EVENT, "events", { ...title, ...schedule }),
     minimalType(DOCUMENT, "documents", { ...title, ...schedule, ...window }),
     minimalType(QUICK_LINK, "quick_links", { label: { type: "string" }, ...schedule, ...window }),
-    minimalType("api::wiki-page.wiki-page", "wiki_pages", { ...title, ...schedule }),
+    minimalType("api::wiki-page.wiki-page", "wiki_pages", {
+      ...title,
+      ...schedule,
+      parent: { type: "relation", relation: "manyToOne", target: "api::wiki-page.wiki-page" },
+    }),
     minimalType("api::course.course", "courses", { ...title, ...schedule }),
     minimalType("api::lesson.lesson", "lessons", { ...title, ...schedule }),
   ]);
@@ -255,9 +259,7 @@ describe("failures (rule 7)", () => {
     expect(await readRevision(strapi, ANNOUNCEMENT, draft.documentId)).toBe(2);
     const trail = await audit(draft.documentId);
     expect(trail[1][0]).toBe("scheduleFailed");
-    expect(String(trail[1][3])).toMatch(
-      /^notPublishable: This draft cannot be published yet: title$/,
-    );
+    expect(String(trail[1][3])).toMatch(/^notPublishable: keys: title$/);
     expect(strapi.log.error).toHaveBeenCalledWith(
       `[scheduler] ${ANNOUNCEMENT} ${draft.documentId} failed: notPublishable`,
     );
@@ -285,6 +287,77 @@ describe("failures (rule 7)", () => {
       publishAt: null,
       scheduleError: "retryExhausted",
     });
+  });
+});
+
+describe("withdrawals and pending updates (review findings)", () => {
+  const failUnpublish = () =>
+    open.service.use(async (context, next) => {
+      if (context.action === "unpublish") {
+        throw Object.assign(new Error("deadlock detected"), { code: "40P01" });
+      }
+      return next();
+    });
+
+  it("a due withdrawal that fails transiently is neither dropped nor published over", async () => {
+    const link = await docs(QUICK_LINK).create({ data: { label: "Live" }, status: "published" });
+    await docs(QUICK_LINK).update({
+      documentId: link.documentId,
+      data: { label: "Pending update", publishAt: PAST, unpublishAt: PAST },
+    });
+    failUnpublish();
+    const attempts = new TransientAttempts();
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      const result = await run(NOW, attempts);
+      expect(result.retrying, `attempt ${attempt}`).toEqual([`${QUICK_LINK} ${link.documentId}`]);
+      expect(result.published).toEqual([]);
+      expect(result.expired).toEqual([]);
+      const [draft, published] = await rows(QUICK_LINK, link.documentId);
+      expect([draft.publishAt, draft.unpublishAt, published.published]).toEqual([
+        expect.anything(),
+        expect.anything(),
+        true,
+      ]);
+    }
+    // The fifth failure records it for good; a failed withdrawal also cancels the pending publish.
+    const fifth = await run(NOW, attempts);
+    expect(fifth.failed).toEqual([`${QUICK_LINK} ${link.documentId}`]);
+    expect(fifth.published).toEqual([]);
+    const [draft] = await rows(QUICK_LINK, link.documentId);
+    expect(draft).toMatchObject({
+      publishAt: null,
+      unpublishAt: null,
+      scheduleError: "retryExhausted",
+    });
+    const published = await open.db
+      .query(QUICK_LINK)
+      .findOne({ where: { documentId: link.documentId, publishedAt: { $notNull: true } } });
+    expect(published?.label).toBe("Live");
+  });
+
+  it("drafts that wait for their publish never starve the withdrawals behind them", async () => {
+    for (let index = 0; index < SCHEDULE_BATCH + 10; index += 1) {
+      await docs(QUICK_LINK).create({
+        data: { label: `Waiting ${index}`, publishAt: FUTURE, unpublishAt: EARLIER },
+      });
+    }
+    const link = await docs(QUICK_LINK).create({ data: { label: "Due" }, status: "published" });
+    await docs(QUICK_LINK).update({ documentId: link.documentId, data: { unpublishAt: PAST } });
+    const result = await run();
+    expect(result.unpublished).toEqual([`${QUICK_LINK} ${link.documentId}`]);
+  }, 60_000);
+
+  it("a child page due with its parent is retried, not failed, when it sorts first", async () => {
+    const WIKI = "api::wiki-page.wiki-page";
+    const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: PAST } });
+    const child = await docs(WIKI).create({
+      data: { title: "Child", parent: parent.documentId, publishAt: EARLIER },
+    });
+    const first = await run();
+    expect(first.retrying).toEqual([`${WIKI} ${child.documentId}`]);
+    expect(first.published).toEqual([`${WIKI} ${parent.documentId}`]);
+    const second = await run();
+    expect(second.published).toEqual([`${WIKI} ${child.documentId}`]);
   });
 });
 
