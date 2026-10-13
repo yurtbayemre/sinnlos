@@ -63,8 +63,11 @@ import {
  * due): every page of it waits on the next, forever. Each run walks the
  * waiting chains of up to SCHEDULE_BATCH waiting pages, following the
  * parents while they wait too (at most WAIT_CHAIN_MAX_DEPTH levels and
- * WAIT_WALK_BUDGET lookups a run). A chain that comes back to a page it
- * passed, or that is deeper than the bound, cannot finish: the pages of
+ * WAIT_WALK_BUDGET lookups a run). That walk only finds candidates; the
+ * record locks the candidate pages and walks every page's chain again
+ * under those locks with a fresh clock before it writes anything. A chain
+ * that comes back to a page it passed, or that is deeper than the bound,
+ * cannot finish: the pages of
  * the loop (or the walked ones) are recorded as `notPublishable`
  * (scheduleError, publishAt cleared, a `scheduleFailed` audit row whose
  * detail names the reason; rule 7), so the schedule badge shows them, and
@@ -135,7 +138,17 @@ import {
  *     `retryExhausted`. A restart forgets the count (only adds retries);
  *   - a readiness refusal whose course or parent is itself unpublished and
  *     due (DEPENDENCIES above): the schedule stays, the next minute tries
- *     again, and no attempt is counted.
+ *     again, and no attempt is counted. Whether a refusal is such a wait is
+ *     decided under the document's lock in the failure record, with a fresh
+ *     clock, never from a read before it.
+ *
+ * TIME OF CHECK. Nothing read before a document's lock decides a write:
+ * the selection (due, waiting, a withdrawal's backoff) only picks
+ * candidates; under the lock the revision must be the selected one, and
+ * due, expiry, the withdrawal precedence, a pending publish, the readiness
+ * wait and a parent loop are judged again on the locked rows with a clock
+ * sampled after the lock. A save in between moves the revision (skipped)
+ * or changes what the re-check sees.
  * Each recorded failure logs `[scheduler] <uid> <documentId> failed: <code>`.
  * Details (in the audit row and the logs) name the error class, a driver
  * code and field names, never an error message: a database error's message
@@ -347,7 +360,9 @@ const rawRows = (result: unknown): Record<string, unknown>[] => {
  * row also names the document it waits for (`target_document_id`). One
  * read query: the link table and the target's rows are in the statement,
  * so the database pages over eligible rows only. `onlyDocumentId` narrows
- * it to one document (the cycle walk).
+ * it to one document (the cycle walk). With `trx` (the knex transaction of
+ * a held document lock) the read runs in that transaction: on SQLite's one
+ * connection a read beside it would wait for it forever.
  */
 async function dueRowsByWait(
   strapi: ScheduledPublishStrapi,
@@ -356,6 +371,7 @@ async function dueRowsByWait(
   waiting: boolean,
   limit: number,
   onlyDocumentId?: string,
+  trx?: unknown,
 ): Promise<Array<{ documentId: string; targetDocumentId: string | null }> | null> {
   const t = waitTables(strapi, uid);
   if (t === null) return null;
@@ -399,7 +415,10 @@ async function dueRowsByWait(
   bindings.push(t.table, t.publishedAt, t.publishAt, t.publishAt, now);
   if (onlyDocumentId !== undefined) bindings.push(t.documentId, onlyDocumentId);
   bindings.push(...waitsBindings, t.publishAt, t.id, limit);
-  const rows = rawRows(await strapi.db.connection.raw(sql, bindings));
+  const runner = (trx as { raw?: unknown } | undefined)?.raw
+    ? (trx as { raw(sql: string, bindings: readonly unknown[]): unknown })
+    : strapi.db.connection;
+  const rows = rawRows(await runner.raw(sql, bindings));
   return rows
     .map((row) => ({
       documentId: row.document_id,
@@ -432,6 +451,39 @@ async function duePublishes(
 }
 
 /**
+ * Why the waiting chain of one page cannot finish, or null: it loops back
+ * to the page, or it is deeper than WAIT_CHAIN_MAX_DEPTH. A page that does
+ * not wait, or waits on a chain that ends (or on a loop it is not part
+ * of), has no problem of its own. Run under the page's lock, with a fresh
+ * clock, before anything is recorded (`trx`: see dueRowsByWait).
+ */
+async function waitingChainProblem(
+  strapi: ScheduledPublishStrapi,
+  uid: string,
+  documentId: string,
+  now: Date,
+  trx?: unknown,
+): Promise<string | null> {
+  const waitsOn = async (page: string): Promise<string | null> => {
+    const [row] = (await dueRowsByWait(strapi, uid, now, true, 1, page, trx)) ?? [];
+    return row?.targetDocumentId ?? null;
+  };
+  const path = [documentId];
+  let current = await waitsOn(documentId);
+  while (current !== null) {
+    if (current === documentId) return LOOP_REASON;
+    if (path.includes(current)) return null;
+    if (path.length >= WAIT_CHAIN_MAX_DEPTH) return DEEP_REASON;
+    path.push(current);
+    current = await waitsOn(current);
+  }
+  return null;
+}
+
+const LOOP_REASON = "the parent chain loops back";
+const DEEP_REASON = `the parent chain is deeper than ${WAIT_CHAIN_MAX_DEPTH} levels`;
+
+/**
  * The waiting chains that cannot finish (WAITING CYCLES in the module
  * comment), for a type whose readiness target is itself (wiki pages): the
  * pages to record as `notPublishable`, each with the reason. Walks from up
@@ -442,12 +494,13 @@ async function unfinishableWaits(
   strapi: ScheduledPublishStrapi,
   uid: string,
   now: Date,
-): Promise<Map<string, string>> {
-  const found = new Map<string, string>();
+): Promise<string[][]> {
+  const groups: string[][] = [];
+  const found = new Set<string>();
   const readiness = READINESS_TARGETS[uid];
-  if (!readiness || readiness.target !== uid) return found;
+  if (!readiness || readiness.target !== uid) return groups;
   const sample = (await dueRowsByWait(strapi, uid, now, true, SCHEDULE_BATCH)) ?? [];
-  if (sample.length === 0) return found;
+  if (sample.length === 0) return groups;
   /** What each waiting page waits for (null: it does not wait, its chain ends). */
   const waitsFor = new Map<string, string | null>(
     sample.map((row) => [row.documentId, row.targetDocumentId]),
@@ -474,13 +527,15 @@ async function unfinishableWaits(
       const seen = path.indexOf(current);
       if (seen >= 0) {
         outcome = "loop";
-        for (const member of path.slice(seen)) found.set(member, "the parent chain loops back");
+        const members = path.slice(seen);
+        for (const member of members) found.add(member);
+        groups.push(members);
         break;
       }
       if (path.length >= WAIT_CHAIN_MAX_DEPTH) {
         outcome = "deep";
-        const reason = `the parent chain is deeper than ${WAIT_CHAIN_MAX_DEPTH} levels`;
-        for (const page of path) found.set(page, reason);
+        for (const page of path) found.add(page);
+        groups.push([...path]);
         break;
       }
       path.push(current);
@@ -493,7 +548,7 @@ async function unfinishableWaits(
     }
     if (outcome === "ends" || outcome === "loop") for (const page of path) settled.add(page);
   }
-  return found;
+  return groups;
 }
 
 /**
@@ -689,6 +744,11 @@ async function publishOne(
  *     a bounded backoff until it succeeds, or an author changes or clears
  *     the deadline. A repeat of the same failure writes nothing (no new
  *     revision, no new audit row).
+ * `stillApplies`, when given, decides again under the lock (the locked
+ * rows, a fresh clock) whether the failure holds; when it no longer does,
+ * nothing is written and the answer is "stale". A decision that rests on
+ * other documents (a course or parent, a parent chain) is never taken from
+ * what was read before the lock.
  */
 export async function recordScheduleFailure(
   strapi: ScheduledPublishStrapi,
@@ -698,9 +758,11 @@ export async function recordScheduleFailure(
   pass: Pass,
   code: ScheduleErrorCode,
   detail: string,
-): Promise<number | null> {
-  return strapi.db.transaction(async () => {
+  stillApplies?: (trx: unknown) => Promise<boolean>,
+): Promise<number | null | "stale"> {
+  return strapi.db.transaction(async ({ trx }) => {
     if ((await lockDocument(strapi, uid, documentId)) !== r) return null;
+    if (stillApplies && !(await stillApplies(trx))) return "stale";
     if (pass === "unpublish") {
       const draft = await draftOf(strapi, uid, documentId);
       if (draft?.scheduleError === code) return r;
@@ -776,19 +838,15 @@ export async function runScheduledDocument(
     const failure = classifyScheduleFailure(error);
     // A withdrawal already deferred once goes straight back into its backoff.
     const deferred = pass === "unpublish" && attempts.withdrawalFailures(uid, documentId) > 0;
-    // A course or parent that is due itself: wait for it, no attempt counted.
-    if (
-      pass === "publish" &&
-      failure.kind === "permanent" &&
-      (await blockedByDueTarget(strapi, uid, documentId, error, clock()))
-    ) {
-      strapi.log.warn(
-        `${SCHEDULER_LOG} ${key} publish waits for its course or parent, which is due itself`,
-      );
-      result.retrying.push(key);
-      return;
-    }
     const retry = !deferred && failure.kind === "transient";
+    // A permanent publish refusal whose course or parent is unpublished and
+    // due is a wait (no attempt counted, nothing written). That is decided
+    // under the document's lock with a fresh clock (recordScheduleFailure's
+    // re-check), not from a read before it.
+    const stillApplies =
+      pass === "publish" && failure.kind === "permanent"
+        ? async () => !(await blockedByDueTarget(strapi, uid, documentId, error, clock()))
+        : undefined;
     let code: ScheduleErrorCode;
     if (retry) {
       if (!attempts.fail(uid, documentId, r, pass)) {
@@ -813,7 +871,15 @@ export async function runScheduledDocument(
         pass,
         code,
         failure.detail,
+        stillApplies,
       );
+      if (revision === "stale") {
+        strapi.log.warn(
+          `${SCHEDULER_LOG} ${key} publish waits for its course or parent, which is due itself`,
+        );
+        result.retrying.push(key);
+        return;
+      }
       if (revision === null) {
         result.skipped.push(key);
         return;
@@ -841,41 +907,81 @@ export async function runScheduledDocument(
 }
 
 /**
- * Records a waiting chain that cannot finish (WAITING CYCLES): the page's
- * schedule ends in `notPublishable`, unless a newer revision superseded
- * the run's view of it.
+ * Records a waiting chain that cannot finish (WAITING CYCLES), one group
+ * (the pages of a loop, or a walked chain deeper than the bound) in one
+ * transaction. The walk that found the group ran before any lock, so
+ * nothing is taken from it: the group's pages are locked in ascending
+ * order (the lock order of utils/document-lock.ts), every page's chain is
+ * walked again under those locks with a fresh clock, and only the pages
+ * whose chain still cannot finish are recorded `notPublishable`, each only
+ * if its revision is still the one read before the lock. An author who
+ * moved a parent or unscheduled a page in between ends the loop: nothing
+ * is recorded, and the pages publish as their turn comes. All pages are
+ * judged before the first is recorded (recording one clears its
+ * publishAt, which would hide the loop from the next one's walk).
  */
-async function recordUnfinishableWait(
+async function recordUnfinishableGroup(
   strapi: ScheduledPublishStrapi,
   uid: string,
-  documentId: string,
-  r: number,
-  reason: string,
+  group: readonly string[],
   result: ScheduleRunResult,
+  clock: ScheduleClock,
 ): Promise<void> {
-  const key = label(uid, documentId);
+  const members = [...new Set(group)].sort();
+  const revisions = new Map<string, number>();
+  for (const documentId of members) {
+    revisions.set(documentId, await readRevision(strapi, uid, documentId));
+  }
+  let outcomes: Array<{ documentId: string; revision: number | null | "stale"; reason: string }>;
   try {
-    const revision = await recordScheduleFailure(
-      strapi,
-      uid,
-      documentId,
-      r,
-      "publish",
-      "notPublishable",
-      reason,
-    );
-    if (revision === null) {
+    outcomes = await strapi.db.transaction(async ({ trx }) => {
+      for (const documentId of members) await lockDocument(strapi, uid, documentId);
+      const at = clock();
+      const confirmed: Array<{ documentId: string; reason: string }> = [];
+      for (const documentId of members) {
+        const reason = await waitingChainProblem(strapi, uid, documentId, at, trx);
+        if (reason !== null) confirmed.push({ documentId, reason });
+      }
+      const recorded: Array<{
+        documentId: string;
+        revision: number | null | "stale";
+        reason: string;
+      }> = members
+        .filter((documentId) => !confirmed.some((page) => page.documentId === documentId))
+        .map((documentId) => ({ documentId, revision: "stale" as const, reason: "" }));
+      for (const { documentId, reason } of confirmed) {
+        const revision = await recordScheduleFailure(
+          strapi,
+          uid,
+          documentId,
+          revisions.get(documentId) ?? 0,
+          "publish",
+          "notPublishable",
+          reason,
+        );
+        recorded.push({ documentId, revision, reason });
+      }
+      return recorded;
+    });
+  } catch (error) {
+    for (const documentId of members) {
+      const key = label(uid, documentId);
+      strapi.log.error(
+        `${SCHEDULER_LOG} ${key} failed: notPublishable, and recording it failed too: ` +
+          describeFailure(error),
+      );
+      result.retrying.push(key);
+    }
+    return;
+  }
+  for (const { documentId, revision, reason } of outcomes) {
+    const key = label(uid, documentId);
+    if (revision === null || revision === "stale") {
       result.skipped.push(key);
-      return;
+      continue;
     }
     strapi.log.error(`${SCHEDULER_LOG} ${key} failed: notPublishable (${reason})`);
     result.failed.push(key);
-  } catch (error) {
-    strapi.log.error(
-      `${SCHEDULER_LOG} ${key} failed: notPublishable, and recording it failed too: ` +
-        describeFailure(error),
-    );
-    result.retrying.push(key);
   }
 }
 
@@ -904,9 +1010,8 @@ export async function runScheduledPublishing(
       if (isUnpublishScheduledUid(uid)) {
         await runPass(uid, "unpublish", await dueUnpublishes(strapi, uid, start, attempts));
       }
-      for (const [documentId, reason] of await unfinishableWaits(strapi, uid, start)) {
-        const r = await readRevision(strapi, uid, documentId);
-        await recordUnfinishableWait(strapi, uid, documentId, r, reason, result);
+      for (const group of await unfinishableWaits(strapi, uid, start)) {
+        await recordUnfinishableGroup(strapi, uid, group, result, tick);
       }
       await runPass(uid, "publish", await duePublishes(strapi, uid, start));
     }

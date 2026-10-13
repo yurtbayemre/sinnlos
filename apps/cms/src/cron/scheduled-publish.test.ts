@@ -130,6 +130,39 @@ const audit = async (documentId: string) =>
 const run = (now = NOW, attempts = new TransientAttempts()) =>
   runScheduledPublishing(strapi, now, attempts);
 
+/**
+ * Runs `between` just before the `n`-th transaction the scheduler opens
+ * outside any other one (its document locks are taken inside those): the
+ * window between what a run read and the lock it acts under. Writes made
+ * by `between` itself are not counted. Returns the undo.
+ */
+function pauseBeforeTransaction(n: number, between: () => Promise<void>): () => void {
+  const db = strapi.db as unknown as {
+    transaction(callback: unknown): Promise<unknown>;
+    inTransaction(): boolean;
+  };
+  const original = db.transaction;
+  let count = 0;
+  let busy = false;
+  db.transaction = async function (this: unknown, callback: unknown) {
+    if (!busy && !db.inTransaction()) {
+      count += 1;
+      if (count === n) {
+        busy = true;
+        try {
+          await between();
+        } finally {
+          busy = false;
+        }
+      }
+    }
+    return original.call(db, callback);
+  };
+  return () => {
+    db.transaction = original;
+  };
+}
+
 describe("due publishes (rules 4, 6, 9)", () => {
   it("publishes a due draft once, clears its schedule, advances the revision and audits it", async () => {
     const draft = await docs(ANNOUNCEMENT).create({ data: { title: "Due", publishAt: PAST } });
@@ -549,6 +582,75 @@ describe("dependencies (a course or parent page due itself)", () => {
       });
     }
   }, 120_000);
+
+  it("a readiness refusal is judged under the lock: a parent scheduled before the record makes it a wait", async () => {
+    // TOCTOU review: the wait-or-fail decision was taken from a read before
+    // the failure record's lock; a parent scheduled in between still cost
+    // the child its schedule.
+    const parent = await docs(WIKI).create({ data: { title: "Parent" } });
+    const child = await docs(WIKI).create({
+      data: { title: "Child", parent: parent.documentId, publishAt: EARLIER },
+    });
+    const attempts = new TransientAttempts();
+    const result = emptyResult();
+    const revision = await readRevision(strapi, WIKI, child.documentId);
+    // 1st transaction: the publish (refused: the parent is not published);
+    // before the 2nd, the failure record, an author schedules the parent.
+    const undo = pauseBeforeTransaction(2, async () => {
+      await docs(WIKI).update({ documentId: parent.documentId, data: { publishAt: PAST } });
+    });
+    try {
+      await runScheduledDocument(
+        strapi,
+        WIKI,
+        child.documentId,
+        "publish",
+        NOW,
+        attempts,
+        result,
+        revision,
+      );
+    } finally {
+      undo();
+    }
+    expect(result.retrying).toEqual([`${WIKI} ${child.documentId}`]);
+    expect(result.failed).toEqual([]);
+    expect(attempts.size).toBe(0);
+    expect((await rows(WIKI, child.documentId))[0]).toMatchObject({
+      publishAt: EARLIER,
+      scheduleError: null,
+    });
+    expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${parent.documentId}`]);
+    expect((await run(NOW, attempts)).published).toEqual([`${WIKI} ${child.documentId}`]);
+  });
+
+  it("a parent cycle is judged again under the locks: an author who breaks it first leaves both pages scheduled", async () => {
+    // TOCTOU review: the cycle walk ran before any lock, and the record
+    // acted on it for every page whose own revision had not moved.
+    const a = await docs(WIKI).create({ data: { title: "A", publishAt: PAST } });
+    const b = await docs(WIKI).create({
+      data: { title: "B", parent: a.documentId, publishAt: PAST },
+    });
+    await docs(WIKI).update({ documentId: a.documentId, data: { parent: b.documentId } });
+    // The first transaction of the run records the loop; before it, an
+    // author moves A to the top level.
+    const undo = pauseBeforeTransaction(1, async () => {
+      await docs(WIKI).update({ documentId: a.documentId, data: { parent: null } });
+    });
+    let first;
+    try {
+      first = await run();
+    } finally {
+      undo();
+    }
+    expect(first.failed).toEqual([]);
+    expect(first.published).toEqual([`${WIKI} ${a.documentId}`]);
+    expect((await rows(WIKI, b.documentId))[0]).toMatchObject({
+      publishAt: PAST,
+      scheduleError: null,
+    });
+    expect((await run()).published).toEqual([`${WIKI} ${b.documentId}`]);
+  });
 
   it("a child whose parent is not due fails for good (notPublishable), as before", async () => {
     const parent = await docs(WIKI).create({ data: { title: "Parent", publishAt: FUTURE } });
