@@ -1,0 +1,426 @@
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+
+import {
+  ADMIN_ENV,
+  contentManager,
+  createUser,
+  signIn,
+  type ContentManager,
+} from "./admin-api.test.helper";
+import {
+  createTestStrapi,
+  testEngines,
+  type Caller,
+  type Params,
+  type Row,
+  type TestRole,
+  type TestStrapi,
+} from "./harness.test.helper";
+import {
+  holdTransaction,
+  qualified,
+  settle,
+  waitForLockWait,
+  type Settled,
+} from "./pg-lock.test.helper";
+
+/**
+ * Department targeting fails closed, on the real stack (batch 15 lane 15D;
+ * decision 06 §B6, §D rule 13, §N9, §N10; amendment rows A2, A3, A5):
+ *   - D-PT01: an announcement whose audience is "departments" without a
+ *     department or a team is for moderators only, and notifies nobody;
+ *   - a department deleted in the admin panel marks the announcements that
+ *     targeted it (`retargetRequired`), flags the events that linked it
+ *     (`notifyAudience`), and advances the revisions of every
+ *     announcement, event and document that linked it;
+ *   - department plus team (A3): deleting either criterion makes the
+ *     announcement moderator-only, so neither the team's members in other
+ *     departments nor the rest of the department read it;
+ *   - an event restricted to departments without one notifies nobody on a
+ *     republish;
+ *   - the thread of a restricted announcement answers like a missing
+ *     target;
+ *   - on Postgres, a link committed while the delete runs is marked too.
+ * Writes go through the Document Service in-process and the admin panel's
+ * Content Manager; reads over HTTP as the users they concern.
+ */
+
+const ANNOUNCEMENT = "api::announcement.announcement";
+const EVENT = "api::event.event";
+const DOCUMENT = "api::document.document";
+const DEPARTMENT = "api::department.department";
+const TEAM = "api::team.team";
+const USER = "plugin::users-permissions.user";
+const NOTIFICATION = "api::notification.notification";
+const VERSION = "api::content-version.content-version";
+
+interface Notify {
+  __fanoutsSettledForTest(): Promise<void>;
+}
+
+const START = "2027-03-01T09:00:00.000Z";
+
+describe.each(testEngines())("targeting fails closed on %s", (engine) => {
+  let t: TestStrapi;
+  let panel: ContentManager;
+  let salesMember: Caller;
+  let salesMemberId: number;
+
+  beforeAll(async () => {
+    t = await createTestStrapi({ engine, env: ADMIN_ENV });
+    panel = await contentManager(t);
+    const sales = await createUser(t, "member", t.fixtures.departments.sales);
+    salesMemberId = sales.id;
+    salesMember = { jwt: await signIn(t, sales) };
+  });
+
+  afterAll(async () => {
+    await t?.stop();
+  });
+
+  // ---------------------------------------------------------------------------
+  // helpers
+
+  const settleFanouts = () => t.requireBuilt<Notify>("src/utils/notify").__fanoutsSettledForTest();
+
+  /** The ids of the users notified of `documentId`, ascending. */
+  const notified = async (documentId: string) => {
+    await settleFanouts();
+    const rows = await t.strapi.db.query(NOTIFICATION).findMany({
+      where: { sourceDocumentId: documentId },
+      populate: { recipient: { select: ["id"] } },
+    });
+    return rows
+      .map((row) => (row.recipient as { id: number } | null)?.id)
+      .filter((id): id is number => typeof id === "number")
+      .sort((a, b) => a - b);
+  };
+
+  const department = (name: string) =>
+    t.strapi.documents(DEPARTMENT).create({
+      data: { name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-") },
+    });
+
+  const team = (name: string, of: Row) =>
+    t.strapi.documents(TEAM).create({
+      data: {
+        name,
+        slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+        department: of.documentId,
+      },
+    });
+
+  /** A member of `of` (and of `teams`), with a JWT. */
+  const member = async (of: Row | null, teams: Row[] = [], role: TestRole = "member") => {
+    const user = await createUser(t, role, of);
+    if (teams.length > 0) {
+      await t.strapi.db
+        .query(USER)
+        .update({ where: { id: user.id }, data: { teams: teams.map((row) => row.id) } });
+    }
+    return { id: user.id, caller: { jwt: await signIn(t, user) } as Caller };
+  };
+
+  const publish = (uid: string, data: Params) =>
+    t.strapi.documents(uid).create({ data, status: "published" });
+
+  /** GET of one announcement: the status the caller gets. */
+  const readStatus = async (caller: Caller, documentId: string) =>
+    (await t.api(caller, `/api/announcements/${documentId}`)).status;
+
+  /** The stored [published?, audience, retargetRequired] of each row, draft first. */
+  const announcementFlags = async (documentId: string) =>
+    (
+      await t.strapi.db.query(ANNOUNCEMENT).findMany({
+        where: { documentId },
+        select: ["audience", "retargetRequired", "publishedAt"],
+      })
+    )
+      .map((row) => [row.publishedAt != null, row.audience, row.retargetRequired === true])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+  const eventFlags = async (documentId: string) =>
+    (
+      await t.strapi.db.query(EVENT).findMany({
+        where: { documentId },
+        select: ["notifyAudience", "publishedAt"],
+      })
+    )
+      .map((row) => [row.publishedAt != null, row.notifyAudience])
+      .sort((a, b) => Number(a[0]) - Number(b[0]));
+
+  /** The document's revision (content_versions; 0 without a row). */
+  const revision = async (uid: string, documentId: string) => {
+    const row = await t.strapi.db.query(VERSION).findOne({
+      where: { targetUid: uid, targetDocumentId: documentId },
+      select: ["revision"],
+    });
+    return Number(row?.revision ?? 0);
+  };
+
+  const comment = (caller: Caller, targetDocumentId: string) =>
+    t.api(caller, "/api/comments", {
+      json: { data: { body: "a word", targetType: "announcement", targetDocumentId } },
+    });
+
+  // ---------------------------------------------------------------------------
+
+  it("D-PT01: a legacy 'departments' announcement without a target is moderator-only and notifies nobody", async () => {
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC legacy no target",
+      audience: "departments",
+    });
+    for (const caller of ["member", "team_lead", salesMember] as Caller[]) {
+      expect(await readStatus(caller, created.documentId), String(caller)).toBe(404);
+    }
+    for (const moderator of ["editor", "admin_role"] as const) {
+      expect(await readStatus(moderator, created.documentId), moderator).toBe(200);
+    }
+    const list = await t.api<{ data: { documentId: string }[] }>(
+      "member",
+      "/api/announcements?pagination[pageSize]=100",
+    );
+    expect(list.body.data.map((row) => row.documentId)).not.toContain(created.documentId);
+    expect(await notified(created.documentId)).toEqual([]);
+    await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
+    expect(await notified(created.documentId)).toEqual([]);
+  });
+
+  it("D-PT01: unlinking the department in the admin panel keeps the announcement restricted", async () => {
+    const unit = await department("FC Unlink Dept");
+    const insider = await member(unit);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC unlink",
+      audience: "all",
+      department: unit.documentId,
+    });
+    // The guard raised the flag on both rows at create.
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", false],
+      [true, "departments", false],
+    ]);
+    expect(await notified(created.documentId)).toEqual([insider.id]);
+    expect(await readStatus(insider.caller, created.documentId)).toBe(200);
+
+    const res = await panel.publish(ANNOUNCEMENT, created.documentId, { department: null });
+    expect(res.status, res.text).toBe(200);
+    // Before batch 15 the published row was company-wide now: every member,
+    // Sales included, read it and was notified of the republish.
+    for (const caller of [insider.caller, salesMember, "member"] as Caller[]) {
+      expect(await readStatus(caller, created.documentId), String(caller)).toBe(404);
+    }
+    expect(await readStatus("editor", created.documentId)).toBe(200);
+    expect(await notified(created.documentId)).toEqual([insider.id]);
+  });
+
+  it("a department deleted in the admin panel: announcements marked, events flagged, revisions advanced", async () => {
+    const unit = await department("FC Deleted Dept");
+    const insider = await member(unit);
+    const announcement = await publish(ANNOUNCEMENT, {
+      title: "IT FC dept announcement",
+      department: unit.documentId,
+    });
+    const owned = await publish(ANNOUNCEMENT, {
+      title: "IT FC owned announcement",
+      department: t.fixtures.departments.sales.documentId,
+      ownerDepartment: unit.documentId,
+    });
+    const event = await publish(EVENT, {
+      title: "IT FC dept event",
+      start: START,
+      departments: [unit.documentId],
+    });
+    const document = await publish(DOCUMENT, {
+      title: "IT FC dept document",
+      departments: [unit.documentId],
+      ownerDepartment: unit.documentId,
+    });
+    expect(await notified(event.documentId)).toEqual([insider.id]);
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    const targets = [
+      [ANNOUNCEMENT, announcement.documentId],
+      [ANNOUNCEMENT, owned.documentId],
+      [EVENT, event.documentId],
+      [DOCUMENT, document.documentId],
+    ] as const;
+    const before = await Promise.all(targets.map(([uid, id]) => revision(uid, id)));
+
+    const res = await panel.delete(DEPARTMENT, unit.documentId);
+    expect(res.status, res.text).toBe(200);
+
+    expect(await announcementFlags(announcement.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    // Owned only, targeting Sales: no marker, the Sales audience stays.
+    expect(await announcementFlags(owned.documentId)).toEqual([
+      [false, "departments", false],
+      [true, "departments", false],
+    ]);
+    expect(await readStatus(salesMember, owned.documentId)).toBe(200);
+    for (const caller of [insider.caller, salesMember, "member"] as Caller[]) {
+      expect(await readStatus(caller, announcement.documentId), String(caller)).toBe(404);
+    }
+    expect(await readStatus("editor", announcement.documentId)).toBe(200);
+    expect(await readStatus("admin_role", announcement.documentId)).toBe(200);
+
+    // The event lost its only department: its republish notifies nobody
+    // (before batch 15: the whole company).
+    await t.strapi.documents(EVENT).publish({ documentId: event.documentId });
+    expect(await eventFlags(event.documentId)).toEqual([
+      [false, "departments"],
+      [true, "departments"],
+    ]);
+    expect(await notified(event.documentId)).toEqual([insider.id]);
+    expect(await notified(event.documentId)).not.toContain(salesMemberId);
+
+    const after = await Promise.all(targets.map(([uid, id]) => revision(uid, id)));
+    // The republish of the event advanced its revision once more when the
+    // document lock runs (lane 15B); the delete advanced every one by one.
+    expect(after[0]).toBe(before[0] + 1);
+    expect(after[1]).toBe(before[1] + 1);
+    expect(after[3]).toBe(before[3] + 1);
+    expect(after[2]).toBeGreaterThanOrEqual(before[2] + 1);
+  });
+
+  it("department plus team (A3): deleting the team keeps the rest of the department out", async () => {
+    const unit = await department("FC Team Del Dept");
+    const squad = await team("FC Team Del Squad", unit);
+    const inSquad = await member(unit, [squad]);
+    const departmentOnly = await member(unit);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC dept and team, team deleted",
+      department: unit.documentId,
+      team: squad.documentId,
+    });
+    expect(await notified(created.documentId)).toEqual([inSquad.id]);
+    expect(await readStatus(departmentOnly.caller, created.documentId)).toBe(404);
+    const before = await revision(ANNOUNCEMENT, created.documentId);
+
+    const res = await panel.delete(TEAM, squad.documentId);
+    expect(res.status, res.text).toBe(200);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    // Without the marker the team criterion is gone and the whole
+    // department would read it.
+    for (const caller of [departmentOnly.caller, inSquad.caller]) {
+      expect(await readStatus(caller, created.documentId)).toBe(404);
+    }
+    expect(await readStatus("editor", created.documentId)).toBe(200);
+    expect(await revision(ANNOUNCEMENT, created.documentId)).toBe(before + 1);
+
+    await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
+    expect(await notified(created.documentId)).toEqual([inSquad.id]);
+  });
+
+  it("department plus team (A3): deleting the department keeps the team's outsiders out", async () => {
+    const unit = await department("FC Dept Del Dept");
+    const squad = await team("FC Dept Del Squad", unit);
+    const inSquad = await member(unit, [squad]);
+    const outsider = await member(t.fixtures.departments.sales, [squad]);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC dept and team, dept deleted",
+      department: unit.documentId,
+      team: squad.documentId,
+    });
+    expect(await notified(created.documentId)).toEqual([inSquad.id]);
+    expect(await readStatus(outsider.caller, created.documentId)).toBe(404);
+
+    const res = await panel.delete(DEPARTMENT, unit.documentId);
+    expect(res.status, res.text).toBe(200);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", true],
+      [true, "departments", true],
+    ]);
+    // The team survives the department delete; without the marker its Sales
+    // member would read the announcement now.
+    expect(await readStatus(outsider.caller, created.documentId)).toBe(404);
+    expect(await readStatus(inSquad.caller, created.documentId)).toBe(404);
+    expect(await readStatus("editor", created.documentId)).toBe(200);
+
+    await t.strapi.documents(ANNOUNCEMENT).publish({ documentId: created.documentId });
+    expect(await notified(created.documentId)).toEqual([inSquad.id]);
+
+    // The thread answers like a missing target for a member.
+    const hidden = await comment(outsider.caller, created.documentId);
+    const missing = await comment(outsider.caller, "zzzzzzzzzzzzzzzzzzzzzzzz");
+    expect([hidden.status, hidden.text]).toEqual([missing.status, missing.text]);
+    expect(hidden.status).toBe(400);
+  });
+
+  it("an editor's explicit re-target in the admin panel lowers the marker", async () => {
+    const unit = await department("FC Retarget Dept");
+    const insider = await member(unit);
+    const created = await publish(ANNOUNCEMENT, {
+      title: "IT FC retarget",
+      department: unit.documentId,
+    });
+    const res = await panel.delete(DEPARTMENT, unit.documentId);
+    expect(res.status, res.text).toBe(200);
+    expect(await readStatus(salesMember, created.documentId)).toBe(404);
+    const retarget = await panel.publish(ANNOUNCEMENT, created.documentId, {
+      department: t.fixtures.departments.sales.documentId,
+      retargetRequired: false,
+    });
+    expect(retarget.status, retarget.text).toBe(200);
+    expect(await announcementFlags(created.documentId)).toEqual([
+      [false, "departments", false],
+      [true, "departments", false],
+    ]);
+    expect(await readStatus(salesMember, created.documentId)).toBe(200);
+    expect(await notified(created.documentId)).toContain(salesMemberId);
+    expect(await notified(created.documentId)).toContain(insider.id);
+  });
+
+  it.runIf(engine === "postgres")(
+    "a department link committed while the delete runs is marked, not cascaded open (Postgres lock)",
+    async () => {
+      const unit = await department("FC Race Dept");
+      const squad = await team("FC Race Squad", t.fixtures.departments.engineering);
+      const created = await publish(ANNOUNCEMENT, {
+        title: "IT FC race",
+        team: squad.documentId,
+      });
+      const rows = await t.strapi.db.query(ANNOUNCEMENT).findMany({
+        where: { documentId: created.documentId },
+        select: ["id"],
+      });
+      const before = await revision(ANNOUNCEMENT, created.documentId);
+      // A save that links both rows to the department around the Document
+      // Service (raw SQL, as a previous cms during a rollback), still open
+      // when the delete starts. Unlocked, the scan would miss it and the
+      // cascade would leave the team alone: the whole team, across
+      // departments, would read a department-plus-team announcement.
+      const edit = await holdTransaction(t);
+      let deleting: Promise<Settled<unknown>> | undefined;
+      try {
+        for (const row of rows) {
+          await edit.raw(
+            `INSERT INTO ${qualified(t, "announcements_department_lnk")} (announcement_id, department_id) VALUES (?, ?)`,
+            [row.id, unit.id],
+          );
+        }
+        deleting = settle(t.strapi.documents(DEPARTMENT).delete({ documentId: unit.documentId }));
+        await waitForLockWait(t);
+        await edit.commit();
+      } catch (err) {
+        await edit.rollback();
+        throw err;
+      }
+      expect(await deleting).toMatchObject({ ok: true });
+      expect(await announcementFlags(created.documentId)).toEqual([
+        [false, "departments", true],
+        [true, "departments", true],
+      ]);
+      expect(await readStatus("team_lead", created.documentId)).toBe(404);
+      // The lock comes before the scan for the revision advance too: a gate
+      // that saw the rows before the link fails its comparison.
+      expect(await revision(ANNOUNCEMENT, created.documentId)).toBe(before + 1);
+    },
+  );
+});
