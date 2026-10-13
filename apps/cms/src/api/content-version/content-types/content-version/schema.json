@@ -1,0 +1,20 @@
+{
+  "kind": "collectionType",
+  "collectionName": "content_versions",
+  "info": {
+    "singularName": "content-version",
+    "pluralName": "content-versions",
+    "displayName": "Content version",
+    "description": "The revision of every guarded document (decision 06 §G): one row per (targetUid, targetDocumentId), written only by the document lock (utils/document-lock.ts). Hidden, no routes."
+  },
+  "options": { "draftAndPublish": false },
+  "pluginOptions": {
+    "content-manager": { "visible": false },
+    "content-type-builder": { "visible": false }
+  },
+  "attributes": {
+    "targetUid": { "type": "string", "required": true },
+    "targetDocumentId": { "type": "string", "required": true },
+    "revision": { "type": "integer", "required": true, "default": 0, "min": 0 }
+  }
+}

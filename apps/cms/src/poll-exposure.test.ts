@@ -71,6 +71,8 @@ const REVIEWED_CONSUMERS: Readonly<Record<string, string>> = {
     "permission matrix and grants (enforcement is in the rules, not the grants)",
   "policies/poll-visibility.ts": "the list/detail filter: canSeePoll per published row",
   "seed-demo.ts": "internal demo seed, no response",
+  "utils/authoring-uids.ts":
+    "uid lists of v2 authoring (lock, audit, gate); names types, serves no row",
   "utils/poll-access.ts":
     "loaders for the policy and the controllers; the results body, built only after canSeePoll",
   "utils/poll-audience-backfill.ts": "boot backfill of `audience`, writes flags only",

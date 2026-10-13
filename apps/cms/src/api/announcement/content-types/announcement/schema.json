@@ -39,6 +39,14 @@
       "default": "all"
     },
     "requiresAck": { "type": "boolean", "default": false },
-    "ackDeadline": { "type": "date" }
+    "ackDeadline": { "type": "date" },
+    "retargetRequired": { "type": "boolean", "default": false },
+    "ownerDepartment": {
+      "type": "relation",
+      "relation": "manyToOne",
+      "target": "api::department.department"
+    },
+    "publishAt": { "type": "datetime" },
+    "scheduleError": { "type": "string" }
   }
 }

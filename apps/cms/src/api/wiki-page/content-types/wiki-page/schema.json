@@ -61,6 +61,8 @@
       "relation": "oneToMany",
       "target": "api::wiki-revision.wiki-revision",
       "mappedBy": "page"
-    }
+    },
+    "publishAt": { "type": "datetime" },
+    "scheduleError": { "type": "string" }
   }
 }
