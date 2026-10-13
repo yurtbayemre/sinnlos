@@ -28,8 +28,8 @@ interface WebConfig {
 
 async function loadConfig(): Promise<WebConfig> {
   const url = pathToFileURL(resolve(WEB_DIR, "next.config.mjs")).href;
-  const module = (await import(/* @vite-ignore */ url)) as { default: WebConfig };
-  return module.default;
+  const loaded = (await import(/* @vite-ignore */ url)) as { default: WebConfig };
+  return loaded.default;
 }
 
 /** "22mb" → bytes, as Next reads a size limit (binary units). */
