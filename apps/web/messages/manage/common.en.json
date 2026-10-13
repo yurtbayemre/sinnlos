@@ -242,8 +242,7 @@
   "preview": {
     "title": "Preview",
     "description": "The saved version as readers will see it. Save to update the preview.",
-    "unknownAuthor": "Unknown",
-    "byAuthor": "By {name}"
+    "unknownAuthor": "Unknown"
   },
   "editor": {
     "unsavedHint": "You have unsaved changes."

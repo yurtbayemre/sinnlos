@@ -242,8 +242,7 @@
   "preview": {
     "title": "Vorschau",
     "description": "Die gespeicherte Fassung, wie sie die Zielgruppe sehen wird. Speichern aktualisiert die Vorschau.",
-    "unknownAuthor": "Unbekannt",
-    "byAuthor": "Von {name}"
+    "unknownAuthor": "Unbekannt"
   },
   "editor": {
     "unsavedHint": "Sie haben ungespeicherte Änderungen."

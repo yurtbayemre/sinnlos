@@ -3,7 +3,8 @@ import { getFormatter, getTranslations } from "next-intl/server";
 import { formatInstant, SHORT_DAY } from "@/lib/date-format";
 import { api } from "@/lib/strapi";
 import { tryFetch } from "@/lib/safe-fetch";
-import { STRAPI_PUBLIC_URL } from "@/lib/config";
+import { mediaUrl } from "@/lib/config";
+import { formatKilobytes } from "@/lib/manage/upload-check";
 import type { Document } from "@/lib/types";
 import { EmptyState } from "@/components/empty-state";
 import { FetchErrorBanner } from "@/components/fetch-error";
@@ -13,16 +14,6 @@ import { Card, CardContent } from "@/components/ui/card";
 export async function generateMetadata() {
   const t = await getTranslations("documents");
   return { title: t("title") };
-}
-
-// Strapi's upload plugin reports `size` in KILOBYTES, not bytes — convert
-// first, otherwise a 1 MB file renders as "0.97 B".
-function formatSize(sizeInKb?: number) {
-  if (!sizeInKb) return "";
-  const bytes = sizeInKb * 1024;
-  if (bytes < 1024) return `${Math.round(bytes)} B`;
-  if (bytes < 1048576) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
 /** The document categories, each with its label in the `documents` namespace. */
@@ -74,11 +65,10 @@ export default async function DocumentsPage() {
             </div>
             <div className="stagger space-y-2">
               {items.map((doc) => {
-                const fileUrl = doc.file?.url
-                  ? doc.file.url.startsWith("http")
-                    ? doc.file.url
-                    : `${STRAPI_PUBLIC_URL}${doc.file.url}`
-                  : null;
+                // An /uploads/… path stays relative: it goes through the
+                // web's session-gated proxy, never straight to the cms
+                // host (WD10, batch 16 plan S21).
+                const fileUrl = mediaUrl(doc.file?.url);
                 return (
                   <Card key={doc.id}>
                     <CardContent className="flex items-center gap-4 p-4">
@@ -94,7 +84,7 @@ export default async function DocumentsPage() {
                         )}
                         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                           {doc.file?.name && <span>{doc.file.name}</span>}
-                          {doc.file?.size && <span>{formatSize(doc.file.size)}</span>}
+                          {doc.file?.size ? <span>{formatKilobytes(doc.file.size)}</span> : null}
                           {updatedLabel(doc.updatedAt) && (
                             <span>
                               {tCommon("updated")} {updatedLabel(doc.updatedAt)}
