@@ -62,14 +62,21 @@
  *     Microsoft unset;
  *   - the crons are off (`server.cron.enabled`), so no 03:30 janitor or
  *     07:30 digest fires mid-run;
+ *   - Strapi's own jobs are paused after load(): @strapi/core starts its
+ *     cron service whatever `server.cron.enabled` says (cron/registry.ts).
+ *     Among them, the upload plugin's weekly metrics job is due 15 s after
+ *     the plugin's bootstrap on a fresh database (no stored last run), so
+ *     it fired mid-suite in every boot that lived that long: 9 statements
+ *     (a folder and a file count, a core-store read and update) that once
+ *     landed in a query count (role-read-snapshot PL04, CI);
  *   - temp files and schemas are removed by stop() and the global teardown.
  *
  * TEST-ONLY DEVIATIONS from production, all set here and nowhere else:
  *   - the users-permissions login throttle (10 per minute and IP; every test
  *     login comes from 127.0.0.1) is off; framework-contract.test.ts pins
  *     its key;
- *   - crons off (above); the Strapi logger runs at `error` (set
- *     SINNLOS_IT_LOG_LEVEL=info to see the boot).
+ *   - crons off and Strapi's own jobs paused (above); the Strapi logger
+ *     runs at `error` (set SINNLOS_IT_LOG_LEVEL=info to see the boot).
  *
  * FOR LATER SUITES: the Entra provisioning suite (batch 4) passes its env
  * (`env`, e.g. ENTRA_ENABLED and the tenant), serves JWKS and Graph
@@ -171,6 +178,10 @@ export interface IntegrationStrapi {
     set(path: string, value: unknown): void;
   };
   log: Logger;
+  /** Strapi's cron service; stop() pauses every job, and jobs added later start paused. */
+  cron: { stop(): unknown };
+  /** The Koa context of the HTTP request the calling code runs in, if any. */
+  requestContext: { get(): { get(header: string): string } | undefined };
   load(): Promise<unknown>;
   destroy(): Promise<void>;
   server: {
@@ -665,6 +676,8 @@ async function boot(options: TestStrapiOptions): Promise<TestStrapi> {
     strapi.log.level = process.env.SINNLOS_IT_LOG_LEVEL ?? "error";
     strapi.config.set("server.cron.enabled", false);
     await strapi.load();
+    // Strapi's own jobs (see HERMETIC): load() started them.
+    strapi.cron.stop();
     // Plugin config is (re)built during load(); the throttle reads it per request.
     strapi.config.set("plugin::users-permissions.ratelimit", { enabled: false });
   } catch (err) {

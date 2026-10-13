@@ -28,6 +28,9 @@ import {
 
 const SNAPSHOT = "../__snapshots__/role-read-snapshot.txt";
 
+/** Marks the requests whose statements countQueries counts. */
+const MARKER_HEADER = "x-it-query-count";
+
 const ROLE = "plugin::users-permissions.role";
 
 /** The fixture roles, a member of the other department, and nobody. */
@@ -507,16 +510,27 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
     await expect(`${lines.join("\n")}\n`).toMatchFileSnapshot(SNAPSHOT);
   }, 240_000);
 
-  /** Counts the SQL statements `run` sends (knex `query` events). */
-  const countQueries = async (run: () => Promise<unknown>): Promise<number> => {
+  /**
+   * Counts the SQL statements of one member GET (knex `query` events), only
+   * those the request itself sends: the listener runs in the async context
+   * of the code that sends the statement, where strapi.requestContext holds
+   * the request's Koa context, recognised by a marker header. Anything else
+   * the process runs meanwhile (a Strapi job, a post-commit task of an
+   * earlier write) is not the request's; once in CI the upload plugin's
+   * metrics job (the harness now pauses it) sent its 9 statements during
+   * the fast read: 33, not 24.
+   */
+  let counted = 0;
+  const countQueries = async (path: string): Promise<number> => {
     const knex = (t.strapi.db as unknown as { connection: QueryEvents }).connection;
+    const marker = `count-${(counted += 1)}`;
     let count = 0;
     const listener = () => {
-      count += 1;
+      if (t.strapi.requestContext.get()?.get(MARKER_HEADER) === marker) count += 1;
     };
     knex.on("query", listener);
     try {
-      await run();
+      await t.api("member", path, { headers: { [MARKER_HEADER]: marker } });
     } finally {
       knex.off("query", listener);
     }
@@ -534,8 +548,9 @@ describe.each(testEngines())("role read snapshot on %s", (engine) => {
       `filters[targetType][$in][0]=${target.targetType}` +
       `&filters[targetDocumentId][$in][0]=${target.documentId}`;
     await t.api("member", `/api/comments?${pin}`); // warm the member's session
-    const fast = await countQueries(() => t.api("member", `/api/comments?${pin}`));
-    const slow = await countQueries(() => t.api("member", `/api/comments?${full}`));
+    const fast = await countQueries(`/api/comments?${pin}`);
+    const slow = await countQueries(`/api/comments?${full}`);
+    expect(fast, "no statement attributed to the request").toBeGreaterThan(0);
     expect(fast).toBeLessThan(slow);
     const [a, b] = await Promise.all([
       t.api<{ data: Params[] }>("member", `/api/comments?${pin}`),
