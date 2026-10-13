@@ -188,6 +188,39 @@ describe("buildAckReportRows", () => {
     expect(result.map((r) => r.targetUsers.map((u) => u.id))).toEqual([[2], [1], [3]]);
   });
 
+  it("counts nobody for an announcement that targets nobody (D-PT01, retargetRequired)", () => {
+    const users = [user(1), user(2, { role: { id: ROLE.admin, type: "admin_role" } })];
+    const teams = new Map([[1, [30]]]);
+    const noTarget = announcement(1, { audience: "departments" });
+    const teamDeleted = announcement(2, {
+      audience: "departments",
+      department: { id: 10, name: "Engineering" },
+      retargetRequired: true,
+    });
+    const departmentDeleted = announcement(3, {
+      audience: "departments",
+      team: { id: 30, name: "Frontend" },
+      retargetRequired: true,
+    });
+    const retargeted = announcement(4, {
+      audience: "departments",
+      department: { id: 10, name: "Engineering" },
+      retargetRequired: false,
+    });
+    const result = rows(
+      [noTarget, teamDeleted, departmentDeleted, retargeted],
+      [ack(teamDeleted, 1)],
+      users,
+      { teams },
+    );
+    expect(result.map((r) => r.targetUsers.map((u) => u.id))).toEqual([[], [], [], [1, 2]]);
+    expect(result.slice(0, 3).map((r) => [r.ackedCount, r.pct, r.targetUnknown])).toEqual([
+      [0, 0, false],
+      [0, 0, false],
+      [0, 0, false],
+    ]);
+  });
+
   it("marks EVERY row unknown without a complete user directory", () => {
     const result = rows([announcement(1), announcement(2, { team: { id: 30 } })], [], [user(1)], {
       usersUnknown: true,

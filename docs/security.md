@@ -31,6 +31,7 @@ behind most rules (its §5 conventions and §7 open issues).
 - [Global guards](#global-guards)
   - [Document Service guards](#document-service-guards)
 - [Content types and their access rules](#content-types-and-their-access-rules)
+  - [Announcement and event targeting](#announcement-and-event-targeting)
   - [Poll department targeting](#poll-department-targeting)
   - [Poll guest access](#poll-guest-access)
   - [Private user fields](#private-user-fields)
@@ -792,13 +793,13 @@ this is who sees and changes what, per type.
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `department`      | Readable by every role except `guest`. Master data without draft & publish: one row with a stable id, a save in the admin is live at once; hiding a unit means deleting it. Department heads edit their own (allowlist).                                                                                                                                                                                                                                                                         |
 | `team`            | Like `department`; the team's lead or its department's head edit the description.                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. The `audience` field is not part of the decision. From its `expiresAt` instant it leaves lists, threads and digests for everyone but admins and editors.                                                                                                                                                                              |
+| `announcement`    | Visible to its audience only: `department`, `team` (member or lead) and `audienceRoles`, AND-combined over the criteria that are set; none set = everyone. Fails closed: `audience` = `departments` without a department or team, or `retargetRequired` (a targeted department or team was deleted), is admins' and editors' only and notifies nobody ([below](#announcement-and-event-targeting)). Gone for others from `expiresAt`.                                                            |
 | `acknowledgement` | One per user, anchored to the announcement's `targetDocumentId` (stable across re-publishes), immutable once created. Only the announcement's audience can acknowledge it, and only until it expires (admins and editors excepted); anyone else gets the same 400 as for a missing announcement.                                                                                                                                                                                                 |
 | `comment`         | Anchored by `targetType` + `targetDocumentId` (no foreign key). Reads and creates are filtered to targets the caller may see; an unpublished announcement's thread answers like a missing target until it is published again. Delete by the author or a moderator.                                                                                                                                                                                                                               |
 | `reaction`        | The same anchor and target visibility as comments. `create` toggles; with the boolean `reacted` it sets that end state instead (a repeated request changes nothing). Two simultaneous creates can both store a row; each keeps the oldest copy and deletes the others right after its insert, and removing deletes every copy. Delete takes the documentId or the numeric id.                                                                                                                    |
 | `kudos`           | `from` is always the sender; `to` must be another user. Readable by the staff roles and `authenticated`; the celebrations feed by the staff roles only.                                                                                                                                                                                                                                                                                                                                          |
 | `notification`    | Written by the cms itself (`utils/notify.ts`; the content API has no create or update), read and deleted by the recipient (`admin_role`: all). Publishing an announcement or event notifies its targeted users whose role holds the type's read grant (read from the permissions table at runtime) and who are not blocked, after the publish is saved; admins and editors get strictly the targeted audience. Mark-read takes up to 200 ids and only ever changes the caller's own unread rows. |
-| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read. ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                                                                                                                                                  |
+| `event`           | Not visibility-scoped: every role with `event.find`, `guest` included, sees all published events. `departments` decide who is notified, not who can read; `notifyAudience` = `departments` without a department notifies nobody ([below](#announcement-and-event-targeting)). ICS export at `/api/events/:documentId/ics` (the numeric id of the published row also works, anything else is a 404).                                                                                              |
 | `event-rsvp`      | One answer per user and event (`create` is an upsert; the capacity gate counts each user's newest answer). Raw reads return only the caller's own rows (admin: all). Everyone else's answers come from `GET /api/event-rsvps/summary?targets=<documentIds>` (at most 50 published events): the yes/maybe/no counts, the names of the "yes" answers and the caller's own answer; who answered maybe or no never leaves the cms.                                                                   |
 | `poll`            | See [poll department targeting](#poll-department-targeting) and [guest access](#poll-guest-access). The author is set to the caller on `POST /api/polls`; 2 to 10 different, non-empty options, checked for every writer including the admin panel.                                                                                                                                                                                                                                              |
 | `poll-vote`       | No generic routes. `POST /api/polls/:id/vote` and `GET /api/polls/:id/results` take the poll's documentId or its published row id. A vote cannot be changed; the results count each voter's first ballot only, and a vote removes the voter's later rows right after it is stored. The card sends the answer text it showed, and the cms refuses a vote whose option moved ("Poll options changed").                                                                                             |
@@ -814,6 +815,57 @@ this is who sees and changes what, per type.
 | `wiki-revision`   | Inherits its page's visibility; not readable by `guest`. Written by the page lifecycle when an update changes a non-empty body; the editor is recorded for REST edits only.                                                                                                                                                                                                                                                                                                                      |
 | _profile_         | `GET`/`PUT /api/me`, the caller's own record. The output is an allowlist (no password hash or tokens; the manager is a summary). `PUT` takes only the whitelisted fields, trims them, answers 400 above 255 characters and accepts `locale` `en` or `de` only. For a user bound to Entra, display name, job title, phone and office location belong to Entra: `PUT` ignores them and both answers list them in `entraManagedFields`. Guests see no digest options, and `PUT` ignores theirs.     |
 | _entra-auth_      | `POST /api/auth/entra/exchange`, server to server only ([above](#microsoft-entra-id)).                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### Announcement and event targeting
+
+Batch 15 makes department targeting fail closed (decision 06 §B6, §N9).
+Enforced by the cms for every reader and every notification:
+
+- **Announcements** are read through one rule,
+  `packages/domain/src/audience.ts` (`isAnnouncementTargetedTo`), which the
+  read policy, the bell and digest fan-outs, the comment and reaction
+  target checks, the acknowledgement controller and the web acknowledgement
+  report all ask. Besides the AND-combined criteria, two states target
+  nobody, whatever else is set:
+  - **D-PT01:** `audience` is `departments` but neither a department nor a
+    team is linked (a legacy row, an unlink in the admin panel, or a
+    delete that removed the last target). Until batch 15 such a row was
+    company-wide.
+  - **`retargetRequired`:** a department or team the announcement targeted
+    was deleted. Deleting one AND-combined criterion would widen the
+    audience to what remains (a department-plus-team announcement would
+    reach the team's members in other departments, or the whole
+    department), so the department and team delete hooks set the marker
+    first.
+
+  Such an announcement is readable by admins and editors only (their read
+  bypass), its thread answers like a missing target, nobody is notified
+  of it or gets it in a digest, and the acknowledgement report counts no
+  audience. It stays so until a moderator re-targets it.
+
+- **Events** stay readable calendar-wide. `notifyAudience` is
+  `departments` on every event row that links a department; such an event
+  without a department left notifies nobody when it is published, instead
+  of the whole company.
+- **The flags only restrict.** The cms raises the announcement `audience`
+  and the event `notifyAudience` on every row that links a target, in the
+  same transaction as each write (admin panel, content API, scheduler;
+  `apps/cms/src/utils/targeting-flags.ts`), and a boot backfill raises them
+  on rows written before. Before a department or team delete cascades its
+  links away, the delete sets the flags and the marker on the rows that
+  linked it and advances the revision of every announcement, event and
+  document that linked it, so a form opened before the delete gets a
+  conflict or "not found" instead of writing over it (a delete outside a
+  transaction, which only a script can make, is refused). Every reader
+  reads the flag and the marker once more after the targeting relations
+  and keeps the raised value, so a delete between those statements never
+  pairs the old marker with the new links. Nothing lowers a
+  flag or the marker except an explicit re-target: in the admin panel, set
+  Audience (or Notify audience) to `all` or clear Retarget required; a
+  save that still links a target is flipped back to `departments`.
+- **Residual:** an admin-panel form opened before a department or team
+  delete still holds the old marker value (false) and saves it back; the
+  admin panel is not revision-checked. The audit trail shows the save.
 
 ### Poll department targeting
 
@@ -1052,6 +1104,12 @@ reverse proxy.
   against the cms grants.
 - `apps/cms/src/poll-exposure.test.ts`: no module reads polls past the
   poll rules.
+- `packages/domain/src/audience.test.ts`, `apps/cms/src/utils/targeting-flags.test.ts`
+  and the department and team lifecycle suites: D-PT01, the re-target
+  marker, the flags raised and never lowered, the delete hooks' revision
+  advance in ascending order; `integration/targeting-fail-closed.integration.test.ts`
+  runs them over HTTP on SQLite and Postgres, with the batch-14 discard
+  case and the read-only diagnostics.
 - `apps/cms/src/extensions/users-permissions/strapi-server.test.ts`: the
   token versions: the claim, the bump and the save in one transaction and
   its rollback, the admin-panel guard and the dropped `tokenVersion`;

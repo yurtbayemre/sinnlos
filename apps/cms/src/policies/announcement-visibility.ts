@@ -2,7 +2,7 @@ import { MODERATORS } from "../bootstrap/roles";
 import { isAnnouncementVisible, type AnnouncementTargeting } from "../utils/announcement-audience";
 import { notExpiredWhere } from "../utils/announcement-expiry";
 import { visibleIdsPolicy, type VisibleIdsInput } from "../utils/policy-factories";
-import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
+import { loadUserScope, toAudienceScope, withFreshAnnouncementFlags } from "../utils/visible-ids";
 
 /**
  * Enforces announcement targeting on reads of the `announcement` content
@@ -38,6 +38,14 @@ import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
  * for every non-bypass caller at that instant (utils/announcement-
  * expiry.ts). The ids are read at request time; admin_role / editor keep
  * reading expired announcements through the bypass.
+ *
+ * Fail closed (batch 15, D-PT01 and the re-target marker): an announcement
+ * whose `audience` is "departments" without a department or a team, or
+ * whose `retargetRequired` is set (a department or team it targeted was
+ * deleted), is among nobody's visible ids; admin_role / editor keep it
+ * through the bypass until they re-target it. The rule is the shared
+ * predicate's (packages/domain/src/audience.ts), so the select must carry
+ * both fields.
  */
 
 type AnnouncementRow = AnnouncementTargeting & { id: number };
@@ -51,16 +59,21 @@ async function visibleAnnouncementIds({
   // Team targeting covers members AND the team lead — a lead is not
   // automatically listed in `team.members` (toAudienceScope).
   const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
+  const where = notExpiredWhere(new Date());
   const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-    where: notExpiredWhere(new Date()),
-    select: ["id", "audience"],
+    where,
+    // The predicate reads the flag and the marker (D-PT01, retargetRequired).
+    select: ["id", "audience", "retargetRequired"],
     populate: {
       department: { select: ["id"] },
       team: { select: ["id"] },
       audienceRoles: { select: ["id"] },
     },
   })) as AnnouncementRow[];
-  return rows.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
+  // Flags read again after the relations: a delete between the statements
+  // must not pair an old marker with the new links (utils/targeting-flags.ts).
+  const checked = await withFreshAnnouncementFlags(strapi, rows, where);
+  return checked.filter((row) => isAnnouncementVisible(row, scope)).map((row) => row.id);
 }
 
 export default visibleIdsPolicy({

@@ -162,6 +162,8 @@ describe("announcement afterCreate: audience = targeting AND read grant AND acti
       .sort();
     expect(reads).toEqual(
       [
+        // The flag and the marker again, after the relations (batch 15).
+        "findMany api::announcement.announcement",
         "findMany api::notification.notification",
         "findMany api::team.team",
         "findMany plugin::users-permissions.permission",
@@ -445,5 +447,35 @@ describe("announcement fan-out after the publish commits (LF02)", () => {
     // The second publish's own fan-out finds everyone served.
     await lifecycles.afterCreate({ result: second });
     expect(notificationRows(strapi)).toHaveLength(everyone.length);
+  });
+});
+
+describe("announcement afterCreate: a department delete between the reads (batch 15)", () => {
+  it("notifies nobody: the marker is read again after the relations", async () => {
+    // Engineering plus the Frontend team; Engineering was deleted (the marker
+    // set, the link gone) between the fan-out's scalar select and its
+    // populate: the select still says retargetRequired=false, the populate
+    // no longer finds the department. Without the second read the team's
+    // lead from Sales (dave) and alice would be notified.
+    const strapi = setup();
+    const row = publish(strapi, {
+      audience: "departments",
+      team: { id: TEAM.frontend },
+      retargetRequired: true,
+    });
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      const inner = query(uid);
+      if (uid !== ANNOUNCEMENT_UID) return inner;
+      return {
+        ...inner,
+        findOne: async (params) => {
+          const found = await inner.findOne(params);
+          return found && { ...found, retargetRequired: false };
+        },
+      };
+    };
+    await lifecycles.afterCreate({ result: row });
+    expect(recipientsOf(strapi)).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@ import {
   NOTIFICATION_UID,
   PERMISSION_UID,
   ROLE,
+  TEAM,
   USER,
   USER_UID,
   createOrgStub,
@@ -323,11 +324,12 @@ describe("sendDigests orchestrator", () => {
     expect(count(`findMany ${USER_UID}`)).toBe(2); // candidates + scopes
     expect(count("findMany api::team.team")).toBe(1);
     expect(count(`findMany ${PERMISSION_UID}`)).toBe(1);
-    expect(count(`findMany ${ANNOUNCEMENT_UID}`)).toBe(1);
+    // The window, then its flags again after the relations (batch 15).
+    expect(count(`findMany ${ANNOUNCEMENT_UID}`)).toBe(2);
     expect(count(`findMany ${NOTIFICATION_UID}`)).toBe(1);
     expect(count(`update ${USER_UID}`)).toBe(5);
     // Nothing per user but the lastDigestAt update (no mentions/kudos opted in).
-    expect(reads).toHaveLength(6 + 5);
+    expect(reads).toHaveLength(7 + 5);
   });
 
   it("guest, blocked, member, admin: only active readers, strictly their audience", async () => {
@@ -358,6 +360,43 @@ describe("sendDigests orchestrator", () => {
     expect(strapi.log.info).toHaveBeenCalledWith(
       "[digest] run complete: sent=2 empty=0 skipped=1 failed=0 of 3 candidate(s)",
     );
+  });
+
+  it("leaves out announcements that target nobody (D-PT01, retargetRequired), for every recipient", async () => {
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn(), [USER.anna]: optIn(), [USER.carol]: optIn() },
+      announcements: [
+        news("No target left", minutesAfter(MONDAY_RUN, 1), { audience: "departments" }),
+        news("Team deleted", minutesAfter(MONDAY_RUN, 2), {
+          audience: "departments",
+          department: { id: DEPT.engineering },
+          retargetRequired: true,
+        }),
+        news("Department deleted", minutesAfter(MONDAY_RUN, 3), {
+          audience: "departments",
+          team: { id: TEAM.frontend },
+          retargetRequired: true,
+        }),
+        news("Re-targeted", minutesAfter(MONDAY_RUN, 4), {
+          audience: "departments",
+          department: { id: DEPT.engineering },
+          retargetRequired: false,
+        }),
+        news("Everyone", minutesAfter(MONDAY_RUN, 5)),
+      ],
+    });
+    await sendDigests(strapi, NOW);
+    // alice: Engineering, Frontend member; carol: editor, Engineering;
+    // anna: admin_role, Sales. No bypass in the digest: nobody gets them.
+    for (const user of ["alice", "carol", "anna"]) {
+      const text = mailTo(mails(), user)?.text ?? "";
+      expect(text, user).toContain("• Everyone");
+      expect(text, user).not.toContain("No target left");
+      expect(text, user).not.toContain("Team deleted");
+      expect(text, user).not.toContain("Department deleted");
+    }
+    expect(mailTo(mails(), "alice")?.text).toContain("• Re-targeted");
+    expect(mailTo(mails(), "anna")?.text).not.toContain("Re-targeted");
   });
 
   it("a guest is skipped even if up_permissions granted it announcement.find", async () => {
@@ -669,5 +708,50 @@ describe("selectAnnouncements", () => {
     expect(isDigestRecipient({ ...scope, roleType: "guest" }, readers)).toBe(false);
     expect(isDigestRecipient({ ...scope, roleId: ROLE.guest }, readers)).toBe(false);
     expect(DIGEST_EXCLUDED_ROLE_TYPES).toEqual(["guest"]);
+  });
+});
+
+describe("a department delete between the digest's reads (batch 15)", () => {
+  beforeEach(() => {
+    vi.stubEnv("SMTP_HOST", FULL.SMTP_HOST);
+    vi.stubEnv("SMTP_USER", FULL.SMTP_USER);
+    vi.stubEnv("SMTP_PASS", FULL.SMTP_PASS);
+    vi.stubEnv("PUBLIC_WEB_URL", FULL.PUBLIC_WEB_URL);
+    vi.stubEnv("DIGEST_FROM", FULL.DIGEST_FROM);
+    vi.stubEnv("DIGESTS_DISABLED", "0");
+    vi.stubEnv("APP_TIME_ZONE", "Europe/Berlin");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("re-reads the marker after the relations: a torn read puts nothing in a digest", async () => {
+    const { strapi, mails } = digestStub({
+      users: { [USER.alice]: optIn() },
+      announcements: [
+        news("Torn", minutesAfter(MONDAY_RUN, 1), {
+          audience: "departments",
+          team: { id: TEAM.frontend },
+          retargetRequired: true,
+        }),
+        news("Everyone", minutesAfter(MONDAY_RUN, 2)),
+      ],
+    });
+    const query = strapi.db.query.bind(strapi.db);
+    strapi.db.query = (uid: string) => {
+      const inner = query(uid);
+      if (uid !== ANNOUNCEMENT_UID) return inner;
+      return {
+        ...inner,
+        findMany: async (params) => {
+          const rows = await inner.findMany(params);
+          return params?.populate ? rows.map((row) => ({ ...row, retargetRequired: false })) : rows;
+        },
+      };
+    };
+    await sendDigests(strapi, NOW);
+    const text = mailTo(mails(), "alice")?.text ?? "";
+    expect(text).toContain("• Everyone");
+    expect(text).not.toContain("Torn");
   });
 });

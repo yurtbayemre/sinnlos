@@ -498,9 +498,12 @@ describe("Document Service middlewares in register() (decision 06 §K)", () => {
       return hits;
     };
     expect(await guarded(polls)).toEqual(["api::poll.poll"]);
+    // Batch 15 lane 15D: the department/targeting guard also raises the
+    // announcement (and event) targeting flags (utils/targeting-flags.ts).
     expect(await guarded(departmentScoped)).toEqual([
       "api::document.document",
       "api::quick-link.quick-link",
+      "api::announcement.announcement",
     ]);
   });
 

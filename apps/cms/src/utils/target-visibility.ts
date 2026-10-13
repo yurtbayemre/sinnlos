@@ -45,6 +45,12 @@
  * with it: the list and single reads, comment and reaction creates. The
  * admin_role / editor bypass keeps it, as the announcement read policy
  * does.
+ *
+ * Fail closed (batch 15): a published announcement that targets nobody
+ * (D-PT01, or the `retargetRequired` marker after a department or team
+ * delete; packages/domain/src/audience.ts) is invisible to every
+ * non-bypass caller the same way, so its thread answers like a missing
+ * target until a moderator re-targets it.
  */
 
 import { MODERATORS, hasRole, type RoleHolder } from "../bootstrap/roles";
@@ -53,7 +59,12 @@ import { isAnnouncementExpired } from "./announcement-expiry";
 import { targetAnchor, type CommentTargetType } from "./comment-target";
 import type { PolicyStrapi } from "./policy-factories";
 import { fitsBindLimit } from "./policy-query";
-import { loadUserScope, toAudienceScope, visibleWikiSpaceIds } from "./visible-ids";
+import {
+  loadUserScope,
+  toAudienceScope,
+  visibleWikiSpaceIds,
+  withFreshAnnouncementFlags,
+} from "./visible-ids";
 
 /** A signed-in caller with a row id (the scope is loaded by it). */
 export interface CallerUser extends RoleHolder {
@@ -73,10 +84,26 @@ type AnnouncementRow = {
   documentId?: string | null;
   publishedAt?: string | null;
   expiresAt?: string | null;
+  audience?: string | null;
+  retargetRequired?: boolean | null;
   department?: { id: number } | null;
   team?: { id: number } | null;
   audienceRoles?: { id: number }[] | null;
 };
+
+/**
+ * The announcement columns the checks read: the published state, the expiry
+ * and the targeting flag and marker the shared predicate needs (D-PT01,
+ * retargetRequired).
+ */
+const ANNOUNCEMENT_SELECT = [
+  "id",
+  "documentId",
+  "publishedAt",
+  "audience",
+  "retargetRequired",
+  "expiresAt",
+];
 
 const ANNOUNCEMENT_POPULATE = {
   department: { select: ["id"] },
@@ -175,17 +202,18 @@ export async function visibleTargetAnchors(
   const raw = user ? await loadUserScope(strapi, user.id) : null;
   const audience = toAudienceScope(raw);
 
+  const published = { publishedAt: { $notNull: true } };
   const [announcementRows, spaceIds] = await Promise.all([
-    strapi.db.query(ANNOUNCEMENT_UID).findMany({
-      where: { publishedAt: { $notNull: true } },
-      select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
-      populate: ANNOUNCEMENT_POPULATE,
-    }),
+    strapi.db
+      .query(ANNOUNCEMENT_UID)
+      .findMany({ where: published, select: ANNOUNCEMENT_SELECT, populate: ANNOUNCEMENT_POPULATE })
+      // The flags again, after the relations (utils/targeting-flags.ts).
+      .then((rows) => withFreshAnnouncementFlags(strapi, listOf<AnnouncementRow>(rows), published)),
     visibleWikiSpaceIds(strapi, raw),
   ]);
 
   const now = new Date();
-  const announcement = [...publishedByAnchor(listOf<AnnouncementRow>(announcementRows)).entries()]
+  const announcement = [...publishedByAnchor(announcementRows).entries()]
     .filter(([, row]) => !isAnnouncementExpired(row, now) && isAnnouncementVisible(row, audience))
     .map(([anchor]) => anchor);
 
@@ -211,12 +239,17 @@ export async function isTargetVisible(
   user: CallerUser | null | undefined,
 ): Promise<boolean> {
   if (targetType === "announcement") {
-    const rows = listOf<AnnouncementRow>(
-      await strapi.db.query(ANNOUNCEMENT_UID).findMany({
-        where: { documentId: targetDocumentId, publishedAt: { $notNull: true } },
-        select: ["id", "documentId", "publishedAt", "audience", "expiresAt"],
-        populate: ANNOUNCEMENT_POPULATE,
-      }),
+    const where = { documentId: targetDocumentId, publishedAt: { $notNull: true } };
+    const rows = await withFreshAnnouncementFlags(
+      strapi,
+      listOf<AnnouncementRow>(
+        await strapi.db.query(ANNOUNCEMENT_UID).findMany({
+          where,
+          select: ANNOUNCEMENT_SELECT,
+          populate: ANNOUNCEMENT_POPULATE,
+        }),
+      ),
+      where,
     );
     const row = publishedByAnchor(rows).get(targetDocumentId);
     if (!row) return false;
