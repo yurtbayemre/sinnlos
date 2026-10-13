@@ -6,7 +6,6 @@ import {
   createTestDatabase,
   createTestStrapi,
   testEngines,
-  type Caller,
   type Row,
   type TestDatabase,
   type TestRole,
@@ -49,12 +48,14 @@ const SECRET = "ZZSECRET";
 /** A prefix no revision has: the control of the oracle probes. */
 const NO_MATCH = "ZZNOMATCH";
 
-const CALLERS: readonly Caller[] = [...TEST_ROLES, null];
-const who = (caller: Caller) =>
-  caller === null ? "anonymous" : typeof caller === "string" ? caller : "jwt";
+/** Every role, and no token at all (null). */
+const CALLERS: readonly (TestRole | null)[] = [...TEST_ROLES, null];
 
 /** Roles that hold department, team and user reads (guest holds no department.find). */
 const ORG_READERS: readonly TestRole[] = TEST_ROLES.filter((role) => role !== "guest");
+
+/** The moderators: the roles with the admin_role/editor bypass. */
+const MODERATOR_ROLES: readonly TestRole[] = ["admin_role", "editor"];
 
 /** The grants batch 15 wrote (its PERMISSION_MATRIX), which this release revokes. */
 const BATCH_15_GRANTS: Readonly<Record<string, readonly string[]>> = {
@@ -167,10 +168,11 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
               ? { json: { data: { body: "x", page: page.documentId } } }
               : {}),
           });
-          expect({ method, path, who: who(caller), status: res.status }).toEqual({
+          const who = caller ?? "anonymous";
+          expect({ method, path, who, status: res.status }).toEqual({
             method,
             path,
-            who: who(caller),
+            who,
             status: expect.toBeOneOf([404, 405]),
           });
           expect(res.text).not.toContain(SECRET);
@@ -246,7 +248,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
     });
 
     it("the moderators' root populate still reaches the page through departments (control)", async () => {
-      for (const role of ["admin_role", "editor"] as const) {
+      for (const role of MODERATOR_ROLES) {
         const res = await t.api(role, "/api/departments?populate[pages][populate][revisions]=true");
         expect(res.text).toContain("IT Revisions Page");
       }
@@ -254,8 +256,6 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
   });
 
   describe("filters and sort through wiki-page.revisions are refused or blind", () => {
-    const MODERATOR_ROLES: readonly TestRole[] = ["admin_role", "editor"];
-
     interface Probe {
       label: string;
       /** `{prefix}` is replaced by the probed prefix. */
@@ -274,12 +274,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
       path: string,
       roles: readonly TestRole[] = TEST_ROLES,
       refused: readonly TestRole[] = roles,
-    ): Probe => ({
-      label,
-      path,
-      roles,
-      refused,
-    });
+    ): Probe => ({ label, path, roles, refused });
 
     const filters: readonly Probe[] = [
       probe("root filter", "/api/wiki-pages?filters[revisions][body][$startsWith]={prefix}"),
@@ -372,7 +367,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
         data: { title: "IT Other Page", slug: "it-other-page", body: "other" },
         status: "published",
       });
-      for (const role of ["admin_role", "editor"] as const) {
+      for (const role of MODERATOR_ROLES) {
         const res = await t.api(role, `/api/wiki-pages/${other.documentId}`, {
           method: "PUT",
           json: { data: { revisions: { connect: [revision.documentId] } } },
@@ -425,7 +420,7 @@ describe.each(testEngines())("wiki revisions are closed on %s", (engine) => {
     });
 
     it("the moderators keep their draft reads of the page itself", async () => {
-      for (const role of ["admin_role", "editor"] as const) {
+      for (const role of MODERATOR_ROLES) {
         const res = await t.api<{ data: Record<string, unknown> }>(
           role,
           `/api/wiki-pages/${page.documentId}?status=draft`,

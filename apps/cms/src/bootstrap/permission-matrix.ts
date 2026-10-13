@@ -88,11 +88,9 @@ const DEPARTMENT_AUTHOR_WRITES: CrudAction[] = ["find", "findOne", "create", "up
  * `can-edit-wiki`, which also keeps them to pages in spaces they can
  * read). `guest` is strict read-only on wiki content.
  *
- * No role holds any wiki-revision grant (batch 15.1, decision 06 §B4): a
- * revision holds the page body before an edit, draft text included, and
- * the grant was also what let a caller populate or filter
- * `wiki-page.revisions`. The router is `only: []` and the rows are revoked
- * for every role (REMOVED_CORE_ACTIONS below).
+ * No role holds any wiki-revision grant (batch 15.1, decision 06 §B4): the
+ * router is `only: []` and the rows are revoked for every role
+ * (REMOVED_CORE_ACTIONS below says why).
  *
  * Checked against the routers and controllers by `routes.matrix.test.ts`
  * (roadmap S01), with CUSTOM_ACTION_GRANTS and REVOKED_PERMISSIONS.

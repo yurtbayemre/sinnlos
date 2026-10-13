@@ -27,7 +27,7 @@ interface Row {
   subject: string;
 }
 
-function host(rows: Row[], options: { deleteByIds?: unknown } = {}) {
+function host(rows: Row[], options: { deleteByIds?: undefined } = {}) {
   const deleted: number[][] = [];
   const findMany = vi.fn(async (params: Record<string, unknown>) => {
     const where = params.where as { subject: { $in: string[] }; action: { $in: string[] } };

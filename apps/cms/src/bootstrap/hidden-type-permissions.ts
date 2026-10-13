@@ -47,7 +47,7 @@ export interface HiddenTypePermissionsHost {
       findMany(params: Record<string, unknown>): Promise<{ id: number; subject?: unknown }[]>;
     };
   };
-  admin?: { services?: { permission?: { deleteByIds?: unknown } } };
+  admin?: { services?: { permission?: { deleteByIds?: (ids: number[]) => Promise<unknown> } } };
   log: { info(message: string): void };
 }
 
@@ -80,9 +80,7 @@ export async function removeHiddenTypeWritePermissions(
     where: { subject: { $in: subjects }, action: { $in: [...HIDDEN_TYPE_WRITE_ACTIONS] } },
   });
   if (rows.length === 0) return;
-  await (permissions as { deleteByIds(ids: number[]): Promise<unknown> }).deleteByIds(
-    rows.map((row) => row.id),
-  );
+  await permissions.deleteByIds(rows.map((row) => row.id));
   const removedFrom = [...new Set(rows.map((row) => String(row.subject)))].sort();
   strapi.log.info(
     `[admin-permissions] removed ${rows.length} Content Manager write permission(s) on hidden types: ${removedFrom.join(", ")}`,

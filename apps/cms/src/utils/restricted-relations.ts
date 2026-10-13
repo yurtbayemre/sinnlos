@@ -160,7 +160,7 @@ const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 
 const joinPath = (path: string, key: string) => (path ? `${path}.${key}` : key);
 
-/** True when `attr` of `source` may not be followed by a non-bypass caller. */
+/** True when `attr` of `source` may not be followed under `rules`. */
 export function isRestrictedRelation(
   source: RelationModel | undefined,
   attr: RelationAttribute | undefined,

@@ -11,6 +11,7 @@ import {
   stripRestrictedRelationsFromOutput,
   type RelationAttribute,
   type RelationModel,
+  type RestrictedRelationOptions,
 } from "./restricted-relations";
 
 /**
@@ -95,10 +96,15 @@ const guard = (uid: string, query: Record<string, unknown>) =>
 const populateOn = (uid: string, populate: unknown) => guard(uid, { populate }).populate;
 
 /** Asserts the core's own `Invalid key` 400 (ValidationError), nothing else. */
-function expectRejected(uid: string, query: Record<string, unknown>, message: string) {
+function expectRejected(
+  uid: string,
+  query: Record<string, unknown>,
+  message: string,
+  options: RestrictedRelationOptions = OPTIONS,
+) {
   let thrown: unknown;
   try {
-    guard(uid, query);
+    guardRestrictedRelations(query, MODELS[uid], options);
   } catch (err) {
     thrown = err;
   }
@@ -580,17 +586,8 @@ describe("closed targets bind every caller (CLOSED_RELATION_TARGETS)", () => {
   const closedGuard = (uid: string, query: Record<string, unknown>) =>
     guardRestrictedRelations(query, MODELS[uid], CLOSED);
   const populate = (uid: string, value: unknown) => closedGuard(uid, { populate: value }).populate;
-
-  function expectClosed(uid: string, query: Record<string, unknown>, message: string) {
-    let thrown: unknown;
-    try {
-      closedGuard(uid, query);
-    } catch (err) {
-      thrown = err;
-    }
-    expect(thrown).toBeInstanceOf(errors.ValidationError);
-    expect((thrown as Error).message).toBe(message);
-  }
+  const expectClosed = (uid: string, query: Record<string, unknown>, message: string) =>
+    expectRejected(uid, query, message, CLOSED);
 
   it("strips a populate of revisions in every shape, at any depth", () => {
     expect(populate(WIKI_PAGE, { revisions: "true", space: "true" })).toEqual({ space: "true" });
