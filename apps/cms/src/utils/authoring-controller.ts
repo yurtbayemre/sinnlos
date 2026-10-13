@@ -105,6 +105,8 @@ export interface AuthoringSpec {
   scheduled: boolean;
   /** `unpublishAt`. */
   unpublishScheduled: boolean;
+  /** The targeting flag columns the list reads (needsRetarget). */
+  flagColumns: readonly string[];
 }
 
 export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
@@ -116,6 +118,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: "author",
     scheduled: true,
     unpublishScheduled: false,
+    flagColumns: ["audience", "retargetRequired"],
   },
   [EVENT_UID]: {
     uid: EVENT_UID,
@@ -125,6 +128,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: "organizer",
     scheduled: true,
     unpublishScheduled: false,
+    flagColumns: ["notifyAudience"],
   },
   [QUICK_LINK_UID]: {
     uid: QUICK_LINK_UID,
@@ -134,6 +138,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: null,
     scheduled: true,
     unpublishScheduled: true,
+    flagColumns: ["audience"],
   },
   [DOCUMENT_UID]: {
     uid: DOCUMENT_UID,
@@ -143,6 +148,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: "uploadedBy",
     scheduled: true,
     unpublishScheduled: true,
+    flagColumns: ["audience"],
   },
   [POLL_UID]: {
     uid: POLL_UID,
@@ -152,6 +158,7 @@ export const AUTHORING_SPECS: Readonly<Record<string, AuthoringSpec>> = {
     authorField: "author",
     scheduled: false,
     unpublishScheduled: false,
+    flagColumns: ["audience"],
   },
 };
 
@@ -621,7 +628,21 @@ async function listDocuments(
     where.ownerDepartment = { id: { $null: true } };
   }
   const populate = AUTHORING_POPULATE[spec.uid] ?? {};
-  const drafts = ((await strapi.db.query(spec.uid).findMany({ where, populate })) as unknown[])
+  // The columns a list row needs (never a Markdown body): the label, the
+  // state and schedule, and the targeting flags.
+  const select = [
+    "id",
+    "documentId",
+    "publishedAt",
+    "updatedAt",
+    spec.labelField,
+    ...(spec.scheduled ? ["publishAt", "scheduleError"] : []),
+    ...(spec.unpublishScheduled ? ["unpublishAt"] : []),
+    ...spec.flagColumns,
+  ];
+  const drafts = (
+    (await strapi.db.query(spec.uid).findMany({ where, select, populate })) as unknown[]
+  )
     .filter(isRecord)
     .filter((row) => {
       if (!query.q) return true;
@@ -635,6 +656,7 @@ async function listDocuments(
   )) {
     const rows = (await strapi.db.query(spec.uid).findMany({
       where: { documentId: { $in: chunk }, publishedAt: { $notNull: true } },
+      select,
       populate,
     })) as AuthoringRow[];
     for (const row of rows) published.set(row.documentId, row);

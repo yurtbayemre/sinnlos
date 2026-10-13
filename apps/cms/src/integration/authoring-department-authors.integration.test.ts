@@ -442,6 +442,15 @@ describe.each(testEngines())("authoring: department authors on %s", (engine) => 
       expect(
         moderatorList.body.data.find((row) => row.documentId === id)?.ownerDepartment?.documentId,
       ).toBe(engineering.documentId);
+      expect(moderatorList.body.data.every((row) => row.ownerDepartment !== null)).toBe(true);
+      const moderatorOwned = await api.list<{ documentId: string; ownerDepartment: unknown }>(
+        "editor",
+        "announcements",
+        "owner=moderators",
+      );
+      expect(moderatorOwned.body.data.map((row) => row.documentId)).not.toContain(id);
+      expect(moderatorOwned.body.data.length).toBeGreaterThan(0);
+      expect(moderatorOwned.body.data.every((row) => row.ownerDepartment === null)).toBe(true);
       const narrowed = await api.update(
         "editor",
         "announcements",
