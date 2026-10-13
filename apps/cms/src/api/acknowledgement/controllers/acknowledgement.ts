@@ -52,6 +52,12 @@ interface AckCaller {
  * expired announcements), then expiry, then the audience. Any other target
  * type fails closed: documents have no requiresAck yet, and would need
  * their own visibility rules here once they do.
+ *
+ * An announcement that targets nobody (batch 15: D-PT01, or the
+ * `retargetRequired` marker after a department or team delete) is outside
+ * every audience, so it answers the same 400 to everyone but admin_role
+ * and editor. The target lookup selects no columns, so the flag and the
+ * marker reach the predicate with every other scalar.
  */
 async function isVisibleToCaller(
   strapi: unknown,

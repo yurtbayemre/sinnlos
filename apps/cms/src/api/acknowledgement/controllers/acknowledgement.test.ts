@@ -333,6 +333,44 @@ describe("acknowledgement create: audience (FX27)", () => {
     }
   });
 
+  it("reads every scalar of the target (no select): the flag and the marker reach the predicate", async () => {
+    const { calls } = await create(body);
+    expect(calls[0].params).not.toHaveProperty("select");
+  });
+
+  it("answers an announcement that targets nobody (D-PT01, retargetRequired) with the SAME 400", async () => {
+    const missing = await create({
+      data: { targetType: "announcement", targetDocumentId: "zzzzzzzzzzzzzzzzzzzzzzzz" },
+    });
+    for (const targeting of [
+      // D-PT01: restricted without a department or a team.
+      { audience: "departments", department: null, team: null },
+      // The team was deleted: the caller's department remains, the marker holds.
+      { audience: "departments", department: { id: DEPT_SALES }, retargetRequired: true },
+    ]) {
+      const hidden = await create(body, withTargeting(targeting));
+      expect(hidden.ctx.badRequest.mock.calls).toEqual(missing.ctx.badRequest.mock.calls);
+      expect(created(hidden.calls)).toBe(false);
+      expect(hidden.calls.some((c) => c.uid === "api::acknowledgement.acknowledgement")).toBe(
+        false,
+      );
+      for (const user of [EDITOR, ADMIN]) {
+        const bypass = await create(body, withTargeting(targeting), user);
+        expect(bypass.ctx.badRequest, user.role.type).not.toHaveBeenCalled();
+      }
+    }
+    // Re-targeted (marker off): the department criterion admits the member again.
+    const retargeted = await create(
+      body,
+      withTargeting({
+        audience: "departments",
+        department: { id: DEPT_SALES },
+        retargetRequired: false,
+      }),
+    );
+    expect(retargeted.ctx.badRequest).not.toHaveBeenCalled();
+  });
+
   it("lets anyone acknowledge an untargeted announcement", async () => {
     const guest = { id: 12, role: { type: "guest" } };
     const { ctx } = await create(

@@ -459,6 +459,32 @@ describe("the announcement recipient filter (FX19)", () => {
     ]);
   });
 
+  it("an announcement that targets nobody reaches nobody (D-PT01, retargetRequired)", async () => {
+    expect(await recipients({ audience: "departments" })).toEqual([]);
+    expect(
+      await recipients({
+        audience: "departments",
+        team: { id: TEAM.frontend },
+        retargetRequired: true,
+      }),
+    ).toEqual([]);
+    expect(
+      await recipients({
+        audience: "departments",
+        department: { id: DEPT.engineering },
+        retargetRequired: true,
+      }),
+    ).toEqual([]);
+    // Re-targeted: the marker off, the department's audience again.
+    expect(
+      await recipients({
+        audience: "departments",
+        department: { id: DEPT.engineering },
+        retargetRequired: false,
+      }),
+    ).toEqual([USER.alice, USER.carol]);
+  });
+
   it("holdsGrant and toAudienceScope", () => {
     const scope: UserScope = {
       roleId: ROLE.member,

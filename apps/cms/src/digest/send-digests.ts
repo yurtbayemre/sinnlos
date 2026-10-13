@@ -315,7 +315,8 @@ async function loadAnnouncementWindow(
           notExpiredWhere(now),
         ],
       },
-      select: ["id", "documentId", "title", "audience", "publishedAt"],
+      // `audience` and `retargetRequired`: the predicate's D-PT01 and marker.
+      select: ["id", "documentId", "title", "audience", "retargetRequired", "publishedAt"],
       populate: {
         department: { select: ["id"] },
         team: { select: ["id"] },

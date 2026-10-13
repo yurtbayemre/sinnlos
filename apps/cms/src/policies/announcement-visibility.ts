@@ -38,6 +38,14 @@ import { loadUserScope, toAudienceScope } from "../utils/visible-ids";
  * for every non-bypass caller at that instant (utils/announcement-
  * expiry.ts). The ids are read at request time; admin_role / editor keep
  * reading expired announcements through the bypass.
+ *
+ * Fail closed (batch 15, D-PT01 and the re-target marker): an announcement
+ * whose `audience` is "departments" without a department or a team, or
+ * whose `retargetRequired` is set (a department or team it targeted was
+ * deleted), is among nobody's visible ids; admin_role / editor keep it
+ * through the bypass until they re-target it. The rule is the shared
+ * predicate's (packages/domain/src/audience.ts), so the select must carry
+ * both fields.
  */
 
 type AnnouncementRow = AnnouncementTargeting & { id: number };
@@ -53,7 +61,8 @@ async function visibleAnnouncementIds({
   const scope = user ? toAudienceScope(await loadUserScope(strapi, user.id)) : null;
   const rows = (await strapi.db.query(ANNOUNCEMENT_UID).findMany({
     where: notExpiredWhere(new Date()),
-    select: ["id", "audience"],
+    // The predicate reads the flag and the marker (D-PT01, retargetRequired).
+    select: ["id", "audience", "retargetRequired"],
     populate: {
       department: { select: ["id"] },
       team: { select: ["id"] },

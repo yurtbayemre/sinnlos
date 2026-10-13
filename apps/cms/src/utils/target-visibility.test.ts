@@ -489,3 +489,87 @@ describe("expired announcements (DA02)", () => {
     }
   });
 });
+
+describe("announcements that target nobody (D-PT01, retargetRequired; batch 15)", () => {
+  // The shared stub honours the select: without `retargetRequired` in it
+  // the marked rows would be judged by their remaining criterion.
+  const PUBLISHED = "2026-09-01T00:00:00.000Z";
+  const ENG_ID = 10;
+  const PLATFORM_ID = 30;
+
+  function stub(): StrapiStub {
+    const row = (id: number, documentId: string, published: boolean, extra: object) => ({
+      id,
+      documentId,
+      title: documentId,
+      publishedAt: published ? PUBLISHED : null,
+      ...extra,
+    });
+    return createStrapiStub({
+      tables: {
+        "plugin::users-permissions.user": [
+          { id: 1, username: "eng", department: { id: ENG_ID }, teams: [{ id: PLATFORM_ID }] },
+        ],
+        "api::team.team": [{ id: PLATFORM_ID, lead: null }],
+        "api::announcement.announcement": [
+          row(1, "ann-eng", true, { audience: "departments", department: { id: ENG_ID } }),
+          // D-PT01 on the published row.
+          row(2, "ann-no-target", true, { audience: "departments" }),
+          // The team was deleted: Engineering remains, the marker holds.
+          row(3, "ann-marked", true, {
+            audience: "departments",
+            department: { id: ENG_ID },
+            retargetRequired: true,
+          }),
+          // The department was deleted: Platform remains, the marker holds.
+          row(4, "ann-marked-team", true, {
+            audience: "departments",
+            team: { id: PLATFORM_ID },
+            retargetRequired: true,
+          }),
+          // A re-target in the draft does not open the published thread.
+          row(5, "ann-retargeted-draft", true, {
+            audience: "departments",
+            department: { id: ENG_ID },
+            retargetRequired: true,
+          }),
+          row(6, "ann-retargeted-draft", false, {
+            audience: "departments",
+            department: { id: ENG_ID },
+            retargetRequired: false,
+          }),
+        ],
+      },
+    });
+  }
+
+  const member = { id: 1, role: { type: "member" } };
+  const hidden = ["ann-no-target", "ann-marked", "ann-marked-team", "ann-retargeted-draft"];
+
+  it("leaves them out of a member's visible anchors", async () => {
+    const anchors = await visibleTargetAnchors(stub(), member);
+    expect(anchors.announcement).toEqual(["ann-eng"]);
+    expect((await visibleTargetAnchors(stub(), null)).announcement).toEqual([]);
+  });
+
+  it("refuses the single check like a missing target", async () => {
+    for (const documentId of hidden) {
+      await expect(
+        isTargetVisible(stub(), "announcement", documentId, member),
+        documentId,
+      ).resolves.toBe(false);
+    }
+    await expect(isTargetVisible(stub(), "announcement", "ann-eng", member)).resolves.toBe(true);
+  });
+
+  it("keeps the admin_role / editor bypass for them", async () => {
+    for (const type of ["admin_role", "editor"]) {
+      for (const documentId of hidden) {
+        await expect(
+          isTargetVisible(stub(), "announcement", documentId, { id: 1, role: { type } }),
+          `${type} ${documentId}`,
+        ).resolves.toBe(true);
+      }
+    }
+  });
+});

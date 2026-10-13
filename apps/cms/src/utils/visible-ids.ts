@@ -331,6 +331,12 @@ export function holdsGrant(scope: UserScope, roles: ReadonlySet<number>): boolea
  * announcement.find, not blocked (`scopes` holds active users only).
  * admin_role and editor get strictly the targeted audience like everyone
  * else (owner default, FX19): their read bypass is not a subscription.
+ *
+ * An announcement that targets nobody (batch 15: D-PT01, or the
+ * `retargetRequired` marker) reaches nobody, admin_role and editor
+ * included. The caller hands in the row with its `audience` and
+ * `retargetRequired`: the announcement lifecycle re-reads the published
+ * row with every scalar (no select).
  */
 export function announcementRecipients(
   announcement: AnnouncementTargeting,
